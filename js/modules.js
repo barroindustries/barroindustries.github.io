@@ -755,7 +755,7 @@ function openEomStandingsModal(standings, month) {
     const initials = (s.displayName || s.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:${i === 0 ? 'rgba(255,196,0,0.1)' : 'var(--surface2,rgba(255,255,255,0.04))'};margin-bottom:8px;border:1px solid ${i === 0 ? 'rgba(255,196,0,0.35)' : 'transparent'}">
       <div style="font-size:18px;width:28px;text-align:center;flex:0 0 auto">${medal}</div>
-      <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;flex:0 0 auto;overflow:hidden">${safeHttpUrl(s.photoUrl) ? `<img src="${escHtml(s.photoUrl)}" style="width:100%;height:100%;object-fit:cover" alt=""/>` : escHtml(initials)}</div>
+      <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:var(--on-primary);font-weight:800;font-size:14px;flex:0 0 auto;overflow:hidden">${safeHttpUrl(s.photoUrl) ? `<img src="${escHtml(s.photoUrl)}" style="width:100%;height:100%;object-fit:cover" alt=""/>` : escHtml(initials)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.displayName || s.email)}</div>
         <div style="font-size:11px;color:var(--text-muted)">${s.attPct}% att · ${s.taskPct}% KPI${s.grade != null ? ` · grade ${s.grade}/10` : ''}</div>
@@ -803,8 +803,8 @@ function showCallingCard(u) {
     <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);border-radius:16px;padding:28px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
       ${safeHttpUrl(u.photoUrl)
         ? `<img src="${escHtml(u.photoUrl)}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`
-        : `<div style="width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#fff;margin-bottom:4px">${escHtml(initials)}</div>`}
-      <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:.5px">${escHtml(u.displayName||u.email)}</div>
+        : `<div style="width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:var(--on-primary);margin-bottom:4px">${escHtml(initials)}</div>`}
+      <div style="font-size:20px;font-weight:800;color:var(--on-primary);letter-spacing:.5px">${escHtml(u.displayName||u.email)}</div>
       <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${roleLabel}</div>
       <div style="font-size:11px;color:rgba(255,255,255,0.5)">${escHtml(depts)}</div>
       <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:8px 0"></div>
@@ -1884,7 +1884,7 @@ async function renderPresidentMessageCard() {
       </div>
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-          <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">
+          <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--on-primary)">
             ${safeHttpUrl(pres.photoUrl)?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:escHtml(presName[0]||'')}
           </div>
           <div>

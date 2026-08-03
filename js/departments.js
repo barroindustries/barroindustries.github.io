@@ -574,7 +574,7 @@ function updateCardFollowUpBadge(taskId, count){
 }
 function assigneeChips(t) {
   if (!t.assignedToNames?.length) return '';
-  const chips=t.assignedToNames.slice(0,3).map(n=>`<span style="font-size:11px;background:var(--primary-light);color:#fff;padding:2px 8px;border-radius:10px">${escHtml(n)}</span>`).join('');
+  const chips=t.assignedToNames.slice(0,3).map(n=>`<span style="font-size:11px;background:var(--primary-light);color:var(--on-primary);padding:2px 8px;border-radius:10px">${escHtml(n)}</span>`).join('');
   return chips+(t.assignedToNames.length>3?`<span style="font-size:11px;color:var(--text-muted)">+${t.assignedToNames.length-3}</span>`:'');
 }
 function taskCard(t) {
@@ -2520,7 +2520,7 @@ async function renderMktLeads(content, currentUser, currentRole) {
           <div style="font-weight:700;font-size:13px">${escHtml(c0.name||'')}
             <span class="badge badge-gray" style="font-size:9px">${escHtml(window.leadSourceLabel(c0.source))}</span>
             ${c0.campaignId ? `<span class="badge badge-blue" style="font-size:9px">${emojiIcon('📣',9)} ${campName(c0.campaignId)}</span>` : ''}
-            ${(() => { const st = crmStageMeta(crmStageOf(c0)); return `<span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`; })()}</div>
+            ${(() => { const st = crmStageMeta(crmStageOf(c0)); return `<span class="badge" style="font-size:9px;background:${st.color};color:var(--on-primary)">${st.icon} ${st.label}</span>`; })()}</div>
           <div class="item-meta">
             ${c0.company ? `<span>${emojiIcon('🏢',16)} ${escHtml(c0.company)}</span>` : ''}
             ${c0.phone ? `<span>${emojiIcon('📞',16)} ${escHtml(c0.phone)}</span>` : ''}
@@ -2672,7 +2672,7 @@ async function renderMktPromos(content, currentUser, currentRole) {
         ${Array.from({length:daysIn},(_,i)=>{
           const day=i+1; const ds=`${mStart.slice(0,8)}${pad(day)}`; const isToday=ds===todayStr;
           const cnt=onDay(ds).length;
-          return `<div class="mkt-promo-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:#fff;font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<div style="display:flex;gap:2px;justify-content:center;margin-top:2px">${Array(Math.min(cnt,3)).fill(0).map(()=>`<span style="width:4px;height:4px;border-radius:50%;background:${isToday?'#fff':'var(--danger)'}"></span>`).join('')}</div>`:''}</div>`;
+          return `<div class="mkt-promo-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:var(--on-primary);font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<div style="display:flex;gap:2px;justify-content:center;margin-top:2px">${Array(Math.min(cnt,3)).fill(0).map(()=>`<span style="width:4px;height:4px;border-radius:50%;background:${isToday?'var(--on-primary)':'var(--danger)'}"></span>`).join('')}</div>`:''}</div>`;
         }).join('')}
       </div>
       <div id="mkt-promo-day-detail" style="margin-top:10px;font-size:12px;color:var(--text-muted);min-height:16px"></div>
@@ -4234,7 +4234,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const net      = gross - deduct - caAdv;
       const modeTag  = { installment:'installment', 'custom-request':'custom', 'legacy-override':'custom', full:'full' }[plan.mode];
       const caCell   = caBalance > 0
-        ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${modeTag?` <span style="font-size:10px;background:var(--primary-light);color:#fff;border-radius:4px;padding:1px 5px">${modeTag}</span>`:''}</div>
+        ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${modeTag?` <span style="font-size:10px;background:var(--primary-light);color:var(--on-primary);border-radius:4px;padding:1px 5px">${modeTag}</span>`:''}</div>
            <div style="font-size:10px;color:var(--text-muted)">bal ₱${fmt(caBalance)}</div>`
         : '<span style="color:var(--text-muted)">—</span>';
       // v14 Wave 4 Batch F4 — card reflow (≤700px, via the shared .table-cards
@@ -4244,7 +4244,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       // net prominent"); tc-detail cells are the tap-to-expand breakdown.
       return `<tr class="pr-row">
         <td class="tc-avatar" style="text-align:center">
-          <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:14px;margin:0 auto">
+          <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--on-primary);font-size:14px;margin:0 auto">
             ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((u.displayName||'?')[0])}
           </div>
         </td>
@@ -7191,7 +7191,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
     ${isPres?`<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
       <button class="btn-secondary btn-sm" id="fin-tools-btn" title="President-only maintenance &amp; data-repair tools">${emojiIcon('🔧',16)} Finance Tools</button>
     </div>`:''}
-    ${needsRollupRebuild?`<div class="card" style="margin-bottom:12px;border-color:var(--warn,#FF9F0A)">
+    ${needsRollupRebuild?`<div class="card" style="margin-bottom:12px;border-color:var(--warning,#FF9F0A)">
       <div class="card-body" style="display:flex;align-items:center;gap:8px;font-size:13px">
         ${emojiIcon('⚠️',16)} <span>Totals need a rebuild — ${isPres?'Finance Tools → Rebuild rollups.':'ask the President to run Finance Tools → Rebuild rollups.'}</span>
       </div>
@@ -7814,7 +7814,7 @@ function renderSalesSOPView(container, data) {
     <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:20px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:12px">
       ${steps.map((s,i)=>`
         <span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--text)">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${O};color:#fff;font-size:10px">${i+1}</span>
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${O};color:var(--on-primary);font-size:10px">${i+1}</span>
           ${escHtml(s.short||s.title||'')}
         </span>
         ${i<steps.length-1?`<span style="color:${O};font-weight:800">›</span>`:''}
@@ -7825,7 +7825,7 @@ function renderSalesSOPView(container, data) {
     <div style="display:flex;flex-direction:column;gap:12px">
       ${steps.map((s,i)=>`
         <div style="display:flex;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;border-left:4px solid ${O}">
-          <div style="flex-shrink:0;width:38px;height:38px;border-radius:50%;background:${O};color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800">${i+1}</div>
+          <div style="flex-shrink:0;width:38px;height:38px;border-radius:50%;background:${O};color:var(--on-primary);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800">${i+1}</div>
           <div style="flex:1;min-width:0">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">
               <h4 style="margin:0;font-size:15px;color:var(--text)">${escHtml(s.title||'')}</h4>
@@ -8404,7 +8404,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </div>
         <div class="card" style="text-align:center;padding:16px">
           <div style="font-size:28px;margin-bottom:4px">${emojiIcon('✅',28)}</div>
-          <div style="font-size:22px;font-weight:700;color:#30D158">${activeA}</div>
+          <div style="font-size:22px;font-weight:700;color:var(--success)">${activeA}</div>
           <div style="font-size:12px;color:var(--text-muted)">Active Assets</div>
         </div>
       </div>
@@ -11335,7 +11335,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
   );
 
   const typeChip = c => { const t = aecTypeMeta(c.type);
-    return `<span title="${escHtml(t.label)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${t.color};color:#fff;font-size:10px;font-weight:800">${t.letter}</span>`; };
+    return `<span title="${escHtml(t.label)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${t.color};color:var(--on-primary);font-size:10px;font-weight:800">${t.letter}</span>`; };
 
   // v14 Wave 6 B2 — card reflow (≤700px, shared .table-cards CSS pattern).
   // Row already click-navigates to openAECDetail (bound in bindRows below) —
@@ -11350,7 +11350,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       <td class="tc-detail" data-label="Contact Person">${escHtml(c.contactPerson || '')}</td>
       <td class="tc-detail" data-label="Contact Info" style="font-size:11px">${c.phone ? `${emojiIcon('📞',16)} ${escHtml(c.phone)}<br>` : ''}${c.email ? `${emojiIcon('✉️',16)} ${escHtml(c.email)}` : ''}</td>
       <td class="tc-detail" data-label="Region" style="font-size:11px">${escHtml((c.region || '').split(' — ')[0])}</td>
-      <td class="tc-net"><span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span></td>
+      <td class="tc-net"><span class="badge" style="font-size:9px;background:${st.color};color:var(--on-primary)">${st.icon} ${st.label}</span></td>
       <td class="c tc-detail" data-label="Quote">${c.quoteSent ? `${emojiIcon('✅',16)}${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
       <td class="tc-detail" data-label="Follow-up" style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `${emojiIcon('⏰',16)} ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
       <td class="c tc-actions" style="white-space:nowrap">
@@ -11362,7 +11362,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
     openPage(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
-        <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:#fff;font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:#fff;font-size:9px">${st.icon} ${st.label}</span></div>
+        <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:var(--on-primary);font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:var(--on-primary);font-size:9px">${st.icon} ${st.label}</span></div>
         ${c.contactPerson ? `<div>${emojiIcon('👤',16)} ${escHtml(c.contactPerson)}</div>` : ''}
         ${c.phone ? `<div>${emojiIcon('📞',16)} ${escHtml(c.phone)}</div>` : ''}
         ${c.email ? `<div>${emojiIcon('✉️',16)} ${escHtml(c.email)}</div>` : ''}
@@ -11634,7 +11634,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     const fuOverdue = fu && fu <= today && isOpen(cl);
     return `<div class="item-card cl-card" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer">
       <div style="flex:1;min-width:0">
-        <div class="item-title">${escHtml(cl.name)} <span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>${cl.deleteRequested?` <span class="badge badge-red" style="font-size:9px">${emojiIcon('🗑',9)} del req</span>`:''}</div>
+        <div class="item-title">${escHtml(cl.name)} <span class="badge" style="font-size:9px;background:${st.color};color:var(--on-primary)">${st.icon} ${st.label}</span>${cl.deleteRequested?` <span class="badge badge-red" style="font-size:9px">${emojiIcon('🗑',9)} del req</span>`:''}</div>
         <div class="item-meta">
           ${cl.company?`<span>${emojiIcon('🏢',16)} ${escHtml(cl.company)}</span>`:''}
           ${cl.email?`<span>${emojiIcon('✉️',16)} ${escHtml(cl.email)}</span>`:''}
@@ -11806,7 +11806,7 @@ async function openClientHub(cl, opts) {
         ${opts.canEdit
           ? `<select id="ch-stage" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
               ${CRM_STAGES.map(s=>`<option value="${s.key}" ${crmStageOf(cl)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select>`
-          : `<span class="badge" style="font-size:10px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`}
+          : `<span class="badge" style="font-size:10px;background:${st.color};color:var(--on-primary)">${st.icon} ${st.label}</span>`}
         ${cl.company?`<span style="font-size:12px;color:var(--text-muted)">${emojiIcon('🏢',12)} ${escHtml(cl.company)}</span>`:''}
         ${(cl.brands||[]).map(b=>`<span class="badge badge-gray" style="font-size:9px">${b==='sales'?'Sales':b==='design'?'Design':'Brilliant Steel'}</span>`).join('')}
       </div>
@@ -12955,7 +12955,7 @@ window.renderProjectLifecycle = async function(){
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${p.company==='BK'?'badge-orange':'badge-gray'}" style="font-size:9px">${p.company||''}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
         <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</span></div>
       </div>
-      <span class="badge" style="background:${st.color};color:#fff;flex-shrink:0">${st.icon} ${st.label}</span>
+      <span class="badge" style="background:${st.color};color:var(--on-primary);flex-shrink:0">${st.icon} ${st.label}</span>
     </div></div>`; };
 
   c.innerHTML = `
@@ -12969,7 +12969,7 @@ window.renderProjectLifecycle = async function(){
     </div>
     ${!projects.length?`<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📈',44)}</div><h4>No projects yet</h4><p>A project is created when a quote is converted to a Sales Order.</p></div>`:''}
     ${JOB_STAGES.filter(s=>!['paid','cancelled'].includes(s.id) && (byStage[s.id]||[]).length).map(s=>`
-      <div class="card" style="margin-bottom:12px"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3 style="font-size:13px">${s.icon} ${s.label}</h3><span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span></div>
+      <div class="card" style="margin-bottom:12px"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3 style="font-size:13px">${s.icon} ${s.label}</h3><span class="badge" style="background:${s.color};color:var(--on-primary)">${(byStage[s.id]||[]).length}</span></div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">${(byStage[s.id]||[]).map(card).join('')}</div></div>`).join('')}
     ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">${emojiIcon('💰',13)} Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}
     ${designList.length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">${emojiIcon('🎨',13)} Design Projects (${designList.length})</summary>
@@ -12998,7 +12998,7 @@ function openJobProjectDetail(p){
   const canAdvance = !isPartnerU && (canEditDept(ownerDept) || canEditDept('Sales'));
   const idx = JOB_STAGES.findIndex(s=>s.id===p.stage);
   const next = (p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
-  const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:#fff;font-weight:700`:dn?'background:var(--success);color:#fff':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
+  const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:var(--on-primary);font-weight:700`:dn?'background:var(--success);color:var(--on-primary)':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
   const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
@@ -13484,7 +13484,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
       <div class="card" style="margin-bottom:12px">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
           <h3 style="font-size:13px">${s.icon} ${s.label}</h3>
-          <span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span>
+          <span class="badge" style="background:${s.color};color:var(--on-primary)">${(byStage[s.id]||[]).length}</span>
         </div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
           ${(byStage[s.id]||[]).map(orderCard).join('')}
