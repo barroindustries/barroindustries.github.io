@@ -79,6 +79,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue
 .cat-tab:hover{border-color:var(--mid-blue);}
 .cat-tab.active{color:white;border-color:transparent;}
 
+/* ── RECENTLY USED PRODUCTS (speed win — audit #2) ── */
+.recent-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;}
+.recent-row .recent-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--gray-dark);margin-right:2px;}
+.recent-chip{padding:5px 11px;border-radius:20px;border:1.5px dashed var(--mid-blue);background:var(--light-blue);
+  color:var(--dark-blue);font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;
+  max-width:180px;overflow:hidden;text-overflow:ellipsis;}
+.recent-chip:hover{background:var(--mid-blue);color:white;}
+
 /* ── PRODUCT SEARCH ── */
 .search-wrap{position:relative;}
 .search-input{width:100%;padding:9px 12px;border:1.5px solid var(--gray-mid);border-radius:7px;
@@ -124,11 +133,11 @@ table{width:100%;border-collapse:collapse;}
 .items-table{table-layout:fixed;width:100%;}
 .items-table th:nth-child(1){width:4%;}
 .items-table th:nth-child(2){width:36%;}
-.items-table th:nth-child(3){width:5%;}
+.items-table th:nth-child(3){width:9%;}
 .items-table th:nth-child(4){width:9%;}
 .items-table th:nth-child(5){width:12%;}
 .items-table th:nth-child(6){width:12%;}
-.items-table th:nth-child(7){width:12%;}
+.items-table th:nth-child(7){width:8%;}
 .items-table th:nth-child(8){width:10%;}
 th{background:var(--dark-blue);color:white;text-align:left;padding:7px 8px;
   font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
@@ -160,8 +169,33 @@ tr:hover td{background:#fafbff;}
 .cell-edit{outline:none;border-radius:3px;min-height:1em;padding:1px 3px;transition:background .12s;}
 .cell-edit:hover{background:rgba(46,95,138,.07);cursor:text;}
 .cell-edit:focus{background:rgba(46,95,138,.1);outline:1px dashed var(--mid-blue);}
+/* Touch devices never fire :hover, so the only editability cue a phone/tablet
+   user had was invisible — give contenteditable cells a persistent, faint
+   dashed underline on touch instead (audit: "hover-only edit affordance"). */
+@media (hover:none){
+  .cell-edit{border-bottom:1px dashed rgba(46,95,138,.35);}
+}
 .cell-num{width:100%;text-align:center;border:1.5px solid var(--gray-mid);border-radius:4px;
   padding:3px 2px;font-size:12px;font-family:var(--font);}
+/* Qty +/- stepper — touch-friendly bump buttons flanking a qty input
+   (audit: "bare number inputs — no +/- stepper for touch"). Pure input
+   affordance; bumpQty()/the onchange handlers still run the same
+   Math.max(1,...) guard as manual typing. */
+.qty-stepper{display:flex;align-items:stretch;gap:0;}
+.qty-stepper .qty-btn{flex-shrink:0;width:26px;border:1.5px solid var(--gray-mid);background:var(--gray-light);
+  color:var(--dark-blue);font-size:14px;font-weight:700;cursor:pointer;padding:0;line-height:1;}
+.qty-stepper .qty-btn:first-child{border-radius:4px 0 0 4px;border-right:none;}
+.qty-stepper .qty-btn:last-child{border-radius:0 4px 4px 0;border-left:none;}
+.qty-stepper input{border-radius:0!important;text-align:center;min-width:0;}
+/* Compact variant for the narrow Qty column inside the items table (the calc
+   panel above has room to spare and uses the full-size buttons). */
+.qty-stepper.compact .qty-btn{width:16px;font-size:11px;}
+@media(max-width:700px){
+  /* Mobile already horizontally-scrolls the table (min-width:700px) — give
+     every qty stepper (including the compact table variant) a real touch
+     target there instead of staying column-width-constrained. */
+  .qty-stepper .qty-btn{width:34px;min-height:38px;font-size:16px;}
+}
 .cell-unit{width:100%;border:1.5px solid var(--gray-mid);border-radius:4px;
   padding:3px 2px;font-size:11px;font-family:var(--font);}
 .formula-badge{font-size:10px;background:var(--accent);color:#1a1a1a;padding:1px 5px;
@@ -306,6 +340,10 @@ tr:hover td{background:#fafbff;}
   .pc-check{min-height:44px;}
   .pricing-controls select{flex:1;min-width:0;min-height:40px;}
   .pricing-controls input[type="number"]{flex:1;min-width:0;min-height:40px;width:auto!important;}
+  /* Terms on/off checkbox was a bare 14px box — under the 44px touch target
+     guideline every other mobile control here follows (audit finding). */
+  .term-cb{width:22px;height:22px;}
+  .terms-block h4{min-height:40px;display:flex;align-items:center;gap:9px;}
   .pay-tbl td,.pay-tbl th{font-size:12px;padding:6px 7px;}
   .lead-in{width:100%!important;}
   /* 16px floor (not the old 14px) — anything smaller triggers iOS Safari's
@@ -413,13 +451,24 @@ tr:hover td{background:#fafbff;}
 /* ── TRUST FOOTER / AGENT / BILL STRIP ── */
 .agent-tag{margin-top:5px;font-size:8.5pt;font-weight:800;letter-spacing:1px;color:#fff;
   background:var(--purple);padding:2px 8px;border-radius:4px;display:inline-block;}
-.bill-strip{margin-bottom:8px;}
+/* Bill-to strip — used to be print-only, so the preparer never saw it until
+   the PDF came out (audit: "invisible on screen"). Now shown on screen too,
+   styled as a compact preview card; @media print below still restyles it for
+   the printed page. Toggled via renderBillStrip()'s display:none/block. */
+.bill-strip{margin-bottom:8px;background:var(--gray-light);border:1px solid var(--gray-mid);
+  border-radius:7px;padding:8px 12px;font-size:12.5px;line-height:1.55;color:var(--text);}
 .print-footer{margin-top:14px;padding-top:10px;border-top:2px solid var(--dark-blue);text-align:center;}
 .pf-trust{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;margin-bottom:8px;}
 .pf-badge{font-size:8.5pt;font-weight:700;color:var(--dark-blue);}
 .pf-thanks{font-size:10pt;font-weight:700;color:var(--dark-blue);margin-bottom:3px;}
 .pf-creds{font-size:8pt;color:#666;line-height:1.5;}
 .body-agent .commission-agent-only{display:table-row;}
+/* Restyle the letterhead's extraMeta line as the old .agent-tag badge when
+   it's carrying the Agent Copy confidential notice (see applyLetterheadHeader
+   passing extraMeta only while body-agent is set, so .lh-docmeta only ever
+   appears here in that state). */
+body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;color:#fff;
+  background:var(--purple);padding:2px 8px;border-radius:4px;display:inline-block;margin-top:5px;}
 
 /* ── PRINT ── */
 .print-only{display:none;}
@@ -429,12 +478,17 @@ tr:hover td{background:#fafbff;}
   .qno-builder-section,.totals-controls,.status-bar,.cat-tabs,.pricing-controls{display:none!important;}
   .term-off{display:none!important;}
   .print-only{display:block!important;}
-  /* Sections must FLOW across pages — a tall section (the items table) with
-     page-break-inside:avoid was pushed whole to page 2, leaving page 1 blank
-     except the header. Rows/category groups keep their own avoid (below), so the
-     table stays readable while flowing continuously at any print scale. */
+  /* Sections default to avoid-break (keep-together) — Delivery & Installation,
+     Timeline, Payment, Terms, etc. are short blocks that must never split
+     their heading from their body (audit: "blanket page-break-inside:auto
+     risks orphaned headings"). #itemsSection is the ONE section that must
+     FLOW across pages instead — it's tall and used to get pushed whole to
+     page 2, leaving page 1 blank except the header; its own rows/category
+     groups already keep their own avoid (below), so the table stays readable
+     while flowing continuously at any print scale. */
   .section{box-shadow:none;border:none;margin-bottom:6px;padding:3px 0 6px;border-radius:0;
-    border-bottom:1px solid #e3e7ef;page-break-inside:auto;break-inside:auto;}
+    border-bottom:1px solid #e3e7ef;page-break-inside:avoid;break-inside:avoid;}
+  #itemsSection{page-break-inside:auto;break-inside:auto;}
   .sec-title{font-size:8.5pt;color:#1E3A5F;border-bottom:1.5px solid #1E3A5F;margin-bottom:5px;padding-bottom:2px;letter-spacing:.6px;}
   .main{padding:0;max-width:100%;}
   .print-header{display:none!important;}
@@ -477,9 +531,17 @@ tr:hover td{background:#fafbff;}
   body.body-agent .agent-box{display:block!important;}
   .agent-box{background:#f3e9fb!important;border:1.5px solid #8E44AD;border-radius:6px;
     padding:8px 11px;margin-top:8px;page-break-inside:avoid;}
+  /* Continuation pages of a long items table showed nothing but rows — no
+     company/quote/client identifier (audit: "no page identifier / running
+     header-footer"). Chrome's print engine doesn't reliably support GCPM
+     total-page counters, so a position:fixed footer (a well-supported trick)
+     repeats this identifier on every physical printed page instead. */
+  .print-run-footer{display:block!important;position:fixed;bottom:2mm;left:10mm;right:10mm;
+    font-size:7pt;color:#888;text-align:center;border-top:.5px solid #ddd;padding-top:1.5mm;}
   @page{size:A4 portrait;margin:11mm 10mm 7mm;}
 }
 .print-header{display:none;}
+.print-run-footer{display:none;}
 @media print{.no-print{display:none!important;}}
 
 /* v12 WS31 Spec 7 / Wave 3 Q8 — #lhPrintHeader (shared letterhead engine) is now
@@ -561,6 +623,44 @@ tr:hover td{background:#fafbff;}
 /* ── CLOUD DRAFT SAVED CHIP (Wave 3 Q6) ── */
 .draft-save-chip{display:none;font-size:11px;font-weight:600;color:var(--green,#27AE60);
   padding:4px 9px;border-radius:12px;background:rgba(39,174,96,.12);white-space:nowrap;}
+
+/* ── ALWAYS-VISIBLE RUNNING TOTAL (desktop) — audit: "no persistent running
+   total once you scroll past the items table". Mirrors the existing
+   .qq-badge sticky pill already used inside the Quick Quote picker step, just
+   as a viewport-fixed pill so it survives scrolling into Payment/Timeline/
+   Terms/Photos, which the old itemsSection-scoped sticky bar (mobile media
+   query below) could never do since it can't stick past its own section's
+   bounds. Mobile keeps its own bottom sticky totals bar, so this pill is
+   desktop-only (hidden ≤700px) to avoid stacking two total indicators. ── */
+.running-total-pill{position:fixed;right:18px;bottom:18px;z-index:250;
+  background:var(--dark-blue);color:#fff;padding:10px 18px;border-radius:24px;
+  font-size:13px;font-weight:700;font-family:inherit;box-shadow:0 4px 16px rgba(0,0,0,.28);
+  cursor:pointer;border:none;display:none;}
+.running-total-pill:hover{background:var(--mid-blue);}
+@media(max-width:700px){.running-total-pill{display:none!important;}}
+@media print{.running-total-pill{display:none!important;}}
+
+/* ── TOAST — non-blocking replacement for validation alert()s (audit:
+   "blocking native alert() instead of the app's own status/toast
+   affordance"). Doesn't freeze the page like alert() did. ── */
+.qb-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);
+  background:var(--dark-blue);color:#fff;padding:11px 20px;border-radius:9px;font-size:13px;
+  font-weight:600;box-shadow:0 6px 22px rgba(0,0,0,.28);opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .2s;z-index:3000;max-width:88vw;text-align:center;}
+.qb-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.qb-toast.qb-toast-error{background:var(--red);}
+@media print{.qb-toast{display:none!important;}}
+
+/* ── PHOTO LIGHTBOX (audit: "no lightbox/zoom") ── */
+.photo-card img{cursor:zoom-in;}
+.photo-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2500;
+  display:none;align-items:center;justify-content:center;padding:24px;}
+.photo-lightbox.show{display:flex;}
+.photo-lightbox img{max-width:100%;max-height:100%;border-radius:6px;box-shadow:0 8px 30px rgba(0,0,0,.5);}
+.photo-lightbox-x{position:absolute;top:14px;right:18px;background:rgba(255,255,255,.15);
+  border:none;color:#fff;font-size:22px;width:38px;height:38px;border-radius:50%;cursor:pointer;}
+.photo-card-actions{display:flex;gap:3px;justify-content:flex-end;margin-top:2px;}
+.photo-card-actions .move-btn{border:1px solid var(--gray-mid);}
 </style>
 </head>
 <body>
@@ -670,8 +770,11 @@ tr:hover td{background:#fafbff;}
   </div>
 </div>
 
-<!-- Client billing strip (print) -->
-<div class="print-only bill-strip" id="billStrip"></div>
+<!-- Client billing strip — shown on screen too now (audit: "invisible on
+     screen — preparer can't preview it before printing"); renderBillStrip()
+     toggles display:none/block. Still prints (see the .bill-strip @media
+     print override) since it's no longer gated behind .print-only. -->
+<div class="bill-strip" id="billStrip" style="display:none;"></div>
 
 <!-- Subject line (print) -->
 <div class="print-only" id="phSubject" style="display:none;font-size:10pt;color:#222;margin:6px 0 2px;"><strong>Subject:</strong> <span id="phSubjectVal"></span></div>
@@ -810,6 +913,15 @@ tr:hover td{background:#fafbff;}
       <input type="text" id="quoteNo" placeholder="Auto-generated" readonly style="background:var(--gray-light);" oninput="updatePrintHeader()">
     </div>
     <div class="fg"><label>Salesperson</label><input type="text" id="salesperson" placeholder="Name" oninput="updatePrintHeader()"></div>
+    <div class="fg"><label>Valid For</label>
+      <select id="quoteValidDays" onchange="updatePrintHeader();renderTerms();saveToStorage();">
+        <option value="15">15 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="45">45 days</option>
+        <option value="60">60 days</option>
+        <option value="90">90 days</option>
+      </select>
+    </div>
     <div class="fg"><label>Project Type</label>
       <select id="purpose" onchange="updatePrintHeader();saveToStorage();">
         <option>Restaurant</option><option>Hotel Restaurant</option><option>Hospital / Institutional</option>
@@ -830,10 +942,13 @@ tr:hover td{background:#fafbff;}
 <div class="section no-print">
   <div class="sec-title">Client Information</div>
   <div class="fg-grid">
-    <div class="fg full"><label>Client Name</label><input id="clientName" placeholder="Full name" oninput="updatePrintHeader();saveToStorage();scheduleAutoCustRev();"></div>
+    <div class="fg full"><label>Client Name</label>
+      <input id="clientName" list="clientNameList" placeholder="Full name" oninput="updatePrintHeader();saveToStorage();scheduleAutoCustRev();onClientNameInput();">
+      <datalist id="clientNameList"></datalist>
+    </div>
     <div class="fg full"><label>Company / Business Name</label><input id="clientCompany" placeholder="Company name (if applicable)" oninput="updatePrintHeader();saveToStorage();"></div>
     <div class="fg full"><label>Project Address / Site</label><input id="clientAddress" placeholder="Full address" oninput="renderBillStrip();saveToStorage();"></div>
-    <div class="fg"><label>Contact Number</label><input id="clientPhone" placeholder="+63…" oninput="renderBillStrip();saveToStorage();"></div>
+    <div class="fg"><label>Contact Number</label><input id="clientPhone" type="tel" inputmode="tel" placeholder="+63…" oninput="renderBillStrip();saveToStorage();"></div>
     <div class="fg"><label>Email</label><input id="clientEmail" type="email" placeholder="email@example.com" oninput="renderBillStrip();saveToStorage();"></div>
   </div>
 </div>
@@ -841,6 +956,9 @@ tr:hover td{background:#fafbff;}
 <!-- ── ADD ITEMS ── -->
 <div class="section no-print" id="addItemsSection">
   <div class="sec-title">Add Items to Quote</div>
+
+  <!-- Recently used products (audit speed win #2) — filled by renderRecentProductsRow() -->
+  <div class="recent-row" id="recentProductsRow" style="display:none;"></div>
 
   <!-- Category filter tabs -->
   <div class="cat-tabs" id="catTabs">
@@ -890,9 +1008,13 @@ tr:hover td{background:#fafbff;}
       <div class="calc-price-value" id="calcPriceDisplay">₱0</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-      <div class="fg" style="min-width:80px;max-width:100px;">
+      <div class="fg" style="min-width:110px;max-width:130px;">
         <label>Qty</label>
-        <input type="number" id="calcQty" value="1" min="1" oninput="recomputePrice()">
+        <div class="qty-stepper">
+          <button type="button" class="qty-btn" onclick="bumpCalcQty(-1)" tabindex="-1">−</button>
+          <input type="number" id="calcQty" value="1" min="1" oninput="recomputePrice()">
+          <button type="button" class="qty-btn" onclick="bumpCalcQty(1)" tabindex="-1">+</button>
+        </div>
       </div>
       <div class="fg" style="min-width:120px;max-width:200px;">
         <label>Unit</label>
@@ -1217,6 +1339,24 @@ tr:hover td{background:#fafbff;}
   </div>
 </div>
 
+<!-- Running total pill (desktop, no-print) — audit: "no persistent running
+     total once you scroll past the items table". Direct child of <body> (not
+     .main) so position:fixed is always relative to the viewport. -->
+<button type="button" class="running-total-pill no-print" id="runningTotalPill"
+  onclick="document.getElementById('itemsSection')?.scrollIntoView({behavior:'smooth'})"></button>
+
+<!-- Photo lightbox (audit: "no lightbox/zoom") -->
+<div class="photo-lightbox no-print" id="photoLightbox" onclick="closeLightbox(event)">
+  <button type="button" class="photo-lightbox-x" onclick="closeLightbox()" aria-label="Close">✕</button>
+  <img id="photoLightboxImg" src="" alt="">
+</div>
+
+<!-- Toast host is created lazily by showToast() -->
+
+<!-- Repeats a compact quote identifier on every printed page (audit: "no page
+     identifier / running header-footer on continuation pages"). -->
+<div class="print-run-footer" id="printRunFooter"></div>
+
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -1290,6 +1430,12 @@ let quickMode=false, qqStep=1, qqSelectedClientId=null, qqClients=null;
 // {url, path, caption, itemIndex, dataUrl}. dataUrl is in-memory only (offline print fallback),
 // never persisted to localStorage or the Firestore payload.
 let quotePhotos=[];
+// Recently-used products (audit speed win #2) — plain array of product ids,
+// most-recent-first, capped at 12. Persisted separately from the per-quote
+// bkqb_* keys since "recent products" is a cross-quote preference, not part
+// of the quote's own state (never touched by clearForm()/loadEditableState()).
+let recentProductIds=[];
+try{ recentProductIds=JSON.parse(localStorage.getItem('bkqb_recent_products')||'[]'); }catch(e){ recentProductIds=[]; }
 function fmtNum(v,dec){ const n=parseFloat(Number(v).toFixed(dec)); return n.toString(); }
 function gcdInt(a,b){ return b?gcdInt(b,a%b):a; }
 // inches → "35 7/16" / "35" / "7/16" (nearest 1/16)
@@ -1370,7 +1516,7 @@ let draftSaveTimer=null, draftAckTimer=null;
 //  Tries to load from a local/relative products-database.json first,
 //  then falls back to embedded fallback data.
 // ═══════════════════════════════════════════════════════════════════
-async function loadDatabase() {
+async function loadDatabase(force) {
   setStatus('loading','Loading product database…');
 
   // file:// protocol blocks Firestore/fetch — skip directly to embedded data
@@ -1455,7 +1601,13 @@ async function loadDatabase() {
     // Timeout after 5 seconds
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(), 5000);
-    const r = await fetch('products-database.json?v='+Date.now(), {signal:controller.signal});
+    // Cache-bust ONLY on an explicit user-triggered "Reload DB" (force===true).
+    // The automatic fallback path here also runs on every plain offline open /
+    // Firestore hiccup — cache-busting THAT defeats the service worker's
+    // PRECACHE of this exact file (sw.js) for no reason, turning a fast local
+    // fallback into a network round-trip that can itself time out (audit:
+    // "always cache-busts, defeating HTTP/SW caching on every cold load").
+    const r = await fetch('products-database.json'+(force?('?v='+Date.now()):''), {signal:controller.signal});
     clearTimeout(timer);
     if (!r.ok) throw new Error('fetch failed');
     const text = await r.text();
@@ -1470,12 +1622,30 @@ async function loadDatabase() {
   initUI();
 }
 
-function reloadDatabase(){ loadDatabase(); }
+function reloadDatabase(){ loadDatabase(true); }
 
 function setStatus(type, msg){
   const dot = document.getElementById('statusDot');
   dot.className = 'status-dot '+(type==='online'?'online':type==='offline'?'offline':'loading');
   document.getElementById('statusMsg').textContent = msg;
+}
+
+// Non-blocking toast — replaces the blocking native alert() this file used to
+// use for in-flow validation messages (client-name-required, print-before-
+// filing gates, share errors). Doesn't freeze the page like alert() did.
+let _toastTimer=null;
+function showToast(msg,type){
+  const t=document.getElementById('qbToast')||(()=>{
+    const el=document.createElement('div');
+    el.id='qbToast'; el.className='qb-toast no-print';
+    document.body.appendChild(el);
+    return el;
+  })();
+  t.textContent=msg;
+  t.classList.toggle('qb-toast-error',type==='error');
+  t.classList.add('show');
+  if(_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer=setTimeout(()=>{ t.classList.remove('show'); },3200);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1573,14 +1743,25 @@ document.addEventListener('DOMContentLoaded', ()=>{
     else if(e.key==='Enter'){e.preventDefault();selectFocused();}
     else if(e.key==='Escape') closeDropdown();
   });
+  // Enter commits the calc panel (audit: "Enter key doesn't submit the calc
+  // panel — must reach for the mouse"). Skipped for <select>/<textarea>
+  // targets so it doesn't fight normal keyboard navigation of a spec dropdown.
+  document.getElementById('calcPanel')?.addEventListener('keydown', e=>{
+    if(e.key!=='Enter') return;
+    const tag=(e.target.tagName||'').toUpperCase();
+    if(tag==='SELECT'||tag==='TEXTAREA') return;
+    e.preventDefault();
+    addItemFromCalc();
+  });
   // Client # auto-suggestion: mark manual edits, then suggest once auth is ready.
   document.getElementById('qnoSeq')?.addEventListener('input',()=>{_seqTouched=true;});
-  if(typeof auth!=='undefined'&&auth.onAuthStateChanged) auth.onAuthStateChanged(u=>{ if(u) autoClientSeq(); });
+  if(typeof auth!=='undefined'&&auth.onAuthStateChanged) auth.onAuthStateChanged(u=>{ if(u){ autoClientSeq(); populateClientDatalist(); } });
 });
 
 function initUI(){
   buildCoefTable();
   renderItems();
+  renderRecentProductsRow();
   // ?mode=quick — enable the Quick Quote wizard on load (v12 WS31).
   if (!quickMode && new URLSearchParams(location.search).get('mode') === 'quick') toggleQuickMode();
 }
@@ -1626,6 +1807,13 @@ function applyLetterheadHeader(){
     docTitle: 'QUOTATION',
     docNumber: document.getElementById('quoteNo')?.value || '',
     dateLabel: new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}),
+    // Agent Copy print used to look byte-identical to the Client Copy header
+    // (audit: "no longer shows the AGENT COPY — CONFIDENTIAL tag" since the
+    // WS31 letterhead migration made #lhPrintHeader the sole printed header
+    // and it never knew about the legacy #phAgentTag). extraMeta is an
+    // existing, already-supported buildLetterhead() option — this reuses it
+    // rather than touching js/letterhead.js.
+    extraMeta: document.body.classList.contains('body-agent') ? ['AGENT COPY — CONFIDENTIAL'] : [],
     accent: currentCo==='BS' ? '#37474F' : '#1E3A5F',
     // v14: resolve the PER-COMPANY mark; an empty one means this company has
     // no logo, so suppress it (showLogo:false) instead of inheriting the
@@ -1766,10 +1954,12 @@ async function qqRenderStep1(body){
       <datalist id="qqClientList"></datalist>
     </div>
     <div class="fg-grid" style="margin-top:10px">
-      <div class="fg full"><label>Client Name</label><input id="qq-name" placeholder="Full name"></div>
+      <div class="fg full"><label>Client Name</label><input id="qq-name" placeholder="Full name">
+        <div id="qq-name-err" style="display:none;color:var(--red);font-size:11px;margin-top:4px;">Enter the client name first.</div>
+      </div>
       <div class="fg full"><label>Company / Business Name</label><input id="qq-company" placeholder="Company name (if applicable)"></div>
       <div class="fg full"><label>Project Address / Site</label><input id="qq-addr" placeholder="Full address"></div>
-      <div class="fg"><label>Contact Number</label><input id="qq-phone" placeholder="+63…"></div>
+      <div class="fg"><label>Contact Number</label><input id="qq-phone" type="tel" inputmode="tel" placeholder="+63…"></div>
       <div class="fg"><label>Email</label><input id="qq-email" type="email" placeholder="email@example.com"></div>
     </div>`;
   // Prefill FROM the main form's client fields — the main form stays the single
@@ -1808,10 +1998,47 @@ async function qqLoadClients(){
   return qqClients;
 }
 
+// Client autocomplete for the FULL (non-Quick-Quote) form (audit: "Client
+// autocomplete/picker only exists in Quick Mode, not the full form" — reps in
+// the default full-form workflow had zero lookup and retyped every existing
+// client's details, guaranteeing typos/duplicate `clients` records). Reuses
+// the same cached list + exact-match autofill pattern as the Quick Quote
+// qq-pick handler above; the main form's fields stay the single source of
+// truth (buildQuotePayload() reads these ids, unchanged).
+let _clientListPopulated=false;
+async function populateClientDatalist(){
+  const dl=document.getElementById('clientNameList'); if(!dl) return;
+  const clients=await qqLoadClients();
+  dl.innerHTML=clients.map(c=>`<option value="${attrEsc(c.name||'')}">`).join('');
+  _clientListPopulated=true;
+}
+async function onClientNameInput(){
+  const typed=(document.getElementById('clientName')?.value||'').trim();
+  if(!typed) return;
+  if(!_clientListPopulated) await populateClientDatalist();
+  const clients=await qqLoadClients();
+  const match=clients.find(c=>(c.name||'').trim().toLowerCase()===typed.toLowerCase());
+  if(!match) return;
+  const set=(id,val)=>{ const f=document.getElementById(id); if(f) f.value=val||''; };
+  set('clientCompany',match.company);
+  set('clientAddress',match.address);
+  set('clientPhone',match.phone);
+  set('clientEmail',match.email);
+  updatePrintHeader(); renderBillStrip(); saveToStorage();
+}
+
 // ── Step 2 — Products (photo catalog) ──
 function qqRenderStep2(body){
   const cats=DB.categories||[];
   const chipStyle=c=>currentCatFilter===c.id?`background:${c.color};color:white;border-color:${c.color};`:'';
+  // Recently-used row (audit speed win #2) — pinned above the category chips
+  // so reps quoting the same handful of SKUs repeatedly don't have to
+  // re-search/re-tab every time. Tapping one runs the same qqPick() path.
+  const recentProds=recentProductIds.map(id=>DB.products.find(p=>p.id===id)).filter(Boolean).slice(0,10);
+  const recentRow = recentProds.length ? `<div class="recent-row">
+    <span class="recent-label">Recently used</span>
+    ${recentProds.map(p=>`<button type="button" class="recent-chip" onclick="qqPick('${attrEsc(p.id)}')" title="${attrEsc(p.name)}">${txtEsc(p.shortName||p.name)}</button>`).join('')}
+  </div>` : '';
   const chips=`<div class="cat-tabs" style="margin-bottom:10px">
     <button class="cat-tab${currentCatFilter==='all'?' active':''}" onclick="qqFilterCat('all')" style="${currentCatFilter==='all'?'background:var(--dark-blue);color:white;border-color:var(--dark-blue);':''}">All</button>
     ${cats.map(c=>`<button class="cat-tab${currentCatFilter===c.id?' active':''}" onclick="qqFilterCat('${attrEsc(c.id)}')" style="${chipStyle(c)}">${c.icon||''} ${txtEsc(c.label||c.id)}</button>`).join('')}
@@ -1825,7 +2052,7 @@ function qqRenderStep2(body){
     </button>`).join('')}</div>`
     : `<div class="empty-state" style="padding:24px;text-align:center;color:var(--gray-dark)">No products in this category.</div>`;
   const badge = items.length ? `<div class="qq-badge">🧺 ${items.length} item(s) · ${formatPeso(computeTotals().grand)}</div>` : '';
-  body.innerHTML = chips + grid + badge;
+  body.innerHTML = recentRow + chips + grid + badge;
 }
 function qqFilterCat(cat){ currentCatFilter=cat; qqRender(); }
 // Opens the REAL calc panel (dimensions/qty/computePrice) — no forked pricing.
@@ -1845,7 +2072,14 @@ function qqRenderStep3(body){
 function qqGo(delta){
   if(delta>0 && qqStep===1){
     const name=(document.getElementById('qq-name')?.value||'').trim();
-    if(!name){ alert('Enter the client name first.'); return; }
+    const errEl=document.getElementById('qq-name-err');
+    if(!name){
+      // Inline helper text instead of a blocking alert() (audit finding).
+      if(errEl) errEl.style.display='block';
+      document.getElementById('qq-name')?.focus();
+      return;
+    }
+    if(errEl) errEl.style.display='none';
     // Copy Step 1 into the main form (single source of truth stays the main
     // form — buildQuotePayload() reads these ids unchanged).
     document.getElementById('clientName').value=name;
@@ -1978,7 +2212,7 @@ function updatePrintHeader(){
   const sp=document.getElementById('salesperson').value;
   document.getElementById('phQuoteNo').textContent=no?'Quote No.: '+no:'';
   document.getElementById('phDate').textContent=d?'Date: '+fmtDate(new Date(d+'T12:00:00')):'';
-  document.getElementById('phValid').textContent=d?'Valid Until: '+fmtDate(addDays(d,30)):'';
+  document.getElementById('phValid').textContent=d?'Valid Until: '+fmtDate(addDays(d,getValidDays())):'';
   document.getElementById('phSalesperson').textContent=sp?'Prepared by: '+sp:'';
   const subj=document.getElementById('subject')?.value?.trim()||'';
   const subjEl=document.getElementById('phSubject');
@@ -1991,18 +2225,26 @@ function updatePrintHeader(){
 
 function renderBillStrip(){
   const box=document.getElementById('billStrip'); if(!box) return;
-  const name=document.getElementById('clientName')?.value?.trim()||'';
-  const co=document.getElementById('clientCompany')?.value?.trim()||'';
-  const addr=document.getElementById('clientAddress')?.value?.trim()||'';
-  const phone=document.getElementById('clientPhone')?.value?.trim()||'';
-  const email=document.getElementById('clientEmail')?.value?.trim()||'';
-  const purpose=document.getElementById('purpose')?.value||'';
-  if(!name&&!co&&!addr){ box.innerHTML=''; return; }
+  // txtEsc every field — this was the one render path in the file that
+  // concatenated raw client-supplied text straight into innerHTML with no
+  // escaping (audit correctness/XSS finding). Client name/company round-trip
+  // through Firestore on reopen, so an unescaped value would re-render
+  // unescaped for every teammate who later reopens the quote.
+  const name=txtEsc(document.getElementById('clientName')?.value?.trim()||'');
+  const co=txtEsc(document.getElementById('clientCompany')?.value?.trim()||'');
+  const addr=txtEsc(document.getElementById('clientAddress')?.value?.trim()||'');
+  const phone=txtEsc(document.getElementById('clientPhone')?.value?.trim()||'');
+  const email=txtEsc(document.getElementById('clientEmail')?.value?.trim()||'');
+  const purpose=txtEsc(document.getElementById('purpose')?.value||'');
+  if(!name&&!co&&!addr){ box.innerHTML=''; box.style.display='none'; return; }
   const l1=`<strong>BILL TO:</strong> ${name||'—'}${co?' — '+co:''}`;
   const parts=[]; if(addr)parts.push(addr); if(phone)parts.push('☎ '+phone); if(email)parts.push('✉ '+email);
   const l2=parts.join('  |  ');
   const l3=purpose?`Project Type: ${purpose}`:'';
   box.innerHTML=`<div>${l1}</div>${l2?`<div>${l2}</div>`:''}${l3?`<div style="color:#666;">${l3}</div>`:''}`;
+  // Shown on screen now too (audit: "invisible on screen — preparer can't
+  // preview it before printing"); print CSS still restyles it for the page.
+  box.style.display='block';
 }
 
 function updateFiledSig(){
@@ -2084,6 +2326,10 @@ function clearSearch(){
   document.getElementById('searchInput').value='';
   closeDropdown();
   dismissCalc();
+  // Restore focus so a multi-item quote can keep a type-add-type-add loop
+  // going without a mouse trip back into the field (audit: "search input
+  // loses focus after adding an item").
+  document.getElementById('searchInput')?.focus();
 }
 
 function moveFocus(dir){
@@ -2103,12 +2349,86 @@ function selectFocused(){
 // ═══════════════════════════════════════════════════════════════════
 //  CALCULATOR / CONFIGURATOR
 // ═══════════════════════════════════════════════════════════════════
+// Recently-used products row — audit speed win #2. record() runs after every
+// successful add (both the one-tap fixed-price path and the calc-panel path);
+// render() paints the chip row above the category tabs (desktop) — tapping a
+// chip runs the exact same selectProduct() path as the search dropdown.
+function recordRecentProduct(id){
+  if(!id) return;
+  recentProductIds=[id,...recentProductIds.filter(x=>x!==id)].slice(0,12);
+  try{ localStorage.setItem('bkqb_recent_products',JSON.stringify(recentProductIds)); }catch(e){}
+  renderRecentProductsRow();
+}
+function renderRecentProductsRow(){
+  const row=document.getElementById('recentProductsRow'); if(!row) return;
+  const prods=recentProductIds.map(id=>(DB.products||[]).find(p=>p.id===id)).filter(Boolean).slice(0,10);
+  if(!prods.length){ row.style.display='none'; row.innerHTML=''; return; }
+  row.style.display='flex';
+  row.innerHTML='<span class="recent-label">Recently used</span>'+prods.map(p=>
+    `<button type="button" class="recent-chip" onclick="selectProduct('${attrEsc(p.id)}')" title="${attrEsc(p.name)}">${txtEsc(p.shortName||p.name)}</button>`
+  ).join('');
+}
+
+// Skip the calc panel entirely for fixed-price, no-spec products (audit
+// speed win #1 — 69% of the catalog has nothing to configure there: no
+// dims/specs, just a redundant Qty-1 + "Add to Quote" click). Everything
+// else (per_length/per_area/per_run/configurable, or anything with specs)
+// still opens the full configure panel unchanged.
 function selectProduct(id){
-  selectedProduct = DB.products.find(p=>p.id===id);
-  if(!selectedProduct) return;
+  const p=DB.products.find(x=>x.id===id);
+  if(!p) return;
   closeDropdown();
+  if(p.formulaType==='fixed' && !(p.specs&&p.specs.length)){
+    addFixedItemDirect(p);
+    return;
+  }
+  selectedProduct=p;
   document.getElementById('searchInput').value=selectedProduct.name;
   buildCalcPanel(selectedProduct);
+}
+
+// Dimension display string for the one-tap path — mirrors getDimString()'s
+// non-per_run branch exactly, but reads the PRODUCT's own defaultDimensions
+// instead of the global dimsMm (which is calc-panel session state and may
+// still hold a stale value from a previous, unrelated product selection).
+function fixedItemDimString(p){
+  const dd=p.defaultDimensions||{};
+  const u=MEASURE_UNITS[measureUnit];
+  const dimLabel={W:'L',D:'W',H:'H'};
+  const parts=[];
+  ['W','D','H'].forEach(k=>{ if(dd[k]) parts.push(`${dimLabel[k]}${dispVal(dd[k])}${u.text?(u.suffix||''):''}`); });
+  if(!parts.length) return '';
+  return parts.join(' × ')+(u.text?'':' '+measureUnit);
+}
+
+// Adds a fixed-price, no-spec product straight to the quote at qty 1 — same
+// item shape addItemFromCalc() builds, still priced through computePrice()
+// (so the Material Price Index coefficient / rounding stay byte-identical to
+// what the calc-panel path would have produced). Qty/price stay editable
+// inline afterward via the normal updateQty/updatePrice cell handlers.
+function addFixedItemDirect(p){
+  const price=computePrice(p);
+  items.push({
+    id:p.id, category:p.category, name:p.name, dims:fixedItemDimString(p),
+    specs:[], specStr:'', qty:1, unit:p.unit||'pc', unitPrice:price, amount:price,
+    leadTime:p.leadTime||'—', laborHours:p.laborHours||null,
+    capitalMaterials:p.capitalMaterials||0, capitalLabor:p.capitalLabor||0,
+    formulaType:p.formulaType,
+  });
+  recordRecentProduct(p.id);
+  saveToStorage();
+  renderItems();
+  flashItemSaved();
+  showToast('➕ Added: '+p.name);
+  clearSearch();
+  dismissCalc();
+  if (quickMode) qqRender();
+}
+
+function bumpCalcQty(delta){
+  const el=document.getElementById('calcQty'); if(!el) return;
+  el.value=Math.max(1,(parseInt(el.value)||1)+delta);
+  recomputePrice();
 }
 
 function buildCalcPanel(p){
@@ -2155,6 +2475,10 @@ function buildCalcPanel(p){
 
   panel.classList.add('open');
   recomputePrice();
+  // Quick Quote step 2 renders the calc panel far down the page, below the
+  // (hidden) search/cat-tabs row — a tap on a product photo card gave no
+  // visible feedback since the panel opened off-screen (audit: mobile).
+  if(quickMode) setTimeout(()=>{ panel.scrollIntoView({behavior:'smooth',block:'start'}); },30);
 }
 
 // Build the dimension inputs for the current product in the chosen measurement unit.
@@ -2317,6 +2641,7 @@ function addItemFromCalc(){
     formulaType:p.formulaType,
   });
 
+  recordRecentProduct(p.id);
   saveToStorage();
   renderItems();
   clearSearch();
@@ -2393,7 +2718,13 @@ function renderItems(){
           <div class="spec-line"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
           <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
         </td>
-        <td style="text-align:center;"><input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:50px;"></td>
+        <td style="text-align:center;">
+          <div class="qty-stepper compact" style="justify-content:center;">
+            <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},-1)" tabindex="-1">−</button>
+            <input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:32px;">
+            <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},1)" tabindex="-1">+</button>
+          </div>
+        </td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
         <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}</td>
@@ -2403,6 +2734,7 @@ function renderItems(){
             ${dragHandle}
             <button class="move-btn" onclick="moveItemUp(${idx})" title="Move up" ${isFirst?'disabled':''}>▲</button>
             <button class="move-btn" onclick="moveItemDown(${idx})" title="Move down" ${isLast?'disabled':''}>▼</button>
+            <button class="move-btn" onclick="duplicateItem(${idx})" title="Duplicate this line">⧉</button>
             <button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button>
           </div>
         </td>
@@ -2464,7 +2796,21 @@ function renderTotals(){
   renderPaymentSchedule(t.grand);
   updateDiPrint();
   if(currentView==='internal') computeMarginSummary();
+  updateRunningTotalPill(t);
   saveToStorage();
+}
+
+// Always-visible running total (desktop) — audit: "no persistent running
+// total once you scroll past the items table". Fixed-position pill (see CSS)
+// so it stays visible through Payment/Timeline/Terms/Photos, unlike the
+// existing itemsSection-scoped sticky bar (mobile media query) which can
+// never stick past its own section's bounds.
+function updateRunningTotalPill(t){
+  const pill=document.getElementById('runningTotalPill'); if(!pill) return;
+  if(!items.length){ pill.style.display='none'; return; }
+  t=t||computeTotals();
+  pill.textContent=`🧺 ${items.length} item(s) · ${formatPeso(t.grand)}`;
+  pill.style.display='block';
 }
 
 // ── Payment schedule ──
@@ -2706,9 +3052,33 @@ function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();
 // matches Quick Estimate's qeSetQty/qeAddItem (sales.js), which already
 // guarded against 0 *and* negative qty; this only guarded against 0.
 function updateQty(idx,el){items[idx].qty=Math.max(1,parseInt(el.value)||1);items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
+// Qty +/- stepper buttons (audit: touch-friendly bump instead of retyping the
+// field) — same Math.max(1,...) guard as manual entry via updateQty above.
+function bumpQty(idx,delta){
+  if(!items[idx]) return;
+  items[idx].qty=Math.max(1,(items[idx].qty||1)+delta);
+  items[idx].amount=items[idx].unitPrice*items[idx].qty;
+  saveToStorage();renderItems();flashItemSaved();
+}
 function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();flashItemSaved();}
 function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
 function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
+// Duplicate a line item (audit: "no duplicate/clone-line-item action") —
+// inserts an identical copy directly after the original; the copy is then
+// edited inline exactly like any custom item (name/specs/dims/qty/price cells
+// are all already independently editable). Inserting shifts every later
+// item's array index by one, so this MUST go through the same
+// withPhotoIndexRemap() every reorder path already uses (see the drag-reorder
+// section below) — otherwise a photo linked to any item after idx would
+// silently point at the wrong (shifted) item.
+function duplicateItem(idx){
+  if(!items[idx]) return;
+  withPhotoIndexRemap(()=>{
+    const copy=JSON.parse(JSON.stringify(items[idx]));
+    items.splice(idx+1,0,copy);
+  });
+  saveToStorage();renderItems();flashItemSaved();
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  QB #9 — DRAG-TO-REORDER LINE ITEMS (+ up/down buttons for touch)
@@ -2932,7 +3302,12 @@ const TERMS_DEF=[
   {id:'tc_payment',title:'Payment Terms',content:'Down payment due upon confirmation; balance settled per the Payment Schedule above. All payments are non-refundable once fabrication has commenced.'},
   {id:'tc_warranty',title:'Warranty',content:'12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.'},
   {id:'tc_scope',title:'Scope of Work',content:'Price covers fabrication, delivery, and installation as specified. Electrical works, gas connections, and civil works are excluded unless stated.'},
-  {id:'tc_validity',title:'Quotation Validity',content:'This quotation is valid for 30 days from date of issuance. Prices are subject to change after validity.'},
+  // Default content is a function of the selected "Valid For" days (audit:
+  // "hardcoded to 30 days... even a rep who manually retypes the terms text
+  // still sees a mismatched Valid-Until date") — renderTerms() below calls
+  // this to get the default whenever the rep hasn't manually overridden the
+  // term's content (termsContent[t.id] still wins once they do).
+  {id:'tc_validity',title:'Quotation Validity',content:d=>`This quotation is valid for ${d} days from date of issuance. Prices are subject to change after validity.`},
   {id:'tc_site',title:'Site Requirements',content:'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.'},
   {id:'tc_acceptance',title:'Acceptance',content:'By signing this quotation, the client accepts all terms and conditions stated herein.'},
 ];
@@ -2942,12 +3317,16 @@ function renderTerms(){
   let html='';
   TERMS_DEF.forEach(t=>{
     const enabled=termsEnabled[t.id]!==false;
+    // t.content may be a plain string or (tc_validity only) a function of the
+    // selected "Valid For" days — resolve it here so the default text always
+    // matches the header's Valid-Until date until the rep manually edits it.
+    const defaultContent=typeof t.content==='function' ? t.content(getValidDays()) : t.content;
     html+=`<div class="terms-block ${enabled?'':'term-off'}">
       <h4>
         <input type="checkbox" class="term-cb" ${enabled?'checked':''} onchange="toggleTerm('${t.id}',this)">
         ${t.title}
       </h4>
-      <div class="term-content" contenteditable="true" onblur="saveTerm('${t.id}',this)">${termsContent[t.id]||t.content}</div>
+      <div class="term-content" contenteditable="true" onblur="saveTerm('${t.id}',this)">${termsContent[t.id]||defaultContent}</div>
     </div>`;
   });
   grid.innerHTML=html;
@@ -3133,8 +3512,8 @@ function shareQuote(){
   const json=JSON.stringify(state);
   const compressed=btoa(encodeURIComponent(json));
   const url=location.href.split('#')[0]+'#quote='+compressed;
-  if(url.length>100000){alert('Quote too large to share via URL. Use Print/PDF instead.');return;}
-  navigator.clipboard.writeText(url).then(()=>alert('Share link copied to clipboard!'))
+  if(url.length>100000){showToast('Quote too large to share via URL — use Print/PDF instead.','error');return;}
+  navigator.clipboard.writeText(url).then(()=>showToast('🔗 Share link copied to clipboard!'))
     .catch(()=>prompt('Copy this link:',url));
 }
 
@@ -3244,8 +3623,9 @@ function renderPhotoGrid(){
   grid.innerHTML=`<div class="photo-grid">${quotePhotos.map((p,i)=>{
     const src=p.url||p.dataUrl||'';
     const itemOptions=items.map((it,ii)=>`<option value="${ii}" ${p.itemIndex===ii?'selected':''}>#${ii+1} — ${txtEsc(it.name)}</option>`).join('');
+    const isFirst=i===0, isLast=i===quotePhotos.length-1;
     return `<div class="photo-card">
-      <img src="${attrEsc(src)}" alt="Photo ${i+1}">
+      <img src="${attrEsc(src)}" alt="Photo ${i+1}" onclick="openLightbox('${attrEsc(src)}')">
       <div class="photo-card-body">
         <input type="text" placeholder="Caption…" value="${attrEsc(p.caption||'')}" oninput="updatePhotoCaption(${i},this.value)">
         <select onchange="updatePhotoLink(${i},this.value)">
@@ -3253,10 +3633,42 @@ function renderPhotoGrid(){
           ${itemOptions}
         </select>
         ${!p.url && p.dataUrl ? '<div class="photo-offline-hint">Not uploaded — will print only</div>' : ''}
+        <div class="photo-card-actions no-print">
+          <button type="button" class="move-btn" onclick="movePhotoUp(${i})" title="Move earlier" ${isFirst?'disabled':''}>▲</button>
+          <button type="button" class="move-btn" onclick="movePhotoDown(${i})" title="Move later" ${isLast?'disabled':''}>▼</button>
+        </div>
         <button type="button" class="photo-del-btn" onclick="deletePhoto(${i})">✕ Remove</button>
       </div>
     </div>`;
   }).join('')}</div>`;
+}
+
+// Photo lightbox (audit: "no lightbox/zoom" — a rep reviewing site photos
+// before filing couldn't verify detail without opening the file elsewhere).
+function openLightbox(src){
+  const box=document.getElementById('photoLightbox'), img=document.getElementById('photoLightboxImg');
+  if(!box||!img||!src) return;
+  img.src=src;
+  box.classList.add('show');
+}
+function closeLightbox(e){
+  if(e && e.target!==document.getElementById('photoLightbox') && !e.target.closest('.photo-lightbox-x')) return;
+  document.getElementById('photoLightbox')?.classList.remove('show');
+}
+// Reorder photos (audit: "...and no way to reorder them"). Print order (the
+// annex) follows quotePhotos' array order, same as renderPhotoAnnex() already
+// reads it. Unlike item reordering, no itemIndex remap is needed: itemIndex
+// values reference the ITEMS array, not the photo array, so swapping two
+// photos' positions never changes what either one is linked to.
+function movePhotoUp(i){
+  if(i<=0||!quotePhotos[i]) return;
+  [quotePhotos[i-1],quotePhotos[i]]=[quotePhotos[i],quotePhotos[i-1]];
+  saveToStorage(); renderQuotePhotos();
+}
+function movePhotoDown(i){
+  if(i>=quotePhotos.length-1||!quotePhotos[i]) return;
+  [quotePhotos[i],quotePhotos[i+1]]=[quotePhotos[i+1],quotePhotos[i]];
+  saveToStorage(); renderQuotePhotos();
 }
 function renderPhotoAnnex(){
   const annex=document.getElementById('photoAnnex');
@@ -3290,7 +3702,28 @@ function renderPhotoAnnex(){
 // ═══════════════════════════════════════════════════════════════════
 //  STORAGE
 // ═══════════════════════════════════════════════════════════════════
+// saveToStorage() is wired via oninput on several text fields (client name/
+// address/etc.) — every keystroke used to run every localStorage.setItem
+// below synchronously, several of them JSON.stringify-ing the whole `items`
+// array (audit: "9 synchronous localStorage writes... on every keystroke").
+// Debounced ~200ms trailing; the flush function reads the CURRENT live
+// DOM/JS state at fire time (nothing is snapshotted at schedule time), so
+// coalescing multiple rapid calls never writes stale data. scheduleDraftSave()
+// (the 5s cloud-draft debounce) still arms on every call, unaffected.
+// Flushed immediately on tab hide/teardown so no draft is lost if the iframe
+// is removed mid-debounce.
+let _saveToStorageTimer=null;
 function saveToStorage(){
+  scheduleDraftSave();
+  if(_saveToStorageTimer) clearTimeout(_saveToStorageTimer);
+  _saveToStorageTimer=setTimeout(_flushSaveToStorage,200);
+}
+function flushSaveToStorageNow(){
+  if(_saveToStorageTimer){ clearTimeout(_saveToStorageTimer); _saveToStorageTimer=null; }
+  _flushSaveToStorage();
+}
+function _flushSaveToStorage(){
+  _saveToStorageTimer=null;
   try{
     const client={
       clientName:document.getElementById('clientName').value,
@@ -3318,12 +3751,20 @@ function saveToStorage(){
     localStorage.setItem('bkqb_photos',JSON.stringify(quotePhotos.map(({dataUrl,...p})=>p)));
     localStorage.setItem('bkqb_labor',JSON.stringify(laborState));
   }catch(e){}
-  scheduleDraftSave(); // Wave 3 Q6 — every local save also arms the 5s cloud-draft debounce
 }
+// Flush any pending debounced write before the tab/iframe might be torn down —
+// visibilitychange fires reliably on mobile (unlike beforeunload), pagehide
+// covers desktop tab close/navigation.
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') flushSaveToStorageNow(); });
+window.addEventListener('pagehide', flushSaveToStorageNow);
 
 // Pricing / payment / delivery fields — single source for save, load, payload
 const PRICING_IDS=['showVat','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
-  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails'];
+  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails','quoteValidDays'];
+// Quote validity period (audit: "hardcoded to 30 days in two places, not
+// configurable") — a display-only helper, riding PRICING_IDS so it round-trips
+// through save/load/payload exactly like every other field in that list.
+function getValidDays(){ return parseInt(document.getElementById('quoteValidDays')?.value||30,10)||30; }
 function getPricingFields(){
   const o={};
   PRICING_IDS.forEach(id=>{
@@ -3349,6 +3790,8 @@ function applyPricingFields(o){
   updateDiPrint();
   updateRemarksPrint();
   renderPaymentDetails();
+  updatePrintHeader();   // reflect a restored quoteValidDays in the "Valid Until" line
+  renderTerms();         // reflect a restored quoteValidDays in the default Validity term text
 }
 
 function loadFromStorage(){
@@ -3496,7 +3939,7 @@ function clearForm(){
   applyPricingFields({showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
     commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
     diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
-    interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true});
+    interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30'});
   document.getElementById('quoteDate').value=today;
   document.getElementById('filedBadge').classList.remove('show');
   document.getElementById('filedBadge').textContent='✓ FILED';
@@ -3585,6 +4028,19 @@ function buildVerifyModal(){
       </div>
     </div>`;
   }
+  // Grand total summary (audit: "Verify & File modal never shows the grand
+  // total before submission") — display-only, pulled straight from the same
+  // computeTotals() every other total on screen already uses.
+  const t=computeTotals();
+  const discBit=t.discountAmt>0 ? (t.discMode==='amount'?' − discount':` − ${t.discPct}% discount`) : '';
+  const vatBit=t.showVat?' · incl. 12% VAT':' · VAT exclusive';
+  html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+    <div class="verify-icon">💰</div>
+    <div class="verify-info">
+      <div class="verify-label" style="font-size:13px;font-weight:700">Grand Total: ${formatPeso(t.grand)}</div>
+      <div class="verify-val">${items.length} item(s)${discBit}${vatBit}</div>
+    </div>
+  </div>`;
   // Approval option
   const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
   html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
@@ -3656,6 +4112,7 @@ async function fileQuotation(){
   if(_isFiling) return; // double-tap guard — see note above canFile()
   if(!canFile()) return;
   _isFiling=true;
+  flushSaveToStorageNow(); // ensure the local draft is consistent before this quote is filed
   const fileBtnEl=document.getElementById('fileBtn');
   if(fileBtnEl){ fileBtnEl.disabled=true; fileBtnEl.style.opacity='0.5'; }
   await reserveAtomicQnoSeq();
@@ -3765,7 +4222,7 @@ function buildQuotePayload(){
                completionDate:getLeadDays()?addDays(getStartDate(),getLeadDays()).toISOString().split('T')[0]:'' },
     remarks:       document.getElementById('remarks')?.value||'',
     bankDetails:   document.getElementById('bankDetails')?.value||'',
-    validUntil:    document.getElementById('quoteDate')?.value?addDays(document.getElementById('quoteDate').value,30).toISOString().split('T')[0]:'',
+    validUntil:    document.getElementById('quoteDate')?.value?addDays(document.getElementById('quoteDate').value,getValidDays()).toISOString().split('T')[0]:'',
     discountPct:   t.discPct,
     discountAmount:t.discountAmt,
     netAmount:     t.net,
@@ -3910,14 +4367,28 @@ function buildAgentBox(){
     <div class="pay-note">Commission is computed on the grand total and payable upon full client settlement. CONFIDENTIAL — for the agent only; do not give this copy to the client.</div>`;
 }
 
+// Populates the print-only running footer (audit: "no page identifier on
+// continuation pages") with a compact quote/client identifier.
+function updatePrintRunFooter(){
+  const f=document.getElementById('printRunFooter'); if(!f) return;
+  const no=document.getElementById('quoteNo')?.value?.trim()||'';
+  const cn=document.getElementById('clientName')?.value?.trim()||'';
+  f.textContent=[no,cn].filter(Boolean).join(' — ');
+}
+
 function doPrint(){
-  applyLetterheadHeader();   // v12 WS31 — refresh the shared letterhead so the doc number is current
-  if(quoteStatus!=='filed'){
-    alert('Please file this quote before printing. Tap "Verify & File" to complete filing first.');
-    doVerifyAndFile(); return;
-  }
+  // Ensure the letterhead is rebuilt in CLIENT-copy state (no agent tag) —
+  // reordered ahead of applyLetterheadHeader() so a print right after an
+  // agent-copy print (body-agent still set, e.g. its cleanup timeout hasn't
+  // fired yet) can never leak the confidential tag onto a client print.
   document.body.classList.remove('body-agent');
   document.getElementById('phAgentTag').style.display='none';
+  applyLetterheadHeader();   // v12 WS31 — refresh the shared letterhead so the doc number is current
+  updatePrintRunFooter();
+  if(quoteStatus!=='filed'){
+    showToast('Please file this quote before printing — tap "Verify & File" first.','error');
+    doVerifyAndFile(); return;
+  }
   const prev=document.title;
   document.title=quoteFileName('');
   window.print();
@@ -3925,23 +4396,26 @@ function doPrint(){
 }
 
 function doPrintAgent(){
-  if(!items.length){ alert('Add at least one item before printing an agent copy.'); return; }
+  if(!items.length){ showToast('Add at least one item before printing an agent copy.','error'); return; }
   buildAgentBox();
   document.body.classList.add('body-agent');
   document.getElementById('phAgentTag').style.display='inline-block';
+  applyLetterheadHeader();   // rebuild the letterhead so it picks up the AGENT COPY extraMeta tag
+  updatePrintRunFooter();
   const prev=document.title;
   document.title=quoteFileName('Agent Copy');
   window.print();
   setTimeout(()=>{
     document.body.classList.remove('body-agent');
     document.getElementById('phAgentTag').style.display='none';
+    applyLetterheadHeader();   // restore the client-copy letterhead for next time
     document.title=prev;
   },800);
 }
 
 function doShare(){
   if(quoteStatus!=='filed'){
-    alert('Please file this quote before sharing. Tap "Verify & File" to complete filing first.');
+    showToast('Please file this quote before sharing — tap "Verify & File" first.','error');
     doVerifyAndFile(); return;
   }
   shareQuote();
