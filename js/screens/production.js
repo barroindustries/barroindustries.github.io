@@ -566,6 +566,16 @@ function openJobProjectDetail(p){
   const stageUnknown = idx === -1;
   const next = (stageUnknown || p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
   const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:var(--on-primary);font-weight:700`:dn?'background:var(--success);color:var(--on-primary)':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
+  // Sales→Production handoff (beta sweep) — the Document Register and Timeline
+  // are NOT behind showMoney, yet both carry ₱ figures for Production-only
+  // viewers: auto-posted 'Payment ₱X (deposit)' / 'Profit factors updated
+  // (capital ₱X)' timeline events and Official-Receipt document rows whose ref
+  // falls back to '₱<amount>'. Filter those out when money is hidden — every
+  // auto-generated money string contains '₱', so that's the reliable signal,
+  // plus a doc-type guard for receipts/invoices/billing. showMoney viewers see
+  // everything unchanged.
+  const visDocs = (p.documents||[]).filter(dc => showMoney || !(/receipt|invoice|billing/i.test(dc.type||'') || /₱/.test(dc.ref||'')));
+  const visTimeline = (p.timeline||[]).slice().reverse().filter(t => showMoney || !/₱/.test(t.event||''));
   const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
     ${stageUnknown?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} This project's stage ("${escHtml(p.stage||'')}") doesn't match any known lifecycle stage — data may be corrupted. An admin should fix it directly before advancing.</span></div>`:''}
@@ -607,7 +617,7 @@ function openJobProjectDetail(p){
     </div></div>`:''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📄',16)} Document Register</div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
-      ${(p.documents||[]).length?`<div class="table-wrap"><table class="data-table"><tbody>${(p.documents||[]).map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
+      ${visDocs.length?`<div class="table-wrap"><table class="data-table"><tbody>${visDocs.map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
     </div></div>
     ${(showMoney && (p.invoices||[]).length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>
@@ -617,7 +627,7 @@ function openJobProjectDetail(p){
         <div class="item-meta"><span>${emojiIcon('📅',16)} ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}${inv.desc?`<span>${escHtml(inv.desc)}</span>`:''}</div>
       </div>`).join('')}</div>`:''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🕘',16)} Timeline</div>
-    <div style="max-height:160px;overflow:auto;font-size:12px">${(p.timeline||[]).slice().reverse().map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
+    <div style="max-height:160px;overflow:auto;font-size:12px">${visTimeline.map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
     <div id="proj-detail-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `
     ${_isFinAdmin()&&!isPartnerU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
