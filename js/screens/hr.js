@@ -602,7 +602,15 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const payRunMonths     = payRunsSnap.docs.map(d=>d.id).filter(id=>/^\d{4}-\d{2}$/.test(id));
   const earliestPayRunMo = payRunMonths.length ? payRunMonths.slice().sort()[0] : null;
   const earliestHistMo   = earliestHistSnap.docs[0] ? (earliestHistSnap.docs[0].data().month || null) : null;
-  const PAYROLL_EPOCH    = [earliestPayRunMo, earliestHistMo, thisMonth].filter(Boolean).sort()[0] || thisMonth;
+  // v14 fix (owner: "June was not disbursed... why is it not reflected") — a
+  // month that was NEVER computed has no pay_run/salary_history doc, so the old
+  // epoch (earliest pay_run = July) hid June entirely. Always surface at least
+  // the last few months so delayed never-run months appear; extend further back
+  // when older pay_run/history data exists.
+  const _prMonthsAgo = (mo, n) => { const [y,mm]=mo.split('-').map(Number); const d=new Date(Date.UTC(y, mm-1-n, 1)); return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0'); };
+  const _minEpoch = _prMonthsAgo(thisMonth, 3);
+  const _rawEpoch = [earliestPayRunMo, earliestHistMo, thisMonth].filter(Boolean).sort()[0] || thisMonth;
+  const PAYROLL_EPOCH    = _rawEpoch < _minEpoch ? _rawEpoch : _minEpoch;
   const allMonths        = _prEnumerateMonths(PAYROLL_EPOCH, thisMonth); // ascending, PAYROLL_EPOCH..thisMonth inclusive
   const monthsDesc        = allMonths.slice().sort().reverse();
   const monthOptionsHtml = monthsDesc.map(m => {
@@ -627,7 +635,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
         ${monthOptionsHtml}
       </select>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
         <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
         <button class="btn-secondary btn-sm" id="raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
         <button class="btn-secondary btn-sm" id="print-payroll-btn">${emojiIcon('🖨',16)} Print All</button>
