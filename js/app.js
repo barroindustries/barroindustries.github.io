@@ -576,6 +576,11 @@ function initPullToRefresh() {
     const travel = Math.min(dist * 0.48, 52);
     ind.style.transform = `translateX(-50%) translateY(${travel}px)`;
     ind.style.opacity   = String(Math.min(softPct * 1.8, 1));
+    // Owner req — the PAGE itself follows the finger down (native rubber-band),
+    // so the pull is physical/deliberate, not just a floating icon. Damped so
+    // it lags the finger, and capped. Reset (with spring-back) in hideInd().
+    mc.style.transition = 'none';
+    mc.style.transform  = `translateY(${Math.min(dist * 0.42, 120)}px)`;
 
     setArc(softPct);
     ind.classList.toggle('ptr-ready', ready);
@@ -590,8 +595,12 @@ function initPullToRefresh() {
     ind.style.transition = 'transform .30s cubic-bezier(0.25,0.46,0.45,0.94), opacity .30s ease';
     ind.style.transform  = 'translateX(-50%) translateY(-90px)';
     ind.style.opacity    = '0';
+    // Spring the pulled page back to rest.
+    mc.style.transition = 'transform .32s cubic-bezier(0.25,0.46,0.45,0.94)';
+    mc.style.transform  = '';
     setTimeout(() => {
       ind.style.transition = '';
+      mc.style.transition = '';
       ind.classList.remove('ptr-ready','ptr-hard','ptr-refreshing');
       setArc(0);
       if (icon) icon.textContent = '↓';

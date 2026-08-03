@@ -372,13 +372,22 @@ service cloud.firestore {
         && request.resource.data.workerId == workerId
         && request.resource.data.get('date', date) == date
         && request.resource.data.get('recordedBy', request.auth.uid) == request.auth.uid
-        // v14 P0 pay-integrity — timeIn/timeOut/hoursWorked/inValid/outValid are
-        // now FUNCTION-ONLY: written exclusively by the recordAttendancePunch
-        // callable (Admin SDK, bypasses these rules) after it re-verifies the
-        // geofence + selfie server-side. A self-service client may only write the
-        // pre-punch audit trail (attempts) + an advisory pendingPunch marker — it
-        // can NEVER assert a valid-looking or backdated shift directly.
-        && !request.resource.data.keys().hasAny(['timeIn', 'timeOut', 'hoursWorked', 'inValid', 'outValid'])
+        // v14 P0 pay-integrity (re-audit fix) — a self-service client may write
+        // ONLY the pre-punch audit trail (attempts) + an advisory pendingPunch
+        // marker. timeIn/timeOut/hoursWorked/inValid/outValid AND every provenance
+        // field (serverVerified, needsReview, in/outAccuracyM/DistanceM/SelfieUrl,
+        // in/outAt) are FUNCTION-ONLY — written exclusively by recordAttendancePunch
+        // (Admin SDK, bypasses these rules) after it re-verifies geofence + selfie.
+        // Uses diff().affectedKeys() on UPDATES (not keys() over the whole
+        // post-write doc) so a pendingPunch/attempts merge onto a doc the function
+        // already stamped isn't wrongly denied — the old keys().hasAny() silently
+        // blocked EVERY Time-Out advisory write. A strict hasOnly allowlist (vs the
+        // old 5-field blocklist) also stops a worker forging serverVerified/needsReview.
+        && (
+          resource == null
+            ? request.resource.data.keys().hasOnly(['workerId', 'date', 'recordedBy', 'attempts', 'pendingPunch'])
+            : request.resource.data.diff(resource.data).affectedKeys().hasOnly(['workerId', 'date', 'recordedBy', 'attempts', 'pendingPunch'])
+        )
         && (resource == null || resource.data.get('recordedBy', '') == request.auth.uid)
       ));
     }

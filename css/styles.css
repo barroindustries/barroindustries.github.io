@@ -737,7 +737,8 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 
 /* ── Topbar ── (merged into single rule at the LIQUID GLASS copy, see below) */
 .menu-toggle {
-  background: var(--s1); border: 1px solid var(--border);
+  /* Owner req — seamless top-bar hamburger/back: no box border/fill at rest. */
+  background: transparent; border: none;
   border-radius: var(--r-xs); color: var(--text-muted);
   font-size: var(--fs-xl); cursor: pointer; padding: 6px 7px;
   display: none; transition: background var(--t1), color var(--t1);
