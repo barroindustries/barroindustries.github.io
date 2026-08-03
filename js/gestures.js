@@ -1,13 +1,23 @@
 // ═══════════════════════════════════════════════════════
 //  Barro Industries Operating System — Gestures (v12 WS42 Phase 12)
-//  Edge swipe-back (Android/iPhone parity) + mobile-sheet swipe-dismiss.
+//  Clean two-edge swipe model (owner decision 2026-08-04):
+//    • LEFT edge, dragged RIGHT  → open the nav drawer (window.openSidebar).
+//    • RIGHT edge, dragged LEFT → back (Overlay.dismissTop() / history.back()).
+//  Each edge owns exactly one action — a left-edge drag never triggers back,
+//  a right-edge drag never opens the drawer. The old single-edge "swipe-back
+//  OR open-drawer depending on context" behavior, and the full-surface
+//  page-swipe-back (drag anywhere on a pushed page), are both retired: the
+//  owner found the full-surface drag error-prone/"bad" — the two narrow edge
+//  zones below cover the same need without hijacking ordinary scrolling or
+//  in-page gestures (chat's own swipe-to-reply, inbox swipe-to-reveal, etc).
 //
 //  Ground rules honored:
 //   • Drives window.Overlay (config.js) — NEVER a parallel stack. Every "back"
 //     action here ends in Overlay.dismissTop() or history.back(), exactly like
 //     a tap on a back button / X / Escape already does.
 //   • Disabled entirely on pointer:fine devices (mouse/trackpad primary).
-//   • Disabled inside horizontally-scrollable widgets ([data-hscroll], .table-scroll).
+//   • Disabled inside horizontally-scrollable widgets ([data-hscroll], .table-scroll,
+//     .table-wrap) and inside inputs/textarea/select/contenteditable.
 //   • touchmove is non-passive ONLY while an active drag is in progress, and only
 //     for the specific gesture being tracked (24px edge strip, or a sheet handle).
 //   • transform/opacity only — no layout-thrashing properties are animated.
@@ -16,11 +26,12 @@
 (function () {
   'use strict';
 
-  const EDGE_ZONE   = 24;   // px from the left edge that arms edge swipe-back
-  const EDGE_DX_ARM = 24;  // v14 accidental-touch retune: 16→24   // px of horizontal travel before we decide this is a swipe, not a scroll (v14 mobile-shell batch — was un-gated, see edgeTouchMove)
-  const EDGE_SLOPE  = 2.2; // v14 accidental-touch retune: 1.8→2.2  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from an implicit ~1.75 floor)
+  const EDGE_ZONE   = 24;   // px from either screen edge that arms its edge gesture
+  const EDGE_DX_ARM = 24;  // v14 accidental-touch retune: 16→24   // px of horizontal travel before we decide this is a swipe, not a scroll
+  const EDGE_SLOPE  = 2.2; // v14 accidental-touch retune: 1.8→2.2  // |dx| must exceed this multiple of |dy| to arm
   const DX_THRESH   = 70;   // px horizontal drag to commit to "back" / "open drawer"
   const DY_ABORT    = 40;   // px vertical drift, measured at release, that still cancels a commit
+  const PILL_W      = 34;   // matches the pill's fixed width/height below
   const SHEET_DX_MQ = '(max-width: 639px)'; // matches the WS42 Phase 10 bottom-sheet breakpoint
   const SHEET_DY_THRESH = 120; // px downward drag to commit to dismiss
   const SHEET_VELOCITY_THRESH = 0.6; // px/ms flick velocity that also commits
@@ -33,13 +44,45 @@
   function reducedMotion() {
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
+  function viewportWidth() {
+    return window.innerWidth || document.documentElement.clientWidth || 0;
+  }
   function insideHScroll(el) {
     // .table-wrap is the class the app's scrollable tables ACTUALLY use —
     // .table-scroll matched nothing, so edge-swipe hijacked table scrolling.
     return !!(el && el.closest && el.closest('[data-hscroll], .table-scroll, .table-wrap'));
   }
+  // Shared exclusion for both edges — never arm inside a horizontally
+  // scrollable widget or a text-entry field (a touch starting there is
+  // input, not navigation).
+  function edgeExcluded(el) {
+    if (insideHScroll(el)) return true;
+    if (el && el.closest && el.closest('input, textarea, select, [contenteditable]')) return true;
+    return false;
+  }
+
+  // v13 Phase 105 / gestures.js — the mobile off-canvas drawer only exists
+  // (has a working CSS .open transform) at the <=768px tier; the 769-819px
+  // and 820-1023px tablet tiers keep #sidebar permanently off-canvas or as a
+  // persistent icon rail with no matching .open rule. Gating left-edge-open
+  // on this avoids a real bug: calling openSidebar() at those wider tiers
+  // still shows the #sidebar-overlay scrim (it toggles unconditionally) with
+  // no sidebar visibly sliding in behind it, i.e. a "phantom darken" with no
+  // visible cause.
+  function isMobileSidebarViewport() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+  }
+  function sidebarIsOpen() {
+    const sidebar = document.getElementById('sidebar');
+    return !!(sidebar && sidebar.classList.contains('open'));
+  }
 
   // ── Shared chevron-pill affordance (single reused DOM node, transform-only) ──
+  // Glyph flips per edge so the affordance reads correctly: a right-pointing
+  // chevron for "this opens something" (left edge), a left-pointing chevron
+  // for "this goes back" (right edge, the traditional back-swipe glyph).
+  const GLYPH_OPEN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+  const GLYPH_BACK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
   let pillEl = null;
   function getPill() {
     if (pillEl) return pillEl;
@@ -56,9 +99,15 @@
       'will-change:transform,opacity',
       'transform:translate3d(-40px,0,0) scale(0.8)'
     ].join(';');
-    pillEl.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>';
+    pillEl.innerHTML = GLYPH_BACK;
     document.body.appendChild(pillEl);
     return pillEl;
+  }
+  function setPillGlyph(side) {
+    const p = getPill();
+    if (p.dataset.side === side) return;
+    p.dataset.side = side;
+    p.innerHTML = side === 'left' ? GLYPH_OPEN : GLYPH_BACK;
   }
   function movePill(x, y, opacity) {
     const p = getPill();
@@ -66,66 +115,95 @@
     p.style.transform = 'translate3d(' + Math.round(x) + 'px,' + Math.round(y - 17) + 'px,0) scale(1)';
     p.style.opacity = String(opacity);
   }
-  function retractPill(commit) {
+  function retractPill(commit, side) {
     const p = getPill();
+    const vw = viewportWidth();
+    const lastY = parseFloat(p.style.transform.split(',')[1]) || 0;
     p.style.transition = reducedMotion() ? 'none' : 'transform 180ms ease, opacity 180ms ease';
     p.style.opacity = '0';
-    p.style.transform = commit
-      ? 'translate3d(60px,' + (parseFloat(p.style.transform.split(',')[1]) || 0) + 'px,0) scale(1)'
-      : 'translate3d(-40px,0,0) scale(0.8)';
+    if (side === 'right') {
+      p.style.transform = commit
+        ? 'translate3d(' + Math.max(0, vw - 60 - PILL_W) + 'px,' + lastY + 'px,0) scale(1)'
+        : 'translate3d(' + (vw + 40) + 'px,0,0) scale(0.8)';
+    } else {
+      p.style.transform = commit
+        ? 'translate3d(60px,' + lastY + 'px,0) scale(1)'
+        : 'translate3d(-40px,0,0) scale(0.8)';
+    }
   }
 
-  // v13 Phase 64 — sole owner of the left-edge swipe gesture (the old
-  // app.js initSidebarSwipe open-tracker was removed to stop two listeners
-  // racing on the same gesture). Decision order at commit time:
-  //   (a) an overlay/sheet/sidebar/pushed page is on top of the Overlay stack
-  //       → dismiss it (this also covers closing an already-open mobile
-  //       sidebar, since openSidebar() pushes a 'sidebar' entry onto the stack)
-  //   (b) otherwise we're on the BASE page (Overlay stack empty) — on a
-  //       mobile-sidebar viewport with the drawer closed, OPEN it (FB-style;
-  //       owner decision 2026-08-03). Previously gated to
-  //       window.currentPage==='dashboard' only, so the gesture fell through
-  //       to history.back() on every other base page — removed, this now
-  //       applies uniformly regardless of which page is showing.
-  //   (c) otherwise (no off-canvas drawer at this viewport, e.g. the tablet
-  //       rail tier) → history.back()
-  function isMobileSidebarViewport() {
-    return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
-  }
-  function sidebarIsOpen() {
-    const sidebar = document.getElementById('sidebar');
-    return !!(sidebar && sidebar.classList.contains('open'));
+  // v13 Phase 64 / v15 two-edge rework — sole owner of the edge-swipe
+  // gestures (the old app.js initSidebarSwipe open-tracker was removed
+  // earlier to stop two listeners racing on the same gesture; this file
+  // remains the only place that arms either edge). Each edge commits to
+  // exactly one action:
+  //   LEFT edge, dragged RIGHT  → window.openSidebar() (mobile off-canvas
+  //     drawer tier only — see isMobileSidebarViewport() above). Never
+  //     touches Overlay/back.
+  //   RIGHT edge, dragged LEFT  → doBack(): dismissTop() if the Overlay
+  //     stack has anything on it (a pushed page, modal, drawer, or the
+  //     sidebar itself if it's open — openSidebar() pushes a 'sidebar'
+  //     entry, so right-edge-back also closes an open drawer), else
+  //     history.back().
+  function doOpenDrawer() {
+    if (typeof window.openSidebar === 'function') window.openSidebar();
   }
   function doBack() {
     if (window.Overlay && window.Overlay.isOpen()) {
       window.Overlay.dismissTop();
-    } else if (isMobileSidebarViewport() && !sidebarIsOpen()) {
-      if (typeof window.openSidebar === 'function') window.openSidebar();
     } else {
       history.back();
     }
   }
 
-  // ── Edge swipe-back / swipe-open-drawer ─────────────────────────────────
-  let edge = null; // { startX, startY, startTime, tracking, armed, lastX, lastY }
+  let edge = null; // { side: 'left'|'right', startX, startY, startTime, tracking, armed, lastX, lastY }
 
   function edgeTouchStart(e) {
     if (!enabled || pointerIsFine()) return;
     if (e.touches.length !== 1) return;
     const t = e.touches[0];
-    if (t.clientX > EDGE_ZONE) return;
-    if (insideHScroll(e.target)) return;
-    edge = { startX: t.clientX, startY: t.clientY, startTime: Date.now(), tracking: true, armed: false, lastX: t.clientX, lastY: t.clientY };
+    const vw = viewportWidth();
+    let side = null;
+    if (t.clientX <= EDGE_ZONE) side = 'left';
+    else if (vw && t.clientX >= vw - EDGE_ZONE) side = 'right';
+    if (!side) return;
+    if (edgeExcluded(e.target)) return;
+    if (side === 'left') {
+      // Nothing off-canvas to open at this viewport tier, or already open —
+      // don't arm at all (no pill, no-op), rather than fire a gesture that
+      // silently does nothing at release.
+      if (!isMobileSidebarViewport() || sidebarIsOpen()) return;
+      // gesture-conflict fix — chat's own swipe-RIGHT-to-reply is bound to
+      // .ms-row[data-mid] via delegation on .messenger-body, and that panel's
+      // padding (16px 12px, see css/styles.css) is thinner than our 24px edge
+      // zone: a "theirs" row's hit-box starts at ~12px, well inside our left
+      // strip. Both gestures arm on the SAME rightward drag there, so leave
+      // this zone to chat's reply-swipe entirely — it never competes with the
+      // RIGHT edge (back arms on leftward drags only, which chat's swipe
+      // always aborts), so only the left/open side needs this carve-out.
+      if (e.target && e.target.closest && e.target.closest('.messenger-body')) return;
+    } else {
+      // gesture-conflict fix — the chat inbox's own swipe-LEFT-to-reveal
+      // (Pin/Mute/Archive, chat.js _onInboxSwipeStart/Move) is bound to
+      // .chat-inbox-row, which spans the full width of its container; the
+      // row's right edge can sit inside our 24px right-edge strip. Both
+      // gestures arm on the SAME leftward drag there. Carve out only the row
+      // itself, not the surrounding page — back-swipe from the rest of the
+      // inbox screen (headers, empty gutters, the outer few px of this same
+      // zone past the row's own edge) still works.
+      if (e.target && e.target.closest && e.target.closest('.chat-inbox-row, .ms-inbox-row-wrap')) return;
+    }
+    edge = { side, startX: t.clientX, startY: t.clientY, startTime: Date.now(), tracking: true, armed: false, lastX: t.clientX, lastY: t.clientY };
     document.addEventListener('touchmove', edgeTouchMove, { passive: false });
     document.addEventListener('touchend', edgeTouchEnd, { passive: true });
     document.addEventListener('touchcancel', edgeTouchCancel, { passive: true });
   }
-  // v14 mobile-shell batch — armed the same way pageTouchMove is below: wait
-  // for EDGE_DX_ARM px of travel before deciding, then require the drag to
-  // clear EDGE_SLOPE×|dy| to call it horizontal. Previously this called
-  // e.preventDefault() on the very first rightward pixel with no minimum
-  // travel or slope check, which could clip the start of a vertical scroll
-  // that happened to begin inside the 24px edge strip.
+  // v14 mobile-shell batch — armed the same way pageTouchMove used to be:
+  // wait for EDGE_DX_ARM px of travel before deciding, then require the drag
+  // to clear EDGE_SLOPE×|dy| to call it horizontal AND moving in the one
+  // direction this edge cares about (rightward for left, leftward for
+  // right). Anything else (wrong direction, or vertical drift wins) is a
+  // scroll, and this listener steps out of its way for the rest of the touch.
   function edgeTouchMove(e) {
     if (!edge || !edge.tracking) return;
     const t = e.touches[0];
@@ -133,31 +211,44 @@
     const dy = t.clientY - edge.startY;
     edge.lastX = t.clientX; edge.lastY = t.clientY;
     if (!edge.armed) {
-      if (Math.abs(dx) < EDGE_DX_ARM) return;                        // not enough travel to decide yet
-      if (dx <= 0 || Math.abs(dx) < EDGE_SLOPE * Math.abs(dy)) {      // leftward, or vertical drift wins — it's a scroll
+      if (Math.abs(dx) < EDGE_DX_ARM) return;                            // not enough travel to decide yet
+      const wantsDir = edge.side === 'left' ? dx > 0 : dx < 0;
+      if (!wantsDir || Math.abs(dx) < EDGE_SLOPE * Math.abs(dy)) {       // wrong direction, or vertical drift wins — it's a scroll
         edge.tracking = false;
-        retractPill(false);
+        retractPill(false, edge.side);
         return;
       }
       edge.armed = true;
+      setPillGlyph(edge.side);
     }
     e.preventDefault(); // scoped to this active edge-drag only, and only once armed
-    const followX = Math.min(dx * 0.6, 90);
-    movePill(followX, t.clientY, Math.min(dx / DX_THRESH, 1));
+    const vw = viewportWidth();
+    if (edge.side === 'left') {
+      const followX = Math.min(dx * 0.6, 90);
+      movePill(followX, t.clientY, Math.min(dx / DX_THRESH, 1));
+    } else {
+      const adx = Math.abs(dx);
+      const followX = vw - PILL_W - Math.min(adx * 0.6, 90);
+      movePill(followX, t.clientY, Math.min(adx / DX_THRESH, 1));
+    }
   }
   function edgeTouchEnd() {
     cleanupEdgeListeners();
     if (!edge) return;
+    const side = edge.side;
     const dx = edge.lastX - edge.startX;
     const dy = edge.lastY - edge.startY;
-    const committed = edge.armed && dx > DX_THRESH && Math.abs(dy) < DY_ABORT;
-    retractPill(committed);
-    if (committed) doBack();
+    const committed = edge.armed && Math.abs(dy) < DY_ABORT &&
+      (side === 'left' ? dx > DX_THRESH : dx < -DX_THRESH);
+    retractPill(committed, side);
+    if (committed) {
+      if (side === 'left') doOpenDrawer(); else doBack();
+    }
     edge = null;
   }
   function edgeTouchCancel() {
     cleanupEdgeListeners();
-    retractPill(false);
+    retractPill(false, edge ? edge.side : 'left');
     edge = null;
   }
   function cleanupEdgeListeners() {
@@ -237,124 +328,21 @@
     document.removeEventListener('touchcancel', sheetTouchCancel, { passive: true });
   }
 
-  // ── Full-surface swipe-back on pushed pages (v14 Batch1 1d) ───────────────
-  // The 24px edge strip above only shows a decorative pill and defers to
-  // history.back()/doBack() generically. A page opened via openPage (Overlay
-  // kind 'page') additionally arms a horizontal pan starting ANYWHERE on its
-  // panel — not modals, which stay dismissed via backdrop/Esc/Back only.
-  // Starts inside the edge zone are left to edgeTouchStart above (untouched)
-  // so the two gestures never race the same touch into two dismissals.
-  const PAGE_DX_ARM          = 22;  // v14 accidental-touch retune: 16→22   // px before we commit to "this is horizontal" (v14 mobile-shell batch — raised from 12 so vertical scrolls never feel hijacked)
-  const PAGE_SLOPE           = 2.2; // v14 accidental-touch retune: 1.8→2.2  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from 1.6)
-  const PAGE_VELOCITY_THRESH = 0.8; // v14 accidental-touch retune: 0.5→0.8  // px/ms flick velocity that also commits
-
-  let pageSwipe = null; // { el, startX, startY, lastX, lastY, armed, startTime }
-
-  function hasHOverflow(el) {
-    let node = el;
-    while (node && node !== document.body && node.nodeType === 1) {
-      if (node.scrollWidth > node.clientWidth) {
-        const cs = getComputedStyle(node);
-        if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') return true;
-      }
-      node = node.parentElement;
-    }
-    return false;
-  }
-  function pageSwipeExcluded(target) {
-    if (insideHScroll(target)) return true;
-    if (target && target.closest && target.closest('input, textarea, select, [contenteditable]')) return true;
-    // gesture-conflict fix 2026-08 — the chat thread panel (openPage, kind
-    // 'page') already stacks its own swipe-right-to-reply on message rows
-    // AND native vertical scroll inside .messenger-body; letting this
-    // full-surface page-swipe-back arm too meant a single rightward drag
-    // could double-arm both gestures. Excluding the scroller and composer
-    // here is what stops that race (the 24px edge-zone escape hatch in
-    // edgeTouchStart is untouched and still works everywhere, including
-    // over the chat thread).
-    if (target && target.closest && target.closest('.messenger-body, .messenger-input-row')) return true;
-    return hasHOverflow(target);
-  }
-
-  function pageTouchStart(e) {
-    if (!enabled || pointerIsFine()) return;
-    if (e.touches.length !== 1) return;
-    if (!window.Overlay || window.Overlay.topKind() !== 'page') return;
-    const el = window.Overlay.topEl && window.Overlay.topEl();
-    if (!el) return;
-    const t = e.touches[0];
-    if (t.clientX <= EDGE_ZONE) return; // edge-zone starts stay edgeTouchStart's job
-    if (!el.contains(e.target)) return;
-    if (pageSwipeExcluded(e.target)) return;
-    pageSwipe = { el, startX: t.clientX, startY: t.clientY, lastX: t.clientX, lastY: t.clientY, armed: false, startTime: Date.now() };
-    document.addEventListener('touchmove', pageTouchMove, { passive: false });
-    document.addEventListener('touchend', pageTouchEnd, { passive: true });
-    document.addEventListener('touchcancel', pageTouchCancel, { passive: true });
-  }
-  function pageTouchMove(e) {
-    if (!pageSwipe) return;
-    const t = e.touches[0];
-    const dx = t.clientX - pageSwipe.startX;
-    const dy = t.clientY - pageSwipe.startY;
-    pageSwipe.lastX = t.clientX; pageSwipe.lastY = t.clientY;
-    if (!pageSwipe.armed) {
-      if (Math.abs(dx) < PAGE_DX_ARM) return;                    // not enough travel to decide yet
-      if (dx <= 0 || Math.abs(dx) < PAGE_SLOPE * Math.abs(dy)) {  // leftward, or vertical drift wins — it's a scroll
-        pageTouchCancel();
-        return;
-      }
-      pageSwipe.armed = true;
-    }
-    e.preventDefault(); // scoped to this active page-drag only
-    if (!reducedMotion()) {
-      pageSwipe.el.style.transition = 'none';
-      pageSwipe.el.style.transform = 'translate3d(' + Math.max(0, dx) + 'px,0,0)';
-    }
-  }
-  function pageTouchEnd() {
-    cleanupPageListeners();
-    if (!pageSwipe) return;
-    const { el, armed } = pageSwipe;
-    const dx = pageSwipe.lastX - pageSwipe.startX;
-    const dt = Math.max(1, Date.now() - pageSwipe.startTime);
-    const velocity = dx / dt;
-    const vw = window.innerWidth || document.documentElement.clientWidth || 1;
-    const commit = armed && dx > 0 && (dx > vw * 0.42 || velocity > PAGE_VELOCITY_THRESH);  // v14 retune: 0.35→0.42vw
-    if (commit) {
-      // Hand off to the normal close path — its own teardown animation takes
-      // over, so just drop our live-drag inline styles rather than layering
-      // a second exit animation on top.
-      el.style.transition = '';
-      el.style.transform = '';
-      if (window.Overlay) window.Overlay.dismissTop();
-    } else if (armed) {
-      el.style.transition = reducedMotion() ? 'none' : 'transform 200ms cubic-bezier(.34,1.56,.64,1)';
-      el.style.transform = 'translate3d(0,0,0)';
-      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; }, reducedMotion() ? 0 : 200);
-    }
-    pageSwipe = null;
-  }
-  function pageTouchCancel() {
-    cleanupPageListeners();
-    if (pageSwipe && pageSwipe.armed) {
-      const el = pageSwipe.el;
-      el.style.transition = reducedMotion() ? 'none' : 'transform 200ms ease';
-      el.style.transform = 'translate3d(0,0,0)';
-      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; }, reducedMotion() ? 0 : 200);
-    }
-    pageSwipe = null;
-  }
-  function cleanupPageListeners() {
-    document.removeEventListener('touchmove', pageTouchMove, { passive: false });
-    document.removeEventListener('touchend', pageTouchEnd, { passive: true });
-    document.removeEventListener('touchcancel', pageTouchCancel, { passive: true });
-  }
+  // Full-surface page-swipe-back (v14 Batch1 1d) — REMOVED (owner decision
+  // 2026-08-04). It armed a horizontal pan starting ANYWHERE on a pushed
+  // page's panel, which the owner found error-prone ("bad") in practice —
+  // easy to trigger by accident while just interacting with page content,
+  // and it needed a growing pile of per-widget exclusions (messenger-body,
+  // messenger-input-row, any horizontally-scrollable element) to stay out of
+  // other gestures' way. The clean two-edge model below covers the same
+  // need: RIGHT-edge-drag-left already reaches Overlay.dismissTop() for a
+  // pushed page from anywhere on the panel's own right edge, same as it does
+  // for every other overlay/modal/drawer.
 
   // ── Root listeners (always attached; each gesture gates itself internally
   //    on `enabled` + pointer:fine so enable()/disable() need no re-wiring) ──
   document.addEventListener('touchstart', edgeTouchStart, { passive: true });
   document.addEventListener('touchstart', sheetTouchStart, { passive: true });
-  document.addEventListener('touchstart', pageTouchStart, { passive: true });
 
   window.Gestures = {
     enable() { enabled = true; },
