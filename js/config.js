@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.44';
+window.APP_VERSION = '14.0.45';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1897,12 +1897,16 @@ window.CashAdvance = {
   },
 
   // ── Payments (ALWAYS transactional — fixes the one unguarded record-payment site) ──
-  async recordPayment(id, { amount, date }) {
+  async recordPayment(id, { amount, date, bankAccount = null }) {
     const paid = parseFloat(amount)||0;
     if (paid <= 0) throw new Error('Enter a payment amount greater than ₱0.');
     const ref     = db.collection('cash_advances').doc(id);
     const uid     = window.currentUser && window.currentUser.uid;
     const payDate = date || (window.bizDate ? window.bizDate() : today());
+    // Stable id minted ONCE, shared by the stored payment record AND its ledger
+    // ref, so a resync/backfill can reconstruct the exact ref and can never
+    // double-post a repayment that already reached the ledger.
+    const paymentId = db.collection('ledger').doc().id;
     let result = null;
     await db.runTransaction(async t => {
       const fresh = await t.get(ref);
@@ -1911,12 +1915,42 @@ window.CashAdvance = {
       if (cur.status !== 'approved' || (cur.balance||0) <= 0)
         throw new Error('This cash advance has no outstanding balance (already paid or not approved).');
       const newBal   = Math.max(0, (cur.balance||0) - paid);
-      const payments = [...(cur.payments||[]), { amount: paid, date: payDate, recordedBy: uid }];
+      const payments = [...(cur.payments||[]), { amount: paid, date: payDate, recordedBy: uid, paymentId, source:'manual' }];
       t.update(ref, { balance: newBal, payments, status: newBal <= 0 ? 'paid' : 'approved', ...(newBal<=0?{paidAt:firebase.firestore.FieldValue.serverTimestamp()}:{}) });
-      result = { newBal, userId: cur.userId };
+      result = { newBal, userId: cur.userId, userName: cur.userName || '' };
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     if (result) {
+      // Money-critical fix — mirror the repayment into the ledger so the
+      // 'Advances to Employees' receivable actually goes DOWN on a manual
+      // (non-payroll) payment. Previously recordPayment reduced only the CA
+      // doc's balance and posted NOTHING to the ledger, so Reports/Dashboard
+      // (which read the ledger only) kept the full receivable and never saw
+      // the returning cash. Exact reverse of approve()'s debit+bank-'out': a
+      // CREDIT to the SAME 'Advances to Employees' asset + a bank-'in' tag.
+      // Same raw-add-with-dupe-check path approve() uses (so bankFlow is
+      // written verbatim and, like the release leg, it stays out of
+      // finance_rollup — a credit/asset row is ledgerKind 'asset', i.e. 0
+      // income / 0 expense, so it never inflates reports). Best-effort: a
+      // closed period or a non-finance actor's blocked write must never break
+      // the CA payment record the transaction already committed.
+      try {
+        const lref = `CA-${id}-REPAY-${paymentId}`;
+        const dupe = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
+        if (!dupe.docs.length) {
+          await db.collection('ledger').add({
+            date: payDate, type:'credit',
+            accountType:'asset', account:'Advances to Employees',
+            description:`Cash advance repayment — ${result.userName||''}`.trim(),
+            amount: paid, category:'Cash Advance', refNumber: lref, source:'Cash Advance',
+            ...window.BankAccounts.tag(bankAccount, 'in'),
+            addedBy: window.currentUser?.uid || null,
+            addedByName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+        }
+      } catch(e){ console.warn('[CA repay ledger]', e?.message || e); }
       const statusMsg = result.newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmt(result.newBal)}`;
       await Notifs.send(result.userId, { title:'💳 Cash Advance Payment Recorded', body:`₱${fmt(paid)} payment was recorded. ${statusMsg}`, icon:'💳', type:'cash_advance' });
     }
@@ -1927,19 +1961,27 @@ window.CashAdvance = {
   // record fetch resolves BEFORE the panel opens, so the full body HTML is
   // already known at open time — no post-open #modal-body targeting needed.
   openPaymentModal(id, onDone) {
-    db.collection('cash_advances').doc(id).get().then(snap => {
+    db.collection('cash_advances').doc(id).get().then(async snap => {
       if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
       const a = snap.data();
+      // Bank picker so the repayment's ledger mirror can tag which company
+      // account the cash landed in ('— no account —' is fine: the receivable
+      // still gets credited, just without a bank-balance movement).
+      const bankOpts = await window.BankAccounts.optionsHTML();
       openPage(`Record Payment${a.userName?` — ${escHtml(a.userName)}`:''}`, `
         <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(a.balance||0)}</strong></div>
         <div class="form-group"><label>Amount Paid</label><input id="ca-pay-amt" type="number" inputmode="decimal" value="${a.monthlyPayment||a.balance||0}" min="0" max="${a.balance||0}"/></div>
         <div class="form-group"><label>Date</label><input id="ca-pay-date" type="date" value="${window.bizDate?window.bizDate():today()}"/></div>
+        <div class="form-group"><label>Deposited to (company account)</label>
+          <select id="ca-pay-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
       `, `<button class="btn-primary" id="ca-pay-confirm-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('ca-pay-confirm-btn').addEventListener('click', async () => {
         try {
+          const acct = await window.BankAccounts.pick(document.getElementById('ca-pay-bank').value);
           await window.CashAdvance.recordPayment(id, {
             amount: document.getElementById('ca-pay-amt').value,
-            date:   document.getElementById('ca-pay-date').value
+            date:   document.getElementById('ca-pay-date').value,
+            bankAccount: acct
           });
           closeModal();
           Notifs.showToast('Payment recorded!');
