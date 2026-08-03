@@ -385,10 +385,20 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         // the ledger post was a best-effort follow-up that could silently fail).
         // arrayUnion avoids needing to read the current array first.
         const vatRate = 12, net = +(amt/(1+vatRate/100)).toFixed(2), vatAmount = +(amt-net).toFixed(2);
-        // Deterministic ref (project id + existing-payments-count) → idempotent on retry/backfill.
-        const priorCount = Array.isArray(p.payments) ? p.payments.length : 0;
-        const dref = `DPROJ-${p.id}-${priorCount}`;
-        await window.Ledger.post({
+        // Money-critical fix (beta sweep) — was `DPROJ-${p.id}-${p.payments.length}`,
+        // a POSITIONAL index off the in-memory `p` snapshot. Two payments recorded
+        // close together (stale `p`, two tabs) computed the SAME ref; the 2nd hit
+        // Ledger.post's dedupe (existed:true), so its projectSync arrayUnion never
+        // committed — the payment was silently LOST while the code still toasted
+        // "Payment recorded" (the return value was never checked). Since this posts
+        // to Sales Revenue, that's unbilled revenue. Mint a fresh Firestore auto-id
+        // per payment so distinct payments can never collide, and honour
+        // Ledger.post's {existed} instead of always claiming success. (Mirror of the
+        // production.js openProjectBillingModal fix.)
+        const paymentId = db.collection('ledger').doc().id;
+        payment.paymentId = paymentId;
+        const dref = `DPROJ-${p.id}-${paymentId}`;
+        const postRes = await window.Ledger.post({
           ref: dref, date: payment.date, kind: 'credit',
           accountType: 'income', account: 'Sales Revenue', category: 'Sales Revenue',
           description: `Design project — ${p.name||p.id}${payment.note?' ('+payment.note+')':''}`,
@@ -396,6 +406,11 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
           extra: { net, vatAmount, ...window.BankAccounts.tag(acct, 'in') },
           projectSync: { collection: 'projects', docId: p.id, fields: { payments: firebase.firestore.FieldValue.arrayUnion(payment) } }
         });
+        if (postRes && postRes.existed) {
+          Notifs.showToast('This payment was already recorded — nothing new was posted.','error');
+          if (payBtn) payBtn.disabled = false;
+          return;
+        }
         p.payments = [...(p.payments||[]), payment];
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
         Notifs.showToast('Payment recorded','success');
