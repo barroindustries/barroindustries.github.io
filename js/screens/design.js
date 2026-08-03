@@ -890,6 +890,10 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
     Notifs.showToast('Only the project Design Lead or a manager can release drawings.', 'error');
     return;
   }
+  if (to === 'released' && !(d.fileUrl||d.driveUrl)) {
+    Notifs.showToast('Attach a drawing file before releasing', 'error');
+    return;
+  }
   // ── WS35 handoff hardening: never silently release into a void ──
   if (to === 'released' && !project?.jobProjectId) {
     const msg = 'This Design project is NOT linked to a Job Project — releasing will only notify the Production department; nothing will appear in any Job Project document register. Link it via Edit Project first, or release anyway?';
@@ -933,7 +937,7 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
         await db.collection('job_projects').doc(project.jobProjectId).update({
           // drawingId + url are WS28's intake hook — its future production flow reads
           // this register, never design_drawings directly. url = fileUrl (WS15 precedence).
-          documents: firebase.firestore.FieldValue.arrayUnion({ type:'Drawing', ref:`${d.title} Rev ${d.currentRev||'A'}`, drawingId:d.id, url:d.fileUrl||null, at:nowIso, by:who }),
+          documents: firebase.firestore.FieldValue.arrayUnion({ type:'Drawing', ref:`${d.title} Rev ${d.currentRev||'A'}`, drawingId:d.id, url:d.fileUrl||d.driveUrl||null, at:nowIso, by:who }),
           timeline:  firebase.firestore.FieldValue.arrayUnion({ at:nowIso, event:`Drawing released: ${d.title} Rev ${d.currentRev||'A'}`, by:who }),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         });

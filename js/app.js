@@ -1000,8 +1000,24 @@ function initLogin() {
         }
       }
 
+      const remember = document.getElementById('remember-me').checked;
+      // Must set persistence BEFORE signInWithEmailAndPassword — it only applies to the
+      // sign-in call that follows it, not retroactively. LOCAL (checked/default) matches
+      // the global boot default in firebase-config.js and survives browser/tab close for
+      // ~10 days, which is what keeps background push alive. SESSION (unchecked) ends the
+      // session the moment the tab/browser fully closes — that's intentionally weaker,
+      // but it's the entire point of "Save login on this device": on a shared/kiosk
+      // machine the user is explicitly opting OUT of being remembered, so losing push
+      // continuity here is expected, not a bug to "fix" back to LOCAL.
+      try {
+        await auth.setPersistence(
+          remember ? firebase.auth.Auth.Persistence.LOCAL
+                   : firebase.auth.Auth.Persistence.SESSION
+        );
+      } catch (_) { /* private-mode/webview may reject setPersistence; falls back to boot default */ }
+
       await auth.signInWithEmailAndPassword(emailToUse, document.getElementById('password').value);
-      if (document.getElementById('remember-me').checked) {
+      if (remember) {
         localStorage.setItem('bi-saved-email', input);
       } else {
         localStorage.removeItem('bi-saved-email');

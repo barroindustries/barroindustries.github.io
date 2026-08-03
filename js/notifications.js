@@ -130,7 +130,7 @@ window.Notifs = (() => {
     }
   }
 
-  function _navigateFromNotif(type, taskId, chatId) {
+  function _navigateFromNotif(type, taskId, chatId, link) {
     document.getElementById('notif-panel')?.classList.add('hidden');
     document.getElementById('notif-backdrop')?.classList.add('hidden');
     if (type === 'chat_message') {
@@ -154,6 +154,8 @@ window.Notifs = (() => {
       if (typeof navigateTo === 'function') navigateTo('approvals');
     } else if (type === 'payroll' || type === 'kpi_grade' || type === 'self_assessment') {
       if (typeof navigateTo === 'function') navigateTo('personal-finance');
+    } else if (link && typeof navigateTo === 'function') {
+      navigateTo(link);
     }
   }
 
@@ -289,7 +291,7 @@ window.Notifs = (() => {
     _updatePanelHint(unreadCount, items.length);
 
     const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment','chat_message']);
-    const isNavigable = n => n.taskId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
+    const isNavigable = n => n.taskId || n.link || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
 
     // Many notifications set BOTH an icon AND a title that starts with the same
     // emoji (e.g. icon '💸' + title '💸 New Expense') — which rendered the icon
@@ -315,8 +317,8 @@ window.Notifs = (() => {
       // inlined (not a styles.css class) per this file's existing toast precedent.
       const unreadDot = !n.read ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${tileColor};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>` : '';
       return `
-      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}">
-        <div class="notif-item-main">
+      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}" data-link="${escHtml(n.link||'')}">
+        <div class="notif-item-main" style="cursor:pointer">
           <div class="notif-item-emoji">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 32)}</div>
           <div class="notif-item-text">
             <div class="notif-item-title" style="${n.read ? '' : 'font-weight:700'}">${unreadDot}${escHtml(titleText)}</div>
@@ -427,6 +429,7 @@ window.Notifs = (() => {
         const type = item?.dataset.type || '';
         const taskId = item?.dataset.taskId || '';
         const chatId = item?.dataset.chatId || '';
+        const link = item?.dataset.link || '';
         // Auto mark as read on view
         if (item?.classList.contains('unread')) {
           item.classList.remove('unread');
@@ -434,7 +437,29 @@ window.Notifs = (() => {
           item.querySelector('.notif-read-btn')?.remove();
           await markRead(uid, item.dataset.id);
         }
-        _navigateFromNotif(type, taskId, chatId);
+        _navigateFromNotif(type, taskId, chatId, link);
+      });
+    });
+
+    // Row body click — tap the card itself to open/navigate. The Open button
+    // only renders for isNavigable() types, so this is the primary (often
+    // only) tap target, especially for link-only notifications.
+    list.querySelectorAll('.notif-item-main').forEach(main => {
+      main.addEventListener('click', async () => {
+        const item = main.closest('.notif-item');
+        if (!item) return;
+        const type = item.dataset.type || '';
+        const taskId = item.dataset.taskId || '';
+        const chatId = item.dataset.chatId || '';
+        const link = item.dataset.link || '';
+        // Auto mark as read on open
+        if (item.classList.contains('unread')) {
+          item.classList.remove('unread');
+          item.classList.add('read');
+          item.querySelector('.notif-read-btn')?.remove();
+          await markRead(uid, item.dataset.id);
+        }
+        _navigateFromNotif(type, taskId, chatId, link);
       });
     });
   }

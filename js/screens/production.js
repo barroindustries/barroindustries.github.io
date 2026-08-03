@@ -617,7 +617,7 @@ function openJobProjectDetail(p){
     </div></div>`:''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📄',16)} Document Register</div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
-      ${visDocs.length?`<div class="table-wrap"><table class="data-table"><tbody>${visDocs.map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
+      ${visDocs.length?`<div class="table-wrap"><table class="data-table"><tbody>${visDocs.map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${(dc.driveUrl||dc.url)?`<a href="${escHtml(dc.driveUrl||dc.url)}" target="_blank" rel="noopener">${escHtml(dc.ref||'Open')}</a>`:escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
     </div></div>
     ${(showMoney && (p.invoices||[]).length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>

@@ -252,7 +252,16 @@ service cloud.firestore {
     // isAuth() (the audit separately flagged that published-post NOTIFICATIONS
     // also fan out to partners; that's a different, notification-side fix).
     match /posts/{postId} {
-      allow read: if isAuth() && !isPartner();
+      // Internal feed stays !isPartner()-only, EXCEPT posts deliberately targeted
+      // at the Partners dept once published — the partner Posts tab lists exactly
+      // where('dept','==','Partners').where('status','==','published'), whose
+      // equality filters statically match this predicate so the list() is
+      // provable and succeeds (a bare !isPartner() rule made that query throw
+      // 'Missing or insufficient permissions' and blanked the partner feed). Uses
+      // .get(...,'') so a post missing dept/status denies for partners rather than
+      // erroring the rule. General/other-dept posts remain fully internal.
+      allow read: if isAuth() && ( !isPartner()
+        || (resource.data.get('dept','') == 'Partners' && resource.data.get('status','') == 'published') );
       // v13 Phase 22: enforce the publish/approval model server-side — matches
       // modules.js openNewPostModal (authorId is the real field name; only the
       // president gets publishDirectly, everyone else always lands 'pending').

@@ -247,7 +247,12 @@ function isRealPresident() {
       try{
         if(item){
           const oldQty = item.qty||0;
-          await db.collection('inventory_items').doc(item.id).update(data);
+          const newQty = parseFloat(document.getElementById('iv-qty').value)||0;
+          const delta = newQty - oldQty;
+          const upd = { ...data };
+          delete upd.qty;
+          if (Math.abs(delta) > 1e-9) upd.qty = firebase.firestore.FieldValue.increment(delta);
+          await db.collection('inventory_items').doc(item.id).update(upd);
           window.logAudit&&window.logAudit('update','inventory_item',item.id,{name,qty:data.qty});
           // A manual on-hand edit changes stock without a Stock In/Out — log an
           // 'adjust' movement so the history reflects every quantity change.
