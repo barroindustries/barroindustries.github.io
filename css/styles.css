@@ -4710,6 +4710,118 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 /* Legacy per-theme overrides retired — .ms-bubble-*/.messenger-body/.ms-input
    are fully token-driven now (--bubble-in-bg/--chat-bg/--surface-2). */
 
+/* ══════════════════════════════
+   Wave2 practicality batch — in-thread search, record-link chips,
+   dept-grouped New Message picker, offline attachment retry,
+   pinned messages + announcement channels
+══════════════════════════════ */
+
+/* In-thread search bar — collapsible row under .ms-thread-header, same slim
+   56px-header visual language (icon buttons, muted count text). */
+.ms-thread-search-bar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.ms-thread-search-bar.hidden { display: none; }
+.ms-thread-search-input {
+  flex: 1; min-width: 0; border: none; border-radius: var(--pill);
+  padding: 6px 12px; background: var(--surface-2); color: var(--text);
+  font-size: var(--fs-sm); outline: none;
+}
+.ms-thread-search-input:focus { box-shadow: 0 0 0 3px var(--primary-soft); }
+.ms-thread-search-nav {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+}
+.ms-thread-search-nav:hover { background: var(--surface-2); color: var(--text); }
+.ms-thread-search-count {
+  font-size: var(--fs-2xs); color: var(--text-muted); white-space: nowrap;
+  padding: 0 2px; min-width: 44px; text-align: center;
+}
+/* Search hit highlight — rendered as <mark> inside an already-escHtml'd
+   .ms-text (see chat.js _highlightSearchMatch); the "active" (currently
+   navigated-to) hit gets a stronger accent so next/prev is visually obvious. */
+.ms-search-hit {
+  background: color-mix(in srgb, var(--gold-3, #FFD60A) 55%, transparent);
+  color: inherit; border-radius: 3px; padding: 0 1px;
+}
+.ms-search-hit-active {
+  background: var(--primary); color: var(--on-primary, #fff);
+}
+
+/* Pinned-messages bar — slim summary row under the header/search bar;
+   tapping expands a dropdown list of every pin (Messenger-style). */
+.ms-pinned-bar { position: relative; border-bottom: 1px solid var(--border); background: var(--surface); }
+.ms-pinned-bar.hidden { display: none; }
+.ms-pinned-summary {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 7px 12px; border: none; background: none; color: var(--text);
+  cursor: pointer; text-align: left; font-size: var(--fs-xs);
+}
+.ms-pinned-summary:hover { background: var(--surface-2); }
+.ms-pinned-summary svg, .ms-pinned-summary i { color: var(--primary); flex-shrink: 0; width: 13px; height: 13px; }
+.ms-pinned-count { font-weight: 700; flex-shrink: 0; }
+.ms-pinned-snippet {
+  flex: 1; min-width: 0; color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ms-pinned-list {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 15;
+  background: var(--modal-bg); border: 1px solid var(--border); border-top: none;
+  box-shadow: var(--sh-lg); max-height: 260px; overflow-y: auto;
+}
+.ms-pinned-list.hidden { display: none; }
+.ms-pinned-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.ms-pinned-row:last-child { border-bottom: none; }
+.ms-pinned-row:hover { background: var(--surface-2); }
+.ms-pinned-row-body { flex: 1; min-width: 0; }
+.ms-pinned-row-author { font-size: var(--fs-2xs); font-weight: 700; color: var(--primary); }
+.ms-pinned-row-snippet {
+  font-size: var(--fs-xs); color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ms-pinned-row-unpin {
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  padding: 4px; flex-shrink: 0; display: flex; align-items: center;
+}
+.ms-pinned-row-unpin:hover { color: var(--danger); }
+
+/* Announcement channel — read-only banner shown in place of a hidden
+   composer (chat.js _buildThreadPanel's canPost gate). */
+.ms-announcement-readonly {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 14px 8px; padding: 8px 12px;
+  background: var(--surface-2); border-radius: var(--r-sm, 10px);
+  color: var(--text-muted); font-size: var(--fs-xs);
+}
+.ms-announcement-readonly svg, .ms-announcement-readonly i { flex-shrink: 0; }
+.ms-composer-hidden { display: none !important; }
+
+/* Dept-grouped New Message picker — section header shared by "Recent" and
+   each department group (same visual language as the inbox's own pinned-rail
+   label). */
+.ms-picker-group-label {
+  display: flex; align-items: center; gap: 4px; padding: 10px 4px 4px;
+  font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.ms-picker-group-label i, .ms-picker-group-label svg { width: 11px; height: 11px; }
+
+/* Offline-queued attachment send (P1) — distinct from .ms-bubble-failed:
+   this isn't an error the sender needs to fix, just connectivity, so it uses
+   the info token instead of danger and reads as "queued" not "broken". */
+.ms-bubble-offline {
+  cursor: pointer;
+  background: color-mix(in srgb, var(--info, #0866FF) 12%, var(--bubble-out-bg));
+  border: 1px solid color-mix(in srgb, var(--info, #0866FF) 40%, transparent);
+}
+.ms-pending-offline-label { font-size: var(--fs-2xs); color: var(--info, #0866FF); font-weight: 600; }
+
 /* ── Task fullscreen panel messenger fills height ── */
 #task-fullscreen-panel .messenger-wrap {
   flex: 1; margin-top: 0; border-radius: 0; border: none;

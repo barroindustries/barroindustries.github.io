@@ -114,6 +114,20 @@ window.Chat = (() => {
   const INBOX_SWIPE_REVEAL = 132;
   let _inboxMenuOutsideWired = false;   // document click-away listener, wired once
 
+  // Wave2 practicality batch — in-thread search (P0). Client-side over the
+  // currently-loaded window (_earlier + _msgs) + on-demand loadEarlier() pages,
+  // no separate index. _threadSearchCurrentMid (not a numeric index) survives
+  // a loadEarlier() prepend cleanly — the match array is recomputed but the
+  // "which message is the active hit" identity doesn't need to shift.
+  let _threadSearchOpen = false, _threadSearchQ = '';
+  let _threadSearchMatches = [];      // message ids, chronological (oldest→newest), within the loaded window
+  let _threadSearchCurrentMid = null; // id of the currently-focused hit, or null
+  // Wave2 practicality batch — offline/failed attachment sends (P1). Reuses
+  // the existing _pending/_retryPending machinery byte-for-byte; only adds a
+  // distinct 'offline' status (vs. 'failed') and an automatic retry on the
+  // browser's 'online' event. See _markPendingOffline/doSend's catch below.
+  const HEIC_RE = /\.(heic|heif)$/i;
+
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
   // Wave5 M3 — shared image-URL sniff, hoisted out of _renderMessagePart (was
@@ -146,6 +160,36 @@ window.Chat = (() => {
     (p.previewUrls || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
   }
   function dmIdFor(a, b) { return 'dm_' + [a, b].sort().join('_'); }
+  // Wave2 practicality batch (P1) — "Recents" for the dept-grouped New Message
+  // picker: last N distinct people the CURRENT uid has opened a DM with,
+  // most-recent-first, persisted to localStorage (login-scoped key, same
+  // pattern as the chat nav badge's own per-uid storage key above). Recorded
+  // from openDM() itself — the ONE chokepoint every "start/reopen a DM" path
+  // in this file already goes through (New Message picker today; any future
+  // caller inherits this for free too).
+  const RECENT_DM_CAP = 10;
+  function _recentDmKey() {
+    const uid = (window.currentUser && currentUser.uid) || '';
+    return uid ? ('bi-chat-recent-dms-' + uid) : null;
+  }
+  function _recordRecentDm(otherUid) {
+    const key = _recentDmKey();
+    if (!key || !otherUid) return;
+    try {
+      let list = JSON.parse(localStorage.getItem(key) || '[]');
+      if (!Array.isArray(list)) list = [];
+      list = [otherUid, ...list.filter(u => u !== otherUid)].slice(0, RECENT_DM_CAP);
+      localStorage.setItem(key, JSON.stringify(list));
+    } catch (_) { /* best-effort — a missing/corrupt entry just means no Recents section */ }
+  }
+  function _recentDmIds() {
+    const key = _recentDmKey();
+    if (!key) return [];
+    try {
+      const list = JSON.parse(localStorage.getItem(key) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch (_) { return []; }
+  }
   function deptChannelKeys() {
     return Object.keys(window.DEPARTMENTS || {})
       .filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept);
@@ -194,6 +238,9 @@ window.Chat = (() => {
     _pending = [];
     _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
     _replyTarget = null; _swipe = null;      // Wave5 M2 — reply-arm + in-flight swipe never survive a thread close
+    // Wave2 practicality batch — in-thread search never carries into the next
+    // thread-open (matches _initialMarkReadPending's own reset just below).
+    _threadSearchOpen = false; _threadSearchQ = ''; _threadSearchMatches = []; _threadSearchCurrentMid = null;
     document.getElementById('chat-thread-scroll')?.removeEventListener('scroll', _onThreadScroll);
     if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
@@ -479,6 +526,10 @@ window.Chat = (() => {
       return (cv.participantNames && cv.participantNames[otherUid]) || 'User';
     }
     if (cv.type === 'group') return cv.name || 'Group';
+    // Wave2 practicality batch (P2 stretch) — announcement channels are a
+    // group-shaped conv (participants array, no department) with restricted
+    // posting; title resolution mirrors 'group' exactly.
+    if (cv.type === 'announcement') return cv.name || 'Announcement';
     return cv.name || cv.department || 'Channel';
   }
 
@@ -512,6 +563,10 @@ window.Chat = (() => {
     _updateChatNavBadge(nonArchived.filter(_isUnread).length);
     const filtered = _filter === 'archived' ? all.filter(_isArchived)
       : _filter === 'all' ? nonArchived
+      // Wave2 practicality batch — the "Groups" chip also surfaces announcement
+      // channels (group-shaped membership, just restricted posting); no
+      // separate filter chip added for a P2-stretch feature.
+      : _filter === 'group' ? nonArchived.filter(cv => cv.type === 'group' || cv.type === 'announcement')
       : nonArchived.filter(cv => cv.type === _filter);
     const sorted = filtered.slice().sort((a, b) =>
       (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
@@ -561,9 +616,11 @@ window.Chat = (() => {
         avatarHtml = otherUser?.photoUrl
           ? `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0;padding:0"><img src="${escHtml(otherUser.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/><span class="ms-presence-dot" style="background:${dotColor}"></span></div>`
           : `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0;background:${_avatarColorFor(otherUid||title)}">${initials(title)}<span class="ms-presence-dot" style="background:${dotColor}"></span></div>`;
-      } else if (cv.type === 'group') {
+      } else if (cv.type === 'group' || cv.type === 'announcement') {
         // Wave5 M4 — group avatar renders conv.photoUrl (set via the info
         // page's About section, creator/admin only) with initials fallback.
+        // Wave2 practicality batch — announcement channels share this exact
+        // rendering (see _convTitle above for the same 'group'-shaped treatment).
         avatarHtml = cv.photoUrl
           ? `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;padding:0"><img src="${escHtml(cv.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/></div>`
           : `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${_avatarColorFor(cv.id||title)}">${initials(title)}</div>`;
@@ -813,6 +870,7 @@ window.Chat = (() => {
         lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
       });
     }
+    _recordRecentDm(otherUid);   // Wave2 practicality batch (P1) — Recents for the New Message picker
     if (window.currentPage !== 'chat') navigateTo('chat');   // clears any open overlays first
     openConversation(id);
   }
@@ -839,8 +897,10 @@ window.Chat = (() => {
       avatarHtml = otherInfo.photoUrl
         ? `<div class="ms-avatar ms-avatar-md" id="chat-thread-avatar"><img src="${escHtml(otherInfo.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/></div>`
         : `<div class="ms-avatar ms-avatar-md" id="chat-thread-avatar" style="background:${_avatarColorFor(otherUid||title)}">${initials(title)}</div>`;
-    } else if (conv.type === 'group') {
-      title = conv.name || 'Group';
+    } else if (conv.type === 'group' || conv.type === 'announcement') {
+      // Wave2 practicality batch — announcement channels are group-shaped
+      // (see _convTitle/the inbox avatar branch above for the same rationale).
+      title = conv.name || (conv.type === 'announcement' ? 'Announcement' : 'Group');
       // Wave5 M4 — group avatar renders conv.photoUrl with initials fallback;
       // id lets the About-section photo-upload handler (_openMediaTab) patch
       // this exact node live, without waiting for the next thread-open.
@@ -882,7 +942,12 @@ window.Chat = (() => {
       ? `<span id="chat-presence-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:transparent;margin-right:4px"></span><span id="chat-presence-label" style="font-size:11px;color:var(--text-muted)"></span>`
       : conv.type === 'group'
         ? `<span style="font-size:11px;color:var(--text-muted)">${memberCount} member${memberCount!==1?'s':''}</span>`
-        : `<span style="font-size:11px;color:var(--text-muted)">Department channel</span>`;
+        // Wave2 practicality batch (P2 stretch) — announcement channel: same
+        // member-count line, plus a label so a read-only member knows why the
+        // composer is hidden (see the ms-announcement-readonly banner below).
+        : conv.type === 'announcement'
+          ? `<span style="font-size:11px;color:var(--text-muted)">${memberCount} member${memberCount!==1?'s':''} · Announcements</span>`
+          : `<span style="font-size:11px;color:var(--text-muted)">Department channel</span>`;
     // Messenger restyle Fix 4 — slim header: back + avatar + name/members +
     // (i) ONLY. Leave (group-only) and the wallpaper ⋮ preset picker used to
     // live here; both RELOCATED into the info page (_openMediaTab's About
@@ -890,6 +955,21 @@ window.Chat = (() => {
     // "Chat wallpaper" row that expands the SAME WALLPAPERS preset list
     // in place. Reachable via the exact same (i) button as before.
     const infoBtnHtml = `<button id="chat-info-btn" class="ms-thread-menu-btn" title="Shared media, files &amp; links" aria-label="Shared media, files and links">${emojiIcon('info', 18)}</button>`;
+    // Wave2 practicality batch (P0) — in-thread search trigger, right beside
+    // the (i) info button (same .ms-thread-menu-btn treatment).
+    const searchBtnHtml = `<button id="chat-search-btn" class="ms-thread-menu-btn" title="Search in this chat" aria-label="Search in this chat">${emojiIcon('search', 18)}</button>`;
+    // Wave2 practicality batch (P2 stretch) — announcement channel: only the
+    // creator or an admin may post; everyone else gets a read-only banner
+    // instead of the composer. The composer markup below is ALWAYS rendered
+    // (kept simple/safe — every existing wiring call below still finds its
+    // element) but hidden via CSS + disabled attributes when canPost is false;
+    // doSend() itself also short-circuits on !canPost as a defense-in-depth
+    // guard (see below). Server-side enforcement is the firestore.rules text
+    // in this batch's report — the UI gate alone is never the real wall.
+    const canPost = conv.type !== 'announcement' || _canManageConv(conv);
+    const readonlyBannerHtml = !canPost
+      ? `<div class="ms-announcement-readonly">${emojiIcon('megaphone', 15)}<span>Only admins can post in this channel.</span></div>`
+      : '';
     // Messenger body/typing row/composer markup below is byte-identical to
     // the old shell's innerHTML — only the outer wrapper (now openPage's
     // .page-panel) and the header (now injected, back-button-less) changed.
@@ -903,8 +983,17 @@ window.Chat = (() => {
           <div class="ms-thread-title">${escHtml(title)}</div>
           <div class="ms-thread-subtitle">${subtitleHtml}</div>
         </div>
+        ${searchBtnHtml}
         ${infoBtnHtml}
       </div>
+      <div id="chat-search-bar" class="ms-thread-search-bar hidden">
+        <button type="button" id="chat-search-prev" class="ms-thread-search-nav" title="Previous match" aria-label="Previous match">${emojiIcon('chevron-up', 15)}</button>
+        <button type="button" id="chat-search-next" class="ms-thread-search-nav" title="Next match" aria-label="Next match">${emojiIcon('chevron-down', 15)}</button>
+        <input id="chat-search-input-thread" class="ms-thread-search-input" placeholder="Search in this chat"/>
+        <span id="chat-search-count" class="ms-thread-search-count"></span>
+        <button type="button" id="chat-search-close" class="ms-thread-search-nav" title="Close search" aria-label="Close search">${emojiIcon('x', 15)}</button>
+      </div>
+      <div id="chat-pinned-bar" class="ms-pinned-bar hidden"></div>
       <div id="chat-thread-scroll-wrap" style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
         <div id="chat-thread-scroll" class="messenger-body" style="padding:12px 14px"></div>
         <button id="chat-scroll-fab" class="ms-scroll-fab hidden" type="button" title="Scroll to latest" aria-label="Scroll to latest messages">
@@ -915,7 +1004,8 @@ window.Chat = (() => {
       <div id="chat-typing-row"></div>
       <div id="chat-file-preview" style="font-size:11px;color:var(--primary);padding:0 14px 4px;min-height:16px"></div>
       <div id="chat-reply-chip" class="ms-reply-chip hidden"></div>
-      <div class="messenger-input-row">
+      ${readonlyBannerHtml}
+      <div class="messenger-input-row${canPost ? '' : ' ms-composer-hidden'}">
         <div id="chat-mention-dd" class="ms-mention-dd hidden" role="listbox"></div>
         <div id="chat-emoji-grid" class="ms-emoji-grid hidden" role="menu">${
           EMOJI_GRID.map(e => `<button type="button" class="ms-emoji-opt" data-emoji="${e}">${e}</button>`).join('')
@@ -929,9 +1019,10 @@ window.Chat = (() => {
           <label for="chat-camera" class="ms-attach-btn" title="Camera">${emojiIcon('camera', 18)}</label>
           <input type="file" id="chat-camera" accept="image/*" capture="environment" style="display:none"/>
           <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
+          <button type="button" class="ms-attach-btn" id="chat-attach-ref" title="Attach a task, quote or bidding">${emojiIcon('link-2',18)}</button>
         </div>
         <button type="button" class="ms-attach-btn" id="chat-emoji-btn" title="Emoji">${emojiIcon('smile',18)}</button>
-        <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…"></textarea>
+        <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…" ${canPost ? '' : 'disabled'}></textarea>
         <button class="ms-send-btn" id="chat-send" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
@@ -983,18 +1074,65 @@ window.Chat = (() => {
     // Wave5 M3 (J4) — ⓘ Shared Media/Files/Links info page.
     document.getElementById('chat-info-btn')?.addEventListener('click', () => _openMediaTab(conv));
 
+    // Wave2 practicality batch (P0) — in-thread search wiring. The heavy
+    // lifting (match computation, highlight, scroll-to-hit, paged
+    // loadEarlier() on demand) lives in the module-level _threadSearch*
+    // helpers below; this just wires the header button + collapsible bar.
+    document.getElementById('chat-search-btn')?.addEventListener('click', () => _toggleThreadSearch());
+    document.getElementById('chat-search-close')?.addEventListener('click', () => _toggleThreadSearch(false));
+    document.getElementById('chat-search-prev')?.addEventListener('click', () => _threadSearchStep(-1));
+    document.getElementById('chat-search-next')?.addEventListener('click', () => _threadSearchStep(1));
+    let _threadSearchDebTimer = null;
+    document.getElementById('chat-search-input-thread')?.addEventListener('input', e => {
+      const v = e.target.value;
+      clearTimeout(_threadSearchDebTimer);
+      _threadSearchDebTimer = setTimeout(() => _setThreadSearchQuery(v), 150);
+    });
+    document.getElementById('chat-search-input-thread')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); _threadSearchStep(e.shiftKey ? -1 : 1); }
+      else if (e.key === 'Escape') { _toggleThreadSearch(false); }
+    });
+
+    // Wave2 practicality batch (P2 stretch) — pinned-messages bar: NOT painted
+    // here — at this point in the call sequence _openConv is still the
+    // PREVIOUS thread's value (openConversation assigns it only after this
+    // function returns; see that function's own comment on why). Painted from
+    // openConversation itself right after _openConv is (re)assigned, and again
+    // from the messages listener once _msgs/_earlier resolve (so a pinned
+    // message's snippet/author show up as soon as the loaded window can
+    // resolve them — a generic "Pinned message" fallback renders until then).
+
     // composer wiring: send → Chat.sendMessage({text, file, images, link}) then
     // clear input/attachment/preview (NO re-render call — the messages
     // listener repaints). pendingImages/pendingFile/pendingLink are mutually
     // exclusive "what's currently attached" slots, same as the pre-M3
-    // file/link exclusivity — attaching one clears the other two.
-    let pendingFile = null, pendingLink = null, pendingImages = [];
+    // file/link exclusivity — attaching one clears the other two. pendingRef
+    // (Wave2 practicality batch, P0 record-link) is INDEPENDENT of that group
+    // — a task/quote/bidding reference is plain metadata, not a competing
+    // upload, so it can ride alongside a photo/file/link/text in the same send.
+    let pendingFile = null, pendingLink = null, pendingImages = [], pendingRef = null;
     const fileInp = document.getElementById('chat-file');
     const cameraInp = document.getElementById('chat-camera');
     const filePreview = document.getElementById('chat-file-preview');
     const input = document.getElementById('chat-input');
     const sendBtn = document.getElementById('chat-send');
-    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingImages.length || pendingLink); };
+    // Wave2 practicality batch — filePreview now composes from up to 2
+    // independent slots (the file/image/link group, plus pendingRef), joined
+    // with a middle dot when both are present.
+    const updateFilePreview = () => {
+      // Wave2 practicality batch — this moved from textContent to innerHTML
+      // (to fit the emoji-icon glyphs), so every dynamic value below (file
+      // name, link, ref label — all user/attacker-influenceable) MUST be
+      // escHtml'd explicitly now; textContent used to do that for free.
+      const parts = [];
+      if (pendingFile) parts.push(`${emojiIcon('paperclip',12)} ${escHtml(pendingFile.name || 'file')}`);
+      else if (pendingImages.length) parts.push(`${emojiIcon('camera',12)} ${pendingImages.length} photo${pendingImages.length > 1 ? 's' : ''} selected`);
+      else if (pendingLink) parts.push(`${emojiIcon('link',12)} ${escHtml(pendingLink)}`);
+      if (pendingRef) parts.push(`${emojiIcon(pendingRef.kind === 'task' ? 'clipboard-list' : pendingRef.kind === 'quote' ? 'file-text' : 'landmark', 12)} ${escHtml(pendingRef.label)}`);
+      filePreview.innerHTML = parts.join(' &nbsp;·&nbsp; ');
+      if (window.lucide) lucide.createIcons({ nodes: [filePreview] });
+    };
+    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingImages.length || pendingLink || pendingRef); };
     // Messenger restyle Fix 5 — the 3 attach controls (file/camera/link)
     // collapse into ONE ➕ button that expands them inline (Messenger-style)
     // when tapped, and auto-collapses once the composer has text (below, in
@@ -1032,9 +1170,35 @@ window.Chat = (() => {
       const add = files.slice(0, room);
       if (files.length > add.length) Notifs.showToast('Up to 6 photos per message — extra photos skipped', 'error');
       pendingImages.push(...add);
-      filePreview.textContent = `📷 ${pendingImages.length} photo${pendingImages.length > 1 ? 's' : ''} selected`;
+      updateFilePreview();
       updateSendState();
       setAttachExpanded(false);
+      // Wave2 practicality batch (P1) — an undecodable image (typically HEIC/
+      // HEIF on a browser with no built-in decoder) can't be transcoded via
+      // canvas: canvas.drawImage() needs a successfully DECODED source in the
+      // first place, so if the browser's own <img> can't decode it, there's
+      // nothing to draw FROM. _compressImage already has this exact fallback
+      // (its img.onerror resolves with the original file rather than
+      // rejecting) — the gap this closes is that fallback being SILENT. Probe
+      // async, fire-and-forget (never blocks attaching): warn instead of
+      // quietly uploading a photo some recipients' browsers won't render.
+      add.forEach(f => {
+        const looksHeic = HEIC_RE.test(f.name || '') || /^image\/hei[cf]/i.test(f.type || '');
+        _probeImageDecodable(f).then(ok => {
+          if (!ok) {
+            // This device's own browser couldn't decode it at all — it will
+            // upload as-is (same _compressImage fallback as before), but is
+            // very likely to render as a broken image for EVERYONE, sender
+            // included.
+            Notifs.showToast(`"${f.name || 'photo'}" couldn't be previewed on this device and may not display for anyone — consider sending it as JPEG/PNG instead`, 'error');
+          } else if (looksHeic) {
+            // Decoded fine here (e.g. Safari/iOS has native HEIC support) but
+            // the format itself is a common no-render case for recipients on
+            // other browsers/devices once it's rendered from Storage.
+            Notifs.showToast(`"${f.name || 'photo'}" is a HEIC photo — it may not display for recipients on non-Apple devices`, 'error');
+          }
+        });
+      });
     }
     fileInp.addEventListener('change', e => {
       const files = Array.from(e.target.files || []);
@@ -1066,7 +1230,7 @@ window.Chat = (() => {
       }
       pendingImages = []; pendingLink = null;
       pendingFile = f || null;
-      filePreview.textContent = f ? `📎 ${f.name}` : '';
+      updateFilePreview();
       updateSendState();
       setAttachExpanded(false);
     });
@@ -1081,9 +1245,20 @@ window.Chat = (() => {
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
       pendingLink = url; pendingFile = null; pendingImages = [];   // a link replaces a pending file/images
       fileInp.value = '';
-      filePreview.textContent = `🔗 ${url}`;
+      updateFilePreview();
       updateSendState();
       setAttachExpanded(false);
+    });
+    // Wave2 practicality batch (P0) — "Attach a record" picker (task/quote/
+    // bidding). Independent of the file/image/link group above — see
+    // pendingRef's own comment at declaration.
+    document.getElementById('chat-attach-ref')?.addEventListener('click', () => {
+      _openRefPicker(ref => {
+        pendingRef = ref;
+        updateFilePreview();
+        updateSendState();
+        setAttachExpanded(false);
+      });
     });
 
     // Wave5 M3 (J4) — paste an image from the clipboard directly into the
@@ -1181,23 +1356,29 @@ window.Chat = (() => {
     // makes that feel instant, not a relaxation of the guard itself.
     const doSend = async () => {
       if (_isSending) return;
+      // Wave2 practicality batch (P2 stretch) — announcement channel:
+      // defense-in-depth guard (the composer is already hidden/disabled via
+      // CSS when !canPost — see the bodyHtml above). Server-side enforcement
+      // is the firestore.rules text in this batch's report.
+      if (!canPost) return;
       const text = (input.value || '').trim();
       const file = pendingFile, link = pendingLink, images = pendingImages.slice();   // Wave5 M3 — snapshot before clearing
+      const ref = pendingRef;                               // Wave2 — snapshot before clearing, same pattern
       const replyTo = _replyTarget;                        // Wave5 M2 — captured BEFORE clearing below
       const mentions = _computeMentions(text, conv);        // Wave5 M2
-      if (!text && !file && !link && !images.length) return;
+      if (!text && !file && !link && !images.length && !ref) return;
       _isSending = true;
       sendBtn.disabled = true;
       const clientKey = _newClientKey();
-      const savedText = input.value, savedFilePreview = filePreview.textContent;
+      const savedText = input.value;
       input.value = ''; _autoGrow(input);
-      fileInp.value = ''; pendingFile = null; pendingLink = null; pendingImages = [];
-      filePreview.textContent = '';
+      fileInp.value = ''; pendingFile = null; pendingLink = null; pendingImages = []; pendingRef = null;
+      updateFilePreview();
       _replyTarget = null; _renderReplyChip();               // Wave5 M2 — clears on optimistic send, like the composer text
       document.getElementById('chat-mention-dd')?.classList.add('hidden');
       clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
       updateSendState();
-      _addPendingMessage({ clientKey, text, file, images, link, replyTo });
+      _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref });
       // Wave1 P1 fix #6 — the optimistic bubble above IS the UI-complete
       // signal; the guard used to stay held until the underlying network
       // write resolved, which offline (or on a stalled upload — put() has no
@@ -1210,7 +1391,7 @@ window.Chat = (() => {
       _isSending = false;
       updateSendState();
       try {
-        await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions });
+        await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions, ref });
       } catch (e) {
         // v14 chat re-audit fix — canceled via the pending bubble's ✕ while
         // the send was in flight (_cancelPendingMessage): it's already gone
@@ -1218,10 +1399,29 @@ window.Chat = (() => {
         // composer text/attachment/draft or toast an error for a send they
         // explicitly dismissed.
         if (_canceledClientKeys.delete(clientKey)) return;
+        // Wave2 practicality batch (P1) — robust offline attachment retry: an
+        // image/file send that fails while the browser is OFFLINE is queued
+        // (kept in _pending with the blob still attached, per
+        // _addPendingMessage) rather than restored to the composer as a
+        // regular "failed, edit and retry" bubble — the composer already
+        // moved on (Wave1 P1 fix #6, above), so there's nothing to "restore
+        // into" for the user to look at; the bubble itself IS the record, and
+        // the 'online' listener below retries it automatically the moment
+        // connectivity returns (also tap-to-retry, same as 'failed').
+        // A generic upload failure with an active connection keeps the exact
+        // pre-existing behavior: restore composer state, mark 'failed'.
+        const isAttachmentSend = !!(file || images.length);
+        if (isAttachmentSend && typeof navigator !== 'undefined' && navigator.onLine === false) {
+          _markPendingOffline(clientKey);
+          Notifs.info('You’re offline — this will send automatically once you’re back online.');
+          return;
+        }
         input.value = savedText; _autoGrow(input);
-        if (file) { pendingFile = file; filePreview.textContent = savedFilePreview; }
-        else if (images.length) { pendingImages = images; filePreview.textContent = savedFilePreview; }
-        else if (link) { pendingLink = link; filePreview.textContent = savedFilePreview; }
+        if (file) pendingFile = file;
+        else if (images.length) pendingImages = images;
+        else if (link) pendingLink = link;
+        if (ref) pendingRef = ref;
+        if (file || images.length || link || ref) updateFilePreview();
         if (replyTo) { _replyTarget = replyTo; _renderReplyChip(); }   // Wave5 M2 — restore reply-arm on failure too
         _saveDraft(conv.id, savedText);
         _markPendingFailed(clientKey);
@@ -1385,6 +1585,12 @@ window.Chat = (() => {
     // right back to null for the conversation we're about to open.
     _buildThreadPanel(conv);
     _openConvId = convId; _openConv = conv;
+    // Wave2 practicality batch (P2 stretch) — pinned-messages bar: safe to
+    // paint now that _openConv points at the conv actually being opened (the
+    // #chat-pinned-bar DOM already exists — _buildThreadPanel injected it
+    // just above). Repainted again once the messages listener resolves (see
+    // its onSnapshot callback below) so snippets fill in as the window loads.
+    _renderPinnedBar();
     // Wave5 M4 (J9) — capture "my readAt" preferring the denormalized
     // conv.reads.{uid} (zero extra reads — it rode in on `conv` itself,
     // whether that came from the inbox's live listener or the direct get()
@@ -1427,6 +1633,12 @@ window.Chat = (() => {
         _msgs = s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse();
         _reconcilePending();     // drop any optimistic bubble the snapshot just echoed back
         _renderThread();
+        // Wave2 practicality batch (P0) — recompute search matches against the
+        // freshly-loaded window (a new incoming message might match the
+        // active query) and refresh the pinned bar's snippet resolution now
+        // that more of _msgs is available (see _renderPinnedBar's own comment).
+        if (_threadSearchQ.trim()) { _computeThreadSearchMatches(); _updateThreadSearchUI(); }
+        _renderPinnedBar();
         // Wave1 P1 fix #7 — the old unconditional _markRead()/_clearChatNotifs()
         // right after wiring these listeners (below, now removed) fired the
         // instant openConversation() was called, even if the user backed out
@@ -1515,6 +1727,24 @@ window.Chat = (() => {
   // undecodable image, e.g. some HEIC the browser can't draw, still resolves
   // with the ORIGINAL file rather than rejecting — the upload proceeds with
   // the uncompressed original instead of losing the attachment entirely).
+  // Wave2 practicality batch (P1) — cheap decode probe used ONLY to decide
+  // whether to warn the sender at attach-time (see _addPendingImages above).
+  // Deliberately NOT reused by _compressImage itself — that function's own
+  // img.onerror fallback (below) already has to run the real compress
+  // attempt regardless, so a separate up-front probe there would just be a
+  // second decode of the same bytes for no benefit.
+  function _probeImageDecodable(file) {
+    return new Promise(resolve => {
+      if (!file || !/^image\//.test(file.type || '')) { resolve(true); return; }
+      let url;
+      try { url = URL.createObjectURL(file); } catch (_) { resolve(true); return; }
+      const img = new Image();
+      const done = ok => { try { URL.revokeObjectURL(url); } catch (_) {} resolve(ok); };
+      img.onload = () => done(true);
+      img.onerror = () => done(false);
+      img.src = url;
+    });
+  }
   function _compressImage(file) {
     return new Promise(resolve => {
       if (!file || !/^image\//.test(file.type || '') || file.size < 300 * 1024) {
@@ -1576,7 +1806,7 @@ window.Chat = (() => {
   // writing into the wrong conversation's subcollections. For every M1 caller
   // conv.id === _openConvId is always true (conv came from _openConv itself),
   // so nothing changes for them.
-  async function sendMessage({ text, file, images, link, clientKey, replyTo, forwardedFrom, mentions,
+  async function sendMessage({ text, file, images, link, clientKey, replyTo, forwardedFrom, mentions, ref,
                                 conv: convParam, fileUrl: preFileUrl, fileName: preFileName, fileSource: preFileSource,
                                 media: preMedia }) {
     const conv = convParam || _openConv; if (!conv) return;
@@ -1646,6 +1876,16 @@ window.Chat = (() => {
     if (forwardedFrom) msgDoc.forwardedFrom = { convId: forwardedFrom.convId, authorName: forwardedFrom.authorName };
     if (mentions && mentions.length) msgDoc.mentions = mentions;
     if (media && media.length) msgDoc.media = media;
+    // Wave2 practicality batch (P0) — record-link chip: {kind, id, label,
+    // collection?}. `collection` disambiguates WHICH quote collection
+    // (bk_quotes/bs_quotes) or gov bucket (gov_philgeps/gov_active_bids/
+    // gov_archive) the id lives in — absent for kind:'task' (one collection).
+    // Set-once-at-create, like replyTo/forwardedFrom/mentions above (never
+    // mutated afterward), so it's deliberately excluded from _msgRev too.
+    if (ref && ref.kind && ref.id) {
+      msgDoc.ref = { kind: ref.kind, id: ref.id, label: (ref.label || 'Linked record').slice(0, 140) };
+      if (ref.collection) msgDoc.ref.collection = ref.collection;
+    }
     await db.collection('conversations').doc(conv.id).collection('messages').add(msgDoc);
     // v14 chat re-audit fix — the Shared Media page (_openMediaTab) now
     // caches its up-to-500-message fetch; invalidate that cache key eagerly
@@ -1668,7 +1908,12 @@ window.Chat = (() => {
     const preview = text ? (text.length > 80 ? text.slice(0, 80) + '…' : text)
                          : media && media.length ? `📷 ${media.length > 1 ? media.length + ' photos' : 'Photo'}`
                          : fileSource === 'link' ? '🔗 Link'
-                         : `📎 ${fileName || 'File'}`;
+                         : fileUrl ? `📎 ${fileName || 'File'}`
+                         // Wave2 practicality batch (P0) — a ref-only send (no text/
+                         // file/media/link, just a task/quote/bidding chip) needs its
+                         // own preview branch — the old fallback (`📎 ${fileName||'File'}`)
+                         // would otherwise misreport it as a generic attachment.
+                         : (msgDoc.ref ? `🔗 ${msgDoc.ref.label}` : '');
     // Second write — passes the affectedKeys([lastMessage*,reads]) member
     // branch. Wave5 M4 (J9): the sender's own reads.{uid} rides in the SAME
     // write as the preview bump — the deployed rule requires exactly that
@@ -1988,6 +2233,60 @@ window.Chat = (() => {
       <div class="ms-reply-quote-snippet${r.removed ? ' ms-reply-quote-removed' : ''}">${r.removed ? 'Original message removed' : escHtml(r.snippet || '')}</div>
     </div>`;
   }
+  // Wave2 practicality batch (P0) — record-link chip. Shared by the confirmed-
+  // message renderer (_renderMessagePart) and the optimistic pending bubble
+  // (_renderPendingBubble), same "one markup, two callers" pattern as
+  // _replyQuoteHtml above. `ref` is `{kind, id, label, collection?}` — absent
+  // on every message that isn't a record-link, rendering nothing.
+  // Reuses .ms-file-chip's existing visual language (rounded pill, icon +
+  // label) rather than adding new CSS — a plain <div role="button"> instead
+  // of an <a> since this triggers an in-app opener (_openRefChip), not a URL.
+  function _refChipHtml(ref) {
+    if (!ref || !ref.kind || !ref.id) return '';
+    const icon = ref.kind === 'task' ? 'clipboard-list' : ref.kind === 'quote' ? 'file-text' : 'landmark';
+    return `<div class="ms-file-chip chat-ref-tap" role="button" tabindex="0" style="margin-top:5px;cursor:pointer"
+        data-kind="${escHtml(ref.kind)}" data-id="${escHtml(ref.id)}" data-collection="${escHtml(ref.collection || '')}" data-label="${escHtml(ref.label || '')}">
+      ${emojiIcon(icon, 14)}<span>${escHtml(ref.label || 'Linked record')}</span>
+    </div>`;
+  }
+  // Opens the record a ref chip points at. navigateTo() (js/app.js) has no
+  // record-level deep-link — confirmed by recon: it only ever dispatches to a
+  // whole PAGE (`case 'tasks': renderTasks(...)`), never a specific doc. The
+  // real per-record entry points are dedicated globals a couple of screens
+  // already expose for exactly this ("open one record") purpose:
+  //   - tasks:   window.openTaskDetail(id, currentUser, currentRole) — already
+  //     used this way by js/notifications.js's own deep-link handler.
+  //   - quotes:  window.reopenQuoteFromDoc(collection, id) — loads the quote
+  //     into the quote-builder iframe (its OWN internal navigateTo call); only
+  //     works if the doc has an editableState snapshot, else it toasts itself.
+  //   - biddings: no equivalent exists — openGovBidDetail(d) is a private
+  //     closure inside departments.js's renderDocCollection, never exposed on
+  //     window, and takes an already-fetched doc object rather than an id.
+  //     Best available fallback without editing departments.js: land on the
+  //     whole Government Biddings page (navigateTo('dept:Government
+  //     Biddings')) — flagged as a follow-up in this batch's report (a small
+  //     `window.openGovBidDetailById(bucket, id)` export would close this gap).
+  function _openRefChip(ref) {
+    if (!ref || !ref.kind || !ref.id) return;
+    try {
+      if (ref.kind === 'task') {
+        if (typeof window.openTaskDetail === 'function') {
+          window.openTaskDetail(ref.id, window.currentUser, window.currentRole);
+        } else if (typeof window.navigateTo === 'function') {
+          window.navigateTo('tasks');
+        }
+      } else if (ref.kind === 'quote') {
+        if (typeof window.reopenQuoteFromDoc === 'function') {
+          window.reopenQuoteFromDoc(ref.collection || 'bk_quotes', ref.id);
+        } else {
+          Notifs.showToast('Quote viewer unavailable', 'error');
+        }
+      } else if (ref.kind === 'bidding') {
+        if (typeof window.navigateTo === 'function') window.navigateTo('dept:Government Biddings');
+        Notifs.info(`Opening Government Biddings — find "${ref.label || 'the record'}" in the list`);
+      }
+    } catch (_) { Notifs.showToast('Could not open that record', 'error'); }
+  }
   // Wave5 M2 (J6) — highlights @mentions in an ALREADY-escHtml'd string. Takes
   // the message's `mentions:[uid]` array, resolves each uid to a display name
   // via the same _authorInfo the rest of the renderer uses, HTML-escapes that
@@ -2160,9 +2459,19 @@ window.Chat = (() => {
     // .chat-bubble-tap — unchanged), rather than a new menu.
     // Wave5 M2 — Forward joins the same picker (same long-press/right-click
     // reach, desktop AND mobile, so no separate hover-only affordance needed).
+    // Wave2 practicality batch (P2 stretch) — Pin/Unpin joins the same picker
+    // (conv creator/admin only — _canManageConv mirrors the pinnedMsgIds
+    // firestore.rules text in this batch's report). _openConv is always the
+    // currently-open thread's conv, same module-state read _isAdminRole()/etc.
+    // already rely on throughout this renderer.
+    const isPinnedMsg = !!(_openConv && (_openConv.pinnedMsgIds || []).includes(m.id));
+    const canPin = _canManageConv(_openConv);
+    const pinBtnHtml = canPin
+      ? `<button class="chat-pin-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="${isPinnedMsg ? 'Unpin' : 'Pin'}">${emojiIcon(isPinnedMsg ? 'pin-off' : 'pin', 14)}</button>`
+      : '';
     const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px;align-items:center">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
-    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button>${touchActionsHtml}</div>`;
+    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button>${pinBtnHtml}${touchActionsHtml}</div>`;
     // Messenger restyle Fix 3 — the always-visible quick-heart button beside
     // every bubble is GONE (owner: single biggest clutter item). Reacting is
     // now DOUBLE-TAP the bubble = toggle ❤️ (same toggleReaction data model,
@@ -2184,6 +2493,15 @@ window.Chat = (() => {
     // Wave5 M2 (J3) — "Forwarded" label, absent on every doc without forwardedFrom.
     const forwardedHtml = m.forwardedFrom
       ? `<div class="ms-forwarded-label">${emojiIcon('forward',10)}<span>Forwarded</span></div>` : '';
+    // Wave2 practicality batch (P0) — in-thread search highlight. Runs AFTER
+    // mention-highlighting (both operate on already-escHtml'd text, same
+    // "safe to layer" contract _highlightMentions documents above) so a
+    // search hit inside an @mention still highlights correctly. Absent/empty
+    // _threadSearchQ is a no-op passthrough — zero cost when search isn't open.
+    let textHtml = m.text ? _highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions) : '';
+    if (textHtml && _threadSearchQ.trim()) textHtml = _highlightSearchMatch(textHtml, _threadSearchQ, m.id === _threadSearchCurrentMid);
+    // Wave2 practicality batch (P0) — record-link chip (task/quote/bidding).
+    const refHtml = _refChipHtml(m.ref);
 
     const isLast = idx === list.length - 1;
 
@@ -2210,7 +2528,7 @@ window.Chat = (() => {
           ${isMine ? replyBtnHtml : ''}
           <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass}${isClusterLast?' ms-time-rest':''} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${replyQuoteHtml}
-            ${m.text ? `<div class="ms-text">${_highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions)}</div>` : ''}
+            ${textHtml ? `<div class="ms-text">${textHtml}</div>` : ''}
             ${m.media && m.media.length ? _mediaGridHtml(m)
               : m.fileUrl ? (m.fileSource!=='link' && _isImageUrl(m.fileUrl)
                 // Wave5 M3 (J1) — legacy single-image docs (fileUrl, no media[])
@@ -2223,6 +2541,7 @@ window.Chat = (() => {
                 ? `<div style="margin-top:${m.text?'6':'0'}px"><img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="0" src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer"/></div>`
                 : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(m.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(m.fileName||'Attachment')}</span></a>`
               ) : ''}
+            ${refHtml}
             <div class="ms-meta">
               <span class="ms-time">${timeLabel}</span>
               ${m.editedAt?'<span class="ms-edited">(edited)</span>':''}
@@ -2425,6 +2744,12 @@ window.Chat = (() => {
       if (delBtn) { e.stopPropagation(); _onDeleteMessage(delBtn.dataset.mid); return; }
       const hardDelBtn = e.target.closest('.chat-msg-harddel-btn');
       if (hardDelBtn) { e.stopPropagation(); _onHardDeleteMessage(hardDelBtn.dataset.mid); return; }
+      // Wave2 practicality batch (P2 stretch) — Pin/Unpin (picker button).
+      const pinBtn = e.target.closest('.chat-pin-btn');
+      if (pinBtn) { e.stopPropagation(); _togglePinMessage(pinBtn.dataset.mid); return; }
+      // Wave2 practicality batch (P0) — record-link chip tap.
+      const refChip = e.target.closest('.chat-ref-tap');
+      if (refChip) { e.stopPropagation(); _openRefChip({ kind: refChip.dataset.kind, id: refChip.dataset.id, collection: refChip.dataset.collection || null, label: refChip.dataset.label || '' }); return; }
       // Wave5 M3 (J1) — any message image (legacy single fileUrl OR a new
       // media-grid tile) opens the in-app lightbox instead of the old
       // window.open(). Checked BEFORE the generic bubble-tap-toggle below so
@@ -2673,7 +2998,7 @@ window.Chat = (() => {
   function _newClientKey() {
     return (currentUser?.uid || 'u') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   }
-  function _addPendingMessage({ clientKey, text, file, images, link, replyTo }) {
+  function _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref }) {
     let previewUrl = null;
     if (file && /^image\//.test(file.type || '')) {
       try { previewUrl = URL.createObjectURL(file); } catch (_) {}
@@ -2685,13 +3010,26 @@ window.Chat = (() => {
     // Wave5 M2 — replyTo rides the pending bubble too (spec requirement):
     // stored verbatim so _renderPendingBubble can show the SAME quote block
     // the confirmed message will render once the snapshot echoes it back.
+    // Wave2 practicality batch — `ref` rides the pending bubble the same way
+    // (it's plain data, already-existing-record metadata — no upload needed,
+    // so the chip is tappable even before the message doc lands).
     _pending.push({ clientKey, text: text || '', file: file || null, images: images || [], previewUrl, previewUrls,
-      link: link || null, status: 'sending', replyTo: replyTo || null });
+      link: link || null, status: 'sending', replyTo: replyTo || null, ref: ref || null });
     _renderThread();
   }
   function _markPendingFailed(clientKey) {
     const p = _pending.find(x => x.clientKey === clientKey);
     if (p) { p.status = 'failed'; _renderPendingTail(); }
+  }
+  // Wave2 practicality batch (P1) — offline-queued attachment send: distinct
+  // from 'failed' (a real, still-connected send error the sender must
+  // manually retry). This status shows "will send when back online" instead
+  // of "tap to retry", and the module-scope 'online' listener below retries
+  // it automatically — tap-to-retry still works too (see
+  // _wirePendingTailDelegation's selector, extended to include this class).
+  function _markPendingOffline(clientKey) {
+    const p = _pending.find(x => x.clientKey === clientKey);
+    if (p) { p.status = 'offline'; _renderPendingTail(); }
   }
   // Matches confirmed message docs (by clientKey) against _pending and drops
   // the ones the snapshot just echoed back — this is the "✓ when the snapshot
@@ -2717,17 +3055,40 @@ window.Chat = (() => {
       // from the stored text (the retry always targets the currently open
       // thread, same as the original send, so _openConv is the right conv).
       const mentions = _computeMentions(p.text, _openConv);
-      await sendMessage({ text: p.text, file: p.file, images: p.images, link: p.link, clientKey, replyTo: p.replyTo, mentions });
+      await sendMessage({ text: p.text, file: p.file, images: p.images, link: p.link, clientKey, replyTo: p.replyTo, mentions, ref: p.ref });
     } catch (e) {
       // v14 chat re-audit fix — canceled out from under this retry — don't
       // flip a bubble that's no longer even in `_pending` back to 'failed',
       // and don't toast an error for a send the user already dismissed.
       if (_canceledClientKeys.delete(clientKey)) return;
+      // Wave2 practicality batch (P1) — a retry that STILL fails while
+      // offline stays queued (rather than flipping to 'failed' and toasting
+      // an error every time the 'online' listener's auto-retry loop happens
+      // to fire before connectivity is actually usable) — quietly re-arms
+      // for the next 'online' event / manual tap.
+      const isAttachmentSend = !!(p.file || (p.images && p.images.length));
+      if (isAttachmentSend && typeof navigator !== 'undefined' && navigator.onLine === false) {
+        p.status = 'offline';
+        _renderPendingTail();
+        return;
+      }
       p.status = 'failed';
       _renderPendingTail();
       Notifs.error((e && e.message) || 'Message not sent — retry.');
     }
   }
+  // Wave2 practicality batch (P1) — automatic reconnect retry: fires whenever
+  // the browser regains connectivity, and retries every offline-queued
+  // attachment bubble for the CURRENTLY open thread (offline-queued bubbles
+  // from a thread the user has since navigated away from are already gone —
+  // teardownThread clears _pending, same as every other pending-bubble state;
+  // see this batch's report for that scope note). Wired once at module load
+  // (mirrors the existing visibilitychange/pagehide listeners just below),
+  // not per thread-open — _pending is simply empty when no thread is open, so
+  // this is a safe no-op then.
+  window.addEventListener('online', () => {
+    _pending.filter(p => p.status === 'offline').forEach(p => _retryPending(p.clientKey));
+  });
   // v14 chat re-audit fix — a stuck 'sending' pending bubble (Storage upload
   // stalled on a slow/offline connection — put() has no explicit timeout in
   // this file) used to have NO affordance at all until it flipped to
@@ -2772,7 +3133,14 @@ window.Chat = (() => {
       // before the failed-retry branch since the two states are exclusive.
       const cancelBtn = e.target.closest('.ms-pending-cancel');
       if (cancelBtn) { _cancelPendingMessage(cancelBtn.dataset.clientKey); return; }
-      const failed = e.target.closest('.ms-bubble-failed');
+      // Wave2 practicality batch (P0) — a pending bubble's ref chip (if any)
+      // is tappable too — it points at an already-existing record, not
+      // something that needs the send to land first.
+      const refChip = e.target.closest('.chat-ref-tap');
+      if (refChip) { e.stopPropagation(); _openRefChip({ kind: refChip.dataset.kind, id: refChip.dataset.id, collection: refChip.dataset.collection || null, label: refChip.dataset.label || '' }); return; }
+      // Wave2 practicality batch (P1) — tap-to-retry also covers the offline-
+      // queued state (manual retry alongside the automatic 'online' one).
+      const failed = e.target.closest('.ms-bubble-failed, .ms-bubble-offline');
       if (failed) _retryPending(failed.dataset.clientKey);
     });
   }
@@ -2784,13 +3152,19 @@ window.Chat = (() => {
   }
   function _renderPendingBubble(p) {
     const failed = p.status === 'failed';
+    const offline = p.status === 'offline';   // Wave2 practicality batch (P1)
     // v14 chat re-audit fix — a 'sending' bubble now carries its own small
     // ✕ cancel affordance (wired in _wirePendingTailDelegation) instead of
     // being tappable ONLY once it flips to 'failed'. Inline-styled (no CSS
     // file in scope for this batch) to match the existing ⏳/⚠ status glyphs.
     const statusHtml = failed
       ? `<span class="ms-pending-status">${emojiIcon('⚠',12)}</span><span class="ms-pending-retry-label">Tap to retry</span>`
-      : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>` +
+      // Wave2 practicality batch (P1) — offline-queued: a distinct, non-
+      // alarming label (this isn't an error the sender needs to fix, just
+      // connectivity) — auto-retries on 'online', tap-to-retry also works.
+      : offline
+        ? `<span class="ms-pending-status">${emojiIcon('wifi-off',11)}</span><span class="ms-pending-offline-label">Will send when back online</span>`
+        : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>` +
         `<button type="button" class="ms-pending-cancel" data-client-key="${escHtml(p.clientKey)}" ` +
         `title="Cancel sending" aria-label="Cancel sending" ` +
         `style="background:none;border:none;padding:2px;margin-left:4px;cursor:pointer;` +
@@ -2812,14 +3186,18 @@ window.Chat = (() => {
         ? `<div style="margin-top:${p.text?'6':'0'}px"><img src="${p.previewUrl}" alt="" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);opacity:.75"/></div>`
         : (p.file ? `<div class="ms-file-chip">${emojiIcon('paperclip',14)}<span>${escHtml(p.file.name)}</span></div>` : '');
     const linkHtml = (p.link && !p.file) ? `<div class="ms-file-chip">${emojiIcon('link',14)}<span>${escHtml(p.link)}</span></div>` : '';
+    // Wave2 practicality batch (P0) — same ref-chip markup/contract the
+    // confirmed-message renderer uses (see _renderMessagePart) so both wire
+    // through the SAME .chat-ref-tap delegated click.
+    const refHtml = _refChipHtml(p.ref);
     return `
       <div class="ms-row ms-row-mine ms-grp-single">
         <div class="ms-bubble-wrap" style="align-items:flex-end">
           <div class="ms-bubble-row">
-            <div class="ms-bubble ms-bubble-mine ms-grp-single ${failed?'ms-bubble-failed':'ms-bubble-pending'}" data-client-key="${escHtml(p.clientKey)}">
+            <div class="ms-bubble ms-bubble-mine ms-grp-single ${failed?'ms-bubble-failed':offline?'ms-bubble-offline':'ms-bubble-pending'}" data-client-key="${escHtml(p.clientKey)}">
               ${_replyQuoteHtml(p.replyTo)}
               ${p.text ? `<div class="ms-text">${escHtml(p.text).replace(/\n/g,'<br/>')}</div>` : ''}
-              ${mediaHtml}${linkHtml}
+              ${mediaHtml}${linkHtml}${refHtml}
               <div class="ms-meta" style="display:flex">${statusHtml}</div>
             </div>
           </div>
@@ -2923,13 +3301,184 @@ window.Chat = (() => {
     }
   }
 
+  // ── Wave2 practicality batch (P0) — in-thread message search ──
+  // Client-side over the currently-loaded window (_earlier + _msgs) + an
+  // on-demand loadEarlier() page when stepping "prev" past the oldest loaded
+  // match — no separate index, no extra Firestore query shape. Match state
+  // lives at module scope (like _replyTarget/_swipe) so it survives the
+  // thread's normal re-renders; teardownThread resets it (see above).
+  function _escRegExpChars(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  // Operates on an ALREADY-escHtml'd string (same contract _highlightMentions
+  // documents) — the query itself is escHtml'd too before being turned into a
+  // regex source, so it can only ever match/insert already-neutralized text;
+  // it can't introduce markup that wasn't already safely escaped.
+  function _highlightSearchMatch(escapedHtml, query, isActiveMsg) {
+    const q = (query || '').trim();
+    if (!q) return escapedHtml;
+    const escQ = escHtml(q);
+    let re;
+    try { re = new RegExp(_escRegExpChars(escQ), 'gi'); } catch (_) { return escapedHtml; }
+    let first = true;
+    return escapedHtml.replace(re, match => {
+      const cls = 'ms-search-hit' + (isActiveMsg && first ? ' ms-search-hit-active' : '');
+      first = false;
+      return `<mark class="${cls}">${match}</mark>`;
+    });
+  }
+  function _computeThreadSearchMatches() {
+    const q = _threadSearchQ.trim().toLowerCase();
+    if (!q) { _threadSearchMatches = []; return; }
+    _threadSearchMatches = [..._earlier, ..._msgs]
+      .filter(m => !m.deleted && (m.text || '').toLowerCase().includes(q))
+      .map(m => m.id);
+  }
+  function _updateThreadSearchUI() {
+    const countEl = document.getElementById('chat-search-count');
+    if (!countEl) return;
+    if (!_threadSearchQ.trim()) { countEl.textContent = ''; return; }
+    if (!_threadSearchMatches.length) { countEl.textContent = 'No matches'; return; }
+    const idx = _threadSearchCurrentMid ? _threadSearchMatches.indexOf(_threadSearchCurrentMid) : -1;
+    countEl.textContent = `${idx + 1} of ${_threadSearchMatches.length}`;
+  }
+  function _scrollToActiveSearchHit() {
+    if (!_threadSearchCurrentMid) return;
+    const el = document.getElementById('chat-thread-scroll');
+    const row = el && el.querySelector(`.ms-row[data-mid="${CSS.escape(_threadSearchCurrentMid)}"]`);
+    if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  // Re-runs the query against the currently-loaded window and forces a FULL
+  // thread rebuild (resetting _lastRenderOrder) — search-highlight state
+  // isn't part of _msgRev (it's external UI state, not message data), so the
+  // normal patch-diff path (_patchThread) would never repaint existing rows
+  // for a query-only change. Cheap enough here: the loaded window is capped
+  // (PAGE_SIZE + EARLIER_CAP) and this only runs on input (debounced) / nav.
+  function _setThreadSearchQuery(q) {
+    _threadSearchQ = q || '';
+    _computeThreadSearchMatches();
+    _threadSearchCurrentMid = _threadSearchMatches.length ? _threadSearchMatches[_threadSearchMatches.length - 1] : null;
+    _lastRenderOrder = null;
+    _renderThread();
+    _scrollToActiveSearchHit();
+    _updateThreadSearchUI();
+  }
+  function _toggleThreadSearch(force) {
+    const bar = document.getElementById('chat-search-bar');
+    const open = typeof force === 'boolean' ? force : !_threadSearchOpen;
+    _threadSearchOpen = open;
+    if (bar) bar.classList.toggle('hidden', !open);
+    if (open) {
+      document.getElementById('chat-search-input-thread')?.focus();
+    } else {
+      const input = document.getElementById('chat-search-input-thread');
+      if (input) input.value = '';
+      _setThreadSearchQuery('');   // clears matches/highlight and forces a clean re-render
+    }
+  }
+  // dir: -1 = older/prev match, +1 = newer/next match. Pages in an older
+  // batch via loadEarlier() on demand when stepping prev past the oldest
+  // loaded match (spec: "paged fetch of older ones on demand") — "next" never
+  // needs that since _msgs is always the live tail already.
+  async function _threadSearchStep(dir) {
+    if (!_threadSearchQ.trim() || !_threadSearchMatches.length) return;
+    let idx = _threadSearchCurrentMid ? _threadSearchMatches.indexOf(_threadSearchCurrentMid) : -1;
+    let target = idx + dir;
+    if (target < 0 && !_earlierExhausted) {
+      await loadEarlier();               // its own _renderThread already re-applies the current query's highlight
+      _computeThreadSearchMatches();
+      idx = _threadSearchCurrentMid ? _threadSearchMatches.indexOf(_threadSearchCurrentMid) : -1;
+      target = idx + dir;
+    }
+    if (target < 0 || target >= _threadSearchMatches.length) { _updateThreadSearchUI(); return; }
+    _threadSearchCurrentMid = _threadSearchMatches[target];
+    _lastRenderOrder = null;
+    _renderThread();
+    _scrollToActiveSearchHit();
+    _updateThreadSearchUI();
+  }
+
+  // ── Wave2 practicality batch (P2 stretch) — pinned messages ──
+  // Pins are `conv.pinnedMsgIds: [messageId]`, written by the conv's creator
+  // or an admin (see _canManageConv and this batch's report for the exact
+  // firestore.rules text). _openConv is a one-time snapshot taken at thread-
+  // open (see openConversation) — a pin/unpin from ANOTHER viewer while this
+  // viewer has the thread open won't show live here until it's reopened; see
+  // the report's "known limitations" note.
+  async function _togglePinMessage(mid) {
+    if (!_openConvId || !_openConv) return;
+    const pinned = new Set(_openConv.pinnedMsgIds || []);
+    const willPin = !pinned.has(mid);
+    const FV = firebase.firestore.FieldValue;
+    try {
+      await db.collection('conversations').doc(_openConvId)
+        .update({ pinnedMsgIds: willPin ? FV.arrayUnion(mid) : FV.arrayRemove(mid) });
+      if (willPin) pinned.add(mid); else pinned.delete(mid);
+      _openConv.pinnedMsgIds = Array.from(pinned);
+      _renderPinnedBar();
+      _lastRenderOrder = null;   // pin state isn't part of _msgRev — force the picker's Pin/Unpin label to repaint
+      _renderThread();
+      Notifs.success(willPin ? 'Pinned' : 'Unpinned');
+    } catch (_) { Notifs.showToast('Could not update pin', 'error'); }
+  }
+  function _wirePinnedBarDelegation(bar) {
+    if (bar.dataset.wired) return;
+    bar.dataset.wired = '1';
+    bar.addEventListener('click', e => {
+      const summary = e.target.closest('#chat-pinned-summary');
+      if (summary) { document.getElementById('chat-pinned-list')?.classList.toggle('hidden'); return; }
+      const unpinBtn = e.target.closest('.ms-pinned-row-unpin');
+      if (unpinBtn) { e.stopPropagation(); _togglePinMessage(unpinBtn.dataset.mid); return; }
+      const row = e.target.closest('.ms-pinned-row');
+      if (row) { _scrollToMessage(row.dataset.mid); document.getElementById('chat-pinned-list')?.classList.add('hidden'); }
+    });
+  }
+  function _renderPinnedBar() {
+    const bar = document.getElementById('chat-pinned-bar');
+    if (!bar) return;
+    const ids = (_openConv && _openConv.pinnedMsgIds) || [];
+    if (!ids.length) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
+    const list = [..._earlier, ..._msgs];
+    // A pinned message that's since been unsent (tombstoned) would otherwise
+    // fall through to the generic 'Attachment' fallback below (unsend clears
+    // text/fileUrl/media alike) — call it out explicitly instead.
+    const snippetFor = m => m.deleted ? 'Message removed'
+      : (m.text || m.fileName || ((m.media && m.media.length) ? 'Photo' : 'Attachment') || '').slice(0, 80);
+    const lastMsg = list.find(m => m.id === ids[ids.length - 1]);
+    const summaryLabel = lastMsg ? snippetFor(lastMsg) : 'Pinned message';
+    const canPin = _canManageConv(_openConv);
+    bar.classList.remove('hidden');
+    bar.innerHTML = `
+      <button type="button" id="chat-pinned-summary" class="ms-pinned-summary">
+        ${emojiIcon('pin', 13)}
+        <span class="ms-pinned-count">${ids.length > 1 ? ids.length + ' pinned' : 'Pinned'}</span>
+        <span class="ms-pinned-snippet">${escHtml(summaryLabel)}</span>
+      </button>
+      <div id="chat-pinned-list" class="ms-pinned-list hidden">
+        ${ids.slice().reverse().map(mid => {
+          const m = list.find(x => x.id === mid);
+          const info = m ? _authorInfo(m.authorId, m.authorName) : null;
+          const snip = m ? snippetFor(m) : 'Message not loaded';
+          return `<div class="ms-pinned-row" data-mid="${escHtml(mid)}">
+            <div class="ms-pinned-row-body">
+              ${info ? `<div class="ms-pinned-row-author">${escHtml(info.name)}</div>` : ''}
+              <div class="ms-pinned-row-snippet">${escHtml(snip)}</div>
+            </div>
+            ${canPin ? `<button type="button" class="ms-pinned-row-unpin" data-mid="${escHtml(mid)}" title="Unpin">${emojiIcon('x', 12)}</button>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    _wirePinnedBarDelegation(bar);
+    if (window.lucide) lucide.createIcons({ nodes: [bar] });
+  }
+
   // ── Wave5 M2 (J6) — @mentions: composer-side candidate list + detection ──
   // Group/dept ONLY (spec) — a dm returns [] here, so every mention code path
   // (typeahead, _computeMentions) is naturally a no-op there without a
   // separate conv.type guard at every call site.
   function _mentionCandidatesFor(conv) {
-    if (!conv || (conv.type !== 'group' && conv.type !== 'dept')) return [];
-    if (conv.type === 'group') {
+    // Wave2 practicality batch — announcement channels are group-shaped
+    // (participants array), so they get @mentions the same way a group does.
+    if (!conv || (conv.type !== 'group' && conv.type !== 'dept' && conv.type !== 'announcement')) return [];
+    if (conv.type === 'group' || conv.type === 'announcement') {
       return (conv.participants || []).filter(uid => uid !== currentUser.uid).map(uid => ({
         uid, name: (conv.participantNames && conv.participantNames[uid]) || _usersByUid[uid]?.displayName || 'User'
       }));
@@ -3071,7 +3620,8 @@ window.Chat = (() => {
           await sendMessage({
             text: m.text || '', clientKey: _newClientKey(), conv: target, forwardedFrom,
             fileUrl: m.fileUrl || null, fileName: m.fileName || null, fileSource: m.fileSource || null,
-            media: m.media || null   // Wave5 M3 — forwarding a media message reuses its uploaded photo URLs, no re-upload
+            media: m.media || null,   // Wave5 M3 — forwarding a media message reuses its uploaded photo URLs, no re-upload
+            ref: m.ref || null        // Wave2 practicality batch — a forwarded record-link chip rides along too
           });
           Notifs.success('Forwarded');
         } catch (_) {
@@ -3079,6 +3629,83 @@ window.Chat = (() => {
         }
       });
     });
+  }
+
+  // ── Wave2 practicality batch (P0) — "Attach a record" picker ──
+  // Task / Quote / Bidding tabs (chipTabs, same pattern the Shared Media page
+  // uses), a search box, and a scrollable shortlist. Every collection read
+  // goes through .catch(()=>({docs:[]})) per spec — a denied read (e.g. a
+  // partner against bk_quotes/gov_*, see this batch's report for the exact
+  // per-collection rules) just contributes zero rows for that source rather
+  // than throwing, so the picker degrades to "fewer results" instead of
+  // erroring for any role. `onPick(ref)` is called with `{kind, id, label,
+  // collection?}` once the caller taps a row.
+  async function _openRefPicker(onPick) {
+    const tabs = [{ key: 'task', label: 'Task' }, { key: 'quote', label: 'Quote' }, { key: 'bidding', label: 'Bidding' }];
+    const body = `
+      <div id="chat-ref-tabs"></div>
+      <input id="chat-ref-search" class="ms-input" placeholder="Search…" style="width:100%;margin:10px 0"/>
+      <div id="chat-ref-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>`;
+    window.openPage('Attach a record', body);
+    document.getElementById('chat-ref-tabs').innerHTML = window.chipTabs(tabs, 'task');
+
+    let allRows = [];   // current tab's rows: [{kind,id,label,collection?}]
+
+    function renderRows(query) {
+      const listEl = document.getElementById('chat-ref-list');
+      if (!listEl) return;
+      const q = (query || '').trim().toLowerCase();
+      const filtered = q ? allRows.filter(r => r.label.toLowerCase().includes(q)) : allRows;
+      listEl.innerHTML = filtered.length
+        ? filtered.slice(0, 100).map(r => `<div class="item-card chat-ref-pick-row pressable" data-id="${escHtml(r.id)}" style="cursor:pointer;padding:10px">${escHtml(r.label)}</div>`).join('')
+        : `<div class="empty-state" style="padding:16px"><p>No matches.</p></div>`;
+      listEl.querySelectorAll('.chat-ref-pick-row').forEach(row => {
+        row.addEventListener('click', () => {
+          const r = filtered.find(x => x.id === row.dataset.id);
+          if (!r) return;
+          window.Overlay.dismissTop();
+          onPick(r);
+        });
+      });
+    }
+
+    async function loadTab(kind) {
+      const listEl = document.getElementById('chat-ref-list');
+      if (listEl) listEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+      let rows = [];
+      if (kind === 'task') {
+        const snap = await dbCachedGet('chat-ref-tasks', () => db.collection('tasks').get(), 30000).catch(() => ({ docs: [] }));
+        rows = snap.docs.map(d => ({ kind: 'task', id: d.id, label: d.data().title || '(untitled task)' }));
+      } else if (kind === 'quote') {
+        const [bk, bs] = await Promise.all([
+          dbCachedGet('chat-ref-bk-quotes', () => db.collection('bk_quotes').get(), 30000).catch(() => ({ docs: [] })),
+          dbCachedGet('chat-ref-bs-quotes', () => db.collection('bs_quotes').get(), 30000).catch(() => ({ docs: [] }))
+        ]);
+        rows = [
+          ...bk.docs.map(d => { const q = d.data(); return { kind: 'quote', id: d.id, collection: 'bk_quotes',
+            label: `BK ${q.quoteNumber || d.id.slice(-6).toUpperCase()} — ${q.clientName || 'Unnamed'}` }; }),
+          ...bs.docs.map(d => { const q = d.data(); return { kind: 'quote', id: d.id, collection: 'bs_quotes',
+            label: `BS ${q.quoteNumber || d.id.slice(-6).toUpperCase()} — ${q.clientName || 'Unnamed'}` }; })
+        ];
+      } else if (kind === 'bidding') {
+        // window.GOV_BUCKETS (js/screens/govit.js) is the canonical bucket
+        // list; a hardcoded fallback covers the (unlikely, load-order) case
+        // it hasn't parsed yet — same 3 collection names confirmed via recon.
+        const buckets = (window.GOV_BUCKETS && window.GOV_BUCKETS.length) ? window.GOV_BUCKETS
+          : [{ collection: 'gov_philgeps', label: 'PhilGEPS' }, { collection: 'gov_active_bids', label: 'Active Bids' }, { collection: 'gov_archive', label: 'Archive' }];
+        const snaps = await Promise.all(buckets.map(b =>
+          dbCachedGet('chat-ref-' + b.collection, () => db.collection(b.collection).get(), 30000).catch(() => ({ docs: [] }))
+        ));
+        rows = snaps.flatMap((snap, i) => snap.docs.map(d => { const g = d.data(); return { kind: 'bidding', id: d.id, collection: buckets[i].collection,
+          label: `${g.title || g.name || 'Untitled'} (${buckets[i].label})` }; }));
+      }
+      allRows = rows;
+      renderRows(document.getElementById('chat-ref-search')?.value || '');
+    }
+
+    window.bindChipTabs(document.getElementById('chat-ref-tabs'), key => loadTab(key));
+    document.getElementById('chat-ref-search')?.addEventListener('input', e => renderRows(e.target.value));
+    loadTab('task');
   }
 
   // ── Wave5 M2 (J6) — composer emoji picker (REACTIONS + EMOJI_GRID; module-
@@ -3361,7 +3988,18 @@ window.Chat = (() => {
   // never show these controls — dept membership is derived from department,
   // not owned by a creator, and a dm has no "group" identity to manage.
   function _isGroupAdmin(conv) {
-    return conv.type === 'group' && (conv.createdBy === currentUser.uid || _isAdminRole());
+    // Wave2 practicality batch — announcement channels reuse the "group
+    // management" surface (rename/photo/add-members/leave, all in _openMediaTab's
+    // About section) verbatim; same creator-or-admin gate as a normal group.
+    return (conv.type === 'group' || conv.type === 'announcement') && (conv.createdBy === currentUser.uid || _isAdminRole());
+  }
+  // Wave2 practicality batch (P2 stretch) — who may pin/unpin a message and who
+  // may post in an announcement channel share the SAME gate: the conv's
+  // creator, or an admin role. Mirrors the firestore.rules text in this
+  // batch's report (pinnedMsgIds folded into the existing creator/admin
+  // disjunct; message-create gated the same way for type:'announcement').
+  function _canManageConv(conv) {
+    return !!conv && (conv.createdBy === currentUser.uid || _isAdminRole());
   }
   // v14 chat re-audit fix — shared by the About section's initial render AND
   // _openAddMembersPicker's live patch-in-place, so the remove-member button
@@ -3511,10 +4149,13 @@ window.Chat = (() => {
         </div>
         <div class="chat-about-subtitle">${
           conv.type === 'group' ? `${memberCount} member${memberCount!==1?'s':''}`
+          // Wave2 practicality batch (P2 stretch) — announcement channel reuses
+          // the group-shaped About section verbatim (see _isGroupAdmin above).
+          : conv.type === 'announcement' ? `${memberCount} member${memberCount!==1?'s':''} · Announcements`
           : conv.type === 'dept' ? 'Department channel'
           : 'Direct message'
         }</div>
-        ${conv.type === 'group' ? `
+        ${(conv.type === 'group' || conv.type === 'announcement') ? `
         <div class="chat-about-members">${(conv.participants||[]).map(uid => _memberRowHtml(uid, conv, isGroupAdmin)).join('')}</div>
         ${isGroupAdmin ? `<button type="button" id="chat-about-addmember-btn" class="btn-secondary btn-sm" style="width:100%">${emojiIcon('users',14)} Add members</button>` : ''}
         ` : ''}
@@ -3529,7 +4170,7 @@ window.Chat = (() => {
                 <span class="ms-wallpaper-swatch wp-${w.key}"></span>${escHtml(w.label)}
               </button>`).join('')}
           </div>
-          ${conv.type === 'group' ? `
+          ${(conv.type === 'group' || conv.type === 'announcement') ? `
           <button type="button" id="chat-about-leave-btn" class="chat-about-row chat-about-row-danger">
             <span class="chat-about-row-icon">${emojiIcon('log-out',16)}</span>
             <span class="chat-about-row-label">Leave group</span>
@@ -3743,7 +4384,8 @@ window.Chat = (() => {
   return { openDM, openConversation, openDeptChannel, sendMessage, toggleReaction,
            loadEarlier, onComposerInput, teardownInbox, teardownThread,
            dmIdFor, myDeptChannels, dmCandidates, setFilter, setSearch, _attachInbox,
-           _attachGlobalBadgeListener, _detachGlobalBadgeListener };
+           _attachGlobalBadgeListener, _detachGlobalBadgeListener,
+           _recentDmIds };   // Wave2 practicality batch — read by renderChatPage's New Message picker
 })();
 
 // ── Inbox page (router target: case 'chat') ──
@@ -3811,10 +4453,46 @@ window.renderChatPage = async function() {
         </div>
       </div>`;
     };
+    // Wave2 practicality batch (P1) — dept-grouped picker with a "Recents"
+    // section. deptLabel mirrors _targetsFor's own dept-membership rule
+    // (single `department` field, first entry of a `departments` array as a
+    // fallback) so grouping reads the SAME field the rest of chat.js already
+    // treats as canonical. Recents = window.Chat._recentDmIds(), filtered to
+    // candidates still eligible today (a partner whose company changed, or a
+    // deactivated account, silently drops out rather than dead-ending).
+    const byUid = {}; candidates.forEach(u => { byUid[u.id] = u; });
+    const deptLabel = u => u.department || (Array.isArray(u.departments) && u.departments[0]) || 'Other';
+    const recentIds = (window.Chat._recentDmIds ? window.Chat._recentDmIds() : []).filter(id => byUid[id]);
+    // buildListHtml re-derives the grouped/recents markup from the CURRENT
+    // search query — called once for the initial render and again on every
+    // debounced keystroke (wireRows re-binds afterward either way, same
+    // "rebuild + rebind" pattern _renderInbox already uses for its own rows).
+    const buildListHtml = query => {
+      const q = (query || '').trim().toLowerCase();
+      const matches = u => !q
+        || (u.displayName || u.email || '').toLowerCase().includes(q)
+        || (u.role || '').toLowerCase().includes(q)
+        || deptLabel(u).toLowerCase().includes(q);   // Wave2 — search also matches department
+      let html = '';
+      const recentUsers = recentIds.map(id => byUid[id]).filter(Boolean).filter(matches);
+      if (recentUsers.length) {
+        html += `<div class="ms-picker-group-label">${emojiIcon('clock',12)} Recent</div>` + recentUsers.map(rowHtml).join('');
+      }
+      const recentSet = new Set(recentUsers.map(u => u.id));
+      const groups = {};
+      candidates.filter(u => !recentSet.has(u.id)).filter(matches).forEach(u => {
+        const g = deptLabel(u);
+        (groups[g] = groups[g] || []).push(u);
+      });
+      Object.keys(groups).sort((a, b) => a.localeCompare(b)).forEach(g => {
+        html += `<div class="ms-picker-group-label">${escHtml(g)}</div>` + groups[g].map(rowHtml).join('');
+      });
+      return html || '<div class="empty-state" style="padding:16px"><p>No matches.</p></div>';
+    };
 
     const body = `
-      <input id="chat-pick-search" class="ms-input" placeholder="Search people…" style="width:100%;margin-bottom:10px"/>
-      <div id="chat-pick-list" class="item-list">${candidates.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>No one to message yet.</p></div>'}</div>
+      <input id="chat-pick-search" class="ms-input" placeholder="Search people or department…" style="width:100%;margin-bottom:10px"/>
+      <div id="chat-pick-list" class="item-list">${candidates.length ? buildListHtml('') : '<div class="empty-state" style="padding:16px"><p>No one to message yet.</p></div>'}</div>
       ${!isPtnr ? `
       <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
         <div style="font-weight:700;margin-bottom:8px">${emojiIcon('👥',16)} New Group</div>
@@ -3825,6 +4503,10 @@ window.renderChatPage = async function() {
             <span>${escHtml(u.displayName||u.email)}</span>
           </label>`).join('')}
         </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+          <input type="checkbox" id="chat-group-announcement-cb"/>
+          <span style="font-size:12px;color:var(--text-muted)">Announcement channel — only you and admins can post</span>
+        </label>
         <button class="btn-primary btn-sm" id="chat-group-create-btn" style="margin-top:10px">Create Group</button>
         <div id="chat-group-err" class="error-msg hidden" style="margin-top:6px"></div>
       </div>` : ''}
@@ -3843,11 +4525,8 @@ window.renderChatPage = async function() {
     wireRows();
 
     document.getElementById('chat-pick-search')?.addEventListener('input', e => {
-      const q = e.target.value.trim().toLowerCase();
-      const filtered = candidates.filter(u =>
-        (u.displayName||u.email||'').toLowerCase().includes(q) || (u.role||'').toLowerCase().includes(q));
       const listEl = document.getElementById('chat-pick-list');
-      if (listEl) listEl.innerHTML = filtered.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>No matches.</p></div>';
+      if (listEl) listEl.innerHTML = buildListHtml(e.target.value);
       wireRows();
     });
 
@@ -3868,9 +4547,15 @@ window.renderChatPage = async function() {
         participantNames[uid] = u?.displayName || u?.email || 'User';
       });
       if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+      // Wave2 practicality batch (P2 stretch) — announcement channel: same
+      // group-shaped doc, just a different `type` — firestore.rules' create
+      // rule needs 'announcement' added alongside 'dm'/'group' (see this
+      // batch's report); message-create there is what actually enforces
+      // "only admin/creator may post" server-side.
+      const isAnnouncement = !!document.getElementById('chat-group-announcement-cb')?.checked;
       try {
         const ref = await db.collection('conversations').add({
-          type: 'group', participants, participantNames, name,
+          type: isAnnouncement ? 'announcement' : 'group', participants, participantNames, name,
           department: null, createdBy: myUid, createdByName: myDisplayName,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
