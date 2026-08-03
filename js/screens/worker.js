@@ -420,6 +420,13 @@ async function _handleClock(kind, profile) {
     // logged). Never writes timeIn/timeOut/inValid on an invalid attempt.
     ref.set({
       workerId: profile.id, date: recordDateStr,
+      // v14 attendance fix — own the day-doc from the FIRST tap, even when this
+      // attempt is out-of-range. Without recordedBy here the audit shell has no
+      // owner, so the later in-range Time In (an UPDATE) is denied by the rule's
+      // `resource.data.recordedBy == uid` anti-clobber clause — permanently
+      // bricking an honest worker's real punch on the exact flaky-GPS / tight-
+      // radius case this app runs in (they'd show Absent for a day they worked).
+      recordedBy: currentUser.uid,
       attempts: firebase.firestore.FieldValue.arrayUnion({
         kind, lat: pos.lat, lng: pos.lng,
         distanceM: nearest ? Math.round(nearest.distanceM) : null,
@@ -444,7 +451,13 @@ async function _handleClock(kind, profile) {
   let selfieUrl;
   try {
     const blob = await _compressSelfie(file);
-    const path = `attendance-selfies/${currentUser.uid}/${recordDateStr}-${kind}.jpg`;
+    // v14 attendance fix — unique filename per attempt. Workers have create-only
+    // (admin-only update) on this path; a fixed name meant that if the upload
+    // landed but the record write then failed (flaky Wi-Fi / tab killed after
+    // put() resolved), the orphan file turned every retry into a denied UPDATE —
+    // locking the worker out of that day/kind until an admin deleted it. The
+    // Date.now() is a filename suffix only (uniqueness, never day-keying).
+    const path = `attendance-selfies/${currentUser.uid}/${recordDateStr}-${kind}-${Date.now()}.jpg`;
     const sref = storage.ref(path);
     await sref.put(blob, { customMetadata: { uploadedBy: currentUser.uid } });
     selfieUrl = await sref.getDownloadURL();
