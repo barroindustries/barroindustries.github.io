@@ -1558,14 +1558,33 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     </div>
     <div class="form-group">
       <label>Linked Login Account (uid) — optional</label>
-      <input id="hrp-linked-uid" value="${escHtml(profile?.linkedUid||'')}" placeholder="Only if this worker ALSO has a users/ login account"/>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">v12 WS20: set this if the worker is paid weekly here AND has a regular-staff login — the monthly payroll run hard-skips this uid to prevent double pay.</div>
+      <input id="hrp-linked-uid" list="hrp-linked-uid-list" value="${escHtml(profile?.linkedUid||'')}" placeholder="Start typing a name or email to search, or paste a uid"/>
+      <datalist id="hrp-linked-uid-list"></datalist>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">v14 Type-B self-service: set this if the worker is paid weekly here AND has a regular-staff login — the monthly payroll run hard-skips this uid to prevent double pay. Pick from the suggestions (matched by name/email) so the uid is never mistyped — it's re-checked on Save either way.</div>
     </div>
   `, `<button class="btn-primary" id="hrp-save-btn">${isEdit?'Update':'Save'} Profile</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   // Stable doc id (pre-allocate for new profiles so the photo path is known).
   const profileId = profile?.id || db.collection('worker_profiles').doc().id;
   let uploadedPhotoUrl = profile?.photoUrl || '';
+
+  // ── Linked Login Account autocomplete — was a blind uid paste with no
+  // lookup-by-name/email. Populate a <datalist> from the users cache so HR
+  // picks a real account instead of typing a raw uid from memory. Purely a
+  // suggestion UI (mobile datalist support varies) — the field stays a plain
+  // text input, re-validated (existence + uniqueness) on Save below either way. ──
+  (async () => {
+    const listEl = document.getElementById('hrp-linked-uid-list');
+    if (!listEl) return;
+    try {
+      const usersSnap = await window.dbCachedGet('users', () => db.collection('users').get());
+      listEl.innerHTML = usersSnap.docs.map(d => {
+        const u = d.data();
+        const label = `${u.displayName || u.email || d.id}${u.email ? ' — ' + u.email : ''}`;
+        return `<option value="${escHtml(d.id)}">${escHtml(label)}</option>`;
+      }).join('');
+    } catch (_) { /* best-effort — free-text uid entry still works without it */ }
+  })();
 
   document.getElementById('hrp-gen-id')?.addEventListener('click', async () => {
     const btn = document.getElementById('hrp-gen-id'); btn.disabled = true; btn.textContent = '…';
@@ -1587,6 +1606,39 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   document.getElementById('hrp-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('hrp-name').value.trim();
     if (!name) { Notifs.showToast('Name is required','error'); return; }
+    const linkedUid = document.getElementById('hrp-linked-uid').value.trim();
+    // ── Validate the Linked Login Account uid BEFORE writing — a copy/paste
+    // mistake here used to either silently break the bridge (no existence
+    // check) or, worse, link to a DIFFERENT real employee's account (no
+    // uniqueness check), letting that unrelated person clock in/out and see
+    // pay estimates under this worker's identity. Both reads are already
+    // allowed by firestore.rules for finance/admin (users: any authed read;
+    // worker_profiles: isFinanceOrAdmin() read), so no rules change needed. ──
+    if (linkedUid) {
+      const saveBtn = document.getElementById('hrp-save-btn');
+      if (saveBtn) saveBtn.disabled = true;
+      let userDoc;
+      try {
+        userDoc = await db.collection('users').doc(linkedUid).get();
+      } catch (err) {
+        if (saveBtn) saveBtn.disabled = false;
+        Notifs.showToast('Could not verify Linked Login Account: ' + (err.message||err), 'error');
+        return;
+      }
+      if (!userDoc.exists) {
+        if (saveBtn) saveBtn.disabled = false;
+        Notifs.showToast('No login account found with that uid — pick a suggestion or leave it blank.', 'error');
+        return;
+      }
+      const dupeSnap = await db.collection('worker_profiles').where('linkedUid', '==', linkedUid).get().catch(() => ({ docs: [] }));
+      const dupe = dupeSnap.docs.find(d => d.id !== profileId);
+      if (dupe) {
+        if (saveBtn) saveBtn.disabled = false;
+        Notifs.showToast(`That login is already linked to worker profile "${dupe.data().name || dupe.id}" — each account can only link to one worker profile.`, 'error');
+        return;
+      }
+      if (saveBtn) saveBtn.disabled = false;
+    }
     const data = {
       name,
       idNumber: document.getElementById('hrp-id').value.trim(),
@@ -1617,7 +1669,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       status: document.getElementById('hrp-status').value,
       caBalance: parseFloat(document.getElementById('hrp-ca-balance').value)||0,
       includeInPayroll: document.getElementById('hrp-include-payroll').checked,
-      linkedUid: document.getElementById('hrp-linked-uid').value.trim(),
+      linkedUid,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
@@ -1714,6 +1766,7 @@ async function openWorkSitesPage(currentUser, currentRole) {
         btn.disabled = true;
         try {
           await db.collection('geo_sites').doc(s.id).update({ active: !(s.active!==false) });
+          window.dbCacheInvalidate && window.dbCacheInvalidate('geo_sites-active'); // js/screens/worker.js's Time In/Out session cache
           Notifs.success(`${s.name||'Site'} ${s.active!==false?'deactivated':'activated'}.`);
         } catch (err) {
           Notifs.showToast('Could not update site: ' + (err.message||err), 'error');
@@ -1781,14 +1834,21 @@ function openWorkSiteForm(site, currentUser, onSave) {
     const name = document.getElementById('ws-name').value.trim();
     const lat = parseFloat(document.getElementById('ws-lat').value);
     const lng = parseFloat(document.getElementById('ws-lng').value);
-    const radiusM = parseFloat(document.getElementById('ws-radius').value) || 150;
+    const radiusM = parseFloat(document.getElementById('ws-radius').value);
     const active = document.getElementById('ws-active').checked;
     if (!name) { Notifs.showToast('Site name is required','error'); return; }
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) { Notifs.showToast('Valid latitude and longitude are required','error'); return; }
+    // A blank/zero/negative radius used to silently fall back to 150 only
+    // when parseFloat was falsy — a typed "-50" parses to a real negative
+    // number and saved as-is, and since geo-core.js's siteMatch requires
+    // distanceM (always >= 0) <= radiusM, a negative radius can NEVER match,
+    // silently making the site permanently unusable with no error shown.
+    if (!Number.isFinite(radiusM) || radiusM <= 0) { Notifs.showToast('Radius must be a positive number of meters','error'); return; }
     const data = { name, lat, lng, radiusM, active, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
     const ref = site?.id ? db.collection('geo_sites').doc(site.id) : db.collection('geo_sites').doc();
     await ref.set(data, { merge:true });
+    window.dbCacheInvalidate && window.dbCacheInvalidate('geo_sites-active'); // js/screens/worker.js's Time In/Out session cache
     closeModal();
     Notifs.success(isEdit ? 'Work site updated!' : 'Work site added!');
     onSave();
@@ -2126,10 +2186,16 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   }
 
   // ── Auto-compute hours from daily time log (−1hr lunch if shift spans 12–1PM) ──
-  let foodEdited = false;
+  let foodEdited = false, otHrsEdited = false;
   document.getElementById('ps-meal')?.addEventListener('input', () => { foodEdited = true; });
+  // v14: flag overtime automatically from days exceeding 8 hrs — this table
+  // is fed by "Load Kiosk Hours" (self-service geofenced timeIn/timeOut),
+  // which is uniquely well-positioned to surface OT without HR hand-typing
+  // it. Only OT HOURS are auto-filled here — the OT RATE input (a pay policy
+  // value) is left exactly as before, still manual/editable.
+  document.getElementById('ps-ot-hrs')?.addEventListener('input', () => { otHrsEdited = true; });
   const recomputeHours = () => {
-    let total = 0, daysOver4 = 0;
+    let total = 0, daysOver4 = 0, otHrsTotal = 0;
     for (let i = 0; i < 7; i++) {
       const hrs = computeDayHours(
         document.getElementById(`ps-tin-${i}`)?.value,
@@ -2139,6 +2205,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       if (cell) cell.textContent = hrs.toFixed(2);
       total += hrs;
       if (hrs > 4) daysOver4++;
+      if (hrs > 8) otHrsTotal += (hrs - 8);
     }
     const totalEl = document.getElementById('ps-computed-total');
     if (totalEl) totalEl.textContent = total.toFixed(2);
@@ -2147,6 +2214,9 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     // Food allowance: profile rate × number of days exceeding 4 hrs (unless manually overridden)
     const foodInput = document.getElementById('ps-meal');
     if (foodInput && !foodEdited) foodInput.value = ((profile.foodAllowance||0) * daysOver4).toFixed(2);
+    // OT hours: sum of (hrs − 8) across days exceeding 8 hrs (unless manually overridden)
+    const otHrsInput = document.getElementById('ps-ot-hrs');
+    if (otHrsInput && !otHrsEdited) otHrsInput.value = otHrsTotal.toFixed(2);
   };
   document.querySelectorAll('.ps-time-input').forEach(inp => inp.addEventListener('input', recomputeHours));
   recomputeHours();

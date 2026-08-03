@@ -146,7 +146,19 @@ function _getPosition() {
 // ── Selfie capture — a fresh <input type=file accept=image/* capture=user>
 // per call (no persistent DOM node). Resolves null (never throws) if the
 // user cancels the native picker — the caller must treat null as "abort,
-// write nothing", not as a failure to retry automatically. ──
+// write nothing", not as a failure to retry automatically.
+//
+// CANCEL-DETECTION HARDENING (was: single 'focus' event + flat 500ms) —
+// neither 'focus' nor 'visibilitychange' is a reliable one-shot "user
+// cancelled" signal: opening the native camera (or an intermediate
+// Camera/Gallery chooser some Android skins show) can blur/refocus the
+// window BEFORE a photo is taken, and loading a freshly-captured full-res
+// JPEG/HEIC into input.files can itself take well over 500ms. Either case
+// used to fire the old flat timer and discard a real photo as a "cancel"
+// (the later 'change' became a silent no-op). Fix: widen the grace window
+// to 2s AND re-arm it on every focus/visibility signal instead of
+// committing on the first one — only if NEITHER fires again, nor does
+// 'change', for a full 2s straight do we treat it as an actual cancel. ──
 function _captureSelfie() {
   return new Promise(resolve => {
     const input = document.createElement('input');
@@ -154,20 +166,86 @@ function _captureSelfie() {
     input.style.position = 'fixed'; input.style.left = '-9999px'; input.style.opacity = '0';
     document.body.appendChild(input);
     let settled = false;
-    const finish = file => { if (settled) return; settled = true; input.remove(); resolve(file); };
+    let graceTimer = null;
+    const CANCEL_GRACE_MS = 2000;
+    const cleanupListeners = () => {
+      window.removeEventListener('focus', onSignal);
+      document.removeEventListener('visibilitychange', onSignal);
+    };
+    const finish = file => {
+      if (settled) return;
+      settled = true;
+      if (graceTimer) clearTimeout(graceTimer);
+      cleanupListeners();
+      input.remove();
+      resolve(file);
+    };
     input.addEventListener('change', () => {
       finish(input.files && input.files[0] ? input.files[0] : null);
     });
-    // No 'cancel' event exists for <input type=file> — the widely-used signal
-    // for "user dismissed the picker without choosing a file" is the window
-    // regaining focus with no 'change' having fired. The short delay avoids
-    // racing the 'change' event itself (which also follows a focus return).
-    window.addEventListener('focus', function onFocus() {
-      window.removeEventListener('focus', onFocus);
-      setTimeout(() => finish(null), 500);
-    }, { once: true });
+    // No 'cancel' event exists for <input type=file>. Re-arm (don't commit)
+    // on every focus/visibility return — an intermediate picker transition
+    // just restarts the clock instead of instantly declaring a cancel.
+    function onSignal() {
+      if (settled) return;
+      if (document && 'visibilityState' in document && document.visibilityState !== 'visible') return;
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = setTimeout(() => finish(null), CANCEL_GRACE_MS);
+    }
+    window.addEventListener('focus', onSignal);
+    document.addEventListener('visibilitychange', onSignal);
     input.click();
   });
+}
+
+// ── Shared 52px rounded/bordered selfie thumbnail markup — was duplicated
+// inline across three render branches in _loadClockCard; one template now
+// so a future sizing/style tweak is a one-line change instead of three. ──
+function _selfieThumb(url, label) {
+  if (!url) return '';
+  return `<img src="${escHtml(url)}" alt="${escHtml(label)}" style="width:52px;height:52px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"/>`;
+}
+
+// ── Resolve which attendance_worker day-doc is the ACTIVE one right now.
+// Normally that's today, but a shift that started before midnight and has
+// no timeOut yet is still open — Time Out (and the clock card's own state)
+// must keep targeting THAT day's doc. Without this, window.bizDate() being
+// recomputed fresh on every call meant Time In (11:50pm) and Time Out
+// (12:10am) landed in TWO DIFFERENT day-docs: yesterday's doc stuck forever
+// with timeIn/no timeOut, and today's doc getting a timeOut with no timeIn
+// (computeDayHours(undefined, timeStr) => 0 hoursWorked). This also doubles
+// as the double-Time-In guard: if _loadClockCard sees yesterday's shift is
+// still open, it shows "TIME OUT" (not "TIME IN"), so a worker can't start a
+// second concurrent shift while the first is unclosed. ──
+async function _resolveActiveRecord(profileId) {
+  const todayStr = window.bizDate();
+  const base = db.collection('attendance_worker').doc(profileId).collection('records');
+  const todayRef = base.doc(todayStr);
+  const todaySnap = await todayRef.get();
+  const todayData = todaySnap.exists ? todaySnap.data() : null;
+  if (todayData && todayData.timeIn && !todayData.timeOut) {
+    return { dateStr: todayStr, ref: todayRef, data: todayData };
+  }
+  if (!todayData || !todayData.timeIn) {
+    const yestStr = window.bizDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const yestRef = base.doc(yestStr);
+    const yestSnap = await yestRef.get();
+    const yestData = yestSnap.exists ? yestSnap.data() : null;
+    if (yestData && yestData.timeIn && !yestData.timeOut) {
+      return { dateStr: yestStr, ref: yestRef, data: yestData };
+    }
+  }
+  return { dateStr: todayStr, ref: todayRef, data: todayData || {} };
+}
+
+// ── Minutes elapsed since an "HH:MM" time-in on a given Manila dateStr,
+// vs. right now. Used only for the min-shift-length confirmation guard on
+// Time Out — never blocks, just asks. ──
+function _minutesSince(timeHM, dateStr) {
+  if (!timeHM || !dateStr) return null;
+  const then = new Date(`${dateStr}T${timeHM}:00+08:00`);
+  if (isNaN(then.getTime())) return null;
+  return (Date.now() - then.getTime()) / 60000;
 }
 
 // ── The Time In/Out card ─────────────────────────────────────────────────
@@ -175,11 +253,10 @@ async function _loadClockCard(profile) {
   const el = document.getElementById('wb-clock-card');
   if (!el) return;
   el.innerHTML = window.skeletonHtml('rows');
-  const todayStr = window.bizDate();
   let rec = {};
   try {
-    const snap = await db.collection('attendance_worker').doc(profile.id).collection('records').doc(todayStr).get();
-    rec = snap.exists ? snap.data() : {};
+    const active = await _resolveActiveRecord(profile.id);
+    rec = active.data || {};
   } catch (err) {
     el.innerHTML = `<div class="card"><div class="card-body"><div class="empty-state">
       <div class="empty-icon">${emojiIcon('⚠️', 44)}</div><h4>Could not load today's attendance</h4>
@@ -212,8 +289,8 @@ async function _loadClockCard(profile) {
         ${hasOut ? `
           <div style="display:flex;gap:12px;align-items:center">
             <div style="display:flex;gap:6px">
-              ${rec.inSelfieUrl ? `<img src="${escHtml(rec.inSelfieUrl)}" alt="Time In selfie" style="width:52px;height:52px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"/>` : ''}
-              ${rec.outSelfieUrl ? `<img src="${escHtml(rec.outSelfieUrl)}" alt="Time Out selfie" style="width:52px;height:52px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"/>` : ''}
+              ${_selfieThumb(rec.inSelfieUrl, 'Time In selfie')}
+              ${_selfieThumb(rec.outSelfieUrl, 'Time Out selfie')}
             </div>
             <div>
               <div style="font-size:13px;font-weight:600;color:var(--success)">${emojiIcon('✅', 16)} Done for today</div>
@@ -222,7 +299,7 @@ async function _loadClockCard(profile) {
           </div>`
         : hasIn ? `
           <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px">
-            ${rec.inSelfieUrl ? `<img src="${escHtml(rec.inSelfieUrl)}" alt="Time In selfie" style="width:52px;height:52px;border-radius:10px;object-fit:cover;border:1px solid var(--border)"/>` : ''}
+            ${_selfieThumb(rec.inSelfieUrl, 'Time In selfie')}
             <div>
               <div style="font-size:13px;font-weight:600;color:var(--warning)">Timed in at ${escHtml(rec.timeIn || '—')}</div>
               <div style="font-size:11px;color:var(--text-muted)">${rec.inDistanceM != null ? `${rec.inDistanceM}m from site` : ''}</div>
@@ -256,6 +333,41 @@ async function _handleClock(kind, profile) {
   };
   if (btn) btn.disabled = true;
 
+  // ── 0. Resolve which day-doc this action targets. Time In always starts a
+  // fresh shift dated today. Time Out must close whichever shift is still
+  // OPEN — today's, or (a shift that crossed midnight) yesterday's — via
+  // _resolveActiveRecord, or the Manila-day boundary silently splits one
+  // shift into two broken records (see that function's header). ──
+  const todayStr = window.bizDate();
+  let recordDateStr = todayStr;
+  let ref = db.collection('attendance_worker').doc(profile.id).collection('records').doc(todayStr);
+  let curData = null;
+  if (kind === 'out') {
+    try {
+      const active = await _resolveActiveRecord(profile.id);
+      recordDateStr = active.dateStr;
+      ref = active.ref;
+      curData = active.data;
+    } catch (err) {
+      // Best-effort — fall back to today's doc rather than crashing the
+      // whole Time Out flow; the read-modify-write in step 5 re-checks anyway.
+    }
+    // ── Minimum-shift-length guard — an accidental double-tap of Time Out
+    // seconds after Time In shouldn't silently record a near-zero-hour shift
+    // with no confirmation. Never blocks, only asks. ──
+    if (curData && curData.timeIn) {
+      const elapsedMin = _minutesSince(curData.timeIn, recordDateStr);
+      if (elapsedMin != null && elapsedMin >= 0 && elapsedMin < 2) {
+        const proceed = await window.confirmDialog({
+          title: 'Time Out so soon?',
+          message: `You timed in at ${curData.timeIn} — that's only ${Math.max(0, Math.round(elapsedMin))} min ago. Time Out now?`,
+          confirmLabel: 'Time Out anyway', cancelLabel: 'Not yet'
+        });
+        if (!proceed) { if (btn) btn.disabled = false; setStatus(''); return; }
+      }
+    }
+  }
+
   // ── 1. Location ──
   setStatus('Getting your location…');
   let pos;
@@ -267,10 +379,18 @@ async function _handleClock(kind, profile) {
     return;
   }
 
-  // ── 2. Active Work Sites ──
+  // ── 2. Active Work Sites — short session cache (60s) via the app's own
+  // dbCachedGet convention (js/config.js) so a worker who needs several
+  // retries to get inside a tight radius isn't re-querying this mostly-static
+  // collection from scratch every attempt. Position itself is intentionally
+  // NEVER cached — re-requesting fresh GPS on every attempt is the whole
+  // point of a retry (the worker may have physically moved closer), and
+  // caching a geofence-gating position would defeat the check's purpose. ──
   let sites = [];
   try {
-    const sitesSnap = await db.collection('geo_sites').where('active', '==', true).get();
+    const sitesSnap = window.dbCachedGet
+      ? await window.dbCachedGet('geo_sites-active', () => db.collection('geo_sites').where('active', '==', true).get(), 60000)
+      : await db.collection('geo_sites').where('active', '==', true).get();
     sites = sitesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (err) {
     setStatus('Could not load work sites — check your connection and try again.', true);
@@ -287,8 +407,6 @@ async function _handleClock(kind, profile) {
 
   // ── 3. Geofence check (js/geo-core.js) ──
   const match = window.siteMatch(pos, sites);
-  const todayStr = window.bizDate();
-  const ref = db.collection('attendance_worker').doc(profile.id).collection('records').doc(todayStr);
 
   if (!match.inRange) {
     const nearest = match.nearest;
@@ -301,7 +419,7 @@ async function _handleClock(kind, profile) {
     // block the worker from retrying; it just means this one attempt isn't
     // logged). Never writes timeIn/timeOut/inValid on an invalid attempt.
     ref.set({
-      workerId: profile.id, date: todayStr,
+      workerId: profile.id, date: recordDateStr,
       attempts: firebase.firestore.FieldValue.arrayUnion({
         kind, lat: pos.lat, lng: pos.lng,
         distanceM: nearest ? Math.round(nearest.distanceM) : null,
@@ -326,7 +444,7 @@ async function _handleClock(kind, profile) {
   let selfieUrl;
   try {
     const blob = await _compressSelfie(file);
-    const path = `attendance-selfies/${currentUser.uid}/${todayStr}-${kind}.jpg`;
+    const path = `attendance-selfies/${currentUser.uid}/${recordDateStr}-${kind}.jpg`;
     const sref = storage.ref(path);
     await sref.put(blob, { customMetadata: { uploadedBy: currentUser.uid } });
     selfieUrl = await sref.getDownloadURL();
@@ -346,17 +464,19 @@ async function _handleClock(kind, profile) {
   try {
     // Time Out needs timeIn (already on the doc) to compute hoursWorked —
     // read-modify-write, same computeDayHours the kiosk/payslip paths use.
+    // Re-fetch (rather than trusting step 0's curData) since GPS + selfie
+    // capture + upload can take a while and this must reflect the latest state.
     const cur = await ref.get();
-    const curData = cur.exists ? cur.data() : {};
+    const freshData = cur.exists ? cur.data() : {};
     const fields = kind === 'in'
       ? { timeIn: timeStr, inLat: pos.lat, inLng: pos.lng, inDistanceM: distanceM, inSiteId: match.nearest.siteId, inSelfieUrl: selfieUrl, inValid: true, inAt: firebase.firestore.FieldValue.serverTimestamp() }
       : { timeOut: timeStr, outLat: pos.lat, outLng: pos.lng, outDistanceM: distanceM, outSiteId: match.nearest.siteId, outSelfieUrl: selfieUrl, outValid: true, outAt: firebase.firestore.FieldValue.serverTimestamp() };
     if (kind === 'out') {
       const calcFn = (typeof computeDayHours === 'function') ? computeDayHours : null;
-      fields.hoursWorked = calcFn ? calcFn(curData.timeIn, timeStr) : 0;
+      fields.hoursWorked = calcFn ? calcFn(freshData.timeIn, timeStr) : 0;
     }
     await ref.set({
-      workerId: profile.id, date: todayStr,
+      workerId: profile.id, date: recordDateStr,
       recordedBy: currentUser.uid,
       recordedByName: (window.userProfile && userProfile.displayName) || currentUser.email,
       recordedAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -413,6 +533,10 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
   const firstDay = window.bizDow(new Date(`${monthStart}T12:00:00`));
   const todayStr = window.bizDate();
   const phHolidays = (typeof getPHHolidays === 'function') ? getPHHolidays(viewYear) : {};
+  // Never fabricate an "Absent" mark for a day before the worker's own
+  // hire/link date — a mid-month link/hire would otherwise paint every
+  // prior day red with no real data behind it.
+  const hireDateStr = profile.issuedOn || null;
 
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   let html = `<div class="att-cal-grid">${dayLabels.map(d => `<div class="att-cal-hdr">${d}</div>`).join('')}${Array(firstDay).fill('<div></div>').join('')}`;
@@ -425,9 +549,10 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
     const holiday = phHolidays[dateStr];
     const isNoWork = isSunday || !!holiday;
     const isPast = dateStr <= todayStr;
+    const isBeforeHire = !!(hireDateStr && dateStr < hireDateStr);
     const rec = records[dateStr];
     let status = '';
-    if (!isNoWork && isPast) {
+    if (!isNoWork && isPast && !isBeforeHire) {
       if (rec && rec.timeIn) { status = 'present'; presentCount++; hoursTotal += (rec.hoursWorked || 0); }
       else if (dateStr < todayStr) { status = 'absent'; absentCount++; }
     }
@@ -615,7 +740,16 @@ window.renderWorkerHome = async function () {
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const renderCal = () => _loadWorkerCalendar(profile, viewYear, viewMonth);
-  document.getElementById('wb-prev-month').addEventListener('click', () => { viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } renderCal(); });
+  // Don't let a worker page back past their own hire/link month — there's no
+  // real attendance data before it (see _loadWorkerCalendar's isBeforeHire),
+  // so a fabricated wall of "Absent" months is never a page-back away.
+  const hireYear = profile.issuedOn ? parseInt(profile.issuedOn.slice(0, 4), 10) : null;
+  const hireMonth = profile.issuedOn ? parseInt(profile.issuedOn.slice(5, 7), 10) - 1 : null;
+  const atOrBeforeHireMonth = (y, m) => hireYear != null && (y < hireYear || (y === hireYear && m <= hireMonth));
+  document.getElementById('wb-prev-month').addEventListener('click', () => {
+    if (atOrBeforeHireMonth(viewYear, viewMonth)) { Notifs.showToast("You weren't hired yet before this month.", 'info'); return; }
+    viewMonth--; if (viewMonth < 0) { viewMonth = 11; viewYear--; } renderCal();
+  });
   document.getElementById('wb-next-month').addEventListener('click', () => { viewMonth++; if (viewMonth > 11) { viewMonth = 0; viewYear++; } renderCal(); });
 
   await Promise.all([

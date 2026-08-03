@@ -12,6 +12,14 @@ window.Chat = (() => {
   const TYPING_TTL_MS     = 6000;    // beacon age still shown as "typing…"
   const READ_FRESH_MS     = 45000;   // recipient read this recently → skip notif
   const NOTIF_THROTTLE_MS = 60000;   // per (conversation, recipient) notif spacing
+  // v14 chat re-audit fix — non-image chat attachments (pdf/doc/xls/zip/etc,
+  // see the #chat-file accept list) had NO client-side size guard; they
+  // uploaded straight to Storage and only failed once the write hit
+  // storage.rules' isValidDocument() cap (25MB — storage.rules ~line 67).
+  // Mirrors that cap exactly: a file that WOULD upload is never blocked
+  // client-side, and one that WOULDN'T never starts (immediate toast instead
+  // of a slow-connection wait followed by a generic failure).
+  const MAX_CHAT_FILE_BYTES = 25 * 1024 * 1024;
   const REACTIONS = ['👍','❤️','😂','😮','😢','🙏'];
   const GROUP_WINDOW_MS = 2 * 60 * 1000;     // WS42 Phase 17: consecutive-message grouping window
   const TIME_GAP_MS     = 20 * 60 * 1000;    // WS42 Phase 17: time-gap separator threshold
@@ -36,9 +44,23 @@ window.Chat = (() => {
   let _lastTypingWrite = 0, _filter = 'all', _searchQ = '';
   let _presenceByUid = {}, _usersByUid = {};  // small local caches (NOT extra listeners)
   const _notifLastSent = {};                 // `${convId}_${uid}` → ms epoch
+  // v14 chat re-audit fix — clientKeys explicitly canceled out of a stuck
+  // 'sending' pending bubble (see _cancelPendingMessage). The real send may
+  // still be in flight in the background (no true network-abort — the
+  // storage.ref().put() UploadTask isn't kept around for that); this set
+  // just tells doSend's / _retryPending's catch blocks "don't resurrect the
+  // composer text or toast an error, the user already dismissed this one."
+  const _canceledClientKeys = new Set();
+  // v14 chat re-audit fix — conv ids for which a one-time legacy readers-doc
+  // fetch has already been kicked off by _myReadAtMs's migration fallback
+  // (below), so a burst of inbox re-renders doesn't refire it per row.
+  const _legacyReadFetching = new Set();
   let _lastMsgIds = null;                    // WS42 Phase 19: which bubble ids already animated in (send pop-in)
   let _lastRenderOrder = null;               // Phase 63 #2: message-id order of the last DOM render (keyed-diff)
   let _earlierCapped = false;                // Phase 63 #3: true once _earlier has been trimmed to the cap
+  let _earlierExhausted = false;             // v14 chat fix — true once loadEarlier() gets back a short/empty
+                                              // page (no older history left); lets the lightbox tell "nothing
+                                              // more to load" apart from "just haven't tried loading it yet"
   let _isSending = false;                    // Phase 63 #1: shared guard — click AND Enter both route through doSend
   // Phase 63 #5: inbox refresh cascade debounce (leading-immediate, 2s trailing coalesce)
   let _inboxDebTimer = null, _inboxDebPendingSnap = null, _inboxWindowStart = 0;
@@ -170,6 +192,7 @@ window.Chat = (() => {
   // ── Inbox ──
   function _attachInbox() {
     teardownInbox();
+    _sweepStaleDeptDrafts();   // v14 chat re-audit fix — GC dept-channel drafts on every chat-page visit
     _inboxUnsub = db.collection('conversations')
       .where('participants', 'array-contains', currentUser.uid)
       .onSnapshot(snap => { _scheduleInboxRefresh(snap); },
@@ -207,8 +230,18 @@ window.Chat = (() => {
     }, 2000 - (now - _inboxWindowStart));
   }
   async function _refreshDeptChannels() {
+    // v14 chat re-audit fix — this used to be a raw .get() per department on
+    // EVERY debounced inbox-refresh burst (unlike _refreshPresence/-Users,
+    // which already route through dbCachedGet). For an admin role
+    // (myDeptChannels() == every department) a busy chat re-reads every
+    // dept_<X> conv doc repeatedly with no TTL — real, avoidable read cost
+    // that scales with department count × message frequency. Per-department
+    // cache key, short TTL (channel docs rarely change shape — name/
+    // wallpaper/photo — so brief staleness there is a non-issue). dbCachedGet's
+    // own negative-cache (config.js FAIL_TTL) also covers the "denied ≠
+    // missing" unprovisioned-doc case below for free.
     _deptConvs = (await Promise.all(myDeptChannels().map(d =>
-      db.collection('conversations').doc('dept_' + d).get()
+      dbCachedGet('dept-conv-' + d, () => db.collection('conversations').doc('dept_' + d).get(), 5000)
         .then(s => s.exists ? { id: s.id, ...s.data() }
           : { id: 'dept_' + d, type: 'dept', department: d, name: d,
               participants: [], _unprovisioned: true })
@@ -243,9 +276,30 @@ window.Chat = (() => {
   // this batch and hasn't been opened since) — migration-safe: never throws,
   // never crashes on an absent field, and self-heals the first time the
   // conversation is opened (_markRead's new conv-doc merge).
+  // v14 chat re-audit fix — `_myReads` used to be a genuinely dead fallback:
+  // nothing anywhere in this file ever wrote to it, so a conv doc that
+  // predates the reads-map migration (or simply has no entry yet for MY uid
+  // — e.g. I read it via the old readers-subcollection-only path before this
+  // migration shipped, and haven't reopened it since) always read back 0
+  // here, showing unread in the inbox/badge forever rather than "until
+  // reopened once" as originally intended. Fixed by actually populating
+  // `_myReads`: on a cache miss, kick off a ONE-TIME (per conv id, deduped
+  // via _legacyReadFetching) background get() of the legacy readers/{uid}
+  // doc, cache whatever it finds, and re-render the inbox once it resolves.
+  // A conv that's already migrated (has reads.{uid}) never takes this path;
+  // a genuinely-never-read conv still resolves to 0 (no behavior change there).
   function _myReadAtMs(cv) {
     const r = cv.reads && cv.reads[currentUser.uid];
     if (r && typeof r.toMillis === 'function') return r.toMillis();
+    if (_myReads[cv.id] == null && cv.id && !_legacyReadFetching.has(cv.id)) {
+      _legacyReadFetching.add(cv.id);
+      db.collection('conversations').doc(cv.id).collection('readers').doc(currentUser.uid).get()
+        .then(s => {
+          _myReads[cv.id] = s.exists ? (s.data().readAt?.toMillis?.() || 0) : 0;
+          _renderInbox();       // self-heal: repaint once the legacy readAt is known
+        })
+        .catch(() => { _myReads[cv.id] = 0; });   // rules-denied (e.g. unprovisioned dept doc) or offline — same 0 as before
+    }
     return _myReads[cv.id] || 0;
   }
   function _isUnread(cv) {
@@ -896,6 +950,16 @@ window.Chat = (() => {
       // Non-image selection: unchanged single-doc pipeline (Non-image files
       // unchanged, per spec) — a doc attachment replaces images/link too.
       const f = files[0];
+      // v14 chat re-audit fix — only images had a size floor
+      // (_compressImage's 300KB compression threshold); a non-image
+      // attachment went straight to Storage with no client-side size check,
+      // only failing after a slow-connection wait once it hit
+      // storage.rules' isValidDocument() cap (25MB — MAX_CHAT_FILE_BYTES
+      // above mirrors that same limit). Reject and toast immediately instead.
+      if (f && f.size > MAX_CHAT_FILE_BYTES) {
+        Notifs.showToast(`"${f.name}" is too large to attach (max 25MB)`, 'error');
+        return;
+      }
       pendingImages = []; pendingLink = null;
       pendingFile = f || null;
       filePreview.textContent = f ? `📎 ${f.name}` : '';
@@ -1033,6 +1097,12 @@ window.Chat = (() => {
       try {
         await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions });
       } catch (e) {
+        // v14 chat re-audit fix — canceled via the pending bubble's ✕ while
+        // the send was in flight (_cancelPendingMessage): it's already gone
+        // from _pending and the user has moved on, so don't resurrect the
+        // composer text/attachment/draft or toast an error for a send they
+        // explicitly dismissed.
+        if (_canceledClientKeys.delete(clientKey)) return;
         input.value = savedText; _autoGrow(input);
         if (file) { pendingFile = file; filePreview.textContent = savedFilePreview; }
         else if (images.length) { pendingImages = images; filePreview.textContent = savedFilePreview; }
@@ -1274,6 +1344,26 @@ window.Chat = (() => {
     });
   }
 
+  // v14 chat re-audit fix — bounded-retry helper for the conv-doc preview
+  // bump (see sendMessage below). 2 retries with linear backoff, then logs
+  // and gives up — never throws (the caller awaits this, but the message
+  // itself is already sent by the time it's called).
+  async function _bumpConvPreview(convId, payload) {
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      try {
+        await db.collection('conversations').doc(convId).update(payload);
+        return;
+      } catch (e) {
+        if (attempt === 2) {
+          console.error('[chat] conversation preview/read-receipt bump failed after retries — ' +
+            'inbox preview, sort order, and the sender\'s own read receipt may be stale for conv', convId, e);
+          return;
+        }
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+  }
+
   // ── Send (message add → parent preview bump → own receipt → notify) ──
   // Wave5 M2 — factored to accept an EXPLICIT `conv` (used by Forward to write
   // into a conversation that may not be the one currently open) instead of
@@ -1358,6 +1448,14 @@ window.Chat = (() => {
     if (mentions && mentions.length) msgDoc.mentions = mentions;
     if (media && media.length) msgDoc.media = media;
     await db.collection('conversations').doc(conv.id).collection('messages').add(msgDoc);
+    // v14 chat re-audit fix — the Shared Media page (_openMediaTab) now
+    // caches its up-to-500-message fetch; invalidate that cache key eagerly
+    // when THIS message carries an attachment so opening Shared Media right
+    // after sending a photo/file shows it immediately instead of waiting out
+    // the TTL.
+    if (((media && media.length) || fileUrl) && typeof dbCacheInvalidate === 'function') {
+      dbCacheInvalidate('chat-media-' + conv.id);
+    }
     // Notif/preview text sink — PLAIN emoji only, never emojiIcon() (which
     // returns `<i data-lucide>` HTML markup): this string lands in
     // conv.lastMessageText (rendered via escHtml, a plain-text sink — see
@@ -1379,11 +1477,21 @@ window.Chat = (() => {
     // (firestore.rules ~line 413-418). Sending a message implies you've read
     // up to your own message, so this keeps the sender's own row from ever
     // showing as unread to themself.
-    await db.collection('conversations').doc(conv.id).update({
+    //
+    // v14 chat re-audit fix — this used to be a bare `.catch(() => {})`: if
+    // it failed (transient error, offline flap) the message doc above had
+    // already landed, so it'd be visible in the thread, but every
+    // participant's inbox preview/sort order AND the sender's own read
+    // receipt would silently go stale forever, with no retry and nothing
+    // logged. _bumpConvPreview retries a couple of times with backoff before
+    // giving up, and logs a final failure instead of swallowing it — still
+    // fire-and-forget from the UI's perspective (the send itself already
+    // succeeded once the message doc write above landed).
+    await _bumpConvPreview(conv.id, {
       lastMessageAt: FV.serverTimestamp(), lastMessageText: preview,
       lastMessageBy: currentUser.uid, lastMessageByName: _myName(),
       [`reads.${currentUser.uid}`]: FV.serverTimestamp()
-    }).catch(() => {});
+    });
     if (conv.id === _openConvId) { _markRead(); _clearOwnTyping(); }
     _notifyRecipients(conv, preview, mentions);       // fire-and-forget
   }
@@ -1414,33 +1522,41 @@ window.Chat = (() => {
   // falls through to the normal throttle check — i.e. it degrades to "notify
   // as usual," never to "silently skip." Full read-state for non-open
   // conversations is M4's reads-denormalization work, out of scope here.
+  // v14 chat re-audit fix — was a sequential `for...await` loop, serializing
+  // one Firestore write per recipient. Each recipient's send is already
+  // independent and fire-and-forget from THIS function's own caller
+  // (sendMessage doesn't await _notifyRecipients at all), so there was no
+  // ordering requirement being preserved, only wall-clock latency being
+  // lost. Promise.all parallelizes them; every per-uid skip rule (mute/
+  // read-fresh/throttle) and the throttle-stamp timing (all read the SAME
+  // `now` captured once, same as before) are unchanged.
   async function _notifyRecipients(conv, preview, mentions) {
     const targets = await _targetsFor(conv);
     const mentionSet = new Set(mentions || []);
     const now = Date.now();
     const label = conv.type === 'dm' ? _myName() : (conv.name || conv.department || 'Chat');
-    for (const uid of targets) {
-      if (uid === currentUser.uid) continue;
+    await Promise.all(targets.map(async uid => {
+      if (uid === currentUser.uid) return;
       // Wave5 M4 (J7) — a recipient who has muted THIS conversation (own-key
       // mutedBy.{uid}, see _toggleConvFlag) gets no in-app notification at
       // all, checked BEFORE the mention/throttle logic — muting is an
       // explicit "don't tell me" a mention shouldn't override. Once
       // functions/index.js consults the same mutedBy map (main session, this
       // batch), this exact suppression carries through to push too.
-      if (conv.mutedBy && conv.mutedBy[uid]) continue;
+      if (conv.mutedBy && conv.mutedBy[uid]) return;
       const isMentioned = mentionSet.has(uid);
       if (!isMentioned) {
         const r = _readers.find(x => x.uid === uid);        // live snapshot — zero extra reads
-        if (r && r.readAt?.toMillis && (now - r.readAt.toMillis()) < READ_FRESH_MS) continue;
+        if (r && r.readAt?.toMillis && (now - r.readAt.toMillis()) < READ_FRESH_MS) return;
         const k = `${conv.id}_${uid}`;
-        if (_notifLastSent[k] && (now - _notifLastSent[k]) < NOTIF_THROTTLE_MS) continue;
+        if (_notifLastSent[k] && (now - _notifLastSent[k]) < NOTIF_THROTTLE_MS) return;
       }
       _notifLastSent[`${conv.id}_${uid}`] = now;
       await Notifs.send(uid, {
         title: `💬 ${label}`,
         body: isMentioned ? `${_myName()} mentioned you: ${preview}` : `${_myName()}: ${preview}`,
         icon: '💬', type: 'chat_message', chatId: conv.id }).catch(() => {});
-    }
+    }));
   }
 
   // ── Reactions (Decision 9) ──
@@ -1501,10 +1617,19 @@ window.Chat = (() => {
 
   // ── Pagination — one-shot older page, prepended (static; not live) ──
   async function loadEarlier() {
-    const anchor = (_earlier[0] || _msgs[0]); if (!anchor || !anchor._snap) return;
+    const anchor = (_earlier[0] || _msgs[0]);
+    // v14 chat re-audit fix — no anchor at all means nothing to page before
+    // (empty/just-opened thread); flag exhausted so the lightbox's
+    // load-more branch (below) doesn't keep retrying a no-op every swipe.
+    if (!anchor || !anchor._snap) { _earlierExhausted = true; return; }
     const s = await db.collection('conversations').doc(_openConvId).collection('messages')
       .orderBy('createdAt', 'desc').startAfter(anchor._snap).limit(PAGE_SIZE).get()
       .catch(() => ({ docs: [] }));
+    // v14 chat re-audit fix — a short page (fewer than PAGE_SIZE docs back)
+    // means this WAS the last of the history; the lightbox's "swipe past the
+    // oldest loaded photo" handler (_openLightbox's go()) uses this to know
+    // when a wrap is really the end vs. just unfetched history.
+    _earlierExhausted = s.docs.length < PAGE_SIZE;
     _earlier = [...s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse(), ..._earlier];
     // Phase 63 #3 — _earlier only ever grows via "Load earlier" taps; without
     // a cap a long scroll-back session holds every page ever fetched in
@@ -2202,6 +2327,30 @@ window.Chat = (() => {
     } catch (_) {}
   }
   function _clearDraft(convId) { try { localStorage.removeItem(_draftKey(convId)); } catch (_) {} }
+  // v14 chat re-audit fix — drafts were never garbage-collected: a draft
+  // typed into a group later left, or a dept channel the user no longer
+  // belongs to, stayed in localStorage forever (only cleared on a successful
+  // send in THAT conversation). Two targeted cleanups instead of an
+  // unbounded generic sweep:
+  //  1. Dept-channel drafts: myDeptChannels() is synchronously derivable from
+  //     currentDepts/role, so a `bi-chat-draft-dept_<X>` key for a
+  //     department the user no longer belongs to can be swept for free. Run
+  //     once per chat-page-visit (from _attachInbox), not on every render.
+  //  2. Group-leave: cleared directly at the Leave-group button's handler
+  //     (_openMediaTab) — that's the one place this file actually knows "I'm
+  //     not a member of THIS conversation anymore."
+  function _sweepStaleDeptDrafts() {
+    try {
+      const validIds = new Set(myDeptChannels().map(d => 'dept_' + d));
+      const prefix = 'bi-chat-draft-dept_';
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(prefix)) continue;
+        const convId = key.slice('bi-chat-draft-'.length);
+        if (!validIds.has(convId)) localStorage.removeItem(key);
+      }
+    } catch (_) {}
+  }
 
   // ── Wave5 M1 (J2) — optimistic send bubbles ──
   // Rendered into a DEDICATED tail container (#chat-pending-tail), kept as the
@@ -2262,10 +2411,34 @@ window.Chat = (() => {
       const mentions = _computeMentions(p.text, _openConv);
       await sendMessage({ text: p.text, file: p.file, images: p.images, link: p.link, clientKey, replyTo: p.replyTo, mentions });
     } catch (e) {
+      // v14 chat re-audit fix — canceled out from under this retry — don't
+      // flip a bubble that's no longer even in `_pending` back to 'failed',
+      // and don't toast an error for a send the user already dismissed.
+      if (_canceledClientKeys.delete(clientKey)) return;
       p.status = 'failed';
       _renderPendingTail();
       Notifs.error((e && e.message) || 'Message not sent — retry.');
     }
+  }
+  // v14 chat re-audit fix — a stuck 'sending' pending bubble (Storage upload
+  // stalled on a slow/offline connection — put() has no explicit timeout in
+  // this file) used to have NO affordance at all until it flipped to
+  // 'failed'; this lets the user dismiss it from the UI at any time. This is
+  // a best-effort UI-level cancel, not a network abort — sendMessage's
+  // storage.ref().put() call doesn't keep its UploadTask reference around,
+  // so there's nothing to actually cancel in flight; if that upload
+  // eventually completes anyway, the message will simply appear as a normal
+  // confirmed message once the snapshot echoes it back (never silently
+  // lost, just no longer tracked as "mine, pending"). _canceledClientKeys
+  // suppresses the resulting catch-block noise in doSend/_retryPending.
+  function _cancelPendingMessage(clientKey) {
+    const idx = _pending.findIndex(x => x.clientKey === clientKey);
+    if (idx === -1) return;
+    _canceledClientKeys.add(clientKey);
+    _revokePendingPreviews(_pending[idx]);
+    _pending.splice(idx, 1);
+    _renderPendingTail();
+    Notifs.info('Message canceled');
   }
   function _ensurePendingTailEl(el) {
     let tail = document.getElementById('chat-pending-tail');
@@ -2286,6 +2459,11 @@ window.Chat = (() => {
       // Wave5 M2 — the pending bubble's quote block (if any) is tappable too.
       const quote = e.target.closest('.ms-reply-quote');
       if (quote) { _scrollToMessage(quote.dataset.targetMid); return; }
+      // v14 chat re-audit fix — cancel affordance on a still-'sending'
+      // bubble (see _renderPendingBubble/_cancelPendingMessage), checked
+      // before the failed-retry branch since the two states are exclusive.
+      const cancelBtn = e.target.closest('.ms-pending-cancel');
+      if (cancelBtn) { _cancelPendingMessage(cancelBtn.dataset.clientKey); return; }
       const failed = e.target.closest('.ms-bubble-failed');
       if (failed) _retryPending(failed.dataset.clientKey);
     });
@@ -2298,9 +2476,18 @@ window.Chat = (() => {
   }
   function _renderPendingBubble(p) {
     const failed = p.status === 'failed';
+    // v14 chat re-audit fix — a 'sending' bubble now carries its own small
+    // ✕ cancel affordance (wired in _wirePendingTailDelegation) instead of
+    // being tappable ONLY once it flips to 'failed'. Inline-styled (no CSS
+    // file in scope for this batch) to match the existing ⏳/⚠ status glyphs.
     const statusHtml = failed
       ? `<span class="ms-pending-status">${emojiIcon('⚠',12)}</span><span class="ms-pending-retry-label">Tap to retry</span>`
-      : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>`;
+      : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>` +
+        `<button type="button" class="ms-pending-cancel" data-client-key="${escHtml(p.clientKey)}" ` +
+        `title="Cancel sending" aria-label="Cancel sending" ` +
+        `style="background:none;border:none;padding:2px;margin-left:4px;cursor:pointer;` +
+        `color:inherit;opacity:.8;display:inline-flex;align-items:center;vertical-align:middle">` +
+        `${emojiIcon('x',11)}</button>`;
     // Wave5 M3 (J4) — multi-photo local previews render through the SAME
     // .ms-media-grid layout the confirmed message will use, just dimmed
     // (opacity, mirroring the legacy single-preview treatment) and with no
@@ -2605,7 +2792,13 @@ window.Chat = (() => {
       seen++;
       if (seen === localIdx) { flatIdx = i; break; }
     }
-    _openLightbox(all, flatIdx);
+    // v14 chat re-audit fix — allowLoadMore:true only for THIS call site (a
+    // tap inside the live thread). The Shared Media tab's lightbox (below,
+    // `_openLightbox(mediaItems, idx)`) already opens off a one-shot
+    // up-to-500-message fetch, so there's nothing further to page in there —
+    // leaving that call site's default (false) keeps its old silent-wrap
+    // behavior unchanged.
+    _openLightbox(all, flatIdx, { allowLoadMore: true });
   }
   // ── Wave5 M3 (J1) — the lightbox itself. ONE Overlay entry (Back/Esc
   // dismiss come free: js/app.js's popstate handler calls Overlay._popOne()
@@ -2618,14 +2811,16 @@ window.Chat = (() => {
   // pinch (2-touch) and double-tap zoom via a hand-rolled transform (no
   // gesture library) — touch-action:none on the image hands full gesture
   // control to this code instead of fighting native browser panning/zoom.
-  function _openLightbox(images, startIdx) {
+  function _openLightbox(images, startIdx, opts) {
     if (!images || !images.length) return;
+    opts = opts || {};
     let idx = Math.max(0, Math.min(startIdx || 0, images.length - 1));
     let scale = 1, tx = 0, ty = 0;                    // current image's zoom/pan
     let pinchStartDist = 0, pinchStartScale = 1;
     let panStartX = 0, panStartY = 0, panStartTx = 0, panStartTy = 0;
     let swipe = null;                                 // 1-finger, scale===1 drag (nav or dismiss)
     let lastTapAt = 0, lastTapX = 0, lastTapY = 0;     // double-tap-to-zoom detection
+    let _loadingMore = false;                         // v14 chat re-audit fix — re-entrancy guard for go()'s load-more fetch
 
     const el = document.createElement('div');
     el.className = 'ms-lightbox';
@@ -2669,7 +2864,39 @@ window.Chat = (() => {
       countEl.textContent = multi ? `${idx + 1} / ${images.length}` : '';
       resetZoom();
     }
-    function go(delta) { idx = (idx + delta + images.length) % images.length; render(); }
+    // v14 chat re-audit fix — swiping/tapping "previous" from the oldest
+    // photo THIS lightbox currently knows about used to silently wrap
+    // (modulo) straight to the newest one, implying — wrongly, for a long
+    // thread — that the visible set is the whole set. When this call site
+    // opted in (opts.allowLoadMore, set only by _openLightboxFor's in-thread
+    // tap), try a real "load earlier" page first and splice the freshly
+    // discovered photos in before deciding there's genuinely nothing older.
+    // _earlierExhausted (maintained by loadEarlier()) means "the last fetch
+    // came back short — there's truly no more history," so this fires at
+    // most once per still-untried older page, never in a loop.
+    async function go(delta) {
+      if (opts.allowLoadMore && delta < 0 && idx === 0 && !_earlierExhausted && !_loadingMore && _openConvId) {
+        _loadingMore = true;
+        const prevCount = images.length;
+        countEl.textContent = 'Loading…';
+        try { await loadEarlier(); } catch (_) {}
+        _loadingMore = false;
+        const fresh = _collectAllImages();
+        if (fresh.length > prevCount) {
+          const added = fresh.length - prevCount;   // newly-prepended older photos
+          images = fresh;
+          idx = added - 1;                          // land on the newest of the newly-loaded earlier photos
+          render();
+          return;
+        }
+        // That page had no new photos in it (e.g. all-text messages) — fall
+        // through to the normal wrap below. Not a silent no-op: a real fetch
+        // was attempted, and the next swipe-back will try the NEXT page
+        // (unless loadEarlier() has since set _earlierExhausted).
+      }
+      idx = (idx + delta + images.length) % images.length;
+      render();
+    }
 
     el.querySelector('.ms-lightbox-close').addEventListener('click', () => window.Overlay.dismissTop());
     prevBtn.addEventListener('click', () => go(-1));
@@ -2787,6 +3014,21 @@ window.Chat = (() => {
   function _isGroupAdmin(conv) {
     return conv.type === 'group' && (conv.createdBy === currentUser.uid || _isAdminRole());
   }
+  // v14 chat re-audit fix — shared by the About section's initial render AND
+  // _openAddMembersPicker's live patch-in-place, so the remove-member button
+  // (admin-only, never on your own row — self-removal is Leave's job) can't
+  // drift between the two render sites.
+  function _memberRowHtml(uid, conv, isGroupAdmin) {
+    const nm = (conv.participantNames && conv.participantNames[uid]) || 'User';
+    const ini = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
+    const canRemove = isGroupAdmin && uid !== currentUser.uid;
+    return `<div class="chat-about-member-row">
+      <div class="ms-avatar ms-avatar-md">${ini(nm)}</div>
+      <span class="chat-about-member-name">${escHtml(nm)}</span>
+      ${uid === conv.createdBy ? `<span class="chat-about-admin-tag">Admin</span>` : ''}
+      ${canRemove ? `<button type="button" class="chat-about-member-remove" data-uid="${escHtml(uid)}" title="Remove from group" aria-label="Remove ${escHtml(nm)} from group" style="margin-left:auto;background:none;border:none;padding:4px;cursor:pointer;color:inherit;opacity:.7;display:inline-flex;align-items:center">${emojiIcon('x',14)}</button>` : ''}
+    </div>`;
+  }
   // Wave5 M4 — internal-users picker for "Add members" (creator/admin only).
   // Reuses dmCandidates for the same eligibility scoping "New Message"/
   // "New Group" already use (a partner sees only same-company partners +
@@ -2839,15 +3081,8 @@ window.Chat = (() => {
         // still in the DOM), and it won't otherwise refresh until reopened.
         const membersEl = document.querySelector('.chat-about-members');
         if (membersEl) {
-          const ini = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
-          membersEl.innerHTML = conv.participants.map(uid => {
-            const nm = conv.participantNames[uid] || 'User';
-            return `<div class="chat-about-member-row">
-              <div class="ms-avatar ms-avatar-md">${ini(nm)}</div>
-              <span class="chat-about-member-name">${escHtml(nm)}</span>
-              ${uid === conv.createdBy ? `<span class="chat-about-admin-tag">Admin</span>` : ''}
-            </div>`;
-          }).join('');
+          membersEl.innerHTML = conv.participants.map(uid => _memberRowHtml(uid, conv, _isGroupAdmin(conv))).join('');
+          if (window.lucide) lucide.createIcons({ nodes: [membersEl] });   // v14 chat re-audit fix — remove-member ✕ icon needs a refresh on dynamic re-render
         }
         const subtitleEl = document.querySelector('.chat-about-subtitle');
         if (subtitleEl) subtitleEl.textContent = `${conv.participants.length} member${conv.participants.length!==1?'s':''}`;
@@ -2860,8 +3095,17 @@ window.Chat = (() => {
     });
   }
   async function _openMediaTab(conv) {
-    const snap = await db.collection('conversations').doc(conv.id).collection('messages')
-      .orderBy('createdAt', 'desc').limit(500).get().catch(() => ({ docs: [] }));
+    // v14 chat re-audit fix — was a fresh uncached .limit(500).get() on
+    // EVERY tap of the ⓘ button (unlike the users/tasks/kpi/dept-conv reads
+    // elsewhere in this file, which all route through dbCachedGet). Short
+    // TTL keyed per-conversation — sendMessage eagerly invalidates this exact
+    // key the moment a media/file attachment is sent, so a fresh attachment
+    // still shows up immediately rather than waiting out the TTL.
+    const snap = await dbCachedGet('chat-media-' + conv.id,
+      () => db.collection('conversations').doc(conv.id).collection('messages')
+        .orderBy('createdAt', 'desc').limit(500).get(),
+      20000
+    ).catch(() => ({ docs: [] }));
     const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(m => !m.deleted);
     const mediaItems = [], fileItems = [], linkItems = [];
     msgs.forEach(m => {
@@ -2922,14 +3166,7 @@ window.Chat = (() => {
           : 'Direct message'
         }</div>
         ${conv.type === 'group' ? `
-        <div class="chat-about-members">${(conv.participants||[]).map(uid => {
-          const nm = (conv.participantNames && conv.participantNames[uid]) || 'User';
-          return `<div class="chat-about-member-row">
-            <div class="ms-avatar ms-avatar-md">${aboutInitials(nm)}</div>
-            <span class="chat-about-member-name">${escHtml(nm)}</span>
-            ${uid === conv.createdBy ? `<span class="chat-about-admin-tag">Admin</span>` : ''}
-          </div>`;
-        }).join('')}</div>
+        <div class="chat-about-members">${(conv.participants||[]).map(uid => _memberRowHtml(uid, conv, isGroupAdmin)).join('')}</div>
         ${isGroupAdmin ? `<button type="button" id="chat-about-addmember-btn" class="btn-secondary btn-sm" style="width:100%">${emojiIcon('users',14)} Add members</button>` : ''}
         ` : ''}
         <div class="chat-about-rows">
@@ -3019,6 +3256,40 @@ window.Chat = (() => {
         } catch (_) { Notifs.showToast('Photo upload failed', 'error'); }
       });
       document.getElementById('chat-about-addmember-btn')?.addEventListener('click', () => _openAddMembersPicker(conv));
+      // v14 chat re-audit fix — group admin could Add members but had no
+      // Remove-member control anywhere (the only way OFF the roster was the
+      // self-only Leave button). Removing another participant falls under
+      // firestore.rules' unrestricted conv-doc update branch (createdBy==uid
+      // || isAdmin() — no affectedKeys shape restriction, see ~line 453-454),
+      // the SAME branch rename/photo/add-members already rely on, so this
+      // needs no rules change. Gated to isGroupAdmin, and never shown on the
+      // admin's own row (self-removal is what Leave is for).
+      document.querySelector('.chat-about-members')?.addEventListener('click', async e => {
+        const btn = e.target.closest('.chat-about-member-remove'); if (!btn) return;
+        const uid = btn.dataset.uid;
+        const nm = (conv.participantNames && conv.participantNames[uid]) || 'this person';
+        if (!(await confirmDialog({ message: `Remove ${nm} from the group?`, danger: true }))) return;
+        btn.disabled = true;
+        try {
+          await db.collection('conversations').doc(conv.id).update({
+            participants: firebase.firestore.FieldValue.arrayRemove(uid),
+            [`participantNames.${uid}`]: firebase.firestore.FieldValue.delete()
+          });
+          conv.participants = (conv.participants || []).filter(x => x !== uid);
+          if (conv.participantNames) delete conv.participantNames[uid];
+          const membersEl = document.querySelector('.chat-about-members');
+          if (membersEl) {
+            membersEl.innerHTML = conv.participants.map(u => _memberRowHtml(u, conv, isGroupAdmin)).join('');
+            if (window.lucide) lucide.createIcons({ nodes: [membersEl] });
+          }
+          const subtitleEl = document.querySelector('.chat-about-subtitle');
+          if (subtitleEl) subtitleEl.textContent = `${conv.participants.length} member${conv.participants.length!==1?'s':''}`;
+          Notifs.success('Member removed');
+        } catch (_) {
+          Notifs.showToast('Could not remove member', 'error');
+          btn.disabled = false;
+        }
+      });
     }
 
     // Messenger restyle Fix 4 — wallpaper (any conv type) + Leave (group,
@@ -3054,6 +3325,7 @@ window.Chat = (() => {
       await db.collection('conversations').doc(conv.id)
         .update({ participants: firebase.firestore.FieldValue.arrayRemove(currentUser.uid) })
         .catch(() => Notifs.showToast('Could not leave group', 'error'));
+      _clearDraft(conv.id);   // v14 chat re-audit fix — leaving is the one place this file KNOWS a draft is now orphaned
       // Leaving makes both this info page AND the thread behind it stale —
       // close the whole stack back to the inbox (same net effect the old
       // header Leave button had via a single dismissTop(), just one level

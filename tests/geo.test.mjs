@@ -41,6 +41,36 @@ describe('haversineMeters', () => {
     const d = haversineMeters(0, 179.9, 0, -179.9);
     assert.ok(d > 20000 && d < 25000, `expected ~22km, got ${(d / 1000).toFixed(2)}km`);
   });
+
+  // geo-core.js:44's defensive NaN-guard — exercised directly, since
+  // siteMatch relies on this returning non-finite for malformed inputs
+  // (exactly the failure mode an HR-entered geo_sites doc with a blank or
+  // typo'd lat/lng would trigger).
+  it('returns NaN when a coordinate is missing or a non-numeric typo', () => {
+    assert.ok(Number.isNaN(haversineMeters(undefined, 120.9842, 14.5995, 120.9842)));
+    assert.ok(Number.isNaN(haversineMeters(14.5995, 'not-a-number', 14.5995, 120.9842)));
+    assert.ok(Number.isNaN(haversineMeters(NaN, 120.9842, 14.5995, 120.9842)));
+    assert.ok(Number.isNaN(haversineMeters(14.5995, 120.9842, {}, 120.9842)));
+  });
+
+  it('accepts numeric strings (Number() coercion), unlike raw NaN inputs', () => {
+    // parseFloat-free form fields sometimes hand this numeric strings —
+    // Number(lat1)/Number(lng1) etc. should coerce these, not reject them.
+    const got = haversineMeters('0', '0', '0', '1');
+    assert.ok(Number.isFinite(got) && got > 0);
+  });
+
+  it('documents (not asserts as a bug) that blank-string/null coerce to 0, not NaN', () => {
+    // Number('') === 0 and Number(null) === 0 are JS coercion quirks, not a
+    // gap in this function — a blank lat/lng silently becomes a real (if
+    // wildly wrong) coordinate rather than NaN. In practice this can't reach
+    // geo_sites via the Work Sites admin form, which already requires
+    // Number.isFinite(lat) && Number.isFinite(lng) before saving
+    // (js/screens/hr.js openWorkSiteForm) — this test just pins the
+    // underlying behavior so a future change here doesn't silently flip it.
+    assert.equal(haversineMeters('', 120.9842, 14.5995, 120.9842), haversineMeters(0, 120.9842, 14.5995, 120.9842));
+    assert.ok(Number.isFinite(haversineMeters(null, null, 14.5995, 120.9842)));
+  });
 });
 
 describe('siteMatch', () => {
@@ -101,5 +131,40 @@ describe('siteMatch', () => {
     assert.equal(r.inRange, false);
     assert.equal(r.nearest.siteId, 'c');
     assert.ok(r.nearest.distanceM > 450 && r.nearest.distanceM < 550);
+  });
+
+  it('radius boundary — distanceM === radiusM EXACTLY is inRange:true (siteMatch uses inclusive <=)', () => {
+    // Derive the site's radiusM from haversineMeters itself (rather than a
+    // hardcoded round number) so distanceM and radiusM are the exact same
+    // float — the only way to genuinely exercise the <= boundary instead of
+    // landing just inside/outside it due to floating-point rounding.
+    const pos = { lat: 14.6100, lng: 120.9900 };
+    const exactDistance = haversineMeters(hq.lat, hq.lng, pos.lat, pos.lng);
+    const boundarySite = { ...hq, id: 'boundary', radiusM: exactDistance };
+    const r = siteMatch(pos, [boundarySite]);
+    assert.equal(r.inRange, true, `distanceM (${exactDistance}) === radiusM should be inRange`);
+    assert.equal(r.nearest.siteId, 'boundary');
+  });
+
+  it('a malformed site (missing/typo\'d lat or lng) is excluded, not crashed on', () => {
+    // geo-core.js:70's isFinite filter — this is the realistic failure mode
+    // an HR-entered geo_sites doc invites (a typo'd coordinate, or a doc
+    // missing the field entirely — e.g. a manual Firestore console edit;
+    // the Work Sites admin form itself already blocks blank lat/lng at save
+    // time, see js/screens/hr.js openWorkSiteForm).
+    const typoLat = { id: 'bad1', name: 'Typo Lat', lat: 'fourteen', lng: 120.9842, radiusM: 150, active: true };
+    const typoLng = { id: 'bad2', name: 'Typo Lng', lat: 14.5995, lng: 'onetwenty', radiusM: 150, active: true };
+    const missingBoth = { id: 'bad3', name: 'Missing Both', radiusM: 150, active: true };
+    const pos = { lat: 14.5995, lng: 120.9842 };
+
+    // All-malformed: no valid site to match against at all.
+    const rAllBad = siteMatch(pos, [typoLat, typoLng, missingBoth]);
+    assert.deepEqual(rAllBad, { inRange: false, nearest: null });
+
+    // Mixed: the one well-formed site (hq) still matches normally even
+    // though its malformed siblings are silently dropped, not thrown on.
+    const rMixed = siteMatch(pos, [typoLat, hq, typoLng, missingBoth]);
+    assert.equal(rMixed.inRange, true);
+    assert.equal(rMixed.nearest.siteId, 'hq');
   });
 });
