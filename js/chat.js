@@ -2155,6 +2155,15 @@ window.Chat = (() => {
           const targets = await _targetsFor(conv);
           window.Notifs?.deleteForMessage(convId, createdAtMs, targets).catch(() => {});
         }
+        // Owner report 2026-08-03: the unsent TEXT stayed visible in the
+        // inbox preview (conv.lastMessageText is a snapshot). If this was
+        // the conversation's latest message, rewrite the preview to match
+        // the tombstone. lastMessage* keys are member-writable per rules.
+        const lastMs = conv?.lastMessageAt?.toMillis?.();
+        if (conv && createdAtMs && lastMs && createdAtMs >= lastMs) {
+          db.collection('conversations').doc(convId)
+            .update({ lastMessageText: 'Message removed' }).catch(() => {});
+        }
       })
       .catch(() => Notifs.showToast('Delete failed', 'error'));
   }
@@ -2172,6 +2181,12 @@ window.Chat = (() => {
         if (conv && createdAtMs) {
           const targets = await _targetsFor(conv);
           window.Notifs?.deleteForMessage(convId, createdAtMs, targets).catch(() => {});
+        }
+        // Same inbox-preview rewrite as the tombstone path.
+        const lastMs = conv?.lastMessageAt?.toMillis?.();
+        if (conv && createdAtMs && lastMs && createdAtMs >= lastMs) {
+          db.collection('conversations').doc(convId)
+            .update({ lastMessageText: 'Message removed' }).catch(() => {});
         }
       })
       .catch(() => Notifs.showToast('Permanent delete failed', 'error'));
