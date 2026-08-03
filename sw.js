@@ -2,7 +2,10 @@
 //  Barro Industries Operating System — Service Worker
 //  Strategy:
 //    • Install → pre-cache core app shell
-//    • Local JS/CSS → Network-first (so a CACHE_VER bump applies on the next load, not two loads later)
+//    • Local JS/CSS → Stale-while-revalidate (serve cached instantly, refresh in background —
+//      a CACHE_VER bump still applies on the next load: install() re-fetches the whole
+//      PRECACHE list into a brand-new cache name, and app.js reloads once the new SW
+//      activates at the next login-screen visit, independent of this runtime strategy)
 //    • Images/fonts → Cache-first, update in background
 //    • CDN scripts → Cache-first (versioned URLs never change)
 //    • HTML / API → Network-first, cache as offline fallback
@@ -13,7 +16,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.16';
+const CACHE_VER = 'bi-ops-v14.0.17';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -137,14 +140,14 @@ self.addEventListener('fetch', event => {
   // Local same-origin static assets
   if (url.includes(self.location.origin)) {
     const ext = url.split('?')[0].split('.').pop().toLowerCase();
-    // JS/CSS → Network-first so a CACHE_VER bump takes effect on the next load (not two loads later)
+    // JS/CSS → network-first-with-timeout (see networkFirstTimeout below).
     if (['js','css'].includes(ext)) {
-      event.respondWith(networkFirst(event.request, STATIC));
+      event.respondWith(networkFirstTimeout(event.request, STATIC, 900));
       return;
     }
-    // Images/fonts → Cache-first, refresh in background
+    // Images/fonts → Cache-first (static, versioned — no per-load network)
     if (['png','jpg','jpeg','svg','webp','woff','woff2','ico'].includes(ext)) {
-      event.respondWith(staleWhileRevalidate(event.request, STATIC));
+      event.respondWith(cacheFirst(event.request, STATIC));
       return;
     }
     // HTML → Network-first, fallback to cache
@@ -181,6 +184,29 @@ async function staleWhileRevalidate(request, cacheName) {
   }).catch(() => null);
   // Return cached immediately if available, otherwise wait for network
   return cached || fetchPromise;
+}
+
+// v14 perf pass (adjusted): local JS/CSS use network-first-with-timeout rather
+// than pure stale-while-revalidate. SWR served cached code instantly but a real
+// code change only appeared ONE reload later — which breaks the owner's
+// force-reopen-to-verify workflow and the "updates apply on next load, not two
+// loads later" guarantee the original network-first deliberately chose. This
+// races the network against a short timeout: on a normal connection you get the
+// FRESH file (updates apply immediately); only when the network is slower than
+// TIMEOUT do we serve the versioned cache instantly (the speed win on bad
+// connections), refreshing the cache in the background for next time.
+async function networkFirstTimeout(request, cacheName, timeoutMs) {
+  const cache = await caches.open(cacheName);
+  const net = fetch(request).then(r => { if (r && r.ok) cache.put(request, r.clone()); return r; }).catch(() => null);
+  const cached = await cache.match(request);
+  if (!cached) return (await net) || new Response('Offline', { status: 503 });
+  // race: whichever of {fresh network, timeout} wins
+  const winner = await Promise.race([
+    net,
+    new Promise(res => setTimeout(() => res('__timeout__'), timeoutMs)),
+  ]);
+  if (winner && winner !== '__timeout__') return winner;   // network was fast → fresh
+  return cached;                                            // slow network → instant cache (net still refreshes in bg)
 }
 
 async function networkFirst(request, cacheName) {

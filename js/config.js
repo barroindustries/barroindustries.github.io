@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.16';
+window.APP_VERSION = '14.0.17';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -667,6 +667,12 @@ window.fetchUsersWithPayroll = async function() {
   const _alias = {
     'ledger':   { prefixes: ['ledger:', 'ledger>=', 'ledger<='] },  // period-scoped + since/through-scoped reads (v12 WS39 Balance Sheet cumulative-to-date read)
     'expenses': { alsoKeys: ['expenses-pending', 'expenses-recent'] },
+    // Defensive cascade for CashAdvance.planFor's bulk reads (v14 perf pass) —
+    // NOT required for correctness (both keys are cached with ttlMs:0, so they
+    // never serve stale data time-wise regardless), but every existing CA
+    // mutation already calls dbCacheInvalidate('ca-pending'), so piggybacking
+    // here keeps the in-memory store tidy without a new call site.
+    'ca-pending': { alsoKeys: ['ca-approved-all'], prefixes: ['ca-deduct-requests-'] },
   };
   window.dbCacheInvalidate = function(key) {
     if (!key) {
@@ -797,8 +803,14 @@ window.gjForPeriod = function(periodKey) {
 // 'accountType' (those are WS13 chart-of-accounts fields on every ledger row).
 window.BankAccounts = {
   async list({ activeOnly = true } = {}) {
+    // Static-ish config (nickname/id/active-flag registry, NOT live balances —
+    // those are always derived from the ledger, never stored here), and every
+    // write path already calls BankAccounts.invalidate() explicitly, so a
+    // longer TTL only widens the window for a miss on that invalidation call
+    // (e.g. a concurrent tab) — bumped from 60s to 5min, unlike money/live-
+    // status collections which keep short TTLs.
     const snap = await dbCachedGet('bank_accounts',
-      () => db.collection('bank_accounts').get().catch(() => ({ docs: [] })), 60000);
+      () => db.collection('bank_accounts').get().catch(() => ({ docs: [] })), 300000);
     const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       .sort((a,b) => (a.sortOrder||0)-(b.sortOrder||0) || (a.nickname||'').localeCompare(b.nickname||''));
     return activeOnly ? all.filter(a => a.active !== false) : all;
@@ -1903,11 +1915,30 @@ window.CashAdvance = {
   // ── Payroll plug-ins (WS20 calls these; nothing else should touch CA balances) ──
   // planFor: the DEFAULT plan for this uid/month — installment-by-default, or a
   // custom total if an approved ca_deduct request or a legacy override exists.
+  //
+  // v14 perf pass — both callers (Payroll Compute in departments.js, the HR
+  // Payroll table in hr.js) invoke planFor(uid, month) once per employee inside
+  // a Promise.all, which used to fire N separate `where('userId','==',uid)`
+  // queries against cash_advances/approval_requests. Both are now ONE
+  // collection-wide query (status/type/month only, no userId) run through
+  // dbCachedGet with ttlMs:0 — that gives pure IN-FLIGHT request coalescing
+  // (concurrent calls for the same key share the one pending Firestore read;
+  // see dbCachedGet's `entry.pending` short-circuit above) with ZERO
+  // time-based caching: `Date.now() - entry.ts < 0` never holds, so every call
+  // that lands after the shared fetch has already resolved starts a brand-new
+  // live read. Net effect: N reads collapse to 1 for a concurrent Promise.all
+  // batch (the actual hot path), while a single later/isolated call is exactly
+  // as fresh as the old per-uid query — no staleness window is introduced.
+  // Filtering by uid happens client-side after the fetch, which returns the
+  // identical row set per uid (Firestore's cash_advances/approval_requests
+  // read rules are per-document, not query-shaped, and both callers here run
+  // in an isFinanceOrAdmin()/non-partner admin context that can already read
+  // every row this widened query touches — see firestore.rules ~415, ~915).
   async planFor(uid, month) {
-    const caSnap = await db.collection('cash_advances')
-      .where('userId','==',uid).where('status','==','approved').get().catch(()=>({docs:[]}));
-    const cas = caSnap.docs.map(d=>({id:d.id,...d.data()}))
-      .filter(a => (a.balance||0) > 0)
+    const caAllSnap = await dbCachedGet('ca-approved-all',
+      () => db.collection('cash_advances').where('status','==','approved').get().catch(()=>({docs:[]})), 0);
+    const cas = caAllSnap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(a => a.userId === uid && (a.balance||0) > 0)
       .sort((a,b) => (a.createdAt?.toMillis?.()||0) - (b.createdAt?.toMillis?.()||0)); // oldest-first
     const caBalance = _caRound2(cas.reduce((s,a)=>s+(a.balance||0),0));
     if (!cas.length) return { caBalance: 0, mode: 'full', caPlanned: 0, plan: [], source: 'none' };
@@ -1915,10 +1946,12 @@ window.CashAdvance = {
     // Custom source, priority: approved approval_requests(ca_deduct) → legacy
     // payroll_ca_overrides (transition only) → default installment.
     let customAmount = null, source = 'installment';
-    const reqSnap = await db.collection('approval_requests')
-      .where('userId','==',uid).where('type','==','ca_deduct').where('month','==',month).where('status','==','approved')
-      .limit(1).get().catch(()=>({docs:[]}));
-    if (reqSnap.docs.length) { customAmount = reqSnap.docs[0].data().amount; source = 'custom-request'; }
+    const reqAllSnap = await dbCachedGet('ca-deduct-requests-' + month,
+      () => db.collection('approval_requests')
+        .where('type','==','ca_deduct').where('month','==',month).where('status','==','approved')
+        .get().catch(()=>({docs:[]})), 0);
+    const mine = reqAllSnap.docs.filter(d => d.data().userId === uid);
+    if (mine.length) { customAmount = mine[0].data().amount; source = 'custom-request'; }
     if (customAmount == null) {
       const ovrSnap = await db.collection('payroll_ca_overrides').doc(`${uid}_${month}`).get().catch(()=>null);
       if (ovrSnap && ovrSnap.exists) { customAmount = ovrSnap.data().amount; source = 'legacy-override'; }

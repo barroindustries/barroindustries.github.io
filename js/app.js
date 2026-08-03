@@ -227,7 +227,15 @@ async function checkBackupHealth() {
     ];
     const problems = [];
     for (const c of CHECKS) {
-      const snap = await db.collection('system_health').doc(c.id).get().catch(() => null);
+      // Perf: these heartbeat docs are only ever written once daily/monthly by
+      // GitHub Actions, so a live read on every single login is pure waste —
+      // cache for an hour (well under the 30h/34d staleness thresholds below,
+      // so a real outage is still caught the same day it's checked).
+      const snap = await window.dbCachedGet(
+        `system_health:${c.id}`,
+        () => db.collection('system_health').doc(c.id).get(),
+        3600000
+      ).catch(() => null);
       const d = snap && snap.exists ? snap.data() : null;
       const last = d?.lastRunAt?.toDate?.()?.getTime?.() || 0;
       if (!last || (now - last) > c.staleMs) {
@@ -657,6 +665,13 @@ function _resetViewportZoom() {
 // ── User Profile ──────────────────────────────────
 async function loadUserProfile(user) {
   try {
+    // Perf: the payroll/{uid} doc is keyed by the already-known user.uid, so
+    // it doesn't actually depend on the users-doc read below — fire both in
+    // parallel instead of paying two sequential Firestore round trips on every
+    // cold boot. .catch(()=>null) here (rather than letting it throw into the
+    // outer try/catch) preserves the original "no own payroll doc yet → pay
+    // reads as 0" behavior for the merge step further down.
+    const payrollPromise = db.collection('payroll').doc(user.uid).get().catch(() => null);
     let snap = await db.collection('users').doc(user.uid).get();
     if (!snap.exists) {
       const counterRef = db.collection('_counters').doc('employees');
@@ -682,8 +697,8 @@ async function loadUserProfile(user) {
     // Merge the user's OWN pay (salary/allowance/deductions) from the protected
     // payroll/{uid} doc — pay no longer lives on the world-readable users doc.
     try {
-      const paySnap = await db.collection('payroll').doc(user.uid).get();
-      if (paySnap.exists) userProfile = { ...userProfile, ...paySnap.data() };
+      const paySnap = await payrollPromise;
+      if (paySnap && paySnap.exists) userProfile = { ...userProfile, ...paySnap.data() };
     } catch(e) { /* no own payroll doc yet → pay reads as 0 */ }
     currentRole  = userProfile.role || 'employee';
     // Support both old string 'department' and new array 'departments'
@@ -3374,18 +3389,43 @@ window.Keymap = (function () {
 // change (observer) + resize, so it covers every dashboard without per-card edits.
 window.fitKpiValues = function(root){
   const scope = (root && root.querySelectorAll) ? root : document;
-  // Covers every big-number card face: dashboard KPI values + stat-card numbers.
+  const FLOOR = 11;
+  // Phase 1 — READ pass across every matched element first (natural font size +
+  // container clientWidth), before any element's font-size is written. Doing
+  // this element-by-element interleaved with writes (the old approach) forces
+  // a synchronous layout recompute between every single element's write and
+  // the next element's read; capturing all the "how wide is this card" reads
+  // up front lets the browser batch them instead.
+  const jobs = [];
   scope.querySelectorAll('.kpi-value, .stat-num').forEach(el=>{
     el.style.whiteSpace = 'nowrap';
     // Capture the natural (CSS/inline) size once per element, then always re-fit
     // from it so resizing back up works too.
     if(!el.dataset.maxFs){ el.dataset.maxFs = parseFloat(getComputedStyle(el).fontSize) || 24; }
-    let size = parseFloat(el.dataset.maxFs);
-    el.style.fontSize = size + 'px';
-    let guard = 0;
-    while(el.scrollWidth > el.clientWidth + 1 && size > 11 && guard < 40){
-      size -= 1; el.style.fontSize = size + 'px'; guard++;
+    jobs.push({ el, maxFs: parseFloat(el.dataset.maxFs), clientWidth: el.clientWidth });
+  });
+  // Phase 2 — per element, binary-search the largest integer font size in
+  // [FLOOR, maxFs] whose scrollWidth still fits clientWidth. This still needs
+  // a write-then-read per probe (unavoidable — the browser only knows the
+  // resulting text width after the font-size is applied), but converges in
+  // ~log2(range) probes (~5-6 for a typical 11-40px range) instead of the old
+  // linear 1px decrement (up to 40 probes). Same floor, same final pixel
+  // value as the old loop — just fewer forced layouts to get there.
+  jobs.forEach(({ el, maxFs, clientWidth }) => {
+    el.style.fontSize = maxFs + 'px';
+    if (maxFs <= FLOOR || el.scrollWidth <= clientWidth + 1) return; // already fits (or at floor)
+    let lo = FLOOR, hi = maxFs - 1, best = FLOOR;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      el.style.fontSize = mid + 'px';
+      if (el.scrollWidth > clientWidth + 1) {
+        hi = mid - 1;
+      } else {
+        best = mid;
+        lo = mid + 1;
+      }
     }
+    el.style.fontSize = best + 'px';
   });
 };
 (function(){

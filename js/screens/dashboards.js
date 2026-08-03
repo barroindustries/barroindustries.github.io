@@ -758,10 +758,20 @@ function liveDateTime(elId) {
   const update = () => {
     const el = document.getElementById(elId);
     if (!el) { clearInterval(_liveDateInterval); _liveDateInterval = null; return; }
-    el.textContent = new Date().toLocaleString('en-PH', {
+    const str = new Date().toLocaleString('en-PH', {
       weekday:'long', year:'numeric', month:'long', day:'numeric',
       hour:'2-digit', minute:'2-digit', second:'2-digit'
     });
+    // Mutate the existing text node's data instead of reassigning .textContent:
+    // a .data write is a characterData mutation, which app.js's #page-content
+    // MutationObserver (childList/subtree only) does NOT react to — so this
+    // per-second tick no longer retriggers a full fitKpiValues() re-fit pass.
+    // Same visible output, just without the childList mutation.
+    if (el.firstChild && el.firstChild.nodeType === 3 && el.childNodes.length === 1) {
+      el.firstChild.data = str;
+    } else {
+      el.textContent = str;
+    }
   };
   update();
   _liveDateInterval = setInterval(update, 1000);
@@ -2145,15 +2155,22 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const daysInMonth  = countWorkDays(bzYear, bzMonth,
                          new Date(bzYear, bzMonth+1, 0).getDate());
 
-  const [kpi, att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap] = await Promise.all([
-    getKpiScore(currentUser.uid),
+  // kpi_targets is fetched here (alongside everything else) instead of letting
+  // getKpiScore() re-query it internally, and myTasksSnap below is passed into
+  // getKpiScore as preTasks so it skips its own internal tasks query — this
+  // screen already fetches the identical assignedTo-array-contains query for
+  // its own task list rendering, so without this the same query ran twice
+  // per page view. Numbers produced are unchanged (same math, same inputs).
+  const [att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap] = await Promise.all([
     getAttendanceScore(currentUser.uid),
     db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
     db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
     db.collection('kpi_evals').doc(currentUser.uid).get().catch(()=>null),
     db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
-      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()).catch(()=>({docs:[]}))
+      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()).catch(()=>({docs:[]})),
+    db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null)
   ]);
+  const kpi = await getKpiScore(currentUser.uid, myTasksSnap.docs.map(d=>d.data()), kpiTargetSnap);
 
   const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
     const ta = a.createdAt?.toMillis?.() || 0;
@@ -2588,20 +2605,32 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   });
 };
 
-async function getKpiScore(uid) {
+// getKpiScore(uid, preTasks?, preKpiSnap?) — preTasks/preKpiSnap are optional
+// pre-fetched inputs (a plain tasks-data array, and a kpi_targets DocumentSnapshot)
+// for callers that already hold both from their own Promise.all (e.g.
+// renderPersonalFinance below), so this doesn't re-run the identical
+// assignedTo-array-contains tasks query and kpi_targets doc read a second
+// time. Callers that omit them keep the original behavior — same two
+// Firestore reads, same math, unchanged.
+async function getKpiScore(uid, preTasks, preKpiSnap) {
   try {
     // Task completion score (70% weight)
     const DONE_STATUSES = ['done','approved','archived'];
-    const taskSnap = await db.collection('tasks').where('assignedTo','array-contains',uid).get()
-      .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
-    const tasks = taskSnap.docs.map(d=>d.data());
+    let tasks;
+    if (Array.isArray(preTasks)) {
+      tasks = preTasks;
+    } else {
+      const taskSnap = await db.collection('tasks').where('assignedTo','array-contains',uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
+      tasks = taskSnap.docs.map(d=>d.data());
+    }
     const taskScore = tasks.length ? Math.min(1, tasks.filter(t=>DONE_STATUSES.includes(t.status)).length / tasks.length) : 0.5;
 
     // Deliverable quality score (30% weight) — read from kpi_targets collection
     let delivScore = 0.5;
     try {
-      const kpiDoc = await db.collection('kpi_targets').doc(uid).get();
-      if (kpiDoc.exists) {
+      const kpiDoc = preKpiSnap !== undefined ? preKpiSnap : await db.collection('kpi_targets').doc(uid).get();
+      if (kpiDoc && kpiDoc.exists) {
         const d = kpiDoc.data();
         delivScore = typeof d.deliverableScore === 'number' ? Math.min(1, d.deliverableScore / 100) : 0.5;
       }
@@ -3606,7 +3635,7 @@ async function renderCompanyMemos(ct, canAdd) {
     (async () => {
       try {
         const snap = typeof dbCachedGet==='function'
-          ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+          ? await dbCachedGet('users', () => db.collection('users').get(), 30000)
           : await db.collection('users').get();
         people = snap.docs.map(d=>({id:d.id, ...d.data()}))
           // Internal staff only — external partners and Brilliant-Steel-only users
@@ -4118,7 +4147,7 @@ async function renderAnalytics() {
   // Deferred (see loadSubs/loadExpenses/loadFinanceExtras below): submissions, expenses,
   // cash_advances, payslips — each consumed by exactly one or two subtabs, never Overview.
   const [usersSnap,tasksSnap,quotesSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap,clientsSnap] = await Promise.all([
-    dbCachedGet('users', fetchUsersWithPayroll, 60000).catch(()=>({docs:[],size:0})),
+    dbCachedGet('users', fetchUsersWithPayroll, 30000).catch(()=>({docs:[],size:0})),
     cg('tasks-all:'+anKey, _boundTS ? db.collection('tasks').where('createdAt','>=',_boundTS) : db.collection('tasks')),
     dbCachedGet('all-quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
     (window._AN_LED_START ? ledgerSince(window._AN_LED_START) : dbCachedGet('ledger', ()=>db.collection('ledger').get().catch(()=>({docs:[]})), 60000)),
