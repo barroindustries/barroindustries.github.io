@@ -99,6 +99,136 @@ window.computePayLine = function(emp, ctx) {
   };
 };
 
+// ---- v14 post-release — Break-even analysis (owner request: "Add a
+// computation for breakeven. Rents etc.") --------------------------------
+// Pure classification + break-even math. Takes ONE already period-bounded
+// income figure + a {category: {income, expense}} rollup (same shape as
+// finance_rollup/{yyyymm}.byCategory — see js/finance-ledger.js's
+// _syncRollup/rebuildRollups) and pre-resolved fixed/variable category
+// lists. This function does zero keyword-matching, zero Firestore, zero
+// Date.now — js/screens/finance.js's Break-even screen is responsible for:
+//   1. fetching the period via the SAME loadFinStatement() codepath the
+//      Reports tab already uses (no second fetch machinery — see that
+//      file's header for the shared-fetch proof), and
+//   2. resolving the finance_config/breakeven doc (or the built-in default
+//      keyword map when absent) down to plain arrays of EXACT byCategory
+//      key strings before calling this function.
+// Same inputs -> same outputs, always (no wall-clock dependency).
+//
+// ── MATH CONTRACT ──────────────────────────────────────────────────────
+//   contributionMarginRatio (CMR) = (income - variableTotal) / income
+//     income === 0             -> CMR = null (can't ratio against zero revenue)
+//   breakEvenRevenue = fixedTotal / CMR
+//     CMR null OR <= 0         -> breakEvenRevenue = 'n/a' (a CMR of exactly
+//                                  zero or negative means variable costs already
+//                                  consume 100%+ of every peso of revenue — no
+//                                  amount of revenue scale-up alone ever breaks
+//                                  even; NEVER divide and surface Infinity/NaN)
+//   coveragePct = (income / breakEvenRevenue) * 100
+//     breakEvenRevenue 'n/a'   -> coveragePct = null
+//     breakEvenRevenue === 0   -> coveragePct = 100 (nothing left to cover)
+//   gapToBreakEven = max(0, breakEvenRevenue - income)
+//     breakEvenRevenue 'n/a'   -> gapToBreakEven = 'n/a'
+//   perDayNeeded(daysInMonth) — a FUNCTION on the return object (not a
+//     field): breakEvenRevenue / daysInMonth, or null if breakEvenRevenue
+//     is 'n/a' or daysInMonth is missing/<=0. A function, not a baked-in
+//     value, because "how many days" is a display concern the caller
+//     supplies at render time — keeps this whole function deterministic
+//     (see CLAUDE.md's Manila-time-helpers note on why raw Date math never
+//     belongs inside a pure money function).
+//
+// ── CLASSIFICATION ─────────────────────────────────────────────────────
+//   classifiedFixed / classifiedVariable = [{cat, amt}], one entry per
+//     byCategory key found in classification.fixed / classification.variable
+//     (case-SENSITIVE exact match against byCategory's own keys — the
+//     caller already did any case-insensitive keyword matching and handed
+//     back real category strings here).
+//   manualFixed = [{label, amount}] (e.g. a landlord's rent that never
+//     posts to the ledger as its own category) is ADDITIVE to
+//     classifiedFixed/fixedTotal — each becomes {cat:label, amt:amount,
+//     manual:true} appended to classifiedFixed.
+//   unclassified = [{cat, amt}] for every byCategory key in NEITHER list —
+//     SURFACED, never silently folded into fixed or variable (guessing
+//     cost behavior would be dishonest; the screen renders these as a
+//     warning row instead).
+window.computeBreakeven = function(input) {
+  const inp = input || {};
+  const income = +inp.income || 0;
+  const byCategory = inp.byCategory || {};
+  const classification = inp.classification || {};
+  const fixedSet = new Set(classification.fixed || []);
+  const variableSet = new Set(classification.variable || []);
+  const manualFixed = Array.isArray(inp.manualFixed) ? inp.manualFixed : [];
+
+  const classifiedFixed = [];
+  const classifiedVariable = [];
+  const unclassified = [];
+  let categoryFixedTotal = 0;
+  let variableTotal = 0;
+
+  Object.keys(byCategory).forEach(cat => {
+    const row = byCategory[cat] || {};
+    const amt = +(+row.expense || 0).toFixed(2);
+    if (fixedSet.has(cat)) {
+      classifiedFixed.push({ cat, amt });
+      categoryFixedTotal += amt;
+    } else if (variableSet.has(cat)) {
+      classifiedVariable.push({ cat, amt });
+      variableTotal += amt;
+    } else {
+      unclassified.push({ cat, amt });
+    }
+  });
+
+  let manualTotal = 0;
+  manualFixed.forEach(m => {
+    const amt = +(+((m && m.amount) || 0)).toFixed(2);
+    classifiedFixed.push({ cat: (m && m.label) || 'Manual fixed cost', amt, manual: true });
+    manualTotal += amt;
+  });
+
+  const fixedTotal = +(categoryFixedTotal + manualTotal).toFixed(2);
+  variableTotal = +variableTotal.toFixed(2);
+
+  const contributionMarginRatio = income > 0 ? (income - variableTotal) / income : null;
+
+  let breakEvenRevenue;
+  if (contributionMarginRatio === null || contributionMarginRatio <= 0) {
+    breakEvenRevenue = 'n/a';
+  } else {
+    breakEvenRevenue = +(fixedTotal / contributionMarginRatio).toFixed(2);
+  }
+
+  let coveragePct, gapToBreakEven;
+  if (breakEvenRevenue === 'n/a') {
+    coveragePct = null;
+    gapToBreakEven = 'n/a';
+  } else if (breakEvenRevenue === 0) {
+    coveragePct = 100;
+    gapToBreakEven = 0;
+  } else {
+    coveragePct = +((income / breakEvenRevenue) * 100).toFixed(2);
+    gapToBreakEven = +Math.max(0, breakEvenRevenue - income).toFixed(2);
+  }
+
+  function perDayNeeded(daysInMonth) {
+    if (breakEvenRevenue === 'n/a') return null;
+    const d = +daysInMonth || 0;
+    if (d <= 0) return null;
+    return +(breakEvenRevenue / d).toFixed(2);
+  }
+
+  return {
+    fixedTotal, variableTotal, contributionMarginRatio,
+    breakEvenRevenue, coveragePct, gapToBreakEven, perDayNeeded,
+    classifiedFixed, classifiedVariable, unclassified
+  };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { vatSplit: window.vatSplit, computePayLine: window.computePayLine };
+  module.exports = {
+    vatSplit: window.vatSplit,
+    computePayLine: window.computePayLine,
+    computeBreakeven: window.computeBreakeven
+  };
 }

@@ -177,7 +177,9 @@ const FINANCE_GROUPS = [
   { key:'Overview',              label:'Overview',              members:['Overview'] },
   { key:'Money In/Out',          label:'Money In/Out',          members:['Ledger','Cash Receipts','Cash Disbursements','Bank Accounts'] },
   // v14 Wave4 F5 — Balance Sheet / Cash Flow / Bank Rec land here as sub-chips.
-  { key:'Reports',               label:'Reports',               members:['Reports','Balance Sheet','Cash Flow','Bank Rec'] },
+  // v14 post-release — Break-even lands as a Reports sub-chip (owner request:
+  // "Add a computation for breakeven. Rents etc.").
+  { key:'Reports',               label:'Reports',               members:['Reports','Balance Sheet','Cash Flow','Bank Rec','Break-even'] },
   { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','HR Profiles','Cash Advances','SSS / Gov'] },
   { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
   { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR'] },
@@ -194,7 +196,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
     ${window.sopPanel('How Finance works', [
       'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, HR Profiles, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
-      'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow and Bank Reconciliation.',
+      'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow, Bank Reconciliation and Break-even.',
       'Payroll runs through Compute → Verify → Disburse; the same Payroll & HR group handles weekly worker payslips, cash advances and government contributions.',
       `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`,
       isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
@@ -299,6 +301,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Balance Sheet': await window.renderBalanceSheet(content, currentUser, currentRole); break;
     case 'Cash Flow':     await window.renderCashFlowReport(content, currentUser, currentRole); break;
     case 'Bank Rec':      await window.renderBankRec(content, currentUser, currentRole); break;
+    case 'Break-even':    await renderBreakevenTab(content, currentUser, currentRole); break;
     case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;
@@ -808,6 +811,336 @@ window.openFinCategoryDrill = function(category, kind, rows, periodLabel) {
     ]);
   });
 };
+
+// ── Break-even (v14 post-release) ──────────────────────────────────────
+// Owner request: "Add a computation for breakeven. Rents etc." Reuses the
+// EXACT SAME period-bounded fetch as the Income Statement a few hundred
+// lines up — loadFinStatement() (-> ledgerForPeriod/gjForPeriod, filtered +
+// grouped by ledgerKind) — no second fetch machinery, so this screen's
+// income/expense totals can never drift from Reports' own numbers for the
+// same period, because both read through the one shared loader. All the
+// actual break-even MATH (contribution margin, break-even revenue,
+// coverage%, gap, per-day-needed) lives in the pure window.computeBreakeven
+// (js/money-core.js, tested in tests/money.test.mjs) — this function's job
+// is only fetch -> classify -> call it -> render.
+//
+// Classification source: finance_config/breakeven ({fixed:[cat],
+// variable:[cat], none:[cat], manualFixed:[{label,amount}]} — canFinance
+// read+write, rules already deployed). A category explicitly listed in
+// `fixed`/`variable` uses that; one explicitly in `none` (deliberately
+// marked "not classified" via the Classify editor below) is excluded from
+// the math on purpose; every OTHER category — anything Finance has never
+// touched, including a brand-new ledger category that shows up next month —
+// falls through to the built-in keyword default just below (case-insensitive
+// substring match) so new categories are never silently unclassified.
+//
+// There is no dedicated "Rent" line in window.COA (js/config.js) — this
+// app's real expense categories are COS – Direct Material / COS – Direct
+// Labor / Payroll Expense / Operating Expense / Utilities / Tax / Materials
+// / General Expense / Other Expense (js/config.js ~1314). Real rent
+// normally lands under Operating Expense or General Expense, and the
+// default keyword list below deliberately does NOT match either of those
+// generic bucket names (no "rent"/"lease" substring in them) — they show up
+// as "unclassified" until Finance either (a) classifies that bucket via the
+// editor, or (b) — the intended path for "Rents etc." specifically — adds
+// it as its own manualFixed row ("Rent — HQ", amount) if it never posts to
+// the ledger as its own category at all.
+const BE_DEFAULT_FIXED_KW    = ['rent','utilit','salar','payroll','insuran','subscri','internet','lease'];
+const BE_DEFAULT_VARIABLE_KW = ['material','cos','cost of sales','freight','deliver','commission'];
+
+function beDefaultGuess(cat) {
+  const lower = String(cat||'').toLowerCase();
+  if (BE_DEFAULT_FIXED_KW.some(k => lower.includes(k))) return 'fixed';
+  if (BE_DEFAULT_VARIABLE_KW.some(k => lower.includes(k))) return 'variable';
+  return null; // no keyword hit -> unclassified by default
+}
+// Resolve every category present in byCategory down to computeBreakeven's
+// {fixed:[cat], variable:[cat]} input shape: explicit finance_config choice
+// wins, `none` is a deliberate exclusion (no default fallback), anything
+// left over falls back to the keyword default per-category.
+function beResolveClassification(cfg, categories) {
+  const expFixed = new Set(cfg.fixed || []), expVariable = new Set(cfg.variable || []), expNone = new Set(cfg.none || []);
+  const fixed = [], variable = [];
+  categories.forEach(cat => {
+    if (expFixed.has(cat))    { fixed.push(cat); return; }
+    if (expVariable.has(cat)) { variable.push(cat); return; }
+    if (expNone.has(cat))     return; // deliberately left unclassified — no default fallback
+    const guess = beDefaultGuess(cat);
+    if (guess === 'fixed') fixed.push(cat);
+    else if (guess === 'variable') variable.push(cat);
+  });
+  return { fixed, variable };
+}
+// Tri-state resolved view for ONE category (same precedence as
+// beResolveClassification) — used by the Classify editor to show what's
+// actually in effect right now (explicit choice OR live default guess).
+function beResolvedState(cfg, cat) {
+  if ((cfg.fixed||[]).includes(cat))    return 'fixed';
+  if ((cfg.variable||[]).includes(cat)) return 'variable';
+  if ((cfg.none||[]).includes(cat))     return 'none';
+  return beDefaultGuess(cat); // 'fixed' | 'variable' | null
+}
+
+async function renderBreakevenTab(container, currentUser, currentRole, periodKey) {
+  periodKey = periodKey || 'month';
+  container.innerHTML = window.skeletonHtml('rows');
+  const canWrite = isFinancePriv();
+
+  // ONE fetch — same function, same rows, as the Income Statement above.
+  const stmt = await loadFinStatement(periodKey);
+  const { parsed: pParsed, income, expense, totIncome } = stmt;
+  const label = pParsed.type === 'all' ? 'All Time' : (periodKey === 'ytd' ? 'YTD ' + bizYear() : pParsed.label);
+
+  // {cat:{income,expense}} — identical shape to finance_rollup.byCategory
+  // (js/finance-ledger.js _rollupDelta/_syncRollup), built from the SAME
+  // income/expense arrays loadFinStatement already returned (no second read).
+  const byCategory = {};
+  const bump = (arr, field) => arr.forEach(e => {
+    const k = e.category || 'Other';
+    const b = byCategory[k] || (byCategory[k] = { income:0, expense:0 });
+    b[field] += (e.amount || 0);
+  });
+  bump(expense, 'expense');
+  bump(income, 'income');
+  const categories = Object.keys(byCategory);
+
+  const cfgSnap = await db.collection('finance_config').doc('breakeven').get().catch(() => null);
+  const cfg = (cfgSnap && cfgSnap.exists) ? (cfgSnap.data() || {}) : {};
+  const classification = beResolveClassification(cfg, categories);
+  const manualFixed = Array.isArray(cfg.manualFixed) ? cfg.manualFixed : [];
+
+  const r = window.computeBreakeven({ income: totIncome, byCategory, classification, manualFixed });
+
+  // Per-day-needed only makes sense for a single calendar month. Days-in-a-
+  // month is plain calendar-length math (timezone-invariant), NOT the same
+  // class of bug as "what day is it right now" — the Manila-time-helpers
+  // guard (CLAUDE.md) is about wall-clock reads, not this, so no bizDate()
+  // call belongs here; the month itself is already Manila-resolved upstream
+  // by window.Period (bizDate()-driven), all this does is count its days.
+  let perDay = null;
+  if (pParsed.type === 'month') {
+    const mm = pParsed.key.match(/^month:(\d{4})-(\d{2})$/);
+    if (mm) perDay = r.perDayNeeded(new Date(+mm[1], +mm[2], 0).getDate());
+  }
+
+  const noRevenue = totIncome === 0;
+  const negMargin = !noRevenue && r.contributionMarginRatio !== null && r.contributionMarginRatio <= 0;
+  const beDisplay  = (typeof r.breakEvenRevenue === 'number') ? '₱' + fmt(r.breakEvenRevenue) : 'n/a';
+  const covDisplay = (typeof r.coveragePct === 'number') ? r.coveragePct.toFixed(1) + '%' : '—';
+  const cmrDisplay = (r.contributionMarginRatio !== null) ? (r.contributionMarginRatio * 100).toFixed(1) + '%' : '—';
+  const barPct   = (typeof r.coveragePct === 'number') ? Math.max(0, Math.min(100, r.coveragePct)) : 0;
+  const barColor = (typeof r.coveragePct === 'number' && r.coveragePct >= 100) ? 'var(--success)' : 'var(--warning)';
+
+  // Stashed for the CSV button (inline pattern matches window.exportFinReportCSV above).
+  window._beRows = [
+    ...r.classifiedFixed.map(x => ({ classification:'Fixed', category:x.cat, amount:x.amt })),
+    ...r.classifiedVariable.map(x => ({ classification:'Variable', category:x.cat, amount:x.amt })),
+    ...r.unclassified.map(x => ({ classification:'Unclassified', category:x.cat, amount:x.amt })),
+  ];
+
+  const _beLh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'BREAK-EVEN ANALYSIS',
+    dateLabel: label,
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH')
+  }) : null;
+
+  const catRow = (x) => `<tr><td>${escHtml(x.cat)}${x.manual?` <span class="badge badge-gray" style="font-size:9px">manual</span>`:''}</td><td style="text-align:right">₱${fmt(x.amt)}</td></tr>`;
+
+  container.innerHTML = `
+    ${_beLh ? `<style>.bke-print-lh{display:none}@media print{.bke-print-lh{display:block!important;margin-bottom:10px}}</style>
+    <div class="bke-print-lh">${_beLh.headerHTML}</div>` : ''}
+    <div id="bke-period">${window.periodPicker(periodKey, {})}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;flex-wrap:wrap;gap:8px">
+      <div style="font-size:12px;color:var(--text-muted)">${escHtml(label)}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${canWrite?`<button class="btn-secondary btn-sm" id="bke-classify-btn">${emojiIcon('🏷',16)} Classify</button>`:''}
+        <button class="btn-secondary btn-sm" id="bke-csv-btn">${emojiIcon('⬇',16)} CSV</button>
+        <button class="btn-secondary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print</button>
+      </div>
+    </div>
+
+    ${noRevenue ? `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warning)"><div class="card-body">
+        <strong>${emojiIcon('⚠️',16)} n/a — no revenue recorded</strong>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">No income was recorded for ${escHtml(label)}, so break-even revenue can't be computed against zero. Fixed costs below are still real — they're just shown without a revenue target.</div>
+      </div></div>`
+    : negMargin ? `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--danger)"><div class="card-body">
+        <strong>${emojiIcon('⚠️',16)} n/a — variable costs consume all (or more) of revenue</strong>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">Contribution margin is ${cmrDisplay} for ${escHtml(label)} — no amount of extra revenue at today's cost mix reaches break-even. Review the variable-cost classification or per-unit pricing.</div>
+      </div></div>`
+    : ''}
+
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card"><div class="kpi-label">Fixed Costs</div><div class="kpi-value">₱${fmt(r.fixedTotal)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Contribution Margin</div><div class="kpi-value">${cmrDisplay}</div></div>
+      <div class="kpi-card ${typeof r.breakEvenRevenue==='number'?'accent':''}"><div class="kpi-label">Break-even Revenue</div><div class="kpi-value">${beDisplay}</div></div>
+      <div class="kpi-card ${typeof r.coveragePct==='number'&&r.coveragePct>=100?'green':''}"><div class="kpi-label">Coverage</div><div class="kpi-value">${covDisplay}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>${emojiIcon('📉',20)} Progress to Break-even</h3></div>
+      <div class="card-body">
+        <div class="progress-bar-wrap" style="margin-bottom:8px"><div class="progress-bar-fill" style="width:${barPct}%;background:${barColor}"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);flex-wrap:wrap;gap:8px">
+          <span>Income so far: <strong style="color:var(--text)">₱${fmt(totIncome)}</strong></span>
+          <span>Gap to break-even: <strong style="color:var(--text)">${typeof r.gapToBreakEven==='number'?'₱'+fmt(r.gapToBreakEven):'n/a'}</strong></span>
+          ${perDay!=null?`<span>Needed per day (${escHtml(label)}): <strong style="color:var(--text)">₱${fmt(perDay)}</strong></span>`:''}
+        </div>
+      </div>
+    </div>
+
+    <div class="form-row" style="grid-template-columns:1fr 1fr">
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header"><h3>${emojiIcon('📌',18)} Fixed Costs (${r.classifiedFixed.length})</h3></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>${r.classifiedFixed.length ? r.classifiedFixed.map(catRow).join('') : `<tr><td colspan="2" style="color:var(--text-muted)">No fixed costs classified for ${escHtml(label)}</td></tr>`}</tbody>
+          <tfoot><tr style="border-top:2px solid var(--border)"><td style="font-weight:800">Total Fixed</td><td style="text-align:right;font-weight:800">₱${fmt(r.fixedTotal)}</td></tr></tfoot>
+        </table></div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-header"><h3>${emojiIcon('📊',18)} Variable Costs (${r.classifiedVariable.length})</h3></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>${r.classifiedVariable.length ? r.classifiedVariable.map(catRow).join('') : `<tr><td colspan="2" style="color:var(--text-muted)">No variable costs classified for ${escHtml(label)}</td></tr>`}</tbody>
+          <tfoot><tr style="border-top:2px solid var(--border)"><td style="font-weight:800">Total Variable</td><td style="text-align:right;font-weight:800">₱${fmt(r.variableTotal)}</td></tr></tfoot>
+        </table></div></div>
+      </div>
+    </div>
+
+    ${r.unclassified.length ? `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--warning)">
+      <div class="card-header"><h3>${emojiIcon('⚠️',18)} Unclassified (${r.unclassified.length}) — excluded from the math above</h3></div>
+      <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${r.unclassified.map(catRow).join('')}</tbody>
+      </table></div></div>
+      <div class="card-body" style="padding-top:10px;font-size:11px;color:var(--text-muted)">These categories posted expenses this period but aren't tagged Fixed or Variable — shown here, not silently dropped or guessed into a total.${canWrite?' Use Classify to tag them.':''}</div>
+    </div>` : ''}
+
+    <div class="bke-print-lh">${_beLh ? _beLh.footerHTML : ''}</div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
+
+  window.bindPeriodPicker(document.getElementById('bke-period'), (newKey) => {
+    renderBreakevenTab(container, currentUser, currentRole, newKey);
+  }, { activeKey: periodKey });
+
+  document.getElementById('bke-csv-btn')?.addEventListener('click', () => {
+    const slug = label.replace(/[^a-z0-9]+/gi,'-').toLowerCase();
+    window.exportCSV('breakeven-' + slug, window._beRows, [
+      { key:'classification', label:'Classification' },
+      { key:'category', label:'Category' },
+      { key:'amount', label:'Amount', get:x=>x.amount },
+    ]);
+  });
+
+  document.getElementById('bke-classify-btn')?.addEventListener('click', () => {
+    openBreakevenClassifyEditor(categories, cfg, () => renderBreakevenTab(container, currentUser, currentRole, periodKey));
+  });
+}
+
+// ── Break-even Classify editor (Finance-gated) ─────────────────────────
+// Tri-state chip per category (Fixed/Variable/None) + manual fixed-cost
+// add/remove rows, saved to finance_config/breakeven. `categories` is only
+// THIS PERIOD's byCategory keys — saving must not clobber explicit choices
+// made in another period for a category absent from the current one, so
+// the save handler starts from the existing doc's arrays and only replaces
+// entries for categories actually shown in this editor session (see the
+// save handler below for the exact merge).
+function openBreakevenClassifyEditor(categories, cfg, onSaved) {
+  const priorFixed = new Set(cfg.fixed || []), priorVariable = new Set(cfg.variable || []), priorNone = new Set(cfg.none || []);
+  const explicitOf = cat => priorFixed.has(cat) ? 'fixed' : priorVariable.has(cat) ? 'variable' : priorNone.has(cat) ? 'none' : null;
+  // selections holds ONLY categories with an explicit choice (carried over
+  // from cfg, or set by a click below). A category absent from this map has
+  // no override — it keeps riding the live keyword default forever.
+  const selections = {};
+  categories.forEach(cat => { const s = explicitOf(cat); if (s) selections[cat] = s; });
+  let manualRows = (Array.isArray(cfg.manualFixed) ? cfg.manualFixed : []).map(m => ({ label:m.label||'', amount:+m.amount||0 }));
+
+  const chipRow = (cat) => {
+    const explicit = selections[cat];
+    const guess = beDefaultGuess(cat);
+    const btn = (val, lbl) => `<button type="button" class="chip-tab${explicit===val?' active':''}" data-cat="${escHtml(cat)}" data-val="${val}" style="padding:4px 10px;font-size:11px">${lbl}</button>`;
+    const guessNote = !explicit ? `<span style="font-size:10px;color:var(--text-muted);margin-left:6px">(auto: ${guess==='fixed'?'Fixed':guess==='variable'?'Variable':'unclassified'})</span>` : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <span style="font-size:12px">${escHtml(cat)}${guessNote}</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="chip-tabs" style="margin:0">${btn('fixed','Fixed')}${btn('variable','Variable')}${btn('none','None')}</div>
+        ${explicit?`<button type="button" class="btn-secondary btn-sm bke-reset" data-cat="${escHtml(cat)}" style="padding:4px 8px;font-size:10px" title="Clear override — use the live default again" aria-label="Clear override for ${escHtml(cat)}">↺</button>`:''}
+      </div>
+    </div>`;
+  };
+  const manualRowHtml = (m, i) => `<div class="form-row" style="margin-bottom:6px">
+    <div class="form-group"><label>Label</label><input class="bke-m-label" data-i="${i}" value="${escHtml(m.label)}" placeholder="e.g. Rent — HQ"/></div>
+    <div class="form-group" style="display:flex;gap:6px;align-items:flex-end">
+      <div style="flex:1"><label>Amount (₱)</label><input class="bke-m-amount" data-i="${i}" type="number" step="0.01" inputmode="decimal" value="${m.amount||0}"/></div>
+      <button type="button" class="btn-danger btn-sm bke-m-del" data-i="${i}" aria-label="Remove manual fixed cost row">${emojiIcon('trash-2',14)}</button>
+    </div>
+  </div>`;
+
+  const bind = () => {
+    document.querySelectorAll('#bke-classify-cats [data-cat]').forEach(b => b.addEventListener('click', () => {
+      selections[b.dataset.cat] = b.dataset.val; render();
+    }));
+    document.querySelectorAll('.bke-reset').forEach(b => b.addEventListener('click', () => {
+      delete selections[b.dataset.cat]; render();
+    }));
+    document.querySelectorAll('.bke-m-label,.bke-m-amount').forEach(inp => inp.addEventListener('change', () => {
+      const i = +inp.dataset.i;
+      if (inp.classList.contains('bke-m-label')) manualRows[i].label = inp.value.trim();
+      else manualRows[i].amount = parseFloat(inp.value)||0;
+    }));
+    document.querySelectorAll('.bke-m-del').forEach(b => b.addEventListener('click', () => {
+      manualRows.splice(+b.dataset.i, 1); render();
+    }));
+  };
+  const render = () => {
+    document.getElementById('bke-classify-cats').innerHTML = categories.length
+      ? categories.map(chipRow).join('')
+      : `<div style="font-size:12px;color:var(--text-muted)">No categories posted this period yet.</div>`;
+    document.getElementById('bke-classify-manual').innerHTML = manualRows.map(manualRowHtml).join('')
+      || `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">No manual fixed costs added.</div>`;
+    if (window.lucide) lucide.createIcons();
+    bind();
+  };
+
+  window.openPage(`${emojiIcon('🏷',18)} Classify Break-even Costs`, `
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Tag each ledger category Fixed or Variable for break-even math. Untouched categories keep using the built-in keyword default (rent/utilities/salaries → Fixed; materials/COS/freight/commissions → Variable) until classified here. "None" deliberately excludes a category from both totals.</p>
+    <div id="bke-classify-cats" style="margin-bottom:16px"></div>
+    <h4 style="margin:14px 0 6px">${emojiIcon('➕',16)} Manual Fixed Costs</h4>
+    <p style="font-size:11px;color:var(--text-muted);margin-bottom:8px">For fixed costs that never post to the ledger as their own category — e.g. a rent figure tracked outside the ledger.</p>
+    <div id="bke-classify-manual"></div>
+    <button type="button" class="btn-secondary btn-sm" id="bke-m-add">${emojiIcon('➕',16)} Add Row</button>
+  `, `<button class="btn-primary" id="bke-classify-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  render();
+  document.getElementById('bke-m-add').addEventListener('click', () => { manualRows.push({label:'',amount:0}); render(); });
+  document.getElementById('bke-classify-save').addEventListener('click', () => window.busy(document.getElementById('bke-classify-save'), async () => {
+    const fixed = new Set(cfg.fixed || []), variable = new Set(cfg.variable || []), none = new Set(cfg.none || []);
+    // Only categories actually shown in THIS editor session get re-decided;
+    // everything outside that list (another period's categories) is left
+    // exactly as it was in the previously-saved doc.
+    categories.forEach(cat => { fixed.delete(cat); variable.delete(cat); none.delete(cat); });
+    Object.keys(selections).forEach(cat => {
+      if (selections[cat] === 'fixed') fixed.add(cat);
+      else if (selections[cat] === 'variable') variable.add(cat);
+      else if (selections[cat] === 'none') none.add(cat);
+    });
+    const manualFixedOut = manualRows.filter(m => m.label && m.amount).map(m => ({ label: m.label.trim(), amount: +(+m.amount).toFixed(2) }));
+    try {
+      await db.collection('finance_config').doc('breakeven').set({
+        fixed: Array.from(fixed), variable: Array.from(variable), none: Array.from(none), manualFixed: manualFixedOut,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: (window.currentUser&&window.currentUser.uid)||'',
+        updatedByName: (window.userProfile&&window.userProfile.displayName)||(window.currentUser&&window.currentUser.email)||''
+      });
+      closeModal();
+      Notifs.success('Break-even classification saved.');
+      onSaved && onSaved();
+    } catch (e) {
+      Notifs.showToast('Save failed: '+(e.message||e), 'error');
+    }
+  }));
+}
 
 // ── Ledger Tab (includes merged General Journal entries) ─────
 async function renderLedgerTab(container, currentUser, currentRole) {
