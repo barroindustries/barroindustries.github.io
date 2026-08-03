@@ -596,9 +596,12 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       </div>`:''}
     </div>
 
-    <!-- Messaging section fills remaining space -->
-    <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
-      <div id="task-comments-wrap" style="height:100%;display:flex;flex-direction:column"></div>
+    <!-- Messaging section — natural height (owner: "so much space below").
+         The old flex:1 filled the whole panel, so with few messages the
+         composer sat at the bottom of a tall empty region. Now it sizes to
+         content and the panel body scrolls as one column. -->
+    <div style="display:flex;flex-direction:column">
+      <div id="task-comments-wrap" style="display:flex;flex-direction:column"></div>
     </div>
   `;
 
@@ -606,7 +609,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   // shim) whenever this panel tears down — real Back, replaced-away, or
   // Overlay.clearAll(). `panel` is assigned right below; by the time this
   // fires (always later, on teardown) the const has long since initialized.
-  const panel = window.openPage(escHtml(t.title), bodyHTML, '', {
+  const panel = window.openPage((t.title||''), bodyHTML, '', {
     headerRightHTML,
     onClose: () => { if (_activeTaskPanelEl === panel) _activeTaskPanelEl = null; }
   });
@@ -616,7 +619,9 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   // scrollable info region above a flex-fill comments region, each scrolling
   // independently. Override just for this panel instance.
   const bodyEl = panel.querySelector('.page-panel-body');
-  if (bodyEl) bodyEl.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;padding:0';
+  // Single natural scroll region (info + comments + composer flow together),
+  // instead of the old forced split that left a gap below short message lists.
+  if (bodyEl) bodyEl.style.cssText = 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0';
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
 
@@ -1057,7 +1062,7 @@ async function openSubDetail(subId, currentUser, currentRole) {
   const s = {id:snap.id,...snap.data()};
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
 
-  openPage(escHtml(s.title||''), `
+  openPage((s.title||''), `
     <div style="margin-bottom:10px">
       <span class="badge ${statusBadge(s.status)}">${s.status||'pending'}</span>
       <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>

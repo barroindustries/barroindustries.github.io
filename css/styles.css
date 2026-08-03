@@ -6060,3 +6060,12 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .kpi-label { font-size: var(--fs-2xs); margin-bottom: 4px; }
   .kpi-value { font-size: clamp(17px, 5.6vw, 22px); }
 }
+
+/* v14 (owner: "receivables look bad") — analytics two-panel rows (Top Clients |
+   Receivables, and the other renderAnalytics side-by-side cards) used a fixed
+   2-column inline grid that never collapsed, so on a phone each panel was ~180px
+   and card values clipped off the right. Stack them below 700px. The inline
+   grid-template-columns keeps the desktop ratios. */
+@media (max-width: 700px) {
+  .an-row2 { grid-template-columns: 1fr !important; }
+}
