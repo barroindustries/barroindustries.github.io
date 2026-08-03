@@ -413,8 +413,8 @@ async function renderProductDatabase() {
                 <thead><tr><th>Code</th><th>Title</th><th>Measurement</th><th>Specifications</th><th>Unit</th><th style="text-align:right">Price</th><th style="text-align:right">Capital (Mat.)</th><th style="text-align:right">Capital (Labor)</th><th></th></tr></thead>
                 <tbody>
                   ${prods.map(p => `
-                    <tr data-pid="${p.id}" class="pdb-row">
-                      <td class="tc-detail" data-label="Code"><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
+                    <tr data-pid="${escHtml(p.id)}" class="pdb-row">
+                      <td class="tc-detail" data-label="Code"><span style="font-family:monospace;font-size:12px">${escHtml(p.id)}</span></td>
                       <td class="tc-name">${escHtml(p.title||'')}${!p.photoUrl?` <span title="No photo yet" style="opacity:.5">${emojiIcon('📷',16)}</span>`:''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
                       <td class="tc-detail" data-label="Measurement" style="font-size:12px">${measureStr(p.measurement)}</td>
                       <td class="tc-detail" data-label="Specifications" style="font-size:12px;max-width:220px">${escHtml(p.specifications||'—')}</td>
@@ -423,8 +423,8 @@ async function renderProductDatabase() {
                       <td class="tc-detail" data-label="Capital (Mat.)" style="text-align:right">${fmt(p.capitalMaterials)}</td>
                       <td class="tc-detail" data-label="Capital (Labor)" style="text-align:right">${fmt(p.capitalLabor)}</td>
                       <td class="tc-actions" style="text-align:right;white-space:nowrap">
-                        <button class="btn-secondary btn-sm pdb-edit-btn" data-pid="${p.id}">Edit</button>
-                        <button class="btn-danger btn-sm pdb-del-btn" data-pid="${p.id}" data-name="${(p.title||'').replace(/"/g,'&quot;')}" style="margin-left:4px">Delete</button>
+                        <button class="btn-secondary btn-sm pdb-edit-btn" data-pid="${escHtml(p.id)}">Edit</button>
+                        <button class="btn-danger btn-sm pdb-del-btn" data-pid="${escHtml(p.id)}" data-name="${escHtml(p.title||'')}" style="margin-left:4px">Delete</button>
                       </td>
                     </tr>`).join('')}
                 </tbody>
@@ -988,12 +988,18 @@ async function renderManagerDashboard() {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
     const depts = currentDepts || [];
-    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, attExtSnap] = await Promise.all([
       dbCachedGet('users',     () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
       dbCachedGet('approvals-pending', () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'), 30000),
       dbCachedGet('ca-pending',        () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),     30000),
+      // Re-audit 2026-08-03: deptPending below used to omit pending attendance
+      // extensions entirely, even though APPROVAL_CAPS lists 'attendance' as
+      // manager-actionable and both the President/Secretary dashboards already
+      // fold it into their totals — a manager saw no alert/badge for a team
+      // member's pending Time-In extension.
+      dbCachedGet('att-ext-pending', () => safeGet(db.collection('attendance_extensions').where('status','==','pending'), 'attendance_extensions'), 30000),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
@@ -1007,8 +1013,9 @@ async function renderManagerDashboard() {
     const doneT = deptTasks.filter(t=>CLOSED.includes(t.status));
     const overdueT = openT.filter(t=>t.dueDate && t.dueDate < todayStr);
     const subs = subsSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const attExtPending = attExtSnap.docs.filter(d=>teamIds.has(d.data().uid)).length;
     const deptPending = subs.filter(s=>s.status==='pending' && (depts.includes(s.department)||teamIds.has(s.createdBy)||teamIds.has(s.uid))).length
-      + (approvalsSnap.size||0) + (caSnap.size||0);
+      + (approvalsSnap.size||0) + (caSnap.size||0) + attExtPending;
 
     // Today's attendance for the team (admin can read attendance/{uid}/records/{date})
     // Attendance status is derived via the shared window.attRecKind reader (config.js),
@@ -1018,10 +1025,16 @@ async function renderManagerDashboard() {
       const kind = !data ? 'unmarked' : window.attRecKind(data);
       return kind === 'none' ? 'unmarked' : kind;
     };
-    const att = await Promise.all(team.map(u =>
+    // Re-audit 2026-08-03: this ran N uncached Firestore reads (one per team
+    // member) on EVERY render, unlike every other read on this dashboard —
+    // for a larger team that's real read-quota cost and latency that scales
+    // with headcount, for data that only changes a handful of times a day.
+    // Cache keyed by dept+day so switching subtabs/re-rendering within the
+    // same minute reuses the same batch instead of re-reading per employee.
+    const att = await dbCachedGet('mgr-att-today:'+depts.join(',')+':'+todayStr, () => Promise.all(team.map(u =>
       db.collection('attendance').doc(u.id).collection('records').doc(todayStr).get()
         .then(d => ({ uid:u.id, name:u.displayName||u.email, status: attStatus(d.exists ? d.data() : null) }))
-        .catch(() => ({ uid:u.id, name:u.displayName||u.email, status:'unmarked' }))));
+        .catch(() => ({ uid:u.id, name:u.displayName||u.email, status:'unmarked' })))), 60000);
     const present = att.filter(a=>a.status==='present').length;
     const half    = att.filter(a=>a.status==='half').length;
     const unmarked = att.filter(a=>a.status==='unmarked').length;
@@ -4192,6 +4205,14 @@ async function renderAnalytics() {
   // Sales-department quotes, hoisted so both the metrics bag and renderSales
   // read the SAME filtered array instead of re-filtering independently.
   const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
+  // Re-audit 2026-08-03: renderSales's KPI tiles were chain-deduped (latest revision
+  // per lineage only) but the metrics bag (buildMetricsSync) and renderOverview kept
+  // counting every raw quote doc, so a quote re-filed as R2/R3 could still double-count
+  // revenue/win-rate here even though the Sales tab right next to it showed the deduped
+  // number — the exact "false win-rate drop" the owner flagged. Same helper, applied to
+  // every quote-derived figure on this page, not just renderSales's own KPI row.
+  const chainAllQuotes = window.latestQuoteRevisions ? window.latestQuoteRevisions(quotes).latest : quotes;
+  const chainSalesQuotes = window.latestQuoteRevisions ? window.latestQuoteRevisions(salesQuotes).latest : salesQuotes;
   // Pure, synchronous — reads ONLY already-fetched arrays (WS16 no-refetch rule).
   // Re-run whenever window._AN_PERIOD changes (Overview's picker) so the
   // Conclusions card can never describe a period the KPI cards next to it
@@ -4202,15 +4223,15 @@ async function renderAnalytics() {
     const anPeriod = window._AN_PERIOD || 'ytd';
     const ledInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
     const ledOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
-    const wonQuotesP = sum(quotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
+    const wonQuotesP = sum(chainAllQuotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
     const revP = ledInP || wonQuotesP;
     const netP = revP - ledOutP;
     const payrollTotal = sum(users, u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));
     // "this period vs previous same-type period" (WS32 wonMTD/wonPrev ymOf pattern) —
     // scoped to calendar month regardless of the Overview picker, mirroring the
     // existing wonMTD/wonPrev revenue-delta convention elsewhere on this page.
-    const qStat     = window.quoteWinStats(salesQuotes.filter(qq=>ymOf(qq.createdAt)===thisMonth));
-    const qPrevStat = window.quoteWinStats(salesQuotes.filter(qq=>ymOf(qq.createdAt)===lastMonth));
+    const qStat     = window.quoteWinStats(chainSalesQuotes.filter(qq=>ymOf(qq.createdAt)===thisMonth));
+    const qPrevStat = window.quoteWinStats(chainSalesQuotes.filter(qq=>ymOf(qq.createdAt)===lastMonth));
     const bidStat   = window.bidWinStats(govBids);
     const prodTasksM   = tasks.filter(t=>t.department==='Production'||t.category==='Production');
     const prodDoneM    = prodTasksM.filter(t=>['done','approved','archived'].includes(t.status));
@@ -4269,7 +4290,7 @@ async function renderAnalytics() {
     const ledIn  = ym => sum(ledger.filter(l=>ledgerKind(l)==='income'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     const ledOut = ym => sum(ledger.filter(l=>ledgerKind(l)==='expense'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     // sales-based revenue fallback for months where the ledger is still sparse (accepted quotes by createdAt month)
-    const wonQuotesMonth = ym => sum(quotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===ym), q=>q.total);
+    const wonQuotesMonth = ym => sum(chainAllQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===ym), q=>q.total);
     // period-aware totals (This Month / Since Jan 1 / All Time) — v12 WS40: computed
     // once in buildMetricsSync (Spec 2d); reused here byte-identical, not recomputed.
     const revMTD  = M.revP, ledOutP = M.ledOutP;
@@ -4290,7 +4311,7 @@ async function renderAnalytics() {
     // ── Top clients by signed contract (fallback: accepted quotes) ──
     const clientRev={};
     allProjects.filter(p=>p.stage!=='cancelled').forEach(p=>{const k=p.clientName||'—';clientRev[k]=(clientRev[k]||0)+(+p.contractAmount||0);});
-    if(!Object.keys(clientRev).length) quotes.filter(q=>q.status==='accepted').forEach(q=>{const k=q.clientName||q.client||'—';clientRev[k]=(clientRev[k]||0)+(+q.total||0);});
+    if(!Object.keys(clientRev).length) chainAllQuotes.filter(q=>q.status==='accepted').forEach(q=>{const k=q.clientName||q.client||'—';clientRev[k]=(clientRev[k]||0)+(+q.total||0);});
     const topClients=Object.entries(clientRev).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,8);
     const clientTotal=topClients.reduce((s,e)=>s+e[1],0)||1;
     // ── v12 WS40 Spec 3 — Conclusions card ──

@@ -73,7 +73,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (expectedType !== selectedLoginType) {
           const actualLabel   = LOGIN_TYPE_LABELS[expectedType]   || expectedType;
           const selectedLabel = LOGIN_TYPE_LABELS[selectedLoginType] || selectedLoginType;
-          // Wrong portal — sign out and show error in login form
+          // Wrong portal — sign out and show error in login form.
+          // Defensive reset (re-audit 2026-08-03): nothing else has run yet on
+          // this path today, but zero the nav-depth counter here so this
+          // branch stays self-contained regardless of future edits earlier in
+          // the success path above it.
+          window._navDepth = 0;
           await auth.signOut();
           showLogin();
           // Keep form wrap visible (not role picker) so the error element is shown
@@ -140,13 +145,15 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Presence Heartbeat ────────────────────────────
 let _presenceInterval = null;
 let _presenceVisHandler = null;
+let _presencePagehideHandler = null;
 function startPresenceHeartbeat(uid) {
   if (_presenceInterval) clearInterval(_presenceInterval);
   if (_presenceVisHandler) { document.removeEventListener('visibilitychange', _presenceVisHandler); window.removeEventListener('focus', _presenceVisHandler); }
+  if (_presencePagehideHandler) { window.removeEventListener('pagehide', _presencePagehideHandler); }
   let _lastPing = 0;
   const ping = () => {
     _lastPing = Date.now();
-    db.collection('users').doc(uid).update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+    db.collection('users').doc(uid).update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp(), online: true }).catch(()=>{});
   };
   ping();
   // Timer keeps it fresh while the tab is foregrounded; browsers throttle/pause
@@ -156,9 +163,25 @@ function startPresenceHeartbeat(uid) {
   document.addEventListener('visibilitychange', _presenceVisHandler);
   window.addEventListener('focus', _presenceVisHandler);
   _presenceInterval = setInterval(() => { if (document.visibilityState === 'visible') ping(); }, 60000); // every 60s while visible
+  // Re-audit 2026-08-03 — this heartbeat only ever POSITIVELY signals presence
+  // (bumps lastSeen); it never explicitly clears it, so every consumer has to
+  // infer "gone" purely from timestamp staleness, with no real-time offline
+  // signal when a tab/app is actually closed. 'pagehide' fires reliably on tab
+  // close, navigation away, and app backgrounding on mobile (unlike
+  // 'beforeunload', which mobile Safari/PWA contexts often skip); write
+  // online:false as a best-effort last gasp over the still-open connection —
+  // not guaranteed to land, but strictly better than no signal at all. Actual
+  // sign-out/auto-logout/force-logout already route through the
+  // Session.addCleanup below, which also flips it explicitly.
+  _presencePagehideHandler = () => {
+    try { db.collection('users').doc(uid).update({ online: false }).catch(()=>{}); } catch(_){}
+  };
+  window.addEventListener('pagehide', _presencePagehideHandler);
   Session.addCleanup(() => {
     if (_presenceInterval) { clearInterval(_presenceInterval); _presenceInterval = null; }
     if (_presenceVisHandler) { document.removeEventListener('visibilitychange', _presenceVisHandler); window.removeEventListener('focus', _presenceVisHandler); _presenceVisHandler = null; }
+    if (_presencePagehideHandler) { window.removeEventListener('pagehide', _presencePagehideHandler); _presencePagehideHandler = null; }
+    db.collection('users').doc(uid).update({ online: false }).catch(()=>{});
   });
 }
 
@@ -216,20 +239,21 @@ async function checkBackupHealth() {
     if (!problems.length) return;
     renderBackupHealthBanner(problems);
     // Notify the President once per distinct problem (deduped).
-    if (window.Notifs?.send) {
-      // window.PRESIDENT_UID doesn't exist as a global today (js/modules.js has an
-      // unused module-scoped PRESIDENT_UID const holding an EMAIL, not a uid, and no
-      // code anywhere resolves an arbitrary uid by email) — skip the push rather than
-      // invent a new lookup; the banner alone still satisfies the alert requirement.
-      const PREZ_UID = window.PRESIDENT_UID; // if unavailable, skip the push — banner still shows
-      if (PREZ_UID) {
-        window.Notifs.send(PREZ_UID, {
-          title: '⚠️ Backup/sync needs attention',
-          body: problems.join(' '),
-          icon: '🗄️', type: 'system',
-          dedupKey: 'backup-health-' + problems.join('|').slice(0, 80),
-        }).catch(() => {});
-      }
+    // Re-audit 2026-08-03: window.PRESIDENT_UID never existed as a global (only
+    // a module-scoped EMAIL const of the same name in js/modules.js), so this
+    // push branch was permanently skipped and the alert only ever reached
+    // whoever happened to already be logged in as admin/finance when the
+    // banner rendered. Notifs.sendToOwner() (already used elsewhere in this
+    // file, e.g. the quote-filed/quote-review notifications below) queries
+    // users where role in ('president','owner') and fans out — no uid lookup
+    // needed.
+    if (window.Notifs?.sendToOwner) {
+      window.Notifs.sendToOwner({
+        title: '⚠️ Backup/sync needs attention',
+        body: problems.join(' '),
+        icon: '🗄️', type: 'system',
+        dedupKey: 'backup-health-' + problems.join('|').slice(0, 80),
+      }).catch(() => {});
     }
   } catch (_) { /* monitoring must never break the app */ }
 }
@@ -383,9 +407,11 @@ function resetLogoutTimer() {
 // Uses localStorage dedup so repeated logins on the same day don't re-send.
 async function checkPayrollDuties(user) {
   try {
-    const uDoc = await db.collection('users').doc(user.uid).get();
-    if (!uDoc.exists) return;
-    const role = uDoc.data().role;
+    // loadUserProfile(user) is always awaited earlier in the same
+    // onAuthStateChanged handler and already populates window.currentRole from
+    // this exact users/{uid} doc — re-fetching it here was a pure duplicate
+    // read fired on every single sign-in (re-audit 2026-08-03).
+    const role = window.currentRole;
     if (role === 'president' || role === 'owner' || role === 'partner') return;
 
     const todayStr = bizDate();
@@ -925,11 +951,17 @@ function showLoginError(msg) { const el=document.getElementById('login-error'); 
 function clearLoginError() { document.getElementById('login-error').classList.add('hidden'); document.getElementById('reset-sent')?.classList.add('hidden'); }
 function friendlyError(code) {
   return {
-    'auth/user-not-found':    'No account found. Contact HR.',
-    'auth/wrong-password':    'Incorrect password.',
-    'auth/invalid-email':     'Invalid email or username.',
-    'auth/too-many-requests': 'Too many attempts. Try later.',
-    'auth/invalid-credential':'Incorrect username or password.'
+    'auth/user-not-found':          'No account found. Contact HR.',
+    'auth/wrong-password':          'Incorrect password.',
+    'auth/invalid-email':           'Invalid email or username.',
+    'auth/too-many-requests':       'Too many attempts. Try later.',
+    'auth/invalid-credential':      'Incorrect username or password.',
+    // Re-audit 2026-08-03 — these three fall-through cases each need a
+    // different response (retry vs. contact HR vs. try again shortly), but
+    // all silently rendered the same generic 'Sign-in failed.' before this.
+    'auth/network-request-failed':  'No internet connection. Check your network and try again.',
+    'auth/user-disabled':           'This account has been disabled. Contact HR.',
+    'auth/internal-error':          'Something went wrong on our end. Please try again in a moment.'
   }[code] || 'Sign-in failed.';
 }
 
@@ -1127,6 +1159,11 @@ function buildSidebarNav() {
   }).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
+      // Matches the bottom-nav-item/More-sheet-row tap haptic (re-audit
+      // 2026-08-03) — the sidebar is reachable by touch (off-canvas drawer,
+      // tablet-rail widths), so it shouldn't be the one primary-nav surface
+      // that stays silent.
+      window.haptic && window.haptic('light');
       navigateTo(btn.dataset.page);
       // navigateTo() already runs Overlay.clearAll() (tearing down + consuming
       // the sidebar's history entry if one is open); this is a harmless no-op
@@ -1455,7 +1492,14 @@ function renderQuoteBuilderIframe() {
   // override the loaded revision ("new revision opens the first draft").
   // Reopen/revision loads are AUTHORITATIVE: flag them in the URL so the
   // builder suppresses the draft-resume banner entirely for this boot.
-  if (reopenState) qbSrc += (qbSrc.includes('?') ? '&' : '?') + 'reopen=1';
+  // Re-audit 2026-08-03: gate strictly on sourceDocId — reopenQuoteFromDoc/
+  // newRevisionFromDoc (below) always stamp one onto a REAL reopen/revision of
+  // an existing filed quote, but other _qbReopenState writers (e.g. Quick
+  // Estimate's "Create Formal Quotation →" handoff in sales.js, which hands
+  // off a fresh, never-filed basket) don't. Without this gate, reopen=1 fired
+  // for ANY caller and silently suppressed the draft-resume prompt for a
+  // genuinely different unsaved draft sitting in localStorage.
+  if (reopenState && reopenState.sourceDocId) qbSrc += (qbSrc.includes('?') ? '&' : '?') + 'reopen=1';
   const reopenAsRevision = window._qbReopenAsRevision; window._qbReopenAsRevision = false;
   // President-review mode: editing a partner's quote to hand it back. The edits
   // are saved to the SAME (partner-owned) quote doc, not a new president copy.
@@ -1611,20 +1655,53 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
   try {
     const snap = await db.collection(collection).doc(id).get();
     const clicked = { id, ...(snap.data() || {}) };
+    // Re-audit 2026-08-03 (HIGH) — this used to pool candidates by client NAME
+    // string match alone. Two different clients sharing a name (common in the
+    // Philippines, e.g. "Juan Dela Cruz") got pooled together, so New Revision
+    // for one client could silently inherit an unrelated client's pricing;
+    // renaming a client between revisions also dropped earlier revisions out
+    // of the pool. Pool by rootQuoteId first — the exact key buildQuoteChains/
+    // latestQuoteRevisions (sales.js) already use for the same chain — falling
+    // back to clientId, and using client NAME only as a last-resort fallback
+    // for legacy docs that predate BOTH ids. Scoped .where() queries (not a
+    // full collection read) also fix the read-cost issue flagged alongside
+    // this: cost now scales with the one client's chain, not total quote volume.
+    const rootId   = clicked.rootQuoteId || clicked.id;
+    const clientId = clicked.clientId || '';
     const clientKey = (clicked.clientName || '').trim().toLowerCase();
 
-    // Gather every saved quote for this client so the revision continues from the
-    // most recent one. Reading the whole collection can fail for scoped roles
-    // (e.g. partners) — fall back to just the clicked quote in that case.
+    // Gather every quote in the SAME revision chain so the revision continues
+    // from the most recent one. Reading with scoped queries can fail for
+    // scoped roles (e.g. partners) — fall back to just the clicked quote in
+    // that case.
     let pool = [clicked];
-    if (clientKey) {
-      try {
+    try {
+      let mine = [];
+      const byRoot = await db.collection(collection).where('rootQuoteId', '==', rootId).get();
+      mine = byRoot.docs.map(d => ({ id: d.id, ...d.data() })).filter(q => q.editableState);
+      // The clicked doc itself may BE the chain's root (no rootQuoteId field
+      // stamped on it, or it predates Wave 3's chain-linking) — always keep it
+      // as a candidate even if the query above didn't return it.
+      if (clicked.editableState && !mine.some(q => q.id === clicked.id)) mine.push(clicked);
+      // clientId fallback: only used if the rootQuoteId query found nothing
+      // beyond the clicked doc itself (e.g. a legacy chain never stamped).
+      if (mine.length < 2 && clientId) {
+        const byClient = await db.collection(collection).where('clientId', '==', clientId).get();
+        const viaClient = byClient.docs.map(d => ({ id: d.id, ...d.data() })).filter(q => q.editableState);
+        if (viaClient.length > mine.length) mine = viaClient;
+      }
+      // Legacy name-based fallback — ONLY for docs lacking both rootQuoteId
+      // and clientId (pre-Wave-3 quotes), and only matched against other docs
+      // that ALSO lack both ids, so a modern, properly-linked quote can never
+      // be pulled in by a same-name coincidence.
+      if (mine.length < 2 && clientKey && !clientId && !clicked.rootQuoteId) {
         const all = await db.collection(collection).get();
-        const mine = all.docs.map(d => ({ id: d.id, ...d.data() }))
-          .filter(q => (q.clientName || '').trim().toLowerCase() === clientKey && q.editableState);
-        if (mine.length) pool = mine;
-      } catch(_) {}
-    }
+        const viaName = all.docs.map(d => ({ id: d.id, ...d.data() }))
+          .filter(q => !q.clientId && !q.rootQuoteId && (q.clientName || '').trim().toLowerCase() === clientKey && q.editableState);
+        if (viaName.length > mine.length) mine = viaName;
+      }
+      if (mine.length) pool = mine;
+    } catch(_) {}
 
     const revOf = q => {
       const m = String(q.quoteNumber || q.editableState?.quoteNo || '').match(/-R(\d+)\s*$/i);
@@ -1680,8 +1757,12 @@ function catalogDocFromJson(p) {
     specs: Array.isArray(p.specs) ? p.specs : [],
     laborHours: p.laborHours || null,
     leadTime: p.leadTime || '',
-    capitalMaterials: 0,
-    capitalLabor: 0,
+    // v14 re-audit HIGH fix — cost fields no longer go on the products doc at
+    // all (firestore.rules' `allow create` on /products rejects a doc that
+    // carries capitalMaterials/capitalLabor/bom). A freshly-seeded/imported
+    // product simply has no product_costs doc yet either, so
+    // normalizeProduct()'s `?? 0` fallback already shows ₱0 for it — exactly
+    // the same value these two lines used to hard-code here.
     formulaType: p.formulaType || 'fixed',
     formula: p.formula || {},
   };
@@ -1695,7 +1776,34 @@ async function fetchCatalogFile() {
   return JSON.parse(clean);
 }
 
+// v14 re-audit HIGH fix — capitalMaterials/capitalLabor/bom (Barro's cost
+// basis) no longer live on the products doc (see firestore.rules + the
+// migrateProductCostsOut migration in js/migrations.js); they live in
+// product_costs/{docId}, readable only by finance/admin (never partner).
+// This cache is refreshed by seedCatalogIfNeeded() below every time the
+// (isPresident()-gated) Product Database screen loads, and normalizeProduct()
+// merges it in. A non-finance/admin session simply gets a permission-denied
+// here, caught below, leaving the cache empty — normalizeProduct() then falls
+// back to any legacy cost field still on the products doc itself (harmless;
+// during rollout, before migrateProductCostsOut() has run, or for a doc that
+// was never migrated), or 0.
+window._productCostsCache = window._productCostsCache || {};
+async function loadProductCostsCache() {
+  try {
+    const snap = await db.collection('product_costs').limit(2000).get();
+    const map = {};
+    snap.docs.forEach(d => { map[d.id] = d.data(); });
+    window._productCostsCache = map;
+  } catch (e) {
+    // Permission-denied (not finance/admin) or offline — leave whatever was
+    // cached before untouched rather than blanking it out from under a
+    // concurrently-open Product Database render.
+    console.warn('[product_costs] cache load skipped', e.code || e.message || e);
+  }
+}
+
 async function seedCatalogIfNeeded() {
+  await loadProductCostsCache();
   const metaSnap = await db.collection('productMeta').doc('config').get();
   if (metaSnap.exists) return;
   try {
@@ -1765,14 +1873,20 @@ function pdbCategoryLabel(catId, categories) {
 // Fall back to those so old placeholder products still display correctly
 // until they're next edited and saved under the new schema.
 function normalizeProduct(p) {
+  // v14 re-audit HIGH fix — product_costs FIRST, legacy field on the products
+  // doc itself as the rollout fallback (see loadProductCostsCache above).
+  // `??` (not `||`) so a real, deliberate ₱0 cost in product_costs is kept
+  // instead of falling through to a stale legacy value.
+  const costs = window._productCostsCache && window._productCostsCache[p.id];
   return {
     ...p,
     title: p.title || p.name || '',
     basePrice: p.basePrice ?? p.baseRate ?? 0,
     measurement: p.measurement || {},
     specifications: p.specifications || p.notes || '',
-    capitalMaterials: p.capitalMaterials || 0,
-    capitalLabor: p.capitalLabor || 0,
+    capitalMaterials: (costs && costs.capitalMaterials) ?? p.capitalMaterials ?? 0,
+    capitalLabor: (costs && costs.capitalLabor) ?? p.capitalLabor ?? 0,
+    bom: (costs && costs.bom) || p.bom || [],
     formulaType: p.formulaType || 'fixed',
     formula: p.formula || {},
   };
@@ -3081,7 +3195,11 @@ window.Keymap = (function () {
   // v13 Phase 145 — Keymap expansion. No pageAction registry exists yet
   // (Phase 132 not built), so 'n' uses a small ordered selector list of real
   // "+Add" button ids gathered across the major screens instead.
-  const NEW_ITEM_SELECTOR = '[data-key-new], #add-task-btn, #add-expense-btn, ' +
+  // Re-audit 2026-08-03: '#add-expense-btn' never existed anywhere in the
+  // codebase (the Finance/Ledger tab's actual add button is #add-ledger-btn,
+  // already listed below) — it silently no-opped on the Finance screen while
+  // the cheat sheet still advertised 'n' as working everywhere. Removed.
+  const NEW_ITEM_SELECTOR = '[data-key-new], #add-task-btn, ' +
     '#add-client-btn, #add-ledger-btn, #add-deal-btn, #add-ca-for-btn';
 
   function contextNew() {
@@ -3287,7 +3405,15 @@ window.fitKpiValues = function(root){
 
 // ── Quote Builder iframe → Firestore bridge ───────
 window.addEventListener('message', async (e) => {
-  if (e.origin !== window.location.origin) return;  // only trust our own quote-builder iframe — never act on forged cross-origin messages
+  if (e.origin !== window.location.origin) return;  // same-origin only — but that alone doesn't prove it came from the builder
+  // Re-audit 2026-08-03: same-origin was checked but e.source never was —
+  // any same-origin context able to call window.postMessage could forge
+  // QUOTE_FILED/QUOTE_UPDATE/QUOTE_DRAFT and have it processed as a real
+  // quote-builder submission. The narrower QB_READY/REQUEST_STATE handlers
+  // elsewhere in this file already check e.source against the tracked
+  // #qb-frame iframe — do the same here for defense-in-depth.
+  const qbFrame = document.getElementById('qb-frame');
+  if (!qbFrame || e.source !== qbFrame.contentWindow) return;
   const { type, payload, docId, collection } = e.data || {};
   if (!payload || !currentUser || !db) return;
 
@@ -3542,23 +3668,63 @@ function _atLoginScreen() {
   const s = document.getElementById('login-screen');
   return s && !s.classList.contains('hidden');
 }
+// Re-audit 2026-08-03 (item d) — "Mid-session: do nothing" above meant a
+// long-lived kiosk session (up to the 10-day AUTO_LOGOUT_MS window, per
+// firebase-config.js's LOCAL auth persistence) that never revisits the login
+// screen NEVER got a chance to apply a waiting update — the ONLY apply path
+// was gated behind _atLoginScreen(). This adds a small, non-blocking,
+// dismissible pill for that case: tap to apply+reload now, or ignore and it
+// still applies silently next time the login screen IS reached. Never
+// auto-reloads on its own — same "never interrupt a mid-task user" intent the
+// original silent-apply design already committed to, just with an opt-in path
+// for sessions that would otherwise wait for days.
+function _showSwUpdatePill(applyFn) {
+  if (document.getElementById('sw-update-pill')) return;
+  const pill = document.createElement('div');
+  pill.id = 'sw-update-pill';
+  pill.style.cssText = `
+    position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(env(safe-area-inset-bottom,0px) + 78px);
+    z-index:var(--z-toast, 9990);display:flex;align-items:center;gap:8px;
+    background:var(--surface-2);color:var(--text);border:1px solid var(--border);
+    border-radius:999px;padding:8px 8px 8px 14px;font-size:12.5px;font-weight:600;
+    box-shadow:var(--sh-lg, 0 8px 24px rgba(0,0,0,0.3));cursor:pointer;
+    animation:fadeIn .2s ease;max-width:92vw;
+  `;
+  pill.innerHTML = `<span>${emojiIcon('⬆️',14)} Update available — tap to refresh</span>
+    <button aria-label="Dismiss" style="background:none;border:none;color:var(--text-muted);font-size:16px;line-height:1;cursor:pointer;padding:2px 4px">×</button>`;
+  pill.addEventListener('click', (e) => {
+    if (e.target.tagName === 'BUTTON') { pill.remove(); return; }
+    _swReloading = true;
+    applyFn();
+  });
+  document.body.appendChild(pill);
+}
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     // A new SW that finished installing before this page loaded is already waiting.
-    if (reg.waiting && navigator.serviceWorker.controller && _atLoginScreen()) {
-      _swReloading = true;
-      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      if (_atLoginScreen()) {
+        _swReloading = true;
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        _showSwUpdatePill(() => reg.waiting && reg.waiting.postMessage({ type: 'SKIP_WAITING' }));
+      }
     }
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
       if (!newWorker) return;
       newWorker.addEventListener('statechange', () => {
         // installed + already controlled → an UPDATE (not first install).
-        if (newWorker.state === 'installed' && navigator.serviceWorker.controller && _atLoginScreen()) {
-          _swReloading = true;
-          newWorker.postMessage({ type: 'SKIP_WAITING' }); // silent apply, login only
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          if (_atLoginScreen()) {
+            _swReloading = true;
+            newWorker.postMessage({ type: 'SKIP_WAITING' }); // silent apply, login only
+          } else {
+            // Mid-session: offer the non-blocking pill instead of doing nothing.
+            _showSwUpdatePill(() => reg.waiting && reg.waiting.postMessage({ type: 'SKIP_WAITING' }));
+          }
         }
-        // Mid-session: do nothing — the waiting SW activates on the next full load.
       });
     });
   }).catch(console.warn);

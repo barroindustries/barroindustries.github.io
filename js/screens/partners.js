@@ -920,8 +920,14 @@ async function loadPartnersDeptTab(sub) {
       break;
     }
     case 'activity': {
-      // Show recent notifications/actions from partner accounts
-      const notifPromises = partners.slice(0,5).map(p =>
+      // Show recent notifications/actions from partner accounts.
+      // Re-audit 2026-08-03: this used to slice to the first 5 partners BEFORE
+      // fetching, off an unordered users query — so which partners' activity
+      // showed up was arbitrary Firestore document order, and any partner past
+      // #5 never appeared at all, with no indication anything was cut off. Fetch
+      // every partner's recent items (still capped per-partner at limit(5)); the
+      // final .slice(0,20) below already bounds the merged, globally-sorted list.
+      const notifPromises = partners.map(p =>
         db.collection('notifications').doc(p.id).collection('items')
           .orderBy('createdAt','desc').limit(5).get().catch(()=>({docs:[]}))
           .then(snap => snap.docs.map(d=>({...d.data(), partnerName: p.displayName||p.email})))

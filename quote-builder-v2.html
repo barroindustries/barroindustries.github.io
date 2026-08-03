@@ -123,13 +123,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue
 table{width:100%;border-collapse:collapse;}
 .items-table{table-layout:fixed;width:100%;}
 .items-table th:nth-child(1){width:4%;}
-.items-table th:nth-child(2){width:42%;}
+.items-table th:nth-child(2){width:36%;}
 .items-table th:nth-child(3){width:5%;}
 .items-table th:nth-child(4){width:9%;}
 .items-table th:nth-child(5){width:12%;}
 .items-table th:nth-child(6){width:12%;}
 .items-table th:nth-child(7){width:12%;}
-.items-table th:nth-child(8){width:4%;}
+.items-table th:nth-child(8){width:10%;}
 th{background:var(--dark-blue);color:white;text-align:left;padding:7px 8px;
   font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
 td{padding:8px 8px;border-bottom:1px solid var(--gray-mid);font-size:13px;vertical-align:middle;}
@@ -140,6 +140,22 @@ td{padding:8px 8px;border-bottom:1px solid var(--gray-mid);font-size:13px;vertic
 tr:hover td{background:#fafbff;}
 .del-btn{color:var(--red);background:none;border:none;cursor:pointer;font-size:15px;padding:2px 5px;border-radius:4px;}
 .del-btn:hover{background:#fdecea;}
+/* QB #9 — drag-to-reorder line items. Desktop: HTML5 draggable handle
+   (mouse-only gesture, never fires from touchstart, so it can't fight the
+   axis-locked scroll gestures). Touch: up/down buttons instead of
+   long-press-to-drag — long-press inside an iframe on iOS is unreliable
+   (competes with native text-selection/callout and touch-scroll), buttons
+   are a plain click and can never hijack a vertical scroll. */
+.row-actions{display:flex;align-items:center;justify-content:center;gap:2px;flex-wrap:wrap;}
+.drag-handle{cursor:grab;color:var(--gray-dark);font-size:14px;padding:2px 3px;border-radius:4px;user-select:none;line-height:1;}
+.drag-handle:hover{background:rgba(46,95,138,.08);}
+.drag-handle:active{cursor:grabbing;}
+.move-btn{color:var(--dark-blue);background:none;border:none;cursor:pointer;font-size:11px;line-height:1;padding:3px 4px;border-radius:4px;}
+.move-btn:hover{background:rgba(46,95,138,.08);}
+.move-btn:disabled{opacity:.25;cursor:default;}
+.move-btn:disabled:hover{background:none;}
+#itemsTbody tr.dragging{opacity:.4;}
+#itemsTbody tr.drag-over td{box-shadow:inset 0 2px 0 var(--mid-blue);}
 .edit-price{border:1.5px dashed var(--orange);border-radius:4px;width:100%;text-align:right;padding:4px 5px;box-sizing:border-box;}
 .cell-edit{outline:none;border-radius:3px;min-height:1em;padding:1px 3px;transition:background .12s;}
 .cell-edit:hover{background:rgba(46,95,138,.07);cursor:text;}
@@ -281,6 +297,10 @@ tr:hover td{background:#fafbff;}
   /* del-btn is the primary row-action touch target — bring it to the
      44px minimum instead of the old 30px hit area */
   .del-btn{padding:6px 10px;font-size:18px;min-width:44px;min-height:44px;}
+  /* QB #9 mobile — drag handle is hidden on touch (see IS_TOUCH in JS), so
+     the up/down buttons are the only reorder control; give them a real
+     tap target instead of the desktop-hover-sized default. */
+  .move-btn{min-width:34px;min-height:34px;font-size:14px;}
   .pricing-controls{flex-direction:column;align-items:stretch;gap:10px;}
   .pc-row{flex-wrap:wrap;}
   .pc-check{min-height:44px;}
@@ -904,7 +924,7 @@ tr:hover td{background:#fafbff;}
           <th>Unit Price</th>
           <th>Amount</th>
           <th>Lead Time</th>
-          <th class="no-print">Del</th>
+          <th class="no-print">Actions</th>
         </tr>
       </thead>
       <tbody id="itemsTbody">
@@ -1222,6 +1242,12 @@ const CO = {
 //  STATE
 // ═══════════════════════════════════════════════════════════════════
 let items=[], currentView='client', currentCo='BK', qnoMode='auto';
+// QB #9 — drag-to-reorder. Native HTML5 drag events only originate from a
+// mouse gesture (no browser fires dragstart from touchstart), so gating the
+// drag handle on this keeps touch users on the up/down buttons only and
+// guarantees a finger-swipe can never be mistaken for a drag start.
+const IS_TOUCH=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
+let _dragIdx=null;
 let currentCatFilter='all', focusedSearchIdx=-1;
 let DB={products:[],categories:[],laborRoles:[],constants:{}};
 let selectedProduct=null;
@@ -1336,9 +1362,35 @@ async function loadDatabase() {
     ]);
     if (snap.empty) throw new Error('no products in firestore yet');
     const meta = metaSnap.exists ? metaSnap.data() : {};
+
+    // v14 re-audit HIGH fix — capitalMaterials/capitalLabor (Barro's cost
+    // basis) have moved off the `products` doc into product_costs, which
+    // firestore.rules restricts to canFinance()/isAdmin() — never role
+    // 'partner'. Previously this doc carried the cost fields directly, so
+    // ANY authenticated session (including a generic partner's) could read
+    // every product's real cost straight from `products` via the browser
+    // console, regardless of the Cost & Margin panel being removed from the
+    // DOM for them. Only attempt the product_costs read for a non-partner
+    // (internal) session — a partner session is denied by the rules anyway,
+    // so skip the doomed round-trip and just leave costs at 0 for them.
+    // Legacy fallback (`?? p.capitalMaterials ?? 0` below): until
+    // migrateProductCostsOut() has run for a given product, or for a
+    // finance/admin session before that migration ships at all, the value
+    // may still be sitting directly on the products doc.
+    let costMap = {};
+    if (!PARTNER_MODE) {
+      try {
+        const costSnap = await db.collection('product_costs').limit(1000).get();
+        costSnap.docs.forEach(cd => { costMap[cd.id] = cd.data(); });
+      } catch (ce) {
+        console.warn('[quote-builder] product_costs load skipped (finance/admin only)', ce);
+      }
+    }
+
     DB = {
       products: snap.docs.map(d => {
         const p = d.data();
+        const c = costMap[d.id];
         return {
           id: d.id,
           category: p.category,
@@ -1350,8 +1402,8 @@ async function loadDatabase() {
           formula: p.formula || {},
           specs: Array.isArray(p.specs) ? p.specs : [],
           material: p.material || null,
-          capitalMaterials: p.capitalMaterials || 0,
-          capitalLabor: p.capitalLabor || 0,
+          capitalMaterials: (c && c.capitalMaterials) ?? p.capitalMaterials ?? 0,
+          capitalLabor: (c && c.capitalLabor) ?? p.capitalLabor ?? 0,
           laborHours: p.laborHours || null,
           leadTime: p.leadTime || '',
           notes: p.specifications || p.notes || '',
@@ -2157,7 +2209,7 @@ function recomputePrice(){
   if(!selectedProduct) return;
   const p=selectedProduct;
   const price=computePrice(p);
-  const qty=parseInt(document.getElementById('calcQty').value||1);
+  const qty=Math.max(1,parseInt(document.getElementById('calcQty').value||1)||1);
   document.getElementById('calcPriceDisplay').textContent=formatPeso(price);
 
   // Formula hint
@@ -2205,7 +2257,7 @@ function addItemFromCalc(){
   if(!selectedProduct) return;
   const p=selectedProduct;
   const price=computePrice(p);
-  const qty=parseInt(document.getElementById('calcQty').value||1);
+  const qty=Math.max(1,parseInt(document.getElementById('calcQty').value||1)||1);
   const unit=document.getElementById('calcUnit').value||p.unit||'pc';
   const dimStr=getDimString(p);
   const specStr=getSpecString(p);
@@ -2292,11 +2344,18 @@ function renderItems(){
     const catObj=DB.categories?DB.categories.find(c=>c.id===catId)||{label:catId}:{label:catId};
     html+=`<tr class="cat-row"><td colspan="8">${catObj.icon||''} ${catObj.label}</td></tr>`;
     let subtotal=0;
-    catMap[catId].forEach(({item,idx})=>{
+    const grpLen=catMap[catId].length;
+    catMap[catId].forEach(({item,idx},posInCat)=>{
       subtotal+=item.amount;
       const specText=item.specEdit!==undefined?item.specEdit
         :(item.specs&&item.specs.length?item.specs.map(s=>s.label?`${s.label}: ${s.value}`:s.value).join(' • '):'');
-      html+=`<tr>
+      const isFirst=posInCat===0, isLast=posInCat===grpLen-1;
+      // Drag handle only for pointer/mouse devices (see IS_TOUCH) — HTML5
+      // dragstart never fires from a touchstart gesture, so on touch it
+      // would just sit there inert; up/down buttons are the real control there.
+      const dragAttrs=IS_TOUCH?'':`draggable="true" ondragstart="onItemDragStart(event,${idx})" ondragend="onItemDragEnd(event)"`;
+      const dragHandle=IS_TOUCH?'':`<span class="drag-handle" ${dragAttrs} title="Drag to reorder">⠿</span>`;
+      html+=`<tr class="item-row" data-idx="${idx}" ondragover="onItemRowDragOver(event,${idx})" ondragleave="onItemRowDragLeave(event)" ondrop="onItemRowDrop(event,${idx})">
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
           <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${txtEsc(item.name)}</div>
@@ -2309,7 +2368,14 @@ function renderItems(){
         <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}</td>
         <td style="text-align:center;"><input class="cell-unit lead-in" type="text" value="${item.leadTime||''}" placeholder="e.g. 7-14 days" onchange="updateLead(${idx},this)"></td>
-        <td class="no-print" style="text-align:center;"><button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button></td>
+        <td class="no-print" style="text-align:center;">
+          <div class="row-actions">
+            ${dragHandle}
+            <button class="move-btn" onclick="moveItemUp(${idx})" title="Move up" ${isFirst?'disabled':''}>▲</button>
+            <button class="move-btn" onclick="moveItemDown(${idx})" title="Move down" ${isLast?'disabled':''}>▼</button>
+            <button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button>
+          </div>
+        </td>
       </tr>`;
     });
     html+=`<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${catObj.label}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
@@ -2578,10 +2644,98 @@ function editSpecs(idx,el){items[idx].specEdit=el.innerText.trim();saveToStorage
 function editDims(idx,el){items[idx].dims=el.innerText.trim();saveToStorage();flashItemSaved();}
 function updateLead(idx,el){items[idx].leadTime=el.value.trim();saveToStorage();flashItemSaved();}
 function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();flashItemSaved();}
-function updateQty(idx,el){items[idx].qty=parseInt(el.value)||1;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
+// Re-audit fix (sales.txt, "no lower-bound/sign guard") — Math.max(1,...)
+// matches Quick Estimate's qeSetQty/qeAddItem (sales.js), which already
+// guarded against 0 *and* negative qty; this only guarded against 0.
+function updateQty(idx,el){items[idx].qty=Math.max(1,parseInt(el.value)||1);items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
 function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();flashItemSaved();}
 function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
 function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
+
+// ═══════════════════════════════════════════════════════════════════
+//  QB #9 — DRAG-TO-REORDER LINE ITEMS (+ up/down buttons for touch)
+//  Reordering is scoped to items sharing the same category group, since the
+//  table renders/subtotals items grouped by category — a move only changes
+//  relative order within that visual group, it never recategorizes an item.
+//  Every path below mutates the shared `items` array in place and then goes
+//  through saveToStorage()+renderItems(), the same pair every other item
+//  mutator (updateQty/deleteItem/etc.) already uses — so the new order rides
+//  the existing autosave (bkqb_items), editableState (items references the
+//  same array), and printed quote (same #itemsTbody DOM) for free.
+// ═══════════════════════════════════════════════════════════════════
+function categoryIndices(cat){
+  const out=[];
+  items.forEach((it,i)=>{ if(it.category===cat) out.push(i); });
+  return out;
+}
+// Quote photos link to a line item by raw array index (quotePhotos[].itemIndex
+// — see renderQuotePhotos/updatePhotoLink/renderPhotoAnnex above). Reordering
+// `items` moves those indices out from under any linked photo unless we
+// remap them too, which would silently re-point an existing photo caption at
+// the wrong item. Object identity survives a swap/splice (the item objects
+// themselves aren't cloned), so snapshotting the array before the mutation
+// and diffing by reference is a safe, mutation-shape-agnostic way to rebuild
+// every photo's itemIndex afterward.
+function withPhotoIndexRemap(mutateFn){
+  const before=items.slice();
+  mutateFn();
+  quotePhotos.forEach(p=>{
+    if(p.itemIndex==null) return;
+    const obj=before[p.itemIndex];
+    p.itemIndex = obj ? (items.indexOf(obj)===-1?null:items.indexOf(obj)) : null;
+  });
+}
+function moveItemUp(idx){
+  const grp=categoryIndices(items[idx].category);
+  const pos=grp.indexOf(idx);
+  if(pos<=0) return;
+  const other=grp[pos-1];
+  withPhotoIndexRemap(()=>{ [items[idx],items[other]]=[items[other],items[idx]]; });
+  saveToStorage(); renderItems(); flashItemSaved();
+}
+function moveItemDown(idx){
+  const grp=categoryIndices(items[idx].category);
+  const pos=grp.indexOf(idx);
+  if(pos===-1||pos>=grp.length-1) return;
+  const other=grp[pos+1];
+  withPhotoIndexRemap(()=>{ [items[idx],items[other]]=[items[other],items[idx]]; });
+  saveToStorage(); renderItems(); flashItemSaved();
+}
+function onItemDragStart(e,idx){
+  _dragIdx=idx;
+  e.dataTransfer.effectAllowed='move';
+  try{ e.dataTransfer.setData('text/plain',String(idx)); }catch(_){}
+  e.target.closest('tr')?.classList.add('dragging');
+}
+function onItemDragEnd(){
+  document.querySelectorAll('#itemsTbody tr.dragging').forEach(r=>r.classList.remove('dragging'));
+  document.querySelectorAll('#itemsTbody tr.drag-over').forEach(r=>r.classList.remove('drag-over'));
+  _dragIdx=null;
+}
+function onItemRowDragOver(e,idx){
+  // Only accept the drop if it stays inside the same category group —
+  // silently no-ops for a cross-category drag instead of recategorizing.
+  if(_dragIdx===null||!items[_dragIdx]||!items[idx]||items[_dragIdx].category!==items[idx].category) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  e.currentTarget.classList.add('drag-over');
+}
+function onItemRowDragLeave(e){ e.currentTarget.classList.remove('drag-over'); }
+function onItemRowDrop(e,idx){
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const from=_dragIdx;
+  _dragIdx=null;
+  if(from===null||from===idx||!items[from]||!items[idx]) return;
+  if(items[from].category!==items[idx].category) return;
+  withPhotoIndexRemap(()=>{
+    const moved=items[from];
+    items.splice(from,1);
+    const insertAt=from<idx?idx-1:idx; // account for the shift caused by removing `from` first
+    items.splice(insertAt,0,moved);
+  });
+  saveToStorage(); renderItems();
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  LABOR & TIMELINE
@@ -3314,6 +3468,19 @@ function canFile(){
   return VERIFY_CHECKS.every(c=>!!c.get()||waiveFlags[c.id]);
 }
 
+// Re-audit fix — "no double-submit guard on File". A fast double-tap on
+// #fileBtn used to run fileQuotation() twice back-to-back (canFile() never
+// checked quoteStatus, and the button wasn't disabled until after the first
+// call's synchronous work finished), each producing its own filed doc. This
+// flag makes the second tap a no-op; buildVerifyModal() — the only place
+// that re-opens/rebuilds the Verify modal for a genuinely new filing — clears
+// it again. NOTE: this only guards the *client*; the app.js QUOTE_FILED
+// handler's version-count read-then-write (app.js ~3408-3414) is still a
+// non-transactional race between two different browser tabs/devices and
+// needs a Firestore transaction there — flagged separately, out of scope
+// for this file.
+let _isFiling=false;
+
 function doVerifyAndFile(){
   buildVerifyModal();
   document.getElementById('verifyModal').style.display='flex';
@@ -3374,6 +3541,7 @@ function buildVerifyModal(){
     </div>
   </div>`;
   document.getElementById('verifyBody').innerHTML=html;
+  _isFiling=false; // modal (re)built for a fresh filing attempt — clear any prior guard
   const ok=canFile();
   const btn=document.getElementById('fileBtn');
   btn.disabled=!ok;btn.style.opacity=ok?'1':'0.5';
@@ -3391,8 +3559,47 @@ function toggleWaive(id,cb){
 
 function setFileMode(m){ fileMode=m; } // Wave 3 Q4 — 'revision' | 'update'
 
-function fileQuotation(){
+// Re-audit fix — "Auto quote-number sequence is per-user, not atomic".
+// autoComputeCustRev()'s live qnoSeq preview only counts the CURRENT user's
+// own quotes (where('createdBy','==',auth.currentUser.uid)), so two agents
+// each starting a brand-new client the same day can preview — and file —
+// the identical seq. Mirrors sales.js's nextAECNumber() `_counters`
+// transaction pattern: right before filing, a genuinely new auto-numbered
+// quote (never a reopen/revision — those keep their existing seq and only
+// bump the -Rn suffix, so they must NOT re-reserve) atomically claims the
+// next seq for this company+location+method+date, guaranteeing uniqueness
+// across every agent/device no matter how many were mid-preview at once.
+// This page has its own firebase-config.js/`db`, so the reservation is
+// entirely self-contained here — no app.js change needed.
+async function reserveAtomicQnoSeq(){
+  if(qnoMode!=='auto' || reopenSourceDocId) return; // reopened/revision numbers are untouched
+  if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
+  const co=document.getElementById('qnoCo')?.value||'BK';
+  const loc=document.getElementById('qnoLoc')?.value||'XX';
+  const mth=document.getElementById('qnoMethod')?.value||'XX';
+  const d=document.getElementById('quoteDate')?.value||new Date().toISOString().split('T')[0];
+  const key=`qno_${co}_${loc}_${mth}_${d}`;
+  try{
+    const ref=db.collection('_counters').doc(key);
+    const next=await db.runTransaction(async t=>{
+      const cur=await t.get(ref);
+      const n=(cur.exists?(cur.data().count||0):0)+1;
+      t.set(ref,{count:n},{merge:true});
+      return n;
+    });
+    const seqEl=document.getElementById('qnoSeq');
+    if(seqEl) seqEl.value=next;
+    buildQuoteNo();
+  }catch(e){ console.warn('[reserveAtomicQnoSeq]',e); } // on failure, fall back to the existing (best-effort) preview seq rather than blocking filing
+}
+
+async function fileQuotation(){
+  if(_isFiling) return; // double-tap guard — see note above canFile()
   if(!canFile()) return;
+  _isFiling=true;
+  const fileBtnEl=document.getElementById('fileBtn');
+  if(fileBtnEl){ fileBtnEl.disabled=true; fileBtnEl.style.opacity='0.5'; }
+  await reserveAtomicQnoSeq();
   const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
   const quotePayload = buildQuotePayload();
 

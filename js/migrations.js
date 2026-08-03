@@ -388,3 +388,75 @@ window.runCADataRepair = async function(dryRun = true) {
   window.logAudit && window.logAudit(dryRun?'ca-repair-dry-run':'ca-repair-apply','cash_advances','bulk',{ writeCount });
   return report;
 };
+
+// ── Product cost-basis split-out (v14 re-audit HIGH fix, president-run) ──
+// Firestore has no field-level read security: any authenticated user,
+// including role 'partner', could read the whole products/{docId} doc —
+// which carried Barro's cost basis directly on it (capitalMaterials,
+// capitalLabor, and the BOM's per-line unitCost) — straight from the browser
+// console. The quote builder's "hide the cost/margin panel for generic
+// partners" was DOM-only theatre on top of a fully-readable doc.
+//
+// This migration copies those three fields into product_costs/{docId} (see
+// firestore.rules — read/write restricted to canFinance()/isAdmin(), never
+// partner) and then deletes them off the products doc. It is idempotent /
+// safe to re-run: a products doc with none of the three fields present is
+// already migrated and is skipped (`hasCost` false), so re-running after a
+// partial failure or after new products are added never double-processes or
+// clobbers an already-clean doc.
+//
+// Rollout / read-path note: js/app.js's normalizeProduct() + the
+// seedCatalogIfNeeded()-driven cost cache, and quote-builder-v2.html's
+// loadDatabase(), both read product_costs FIRST and fall back to any legacy
+// field still sitting on the products doc — so internal cost/margin display
+// keeps working correctly whether this migration has been run yet or not.
+// Firestore rules (productCostFieldsLocked in firestore.rules) accept this
+// migration's writes at any time — a cost field may only ever move toward
+// null, which is exactly what the FieldValue.delete() below does — so this
+// is safe to run before, during, or after the rules deploy, in either order.
+window.migrateProductCostsOut = async function () {
+  const FV = firebase.firestore.FieldValue;
+  const snap = await db.collection('products').limit(2000).get();
+  const out = { scanned: snap.size, migrated: 0, skipped: 0 };
+  let batch = db.batch(), inBatch = 0;
+  for (const doc of snap.docs) {
+    const p = doc.data();
+    const hasCost = ('capitalMaterials' in p) || ('capitalLabor' in p) || ('bom' in p);
+    if (!hasCost) { out.skipped++; continue; }
+    batch.set(db.collection('product_costs').doc(doc.id), {
+      capitalMaterials: p.capitalMaterials || 0,
+      capitalLabor: p.capitalLabor || 0,
+      bom: Array.isArray(p.bom) ? p.bom : [],
+      updatedAt: FV.serverTimestamp(),
+    }, { merge: true });
+    batch.update(doc.ref, {
+      capitalMaterials: FV.delete(),
+      capitalLabor: FV.delete(),
+      bom: FV.delete(),
+    });
+    out.migrated++;
+    inBatch += 2; // one set + one update per product
+    if (inBatch >= 400) { await batch.commit(); batch = db.batch(); inBatch = 0; }
+  }
+  if (inBatch) await batch.commit();
+  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('products'); dbCacheInvalidate('product_costs'); }
+  console.log('[migrateProductCostsOut]', out);
+  return out;
+};
+
+// President-run trigger — no dedicated button exists yet (the Product
+// Database screen that would host one lives in js/screens/dashboards.js,
+// out of this pass's assigned files; see the handoff report for the exact
+// button wiring to add there). Until that lands, run this from the browser
+// console while signed in as president:
+//   await window.runProductCostsMigration()
+window.runProductCostsMigration = async function () {
+  if (!isPresident()) { Notifs.showToast('President only', 'error'); return; }
+  if (!(await confirmDialog({message:'Move product cost-basis data (Capital Materials/Labor + BOM unit costs) out of the public products collection into product_costs (finance/admin only, never partner)?\n\nSafe to run repeatedly — already-migrated products are skipped.'}))) return;
+  Notifs.info('Migrating product cost basis…');
+  try {
+    const r = await window.migrateProductCostsOut();
+    window.logAudit && window.logAudit('migrate', 'product_costs', null, r);
+    Notifs.success(`Done ✓ ${r.migrated} product${r.migrated===1?'':'s'} migrated, ${r.skipped} already clean.`);
+  } catch (e) { Notifs.showToast('Migration failed: ' + (e.message || e), 'error'); }
+};

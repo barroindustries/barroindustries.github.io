@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.12';
+window.APP_VERSION = '14.0.13';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1654,7 +1654,14 @@ window.CashAdvance = {
   async request({ amount, terms, reason, dateNeeded, userId, userName, employeeId, private: isPrivate }) {
     const amt = parseFloat(amount)||0;
     const isAdminIssued = !!userId;
-    if (!amt || (!isAdminIssued && amt < 100)) throw new Error('Enter a valid amount (min ₱100).');
+    // Re-audit 2026-08-03 (HIGH) — the admin-issued path intentionally skips
+    // the ₱100 minimum (`!isAdminIssued &&` below), but had NO independent
+    // floor: `parseFloat('-500')` is -500, which is truthy, so `!amt` passed
+    // it straight through with a negative amount, negative balance:0 default,
+    // status:'pending' — then CashAdvance.approve()'s compound-interest math
+    // would compute a negative totalPayable/monthlyPayment once approved.
+    if (!(amt > 0)) throw new Error('Enter a valid amount (must be greater than ₱0).');
+    if (!isAdminIssued && amt < 100)             throw new Error('Enter a valid amount (min ₱100).');
     if (!isAdminIssued && amt > 50000)          throw new Error('Maximum cash advance is ₱50,000.');
     const t    = parseInt(terms)||1;
     const uid  = userId || (window.currentUser && window.currentUser.uid);

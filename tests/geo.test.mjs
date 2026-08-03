@@ -2,7 +2,10 @@
 //
 // Guards js/geo-core.js: haversineMeters + siteMatch. Zero deps: node:test +
 // node:assert only, same convention as tests/money.test.mjs. Run with:
-//   node --test tests/
+//   node --test tests/*.test.mjs
+// (bare `node --test tests/` throws MODULE_NOT_FOUND on Node >=24 — the glob
+// form and bare `node --test` both work across versions; see money.test.mjs's
+// header and .github/workflows/ci.yml's money-math-tests job.)
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';

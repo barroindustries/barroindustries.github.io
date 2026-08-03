@@ -317,14 +317,14 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='attendance'?`
-                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Deny</button>
+                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-uid="${item.uid||''}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-uid="${item.uid||''}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='ca'?`
                 <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">${emojiIcon('✓',16)} Approve CA</button>
                 <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='ca_deduct'?`
-                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}">${emojiIcon('✗',16)} Reject</button>
+                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}" data-uid="${item.userId||''}" data-amount="${item.amount||0}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}" data-uid="${item.userId||''}" data-amount="${item.amount||0}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='review-task'?`
                 <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">${emojiIcon('👁',16)} View Task</button>
                 <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
@@ -356,8 +356,8 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm lv-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm lv-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">${emojiIcon('✗',16)} Reject</button>
               `:`
-                <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">${emojiIcon('✗',16)} Reject</button>
+                <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}" data-uid="${item.createdBy||''}" data-title="${escHtml(item.title||item.name||'')}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}" data-uid="${item.createdBy||''}" data-title="${escHtml(item.title||item.name||'')}">${emojiIcon('✗',16)} Reject</button>
               `) : ( canEscalate(item.type)
                 ? `<button class="btn-secondary btn-sm esc-btn" data-label="${escHtml(item.label+' — '+item.name)}">${emojiIcon('🙋',16)} Request President approval</button>`
                 : `<span class="badge badge-gray" style="font-size:11px">${emojiIcon('🔒',11)} ${['finance-req','finance-del','delete-quote','delete-client'].includes(item.type)?'President approval required':'President / Manager approves'}</span>`)}
@@ -381,15 +381,20 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
 
-      // Attendance approve/deny
+      // Attendance approve/deny — re-audit 2026-08-03: this used to hand-write a
+      // hardcoded 2-hour extension with only a local toast, while the dedicated
+      // Attendance sub-tab granted the canonical ATT_EXT_HOURS=6 and notified the
+      // employee. Same request, two different outcomes depending on which tab was
+      // clicked. Now routes through the exact same window.approveAttendanceExtension/
+      // denyAttendanceExtension the Attendance sub-tab uses, so the grant length and
+      // the employee notification are identical no matter which tab approved it.
       wrap.querySelectorAll('.at-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          const ext = new Date(); ext.setHours(ext.getHours()+2);
-          await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), expiresAt:firebase.firestore.Timestamp.fromDate(ext) });
+          await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
           Notifs.success(`Extension approved for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.at-deny-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'denied', deniedBy:currentUser.uid, deniedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
           Notifs.error(`Extension denied for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
@@ -409,13 +414,23 @@ window.renderApprovals = async function(currentUser) {
       // CA deduction-for-this-run request (v12 WS22 decision 9) — approving just
       // flips status; CashAdvance.planFor() picks it up as that month's custom
       // amount the next time Compute runs for that employee's month.
+      // Re-audit 2026-08-03: this only flipped approval_requests status and toasted
+      // the approver, with no Notifs.send to the requesting employee — they'd only
+      // find out indirectly via their payslip. Now notifies like every sibling
+      // approve/reject handler on this page.
       wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
+            title:'✅ CA Deduction Approved', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was approved.`, icon:'✅', type:'ca_deduct_reviewed'
+          }));
           Notifs.success('CA deduction request approved.');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
+            title:'❌ CA Deduction Rejected', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was rejected.`, icon:'❌', type:'ca_deduct_reviewed'
+          }));
           Notifs.error('CA deduction request rejected.');
           loadApprovalsSub('all');
       }));
@@ -445,21 +460,31 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.po-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          const reason = prompt('Reason for rejection (shown to Purchasing):');
+          const reason = await promptDialog({ title:'Reject PO', message:'Reason for rejection (shown to Purchasing):', multiline:true });
           if (reason === null) return;
           await window.rejectPurchaseOrder(btn.dataset.id, reason);
           Notifs.error('PO rejected.');
           loadApprovalsSub('all');
       }));
 
-      // Submission approve/reject
+      // Submission approve/reject — re-audit 2026-08-03: this used to update the
+      // submissions doc and only toast the approver, with no Notifs.send to the
+      // creator (unlike openSubDetail's dedicated flow in tasks.js, which notifies
+      // both ways). Employees who submit via the aggregated queue never heard back.
       wrap.querySelectorAll('.sub-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
+            title:'✅ Submission Approved', body:`"${btn.dataset.title}" was approved.`, icon:'✅', type:'submission_reviewed'
+          }));
           Notifs.success('Submission approved!');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.sub-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
+          if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
+            title:'❌ Submission Rejected', body:`"${btn.dataset.title}" was rejected.`, icon:'❌', type:'submission_reviewed'
+          }));
+          Notifs.error('Submission rejected.');
           loadApprovalsSub('all');
       }));
 
@@ -930,10 +955,17 @@ window.renderApprovals = async function(currentUser) {
       </div>`;
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.querySelectorAll('.rt-view-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id,currentUser,window.currentRole||'president')));
+      // Re-audit 2026-08-03: this dedicated tab updated the task doc and only
+      // toasted the approver — no notifyTaskInvolved call — while the byte-similar
+      // handlers in the aggregated "All Requests" view (.rt-approve-btn/.rt-reject-btn
+      // above) do notify. Same task-review action, same collection, whether the
+      // assignee hears back depended on which Approvals tab was used. Now matches.
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn=>btn.addEventListener('click',async()=>{
         if (!(await confirmDialog({message:`Approve "${escHtml(btn.dataset.name)}"?`, html:true}))) return;
         await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+        const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
+        if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
         Notifs.showToast(`"${btn.dataset.name}" approved!`,'success');
         loadApprovalsSub('review-tasks');
       }));
@@ -941,6 +973,8 @@ window.renderApprovals = async function(currentUser) {
         if (!(await confirmDialog({message:`Send "${escHtml(btn.dataset.name)}" back for revision?`, html:true}))) return;
         await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),sentBackBy:currentUser.uid});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+        const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
+        if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
         Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`,'info');
         loadApprovalsSub('review-tasks');
       }));
@@ -1089,7 +1123,7 @@ window.renderApprovals = async function(currentUser) {
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
               <div class="item-title">${emojiIcon('💸',16)} Cash Advance — ${escHtml(item.userName||'Unknown')}</div>
-              <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
+              ${window.statusBadge2 ? window.statusBadge2('ca', item.status) : `<span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>`}
             </div>
             <div class="item-meta">
               <span>₱${fmt(item.amount)}</span>

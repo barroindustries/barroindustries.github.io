@@ -212,9 +212,14 @@ async function loadSalesContent(currentUser, currentRole, sub) {
 
 // ══════════════════════════════════════════════════
 //  SALES — QUICK ESTIMATE
-//  Fast price-check calculator over the SAME products-database.json the full
-//  Quote Builder uses. Add many lines, see a live total, then (optionally)
-//  hand the whole basket off to the Quote Builder as a formal quotation draft.
+//  Fast price-check calculator over the SAME product data source the full
+//  Quote Builder uses: live Firestore `products` collection first (so a
+//  President price edit reaches Quick Estimate immediately, same as the
+//  full builder), falling back to products-database.json only if Firestore
+//  is empty/unreachable — re-audit fix, this used to read the static JSON
+//  unconditionally and could silently quote stale prices. Add many lines,
+//  see a live total, then (optionally) hand the whole basket off to the
+//  Quote Builder as a formal quotation draft.
 //  Pricing mirrors quote-builder-v2.html computePrice() so estimates match.
 // ══════════════════════════════════════════════════
 const qePeso = n => '₱' + Math.round(Number(n) || 0).toLocaleString('en-PH');
@@ -223,6 +228,43 @@ window._qeItems = window._qeItems || [];   // basket persists within the session
 
 async function qeLoadDB() {
   if (window._qeDB) return window._qeDB;
+  // Firestore first — same shape/mapping as quote-builder-v2.html's
+  // loadDatabase(), so the two tools can never disagree on a live price.
+  try {
+    if (typeof db === 'undefined') throw new Error('firestore not initialized');
+    const [snap, metaSnap] = await Promise.all([
+      db.collection('products').limit(1000).get(),
+      db.collection('productMeta').doc('config').get(),
+    ]);
+    if (snap.empty) throw new Error('no products in firestore yet');
+    const meta = metaSnap.exists ? metaSnap.data() : {};
+    window._qeDB = {
+      products: snap.docs.map(d => {
+        const p = d.data();
+        return {
+          id: d.id,
+          category: p.category,
+          name: p.title || p.name || '',
+          formulaType: p.formulaType || 'fixed',
+          basePrice: p.basePrice ?? p.baseRate ?? 0,
+          defaultDimensions: p.measurement || p.defaultDimensions || {},
+          formula: p.formula || {},
+          specs: Array.isArray(p.specs) ? p.specs : [],
+          capitalMaterials: p.capitalMaterials || 0,
+          capitalLabor: p.capitalLabor || 0,
+          laborHours: p.laborHours || null,
+          leadTime: p.leadTime || '',
+          unit: p.unit || 'pc',
+        };
+      }),
+      categories: meta.categories || [],
+      constants: meta.constants || {},
+    };
+    return window._qeDB;
+  } catch (e) {
+    console.warn('Quick Estimate: Firestore product load failed, falling back to products-database.json', e);
+  }
+  // Fallback: static JSON (offline / Firestore empty / read error)
   try {
     const r = await fetch('products-database.json?v=' + Date.now());
     window._qeDB = await r.json();
@@ -901,10 +943,18 @@ function quoteRevDeltaHtml(cur, prev) {
   if (!prev) return `<span style="font-size:11px;color:var(--text-muted)">first filing</span>`;
   const diff = cur - prev;
   if (!diff) return `<span style="font-size:11px;color:var(--text-muted)">→ no change</span>`;
-  const pct = Math.round((diff / Math.abs(prev)) * 100);
   const up = diff > 0;
   const color = up ? 'var(--success,#30D158)' : 'var(--danger,#e5484d)';
-  return `<span style="font-size:11px;font-weight:700;color:${color}">${up?'▲':'▼'} ₱${fmt(Math.abs(diff))} <span style="font-weight:400;color:var(--text-muted)">(${up?'+':'−'}${Math.abs(pct)}%)</span></span>`;
+  // Re-audit fix — a near-zero prior revision (e.g. a ₱1 typo corrected to
+  // ₱50,000 in R2) used to render as nonsense like "+4999900%" since the
+  // only guard was an exactly-zero check. Below a ₱100 prior-revision
+  // floor, the percentage is meaningless (dividing by a near-zero base) —
+  // label it a flat data correction instead and let the peso diff (already
+  // shown, unaffected by this change) carry the real information.
+  const pctHtml = Math.abs(prev) < 100
+    ? `<span style="font-weight:400;color:var(--text-muted)">(data correction)</span>`
+    : `<span style="font-weight:400;color:var(--text-muted)">(${up?'+':'−'}${Math.abs(Math.round((diff/Math.abs(prev))*100))}%)</span>`;
+  return `<span style="font-size:11px;font-weight:700;color:${color}">${up?'▲':'▼'} ₱${fmt(Math.abs(diff))} ${pctHtml}</span>`;
 }
 
 // Hidden <tr> siblings (table row structure, not <details> — a <tbody>'s
@@ -929,6 +979,7 @@ function quoteChainTableRowsHtml(chain) {
       <td class="tc-actions" style="white-space:nowrap">
         ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
         ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+        ${(status==='filed'||status==='approved')&&!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="No editable snapshot was saved for this revision, so Reopen has nothing to load and New Revision isn't offered.">no snapshot</span>`:''}
       </td>
     </tr>`;
   }).join('');
@@ -994,9 +1045,10 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           <span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
-          ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end;align-items:center">
+          ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+          ${!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="This quote was filed before edit history was captured (or the snapshot write failed) — there's nothing here to reopen or revise.">No editable snapshot</span>`:''}
           ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
@@ -1022,12 +1074,18 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
 
   const bindCardActions = () => {
     container.querySelectorAll('.bk-so-btn').forEach(b=>b.addEventListener('click', e=>openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container)));
-    container.querySelectorAll('.bk-reopen-btn').forEach(b=>b.addEventListener('click', async e=>{
-      try { const s=await db.collection('bk_quotes').doc(e.currentTarget.dataset.id).get(); const qq=s.data()||{};
-        if(!qq.editableState){ Notifs.showToast('No editable snapshot','error'); return; }
-        window._qbReopenState=qq.editableState; navigateTo('bk-quote-builder');
-      } catch(ex){ Notifs.showToast('Reopen failed','error'); }
-    }));
+    // Re-audit fix (HIGH) — this used to set window._qbReopenState directly and
+    // navigate, bypassing window.reopenQuoteFromDoc (app.js). That function is
+    // the only path that stamps sourceDocId/sourceCollection/rootQuoteId onto
+    // the reopened state, so a quote reopened via this button (the more
+    // commonly used action vs. New Revision) always refiled with
+    // parentQuoteId:null/rootQuoteId:null and self-stamped a brand-new
+    // rootQuoteId — silently breaking buildQuoteChains' revision-chain link
+    // back to the original. Routing through the shared helper (same one
+    // .bk-rev-btn already uses below) fixes both this list and the nested
+    // chain-history rows in one place.
+    container.querySelectorAll('.bk-reopen-btn').forEach(b=>b.addEventListener('click', e=>
+      window.reopenQuoteFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
     container.querySelectorAll('.bk-rev-btn').forEach(b=>b.addEventListener('click', e=>
       window.newRevisionFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
     container.querySelectorAll('.bk-del-btn').forEach(b=>b.addEventListener('click', e=>{
@@ -1056,9 +1114,10 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         <div style="flex:1;min-width:120px;font-size:12px"><strong>R${i+1}</strong> · ${escHtml(ts)} · ${escHtml(q.agentName||'—')}</div>
         <div style="font-size:12px;font-weight:700">₱${fmt(tot)}</div>
         <div>${i>0?quoteRevDeltaHtml(tot,prevTot):'<span style="font-size:11px;color:var(--text-muted)">first filing</span>'}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+          ${!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="This revision was filed before edit history was captured — there's nothing here to reopen or revise.">No editable snapshot</span>`:''}
         </div>
       </div>`;
     }).join('');
@@ -1673,6 +1732,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 `:''}
                 ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
                 ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+                ${(status==='filed'||status==='approved')&&!q.editableState?`<span style="font-size:10px;color:var(--text-muted);align-self:center" title="No editable snapshot was saved for this quote, so Reopen has nothing to load and New Revision isn't offered.">no snapshot</span>`:''}
                 ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
                 ${canDeleteDirect
                   ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>`
@@ -1801,18 +1861,15 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
     });
   });
-  // Reopen a filed quote in the builder to edit — re-filing saves a new copy "(2)".
+  // Reopen a filed quote in the builder to edit — re-filing saves a new copy.
+  // Re-audit fix (HIGH) — routed through window.reopenQuoteFromDoc (app.js),
+  // the only path that stamps sourceDocId/sourceCollection/rootQuoteId onto
+  // the reopened state; the old inline version here skipped all three,
+  // silently breaking the revision-chain link on refile. Same fix as the
+  // .bk-reopen-btn handler above.
   el.querySelectorAll('.bs-reopen-btn').forEach(btn => {
-    btn.addEventListener('click', async e => {
-      const id = e.currentTarget.dataset.id;
-      try {
-        const snap = await db.collection('bs_quotes').doc(id).get();
-        const q = snap.data() || {};
-        if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
-        window._qbReopenState = q.editableState;   // picked up by renderQuoteBuilderIframe
-        navigateTo('bs-quote-builder');
-      } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
-    });
+    btn.addEventListener('click', e =>
+      window.reopenQuoteFromDoc('bs_quotes', e.currentTarget.dataset.id, 'bs-quote-builder'));
   });
   // New revision (R2, R3…) of a filed quote — same client/items, today's date.
   el.querySelectorAll('.bs-rev-btn').forEach(btn => {

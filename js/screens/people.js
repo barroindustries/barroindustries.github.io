@@ -109,7 +109,15 @@ window.renderPosts = async function() {
   document.getElementById('new-post-btn').addEventListener('click', () => openNewPostModal(canPost));
 };
 
-async function loadPosts(dept) {
+// Re-audit 2026-08-03: this always queried .limit(30) with no cursor/"load more" —
+// anything older than the most recent 30 posts in a tab was permanently
+// unreachable from this screen. `pageSize` grows via the "Load older posts"
+// button below instead of a real cursor, to keep every existing call site
+// (loadPosts(dept) after delete/approve/pin/heart, etc.) working unchanged —
+// it's a full re-render each time, so there's no risk of double-wiring
+// listeners on already-rendered cards the way an append-only page would have.
+async function loadPosts(dept, pageSize) {
+  pageSize = pageSize || 30;
   const container = document.getElementById('posts-content');
   container.innerHTML = window.skeletonHtml('rows');
   try {
@@ -121,8 +129,9 @@ async function loadPosts(dept) {
     } else {
       q = db.collection('posts').where('dept','==',dept).where('status','==','published').orderBy('createdAt','desc');
     }
-    const snap = await q.limit(30).get();
-    const posts = snap.docs.map(d => ({id:d.id,...d.data()}));
+    const snap = await q.limit(pageSize + 1).get();
+    const hasMore = snap.docs.length > pageSize;
+    const posts = snap.docs.slice(0, pageSize).map(d => ({id:d.id,...d.data()}));
     if (!posts.length) {
       container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📭',44)}</div><h4>No posts yet</h4></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [container] });
@@ -196,8 +205,9 @@ async function loadPosts(dept) {
           </div>
         </div>
       </div>`;
-    }).join('');
+    }).join('') + (hasMore ? `<div style="text-align:center;padding:14px"><button class="btn-secondary btn-sm" id="posts-load-more-btn">${emojiIcon('⬇',16)} Load older posts</button></div>` : '');
     if (window.lucide) lucide.createIcons({nodes:[container]});
+    document.getElementById('posts-load-more-btn')?.addEventListener('click', () => loadPosts(dept, pageSize + 30));
 
     // Open post image in a new tab — URL validated to http(s) only, wired via
     // addEventListener so the raw URL never lands in an inline onclick string.
@@ -433,14 +443,22 @@ window.renderTeamTab = async function() {
 
   if (!viewingAsPartner) renderEomBanner(users, canManageEom);
 
+  // Debounced to match the pattern already used elsewhere (Inventory/Movements
+  // search, js/modules.js) — a full masonry-grid rebuild + card re-wiring on
+  // every keystroke is wasted work once the team list grows.
+  let _teamSearchT;
   document.getElementById('team-search').addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    const filtered = q ? users.filter(u =>
-      (u.displayName||'').toLowerCase().includes(q) ||
-      (u.role||'').toLowerCase().includes(q) ||
-      (Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).join(' ').toLowerCase().includes(q)
-    ) : users;
-    renderTeamCards(filtered, currentUser);
+    clearTimeout(_teamSearchT);
+    const v = e.target.value;
+    _teamSearchT = setTimeout(() => {
+      const q = v.toLowerCase();
+      const filtered = q ? users.filter(u =>
+        (u.displayName||'').toLowerCase().includes(q) ||
+        (u.role||'').toLowerCase().includes(q) ||
+        (Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).join(' ').toLowerCase().includes(q)
+      ) : users;
+      renderTeamCards(filtered, currentUser);
+    }, 180);
   });
 
   // Set Note (IG-style status)
@@ -459,7 +477,10 @@ window.renderTeamTab = async function() {
     });
     document.getElementById('save-note-btn').addEventListener('click', async () => {
       const note = document.getElementById('note-input').value.trim();
-      await db.collection('users').doc(currentUser.uid).update({ statusNote: note });
+      // Re-audit 2026-08-03: statusNote never carried a timestamp, so a note set
+      // weeks ago stayed pinned to the card forever with nothing signalling it's
+      // stale. Stamp it so the card can show its age and auto-expire it.
+      await db.collection('users').doc(currentUser.uid).update({ statusNote: note, statusNoteAt: firebase.firestore.FieldValue.serverTimestamp() });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
       closeModal(); Notifs.success('Note updated!');
       window.renderTeamTab();
@@ -532,12 +553,44 @@ window.renderTeamTab = async function() {
             photoUrl:'', startDate: window.bizDate(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
-          await auth.sendPasswordResetEmail(email);
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
           closeModal();
-          Notifs.success(`Invite sent to ${email}!`);
+          // Re-audit 2026-08-03: the auth account + Firestore profile are already
+          // committed above — a reset-email failure here (rate limit, transient
+          // network) must NOT dead-end into an orphaned, unusable account with no
+          // recovery path. Report it distinctly so the admin knows to resend
+          // rather than assume the whole invite failed (re-running Invite for the
+          // same email would just 400 with auth/email-already-in-use).
+          try {
+            await auth.sendPasswordResetEmail(email);
+            Notifs.success(`Invite sent to ${email}!`);
+          } catch (resetErr) {
+            Notifs.showToast(`Account created for ${email}, but the reset email failed to send (${resetErr.message}). Use "Resend Reset Email" on their Team card to retry — do not re-invite this address.`, 'error');
+          }
           window.renderTeamTab();
-        } catch(err) { Notifs.showToast('Error: '+err.message,'error'); }
+        } catch(err) {
+          if (err && err.code === 'auth/email-already-in-use') {
+            // The account may be a previously-orphaned invite (auth user + profile
+            // created, but the reset email never went out or was never used) —
+            // give the admin a recovery path instead of a dead-end error.
+            const resend = await confirmDialog({
+              title: 'Account already exists',
+              message: `${email} already has an account — likely from a previous invite whose reset email failed to send. Resend the password-reset email instead of creating a new account?`,
+              confirmLabel: 'Resend Reset Email', cancelLabel: 'Cancel'
+            });
+            if (resend) {
+              try {
+                await auth.sendPasswordResetEmail(email);
+                Notifs.success(`Reset email re-sent to ${email}.`);
+                closeModal();
+              } catch (resendErr) {
+                Notifs.showToast('Resend failed: ' + resendErr.message, 'error');
+              }
+            }
+            return;
+          }
+          Notifs.showToast('Error: '+err.message,'error');
+        }
       });
     });
   }
@@ -870,13 +923,23 @@ function renderTeamCards(users, currentUser) {
       diffMin < 1440 ? `${Math.floor(diffMin/60)}h ago` :
       `${Math.floor(diffMin/1440)}d ago`;
 
-    const statusNote = u.statusNote?.trim();
+    // Re-audit 2026-08-03: statusNote had no TTL/age display — a note set weeks
+    // ago stayed pinned indefinitely with nothing signalling it's stale, unlike
+    // the IG-style status it's modeled on. Auto-hide past a 24h TTL and show its
+    // age otherwise. Legacy notes with no statusNoteAt (set before this field
+    // existed) fall back to "no age known" and are shown without a TTL cutoff,
+    // rather than being silently hidden by a timestamp they never had.
+    const noteAtMs = u.statusNoteAt?.toMillis?.() || (u.statusNoteAt?.seconds ? u.statusNoteAt.seconds*1000 : 0);
+    const noteAgeMin = noteAtMs ? Math.floor((now - noteAtMs)/60000) : null;
+    const NOTE_TTL_MIN = 24*60;
+    const statusNote = (noteAgeMin !== null && noteAgeMin >= NOTE_TTL_MIN) ? '' : (u.statusNote?.trim() || '');
+    const noteAgeStr = noteAgeMin === null ? '' : noteAgeMin < 1 ? 'now' : noteAgeMin < 60 ? `${noteAgeMin}m` : `${Math.floor(noteAgeMin/60)}h`;
 
     return `
     <div class="team-member-card" data-uid="${u.id}">
       ${statusNote ? `
         <div class="team-note-bubble">
-          <span>${escHtml(statusNote)}</span>
+          <span>${escHtml(statusNote)}</span>${noteAgeStr?`<span style="font-size:10px;opacity:.6;margin-left:6px">${noteAgeStr}</span>`:''}
         </div>` : ''}
       <div class="team-member-avatar-wrap">
         <div class="team-member-avatar">
@@ -894,7 +957,7 @@ function renderTeamCards(users, currentUser) {
         : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
         <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card" aria-label="View calling card">${emojiIcon('📇',16)}</button>
-        ${!isMe && (!(typeof isPartner==='function'&&isPartner()) || u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim())
+        ${!isMe && (!(typeof isPartner==='function'&&isPartner()) || (u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim()) || ['president','manager'].includes(u.role))
           ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}" aria-label="Message ${escHtml(u.displayName||u.email)}">${emojiIcon('💬',16)}</button>` : ''}
         ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}" aria-label="Nudge ${escHtml(u.displayName||u.email)}">${emojiIcon('👋',16)}</button>` : ''}
       </div>
@@ -1975,7 +2038,7 @@ async function openPresidentCashAdvanceModal(users) {
     // path per rules, but the direct grant/accrual buttons stay finance/admin-only).
     const canGrant = ['president','manager','finance'].includes(currentRole);
     c.innerHTML = `
-      <div class="page-header"><h2>${emojiIcon('🌴',20)} Leave Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${canGrant?`<button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button><button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button>`:''}<button class="btn-secondary btn-sm" id="leave-csv">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
+      <div class="page-header"><h2>${emojiIcon('🌴',20)} Leave Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${canGrant?`<button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button><button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button><button class="btn-secondary btn-sm" id="lv-holidays">${emojiIcon('📅',16)} Manage Holidays</button>`:''}<button class="btn-secondary btn-sm" id="leave-csv">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
       ${window.sopPanel('How Leave works', LEAVE_SOP_STEPS, {open:false})}
       <div class="kpi-row" style="margin-bottom:14px">
         <div class="kpi-card ${pending.length?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
@@ -2005,9 +2068,15 @@ async function openPresidentCashAdvanceModal(users) {
     c.querySelectorAll('.lv-approve').forEach(b=>b.addEventListener('click',()=>approveLeave(reqs.find(r=>r.id===b.dataset.id),c)));
     c.querySelectorAll('.lv-reject').forEach(b=>b.addEventListener('click',()=>rejectLeave(reqs.find(r=>r.id===b.dataset.id),c)));
     if(canGrant){
+      // Re-audit 2026-08-03: renderHolidaysAdmin was fully built (add/edit/remove
+      // PH holiday overrides per year, feeding getPHHolidays across attendance/
+      // leave/payroll) but had no nav entry anywhere — app.js's navigateTo already
+      // has a 'holidays' case, it just had nothing pointing at it. This is the
+      // entry point.
+      document.getElementById('lv-holidays')?.addEventListener('click', () => navigateTo('holidays'));
       document.getElementById('lv-accrue')?.addEventListener('click', async ()=>{
         const yr = window.LeaveAccrual.policyYear();
-        if(!confirm(`Grant / reset ${yr} leave balances for all employees?\nAlready-accrued employees are skipped (idempotent). Vacation ${window.LEAVE_POLICY.grants.vacation} / Sick ${window.LEAVE_POLICY.grants.sick} days.`)) return;
+        if(!(await confirmDialog({ title:'Run Annual Accrual', message:`Grant / reset ${yr} leave balances for all employees?<br>Already-accrued employees are skipped (idempotent). Vacation ${window.LEAVE_POLICY.grants.vacation} / Sick ${window.LEAVE_POLICY.grants.sick} days.`, html:true }))) return;
         Notifs.info('Running annual accrual…');
         try{ const res=await window.LeaveAccrual.runAnnualAccrual();
           window.logAudit && window.logAudit('accrue','leave',yr,res);
@@ -2034,12 +2103,38 @@ async function openPresidentCashAdvanceModal(users) {
           ${users.map(u=>`<option value="${u.id}">${esc(u.displayName||u.email||u.id)}</option>`).join('')}
         </select>
       </div>
+      <div style="font-size:12px;color:var(--text-muted);margin:-4px 0 10px" id="lv-grant-current">Loading current balance…</div>
       <div class="form-row">
-        <div class="form-group"><label>Vacation days</label><input id="lv-grant-vac" type="number" inputmode="decimal" min="0" step="0.5" value="0"/></div>
-        <div class="form-group"><label>Sick days</label><input id="lv-grant-sick" type="number" inputmode="decimal" min="0" step="0.5" value="0"/></div>
+        <div class="form-group"><label>Vacation days (new total)</label><input id="lv-grant-vac" type="number" inputmode="decimal" min="0" step="0.5" value="0"/></div>
+        <div class="form-group"><label>Sick days (new total)</label><input id="lv-grant-sick" type="number" inputmode="decimal" min="0" step="0.5" value="0"/></div>
       </div>
       <div id="lv-grant-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="lv-grant-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    // Re-audit 2026-08-03: the inputs used to always default to 0, and the save
+    // handler does an absolute .set() (not an increment) — an admin who meant
+    // "grant 2 more vacation days" and typed 2 would silently wipe any existing
+    // unused balance down to 2. Prefill with the employee's CURRENT balance (so
+    // an unedited save is a true no-op) and label the fields "new total" so the
+    // overwrite semantics are visible instead of a silent trap. The write itself
+    // (.set with merge:true) is UNCHANGED — this only fixes what the admin sees
+    // before they commit it.
+    const uidSel = document.getElementById('lv-grant-uid');
+    const loadCurrent = async () => {
+      const uid = uidSel.value;
+      const hint = document.getElementById('lv-grant-current');
+      const vacInput = document.getElementById('lv-grant-vac'), sickInput = document.getElementById('lv-grant-sick');
+      if (!uid) { hint.textContent = ''; return; }
+      hint.textContent = 'Loading current balance…';
+      try {
+        const snap2 = await db.collection('leave_balances').doc(uid).get();
+        const d = snap2.exists ? snap2.data() : {};
+        const curVac = d.vacation || 0, curSick = d.sick || 0;
+        hint.textContent = `Current balance: ${curVac} vacation, ${curSick} sick`;
+        vacInput.value = curVac; sickInput.value = curSick;
+      } catch (_) { hint.textContent = ''; }
+    };
+    uidSel.addEventListener('change', loadCurrent);
+    loadCurrent();
     document.getElementById('lv-grant-save').addEventListener('click', async ()=>{
       const uid = document.getElementById('lv-grant-uid').value;
       const vacation = Math.max(0, Number(document.getElementById('lv-grant-vac').value)||0);
@@ -2328,7 +2423,16 @@ window.renderFilesHub = function(){
   const hit = (q, ...fields) => fields.some(f => (f||'').toString().toLowerCase().includes(q));
   const loadScope = (key) => {
     const fc = document.getElementById('fh-hub-content');
+    // Re-audit 2026-08-03: the search box above only ever filtered the
+    // '__all__' scope — every other scope's file list (window.renderFileCollection/
+    // bindFileCollection, js/departments.js) has no search hook of its own, so
+    // typing into the still-enabled box on any other scope silently did nothing.
+    // Cross-file fix would be adding a filter hook to bindFileCollection
+    // (js/departments.js) itself — out of scope here — so in the meantime this
+    // disables the box with an honest hint instead of leaving it a silent trap.
+    const searchBox = document.getElementById('fh-hub-search');
     if (key === '__all__') {
+      if (searchBox) { searchBox.disabled = false; searchBox.placeholder = 'Search my files…'; }
       fc.innerHTML = window.skeletonHtml('rows');
       FilesHub.loadFiles(null).then(files => {
         allScopeFiles = files;
@@ -2336,6 +2440,7 @@ window.renderFilesHub = function(){
       });
       return;
     }
+    if (searchBox) { searchBox.disabled = true; searchBox.placeholder = 'Search only works in "All Scopes"'; searchBox.value = ''; }
     const seed = scopeByKey[key] || { label:key, dept:'General' };
     fc.innerHTML = window.renderFileCollection(seed.label, `fh-hub-${key}`, window.currentRole);
     window.bindFileCollection(`fh-hub-${key}`, window.currentUser, seed.dept, seed.key);

@@ -14,7 +14,7 @@
  *   2. A brand-new root collection appearing in js/ that nobody has looked
  *      at yet re: backup/exclude decisions. Not a failure — just a nudge.
  *
- * This script has no dependencies and targets plain Node 20.
+ * This script has no dependencies and targets any current Node LTS.
  */
 
 const fs = require('fs');
@@ -22,6 +22,7 @@ const path = require('path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const JS_DIR = path.join(REPO_ROOT, 'js');
+const FUNCTIONS_ENTRY = path.join(REPO_ROOT, 'functions', 'index.js');
 const BACKUP_FILE = path.join(REPO_ROOT, 'scripts', 'monthly-backup.js');
 
 // Subcollection names that legitimately show up in `.collection('name')`
@@ -30,25 +31,31 @@ const BACKUP_FILE = path.join(REPO_ROOT, 'scripts', 'monthly-backup.js');
 // from the root-collection scan.
 const KNOWN_SUBCOLLECTIONS = ['comments', 'messages', 'readers', 'typing', 'records', 'items'];
 
-// Baseline snapshot of root collections seen in js/ at authoring time
-// (v13 Phase 7). Anything in the current scan but NOT in this baseline is
-// reported as "new" (warn-only, exit 0) so a human notices drift without
-// blocking CI.
+// Baseline snapshot of root collections seen in js/ + functions/index.js at
+// authoring time (v14 Wave 7 re-audit, 2026-08-03 — refreshed after the
+// Wave 7 department-screen split moved ~10 renderers into js/screens/ and
+// this scanner was found to be blind to that directory; also removed two
+// stale entries, 'finance_records' and 'president_message', that no longer
+// correspond to any real `.collection(...)` call anywhere in js/). Anything
+// in the current scan but NOT in this baseline is reported as "new"
+// (warn-only, exit 0) so a human notices drift without blocking CI.
 const BASELINE = [
   '_counters', 'aec_contacts', 'approval_requests', 'attendance',
   'attendance_extensions', 'attendance_worker', 'audit_log', 'bank_accounts',
   'bk_quotes', 'bs_clients', 'bs_quotes', 'budgets_marketing', 'campaigns',
   'cash_advances', 'cash_disbursement_journal', 'cash_receipt_journal',
   'clients', 'conversations', 'departments', 'design_clients',
-  'design_drawings', 'error_log', 'expenses', 'finance_delete_requests', 'finance_periods',
-  'finance_records', 'general_journal', 'gov_biddings', 'handbook',
+  'design_drawings', 'error_log', 'expenses', 'finance_config',
+  'finance_delete_requests', 'finance_periods', 'finance_rollup',
+  'general_journal', 'geo_sites', 'gov_biddings', 'handbook',
   'hub_files', 'hub_folders', 'id_verify', 'inventory_items', 'it_access',
   'it_assets', 'it_network', 'it_software', 'it_tickets', 'job_costs',
   'job_projects', 'kpi_evals', 'kpi_targets', 'leave_accruals',
-  'leave_balances', 'leave_requests', 'ledger', 'memos', 'notifications',
+  'leave_balances', 'leave_requests', 'ledger', 'memos', 'notif_push_quota',
+  'notif_quota', 'notifications',
   'order_tracking', 'partner_deals', 'pay_runs', 'payroll',
   'payroll_ca_overrides', 'payroll_delete_requests', 'payslips',
-  'pending_raises', 'policies', 'posts', 'president_message',
+  'pending_raises', 'policies', 'posts', 'productMeta',
   'production_orders', 'products', 'projects', 'promotions',
   'purchase_requisitions', 'quotes', 'resources', 'salary_history',
   'salary_raises', 'sales_clients', 'sales_orders', 'settings',
@@ -57,12 +64,30 @@ const BASELINE = [
   'tax_records', 'usernames', 'users', 'worker_directory', 'worker_profiles',
 ];
 
+// Recursively collect every .js file under `dir` (js/screens/, js/*, any
+// future subdirectory) — a flat readdirSync used to silently miss anything
+// nested (this is what let geo_sites/finance_config/etc. go undetected the
+// same day js/screens/*.js was introduced).
+function collectJsFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...collectJsFiles(full));
+    else if (entry.name.endsWith('.js')) out.push(full);
+  }
+  return out;
+}
+
 function scanRootCollections(jsDir) {
   const names = new Set();
-  const files = fs.readdirSync(jsDir).filter(f => f.endsWith('.js'));
+  const files = collectJsFiles(jsDir);
+  // Also scan the Cloud Functions entry point — some root collections
+  // (notif_push_quota, notif_quota) are only ever written from there, never
+  // from client-side js/, and would otherwise never show up in `scanned`.
+  if (fs.existsSync(FUNCTIONS_ENTRY)) files.push(FUNCTIONS_ENTRY);
   const pattern = /\.collection\(\s*['"]([a-z_0-9]+)['"]/gi;
   for (const file of files) {
-    const src = fs.readFileSync(path.join(jsDir, file), 'utf-8');
+    const src = fs.readFileSync(file, 'utf-8');
     let m;
     while ((m = pattern.exec(src)) !== null) {
       names.add(m[1]);
@@ -134,6 +159,23 @@ function main() {
     process.exit(1);
   }
   console.log('OK: every EXCLUDE entry corresponds to a real root collection referenced in js/.');
+
+  // 1b. Phantom OVERRIDES keys — fail. An OVERRIDES entry keyed on a
+  // collection name that no longer exists (a rename that missed a call
+  // site, a typo) would silently stop producing that collection's CSV +
+  // month-activity report with zero signal (the JSON snapshot path is
+  // independent via db.listCollections(), so it wouldn't even error).
+  const phantomOverrides = overrideKeys.filter(name => !scanned.has(name));
+  if (phantomOverrides.length > 0) {
+    console.error('FAIL: phantom OVERRIDES keys (not a real root collection referenced in js/):');
+    for (const p of phantomOverrides) console.error(`  - ${p}`);
+    console.error('');
+    console.error('This OVERRIDES entry in scripts/monthly-backup.js is silently producing no');
+    console.error('CSV/month-activity output for a collection that no longer has this name.');
+    console.error('Fix the key to match the real collection name, or remove the stale entry.');
+    process.exit(1);
+  }
+  console.log('OK: every OVERRIDES key corresponds to a real root collection referenced in js/.');
 
   // 2. New collections relative to the baseline — warn only
   const baselineSet = new Set(BASELINE);

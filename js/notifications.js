@@ -8,6 +8,12 @@ window.Notifs = (() => {
   let unsubscribe = null;
   let _fcmLoadingPromise = null; // serialises concurrent _registerPush calls
   let _unreadDebounceTimer = null;
+  // True unread count from _refreshUnreadCount's dedicated query (up to 100),
+  // as opposed to the 30-item live-listener window _renderIntoList sees. Kept
+  // here so the panel's "X unchecked" hint can be corrected to match the bell
+  // badge once the true count resolves, instead of the two silently disagreeing
+  // whenever unread count exceeds the listener window (Wave 7 re-audit 2026-08-03).
+  let _trueUnreadCount = null;
 
   // ── Start listener ────────────────────────────
   function startListener(uid) {
@@ -46,6 +52,11 @@ window.Notifs = (() => {
         .limit(100)
         .get();
       updateBadge(snap.size);
+      _trueUnreadCount = snap.size;
+      // Correct the panel's "X unchecked" hint (rendered synchronously off the
+      // 30-item window in _renderIntoList, which can undercount) now that the
+      // true count is known — keeps the bell badge and the panel hint in sync.
+      if (_lastItems) _updatePanelHint(snap.size, _lastItems.length);
     } catch (e) {
       console.error('unread count query failed', e);
     }
@@ -258,7 +269,12 @@ window.Notifs = (() => {
       return;
     }
 
-    const unreadCount = items.filter(n => !n.read).length;
+    // Prefer the true (up-to-100) unread count over the 30-item listener
+    // window's own tally whenever it's known and higher — otherwise a user
+    // with >30 unread sees the bell badge and this "X unchecked" hint report
+    // two different numbers for the same thing (Wave 7 re-audit 2026-08-03).
+    const windowUnread = items.filter(n => !n.read).length;
+    const unreadCount = (_trueUnreadCount != null && _trueUnreadCount > windowUnread) ? _trueUnreadCount : windowUnread;
     _updatePanelHint(unreadCount, items.length);
 
     const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment','chat_message']);
@@ -699,9 +715,9 @@ window.Notifs = (() => {
     `;
     overlay.innerHTML = `
       <div style="
-        background:rgba(20,30,55,0.72);
+        background:var(--modal-bg);
         backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
-        border:1px solid rgba(255,255,255,0.12);
+        border:1px solid var(--border);
         border-radius:22px 22px 16px 16px;
         padding:28px 24px 24px;
         width:min(440px,96vw);
@@ -710,8 +726,8 @@ window.Notifs = (() => {
       ">
         <div style="text-align:center;margin-bottom:20px">
           <div style="font-size:44px;margin-bottom:10px">${emojiIcon('🔔',44)}</div>
-          <div style="font-size:18px;font-weight:800;color:var(--text,#e8eaf0);margin-bottom:8px">Allow Notifications</div>
-          <div style="font-size:13px;color:var(--text-muted,#8a9bc0);line-height:1.6">
+          <div style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:8px">Allow Notifications</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.6">
             Please allow notifications so you can receive alerts for:
           </div>
           <div style="margin:14px 0;display:flex;flex-direction:column;gap:8px;text-align:left">
@@ -722,7 +738,7 @@ window.Notifs = (() => {
               [`${emojiIcon('⏰',16)}`,'Attendance & deadline alerts'],
               [`${emojiIcon('💸',16)}`,'Cash advance approvals'],
             ].map(([icon,text])=>`
-              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text,#e8eaf0)">
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text)">
                 <span style="font-size:16px;flex-shrink:0">${icon}</span>${text}
               </div>`).join('')}
           </div>
@@ -733,8 +749,8 @@ window.Notifs = (() => {
           margin-bottom:10px;letter-spacing:.02em;
         ">${emojiIcon('🔔',16)} Allow Notifications</button>
         <button id="push-deny-btn" style="
-          width:100%;padding:11px;background:transparent;color:var(--text-muted,#8a9bc0);
-          border:1.5px solid var(--border,#2a3a52);border-radius:12px;font-size:13px;cursor:pointer;
+          width:100%;padding:11px;background:transparent;color:var(--text-muted);
+          border:1.5px solid var(--border);border-radius:12px;font-size:13px;cursor:pointer;
         ">Not now</button>
       </div>
     `;

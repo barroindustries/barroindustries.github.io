@@ -8,7 +8,12 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER = 'bi-ops-v14.0.12';
+// CACHE_VER is derived from js/config.js's APP_VERSION by .githooks/pre-commit
+// (only when `git config core.hooksPath .githooks` has been run for this
+// clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
+// fails CI loudly if the two ever drift apart, so this is enforced, not just
+// documented convention.
+const CACHE_VER = 'bi-ops-v14.0.13';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -62,6 +67,8 @@ const PRECACHE = [
   '/icons/bi-logo.svg',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/icon-maskable-192.png',
+  '/icons/icon-maskable-512.png',
   '/favicon.svg',
   '/favicon.png',
   '/v/',
@@ -69,10 +76,17 @@ const PRECACHE = [
 ];
 
 // External CDN scripts — cache aggressively (versioned URLs never change)
+// fonts.googleapis.com/fonts.gstatic.com: confirmed actually loaded (the Inter
+// font via css/styles.css's @import) and permitted by index.html's CSP
+// (style-src includes fonts.googleapis.com, font-src includes fonts.gstatic.com)
+// — not a dead preconnect, so it's worth the same cache-first treatment as
+// every other versioned static CDN asset here.
 const CDN_CACHE_PATTERNS = [
   'gstatic.com/firebasejs',
   'cdn.jsdelivr.net/npm/chart.js',
-  'unpkg.com/lucide@'
+  'unpkg.com/lucide@',
+  'fonts.googleapis.com',
+  'fonts.gstatic.com'
 ];
 
 // ── Install: pre-cache app shell ─────────────────────

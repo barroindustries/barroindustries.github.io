@@ -970,13 +970,55 @@ service cloud.firestore {
     }
 
     // ── Products catalog ───────────────────────────────
+    // v14 re-audit HIGH fix — Firestore has no field-level read security, so
+    // this doc's cost-basis fields (capitalMaterials, capitalLabor, and the
+    // BOM's per-line unitCost) were readable by ANY authenticated user,
+    // including role 'partner', straight from the browser console — the
+    // quote builder's DOM-only "hide the cost panel" for generic partners
+    // was theatre on top of a fully-readable doc. Fix: cost data now lives
+    // ONLY in product_costs/{docId} below (finance/admin, never partner).
+    // `products` itself is unchanged for read (still needed for name/price/
+    // measurement/specs); writes going forward may never (re)introduce a
+    // cost field onto it.
+    //
+    // productCostFieldsLocked() lets an update touch any OTHER field freely,
+    // even on a not-yet-migrated doc that still carries legacy cost values,
+    // but a cost field may only ever move TOWARD null (the migration's own
+    // FieldValue.delete()) — never be set/changed to a new non-null value.
+    // That makes the lockdown order-independent: it's safe to deploy this
+    // rule before, during, or after migrateProductCostsOut() has run.
+    function productCostFieldNotIncreased(field) {
+      let nv = request.resource.data.get(field, null);
+      let ov = resource.data.get(field, null);
+      return nv == ov || nv == null;
+    }
+    function productCostFieldsLocked() {
+      return productCostFieldNotIncreased('capitalMaterials')
+          && productCostFieldNotIncreased('capitalLabor')
+          && productCostFieldNotIncreased('bom');
+    }
     match /products/{docId} {
       allow read: if isAuth();
-      allow write: if isAuth() && isAdmin();
+      allow create: if isAuth() && isAdmin()
+        && !('capitalMaterials' in request.resource.data)
+        && !('capitalLabor' in request.resource.data)
+        && !('bom' in request.resource.data);
+      allow update: if isAuth() && isAdmin() && productCostFieldsLocked();
+      allow delete: if isAuth() && isAdmin();
     }
     match /productMeta/{docId} {
       allow read: if isAuth();
       allow write: if isAuth() && isAdmin();
+    }
+    // ── Product cost basis (materials/labor capital + BOM unit costs) ──
+    // v14 re-audit HIGH fix. Split out of products/{docId} (see comment
+    // above) precisely so a partner can never reach this data at all, not
+    // just "shouldn't" per UI. Read+write restricted to finance/admin only —
+    // explicitly NOT partner, even though isAdmin()/canFinance() would never
+    // naturally include that role; the `!isPartner()` is defense-in-depth so
+    // this stays true even if a future edit widens either helper.
+    match /product_costs/{docId} {
+      allow read, write: if isAuth() && !isPartner() && (isAdmin() || canFinance());
     }
 
     // ── Reference materials ────────────────────────────

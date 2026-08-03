@@ -81,7 +81,20 @@ const TASK_STATUSES = [
 ];
 window.TASK_STATUSES = TASK_STATUSES; // v13: STATUS_META 'task' passthrough
 const EMP_STATUSES   = ['backlog','brainstorm','in-progress','submitted'];
-const DONE_STATUSES  = ['approved','archived'];
+// Re-audit 2026-08-03: TASK_STATUSES deliberately carries BOTH 'submitted' and
+// 'review' mapped to the same "In Review" label (read-compat with legacy
+// docs), but rendered verbatim every status-SETTING <select> showed two
+// indistinguishable "In Review" options. 'review' is canonical for anything
+// picked going forward; this trims 'submitted' out of the choices UNLESS a
+// task's live status is already literally 'submitted' (so its own row stays
+// selectable/visible instead of silently defaulting to a different option).
+function selectableTaskStatuses(list, currentStatus) {
+  return list.filter(s => s.value !== 'submitted' || currentStatus === 'submitted');
+}
+// Re-audit 2026-08-03: was missing 'done' even though TASK_STATUSES lists it as
+// a distinct terminal status and dashboards.js's own CLOSED_STATUSES already
+// includes it — a task marked Done stayed visible under Overdue/Near-Due here.
+const DONE_STATUSES  = ['done','approved','archived'];
 const SCORE_STATUSES = ['approved','on-hold','archived'];
 
 function normTask(data,id) {
@@ -160,7 +173,7 @@ function taskCard(t) {
       <div class="item-title">${escHtml(t.title)}</div>
       <div class="item-badges">
         <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
-        <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
+        ${window.statusBadge2 ? window.statusBadge2('task', t.status) : `<span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>`}
         ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange fu-card-badge">${emojiIcon('📣',16)} ${t.openFollowUpCount} follow-up${t.openFollowUpCount>1?'s':''}</span>`:''}
       </div>
     </div>
@@ -435,7 +448,9 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   if (window.lucide) lucide.createIcons({ nodes: [list] });
 
   // For employees in "My Tasks" view, group into active and completed sections
-  const COMPLETED_STATUSES = ['approved','archived','on-hold'];
+  // Re-audit 2026-08-03: was missing 'done' — an employee who marked their own
+  // task Done still saw it filed under Active instead of Completed here.
+  const COMPLETED_STATUSES = ['done','approved','archived','on-hold'];
   if (filter==='mine' && !isPriv) {
     const active    = tasks.filter(t=>!COMPLETED_STATUSES.includes(t.status));
     const completed = tasks.filter(t=>COMPLETED_STATUSES.includes(t.status));
@@ -485,8 +500,10 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
   const canEdit    = isAdmin||isAssignee||isCreator;
-  const canSubmit  = isAssignee&&!['submitted','review','approved','on-hold','archived'].includes(t.status);
-  const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
+  // Re-audit 2026-08-03: was missing 'done' — an assignee whose task was already
+  // marked Done could still click Submit and re-open it into the review queue.
+  const canSubmit  = isAssignee&&!['submitted','review','approved','done','on-hold','archived'].includes(t.status);
+  const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
   // Follow-up requests — admin asks the assignee(s) for an update; assignees (or
   // admins) mark them addressed. Wrapped in #fu-section so the panel can refresh it
@@ -802,7 +819,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     employees = empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   }
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${t.department===k?' selected':''}>${k}</option>`).join('');
-  const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
+  const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
   openPage('Edit Task', `
     <div class="form-group"><label>Title</label><input id="et-title" value="${(t.title||'').replace(/"/g,'&quot;')}"/></div>
@@ -914,7 +931,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       </div>
       <div class="form-group"><label>Status</label>
         <select id="t-status">
-          ${TASK_STATUSES.map(s=>`<option value="${s.value}"${s.value==='backlog'?' selected':''}>${s.label}</option>`).join('')}
+          ${selectableTaskStatuses(TASK_STATUSES).map(s=>`<option value="${s.value}"${s.value==='backlog'?' selected':''}>${s.label}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -956,6 +973,11 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
   document.getElementById('create-task-btn').addEventListener('click', async()=>{
     const title=document.getElementById('t-title').value.trim();
     if (!title){Notifs.showToast('Enter a task title','error');return;}
+    // Re-audit 2026-08-03: an empty Department silently dropped the task into an
+    // invisible "Unassigned" bucket — never matched by a Manager Dashboard's
+    // depts.includes(t.department) scoping, excluded from renderDeptTasks
+    // entirely — even though it may still have named assignees.
+    if (!document.getElementById('t-dept').value){Notifs.showToast('Select a department','error');return;}
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const creatorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const desc=document.getElementById('t-desc').value.trim();

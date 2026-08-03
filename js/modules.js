@@ -418,7 +418,10 @@ function isRealPresident() {
     });
     document.getElementById('jb-del')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({ message: 'Delete this job cost?', danger: true }))) return;
-      try{ await db.collection('job_costs').doc(job.id).delete(); closeModal(); Notifs.success('Deleted'); onSaved&&onSaved(); }
+      // Re-audit 2026-08-03: this deleted a money-adjacent job-cost record with only
+      // a toast — no audit trail of who removed it (unlike itemModal's delete a few
+      // lines above, which does log it).
+      try{ await db.collection('job_costs').doc(job.id).delete(); window.logAudit&&window.logAudit('delete','job_cost',job.id,{project:job.project||''}); closeModal(); Notifs.success('Deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
   }

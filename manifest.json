@@ -3,6 +3,7 @@
   "short_name": "Barro Ops",
   "description": "Barro Industries Operating System \u2014 the company's central system",
   "start_url": "/",
+  "id": "/",
   "display": "standalone",
   "background_color": "#F7F8FA",
   "theme_color": "#FFFFFF",

@@ -3,13 +3,19 @@
 # Dependency-free POSIX-ish shell (grep/sed/find only, no node/python packages).
 # Run from the repo root: bash scripts/ci-invariants.sh
 #
-# Two checks, each fails the build (non-zero exit) when violated:
-#   1. STACKING   — no new 4-digit z-index literal in js/*.js or js/screens/*.js
+# Three checks, each fails the build (non-zero exit) when violated:
+#   1. STACKING   — no new 4-digit z-index literal in js/*.js, js/screens/*.js,
+#                    or css/*.css
 #   2. PRECACHE   — every local js/*.js, js/screens/*.js, css/*.css referenced by
 #                    index.html must be listed in sw.js's PRECACHE array.
+#   3. CACHE_VER  — sw.js's CACHE_VER suffix must equal js/config.js's
+#                    APP_VERSION, so a stale hook / bad manual edit / merge
+#                    conflict that lets the two drift apart fails loud instead
+#                    of silently shipping stale-cached code under a mismatched
+#                    version banner.
 #
 # js/screens/ may not exist yet (Wave 2 Batch B pilot extraction lands it later).
-# Both checks tolerate a missing/empty js/screens/ directory.
+# All checks tolerate a missing/empty js/screens/ directory.
 
 set -u
 overall_fail=0
@@ -22,10 +28,15 @@ collect_js_files() {
   fi
 }
 
+# ── helper: collect the CSS files in scope for the stacking check ─────────
+collect_css_files() {
+  find css -maxdepth 1 -name '*.css' 2>/dev/null
+}
+
 # ═══════════════════════════════════════════════════════════════════════
-# CHECK 1 — STACKING: no new 4-digit z-index literal in js/
+# CHECK 1 — STACKING: no new 4-digit z-index literal in js/ or css/
 # ═══════════════════════════════════════════════════════════════════════
-echo "=== [1/2] STACKING: checking for new 4-digit z-index literals in js/*.js and js/screens/*.js ==="
+echo "=== [1/3] STACKING: checking for new 4-digit z-index literals in js/*.js, js/screens/*.js, css/*.css ==="
 
 # Baseline whitelist — pre-existing raw z-index literals as of Wave 2 Batch C
 # (2026-08-03). Each was audited and is a legitimate top-of-stack overlay
@@ -45,6 +56,7 @@ STACKING_WHITELIST='
 STACK_PATTERN='z-index[[:space:]]*:[[:space:]]*[0-9]{4}|zIndex[[:space:]]*[=:][[:space:]]*['"'"'"]?[0-9]{4}'
 
 js_files=$(collect_js_files)
+css_files=$(collect_css_files)
 stacking_fail=0
 tmp_matches=$(mktemp)
 
@@ -54,6 +66,14 @@ if [ -n "$js_files" ]; then
       echo "$f:$ln:$match"
     done
   done > "$tmp_matches"
+fi
+
+if [ -n "$css_files" ]; then
+  for f in $css_files; do
+    grep -noE "$STACK_PATTERN" "$f" 2>/dev/null | while IFS=: read -r ln match; do
+      echo "$f:$ln:$match"
+    done
+  done >> "$tmp_matches"
 fi
 
 # Count actual matches per file
@@ -86,7 +106,7 @@ echo
 # ═══════════════════════════════════════════════════════════════════════
 # CHECK 2 — PRECACHE COMPLETENESS
 # ═══════════════════════════════════════════════════════════════════════
-echo "=== [2/2] PRECACHE: checking every local js/css asset in index.html is in sw.js PRECACHE ==="
+echo "=== [2/3] PRECACHE: checking every local js/css asset in index.html is in sw.js PRECACHE ==="
 
 precache_fail=0
 
@@ -111,6 +131,40 @@ fi
 if [ "$precache_fail" -eq 0 ]; then
   echo "PASS: every local js/css asset referenced by index.html is in sw.js PRECACHE"
 else
+  overall_fail=1
+fi
+
+echo
+
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK 3 — CACHE_VER: sw.js's cache tag must match js/config.js's APP_VERSION
+# ═══════════════════════════════════════════════════════════════════════
+echo "=== [3/3] CACHE_VER: checking sw.js CACHE_VER matches js/config.js APP_VERSION ==="
+
+cachever_fail=0
+
+app_version=$(grep -oE "APP_VERSION[[:space:]]*=[[:space:]]*'[0-9]+\.[0-9]+\.[0-9]+'" js/config.js \
+  | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+cache_version=$(grep -oE "CACHE_VER[[:space:]]*=[[:space:]]*'bi-ops-v[0-9]+\.[0-9]+\.[0-9]+'" sw.js \
+  | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+
+if [ -z "$app_version" ]; then
+  echo "FAIL: could not find APP_VERSION = 'X.Y.Z' in js/config.js"
+  cachever_fail=1
+elif [ -z "$cache_version" ]; then
+  echo "FAIL: could not find CACHE_VER = 'bi-ops-vX.Y.Z' in sw.js"
+  cachever_fail=1
+elif [ "$app_version" != "$cache_version" ]; then
+  echo "FAIL: CACHE_VER (bi-ops-v$cache_version) in sw.js does not match APP_VERSION ($app_version) in js/config.js."
+  echo "  FIX: the pre-commit hook (.githooks/pre-commit) derives CACHE_VER from APP_VERSION on every"
+  echo "       commit — this drift means the hook wasn't active (run 'git config core.hooksPath"
+  echo "       .githooks' once per clone), or one of the two files was hand-edited. Re-sync sw.js's"
+  echo "       CACHE_VER to 'bi-ops-v${app_version}' to fix."
+else
+  echo "PASS: CACHE_VER (bi-ops-v$cache_version) matches APP_VERSION ($app_version)"
+fi
+
+if [ "$cachever_fail" -ne 0 ]; then
   overall_fail=1
 fi
 
