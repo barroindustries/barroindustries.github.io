@@ -1411,12 +1411,16 @@ html.theme-astral .kpi-card.red { border-left: 1px solid var(--border); }
 .alert-chevron { font-size: var(--fs-xl); font-weight: 700; opacity: 0.7; }
 
 /* ── Task Feed ── */
+/* padding/separator now owned solely by the later "inset separators" copy
+   (~line 5016, iOS DESIGN OVERHAUL section) — this rule used to also set
+   padding:11px 18px + border-bottom, but that copy always won the cascade
+   (same selector, later in source), leaving those two declarations dead.
+   Removed at the source (SEAMLESS MOBILE PASS v2 consolidation) instead of
+   layering another override on top. */
 .task-feed-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 11px 18px; border-bottom: 1px solid var(--border);
   transition: background var(--t1); cursor: pointer;
 }
-.task-feed-item:last-child { border-bottom: none; }
 .task-feed-item:hover { background: var(--s2); }
 .task-feed-item.task-overdue { background: rgba(255,69,58,0.04); }
 .task-feed-item.task-overdue:hover { background: rgba(255,69,58,0.08); }
@@ -2567,9 +2571,11 @@ html.theme-astral #mini-cal td.today {
   .main-content {
     margin-left: 0;
     margin-top: calc(var(--top-nav-h) + env(safe-area-inset-top, 0px));
-    padding: 14px;
-    /* Clear the fixed bottom nav (Facebook-style) so content never hides under it. */
-    padding-bottom: calc(var(--bottom-nav-h) + 24px + env(safe-area-inset-bottom, 0px));
+    /* padding/padding-bottom removed here (SEAMLESS MOBILE PASS v2
+       consolidation) — this was always beaten by the "Mobile padding
+       refinements" block further down (same ≤768px breakpoint, later in
+       source), which is itself beaten at ≤640px by the density pass at the
+       end of this file. One property, one live declaration per width tier. */
   }
   /* Facebook-style shell: clean top bar (brand + action icons) + full-width
      bottom nav for primary tabs. */
@@ -2619,8 +2625,11 @@ html.theme-astral #mini-cal td.today {
   .card-body { overflow-anchor: none; }
   /* Alert banners full width */
   .alert-banner { font-size: var(--fs-sm); padding: 10px 14px; }
-  /* Task feed compact */
-  .task-feed-item { padding: 10px 14px; }
+  /* Task feed compact. (padding: 10px 14px used to live here too, but a
+     later UNCONDITIONAL .task-feed-item rule — "inset separators", ~line
+     5023 — always won regardless of this media query, so it never actually
+     applied at any width. Removed at the source; the ≤640px density pass
+     at the end of this file adds a real, winning override instead.) */
   .task-feed-title { font-size: var(--fs-sm); }
 }
 
@@ -2664,12 +2673,13 @@ html.theme-astral #mini-cal td.today {
 
 @media (max-width: 420px) {
   .login-container { padding: 24px 16px 20px; }
-  .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .kpi-card { padding: 14px 12px; }
+  /* .kpi-row grid-cols/gap, .kpi-card padding, .page-header h2 font-size and
+     .card-header h3 font-size used to live here too, but every one of them
+     was always beaten by later same-breakpoint-or-narrower rules (the ≤640px
+     density pass at the end of this file) — dead weight, removed at the
+     source (SEAMLESS MOBILE PASS v2 consolidation). */
   /* .bn-label hidden globally via pill nav styles */
   .page-header { flex-wrap: wrap; gap: 8px; }
-  .page-header h2 { font-size: 1.0625rem; }
-  .card-header h3 { font-size: var(--fs-md); }
   .login-role-cards { gap: 8px; }
   .login-role-card { padding: 12px 14px; }
   .lrc-icon { width: 36px; height: 36px; }
@@ -5390,11 +5400,20 @@ html.theme-astral .subtab-btn.active {
    no extra inset padding on top of that; its base rule (18px 14px 14px, see
    the Sidebar section above) is enough. */
 
-/* ── Item cards — rounded on mobile ── */
-@media (max-width: 768px) {
-  .item-card { border-radius: 14px !important; }
-  .kpi-card  { border-radius: 16px !important; padding: 16px 14px; }
-  .card      { border-radius: 18px !important; }
+/* ── Item cards — rounded, tablet/large-phone tier only (641–768px) ──
+   SEAMLESS MOBILE PASS v2: this used to run unscoped at ≤768px with
+   !important on every property, so it silently out-shouted whatever the
+   ≤640px phone layer below wanted for the exact same selectors — a textbook
+   case of "more overrides" instead of "edit at the source." Narrowed to the
+   tablet/landscape-phone gap the ≤640px density language deliberately
+   doesn't touch; the !importants are gone since nothing above 768px
+   competes for these properties at this range. ≤640px gets its own flatter,
+   ~10px-radius language — see the SURFACES section in the mobile density
+   block near the end of this file. */
+@media (min-width: 641px) and (max-width: 768px) {
+  .item-card { border-radius: 14px; }
+  .kpi-card  { border-radius: 16px; padding: 16px 14px; }
+  .card      { border-radius: 18px; }
 }
 
 /* PTR arc ring styles are in the PULL-TO-REFRESH block */
@@ -5412,7 +5431,12 @@ html.theme-astral .subtab-btn.active {
   box-shadow: 0 1px 6px rgba(255,59,48,0.50);
 }
 
-/* ── Mobile padding refinements ── */
+/* ── Mobile padding refinements — sole surviving .main-content padding rule
+   for the 641–768px tablet/large-phone gap (the ≤768px main-shell block
+   above deliberately no longer sets this property — see its comment). At
+   ≤640px this is itself superseded by the density pass at the end of the
+   file. The .kpi-row gap:10px this block used to duplicate is already set
+   by the ≤768px main-shell block above (identical value) — removed here. ── */
 @media (max-width: 768px) {
   .main-content {
     padding: 16px;
@@ -5420,7 +5444,6 @@ html.theme-astral .subtab-btn.active {
        inset) plus breathing room, so the last cards never hide under it. */
     padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 28px);
   }
-  .kpi-row { gap: 10px; }
 }
 
 /* ── Form labels — iOS style ── */
@@ -6031,42 +6054,31 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 /* ══════════════════════════════════════════
    WS43 — PHONE BREATHABILITY PASS (owner directive: "less clutter on
    phone, more breathable layout. modern, minimal.")
-   Scope: ≤640px only. Every rule below is additive/override inside this
-   media query — desktop and the existing ≤768px tablet-tier blocks above
-   are untouched. Token-driven, theme-agnostic (no color literals).
-══════════════════════════════════════════ */
+   Scope: ≤640px only.
+   SEAMLESS MOBILE PASS v2 (2026-08-03) — this block's own header used to
+   claim "desktop and the existing ≤768px tablet-tier blocks above are
+   untouched," but WS43 and the V14 MOBILE DENSITY PASS below it went in
+   literally opposite directions on the same selectors (WS43: bigger
+   min-heights/gaps for "breathability"; v14: smaller, for "maximize
+   space" — the owner's newer and current directive). Every declaration
+   that v14 already re-declares for the same selector+property has been
+   deleted here instead of left as dead weight silently losing the cascade
+   — only the rules that are still the ONE live source for their property
+   remain, edited in place to match the new density language. ══════════════════════════════ */
 @media (max-width: 640px) {
 
-  /* 1 — SPACING RHYTHM: page padding, card/section vertical gap.
-     Keep the bottom clear of the fixed bottom nav (must not be reset by this
-     shorthand — it's the last .main-content rule in source order). */
-  .main-content {
-    padding: var(--space-4);
-    padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 28px);
-  }
-  .card, .kpi-row { margin-bottom: var(--space-5); }
-  .item-list { gap: var(--space-3); }
-
-  /* 2 — CALMER CARDS: inner padding, lighter borders */
-  .card { padding: var(--space-4); }
-  .card-body { padding: var(--space-4); }
+  /* CALMER CARDS: lighter borders. (Padding/margin for .card/.card-body/
+     .item-card/.kpi-row/.item-list moved to a single source — the V14
+     MOBILE DENSITY PASS below — removed here to stop the two blocks
+     fighting over the same properties.) */
   .card, .kpi-card, .item-card {
     border-color: color-mix(in srgb, var(--border) 60%, transparent);
   }
 
-  /* 3 — LISTS BREATHE: item rows gap instead of divider+gap double-up */
-  .item-card { padding: var(--space-4); }
-  .task-feed-item::after { display: none; }
-  .task-feed-item { border-bottom: none; }
-
-  /* 4 — KPI TILES: 2-col grid, taller tiles, breathing gap */
-  .kpi-row { grid-template-columns: repeat(2, 1fr); gap: var(--space-3); }
-  .kpi-card { min-height: 72px; padding: var(--space-4); }
-  /* .kpi-value font-size intentionally untouched — protected clamp() rule
-     (line ~4532) already scales it responsively and window.fitKpiValues
-     depends on it; overriding here would break that contract. */
-
-  /* 5 — CHIP ROWS: single-row horizontal scroll, no wrap clutter */
+  /* CHIP ROWS: single-row horizontal scroll, no wrap clutter. Still the one
+     live source for this — height brought down from 40px to match the
+     owner's "paddings take so much space" directive (32px, tighter
+     padding); everything else here (scroll/overflow setup) is unchanged. */
   .chip-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -6076,18 +6088,14 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
     padding-bottom: 2px;
   }
   .chip-tabs::-webkit-scrollbar { display: none; }
-  .chip-tab { min-height: 40px; flex-shrink: 0; }
+  .chip-tab { min-height: 32px; padding: 6px 12px; font-size: var(--fs-sm); flex-shrink: 0; }
 
-  /* 6 — FORMS: full-width primary actions */
+  /* FORMS: full-width primary actions */
   .modal-footer .btn-primary,
   .page-content-form .btn-primary,
   form .btn-primary { width: 100%; }
 
-  /* 7 — TYPE CALM: page title keeps hierarchy; already token-driven via
-     .page-header h2 (--fs-4xl desktop / 2rem here) and .kpi-label
-     (uppercase + --text-muted) — no new visual language introduced. */
-
-  /* 8 — TOPBAR/HEADER SLIM: compact action buttons so title owns the line */
+  /* TOPBAR/HEADER SLIM: compact action buttons so title owns the line */
   .page-header { align-items: center; }
   .page-actions .btn-primary,
   .page-actions .btn-secondary,
@@ -6112,11 +6120,13 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
    a "calmer" feel) so this block wins the cascade on every shared selector
    at equal specificity (later rule wins, source order). Desktop (>640px) and
    @media print are untouched by this block.
+   SEAMLESS MOBILE PASS v2 (2026-08-03) update — the KPI/SURFACES sections
+   at the end of this block are new in this pass (owner: "looks bad... must
+   look seamless... paddings take so much space"); they kill the remaining
+   "boxes-in-boxes" look (heavy radius/shadow/borders) and collapse the KPI
+   tile's icon+label+value vertical stack into a ~64px stat strip. See their
+   own comments for what changed and why it's still safe re: fitKpiValues.
    Guardrails respected:
-   - .kpi-value's clamp(15px, 4.6vw, var(--fs-5xl)) is NOT touched — it's an
-     explicitly protected rule (see WS43 comment above, ~line 6065) that
-     window.fitKpiValues depends on, and it already renders ~17px at 375px
-     wide, well below the 24px ceiling this pass would otherwise ask for.
    - Input/select/textarea font-size is NOT touched — the existing
      @media (pointer:coarse) rule (~line 346) forces 16px there to block iOS
      auto-zoom-on-focus; only height/padding are tightened here.
@@ -6152,10 +6162,16 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .card { padding: 12px; }
   .card-body { padding: 12px; }
   .item-card { padding: 10px 12px; }
+  /* Real, winning override — see the removed dead copy near ~line 2628 for
+     why the old one never applied. */
+  .task-feed-item { padding: 12px 14px; }
   .item-list { gap: 8px; }
   .kpi-row { gap: 8px; }
-  /* Kill the WS43 72px kpi-card floor — let content set height, tighten padding */
-  .kpi-card { min-height: 0; padding: 12px; }
+  /* Kill the WS43 72px kpi-card floor — let content set height, tighten
+     padding. Right padding is wider to clear the icon badge, which the
+     KPI TILES section below corner-pins instead of stacking it above the
+     label (that stacking was the main reason tiles read as "billboards"). */
+  .kpi-card { min-height: 0; padding: 12px 34px 12px 12px; }
   .dashboard-grid { gap: 10px; }
   .dept-grid { gap: 10px; }
   .form-row { gap: 8px; }
@@ -6197,4 +6213,34 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .table-cards tr { padding: 8px 10px; margin-bottom: 8px; }
   .data-table th { padding: 8px 10px; }
   .data-table td { padding: 8px 10px; }
+
+  /* 7 — SURFACES (SEAMLESS MOBILE PASS v2): kill "boxes-in-boxes". Cards
+     flatten to hairline-bordered surfaces instead of border+shadow+big-
+     radius blocks — iOS inset-grouped language (FB Messenger / Apple system
+     apps, per owner reference). Border color is already softened by the
+     WS43 color-mix rule above; this just drops the shadow and shrinks the
+     radius from the 14–18px "tablet tier" values (see the ── Item cards ──
+     block, now scoped to 641–768px only) down to ~10px. Priority/accent
+     left-bars thin from 3px to 2px so they read as a color hint, not a
+     colored sidebar. */
+  .card, .kpi-card, .item-card { border-radius: 10px; box-shadow: none; }
+  .item-card { border-left-width: 2px; }
+  .kpi-card.accent, .kpi-card.green, .kpi-card.warn, .kpi-card.red { border-left-width: 2px; }
+
+  /* 8 — KPI TILES (SEAMLESS MOBILE PASS v2): collapse the icon+label+value
+     vertical stack into a ~64px-tall stat strip. The icon badge used to sit
+     ABOVE the label as a full-width block (see .kpi-icon-wrap's base rule),
+     which is most of why every tile read as a "billboard card" — it moves
+     to a small corner mark instead; .kpi-card's padding above already
+     clears room for it on the right. fitKpiValues (js/app.js) is untouched:
+     it reads the computed font-size at runtime and only ever shrinks
+     further on overflow, so raising the preferred size here (was ~17px at
+     375px via the desktop clamp) is safe and still content-aware. */
+  .kpi-icon-wrap {
+    position: absolute; top: 10px; right: 10px;
+    width: 22px; height: 22px; border-radius: 6px; margin-bottom: 0;
+  }
+  .kpi-icon-wrap svg { width: 12px !important; height: 12px !important; }
+  .kpi-label { font-size: var(--fs-2xs); margin-bottom: 4px; }
+  .kpi-value { font-size: clamp(17px, 5.6vw, 22px); }
 }

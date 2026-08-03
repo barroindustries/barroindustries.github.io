@@ -1004,6 +1004,13 @@ function buildNav() {
 
 function isPresident() { return currentRole === 'president'; }
 function isPartner() { return currentRole === 'partner'; }
+// Type-B (Production, weekly) self-service worker — payClass lives on
+// payroll/{uid} and is merged onto window.userProfile by loadUserProfile()
+// above (own-uid read, firestore.rules payroll/{uid}). Set via js/screens/
+// hr.js's "Employee Type" selector (Edit Payroll). See js/screens/worker.js's
+// file header for the full Type-B architecture (worker_profiles.linkedUid
+// bridge, attendance_worker schema, geofencing).
+function isTypeBWorker() { return !!(window.userProfile && userProfile.payClass === 'production'); }
 function isBrilliantOnly() { return currentDepts.length === 1 && currentDepts[0] === 'Brilliant Steel'; }
 // A Brilliant Steel partner gets the BS-locked portal (their pricing, client book,
 // 50/50 split). A generic partner is any other company doing projects WITH Barro —
@@ -1027,6 +1034,12 @@ function _navVariant() {
   if (partner && isGenericPartner()) return 'genericPartner';
   if (partner) return 'partnerBS';
   if (isBrilliantOnly()) return 'bsOnly';
+  // Type-B (Production, weekly self-service worker) — checked after the
+  // admin/partner branches above (an admin or partner never resolves here in
+  // practice, but this keeps the same "higher tiers win" order the rest of
+  // this function already follows) so their own chrome is never downgraded
+  // to the minimal Home/Chat/Profile bar meant for a production floor worker.
+  if (isTypeBWorker()) return 'workerB';
   return 'staff';
 }
 // Evaluate a NAV_REGISTRY predicate by name (live state, not baked into the
@@ -1857,7 +1870,13 @@ function navigateTo(page, opts) {
   }
 
   switch(page) {
-    case 'dashboard':        renderDashboard(); break;
+    // Type-B (Production, weekly self-service worker) — their whole
+    // "dashboard" is the Time In/Out + calendar + finance screen in
+    // js/screens/worker.js, not renderDashboard()'s role-branch dispatcher
+    // (js/screens/dashboards.js, owned by another pass — this is the one
+    // safe interception point, same pattern renderDeptModule/the dept:
+    // prefix above already uses to redirect before the switch's normal case).
+    case 'dashboard':        (isTypeBWorker() && window.renderWorkerHome) ? window.renderWorkerHome() : renderDashboard(); break;
     case 'company':          renderCompany(); break;
     case 'tasks':            renderTasks(currentUser, currentRole, currentDepts[0]||''); break;
     case 'submissions':      renderSubmissions(currentUser, currentRole, currentDepts[0]||''); break;

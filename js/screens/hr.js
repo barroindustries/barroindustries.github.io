@@ -268,6 +268,7 @@ window.renderHR = async function(currentUser, currentRole){
     { icon:'💰', title:'Payroll',        desc:'Monthly run — Compute → Verify → Disburse', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
     { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips, profiles & ID cards', go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
     ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
+    { icon:'📍', title:'Work Sites',     desc:'Geofenced Time In/Out locations for Type-B (Production) self-service', go:()=>openWorkSitesPage(currentUser, currentRole) },
     { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
     { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
   ];
@@ -960,12 +961,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
         openPage(`Edit Payroll — ${escHtml(emp.displayName||'')}`, `
-          <div class="form-group"><label>Employee Class</label>
+          <div class="form-group"><label>Employee Type</label>
             <select id="ep-class" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-              <option value="regular" ${_payClass==='regular'?'selected':''}>Regular — monthly (KPI + attendance)</option>
-              <option value="production" ${_payClass==='production'?'selected':''}>Production — weekly, fixed rate (hourly attendance, 8-hr day)</option>
+              <option value="regular" ${_payClass==='regular'?'selected':''}>Type A — Regular, monthly (KPI + attendance)</option>
+              <option value="production" ${_payClass==='production'?'selected':''}>Type B — Production, weekly (hourly attendance, 8-hr day)</option>
             </select>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Regular staff are paid monthly here; Production workers are paid weekly via the Payslip generator.</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Type A staff are paid monthly here. Type B (Production) workers are paid weekly via the Payslip generator, excluded from this monthly run, and — if their Worker Profile's "Linked Login Account" is set to this uid (HR → Worker Payslips → the profile's edit form) — can self-service Time In/Out with geofencing from their own phone (HR → Work Sites).</div>
           </div>
           <div class="form-row">
             <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label>
@@ -1663,6 +1664,135 @@ function openWorkerKioskModal(profile, currentUser) {
     closeModal();
     Notifs.success(`Clocked ${label} — ${hrs.toFixed(1)}h logged.`);
   });
+}
+
+// ── Work Sites (geofencing admin) — Type-B self-service Time In/Out ────────
+// CRUD over geo_sites/{id} = {name, lat, lng, radiusM, active}. Consumed by
+// js/screens/worker.js's _handleClock (window.siteMatch, js/geo-core.js)
+// on every Time In/Out attempt. No new CSS — reuses .card/.data-table/
+// .form-group/.badge exactly like every other hr.js screen.
+async function openWorkSitesPage(currentUser, currentRole) {
+  const canEdit = isFinancePriv();
+  openPage(`${emojiIcon('📍',16)} Work Sites`, `
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+      Type-B (Production) workers can only self-service Time In/Out within the radius of an <strong>active</strong> site below.
+      Add every gate/floor a worker might clock in from.
+    </p>
+    <div id="ws-list">${window.skeletonHtml('rows')}</div>
+    ${canEdit ? `<button class="btn-primary" id="ws-add-btn" style="width:100%;margin-top:12px">${emojiIcon('➕',16)} Add Work Site</button>` : ''}
+  `, '', {});
+
+  async function load() {
+    const snap = await db.collection('geo_sites').orderBy('name').get().catch(()=>({docs:[]}));
+    const sites = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const listEl = document.getElementById('ws-list');
+    if (!listEl) return;
+    listEl.innerHTML = !sites.length
+      ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📍',44)}</div><p>No work sites yet. Add one to enable Type-B self-service Time In.</p></div>`
+      : `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Name</th><th>Coordinates</th><th>Radius</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead>
+          <tbody>${sites.map(s=>`<tr>
+            <td style="font-weight:600">${escHtml(s.name||'—')}</td>
+            <td style="font-size:12px"><code>${(Number(s.lat)||0).toFixed(6)}, ${(Number(s.lng)||0).toFixed(6)}</code></td>
+            <td>${s.radiusM||0} m</td>
+            <td><span class="badge ${s.active!==false?'badge-green':'badge-gray'}">${s.active!==false?'Active':'Inactive'}</span></td>
+            ${canEdit?`<td style="white-space:nowrap">
+              <button class="btn-secondary btn-sm ws-edit-btn" data-id="${s.id}" title="Edit" aria-label="Edit ${escHtml(s.name||'site')}">${emojiIcon('✎',14)}</button>
+              <button class="btn-secondary btn-sm ws-toggle-btn" data-id="${s.id}" style="margin-left:4px">${s.active!==false?'Deactivate':'Activate'}</button>
+            </td>`:''}
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    if (window.lucide) lucide.createIcons({ nodes:[listEl] });
+    if (!canEdit) return;
+    listEl.querySelectorAll('.ws-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => openWorkSiteForm(sites.find(s=>s.id===btn.dataset.id), currentUser, load));
+    });
+    listEl.querySelectorAll('.ws-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const s = sites.find(x=>x.id===btn.dataset.id);
+        if (!s) return;
+        btn.disabled = true;
+        try {
+          await db.collection('geo_sites').doc(s.id).update({ active: !(s.active!==false) });
+          Notifs.success(`${s.name||'Site'} ${s.active!==false?'deactivated':'activated'}.`);
+        } catch (err) {
+          Notifs.showToast('Could not update site: ' + (err.message||err), 'error');
+        }
+        load();
+      });
+    });
+  }
+
+  document.getElementById('ws-add-btn')?.addEventListener('click', () => openWorkSiteForm(null, currentUser, load));
+  load();
+}
+
+function openWorkSiteForm(site, currentUser, onSave) {
+  const isEdit = !!site;
+  openModal(`${isEdit?'Edit':'Add'} Work Site`, `
+    <div class="form-group"><label>Site Name *</label><input id="ws-name" value="${escHtml(site?.name||'')}" placeholder="e.g. Carlatan Site"/></div>
+    <div class="form-group"><label>Paste Coordinates <span style="font-size:9px;color:var(--text-muted);font-weight:400">paste "lat, lng" straight from Google Maps</span></label>
+      <div style="display:flex;gap:6px">
+        <input id="ws-paste" placeholder="16.6159, 120.3209" style="flex:1"/>
+        <button type="button" class="btn-secondary btn-sm" id="ws-use-loc" style="white-space:nowrap">${emojiIcon('📍',14)} Use my location</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Latitude *</label><input id="ws-lat" type="number" step="any" value="${site?.lat??''}"/></div>
+      <div class="form-group"><label>Longitude *</label><input id="ws-lng" type="number" step="any" value="${site?.lng??''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Radius (meters)</label><input id="ws-radius" type="number" min="10" step="1" value="${site?.radiusM||150}"/></div>
+      <div class="form-group" style="display:flex;align-items:center;padding-top:22px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="ws-active" ${site?.active!==false?'checked':''} style="width:18px;height:18px"/> Active
+        </label>
+      </div>
+    </div>
+    <div id="ws-status" style="font-size:11px;color:var(--text-muted);min-height:14px"></div>
+  `, `<button class="btn-primary" id="ws-save-btn">${isEdit?'Update':'Save'} Site</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('ws-paste')?.addEventListener('input', (e) => {
+    const parts = e.target.value.split(',').map(s=>s.trim()).filter(Boolean);
+    if (parts.length === 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]))) {
+      document.getElementById('ws-lat').value = parseFloat(parts[0]);
+      document.getElementById('ws-lng').value = parseFloat(parts[1]);
+    }
+  });
+
+  document.getElementById('ws-use-loc')?.addEventListener('click', () => {
+    const btn = document.getElementById('ws-use-loc');
+    const status = document.getElementById('ws-status');
+    if (!navigator.geolocation) { if (status) status.textContent = 'Geolocation not supported on this device/browser.'; return; }
+    btn.disabled = true;
+    if (status) status.textContent = 'Getting your current location — stand at the site first…';
+    navigator.geolocation.getCurrentPosition(pos => {
+      document.getElementById('ws-lat').value = pos.coords.latitude;
+      document.getElementById('ws-lng').value = pos.coords.longitude;
+      if (status) status.textContent = `Location captured (±${Math.round(pos.coords.accuracy||0)}m accuracy).`;
+      btn.disabled = false;
+    }, err => {
+      if (status) status.textContent = 'Could not get location: ' + (err.message || 'permission denied or unavailable.');
+      btn.disabled = false;
+    }, { enableHighAccuracy:true, timeout:10000, maximumAge:0 });
+  });
+
+  document.getElementById('ws-save-btn').addEventListener('click', () => window.busy(document.getElementById('ws-save-btn'), async () => {
+    const name = document.getElementById('ws-name').value.trim();
+    const lat = parseFloat(document.getElementById('ws-lat').value);
+    const lng = parseFloat(document.getElementById('ws-lng').value);
+    const radiusM = parseFloat(document.getElementById('ws-radius').value) || 150;
+    const active = document.getElementById('ws-active').checked;
+    if (!name) { Notifs.showToast('Site name is required','error'); return; }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) { Notifs.showToast('Valid latitude and longitude are required','error'); return; }
+    const data = { name, lat, lng, radiusM, active, updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid };
+    if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
+    const ref = site?.id ? db.collection('geo_sites').doc(site.id) : db.collection('geo_sites').doc();
+    await ref.set(data, { merge:true });
+    closeModal();
+    Notifs.success(isEdit ? 'Work site updated!' : 'Work site added!');
+    onSave();
+  }));
 }
 
 // Payslip workflow: draft → verified → filed → submitted (sequential, no skipping)

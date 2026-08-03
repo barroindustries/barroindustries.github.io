@@ -263,11 +263,32 @@ service cloud.firestore {
     // owner clause — every record is HR-kiosk-written. When WS27/WS20's
     // worker_profiles.linkedUid lands, an additive owner-read clause can be
     // added here without re-keying (workerId already == the worker_profiles docId).
+    // v14 Type-B self-service — the additive owner clause this block's old
+    // comment anticipated: workerId == worker_profiles docId, ownership via
+    // that profile's linkedUid.
+    function isLinkedWorkerUid(workerId) {
+      return get(/databases/$(database)/documents/worker_profiles/$(workerId))
+        .data.get('linkedUid','') == request.auth.uid;
+    }
     match /attendance_worker/{workerId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
     }
     match /attendance_worker/{workerId}/records/{date} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
+      allow write: if isAuth() && (isFinanceOrAdmin() || (
+        isLinkedWorkerUid(workerId)
+        && request.resource.data.workerId == workerId
+        && request.resource.data.get('recordedBy', request.auth.uid) == request.auth.uid
+        && request.resource.data.get('inValid', true) == true
+        && request.resource.data.get('outValid', true) == true
+      ));
+    }
+
+    // ── Geofence work sites (v14 Type-B) ───────────────
+    match /geo_sites/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Attendance extension requests ──────────────────
@@ -1267,7 +1288,10 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
     match /worker_profiles/{docId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
+      // v14 Type-B self-service: a linked login account may read ITS OWN
+      // profile (the linkedUid lookup the worker dashboard boots from).
+      allow read: if isAuth() && (isFinanceOrAdmin()
+        || resource.data.get('linkedUid','') == request.auth.uid);
       allow create, update: if isAuth() && isFinanceOrAdmin();
       allow delete: if isAuth() && isPresident();
     }

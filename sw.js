@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER = 'bi-ops-v14.0.3';
+const CACHE_VER = 'bi-ops-v14.0.4';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -41,6 +41,7 @@ const PRECACHE = [
   '/js/svc-approvals.js',
   '/js/ui-crud-table.js',
   '/js/money-core.js',
+  '/js/geo-core.js',
   '/js/departments.js',
   '/js/screens/design.js',
   '/js/screens/tasks.js',
@@ -57,6 +58,7 @@ const PRECACHE = [
   '/js/screens/people.js',
   '/js/screens/dashboards.js',
   '/js/chat.js',
+  '/js/screens/worker.js',
   '/icons/bi-logo.svg',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.3';
+window.APP_VERSION = '14.0.4';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -577,6 +577,18 @@ window.NAV_REGISTRY = {
       { icon:'message-circle', label:'Chat',    page:'chat'           },
       { icon:'banknote',       label:'Cash',    page:'cash-advances'  },
       { icon:'circle-user',    label:'Profile', page:'my-profile'     }
+    ],
+    // Bottom Nav — Type-B (Production, weekly self-service worker; js/app.js
+    // isTypeBWorker()/_navVariant()). Deliberately minimal: their "Home"
+    // (js/screens/worker.js renderWorkerHome) already IS the whole
+    // dashboard — Time In/Out, attendance calendar, finance/payslips, month
+    // & YTD summary all in one screen — so there's nothing to duplicate a
+    // Tasks/Posts/Cash tab for. 3 items, well under the 5-tab/More-tab
+    // threshold (_bottomNavSplit, js/app.js).
+    workerB: [
+      { icon:'home',           label:'Home',    page:'dashboard'   },
+      { icon:'message-circle', label:'Chat',    page:'chat'        },
+      { icon:'circle-user',    label:'Profile', page:'my-profile'  }
     ]
   }
 };

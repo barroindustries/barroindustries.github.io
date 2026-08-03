@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.3 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.4 · Barro Industries</div>
   </div>
 </div>
 
@@ -402,6 +402,10 @@
      of departments.js so it's independently unit-tested (tests/money.test.mjs).
      Must load before departments.js, which calls these via window.*. -->
 <script defer src="js/money-core.js"></script>
+<!-- Type-B (Production, weekly) self-service attendance — pure geofencing
+     math (haversineMeters/siteMatch), independently unit-tested
+     (tests/geo.test.mjs). No dependencies; loads early like money-core.js. -->
+<script defer src="js/geo-core.js"></script>
 <script defer src="js/departments.js"></script>
 <!-- v14 Wave 2 Batch B — Design department screen, split verbatim out of
      departments.js (extraction-protocol pilot). Must load after
@@ -531,6 +535,16 @@
      openMemoById deep-link does too. -->
 <script defer src="js/screens/dashboards.js"></script>
 <script defer src="js/chat.js"></script>
+<!-- Type-B (Production, weekly) self-service worker screens (renderWorkerHome:
+     geofenced Time In/Out + selfie, attendance calendar, finance/payslips).
+     Loads last, after every screen it calls at runtime by bare-global/
+     window.* name (computeDayHours/toPayslipModel/payslipYtdWeekly/
+     renderPayslipPage from hr.js, getPHHolidays from people.js, liveDateTime
+     from dashboards.js, siteMatch from geo-core.js) — same forward-reference
+     convention as every js/screens/*.js file above. js/app.js's navigateTo
+     ('dashboard' case) and NAV_REGISTRY (js/config.js, 'workerB' variant)
+     reach forward into this file's window.renderWorkerHome the same way. -->
+<script defer src="js/screens/worker.js"></script>
 <script>
   window.addEventListener('load', () => { if (window._applyBrandVersion) window._applyBrandVersion(); });
 </script>

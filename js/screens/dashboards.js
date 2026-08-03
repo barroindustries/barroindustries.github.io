@@ -184,16 +184,16 @@ async function renderSystemHealth() {
       Heartbeat status for scheduled jobs and functions. Daily/attendance/digest jobs are flagged stale after 36h without a report; the monthly backup and its size guard after 40 days.
     </p>
     <div class="card"><div class="card-body" style="padding:0">
-      <div class="table-wrap"><table class="data-table">
+      <div class="table-wrap"><table class="data-table table-cards" id="sh-jobs-table">
         <thead><tr><th>Job</th><th>Cadence</th><th>Status</th><th>Last run (Manila)</th><th>Errors</th></tr></thead>
         <tbody>
           ${jobs.map(j => `
-            <tr>
-              <td>${escHtml(j.label)}</td>
-              <td style="font-size:12px;color:var(--text-muted)">${escHtml(j.cadence)}</td>
-              <td>${badge(j.status)}</td>
-              <td style="font-size:12px" title="${escHtml(fmtAbs(j.lastMs))}">${escHtml(fmtRel(j.lastMs))}${j.lastMs ? ` <span style="color:var(--text-muted)">(${escHtml(fmtAbs(j.lastMs))})</span>` : ''}</td>
-              <td style="font-size:12px">${j.errors ? `<span style="color:var(--danger,#b91c1c)">${j.errors}${j.data?.label ? ' — ' + escHtml(j.data.label) : ''}</span>` : '—'}</td>
+            <tr class="sh-job-row">
+              <td class="tc-name">${escHtml(j.label)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Cadence" style="font-size:12px;color:var(--text-muted)">${escHtml(j.cadence)}</td>
+              <td class="tc-net">${badge(j.status)}</td>
+              <td class="tc-detail" data-label="Last run" style="font-size:12px" title="${escHtml(fmtAbs(j.lastMs))}">${escHtml(fmtRel(j.lastMs))}${j.lastMs ? ` <span style="color:var(--text-muted)">(${escHtml(fmtAbs(j.lastMs))})</span>` : ''}</td>
+              <td class="tc-detail" data-label="Errors" style="font-size:12px">${j.errors ? `<span style="color:var(--danger,#b91c1c)">${j.errors}${j.data?.label ? ' — ' + escHtml(j.data.label) : ''}</span>` : '—'}</td>
             </tr>`).join('')}
         </tbody>
       </table></div>
@@ -205,15 +205,15 @@ async function renderSystemHealth() {
         ? window.renderEmptyState({ icon: '✅', title: 'No errors logged', hint: 'error_log has been clean for the last 7 days.' })
         : `
         <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">${errorCount7d} error${errorCount7d===1?'':'s'} in the last 7 days. Showing the 10 most recent.</p>
-        <div class="table-wrap"><table class="data-table">
+        <div class="table-wrap"><table class="data-table table-cards no-toggle">
           <thead><tr><th>When</th><th>Page</th><th>Message</th><th>Version</th></tr></thead>
           <tbody>
             ${recentErrors.map(e => `
               <tr>
-                <td style="white-space:nowrap;font-size:12px">${escHtml(e.ts?.toDate ? window.fmtManila(e.ts.toDate()) : '—')}</td>
-                <td style="font-size:12px">${escHtml(e.page || '—')}</td>
-                <td style="font-size:11px;color:var(--text-muted);max-width:340px;word-break:break-word">${escHtml(e.message || '—')}</td>
-                <td style="font-size:11px;color:var(--text-muted)">${escHtml(e.version || '—')}</td>
+                <td data-label="When" style="white-space:nowrap;font-size:12px">${escHtml(e.ts?.toDate ? window.fmtManila(e.ts.toDate()) : '—')}</td>
+                <td data-label="Page" style="font-size:12px">${escHtml(e.page || '—')}</td>
+                <td data-label="Message" style="font-size:11px;color:var(--text-muted);max-width:340px;word-break:break-word">${escHtml(e.message || '—')}</td>
+                <td data-label="Version" style="font-size:11px;color:var(--text-muted)">${escHtml(e.version || '—')}</td>
               </tr>`).join('')}
           </tbody>
         </table></div>`}
@@ -221,6 +221,11 @@ async function renderSystemHealth() {
     <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Cloud Function errors (executeApprovalOnUpdate, sendNotificationQuota) beyond their own heartbeat entry require a manual check in the <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">Firebase console</a> logs.</p>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // Card view (≤700px): tap the row to reveal cadence/last-run/errors — same
+  // class-toggle idiom as the shared .table-cards pattern (styles.css ~2028).
+  c.querySelectorAll('#sh-jobs-table tr.sh-job-row').forEach(tr => {
+    tr.addEventListener('click', () => tr.classList.toggle('tc-expanded'));
+  });
 }
 
 async function renderAuditLog() {
@@ -254,7 +259,7 @@ async function renderAuditLog() {
     </div>
     <div class="card"><div class="card-body" style="padding:0">
       ${!entries.length ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📜',44)}</div><h4>No audit entries yet</h4><p>Sensitive changes will be recorded here.</p></div>` :
-      `<div class="table-wrap"><table class="data-table">
+      `<div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Entity</th><th>ID</th><th>Details</th></tr></thead>
         <tbody id="audit-tbody"></tbody>
       </table></div>`}
@@ -268,14 +273,16 @@ async function renderAuditLog() {
     const tb = document.getElementById('audit-tbody');
     if (!tb) return;
     tb.innerHTML = rows.map(e => `
-      <tr>
-        <td style="white-space:nowrap;font-size:12px">${fmtTs(e.ts)}</td>
-        <td style="font-size:12px">${escHtml(e.actorName||'—')}${e.actorRole?`<div style="color:var(--text-muted)">${escHtml(e.actorRole)}</div>`:''}</td>
-        <td><span class="badge ${actBadge(e.action)}">${escHtml(e.action||'—')}</span></td>
-        <td style="font-size:12px">${escHtml(e.entity||'—')}</td>
-        <td style="font-size:11px;font-family:monospace;color:var(--text-muted)">${escHtml(e.entityId||'—')}</td>
-        <td style="font-size:11px;color:var(--text-muted);max-width:240px;word-break:break-word">${escHtml(JSON.stringify(e.details||{}))}</td>
+      <tr class="audit-row">
+        <td class="tc-detail" data-label="When" style="white-space:nowrap;font-size:12px">${fmtTs(e.ts)}</td>
+        <td class="tc-name">${escHtml(e.actorName||'—')}${e.actorRole?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(e.actorRole)}</div>`:''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+        <td class="tc-net"><span class="badge ${actBadge(e.action)}">${escHtml(e.action||'—')}</span></td>
+        <td class="tc-detail" data-label="Entity" style="font-size:12px">${escHtml(e.entity||'—')}</td>
+        <td class="tc-detail" data-label="ID" style="font-size:11px;font-family:monospace;color:var(--text-muted)">${escHtml(e.entityId||'—')}</td>
+        <td class="tc-detail" data-label="Details" style="font-size:11px;color:var(--text-muted);max-width:240px;word-break:break-word">${escHtml(JSON.stringify(e.details||{}))}</td>
       </tr>`).join('') || '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text-muted)">No entries match the filter.</td></tr>';
+    if (window.lucide) lucide.createIcons({ nodes: [tb] });
+    tb.querySelectorAll('tr.audit-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
   };
   document.getElementById('audit-entity')?.addEventListener('change', draw);
   document.getElementById('audit-action')?.addEventListener('change', draw);
@@ -402,20 +409,20 @@ async function renderProductDatabase() {
           <div class="card-body" style="padding:0">
             ${!prods.length ? '<div style="padding:16px;color:var(--text-muted);font-size:13px">No products in this category.</div>' : `
             <div class="table-wrap">
-              <table class="data-table">
+              <table class="data-table table-cards">
                 <thead><tr><th>Code</th><th>Title</th><th>Measurement</th><th>Specifications</th><th>Unit</th><th style="text-align:right">Price</th><th style="text-align:right">Capital (Mat.)</th><th style="text-align:right">Capital (Labor)</th><th></th></tr></thead>
                 <tbody>
                   ${prods.map(p => `
-                    <tr data-pid="${p.id}">
-                      <td><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
-                      <td>${escHtml(p.title||'')}${!p.photoUrl?` <span title="No photo yet" style="opacity:.5">${emojiIcon('📷',16)}</span>`:''}</td>
-                      <td style="font-size:12px">${measureStr(p.measurement)}</td>
-                      <td style="font-size:12px;max-width:220px">${escHtml(p.specifications||'—')}</td>
-                      <td>${escHtml(p.unit||'—')}</td>
-                      <td style="text-align:right">${fmt(p.basePrice)}</td>
-                      <td style="text-align:right">${fmt(p.capitalMaterials)}</td>
-                      <td style="text-align:right">${fmt(p.capitalLabor)}</td>
-                      <td style="text-align:right;white-space:nowrap">
+                    <tr data-pid="${p.id}" class="pdb-row">
+                      <td class="tc-detail" data-label="Code"><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
+                      <td class="tc-name">${escHtml(p.title||'')}${!p.photoUrl?` <span title="No photo yet" style="opacity:.5">${emojiIcon('📷',16)}</span>`:''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                      <td class="tc-detail" data-label="Measurement" style="font-size:12px">${measureStr(p.measurement)}</td>
+                      <td class="tc-detail" data-label="Specifications" style="font-size:12px;max-width:220px">${escHtml(p.specifications||'—')}</td>
+                      <td class="tc-detail" data-label="Unit">${escHtml(p.unit||'—')}</td>
+                      <td class="tc-net" style="text-align:right">${fmt(p.basePrice)}</td>
+                      <td class="tc-detail" data-label="Capital (Mat.)" style="text-align:right">${fmt(p.capitalMaterials)}</td>
+                      <td class="tc-detail" data-label="Capital (Labor)" style="text-align:right">${fmt(p.capitalLabor)}</td>
+                      <td class="tc-actions" style="text-align:right;white-space:nowrap">
                         <button class="btn-secondary btn-sm pdb-edit-btn" data-pid="${p.id}">Edit</button>
                         <button class="btn-danger btn-sm pdb-del-btn" data-pid="${p.id}" data-name="${(p.title||'').replace(/"/g,'&quot;')}" style="margin-left:4px">Delete</button>
                       </td>
@@ -620,6 +627,11 @@ async function renderProductDatabase() {
 
   // Edit & Delete
   c.addEventListener('click', async e => {
+    // Card view (≤700px): tap a product row (outside its buttons) to reveal
+    // the full spec/capital breakdown — same tap-to-expand idiom as the
+    // shared .table-cards pattern (styles.css ~2028).
+    const pdbRow = e.target.closest('tr.pdb-row');
+    if (pdbRow && !e.target.closest('button, a')) { pdbRow.classList.toggle('tc-expanded'); return; }
     // BUILD MATERIALS FROM INVENTORY (BOM)
     if (e.target.classList.contains('pdb-bom-btn')) {
       const prefix = e.target.dataset.prefix;
@@ -1303,14 +1315,14 @@ async function renderFinanceDashboard() {
     document.getElementById('ar-drill-btn')?.addEventListener('click', () => {
       const ageCol = d => d>90?'var(--danger)':d>60?'#FF9500':d>30?'var(--warning)':'var(--text-muted)';
       const rows = arClients.map(g=>`<tr>
-        <td style="font-weight:600">${escHtml(g.client)}</td>
-        <td style="text-align:right;font-weight:700">₱${formatNum(g.total)}</td>
-        <td style="text-align:center;color:${ageCol(g.oldest)};font-weight:600">${g.oldest}d</td>
-        <td style="text-align:center">${g.count}</td>
+        <td data-label="Client" style="font-weight:600">${escHtml(g.client)}</td>
+        <td data-label="Outstanding" style="text-align:right;font-weight:700">₱${formatNum(g.total)}</td>
+        <td data-label="Oldest" style="text-align:center;color:${ageCol(g.oldest)};font-weight:600">${g.oldest}d</td>
+        <td data-label="Projects" style="text-align:center">${g.count}</td>
       </tr>`).join('');
       openPage(`${emojiIcon('📥',16)} Receivables by Client`, `
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Open project balances, oldest first — chase the top of the list. Total <strong>₱${formatNum(arTotal)}</strong> across ${arClients.length} client${arClients.length===1?'':'s'}.</div>
-        <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="data-table">
+        <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="data-table table-cards no-toggle">
           <thead><tr><th>Client</th><th style="text-align:right">Outstanding</th><th style="text-align:center">Oldest</th><th style="text-align:center">Projects</th></tr></thead>
           <tbody>${rows||'<tr><td colspan="4">No open receivables</td></tr>'}</tbody>
         </table></div>`,
@@ -1984,24 +1996,24 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       // Eval — from the already-fetched bulk snapshot (no extra reads)
       const evalD = evalsMap[u.id] || {};
       const selfDone2 = evalD.selfAssessMonth === defaultMonth2;
-      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr>
-        <td>${escHtml(u.displayName||u.email)}</td>
-        <td>${escHtml(depts)}</td>
-        <td>₱${formatNum(net)}</td>
-        <td>${Math.round(kpi*100)}%<br><span style="font-size:10px;color:var(--text-muted)">${tasksDone}/${tasksTotal} tasks</span></td>
-        <td>${Math.round(att*100)}%</td>
-        <td><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
-        <td style="text-align:center">
+      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr class="pf-perf-row">
+        <td class="tc-name">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+        <td class="tc-detail" data-label="Dept">${escHtml(depts)}</td>
+        <td class="tc-detail" data-label="Net Pay">₱${formatNum(net)}</td>
+        <td class="tc-detail" data-label="Task KPI">${Math.round(kpi*100)}%<br><span style="font-size:10px;color:var(--text-muted)">${tasksDone}/${tasksTotal} tasks</span></td>
+        <td class="tc-detail" data-label="Attendance">${Math.round(att*100)}%</td>
+        <td class="tc-net"><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
+        <td class="tc-detail" data-label="Self /10" style="text-align:center">
           ${selfDone2
             ? `<span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':`${emojiIcon('✅',16)}`}</span>
                ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(evalD.selfNotes)}</div>`:''}`
             : `<span style="color:var(--danger);font-size:11px;font-weight:700">${emojiIcon('⚠️',11)} Pending</span>`
           }
         </td>
-        <td style="text-align:center">
+        <td class="tc-detail" data-label="Pres /10" style="text-align:center">
           <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':evalD.presidentGradeFromTasks!=null?evalD.presidentGradeFromTasks+`<small>/10 ${emojiIcon('🔒',16)}</small>`:'—'}</span>
         </td>
-        <td style="display:flex;gap:4px;flex-wrap:wrap">
+        <td class="tc-actions" style="display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn-secondary btn-sm view-profile-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" data-mdone="${tasksDone}" data-mtotal="${tasksTotal}">Profile</button>
           <button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email)}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${escHtml(evalD.presidentNotes||'')}" data-presimprove="${escHtml(evalD.presidentImprovements||'')}">Grade</button>
         </td>
@@ -2018,13 +2030,20 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="card-header"><h3>Performance &amp; Attendance — ${monthLabel}</h3></div>
         <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Task KPI and attendance — a performance reference, not the pay computation. Actual pay runs through Finance → Payroll.</div>
         <div class="table-wrap">
-          <table class="data-table">
+          <table class="data-table table-cards">
             <thead><tr><th>Employee</th><th>Dept</th><th>Net Pay</th><th>Task KPI</th><th>Attendance</th><th>Earned So Far</th><th>Self /10</th><th>Pres /10</th><th></th></tr></thead>
             <tbody>${userRows.map(r=>r.row).join('')}</tbody>
           </table>
         </div>
       </div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('pf-content')] });
+    document.querySelectorAll('#pf-content tr.pf-perf-row').forEach(tr => {
+      tr.addEventListener('click', (ev) => {
+        if (ev.target.closest('button, a')) return;
+        tr.classList.toggle('tc-expanded');
+      });
+    });
     // v12 WS20 D1 — Path B's own payroll-writing engine is gone; this is now a
     // READ-ONLY summary of the real pay_runs/{month} doc, linking to the one
     // payroll engine (departments.js renderPayrollManagement).
@@ -2322,18 +2341,18 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       <div class="card-body" style="padding:0">
         ${!salaryHistory.length
           ? '<div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--text-muted)">No history yet. Records are added monthly by admin.</p></div>'
-          : `<div class="table-wrap"><table class="data-table">
+          : `<div class="table-wrap"><table class="data-table table-cards">
               <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th><th></th></tr></thead>
-              <tbody>${salaryHistory.map(h=>`<tr data-hist-id="${h.id}">
-                <td>${h.month||'—'}</td>
-                <td>₱${formatNum(h.salary)}</td>
-                <td style="color:var(--success)">+₱${formatNum(h.allowance)}</td>
-                <td style="color:var(--danger)">-₱${formatNum(h.deductions)}</td>
-                <td>₱${formatNum(h.netPay)}</td>
-                <td>${h.kpiScore?Math.round(h.kpiScore*100)+'%':'—'}</td>
-                <td>${h.attScore?Math.round(h.attScore*100)+'%':'—'}</td>
-                <td><strong>₱${formatNum(h.finalPay)}</strong></td>
-                <td>${currentRole==='president'||currentRole==='owner'
+              <tbody>${salaryHistory.map(h=>`<tr data-hist-id="${h.id}" class="sal-hist-row">
+                <td class="tc-name">${h.month||'—'} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                <td class="tc-detail" data-label="Base">₱${formatNum(h.salary)}</td>
+                <td class="tc-detail" data-label="Allowance" style="color:var(--success)">+₱${formatNum(h.allowance)}</td>
+                <td class="tc-detail" data-label="Deductions" style="color:var(--danger)">-₱${formatNum(h.deductions)}</td>
+                <td class="tc-detail" data-label="Net">₱${formatNum(h.netPay)}</td>
+                <td class="tc-detail" data-label="KPI">${h.kpiScore?Math.round(h.kpiScore*100)+'%':'—'}</td>
+                <td class="tc-detail" data-label="Att">${h.attScore?Math.round(h.attScore*100)+'%':'—'}</td>
+                <td class="tc-net"><strong>₱${formatNum(h.finalPay)}</strong></td>
+                <td class="tc-actions">${currentRole==='president'||currentRole==='owner'
                   ? `<button class="btn-danger btn-sm ph-delete-btn" data-id="${h.id}" data-month="${h.month||''}">Delete</button>`
                   : currentRole==='finance'
                     ? `<button class="btn-secondary btn-sm ph-req-delete-btn" data-id="${h.id}" data-month="${h.month||''}" style="font-size:11px;color:var(--danger)">Request Delete</button>`
@@ -2348,15 +2367,15 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     <div class="card" style="margin-bottom:16px">
       <div class="card-header"><h3>Salary Changes</h3></div>
       <div class="card-body" style="padding:0">
-        <div class="table-wrap"><table class="data-table">
+        <div class="table-wrap"><table class="data-table table-cards no-toggle">
           <thead><tr><th>Effective</th><th>Old → New</th><th>Change</th><th>Reason</th></tr></thead>
           <tbody>${myRaises.map(r=>{
             const up = (r.changeAmount||0) >= 0;
             return `<tr>
-              <td style="white-space:nowrap;font-size:12px">${escHtml(r.effectiveDate||'—')}</td>
-              <td style="white-space:nowrap">₱${formatNum(r.oldAmount||0)} → <strong>₱${formatNum(r.newAmount||0)}</strong></td>
-              <td style="white-space:nowrap;color:${up?'var(--success)':'var(--danger)'};font-weight:700">${up?'+':''}₱${formatNum(r.changeAmount||0)}${r.changePct!=null?` (${r.changePct>=0?'+':''}${r.changePct}%)`:''}</td>
-              <td style="font-size:12px">${escHtml(r.reason||'—')}</td>
+              <td data-label="Effective" style="white-space:nowrap;font-size:12px">${escHtml(r.effectiveDate||'—')}</td>
+              <td data-label="Old → New" style="white-space:nowrap">₱${formatNum(r.oldAmount||0)} → <strong>₱${formatNum(r.newAmount||0)}</strong></td>
+              <td data-label="Change" style="white-space:nowrap;color:${up?'var(--success)':'var(--danger)'};font-weight:700">${up?'+':''}₱${formatNum(r.changeAmount||0)}${r.changePct!=null?` (${r.changePct>=0?'+':''}${r.changePct}%)`:''}</td>
+              <td data-label="Reason" style="font-size:12px">${escHtml(r.reason||'—')}</td>
             </tr>`;
           }).join('')}</tbody>
         </table></div>
@@ -2379,21 +2398,29 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       <div class="card-body" style="padding:0">
         ${!cashAdvances.length
           ? '<div class="empty-state" style="padding:20px"><p>No cash advances yet.</p></div>'
-          : `<div class="table-wrap"><table class="data-table">
+          : `<div class="table-wrap"><table class="data-table table-cards">
               <thead><tr><th>Date</th><th>Amount</th><th>Balance</th><th>Monthly</th><th>Reason</th><th>Status</th></tr></thead>
-              <tbody>${cashAdvances.map(a=>`<tr>
-                <td>${a.date||'—'}</td>
-                <td>₱${formatNum(a.amount)}</td>
-                <td style="color:${(a.balance||0)>0?'var(--danger)':'var(--success)'}">₱${formatNum(a.balance||0)}</td>
-                <td>${a.monthlyPayment?'₱'+formatNum(a.monthlyPayment):'—'}</td>
-                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.reason||'—')}</td>
-                <td><span class="badge ${a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':a.status==='paid'?'badge-green':'badge-orange'}">${a.status}</span></td>
+              <tbody>${cashAdvances.map(a=>`<tr class="ca-row">
+                <td class="tc-name">${a.date||'—'} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                <td class="tc-detail" data-label="Amount">₱${formatNum(a.amount)}</td>
+                <td class="tc-net" style="color:${(a.balance||0)>0?'var(--danger)':'var(--success)'}">₱${formatNum(a.balance||0)}</td>
+                <td class="tc-detail" data-label="Monthly">${a.monthlyPayment?'₱'+formatNum(a.monthlyPayment):'—'}</td>
+                <td class="tc-detail" data-label="Reason" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.reason||'—')}</td>
+                <td class="tc-detail" data-label="Status"><span class="badge ${a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':a.status==='paid'?'badge-green':'badge-orange'}">${a.status}</span></td>
               </tr>`).join('')}</tbody>
             </table></div>`}
       </div>
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // Card view (≤700px): tap a row (outside its buttons) to reveal the full
+  // breakdown — same tap-to-expand idiom as the shared .table-cards pattern.
+  c.querySelectorAll('tr.sal-hist-row, tr.ca-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
 
   // Salary history delete (president) / request delete (finance)
   document.querySelectorAll('.ph-delete-btn').forEach(btn => {
@@ -2858,21 +2885,22 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const snap = await db.collection('salary_history').where('userId','==',uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]}));
       const history = snap.docs.map(d=>d.data());
       content.innerHTML = history.length ? `
-        <div class="table-wrap"><table class="data-table">
+        <div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Month</th><th>Base</th><th>Allow.</th><th>Deduct.</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th></tr></thead>
-          <tbody>${history.map(h=>`<tr>
-            <td>${h.month||'—'}</td><td>₱${formatNum(h.salary||0)}</td>
-            <td style="color:var(--success)">+₱${formatNum(h.allowance||0)}</td>
-            <td style="color:var(--danger)">-₱${formatNum(h.deductions||0)}</td>
-            <td>₱${formatNum(h.netPay||0)}</td>
-            <td>${h.kpiScore!=null?Math.round(h.kpiScore*100)+'%':'—'}</td>
-            <td>${h.attScore!=null?Math.round(h.attScore*100)+'%':'—'}</td>
-            <td><strong style="color:var(--primary-light)">₱${formatNum(h.finalPay||0)}</strong></td>
+          <tbody>${history.map(h=>`<tr class="wp-sal-row">
+            <td class="tc-name">${h.month||'—'} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Base">₱${formatNum(h.salary||0)}</td>
+            <td class="tc-detail" data-label="Allow." style="color:var(--success)">+₱${formatNum(h.allowance||0)}</td>
+            <td class="tc-detail" data-label="Deduct." style="color:var(--danger)">-₱${formatNum(h.deductions||0)}</td>
+            <td class="tc-detail" data-label="Net">₱${formatNum(h.netPay||0)}</td>
+            <td class="tc-detail" data-label="KPI">${h.kpiScore!=null?Math.round(h.kpiScore*100)+'%':'—'}</td>
+            <td class="tc-detail" data-label="Att">${h.attScore!=null?Math.round(h.attScore*100)+'%':'—'}</td>
+            <td class="tc-net"><strong style="color:var(--primary-light)">₱${formatNum(h.finalPay||0)}</strong></td>
           </tr>`).join('')}</tbody>
         </table></div>
         <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Last ${history.length} recorded month${history.length!==1?'s':''}</div>
       ` : `<div class="empty-state" style="padding:40px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No salary records yet.</p></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [content] });
+      content.querySelectorAll('tr.wp-sal-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
 
     } else if (tabName === 'tasks') {
       subtitle.textContent = 'Task History';
@@ -3004,8 +3032,8 @@ async function renderProgressReports() {
         <div class="card">
           <div class="card-header"><h3>${emojiIcon('👥',20)} All Members Progress</h3></div>
           <div class="card-body" style="padding:0">
-            <div class="table-wrap"><table class="data-table">
-              <thead><tr><th>Member</th><th>Department</th><th>This Month</th><th>All Time</th><th>KPI</th><th></th></tr></thead>
+            <div class="table-wrap"><table class="data-table table-cards">
+              <thead><tr><th></th><th>Member</th><th>Department</th><th>This Month</th><th>All Time</th><th>KPI</th><th></th></tr></thead>
               <tbody>
                 ${users.filter(u=>u.role!=='partner').map(u=>{
                   const uDone   = tasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
@@ -3014,23 +3042,21 @@ async function renderProgressReports() {
                   const uMTotal = monthTasks.filter(t=>isAssigned(t,u.id)).length;
                   const uPct    = uTotal ? Math.round(uDone/uTotal*100) : 0;
                   const depts   = Array.isArray(u.departments)&&u.departments.length ? u.departments.join(', ') : u.department||'—';
-                  return `<tr>
-                    <td>
-                      <div style="display:flex;align-items:center;gap:8px">
-                        <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--white,#fff);flex-shrink:0">
-                          ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <div style="font-size:13px;font-weight:600">${escHtml(u.displayName||u.email)}</div>
-                          <div style="font-size:11px;color:var(--text-muted)">${escHtml(u.role||'')}</div>
-                        </div>
+                  return `<tr class="prm-row">
+                    <td class="tc-avatar">
+                      <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--white,#fff);flex-shrink:0">
+                        ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
                       </div>
                     </td>
-                    <td style="font-size:12px;color:var(--text-muted)">${escHtml(depts)}</td>
-                    <td style="font-size:12px"><strong>${uMDone}</strong>/${uMTotal}</td>
-                    <td style="font-size:12px"><strong>${uDone}</strong>/${uTotal}</td>
-                    <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
-                    <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
+                    <td class="tc-name">
+                      <div style="font-size:13px;font-weight:600">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div>
+                      <div style="font-size:11px;color:var(--text-muted)">${escHtml(u.role||'')}</div>
+                    </td>
+                    <td class="tc-detail" data-label="Department" style="font-size:12px;color:var(--text-muted)">${escHtml(depts)}</td>
+                    <td class="tc-detail" data-label="This Month" style="font-size:12px"><strong>${uMDone}</strong>/${uMTotal}</td>
+                    <td class="tc-detail" data-label="All Time" style="font-size:12px"><strong>${uDone}</strong>/${uTotal}</td>
+                    <td class="tc-net"><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
+                    <td class="tc-actions"><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
                   </tr>`;
                 }).join('')}
               </tbody>
@@ -3071,21 +3097,21 @@ async function renderProgressReports() {
             </div>
             ${window.chipTabs([{key:`${dept}-tasks`,label:'All Tasks'},{key:`${dept}-members`,label:'By Member'}], `${dept}-tasks`, {cls:'prog-dept-tabs'})}
             <div id="prog-${dept.replace(/\s+/g,'_')}-content">
-              <div class="table-wrap"><table class="data-table">
+              <div class="table-wrap"><table class="data-table table-cards no-toggle">
                 <thead><tr><th>Task</th><th>Assigned To</th><th>Status</th><th>Due</th></tr></thead>
                 <tbody>
                   ${data.tasks.slice(0,10).map(t=>`<tr>
-                    <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</td>
-                    <td style="font-size:12px">${escHtml(t.assignedToName||'—')}</td>
-                    <td><span class="badge ${isDoneTask(t)?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span></td>
-                    <td style="font-size:11px;color:var(--text-muted)">${t.dueDate||'—'}</td>
+                    <td data-label="Task" style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</td>
+                    <td data-label="Assigned To" style="font-size:12px">${escHtml(t.assignedToName||'—')}</td>
+                    <td data-label="Status"><span class="badge ${isDoneTask(t)?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span></td>
+                    <td data-label="Due" style="font-size:11px;color:var(--text-muted)">${t.dueDate||'—'}</td>
                   </tr>`).join('')}
                   ${data.tasks.length>10?`<tr><td colspan="4" style="font-size:12px;color:var(--text-muted);text-align:center">+ ${data.tasks.length-10} more tasks</td></tr>`:''}
                 </tbody>
               </table></div>
             </div>
             <div id="prog-${dept.replace(/\s+/g,'_')}-members" style="display:none">
-              <div class="table-wrap"><table class="data-table">
+              <div class="table-wrap"><table class="data-table table-cards">
                 <thead><tr><th>Member</th><th>All Tasks Done</th><th>This Month</th><th>KPI</th><th></th></tr></thead>
                 <tbody>
                   ${data.members.map(u=>{
@@ -3094,12 +3120,12 @@ async function renderProgressReports() {
                     const uMDone = monthTasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
                     const uMTotal= monthTasks.filter(t=>isAssigned(t,u.id)).length;
                     const uPct   = uTotal ? Math.round(uDone/uTotal*100) : 0;
-                    return `<tr>
-                      <td>${escHtml(u.displayName||u.email)}</td>
-                      <td>${uDone}/${uTotal}</td>
-                      <td>${uMDone}/${uMTotal}</td>
-                      <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
-                      <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
+                    return `<tr class="prm-row">
+                      <td class="tc-name">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                      <td class="tc-detail" data-label="All Tasks Done">${uDone}/${uTotal}</td>
+                      <td class="tc-detail" data-label="This Month">${uMDone}/${uMTotal}</td>
+                      <td class="tc-net"><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
+                      <td class="tc-actions"><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
                     </tr>`;
                   }).join('')}
                 </tbody>
@@ -3135,6 +3161,15 @@ async function renderProgressReports() {
         { mDone: +btn.dataset.mdone, mTotal: +btn.dataset.mtotal,
           salary: +btn.dataset.salary, allowance: +btn.dataset.allowance, deductions: +btn.dataset.deductions }
       ));
+    });
+    // Card view (≤700px): tap a member row (outside its View button) to
+    // reveal the full breakdown — covers both "All Members" and each
+    // department's "By Member" table (both share the .prm-row class).
+    c.querySelectorAll('tr.prm-row').forEach(tr => {
+      tr.addEventListener('click', (ev) => {
+        if (ev.target.closest('button, a')) return;
+        tr.classList.toggle('tc-expanded');
+      });
     });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
@@ -4292,21 +4327,22 @@ async function renderAnalytics() {
             <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${escHtml(name)}</span><span style="font-weight:600">₱${fmt(val)}</span></div>
             <div style="height:6px;background:#ffffff14;border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(val/clientTotal*100)}%;background:#0A84FF"></div></div>
           </div>`).join(''):`<p style="color:var(--text-muted);text-align:center;padding:12px">No client revenue yet</p>`}</div></div>
-        <div class="card"><div class="card-header"><h3>Receivables — Open Jobs</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <div class="card"><div class="card-header"><h3>Receivables — Open Jobs</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards no-toggle">
           <thead><tr><th>Client</th><th>Stage</th><th>Outstanding</th></tr></thead>
-          <tbody>${openProjects.length?openProjects.slice().sort((a,b)=>arOf(b)-arOf(a)).slice(0,10).map(p=>`<tr><td>${escHtml(p.clientName||p.name||'—')}</td><td><span class="badge badge-blue">${escHtml((p.stage||'—').replace(/_/g,' '))}</span></td><td>₱${fmt(arOf(p))}</td></tr>`).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No open jobs</td></tr>`}</tbody>
+          <tbody>${openProjects.length?openProjects.slice().sort((a,b)=>arOf(b)-arOf(a)).slice(0,10).map(p=>`<tr><td data-label="Client">${escHtml(p.clientName||p.name||'—')}</td><td data-label="Stage"><span class="badge badge-blue">${escHtml((p.stage||'—').replace(/_/g,' '))}</span></td><td data-label="Outstanding">₱${fmt(arOf(p))}</td></tr>`).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No open jobs</td></tr>`}</tbody>
         </table></div></div></div>
       </div>
-      <div class="card"><div class="card-header"><h3>Team Performance</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="card-header"><h3>Team Performance</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Name</th><th>Role</th><th>Dept</th><th>Tasks Done</th><th>Net Pay</th></tr></thead>
         <tbody>${users.map(u=>{
           const done=tasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length;
           const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);
-          return `<tr><td>${escHtml(u.displayName||u.email||'—')}</td><td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></td><td>${escHtml((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—')}</td><td>${done}</td><td>₱${fmt(net)}</td></tr>`;
+          return `<tr class="an-team-row"><td class="tc-name">${escHtml(u.displayName||u.email||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Role"><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></td><td class="tc-detail" data-label="Dept">${escHtml((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—')}</td><td class="tc-detail" data-label="Tasks Done">${done}</td><td class="tc-net">₱${fmt(net)}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+    wrap.querySelectorAll('tr.an-team-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
     document.getElementById('an-see-strategy')?.addEventListener('click', () => {
       c.querySelector('.an-subtabs .chip-tab[data-chip="strategy"]')?.click();
     });
@@ -4327,9 +4363,17 @@ async function renderAnalytics() {
 
   const renderSales = async () => {
     const CT = window.chartTheme();
-    // v12 WS40 Spec 2a / RE-GROUNDED 3 — the ONE win-rate source; salesQuotes is
-    // the hoisted, unchanged filter (was app.js's own local re-filter before WS40).
-    const q = window.quoteWinStats(salesQuotes);
+    // Owner report 2026-08-03: superseded revisions inflated Total Quotes and
+    // the win rate. Dedupe to each chain's LATEST revision (same helper the
+    // quote lists use) before any counting — a quote re-filed 3 times is ONE
+    // quote with one outcome, not three.
+    const _rev = window.latestQuoteRevisions
+      ? window.latestQuoteRevisions(salesQuotes)
+      : { latest: salesQuotes, supersededIds: new Set() };
+    const chainQuotes = _rev.latest;
+    // v12 WS40 Spec 2a / RE-GROUNDED 3 — the ONE win-rate source; now fed the
+    // chain-deduped set instead of raw docs.
+    const q = window.quoteWinStats(chainQuotes);
     const wonQ = q.won, lostQ = q.lost, openQ = q.open;
     const won2     = q.wonVal, pipeline = q.pipelineVal;
     const wonCount = q.wonCount, lostCount = q.lostCount;
@@ -4355,7 +4399,7 @@ async function renderAnalytics() {
         <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(pipeline)}</div></div>
         <div class="kpi-card"><div class="kpi-label">Win Rate (quotes)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${wonCount}W / ${lostCount}L</div></div>
         <div class="kpi-card"><div class="kpi-label">Avg Deal Size</div><div class="kpi-value">₱${fmt(avgDeal)}</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${salesQuotes.length}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${chainQuotes.length}</div>${_rev.supersededIds.size?`<div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${_rev.supersededIds.size} superseded revision${_rev.supersededIds.size===1?'':'s'} excluded</div>`:''}</div>
         <div class="kpi-card"><div class="kpi-label">Tasks Done</div><div class="kpi-value">${doneSalesTasks.length}/${salesTasks.length}</div></div>
       </div>
       ${clTotal?`<div class="card" style="margin-bottom:16px">
@@ -4378,12 +4422,12 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Quote Status Breakdown</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Monthly Quote Volume</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq2-chart"></canvas></div></div></div>
       </div>
-      <div class="card"><div class="card-header"><h3>Recent Quotes</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="card-header"><h3>Recent Quotes</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards no-toggle">
         <thead><tr><th>Client</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
         <tbody>${salesQuotes.slice(0,20).map(q=>{
           const d=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);
           const statusColor = window.isQuoteWon(q)?'var(--success)':window.isQuoteLost(q)?'var(--danger)':'var(--info)';
-          return `<tr><td>${escHtml(q.clientName||q.client||'—')}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
+          return `<tr><td data-label="Client">${escHtml(q.clientName||q.client||'—')}</td><td data-label="Amount">₱${fmt(q.total||q.amount||0)}</td><td data-label="Status"><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td data-label="Date">${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4425,13 +4469,13 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Task Completion Rate</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="mkt-task-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Task Status Breakdown</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="mkt-status-chart"></canvas></div></div></div>
       </div>
-      <div class="card"><div class="card-header"><h3>Marketing Team</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="card-header"><h3>Marketing Team</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards no-toggle">
         <thead><tr><th>Name</th><th>Role</th><th>Tasks Done</th><th>Tasks Active</th></tr></thead>
         <tbody>${mktUsers.map(u=>{
           const uTasks=mktTasks.filter(t=>Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id);
           const uDone=uTasks.filter(t=>['done','approved','archived'].includes(t.status)).length;
           const uActive=uTasks.filter(t=>['todo','in-progress','review'].includes(t.status)).length;
-          return `<tr><td>${escHtml(u.displayName||u.email||'—')}</td><td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td><td>${uDone}</td><td>${uActive}</td></tr>`;
+          return `<tr><td data-label="Name">${escHtml(u.displayName||u.email||'—')}</td><td data-label="Role"><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td><td data-label="Tasks Done">${uDone}</td><td data-label="Tasks Active">${uActive}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4520,12 +4564,13 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Cash Advance Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-ca-chart"></canvas></div></div></div>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Net Income — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-net-chart"></canvas></div></div></div>
-      <div class="card"><div class="card-header"><h3>Payslips — This Month (${payslipsThisMonth.length})</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="card-header"><h3>Payslips — This Month (${payslipsThisMonth.length})</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Worker</th><th>Pay Period</th><th>Gross</th><th>Net</th><th>Prepared By</th></tr></thead>
-        <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${escHtml(p.workerName||'—')}</td><td>${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
+        <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr class="pslip-row"><td class="tc-name">${escHtml(p.workerName||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Pay Period">${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td class="tc-detail" data-label="Gross">₱${fmt(p.grossPay||0)}</td><td class="tc-net">₱${fmt(p.netPay||0)}</td><td class="tc-detail" data-label="Prepared By">${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
       </table></div></div></div>
     `;
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+    wrap.querySelectorAll('tr.pslip-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
     const cats=[...new Set(ledDebits.map(l=>l.category||'Other'))].slice(0,6);
     const catAmts=cats.map(cat=>ledDebits.filter(l=>(l.category||'Other')===cat).reduce((s,l)=>s+(l.amount||0),0));
     if (!window.Chart) { await window.ensureChart(); }
@@ -4562,12 +4607,12 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Task Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="prod-status-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Output Per Member</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="prod-member-chart"></canvas></div></div></div>
       </div>
-      <div class="card"><div class="card-header"><h3>Production Tasks</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="card-header"><h3>Production Tasks</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards no-toggle">
         <thead><tr><th>Task</th><th>Status</th><th>Assigned</th><th>Priority</th></tr></thead>
         <tbody>${prodTasks.slice(0,20).map(t=>{
           const assignedNames=(Array.isArray(t.assignedTo)?t.assignedTo:[t.assignedTo]).map(uid=>users.find(u=>u.id===uid)?.displayName||'?').join(', ');
           const sc={todo:'#636366','in-progress':'var(--info)',review:'#FF9F0A',done:'var(--success)',approved:'var(--success)',archived:'#636366'}[t.status]||'#636366';
-          return `<tr><td>${escHtml(t.title||'—')}</td><td><span style="color:${sc};font-weight:600">${t.status||'—'}</span></td><td>${escHtml(assignedNames||'—')}</td><td>${t.priority||'—'}</td></tr>`;
+          return `<tr><td data-label="Task">${escHtml(t.title||'—')}</td><td data-label="Status"><span style="color:${sc};font-weight:600">${t.status||'—'}</span></td><td data-label="Assigned">${escHtml(assignedNames||'—')}</td><td data-label="Priority">${t.priority||'—'}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4609,15 +4654,17 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Bid Outcomes</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="gov-outcome-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Gov Department Tasks</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="gov-task-chart"></canvas></div></div></div>
       </div>
-      <div class="card"><div class="card-header"><h3>Bidding Records</h3></div><div class="card-body">${govBids.length?`<div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="card-header"><h3>Bidding Records</h3></div><div class="card-body">${govBids.length?`<div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Project</th><th>Agency</th><th>Bid Amount</th><th>Status</th><th>Date</th></tr></thead>
         <tbody>${govBids.slice(0,20).map(b=>{
           const d=b.createdAt?.toDate?b.createdAt.toDate():new Date(b.createdAt||0);
           const sc={won:'var(--success)',lost:'var(--danger)',pending:'#FF9F0A',submitted:'var(--info)'}[b.status]||'#636366';
-          return `<tr><td>${escHtml(b.projectName||b.title||'—')}</td><td>${escHtml(b.agency||'—')}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
+          return `<tr class="gov-bid-row"><td class="tc-name">${escHtml(b.projectName||b.title||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Agency">${escHtml(b.agency||'—')}</td><td class="tc-detail" data-label="Bid Amount">₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td class="tc-net"><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td class="tc-detail" data-label="Date">${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+    wrap.querySelectorAll('tr.gov-bid-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('gov-outcome-chart'),{type:'doughnut',data:{labels:['Won','Lost','Pending'],datasets:[{data:[wonBids.length,lostBids.length,pendingBids.length],backgroundColor:[CT.good,CT.bad,CT.warn],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}}}}});
     const govStatuses=['todo','in-progress','review','done'];
@@ -4672,7 +4719,7 @@ async function renderAnalytics() {
       </div>`;
     }).join('');
 
-    const shipRows = STRAT_SHIP_MATRIX.map(([m,s,a])=>`<tr><td>${escHtml(m)}</td><td>${escHtml(s)}</td><td style="color:var(--text-muted);font-size:12px">${escHtml(a)}</td></tr>`).join('');
+    const shipRows = STRAT_SHIP_MATRIX.map(([m,s,a])=>`<tr><td data-label="Metric / feature">${escHtml(m)}</td><td data-label="v1 status">${escHtml(s)}</td><td data-label="Activates when" style="color:var(--text-muted);font-size:12px">${escHtml(a)}</td></tr>`).join('');
 
     const renderNotesFor = (deptId) => {
       const doc = notesByDept[deptId] || {};
@@ -4691,7 +4738,7 @@ async function renderAnalytics() {
 
     wrap.innerHTML = `
       <div class="card" style="margin-top:16px;margin-bottom:16px"><div class="card-header"><h3>${emojiIcon('🎯',20)} Full Conclusions</h3></div><div class="card-body">${insightsHtml || '<p style="color:var(--text-muted);text-align:center;padding:16px">No insights yet.</p>'}</div></div>
-      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Wire-in status</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Wire-in status</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards no-toggle">
         <thead><tr><th>Metric / feature</th><th>v1 status</th><th>Activates when</th></tr></thead>
         <tbody>${shipRows}</tbody>
       </table></div></div></div>
@@ -4804,21 +4851,30 @@ async function renderTeam() {
     const days = Math.floor(diff/86400000);
     return { dot: 'gray', label: days>0?days+'d ago':hrs+'h ago' };
   }
-  document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table">
+  document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table table-cards" id="team-payroll-table">
     <thead><tr><th>Employee</th><th>Status</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
-    <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';const pres=getPresence(u);return `<tr>
-      <td>${escHtml(u.displayName||u.email)}</td>
-      <td><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:${pres.dot==='green'?'var(--presence-online)':pres.dot==='orange'?'var(--presence-away)':'#636366'};flex-shrink:0${pres.dot==='green'?';box-shadow:0 0 0 2px rgba(48,209,88,0.3)':''};display:inline-block"></span>${pres.label}</span></td>
-      <td>${u.username?`<code style="font-size:11px">${escHtml(u.username)}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
-      <td><code style="font-size:11px">${escHtml(u.employeeId||'—')}</code></td>
-      <td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td>
-      <td>${escHtml(depts)}</td>
-      <td>₱${formatNum(u.salary)}</td>
-      <td><strong>₱${formatNum(net)}</strong></td>
-      <td><button class="btn-icon edit-emp-btn" data-uid="${u.id}" title="Edit employee" aria-label="Edit ${escHtml(u.displayName||u.email)}"><i data-lucide="pencil" style="width:14px;height:14px;stroke:currentColor"></i></button></td>
+    <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';const pres=getPresence(u);return `<tr class="team-row">
+      <td class="tc-name">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+      <td class="tc-detail" data-label="Status"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:${pres.dot==='green'?'var(--presence-online)':pres.dot==='orange'?'var(--presence-away)':'#636366'};flex-shrink:0${pres.dot==='green'?';box-shadow:0 0 0 2px rgba(48,209,88,0.3)':''};display:inline-block"></span>${pres.label}</span></td>
+      <td class="tc-detail" data-label="Username">${u.username?`<code style="font-size:11px">${escHtml(u.username)}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
+      <td class="tc-detail" data-label="ID"><code style="font-size:11px">${escHtml(u.employeeId||'—')}</code></td>
+      <td class="tc-detail" data-label="Role"><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td>
+      <td class="tc-detail" data-label="Departments">${escHtml(depts)}</td>
+      <td class="tc-detail" data-label="Base">₱${formatNum(u.salary)}</td>
+      <td class="tc-net"><strong>₱${formatNum(net)}</strong></td>
+      <td class="tc-actions"><button class="btn-icon edit-emp-btn" data-uid="${u.id}" title="Edit employee" aria-label="Edit ${escHtml(u.displayName||u.email)}"><i data-lucide="pencil" style="width:14px;height:14px;stroke:currentColor"></i></button></td>
     </tr>`;}).join('')}</tbody>
   </table></div></div>`;
   document.querySelectorAll('.edit-emp-btn').forEach(btn=>btn.addEventListener('click',()=>{const u=users.find(x=>x.id===btn.dataset.uid);if(u)openEditEmployeeModal(u);}));
+  // Card view (≤700px): tap a row (outside its edit button) to reveal the
+  // full breakdown — same tap-to-expand idiom as the shared .table-cards
+  // pattern (mirrors hr.js loadPayrollTable).
+  document.querySelectorAll('#team-payroll-table tr.team-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
   document.getElementById('add-emp-btn').addEventListener('click', openAddEmployeeModal);
   document.getElementById('add-worker-btn').addEventListener('click', openCreateWorkerModal);
   document.getElementById('team-csv-btn')?.addEventListener('click', () => window.exportCSV('team-payroll', users, [
