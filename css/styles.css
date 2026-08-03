@@ -4134,8 +4134,12 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
      the notch/home-indicator bands. */
   body.qb-fullscreen #qb-frame {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    width: 100vw; height: 100dvh;
+    /* Owner report ('top bar can't be seen'): env() resolves to 0 INSIDE an
+       iframe document, so the builder can't clear the notch itself — the
+       PARENT offsets the frame below the inset; the opaque body::after cap
+       (z-topbar) keeps the status-bar band clean above. */
+    top: env(safe-area-inset-top, 0px); left: 0; right: 0; bottom: 0;
+    width: 100vw; height: calc(100dvh - env(safe-area-inset-top, 0px));
     min-height: 0;
     border-radius: 0;
     z-index: var(--z-dialog, 5000);
@@ -4149,7 +4153,9 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
    entering fullscreen pushes an Overlay entry — see enterQbFullscreen). */
 .qb-exit-pill {
   position: fixed;
-  top: calc(12px + env(safe-area-inset-top, 0px));
+  /* bottom-left thumb zone — the old top-left spot sat exactly on the
+     builder's hamburger once the frame was offset below the notch */
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: calc(12px + env(safe-area-inset-left, 0px));
   /* --z-toast (9990) is the token already documented for exactly this kind of
      ephemeral floating chrome ("toast host + gesture pill" — see tokens.css);
