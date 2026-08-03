@@ -2961,14 +2961,29 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     const flagged = [];   // excluded from auto-load — HR must confirm before these feed pay
     const loaded  = [];   // successfully auto-filled — shown in the audit panel too
     for (let i = 0; i < 7; i++) {
-      const r = byOffset[i]; if (!r) continue;
+      const r = byOffset[i];
+      const tin = document.getElementById(`ps-tin-${i}`), tout = document.getElementById(`ps-tout-${i}`);
+      if (!r) {
+        // OVERPAY FIX (v14 HR remediation) — the table's static defaults
+        // (07:00–16:00 Mon–Fri, 07:00–18:00 Sat, ~8h/day) are a hand-entry
+        // starting point, not a record of anyone actually clocking in. This
+        // loop used to `continue` here, leaving that stale 8h default
+        // standing in as "hours worked" for any day with NO kiosk attendance
+        // record — silently paying a full day the worker never clocked.
+        // Loading from the kiosk must now be authoritative for every row: a
+        // day with no record gets cleared to blank/0h (needs-entry) instead
+        // of quietly keeping the default, so only days with an actual
+        // clock-in/out feed pay.
+        if (tin)  { tin.value  = ''; tin.dataset.source  = 'manual'; }
+        if (tout) { tout.value = ''; tout.dataset.source = 'manual'; }
+        continue;
+      }
       const rowLabel = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i];
       const implausible = typeof r.hoursWorked === 'number' && r.hoursWorked > 16;
       if (r.needsReview === true || implausible) {
         flagged.push({ ...r, _rowLabel: rowLabel, _implausible: implausible });
         continue;
       }
-      const tin = document.getElementById(`ps-tin-${i}`), tout = document.getElementById(`ps-tout-${i}`);
       if (tin)  { tin.value  = r.timeIn  || ''; tin.dataset.source  = (r.inSelfieUrl || r.inDistanceM  != null) ? 'kiosk-verified' : 'kiosk-manual'; }
       if (tout) { tout.value = r.timeOut || ''; tout.dataset.source = (r.outSelfieUrl || r.outDistanceM != null) ? 'kiosk-verified' : 'kiosk-manual'; }
       loaded.push({ ...r, _rowLabel: rowLabel });
@@ -3000,25 +3015,69 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole));
   });
 
+  // DOUBLE-SUBMIT / DOUBLE-DEDUCT FIX (v14 HR remediation) — `psSaving` is an
+  // in-flight flag scoped to this ONE generator instance (a fresh closure per
+  // openPayslipGenerator call, so it can't leak across different workers'
+  // modals). Before this fix, double-clicking Save & Generate fired the
+  // handler twice concurrently: two `payslips` docs got created for the same
+  // period, and — worse — window.CashAdvance.deductWorker (a plain balance
+  // decrement, not idempotent per payslip) ran twice, deducting the worker's
+  // cash advance twice for one payslip. The button is disabled synchronously
+  // on the first click so a second click before the first save settles is a
+  // no-op, not a second write.
+  let psSaving = false;
   document.getElementById('ps-save-btn').addEventListener('click', async () => {
+    if (psSaving) return;
     const d = collectPayslipData(profile, currentUser);
     if (!d) return;
-    d.proofUrl = proofFile?.url || null;
-    d.status = 'draft';
-    d.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-    d.createdBy = currentUser.uid;
-    const ref = await db.collection('payslips').add(d);
-    // Apply CA deduction to the worker's running balance — transaction-guarded
-    // re-read (v12 WS22), instead of trusting the balance the modal opened with.
-    if (d.deductions.other.cashAdvance > 0) {
-      await window.CashAdvance.deductWorker(profile.id, d.deductions.other.cashAdvance, { reason:'weekly-payslip', payslipId: ref.id }).catch(()=>{});
+    psSaving = true;
+    const saveBtn = document.getElementById('ps-save-btn');
+    const saveBtnHTML = saveBtn ? saveBtn.innerHTML : '';
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    try {
+      d.proofUrl = proofFile?.url || null;
+      d.status = 'draft';
+      d.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      d.createdBy = currentUser.uid;
+      const ref = await db.collection('payslips').add(d);
+      // Apply CA deduction to the worker's running balance — transaction-guarded
+      // re-read (v12 WS22), instead of trusting the balance the modal opened
+      // with. AWAITED (was already awaited) but now RECONCILED: a swallowed
+      // `.catch(()=>{})` here used to let this fail completely silently — the
+      // payslip would show a cash-advance deduction that never actually
+      // happened to the worker's real worker_profiles.caBalance, with no
+      // signal to HR that the two are now out of sync. The double-submit
+      // guard above is what keeps this call to exactly once per payslip;
+      // this now also surfaces (rather than eats) a genuine failure so HR
+      // knows to reconcile the balance by hand.
+      if (d.deductions.other.cashAdvance > 0) {
+        try {
+          await window.CashAdvance.deductWorker(profile.id, d.deductions.other.cashAdvance, { reason:'weekly-payslip', payslipId: ref.id });
+        } catch (caErr) {
+          console.error('CA deduction failed for saved payslip', ref.id, caErr);
+          // Notifs.showToast renders via textContent (plain text) — no escHtml
+          // here, that's for innerHTML sinks only (see js/notifications.js's
+          // own comment on this exact footgun).
+          Notifs.showToast(`Payslip saved, but the ₱${fmt(d.deductions.other.cashAdvance)} cash-advance deduction FAILED to apply — reconcile ${profile.name||'the worker'}'s CA balance manually.`, 'error');
+        }
+      }
+      // Note: the general-ledger entry is posted when the payslip is "Submitted" (see openPayslipHistory).
+      closeModal();
+      Notifs.success('Payslip saved as draft! Verify and file it from Payslip History.');
+      const model = window.toPayslipModel({...d, id: ref.id}, 'weekly');
+      model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
+      setTimeout(() => window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole)), 400);
+      // psSaving intentionally left true / button left disabled — closeModal()
+      // just tore this panel's DOM down, so there is nothing left to re-submit.
+    } catch (err) {
+      // The payslip write itself (or the YTD lookup before renderPayslipPage)
+      // failed — reset the guard so HR can retry instead of the button being
+      // permanently stuck disabled.
+      console.error('payslip save failed', err);
+      Notifs.showToast('Failed to save payslip — please try again.', 'error');
+      psSaving = false;
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = saveBtnHTML; }
     }
-    // Note: the general-ledger entry is posted when the payslip is "Submitted" (see openPayslipHistory).
-    closeModal();
-    Notifs.success('Payslip saved as draft! Verify and file it from Payslip History.');
-    const model = window.toPayslipModel({...d, id: ref.id}, 'weekly');
-    model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-    setTimeout(() => window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole)), 400);
   });
 }
 
@@ -3457,7 +3516,36 @@ window.renderPayslipPage = function(model, backFn) {
     <button class="btn-secondary btn-sm" id="ps-jpeg-btn">${emojiIcon('📷',16)} Save as JPEG</button>
     ${model.proofUrl?`<a class="btn-secondary btn-sm" href="${safeHttpUrl(model.proofUrl)}" target="_blank">${emojiIcon('📎',16)} Transfer Proof</a>`:''}
   `;
-  const bodyHTML = `<div class="payslip-print">${buildPayslipHTML(model)}</div>`;
+  // CONFIDENTIALITY FIX (v14 HR remediation) — this panel is an openPage host
+  // appended as a document.body-level SIBLING of #page-content, stacked over
+  // whatever screen was open underneath (the payroll roster, HR Profiles
+  // list, personal-finance, the worker-profile panel, …) — see the pass note
+  // above. css/styles.css's base @media print block has
+  // `#page-content,#page-content *{visibility:visible}` (added so a plain
+  // Ctrl+P on roster/report screens works) with ID-selector specificity that
+  // beats a bare `body *{visibility:hidden}` reset — so clicking Print/Save
+  // PDF on ONE payslip printed this panel's `.payslip-print` content AND the
+  // full underlying #page-content screen (e.g. the whole payroll table, every
+  // employee's pay) in the same print job. That's a confidentiality breach:
+  // an HR user asking for one worker's payslip must never leak every other
+  // worker's salary onto the printed/PDF page.
+  // Fix (js/-only — styles.css is out of scope for this pass, same
+  // constraint openPayrollReconciliation's _reconPrintCss hit above): a
+  // scoped inline <style> shipped with THIS panel's body that forces
+  // #page-content hidden and only .payslip-print visible under print,
+  // using !important to beat the ID-selector specificity tie the same way
+  // _reconPrintCss already does for the reconciliation report. The multi-
+  // payslip "Print All" flow (renderPayrollManagement's print-payroll-btn
+  // handler) is untouched — it replaces #page-content's own contents with
+  // every payslip directly, so #page-content legitimately IS the thing that
+  // should print there.
+  const _psPrintCss = `<style>
+    @media print{
+      #page-content,#page-content *{visibility:hidden!important}
+      .payslip-print,.payslip-print *{visibility:visible!important}
+    }
+  </style>`;
+  const bodyHTML = `${_psPrintCss}<div class="payslip-print">${buildPayslipHTML(model)}</div>`;
   const panel = window.openPage(`${emojiIcon('🖨',16)} Payslip — ${escHtml(model.employee?.name||'')}`, bodyHTML, '', {
     headerRightHTML,
     onClose: () => { if (backFn) backFn(); }
