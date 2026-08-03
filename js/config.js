@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.29';
+window.APP_VERSION = '14.0.30';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -39,6 +39,31 @@ window.bizDow = function(date) {
   return { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wd];
 };
 window.bizYear = function() { return parseInt(window.bizDate().slice(0, 4), 10); };
+
+// ── Task completion-month resolution (payroll recall spec §A3.2) ──────────
+// Used by computePayRun's month-scoped KPI (window.computeKpiForMonth,
+// js/money-core.js) to determine which calendar month a task was completed
+// in (vs. simply scoring "the employee's entire task history as it exists
+// today", which silently rescored old months whenever a task's live status
+// changed). Tasks have no dedicated `completedAt` field historically —
+// js/screens/tasks.js/approvals.js now stamp one going forward (§A3.1) — so
+// this resolves a best-effort ladder for tasks finished before that existed.
+// `t` fields may be Firestore Timestamps OR plain {seconds} POJOs (cached
+// reads sometimes serialize Timestamps down to plain objects).
+window.taskDoneMonth = function(t) {
+  const DONE_ST_LOCAL = ['done','approved','archived'];
+  if (!t || DONE_ST_LOCAL.indexOf(t.status) === -1) return null;
+  const ts = t.completedAt || t.approvedAt || t.lastModifiedAt || null;
+  if (!ts) return ''; // done, but no timestamp to resolve a month from — see computeKpiForMonth
+  const d = (ts.toDate && typeof ts.toDate === 'function') ? ts.toDate() : new Date((ts.seconds||0)*1000);
+  return (window.bizDate ? window.bizDate(d) : d.toISOString().slice(0,10)).slice(0,7);
+};
+window.taskCreatedMonth = function(t) {
+  if (!t || !t.createdAt) return ''; // legacy task, no createdAt — treated as "existed since forever"
+  const ts = t.createdAt;
+  const d = (ts.toDate && typeof ts.toDate === 'function') ? ts.toDate() : new Date((ts.seconds||0)*1000);
+  return (window.bizDate ? window.bizDate(d) : d.toISOString().slice(0,10)).slice(0,7);
+};
 
 // ── Haptics (v14 G2) ──────────────────────────────────────────────
 // Thin, feature-detected wrapper over navigator.vibrate — desktop/iOS Safari
@@ -2001,6 +2026,16 @@ window.CashAdvance = {
       const snap = await ref.get().catch(()=>null);
       if (!snap || !snap.exists) continue;
       const cur = snap.data();
+      // Idempotency (payroll recall spec §D2 — fixes G4): a resumed
+      // disbursePayRun re-runs this whole step (Resume Disburse on a stuck
+      // 'disbursing' run, or a reopen→recompute→re-disburse of the SAME
+      // month). If THIS month's payroll deduction already posted to this CA,
+      // skip it — never deduct the same month twice. Correct both for
+      // resume-after-crash (attempt 1 committed the batch -> attempt 2 skips
+      // every CA for this month; attempt 1 crashed pre-commit -> nothing to
+      // skip) and for the reopen/re-disburse case (the month key is the
+      // identity, regardless of which attempt actually wrote it).
+      if ((cur.payments || []).some(pm => pm.source === 'payroll' && pm.month === month)) continue;
       const toDeduct = Math.min(cur.balance||0, p.amount);
       if (toDeduct <= 0) continue;
       const newBal   = Math.max(0, (cur.balance||0) - toDeduct);

@@ -182,7 +182,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.29 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.30 · Barro Industries</div>
   </div>
 </div>
 
@@ -203,7 +203,7 @@
       </div>
       <div class="topbar-wordmark-stack">
         <span class="topbar-brand-main">Barro Industries</span>
-        <span class="topbar-brand-sub" id="topbar-version-str">Operating System · v12.0.0</span>
+        <span class="topbar-brand-sub" id="topbar-version-str">Operating System</span>
       </div>
     </div>
     <div class="topbar-right">
@@ -283,14 +283,7 @@
 
   <!-- Pull-to-refresh indicator -->
   <div id="ptr-indicator">
-    <div class="ptr-ring-wrap">
-      <svg class="ptr-ring-svg" viewBox="0 0 36 36">
-        <circle class="ptr-ring-track" cx="18" cy="18" r="14"/>
-        <circle class="ptr-ring-arc"   cx="18" cy="18" r="14"/>
-      </svg>
-      <div class="ptr-ring-icon">↓</div>
-    </div>
-    <span class="ptr-label">Pull to refresh</span>
+    <div class="ptr-spinner" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   </div>
 
   <!-- Main content -->
@@ -394,7 +387,7 @@
     const lv = document.getElementById('login-version-str');
     if (lv) lv.textContent = 'v' + v + ' · ' + B.name;
     const tb = document.getElementById('topbar-version-str');
-    if (tb) tb.textContent = B.systemName + ' · v' + v;
+    if (tb) tb.textContent = B.systemName;   // just 'Operating System' — version lives in the sidebar footer
     const sv = document.getElementById('sidebar-version-str');
     if (sv) sv.textContent = 'v' + v;
   };
