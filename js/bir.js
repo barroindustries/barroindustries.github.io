@@ -14,6 +14,15 @@
    ═══════════════════════════════════════════════════ */
 'use strict';
 
+// UMD-ish shim (v14 re-audit — matches js/money-core.js's exact pattern):
+// makes `window` exist under plain Node so tests/money.test.mjs can
+// `require()` this file directly (for window.computeVatSummary, a pure
+// function per its own comment below) with zero build step. In the browser,
+// window already exists, so this is a no-op.
+if (typeof window === 'undefined') {
+  globalThis.window = globalThis;
+}
+
 // ── window.BIRCONFIG ─────────────────────────────────────────────────────
 window.BIRCONFIG = {
   // ‼️ FLAG FOR NEIL — PLACEHOLDER. true = files 2550M/Q (the app's existing
@@ -56,7 +65,15 @@ window.readVatField = function (id, amount) {
 window.computeVatSummary = function (rows) {
   const income = rows.filter(e => ledgerKind(e) === 'income');
   const expense = rows.filter(e => ledgerKind(e) === 'expense');
-  const salesRows = income.filter(e => (e.category || '') === 'Sales Revenue');
+  // v14 fix: previously hardcoded to 'Sales Revenue' only — window.COA.income
+  // also lists 'Other Income' (js/config.js), but any row posted under that
+  // category was invisible to this function entirely (not even bucketed as
+  // exempt), silently understating Output VAT/VAT payable for anything
+  // VATable booked as Other Income (e.g. a scrap-material sale, rental
+  // income). Falls back to the literal COA.income pair if window.COA isn't
+  // loaded (this file's own tests require() it standalone).
+  const incomeCats = (window.COA && window.COA.income) || ['Sales Revenue', 'Other Income'];
+  const salesRows = income.filter(e => incomeCats.includes(e.category || ''));
   let vatableSales = 0, exemptSales = 0, outputVat = 0;
   salesRows.forEach(e => {
     const amt = e.amount || 0;
@@ -407,7 +424,14 @@ window.renderBirVat = async function (container, currentUser, currentRole) {
     <div id="bir-vat-body" style="margin-top:10px"><div class="loading-placeholder">Building…</div></div>
   `;
   window.bindPeriodPicker(document.getElementById('bir-vat-period'), (key) => {
-    state.period = key; window.renderBirVat(container, currentUser, currentRole);
+    // v14 fix: priorCreditable is an accountant-typed figure for ONE specific
+    // period's 2550 worksheet — it must not silently carry over when the
+    // period picker switches (e.g. June's manually-entered prior-credit
+    // otherwise kept applying to July's Net VAT calc with no visual cue it
+    // was stale). Reset it whenever the period actually changes.
+    if (key !== state.period) state.priorCreditable = 0;
+    state.period = key;
+    window.renderBirVat(container, currentUser, currentRole);
   }, { activeKey: state.period });
   await window.birRenderVatBody(document.getElementById('bir-vat-body'), state, currentUser);
 };
@@ -523,9 +547,21 @@ window.birRenderWhtBody = async function (bodyEl, state) {
   const phLegAmt = phLegSnap.docs[0]?.data()?.amount || 0;
   const hdmfLegAmt = hdmfLegSnap.docs[0]?.data()?.amount || 0;
   const diff = recomputedTax - whtLeg;
-  const reconcileWarning = Math.abs(diff) > 0.01
-    ? `<div class="bir-banner">⚠ Ledger aggregate (₱${fmt(whtLeg)}) ≠ per-employee total (₱${fmt(recomputedTax)}) — a deleted employee payroll leaves the aggregate legs overstated (known financeDeleteCascade gap); the per-employee total is authoritative for filing.</div>`
-    : '';
+  // v14 fix: the WHTPAY-{month} remittance leg is normally posted separately,
+  // AFTER payroll and ahead of the BIR deadline — not at disburse time. So
+  // whtLeg===0 while recomputedTax>0 is the routine, expected "not yet
+  // remitted" state, not a data-integrity problem. Previously this exact
+  // state fired the same alarming "known financeDeleteCascade gap" wording
+  // every single month before the remittance was recorded, training users to
+  // ignore the banner — which also hid the case where a REAL post-remittance
+  // mismatch occurs. Split into a neutral info note (not-yet-posted) vs. the
+  // real alarm (posted but doesn't match).
+  let reconcileWarning = '';
+  if (whtLeg === 0 && recomputedTax > 0) {
+    reconcileWarning = `<div class="bir-banner" style="border-color:var(--text-muted)">ℹ Withholding Tax Payable (WHTPAY-${escHtml(month)}) hasn't been posted yet — per-employee total (₱${fmt(recomputedTax)}) is what's owed once the remittance is recorded.</div>`;
+  } else if (Math.abs(diff) > 0.01) {
+    reconcileWarning = `<div class="bir-banner">⚠ Ledger aggregate (₱${fmt(whtLeg)}) ≠ per-employee total (₱${fmt(recomputedTax)}) — a deleted employee payroll leaves the aggregate legs overstated (known financeDeleteCascade gap); the per-employee total is authoritative for filing.</div>`;
+  }
   const watermark = !!(window.STATUTORY && window.STATUTORY[year] && window.STATUTORY[year].verified === false);
   const banner = window.birUnverifiedBanner(year);
   const bodyRows = rows.map(r => `<tr>
@@ -1208,3 +1244,14 @@ window.birRenderBankRecBody = async function (bodyEl, accounts, state, currentUs
     } catch (ex) { Notifs.showToast('Could not save: ' + (ex.message || ex), 'error'); }
   });
 };
+
+// v14 re-audit — test-support export guard (matches js/money-core.js's exact
+// pattern). window.computeVatSummary is pure (rows in, object out; its only
+// external dependency, window.ledgerKind, is stubbed by the test the same
+// way tests/money.test.mjs already stubs window.bizYear) — everything else
+// in this file is DOM/Firestore-driven render code, not exported/tested here.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    computeVatSummary: window.computeVatSummary
+  };
+}

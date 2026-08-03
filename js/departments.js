@@ -274,35 +274,53 @@ window.Clients = (function () {
 //  from the client. All finance delete buttons route through financeDelete().
 // ════════════════════════════════════════════════════════════════
 
-// Delete a ledger row by refNumber AND keep finance_rollup in sync (v14 Wave 4
-// Batch F2). Every cascade delete below — plus the ledger-row-itself delete in
-// financeExecuteDelete — funnels through here, which is the actual universal
-// "remove a ledger row" choke point in this app (Ledger.remove() in
-// finance-ledger.js is unused; every UI path calls window.financeDelete, which
-// lands in financeDeleteCascade/financeExecuteDelete either directly or, for a
-// non-president request, later via the Approvals screen). Reads the row BEFORE
-// deleting so its pre-delete contribution can be subtracted from finance_rollup
-// — best-effort, never blocks/throws (Ledger._syncRollup self-catches; a miss
-// here is reconciled by Ledger.rebuildRollups()).
-async function _deleteLedgerRowByRef(ref) {
+// Resolve a ledger row by refNumber — READ-ONLY (v14 fix: previously this
+// helper both looked up AND deleted the row in one step, called once per
+// ref from inside financeDeleteCascade; see that function's header for why
+// it's now split). Returns {ref, data} or null if not found.
+async function _findLedgerRowByRef(ref) {
   const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
-  if (!ls.docs.length) return false;
-  const data = ls.docs[0].data();
-  await ls.docs[0].ref.delete().catch(()=>{});
-  if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(data, -1);
-  return true;
+  return ls.docs.length ? { ref: ls.docs[0].ref, data: ls.docs[0].data() } : null;
 }
 
 // Cascade cleanup that must accompany the ACTUAL delete of certain finance
 // docs (their linked ledger entries / CA balances). Runs in the deleter's
 // context — always the President — so these ledger writes are permitted.
-async function financeDeleteCascade(collection, docId) {
+//
+// v14 fix (money-critical): this function used to COMMIT its own writes
+// (each ledger-row delete + each cash_advances.balance restore landed
+// immediately, individually, many of them wrapped in a swallowing
+// `.catch(()=>{})`), and financeExecuteDelete then deleted the SOURCE doc as
+// a SEPARATE, LATER write. A crash/throw between the two left the cascade
+// fully applied (ledger rows gone, CA balances restored) but the source doc
+// still present — and a retry of the same delete would re-run this whole
+// function a SECOND time, double-crediting every cash_advances.balance via
+// increment(). Fixed by making this function a pure BUILDER: it only READS
+// (to resolve which ledger rows/CA docs are involved) and stages every
+// write onto the ONE `batch` the caller passes in — nothing commits here.
+// financeExecuteDelete commits that batch together with the source-doc
+// delete, so the whole cascade + the delete now succeed or fail as a single
+// atomic unit; a retry after a failure is a true no-op (nothing was written
+// the first time). Returns the pre-delete ledger row data so the caller can
+// sync finance_rollup AFTER the batch commits — best-effort, never inside
+// the atomic write itself (matches finance-ledger.js's documented
+// CONSTRAINT: a rollup write must never gate/rollback a money write).
+async function financeDeleteCascade(collection, docId, batch) {
   let d = null;
   try { const s = await db.collection(collection).doc(docId).get(); d = s.exists ? s.data() : null; } catch(_) {}
-  if (!d) return;
+  if (!d) return [];
+  const staleLedgerRows = []; // pre-delete row data, for post-commit rollup sync
+
+  const stageLedgerDelete = async (ref) => {
+    const found = await _findLedgerRowByRef(ref);
+    if (!found) return;
+    batch.delete(found.ref);
+    staleLedgerRows.push(found.data);
+  };
+
   if (collection === 'salary_history') {
     const ref = `PAY-${d.month}-${d.userId||''}`;
-    await _deleteLedgerRowByRef(ref);
+    await stageLedgerDelete(ref);
     // v12 WS20/21: the employer-share debit leg this employee's line posted
     // (gross-with-liability-legs booking). NOTE: the aggregate SSSPAY-/PHPAY-/
     // HDMFPAY-/WHTPAY-/NETPAY-{month} credit legs (shared across the WHOLE
@@ -310,7 +328,7 @@ async function financeDeleteCascade(collection, docId) {
     // from every other still-standing line for that month. Known gap, left
     // for whoever builds WS39 (BIR/remittance reports, the eventual owner of
     // these legs) since a wrong partial fix is worse than an honest one.
-    await _deleteLedgerRowByRef(ref+'-ER');
+    await stageLedgerDelete(ref+'-ER');
     // Restore any cash-advance balances this payroll run deducted, so deleting the
     // run doesn't leave an employee's loan wrongly marked paid.
     if (Array.isArray(d.caDeductions)) {
@@ -319,45 +337,55 @@ async function financeDeleteCascade(collection, docId) {
           // v12 WS22 fix: every reader filters status==='approved' for an
           // outstanding balance — 'active' was never a recognized status and
           // made a reversed CA invisible to Compute's balance aggregation.
-          await db.collection('cash_advances').doc(cd.caId).update({
+          batch.update(db.collection('cash_advances').doc(cd.caId), {
             balance: firebase.firestore.FieldValue.increment(cd.amount),
             status: 'approved', paidAt: firebase.firestore.FieldValue.delete()
-          }).catch(()=>{});
+          });
         }
       }
     }
   } else if (collection === 'payslips') {
     const ca = d.deductions?.other?.cashAdvance || 0;
-    if (ca > 0 && d.workerId) await db.collection('worker_profiles').doc(d.workerId).update({ caBalance: firebase.firestore.FieldValue.increment(ca) }).catch(()=>{});
-    await _deleteLedgerRowByRef(`WPAY-${docId}`);
+    if (ca > 0 && d.workerId) batch.update(db.collection('worker_profiles').doc(d.workerId), { caBalance: firebase.firestore.FieldValue.increment(ca) });
+    await stageLedgerDelete(`WPAY-${docId}`);
   } else if (collection === 'cash_receipt_journal' || collection === 'cash_disbursement_journal' || collection === 'expenses') {
     // Remove the mirrored ledger row(s) (CRJ-/CDJ-/EXP-<id>, plus the v12 WS36
     // A/R-/A/P-settlement legs CRJ-/CDJ-<id>-AR/-AP) so deleting the source
     // entry doesn't leave the books overstated.
     const prefix = collection === 'cash_receipt_journal' ? 'CRJ' : collection === 'cash_disbursement_journal' ? 'CDJ' : 'EXP';
     const refs = [`${prefix}-${docId}`, `${prefix}-${docId}-AR`, `${prefix}-${docId}-AP`];
-    for (const r of refs) await _deleteLedgerRowByRef(r);
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+    for (const r of refs) await stageLedgerDelete(r);
   } else if (collection === 'cash_advances') {
     // v12 WS36 — remove the mirrored cash-release ledger row (CA-<id>).
-    await _deleteLedgerRowByRef(`CA-${docId}`);
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+    await stageLedgerDelete(`CA-${docId}`);
   }
+  return staleLedgerRows;
 }
 
-// Perform the real delete (cascade first, then the doc). Used by the President's
-// direct delete AND by the Approvals screen when a request is approved.
+// Perform the real delete — cascade + source-doc delete as ONE atomic batch
+// (see financeDeleteCascade's header for why this changed from two separate
+// commits). Used by the President's direct delete AND by the Approvals
+// screen when a request is approved.
 window.financeExecuteDelete = async function(collection, docId) {
-  await financeDeleteCascade(collection, docId);
+  const batch = db.batch();
+  const staleLedgerRows = await financeDeleteCascade(collection, docId, batch);
   // v14 Wave 4 Batch F2 — a DIRECT delete of a ledger row itself (as opposed to
   // a cascade delete above, triggered by deleting the SOURCE doc) also needs
-  // its finance_rollup contribution subtracted. Read before delete since the
-  // row is gone after; best-effort, mirrors _deleteLedgerRowByRef above.
+  // its finance_rollup contribution subtracted. Read before staging the
+  // delete since the row is gone after commit.
   let _ledgerRowBeforeDelete = null;
   if (collection === 'ledger') {
     try { const s = await db.collection('ledger').doc(docId).get(); if (s.exists) _ledgerRowBeforeDelete = s.data(); } catch(_) {}
   }
-  await db.collection(collection).doc(docId).delete();
+  batch.delete(db.collection(collection).doc(docId));
+  await batch.commit();
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  // finance_rollup deltas are best-effort, strictly AFTER the atomic delete
+  // has committed — never gate the delete itself on a rollup write (matches
+  // finance-ledger.js's CONSTRAINT note).
+  for (const row of staleLedgerRows) {
+    if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(row, -1);
+  }
   if (_ledgerRowBeforeDelete && window.Ledger && typeof window.Ledger._syncRollup === 'function') {
     await window.Ledger._syncRollup(_ledgerRowBeforeDelete, -1);
   }
@@ -1579,8 +1607,17 @@ window.computePayRun = async function(month, { policy } = {}) {
       const delivScore = typeof kpiTargetD.deliverableScore === 'number' ? Math.min(1, kpiTargetD.deliverableScore/100) : 1;
       kpiScore = taskScore*0.7 + delivScore*0.3;
     }
-    const attScore = window.getAttendanceScore ? await window.getAttendanceScore(emp.id) : 1;
-    const planResult = window.CashAdvance ? await window.CashAdvance.planFor(emp.id, month) : { plan: [] };
+    // v14 perf fix: these two reads are independent of each other (neither's
+    // input depends on the other's output) — was two SEQUENTIAL awaits per
+    // employee (on top of the whole employee list already running
+    // concurrently via this outer Promise.all). Doesn't reduce the total
+    // Firestore read count (that would need cross-employee batching — a
+    // bigger redesign, flagged separately), but halves this line's own
+    // per-employee latency.
+    const [attScore, planResult] = await Promise.all([
+      window.getAttendanceScore ? window.getAttendanceScore(emp.id) : Promise.resolve(1),
+      window.CashAdvance ? window.CashAdvance.planFor(emp.id, month) : Promise.resolve({ plan: [] })
+    ]);
     const line = window.computePayLine(emp, { month, policy: runPolicy, kpiScore, attScore, caPlan: planResult.plan, caBalance: planResult.caBalance });
     // v12 WS39 — freeze statutory IDs onto the computed line (do NOT touch
     // computePayLine itself, WS20's frozen math). Read live from payroll/{uid}.
@@ -1688,13 +1725,19 @@ window.disbursePayRun = async function(month, opts = {}) {
 
   // ── 2. Cash-advance deductions — THE only balance mutation, via the one
   //       shared service. financeDeleteCascade reverses caDeductions[] later.
-  for (const line of lines) {
+  // v14 perf fix: each employee's CA deduction only ever touches THAT
+  // employee's own cash_advances docs (line.caPlan's caId values are unique
+  // per uid — see CashAdvance.planFor/deduct, js/config.js), so there is no
+  // shared-document contention across employees. Was a plain sequential
+  // for-loop (one Firestore read+batch per employee, one at a time); now
+  // concurrent, same as computePayRun's own per-employee Promise.all above.
+  await Promise.all(lines.map(async (line) => {
     if (line.caPlan && line.caPlan.length) {
       const res = await window.CashAdvance.deduct(line.uid, month, line.caPlan, currentUser?.uid);
       if (res.length) await db.collection('salary_history').doc(`${line.uid}_${month}`)
         .set({ caDeductions: res }, { merge:true }).catch(()=>{});
     }
-  }
+  }));
 
   // ── 3. Ledger — gross-with-liability-legs (v12 WS21 decision 11). Per-employee
   //       Payroll Expense debits (cost-center granularity); aggregate per-agency
@@ -1718,13 +1761,30 @@ window.disbursePayRun = async function(month, opts = {}) {
   };
   const addedByName = window.userProfile?.displayName || currentUser?.email;
 
-  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0;
+  // v14 fix (money-critical — see caPlannedAgg's ledger leg below for the
+  // full worked-example proof): netCashAgg used to be
+  // Σ(effectiveGross - statutoryTotal), which is the employee's pay BEFORE
+  // otherDeductions/caPlanned — but money-core.js's finalPay (the actual
+  // take-home cash) is netBeforeCA - caPlanned, i.e. gross minus statutory
+  // minus otherDeductions minus caPlanned too. Every run with any CA
+  // deduction overstated the Cash credit by exactly Σcaplanned (compounding
+  // every month in Balance Sheet/Bank Rec). Fixed by subtracting caPlanned
+  // here and posting the removed amount as its own ledger leg below —
+  // crediting the SAME 'Advances to Employees' asset account
+  // CashAdvance.approve debits at release (js/config.js) — so debits still
+  // equal credits AND the Cash figure now reflects what actually left the
+  // bank. otherDeductions is NOT touched here: its correct offsetting
+  // account is undefined in the current COA (flagged separately for Neil/
+  // an accountant — see the v14 finance re-audit report) and inventing one
+  // here would be an unproven money-math change.
+  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0, caPlannedAgg=0;
   for (const line of lines) {
     sssAgg += (line.sss||0) + (line.er?.sss||0);
     phAgg  += (line.philhealth||0) + (line.er?.philhealth||0);
     piAgg  += (line.pagibig||0) + (line.er?.pagibig||0);
     taxAgg += (line.tax||0);
-    netCashAgg += (line.effectiveGross||0) - (line.statutoryTotal||0);
+    caPlannedAgg += (line.caPlanned||0);
+    netCashAgg += (line.effectiveGross||0) - (line.statutoryTotal||0) - (line.caPlanned||0);
 
     await upsertLedger(`PAY-${month}-${line.uid}`, {
       date: month+'-01', type:'debit', accountType:'expense', account:'Payroll Expense',
@@ -1769,6 +1829,29 @@ window.disbursePayRun = async function(month, opts = {}) {
   await aggLeg(`PHPAY-${month}`,   'PhilHealth Payable', phAgg);
   await aggLeg(`HDMFPAY-${month}`, 'Pag-IBIG Payable',   piAgg);
   await aggLeg(`WHTPAY-${month}`,  'Withholding Tax Payable', taxAgg);
+  // v14 fix — the other half of the netCashAgg correction above: the CA
+  // repayment collected via payroll deduction must credit (reduce) the
+  // SAME 'Advances to Employees' asset account CashAdvance.approve debited
+  // at release (js/config.js ~1750), or that receivable never comes back
+  // down and the provisional Balance Sheet's Total Assets grows forever by
+  // every CA ever released. WORKED EXAMPLE: employee gross-minus-statutory
+  // (effectiveGross-statutoryTotal) = ₱20,000, caPlanned = ₱2,000 this run.
+  // BEFORE: netCashAgg included the full ₱20,000 as a Cash credit, with no
+  // offsetting entry anywhere — Cash overstated by ₱2,000, CA balance never
+  // reduced in the ledger. AFTER: netCashAgg credits Cash for ₱18,000 (the
+  // real bank transfer) and this leg credits Advances to Employees for
+  // ₱2,000 — debits (Payroll Expense ₱20,000-equivalent already booked
+  // above) still equal credits (₱18,000 + ₱2,000), and the receivable
+  // correctly steps down. NOTE: this fixes the payroll-deduction path only;
+  // CashAdvance.recordPayment's manual "Record Payment" button (js/config.js)
+  // has the identical gap and needs the same fix there — out of this file's
+  // scope, flagged for a config.js-scoped follow-up.
+  if (caPlannedAgg > 0) await upsertLedger(`CADEDUCT-${month}`, {
+    date: month+'-01', type:'credit', accountType:'asset', account:'Advances to Employees',
+    description: `Cash advance repayments — ${monthLabel} payroll`, amount: caPlannedAgg,
+    category:'Cash Advance', source:'Finance', refNumber:`CADEDUCT-${month}`,
+    addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
   if (netCashAgg > 0) await upsertLedger(`NETPAY-${month}`, {
     date: month+'-01', type:'credit', accountType:'asset', account:'Cash',
     description: `Net payroll cash — ${monthLabel}`, amount: netCashAgg,

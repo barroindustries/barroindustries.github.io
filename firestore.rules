@@ -95,7 +95,17 @@ service cloud.firestore {
           && n.get('employeeId', null)  == o.get('employeeId', null)
           // v12 WS19: username is also privileged — it's the lookup key in the
           // new usernames/{u} map (login), so a free self-change would desync it.
-          && n.get('username', null)    == o.get('username', null);
+          && n.get('username', null)    == o.get('username', null)
+          // v14 re-audit fix — hrManagedAccount is only ever legitimately set
+          // ONCE, at account CREATE time (js/screens/dashboards.js "Create Worker
+          // Account" flow); no code path ever updates it. Freezing it here closes
+          // a privilege-escalation chain: without this, any isAdmin() could flip
+          // hrManagedAccount:true onto an ALREADY-EXISTING doc (e.g. the
+          // President's) via a plain update, then call the adminResetPassword
+          // callable (functions/index.js) — whose only server-side precondition
+          // on the target was that same flag — to silently reset that account's
+          // password and take it over.
+          && n.get('hrManagedAccount', null) == o.get('hrManagedAccount', null);
     }
 
     // ── Shape validators (Phase 92) ─────────────────────
@@ -136,10 +146,46 @@ service cloud.firestore {
       // role:'president' onto any user doc with zero field restriction. Secretary/
       // other non-senior admins may still edit a user's non-privileged fields
       // (name/photo/phone) for HR-adjacent oversight, just not the privileged ones.
+      //
+      // v14 re-audit fix — the isSeniorAdmin() branch below used to have NO owner
+      // restriction and NO privileged-fields check at all: a manager could write
+      // role:'president' onto their OWN doc in one direct write (the WS19 comment
+      // above only closed the hole for secretary/other isAdmin(), not for
+      // isSeniorAdmin() itself). Split president out unconditionally (top of the
+      // hierarchy — nothing to escalate to); a manager acting under isSeniorAdmin()
+      // may now only touch ANOTHER user's doc (never their own — self-edits fall
+      // through to the owner branch below, which freezes privileged fields for
+      // everyone incl. managers), and may never mint role:'president' (only the
+      // President can promote to president).
+      //
+      // fcmTokenUnchangedForOthers(): fcmToken is deliberately NOT in
+      // userPrivilegedFieldsUnchanged() so the OWNER can always freely (re)register
+      // their own device's push token on login/token-refresh. But a NON-OWNER
+      // admin editing someone ELSE's doc must never be able to plant their own
+      // device's token there — that would silently redirect the target's payroll/
+      // DM/deadline push notifications to the admin's device. Combined with
+      // finding #1's fix (manager can't touch its own doc under isSeniorAdmin()),
+      // and #2 (hrManagedAccount) below, this closes the three related
+      // account-hijack paths this update rule used to allow.
+      function fcmTokenUnchangedForOthers() {
+        return request.resource.data.get('fcmToken', null) == resource.data.get('fcmToken', null);
+      }
+      // hrManagedAccount is never legitimately updated (only set at create) —
+      // see userPrivilegedFieldsUnchanged()'s comment. isSeniorAdmin() doesn't
+      // call that helper (it's allowed to change OTHER privileged fields like
+      // department/salary as part of ordinary HR duties), so it needs this
+      // one field frozen explicitly.
+      function hrFlagUnchanged() {
+        return request.resource.data.get('hrManagedAccount', null) == resource.data.get('hrManagedAccount', null);
+      }
       allow update: if isAuth() && (
-        isSeniorAdmin() ||
+        isPresident() ||
+        (isSeniorAdmin() && !isOwner(uid)
+          && request.resource.data.get('role', 'employee') != 'president'
+          && fcmTokenUnchangedForOthers()
+          && hrFlagUnchanged()) ||
         (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||
-        (isAdmin() && userPrivilegedFieldsUnchanged())
+        (isAdmin() && userPrivilegedFieldsUnchanged() && fcmTokenUnchangedForOthers())
       );
       allow delete: if isAuth() && isPresident();
     }
@@ -166,7 +212,20 @@ service cloud.firestore {
     // the worst any internal user can do is advance a sequence number.
     match /_counters/{docId} {
       allow read:  if isAuth();
-      allow write: if isAuth() && !isPartner();
+      // v14 re-audit fix — monotonic-only: the new count may never go
+      // backward. Every real writer (nextCounterId et al., generalized in
+      // js/departments.js) always sets count to strictly base+1, so this
+      // never blocks a legitimate mint — it only blocks resetting a sequence
+      // to 0/an arbitrary lower value, which would let the next-minted
+      // employeeId/serial collide with an existing one.
+      // (request.resource is null on a delete — guard that first so a delete
+      // doesn't crash on request.resource.data and error-deny; nothing in the
+      // app deletes a counter doc today, so this matches prior behavior there.)
+      allow write: if isAuth() && !isPartner()
+        && (request.resource == null || (
+          isNonNegNumber(request.resource.data.get('count', 0))
+          && (resource == null || request.resource.data.get('count', 0) >= resource.data.get('count', 0))
+        ));
     }
 
     // ── Posts ──────────────────────────────────────────
@@ -222,6 +281,20 @@ service cloud.firestore {
         && request.resource.data.createdAt == request.time
         && isBoundedString(request.resource.data.get('title', ''), 200)
         && isBoundedString(request.resource.data.get('body', ''), 2000)
+        // v14 re-audit fix — every OTHER field here used to be unbounded, so a
+        // caller could forge a giant type/link/icon (or the dedup/thread keys)
+        // to inflate every recipient's inbox doc / phish via a misleading link.
+        // link/icon/type are written by every real call site (js/notifications.js
+        // send()) even when "empty" — link legitimately can be `null` (its
+        // default), so it's checked null-OR-bounded-string rather than always a
+        // string like the others below.
+        && isBoundedString(request.resource.data.get('icon', ''), 32)
+        && isBoundedString(request.resource.data.get('type', ''), 64)
+        && (request.resource.data.get('link', null) == null
+            || isBoundedString(request.resource.data.get('link', ''), 300))
+        && isBoundedString(request.resource.data.get('dedupKey', ''), 300)
+        && isBoundedString(request.resource.data.get('taskId', ''), 200)
+        && isBoundedString(request.resource.data.get('chatId', ''), 200)
         // Phase 68 quota observer (functions/index.js sendNotificationQuota) keys off
         // senderUid — optional (system/scheduled sends omit it), but when present it
         // must be truthful: a caller can't attribute a notif to another sender.
@@ -266,21 +339,44 @@ service cloud.firestore {
     // v14 Type-B self-service — the additive owner clause this block's old
     // comment anticipated: workerId == worker_profiles docId, ownership via
     // that profile's linkedUid.
+    // v14 re-audit fix — also require the linked profile to be active. Before
+    // this, toggling a worker_profiles doc's Status to 'inactive' (HR's only
+    // offboarding affordance in hr.js) had ZERO effect on the linked account's
+    // ability to keep timing in/out — nothing here ever read `status`. Reusing
+    // the same get() call this function already makes (no extra read cost).
     function isLinkedWorkerUid(workerId) {
-      return get(/databases/$(database)/documents/worker_profiles/$(workerId))
-        .data.get('linkedUid','') == request.auth.uid;
+      let p = get(/databases/$(database)/documents/worker_profiles/$(workerId)).data;
+      return p.get('linkedUid','') == request.auth.uid && p.get('status', 'active') != 'inactive';
     }
     match /attendance_worker/{workerId} {
       allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
     }
     match /attendance_worker/{workerId}/records/{date} {
       allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
+      // v14 re-audit hardening (self-service write only — isFinanceOrAdmin()
+      // stays unrestricted for the HR/kiosk admin path):
+      //  • date field (when present) must match the docId — stops a
+      //    field/docId mismatch from confusing anything that trusts the field.
+      //  • hoursWorked is bounded to a sane single-day range instead of any
+      //    number a devtools write could set (e.g. 99).
+      //  • a self-service write may never clobber an EXISTING record that
+      //    wasn't originally recorded by this same worker — both the HR-kiosk
+      //    path (openWorkerKioskModal, hr.js) and the self-service path stamp
+      //    `recordedBy`, so this blocks a worker from silently overwriting an
+      //    HR-entered day with their own later self-report.
+      // A full today-only date bound would need a Cloud Function (request.time
+      // has no clean date-string formatter in rules) — deferred, same
+      // limitation already accepted for attendance/{uid}/records above.
       allow write: if isAuth() && (isFinanceOrAdmin() || (
         isLinkedWorkerUid(workerId)
         && request.resource.data.workerId == workerId
+        && request.resource.data.get('date', date) == date
         && request.resource.data.get('recordedBy', request.auth.uid) == request.auth.uid
         && request.resource.data.get('inValid', true) == true
         && request.resource.data.get('outValid', true) == true
+        && isNonNegNumber(request.resource.data.get('hoursWorked', 0))
+        && request.resource.data.get('hoursWorked', 0) <= 24
+        && (resource == null || resource.data.get('recordedBy', '') == request.auth.uid)
       ));
     }
 
@@ -298,7 +394,20 @@ service cloud.firestore {
       // so internal users with incomplete profiles are never wrongly locked out;
       // only a positively-identified 'partner' is denied.
       allow read: if isAuth() && !isPartner();
-      allow create: if isAuth();
+      // v14 re-audit fix — was a bare isAuth() with NO field constraints and no
+      // partner exclusion at all (every sibling request collection —
+      // leave_requests, cash_advances, approval_requests — pins ownership,
+      // status, and shape). The sole real write site (js/screens/dashboards.js,
+      // docId `${uid}_${todayStr}`) always self-files as {uid, userName, date,
+      // status:'pending', requestedAt}; finance/admin filing on someone's
+      // behalf is additionally allowed to match the pattern used elsewhere.
+      allow create: if isAuth() && !isPartner() && (
+        isFinanceOrAdmin() ||
+        (request.resource.data.get('uid', '') == request.auth.uid
+          && request.resource.data.get('status', '') == 'pending')
+      ) && request.resource.data.keys().hasOnly(['uid','userName','date','status','requestedAt'])
+        && isBoundedString(request.resource.data.get('userName', ''), 200)
+        && isBoundedString(request.resource.data.get('date', ''), 20);
       allow update, delete: if isAuth() && isAdmin();
     }
 
@@ -313,7 +422,11 @@ service cloud.firestore {
       // to isMoneyAdmin() so 'secretary' can no longer approve a cash advance via
       // a direct write (the UI already hides this button from secretary; the
       // rule now matches).
-      allow create: if isAuth() && (
+      // v14 re-audit fix — amount was never validated at all (only
+      // userId/status/balance were); a negative/absurd amount could reach
+      // downstream payroll-deduction math (CashAdvance.planFor) which assumes
+      // a sane positive balance.
+      allow create: if isAuth() && isNonNegNumber(request.resource.data.get('amount', 0)) && (
         isMoneyAdmin() ||
         (request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending'
@@ -694,11 +807,16 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
-      // Owners may edit their own expense details but not approve it (status frozen).
+      // Owners may edit their own expense details but not approve it (status
+      // frozen) or change the amount after filing (v14 re-audit fix — amount
+      // was freely editable right up until Finance acted on it, with no
+      // diff/audit record of the change; a correction now has to go through
+      // Finance like the status transition already does).
       allow update: if isAuth() && (
         isFinanceOrAdmin() ||
         (resource.data.createdBy == request.auth.uid
-          && request.resource.data.status == resource.data.status)
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.amount == resource.data.amount)
       );
       // Delete is President-only — finance staff request it via the approval flow.
       allow delete: if isAuth() && isPresident();
@@ -949,15 +1067,27 @@ service cloud.firestore {
       function isPromotion() {
         return statusNext() in ['approved', 'released'] && statusNext() != statusNow();
       }
+      // v14 re-audit fix — the two-party approval gate only covered
+      // transitions INTO approved/released; a demotion OUT of them (incl.
+      // released/approved -> draft/for_review) fell into the ordinary
+      // canDesign() branch, so ANY design-dept member (not an approver, not
+      // even the drawing's own author/assignee) could silently revert a
+      // released drawing — undermining the revision-control trail this gate
+      // exists for.
+      function isDemotion() {
+        return statusNow() in ['approved', 'released'] && statusNext() != statusNow();
+      }
       allow read:   if isAuth() && !isPartner();
       // v12 WS35: new drawings must start at draft (no API-created pre-approved docs).
       allow create: if isAuth() && canDesign()
                     && request.resource.data.get('createdBy', '') == request.auth.uid
                     && request.resource.data.get('status', 'draft') == 'draft';
       allow update: if isAuth() && (
-        // (1) ordinary edits + demotions (revisions, back-to-draft/review, supersede,
-        //     reactivate, field edits with status unchanged) — the pre-WS35 gate
-        ( !isPromotion() && (
+        // (1) ordinary edits + non-privileged demotions (revisions,
+        //     back-to-draft/review, supersede, reactivate, field edits with
+        //     status unchanged) — the pre-WS35 gate. Excludes demotions OUT
+        //     of approved/released (clause 4 below now owns those).
+        ( !isPromotion() && !isDemotion() && (
              resource.data.get('createdBy', '')  == request.auth.uid
           || resource.data.get('assignedTo', '') == request.auth.uid
           || canDesign()
@@ -972,6 +1102,9 @@ service cloud.firestore {
         //     already enforced when 'approved' was reached — see clause 2)
         || ( statusNext() == 'released' && statusNow() == 'approved'
           && isDrawingApprover() )
+        // (4) DEMOTE: approved/released -> anything else, approver-only (v14
+        //     re-audit fix — closes the self-demote-without-approval hole).
+        || ( isDemotion() && isDrawingApprover() )
       );
       allow delete: if isAuth() && isAdmin();
     }
@@ -1125,11 +1258,33 @@ service cloud.firestore {
     // post ledger rows (finance + the fenced Production COS path).
     match /finance_rollup/{docId} {
       allow read: if isAuth() && canFinance();
-      allow write: if isAuth() && (canFinance() || canProduction());
+      // v14 re-audit fix — was unfenced `write` (create+update+delete) with NO
+      // affectedKeys() shape guard, unlike the analogous Production ledger leg
+      // above. Every real writer (_syncRollup/rebuildRollups, js/finance-ledger.js)
+      // always sets EXACTLY this field set — a Production-tier account can no
+      // longer overwrite arbitrary fields on any month's doc. Delete is
+      // finance-tier only: rebuildRollups() (the only delete path) is already
+      // president-only client-side, and Production never legitimately deletes
+      // a rollup doc.
+      allow create, update: if isAuth() && (canFinance() || canProduction())
+        && request.resource.data.keys().hasOnly(
+             ['month','income','expense','vatOutput','vatInput','byCategory','count','updatedAt']);
+      allow delete: if isAuth() && canFinance();
     }
 
     match /ledger/{docId} {
       allow read: if isAuth() && canFinance();
+      // v14 re-audit fix — recover the production_orders docId embedded in a
+      // POCOS refNumber ('POCOS-<id>' for the expense leg, 'POCOS-<id>-INV' for
+      // the inventory contra leg — see consumeProductionMaterials(),
+      // js/screens/production.js) so the create rule below can verify the
+      // referenced order actually exists, instead of trusting any
+      // POCOS-shaped string a Production account cares to send. Firestore
+      // auto-ids never contain '-', so stripping the fixed prefix (and, for
+      // the INV leg, the trailing '-INV') recovers the id exactly.
+      function pocosOrderId(ref) {
+        return ref.split('POCOS-')[1].split('-INV')[0];
+      }
       // Finance/admin post anything (subject to the date + period-close gate
       // above). Production may ALSO post its own material COS — v12 WS13 adds a
       // second Production-postable shape, the Inventory contra-leg that nets the
@@ -1155,13 +1310,15 @@ service cloud.firestore {
               (request.resource.data.get('type', '') == 'debit'
                 && request.resource.data.get('category', '') == 'COS – Direct Material'
                 && request.resource.data.get('refNumber', '').matches('POCOS-.*')
-                && request.resource.data.get('accountType', 'expense') == 'expense')
+                && request.resource.data.get('accountType', 'expense') == 'expense'
+                && exists(/databases/$(database)/documents/production_orders/$(pocosOrderId(request.resource.data.get('refNumber','')))))
               ||
               // Inventory contra leg — new clients only.
               (request.resource.data.get('type', '') == 'credit'
                 && request.resource.data.get('accountType', '') == 'asset'
                 && request.resource.data.get('account', '') == 'Inventory'
-                && request.resource.data.get('refNumber', '').matches('POCOS-.*-INV'))
+                && request.resource.data.get('refNumber', '').matches('POCOS-.*-INV')
+                && exists(/databases/$(database)/documents/production_orders/$(pocosOrderId(request.resource.data.get('refNumber','')))))
             ))
       );
       allow update: if isAuth() && canFinance()
@@ -1379,11 +1536,23 @@ service cloud.firestore {
       // Create rule already forces actorUid == auth.uid, so "own" is sound.
       allow read:   if isAuth()
         && (isAdmin() || resource.data.get('actorUid','') == request.auth.uid);
+      // v14 re-audit fix — action/entity/entityId/details had no size bound at
+      // all; an unrate-limited, append-only collection with unbounded fields
+      // can be flooded with near-1MB documents by any signed-in account.
+      // entityId is nullable (logAudit() writes `entityId || null`); details is
+      // a MAP (arbitrary structured payload) — isBoundedString doesn't apply,
+      // so it's capped by top-level key count instead as a rough flood guard.
       allow create: if isAuth()
         && request.resource.data.actorUid == request.auth.uid
         && request.resource.data.actorRole == getRole()
         && request.resource.data.ts == request.time
-        && request.resource.data.keys().hasOnly(['ts','action','entity','entityId','details','actorUid','actorName','actorRole']);
+        && request.resource.data.keys().hasOnly(['ts','action','entity','entityId','details','actorUid','actorName','actorRole'])
+        && isBoundedString(request.resource.data.get('action', ''), 100)
+        && isBoundedString(request.resource.data.get('entity', ''), 100)
+        && (request.resource.data.get('entityId', null) == null
+            || isBoundedString(request.resource.data.get('entityId', ''), 200))
+        && request.resource.data.get('details', {}) is map
+        && request.resource.data.get('details', {}).size() <= 50;
       allow update: if false;
       allow delete: if isAuth() && isPresident();
     }
@@ -1398,10 +1567,16 @@ service cloud.firestore {
     // since boot-time errors can fire before currentUser exists. Only admins may
     // read or prune; no update (append-only, like audit_log).
     match /error_log/{docId} {
+      // v14 re-audit fix — page/version/ua had no size bound at all (only
+      // message/stack were capped); same flood risk as audit_log above. All
+      // three are always plain strings client-side (js/errlog.js buildPayload).
       allow create: if isAuth()
         && request.resource.data.keys().hasOnly(['message','stack','page','version','uid','ua','ts'])
         && isBoundedString(request.resource.data.get('message', ''), 500)
         && isBoundedString(request.resource.data.get('stack', ''), 2000)
+        && isBoundedString(request.resource.data.get('page', ''), 100)
+        && isBoundedString(request.resource.data.get('version', ''), 40)
+        && isBoundedString(request.resource.data.get('ua', ''), 200)
         && request.resource.data.ts == request.time
         && (!request.resource.data.keys().hasAny(['uid'])
             || request.resource.data.uid == null
@@ -1494,10 +1669,37 @@ service cloud.firestore {
     match /id_verify/{token} {
       allow get:  if true;
       allow list: if false;
+      // v14 re-audit fix — the self-mint branch used to accept ANY fields once
+      // kind=='employee' and uid==caller, so a regular employee could claim
+      // title:'President'/department:'Finance'/status:'active' on this PUBLIC,
+      // unauthenticated-readable card. Mirrors buildIdVerifyDoc() (js/app.js)
+      // field-for-field so a self-mint can only ever be a faithful projection
+      // of the caller's OWN users/{uid} doc. HR/finance mints (worker cards,
+      // which have no matching users doc at all) stay fully trusted/unrestricted.
+      function selfMintMatchesCaller() {
+        let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+        let d = request.resource.data;
+        let realName   = u.get('displayName', '') != '' ? u.get('displayName', '') : u.get('name', '');
+        let realId     = u.get('employeeId', '') != '' ? u.get('employeeId', '') : u.get('idNumber', '');
+        let realTitle  = u.get('title', '') != '' ? u.get('title', '') : u.get('jobTitle', '');
+        let realStatus = u.get('status', '') == 'inactive' ? 'inactive' : 'active';
+        let realDepts  = u.get('departments', []).size() > 0
+          ? u.get('departments', [])
+          : (u.get('department', '') != '' ? [u.get('department', '')] : []);
+        let deptStr    = d.get('department', '');
+        let deptTokens = deptStr == '' ? [] : deptStr.split(', ');
+        return d.get('name', '')     == realName
+            && d.get('idNumber', '') == realId
+            && d.get('jobTitle', '') == realTitle
+            && d.get('status', '')   == realStatus
+            && d.get('photoUrl', '') == u.get('photoUrl', '')
+            && realDepts.hasAll(deptTokens);
+      }
       allow create, update: if isAuth() && !isPartner() && (
         isFinanceOrAdmin() ||                                     // HR mints worker + employee cards
         ( request.resource.data.get('kind','') == 'employee'      // employee self-mints OWN card only
-          && request.resource.data.get('uid','') == request.auth.uid )
+          && request.resource.data.get('uid','') == request.auth.uid
+          && selfMintMatchesCaller() )
       );
       allow delete: if isAuth() && isAdmin();
     }

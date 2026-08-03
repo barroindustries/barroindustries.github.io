@@ -167,6 +167,15 @@
 //   Production COS (V13-PLAN.md Phase 13 item, departments.js ~13913-13997, ref `POCOS-*` / `POCOS-*-INV`) → Ledger.postMulti([expense leg, Inventory contra leg]) — the rules' Production-shape special case (firestore.rules ~1050-1069) must keep matching this write shape unchanged.
 //   legacy random-id rows (all refNumber prefixes, five years of production data) → Ledger.migrateLegacyRows({dryRun}) [Phase 14 — one-time, president-only, run per environment after Phase 13 lands; see its header comment near the bottom of this file]
 //
+// UMD-ish shim (v14 re-audit — matches js/money-core.js's exact pattern):
+// makes `window` exist under plain Node so tests/money.test.mjs can
+// `require()` this file directly (for the pure helpers exposed on
+// window.Ledger below — _mapEntry/_sanitize/_rollupDelta) with zero build
+// step. In the browser, window already exists, so this is a no-op.
+if (typeof window === 'undefined') {
+  globalThis.window = globalThis;
+}
+
 ;(function () {
   'use strict';
 
@@ -668,3 +677,17 @@
     _rollupDelta: _rollupDelta, _syncRollup: _syncRollup
   };
 })();
+
+// v14 re-audit — test-support export guard (matches js/money-core.js's exact
+// pattern). Only the PURE pieces (_mapEntry/_sanitize/_rollupDelta — no
+// Firestore, no DOM, per their own code) are meaningfully unit-testable
+// outside a browser; post/upsertByRef/postMulti/remove/etc. all need `db`/
+// `firebase` and stay Firestore-integration-tested (or exercised via
+// window.Ledger._selfTest() from a real browser console) instead.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    _mapEntry: window.Ledger._mapEntry,
+    _sanitize: window.Ledger._sanitize,
+    _rollupDelta: window.Ledger._rollupDelta
+  };
+}

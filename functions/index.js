@@ -2,6 +2,15 @@ const functions = require('firebase-functions');
 const admin     = require('firebase-admin');
 admin.initializeApp();
 
+// v14 re-audit fix — real per-sender enforcement (see the block inside
+// sendPushOnNotification below). Kept in its OWN bucket collection
+// (notif_push_quota), separate from sendNotificationQuota's observe-only
+// notif_quota bucket further down this file — both functions trigger on the
+// SAME onCreate event, and Cloud Functions gives no ordering guarantee
+// between two independent triggers on one document, so sharing one counter
+// would double-count every notification.
+const NOTIF_PUSH_QUOTA_PER_HOUR = 200;
+
 /**
  * Fires whenever a notification doc is written to notifications/{uid}/items/{itemId}.
  * Looks up the user's FCM token and sends a device push.
@@ -29,6 +38,49 @@ exports.sendPushOnNotification = functions
     if (!title.trim() && !body.trim()) {
       console.warn('[FCM] Skipping malformed notification (empty title and body) for', uid);
       return null;
+    }
+
+    // v14 re-audit fix — REAL enforcement of the per-sender send rate, not
+    // just an observed warning (sendNotificationQuota further down this file
+    // logs but never blocked anything). A signed-in account attributed via
+    // senderUid that blows past a sane per-hour rate has THIS notification
+    // deleted and its push skipped — stopping a real-device push-bomb of
+    // another user. senderUid is optional/attacker-omittable on the doc
+    // itself (system/scheduled sends never set it), so this only throttles
+    // attributed sends; every real client call site (js/notifications.js
+    // send/sendToDept/sendToAll/sendToOwner) always includes it when the
+    // caller has a live session, which is the case for any account capable of
+    // triggering this in the first place. Fails OPEN on a bucket-read/write
+    // error — a quota-check bug must never block a legitimate push.
+    const senderUid = raw.senderUid || raw.fromUid || raw.createdBy || raw.senderId || raw.authorUid || null;
+    if (senderUid) {
+      try {
+        const hourBucket = manilaDate().replace(/-/g, '') + '_' + new Date(Date.now() + 8 * 60 * 60 * 1000).getUTCHours();
+        const bucketRef = admin.firestore().collection('notif_push_quota').doc(`${senderUid}_${hourBucket}`);
+        const count = await admin.firestore().runTransaction(async (tx) => {
+          const doc = await tx.get(bucketRef);
+          const next = (doc.exists ? (doc.data().count || 0) : 0) + 1;
+          tx.set(bucketRef, {
+            senderUid, hourBucket, count: next,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          return next;
+        });
+        if (count > NOTIF_PUSH_QUOTA_PER_HOUR) {
+          console.warn(`[sendPushOnNotification] sender ${senderUid} exceeded push quota (${count}/${NOTIF_PUSH_QUOTA_PER_HOUR} in ${hourBucket}) — blocking push and removing notification ${uid}/${context.params.itemId}`);
+          await snap.ref.delete().catch(() => {});
+          await admin.firestore().collection('system_health').doc('sendPushOnNotification').set({
+            job: 'sendPushOnNotification',
+            lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastStatus: 'warn',
+            errors: 0, notified: 0,
+            label: `sender ${senderUid} blocked at ${count}/${NOTIF_PUSH_QUOTA_PER_HOUR} in ${hourBucket} (enforced)`
+          }, { merge: true }).catch(() => {});
+          return null;
+        }
+      } catch (e) {
+        console.error('[sendPushOnNotification] quota check failed (failing open):', e.message);
+      }
     }
 
     // Collapse tag: bursts of the same "kind" of push should collapse into one
@@ -242,8 +294,42 @@ exports.adminResetPassword = functions.https.onCall(async (data, context) => {
   if (!targetSnap.data().hrManagedAccount) {
     throw new functions.https.HttpsError('failed-precondition', 'Only HR-managed worker accounts can be reset here.');
   }
+  // v14 re-audit fix — hrManagedAccount alone is not sufficient proof the
+  // target is a low-privilege worker account: firestore.rules previously let
+  // any isAdmin() (manager/secretary) flip that flag onto an ALREADY-EXISTING
+  // doc via a plain update (now closed separately — see
+  // userPrivilegedFieldsUnchanged() in firestore.rules), which combined with
+  // this function's caller list (president/manager/finance) would have let a
+  // manager silently reset the President's own password. Defense-in-depth:
+  // never let this callable touch an admin/finance-tier account regardless of
+  // the flag, since "HR-managed worker account" is never legitimately one of
+  // these roles in the first place.
+  const targetRole = targetSnap.data().role;
+  if (['president', 'manager', 'secretary', 'finance'].includes(targetRole)) {
+    throw new functions.https.HttpsError('permission-denied', 'This function cannot reset passwords for admin/finance-tier accounts.');
+  }
 
   await admin.auth().updateUser(targetUid, { password: newPassword });
+
+  // v14 re-audit fix — a successful reset used to leave zero trace anywhere
+  // in the app's own data model (no audit_log entry, no notice to the
+  // affected user). Best-effort: never let a logging failure undo an
+  // already-completed password reset.
+  try {
+    await admin.firestore().collection('audit_log').add({
+      ts: admin.firestore.FieldValue.serverTimestamp(),
+      action: 'password-reset',
+      entity: 'user',
+      entityId: targetUid,
+      details: { targetRole: targetRole || null, targetEmail: targetSnap.data().email || null },
+      actorUid: context.auth.uid,
+      actorName: callerSnap.exists ? (callerSnap.data().displayName || callerSnap.data().email || 'unknown') : 'unknown',
+      actorRole: callerRole,
+    });
+  } catch (e) {
+    console.error('[adminResetPassword] audit log write failed:', e.message);
+  }
+
   return { ok: true };
 });
 

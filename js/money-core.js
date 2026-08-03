@@ -169,6 +169,18 @@ window.computeBreakeven = function(input) {
   Object.keys(byCategory).forEach(cat => {
     const row = byCategory[cat] || {};
     const amt = +(+row.expense || 0).toFixed(2);
+    // v14 fix: a category with zero expense this period (e.g. a pure-income
+    // category like 'Sales Revenue'/'Other Income' — the caller bumps BOTH
+    // income and expense arrays into the same byCategory map, see js/screens/
+    // finance.js's renderBreakevenTab) contributes nothing to either fixed or
+    // variable costs. Previously it still landed in `unclassified` (no
+    // keyword ever matches "sales"/"income"), producing a phantom ₱0.00 row
+    // that confused users into thinking a revenue account needed a Fixed/
+    // Variable tag. Skipping it here is provably safe: amt=0 adds 0 to every
+    // downstream sum either way, so no totals change for any real cost
+    // category — only the spurious zero-amount noise disappears from all
+    // three buckets (classifiedFixed/classifiedVariable/unclassified).
+    if (amt <= 0) return;
     if (fixedSet.has(cat)) {
       classifiedFixed.push({ cat, amt });
       categoryFixedTotal += amt;

@@ -21,7 +21,9 @@
      - window.financeDelete / window.financeExecuteDelete /
        financeDeleteCascade — the delete-with-approval choke point.
      - postExpenseToLedger / postCRJToLedger / postCDJToLedger /
-       resyncLedgerForSource / _deleteLedgerRowByRef — the ledger
+       resyncLedgerForSource / _findLedgerRowByRef (v14 renamed from
+       _deleteLedgerRowByRef — now read-only, batch-based; see
+       financeDeleteCascade's header in departments.js) — the ledger
        POSTING logic (expense/journal → ledger mirror).
      - window.assertPeriodOpen (js/config.js), window.closeFinancePeriod /
        window.reopenFinancePeriod — the period-close gate (read side in
@@ -140,7 +142,19 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved, 
   const taStyle  = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)';
   const fieldHtml = f => {
     const v = f.value == null ? '' : f.value;
-    if (f.type === 'select')   return `<div class="form-group"><label>${f.label}</label><select id="fe-${f.key}" style="${selStyle}">${(f.options||[]).map(o=>`<option ${String(o)===String(v)?'selected':''}>${escHtml(o)}</option>`).join('')}</select></div>`;
+    if (f.type === 'select') {
+      let opts = (f.options||[]).slice();
+      // v14 fix (systemic footgun): if the record's current stored value
+      // isn't in the declared options list — a hardcoded options array
+      // drifting out of sync with the real data (e.g. the Ledger category
+      // dropdown vs. COA.expense's real categories) — the browser silently
+      // defaults the <select> to the FIRST option, and save() unconditionally
+      // writes that back, corrupting the field on an otherwise-unrelated
+      // edit. Auto-append the current value as an extra (still-selected)
+      // option so drift is visible/preserved instead of silently overwritten.
+      if (v !== '' && !opts.some(o => String(o) === String(v))) opts.push(v);
+      return `<div class="form-group"><label>${f.label}</label><select id="fe-${f.key}" style="${selStyle}">${opts.map(o=>`<option ${String(o)===String(v)?'selected':''}>${escHtml(o)}</option>`).join('')}</select></div>`;
+    }
     if (f.type === 'textarea') return `<div class="form-group"><label>${f.label}</label><textarea id="fe-${f.key}" rows="2" style="${taStyle}">${escHtml(v)}</textarea></div>`;
     const t = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
     return `<div class="form-group"><label>${f.label}</label><input id="fe-${f.key}" type="${t}" ${f.type==='number'?'step="0.01" inputmode="decimal"':''} value="${escHtml(v)}"/></div>`;
@@ -1188,8 +1202,14 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     <div class="kpi-row">
       <div class="kpi-card green"><div class="kpi-label">Total Credits</div><div class="kpi-value">₱${fmt(totalCredit)}</div></div>
       <div class="kpi-card red"><div class="kpi-label">Total Debits</div><div class="kpi-value">₱${fmt(totalDebit)}</div></div>
-      <div class="kpi-card ${balance>=0?'accent':'red'}"><div class="kpi-label">Balance</div><div class="kpi-value">₱${fmt(balance)}</div></div>
+      <!-- v14 fix: this is Σcredits−Σdebits across EVERY account type mixed
+           together (income/expense/asset/liability) — neither cash on hand,
+           net income, nor any standard accounting total. Relabeled + a
+           tooltip + a pointer to the real reports, so it can't be misread
+           as "how much money we have" or "our profit". -->
+      <div class="kpi-card ${balance>=0?'accent':'red'}" title="Σ credits − Σ debits across ALL account types mixed together — not cash on hand or net income. See Reports (Income Statement) or Bank Accounts for those."><div class="kpi-label">Net Credit/Debit Skew</div><div class="kpi-value">₱${fmt(balance)}</div></div>
     </div>
+    <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px">Not a cash or profit figure — see <em>Reports</em> for Income Statement / VAT, or <em>Bank Accounts</em> for cash position.</div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
       ${entries.length?`<button class="btn-secondary btn-sm" id="ledger-csv-btn">${emojiIcon('⬇',16)} CSV</button>`:''}
       <button class="btn-primary btn-sm" id="add-ledger-btn">+ New Entry</button>
@@ -1336,7 +1356,21 @@ async function renderLedgerTab(container, currentUser, currentRole) {
           { key:'type', label:'Type', type:'select', value:e.type, options:['credit','debit'] },
           { key:'description', label:'Description / Account', type:'text', value:e.description, full:true },
           { key:'amount', label:'Amount (₱)', type:'number', value:e.amount },
-          { key:'category', label:'Category', type:'select', value:e.category||'Other', options:['Sales Revenue','Operating Expense','Payroll','Tax','Materials','Utilities','Journal Entry (Non-cash)','Other'] },
+          // v14 fix: this was a hardcoded 7-item list that drifted out of
+          // sync with the real COA (js/config.js window.COA.expense has
+          // 'Payroll Expense'/'COS – Direct Material'/'COS – Direct Labor'/
+          // 'General Expense'/'Other Expense', none of which matched here —
+          // so opening this modal on almost any real expense row and saving
+          // silently rewrote its category to 'Sales Revenue' (the first
+          // option). Now built from the live Chart of Accounts so every real
+          // category has an exact-matching option (financeEditModal's own
+          // auto-append fallback above is a second, systemic safety net for
+          // any value that still isn't in this list).
+          { key:'category', label:'Category', type:'select', value:e.category||'Other', options:[
+              ...((window.COA && window.COA.income) || ['Sales Revenue','Other Income']),
+              ...((window.COA && window.COA.expense) || ['Operating Expense','Utilities','Tax','Materials','Other Expense']),
+              'Journal Entry (Non-cash)', 'Cash Advance', 'A/R Collection', 'A/P Settlement', 'Other'
+            ] },
           { key:'refNumber', label:'Reference Number', type:'text', value:e.refNumber, full:true }
         ]});
       }

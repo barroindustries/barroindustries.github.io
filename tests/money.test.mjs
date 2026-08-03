@@ -10,7 +10,14 @@
 // labeled below and are expected to change once an accountant verifies real
 // SSS/PhilHealth/Pag-IBIG/TRAIN numbers and the table's verified flag flips.
 //
-// Run with: node --test tests/
+// Run with: node --test tests/*.test.mjs   (v14 re-audit finding: bare
+// `node --test tests/` throws MODULE_NOT_FOUND on Node >=24 — confirmed by
+// direct repro. .github/workflows/ci.yml's money-math-tests job currently
+// runs the bare `node --test tests/` form too and pins Node 20, so it is
+// UNVERIFIED whether CI itself is affected — flagged separately since
+// ci.yml is outside this file's edit scope; this header comment is fixed
+// here so local devs on a newer Node aren't misled by a MODULE_NOT_FOUND
+// error that gives no hint it's a Node-version/glob issue.)
 //
 // Zero deps: node:test + node:assert only, per Wave 2 spec. Both
 // js/statutory-tables.js and js/money-core.js are plain "window globals"
@@ -44,6 +51,26 @@ const statutory = require('../js/statutory-tables.js');
 const money = require('../js/money-core.js');
 const { vatSplit, computePayLine, computeBreakeven } = money;
 const { computeStatutory } = statutory;
+
+// window.ledgerKind lives in js/config.js (the ONE place P&L income/expense
+// classification happens), which this suite does NOT load for the same
+// reason it skips bizYear's real home — config.js touches Firebase/DOM
+// bootstrapping unrelated to pure money math. Stubbed here to the same
+// {accountType-first, then type} logic config.js actually implements (minus
+// the COA_LEGACY_MAP category fallback, which the test rows below don't
+// need — they set type/accountType explicitly), BEFORE requiring bir.js/
+// finance-ledger.js, both of which call window.ledgerKind internally.
+window.ledgerKind = function (row) {
+  if (row && typeof row.accountType === 'string') return row.accountType;
+  if (!row) return 'expense';
+  if (row.type === 'credit') return 'income';
+  return 'expense';
+};
+
+const bir = require('../js/bir.js');
+const { computeVatSummary } = bir;
+const ledger = require('../js/finance-ledger.js');
+const { _mapEntry, _sanitize, _rollupDelta } = ledger;
 
 // computeStatutory console.warns on every call while the table is
 // unverified (by design — "nothing silently ships a wrong number into live
@@ -98,6 +125,20 @@ describe('vatSplit', () => {
   it('rounding edge: exclusive split on a fractional amount', () => {
     // vat = 33.335 * 0.12 = 4.0002 -> toFixed(2) = "4.00" -> 4
     assert.deepEqual(vatSplit(33.335, 'exclusive'), { recorded: 37.34, net: 33.34, vat: 4 });
+  });
+
+  // v14 re-audit finding: "vatSplit has no test for a negative entered amount
+  // (credit memo / sales return)" — money-core.js's header says vatSplit is
+  // used by the sale + project billing flows, which in practice can include
+  // refunds/credit memos with a negative amount. `+entered || 0` only
+  // coerces falsy/non-numeric input to 0 — a real negative number is
+  // truthy and passes straight through the same formula as a positive one,
+  // just mirrored in sign. Pinning today's (undocumented-until-now, but not
+  // proven wrong) behavior for all three treatments, not changing the math.
+  it('negative entered amount (credit memo / sales return): mirrors the positive-amount formula in sign', () => {
+    assert.deepEqual(vatSplit(-1120, 'inclusive'), { recorded: -1120, net: -1000, vat: -120 });
+    assert.deepEqual(vatSplit(-1000, 'exclusive'), { recorded: -1120, net: -1000, vat: -120 });
+    assert.deepEqual(vatSplit(-500, 'exempt'), { recorded: -500, net: -500, vat: 0 });
   });
 });
 
@@ -262,6 +303,22 @@ describe('computePayLine', () => {
     assert.equal(line.statutoryTotal, 500); // SSS/PhilHealth floors apply even at zero gross
     assert.equal(line.netBeforeCA, -500);
     assert.equal(line.finalPay, -500);
+  });
+
+  // v14 re-audit finding: computePayLine's payClass mapping (line ~93:
+  // `emp.payClass==='production'?'production':'regular'`) had no test for
+  // the 'production' branch — every existing test above omits payClass, so
+  // only the 'regular' fallback was pinned. computePayRun (departments.js)
+  // explicitly SKIPS payClass:'production' employees from the monthly run
+  // before computePayLine is ever called on them, so this branch may be
+  // unreachable in the live app today — pinning it anyway documents what
+  // computePayLine itself does if ever called directly with one.
+  it('payClass "production" passes through on the returned line (computePayRun currently never calls this for a production employee)', () => {
+    const line = computePayLine(
+      { id: 'u8', displayName: 'Rico', salary: 18000, allowance: 0, deductions: 0, payClass: 'production' },
+      { policy: 'flat' }
+    );
+    assert.equal(line.payClass, 'production');
   });
 
   it('defaults: missing kpiScore/attScore/caPlan/caBalance in ctx', () => {
@@ -453,5 +510,250 @@ describe('computeBreakeven', () => {
     assert.deepEqual(r.classifiedFixed, []);
     assert.deepEqual(r.classifiedVariable, []);
     assert.deepEqual(r.unclassified, []);
+  });
+
+  // v14 re-audit finding: no test pinned the precedence when a malformed/
+  // duplicate finance_config/breakeven doc lists the SAME category in both
+  // classification.fixed and classification.variable (e.g. a bug in
+  // openBreakevenClassifyEditor's save merge). computeBreakeven checks
+  // fixedSet.has(cat) BEFORE variableSet.has(cat) — documenting that "fixed"
+  // wins is intentional-by-pin, not a silent accident.
+  it('a category present in BOTH classification.fixed and classification.variable: fixed wins (checked first)', () => {
+    const r = computeBreakeven({
+      income: 100000,
+      byCategory: { 'Utilities': { expense: 5000 } },
+      classification: { fixed: ['Utilities'], variable: ['Utilities'] },
+    });
+    assert.deepEqual(r.classifiedFixed, [{ cat: 'Utilities', amt: 5000 }]);
+    assert.deepEqual(r.classifiedVariable, []);
+    assert.equal(r.fixedTotal, 5000);
+    assert.equal(r.variableTotal, 0);
+  });
+
+  // v14 re-audit fix: js/screens/finance.js's renderBreakevenTab builds
+  // byCategory from BOTH income and expense arrays (same map), so a
+  // pure-income category like 'Sales Revenue'/'Other Income' — which only
+  // ever has an `income` field, never `expense` — used to still land in
+  // `unclassified` with amt:0 (no keyword ever matches "sales"/"income"),
+  // showing a phantom ₱0.00 row and inflating the Unclassified count. Fixed
+  // by skipping any byCategory entry whose expense contribution is <= 0
+  // before classifying. Before this fix, `unclassified` would have included
+  // {cat:'Sales Revenue', amt:0} here; now it's correctly absent, and every
+  // nonzero total is unchanged (proving the fix only removes zero-amount
+  // noise, never a real cost).
+  it('a byCategory entry with zero expense (pure-income category) is excluded from fixed/variable/unclassified entirely', () => {
+    const r = computeBreakeven({
+      income: 100000,
+      byCategory: {
+        'Sales Revenue': { income: 100000, expense: 0 },
+        'Payroll Expense': { expense: 20000 },
+        'Materials': { expense: 20000 },
+      },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+    });
+    assert.equal(r.fixedTotal, 20000);
+    assert.equal(r.variableTotal, 20000);
+    assert.deepEqual(r.unclassified, []); // NOT [{ cat: 'Sales Revenue', amt: 0 }]
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// computeVatSummary — js/bir.js (v14 re-audit finding: "the shared VAT
+// engine behind Reports, 2550, and the Financial Statement has no test at
+// all"). Pure: rows array in, object out; its only external dependency is
+// window.ledgerKind, stubbed above the same way this suite already stubs
+// window.bizYear. These tests pin today's exempt/inclusive/exclusive
+// classification and the `vatAmount != null` legacy-fallback branch, AND
+// document the v14 fix below (Other Income was previously invisible to this
+// function entirely — see that test for the specific before/after).
+// ═══════════════════════════════════════════════════════════
+describe('computeVatSummary', () => {
+  it('Sales Revenue row with an explicit vatAmount: bucketed as vatable, outputVat = vatAmount', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Sales Revenue', amount: 1120, vatAmount: 120 },
+    ]);
+    assert.equal(r.vatableSales, 1000);
+    assert.equal(r.exemptSales, 0);
+    assert.equal(r.outputVat, 120);
+    assert.equal(r.inputVat, 0);
+    assert.equal(r.netVat, 120);
+  });
+
+  it('Sales Revenue row with NO vatAmount: legacy fallback amount − amount/1.12', () => {
+    // 1120 - 1120/1.12 = 120.00000000000011 in raw floating point — unlike
+    // vatSplit (money-core.js), this legacy fallback branch has no
+    // .toFixed(2) rounding. Pinning the EXACT unrounded output (a quirk, not
+    // something this fix batch changes — bir.js's own comment calls this
+    // the "legacy fallback" for rows recorded before VAT was tracked
+    // per-entry, and rounding it now would be an unproven money-math change).
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Sales Revenue', amount: 1120 },
+    ]);
+    assert.ok(Math.abs(r.outputVat - 120) < 1e-9);
+    assert.ok(Math.abs(r.vatableSales - 1000) < 1e-9);
+  });
+
+  it('Sales Revenue row with vatAmount <= 0: exempt, not vatable — no negative/zero outputVat contribution', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Sales Revenue', amount: 500, vatAmount: 0 },
+    ]);
+    assert.equal(r.exemptSales, 500);
+    assert.equal(r.vatableSales, 0);
+    assert.equal(r.outputVat, 0);
+  });
+
+  it('inputVat sums only from expense rows (income rows never contribute)', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Sales Revenue', amount: 1120, vatAmount: 120 },
+      { type: 'debit', category: 'Materials', amount: 224, inputVat: 24 },
+      { type: 'debit', category: 'Utilities', amount: 100, inputVat: 0 },
+    ]);
+    assert.equal(r.inputVat, 24);
+    assert.equal(r.netVat, 96); // 120 - 24
+  });
+
+  it('a non-income category (e.g. an asset/liability row misfiled with a stray category) never counts as a sale', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Advances to Employees', amount: 5000 },
+    ]);
+    assert.equal(r.vatableSales, 0);
+    assert.equal(r.exemptSales, 0);
+    assert.equal(r.outputVat, 0);
+  });
+
+  it('empty rows: every field defaults to zero, no throw', () => {
+    const r = computeVatSummary([]);
+    assert.deepEqual(r, { vatableSales: 0, exemptSales: 0, outputVat: 0, inputVat: 0, netVat: 0 });
+  });
+
+  // v14 FIX (not just a pin): window.COA.income = ['Sales Revenue', 'Other
+  // Income'], but computeVatSummary previously hardcoded `category ===
+  // 'Sales Revenue'` only — any row posted under 'Other Income' (e.g. a
+  // scrap-material sale, rental income) was invisible to this function
+  // entirely, not even bucketed as exempt, silently understating Output
+  // VAT/VAT payable. BEFORE this fix, the row below would have contributed
+  // NOTHING to any field (vatableSales/exemptSales/outputVat all 0 despite a
+  // real ₱120 of VAT on the receipt). AFTER the fix, 'Other Income' is
+  // scanned exactly like 'Sales Revenue' (window.COA.income is now the
+  // filter, not a single hardcoded string).
+  it('Other Income row with vatAmount: now counted toward vatableSales/outputVat (previously invisible entirely)', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Other Income', amount: 1120, vatAmount: 120 },
+    ]);
+    assert.equal(r.vatableSales, 1000);
+    assert.equal(r.outputVat, 120);
+    assert.equal(r.exemptSales, 0);
+  });
+
+  it('Other Income row with no VAT (exempt): now bucketed as exempt (previously invisible entirely)', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Other Income', amount: 300, vatAmount: 0 },
+    ]);
+    assert.equal(r.exemptSales, 300);
+    assert.equal(r.vatableSales, 0);
+    assert.equal(r.outputVat, 0);
+  });
+
+  it('Sales Revenue and Other Income both present: outputVat/vatableSales sum across both categories', () => {
+    const r = computeVatSummary([
+      { type: 'credit', category: 'Sales Revenue', amount: 1120, vatAmount: 120 },
+      { type: 'credit', category: 'Other Income', amount: 560, vatAmount: 60 },
+    ]);
+    assert.equal(r.vatableSales, 1500); // 1000 + 500
+    assert.equal(r.outputVat, 180);     // 120 + 60
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// js/finance-ledger.js pure helpers — sanitize/_mapEntry/_rollupDelta (v14
+// re-audit finding: "the sole ledger-posting/dedupe/rollup chokepoint has
+// zero automated test coverage"). These three are exported specifically
+// because they're callable with zero Firestore per their own code (the
+// file's header comment says as much) — post/upsertByRef/postMulti/remove
+// all need `db`/`firebase` and are integration-tested via a real emulator or
+// window.Ledger._selfTest() in a browser console instead, not here.
+//
+// NOTE ON SCOPE: the finding recommended a dedicated tests/ledger.test.mjs
+// file using this exact require()-a-window-global pattern. This v14 fix
+// batch's edit scope is restricted to tests/money.test.mjs only (no new test
+// files) — folded in here instead so the coverage gap is closed without
+// creating an out-of-scope file. A follow-up should still split this into
+// its own tests/ledger.test.mjs for discoverability.
+// ═══════════════════════════════════════════════════════════
+describe('finance-ledger.js pure helpers (sanitize/_mapEntry/_rollupDelta)', () => {
+  it('sanitize: no-op on a ref with no slash', () => {
+    assert.equal(_sanitize('EXP-abc123'), 'EXP-abc123');
+  });
+
+  it('sanitize: replaces every "/" with "_" (Firestore doc ids can\'t contain "/")', () => {
+    assert.equal(_sanitize('A/B/C'), 'A_B_C');
+  });
+
+  it('sanitize: null/undefined ref coerces to empty string, not "null"/"undefined"', () => {
+    assert.equal(_sanitize(null), '');
+    assert.equal(_sanitize(undefined), '');
+  });
+
+  it('_mapEntry: maps ref/kind/category onto refNumber/type/account, strips undefined optional fields', () => {
+    const row = _mapEntry({
+      ref: 'EXP-test1', date: '2026-08-01', kind: 'debit', amount: 1120,
+      category: 'General Expense', accountType: 'expense', source: 'Expense',
+    });
+    assert.equal(row.refNumber, 'EXP-test1');
+    assert.equal(row.type, 'debit');
+    assert.equal(row.account, 'General Expense'); // falls back to category when entry.account is absent
+    assert.equal(row.amount, 1120);
+    assert.equal('dept' in row, false); // undefined optional fields are deleted, not written as null
+    assert.equal('projectId' in row, false);
+  });
+
+  it('_mapEntry: vatTreatment auto-attaches inputVat via vatSplit, unless the caller (or extra) already set it', () => {
+    const withAuto = _mapEntry({ ref: 'EXP-a', date: '2026-08-01', kind: 'debit', amount: 1120, vatTreatment: 'inclusive' });
+    assert.equal(withAuto.inputVat, 120);
+
+    const noTreatment = _mapEntry({ ref: 'CRJ-a', date: '2026-08-01', kind: 'credit', amount: 500, category: 'Sales Revenue' });
+    assert.equal('inputVat' in noTreatment, false); // no vatTreatment -> no inputVat field at all
+
+    const extraWins = _mapEntry({ ref: 'CDJ-a', date: '2026-08-01', kind: 'debit', amount: 1120, vatTreatment: 'inclusive', extra: { inputVat: 99 } });
+    assert.equal(extraWins.inputVat, 99); // caller's own extra.inputVat is never overwritten by the auto-computed split
+  });
+
+  it('_mapEntry: entry.extra fields merge onto the row as-is (e.g. bankFlow)', () => {
+    const row = _mapEntry({ ref: 'CDJ-b', date: '2026-08-01', kind: 'debit', amount: 200, extra: { bankFlow: 'out' } });
+    assert.equal(row.bankFlow, 'out');
+  });
+
+  it('_rollupDelta: a credit row contributes to income, not expense; category defaults to "Other"', () => {
+    const d = _rollupDelta({ date: '2026-08-05', type: 'credit', amount: 1000 });
+    assert.equal(d.month, '2026-08');
+    assert.equal(d.category, 'Other');
+    assert.equal(d.income, 1000);
+    assert.equal(d.expense, 0);
+  });
+
+  it('_rollupDelta: a debit row contributes to expense, not income', () => {
+    const d = _rollupDelta({ date: '2026-08-05', type: 'debit', amount: 500, category: 'Materials' });
+    assert.equal(d.category, 'Materials');
+    assert.equal(d.income, 0);
+    assert.equal(d.expense, 500);
+  });
+
+  it('_rollupDelta: accountType wins over type when both are present (matches window.ledgerKind precedence)', () => {
+    // An asset-tagged credit (e.g. the Advances-to-Employees repayment leg)
+    // must NOT be miscounted as income just because type:'credit'.
+    const d = _rollupDelta({ date: '2026-08-05', type: 'credit', accountType: 'asset', amount: 2000, category: 'Cash Advance' });
+    assert.equal(d.income, 0);
+    assert.equal(d.expense, 0);
+  });
+
+  it('_rollupDelta: malformed/missing date buckets into "undated", not a thrown error', () => {
+    assert.equal(_rollupDelta({ type: 'credit', amount: 100 }).month, 'undated');
+    assert.equal(_rollupDelta({ date: 'not-a-date', type: 'credit', amount: 100 }).month, 'undated');
+  });
+
+  it('_rollupDelta: vatOutput/vatInput come from the SAME computeVatSummary a single-row array would produce (zero-drift-by-construction)', () => {
+    const row = { date: '2026-08-01', type: 'credit', category: 'Sales Revenue', amount: 1120, vatAmount: 120 };
+    const d = _rollupDelta(row);
+    assert.equal(d.vatOutput, computeVatSummary([row]).outputVat);
   });
 });
