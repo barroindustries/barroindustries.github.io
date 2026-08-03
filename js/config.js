@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.181';
+window.APP_VERSION = '12.0.182';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1178,8 +1178,14 @@ window.Overlay = {
     if (!this._stack.length) return;
     const n = this._stack.length;
     while (this._stack.length){ const o = this._stack.pop(); try { o.teardown(); } catch(_){} }
-    // Drop the overlays' history entries so the new page push lands cleanly.
-    try { history.go(-n); } catch(_){}
+    // v14 hotfix (iOS): history.go(-n) here RACED navigateTo's immediate
+    // pushState — on iOS the async rewind landed after the push and its stale
+    // popstate yanked navigation back to the old page (every More-sheet/
+    // drawer tap "did nothing"). Instead: leave the stale overlay entries in
+    // history and tell navigateTo to ABSORB the top one via replaceState.
+    // Remaining stale entries are harmless — the popstate handler already
+    // maps t:'overlay' entries to their base page on future Back presses.
+    this._pendingRewind = (this._pendingRewind || 0) + n;
   }
 };
 
