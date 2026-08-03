@@ -14,37 +14,15 @@
 
 /* ══════════════════════════════
    ANIMATIONS
+   v14 de-structuring pass: meshDrift, float, floatB, gradRun, pulseGlow,
+   goldShine, and ptr-bounce were removed here — each one only ever powered
+   an Astral-exclusive decorative/glow effect that has now been deleted
+   throughout this file, so they were fully orphaned (grep confirmed zero
+   remaining `animation:` consumers, in this file or in js/*.js).
 ══════════════════════════════ */
-@keyframes meshDrift {
-  0%,100% {
-    background-position: 0% 50%, 100% 50%, 50% 0%;
-    opacity: 1;
-  }
-  50% {
-    background-position: 100% 50%, 0% 50%, 50% 100%;
-    opacity: 0.8;
-  }
-}
-@keyframes float {
-  0%,100% { transform: translateY(0)     rotate(0deg); }
-  33%      { transform: translateY(-22px) rotate(2deg); }
-  66%      { transform: translateY(-10px) rotate(-1deg); }
-}
-@keyframes floatB {
-  0%,100% { transform: translateY(0)     rotate(0deg) scale(1); }
-  50%      { transform: translateY(-30px) rotate(-3deg) scale(1.04); }
-}
 @keyframes shimmer {
   0%   { transform: translateX(-100%) skewX(-12deg); }
   100% { transform: translateX(250%)  skewX(-12deg); }
-}
-@keyframes gradRun {
-  0%,100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
-}
-@keyframes pulseGlow {
-  0%,100% { opacity: 0.7; }
-  50%      { opacity: 1; }
 }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(20px) scale(0.97); }
@@ -52,10 +30,6 @@
 }
 @keyframes ptr-spin {
   to { transform: rotate(360deg); }
-}
-@keyframes ptr-bounce {
-  0%,100% { transform: translateY(0); }
-  50%      { transform: translateY(-4px); }
 }
 @keyframes slideIn {
   from { opacity: 0; transform: translateX(-12px); }
@@ -74,10 +48,6 @@
   from { transform: rotateY(0deg); }
   to   { transform: rotateY(360deg); }
 }
-@keyframes skeleton {
-  0%   { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
-}
 @keyframes statePulse {
   0%, 100% { opacity: .45; }
   50%      { opacity: 1; }
@@ -90,10 +60,6 @@
 @keyframes borderGlow {
   0%,100% { box-shadow: 0 0 0 0 var(--pink-glow); }
   50%      { box-shadow: 0 0 0 4px var(--pink-glow); }
-}
-@keyframes goldShine {
-  0%   { transform: skewX(-15deg) translateX(0%); }
-  100% { transform: skewX(-15deg) translateX(400%); }
 }
 
 /* ══════════════════════════════
@@ -244,24 +210,13 @@ body::after { content: none; }
 .btn-busy { animation: statePulse 1.4s ease-in-out infinite; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .btn-busy { animation: none; opacity: .7; } }
 @media (pointer:coarse) { .btn-primary, .btn-secondary, .btn-outline, .btn-danger, .btn-success { min-height: 40px; } }
+/* v14 Astral de-structuring pass: Astral's .btn-primary now differs from Dark
+   ONLY by its gradient fill color — the shimmer sweep pseudo-element, the
+   always-on glow shadow, and the infinite gradient-run animation (all
+   structural/motion, not color) were removed so it inherits the exact same
+   shape/shadow/hover behavior as Dark's .btn-primary. */
 html.theme-astral .btn-primary {
-  background: var(--grad-pk-bl-btn, var(--grad-pk-bl)); background-size: 200% 200%;
-  box-shadow: var(--sh-pink);
-  animation: gradRun 4s ease infinite;
-}
-html.theme-astral .btn-primary::before {
-  content: '';
-  position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-  transform: translateX(-100%) skewX(-12deg);
-  transition: none;
-}
-@media (hover:hover) {
-  html.theme-astral .btn-primary:hover { box-shadow: 0 6px 28px rgba(255,45,120,0.45); }
-  html.theme-astral .btn-primary:hover::before { animation: shimmer 0.5s ease forwards; }
-}
-@media (prefers-reduced-motion: reduce) {
-  html.theme-astral .btn-primary { animation: none; }
+  background: var(--grad-pk-bl-btn, var(--grad-pk-bl));
 }
 
 .btn-secondary {
@@ -433,34 +388,11 @@ label.check-row { display: inline-flex; align-items: center; gap: 8px; min-heigh
   background: var(--bg);
 }
 
-/* Large decorative orbs — Astral's aurora identity only; Light/Dark stay flat
-   per Phase 9 (no ambient glow, no continuous animation). */
+/* v14 Astral de-structuring pass: the decorative aurora orbs + gold pulse orb
+   (::before/::after pseudo-elements with infinite animation) were removed —
+   Astral now shares Light/Dark's flat, zero-ambient-glow, zero-animation
+   login background exactly; only its palette tokens differ. */
 .login-bg { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-html.theme-astral .login-bg::before {
-  content: '';
-  position: absolute; top: -180px; left: -120px;
-  width: 560px; height: 560px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,45,120,0.18) 0%, transparent 68%);
-  animation: float 11s ease-in-out infinite;
-}
-html.theme-astral .login-bg::after {
-  content: '';
-  position: absolute; bottom: -160px; right: -100px;
-  width: 500px; height: 500px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(10,132,255,0.15) 0%, transparent 68%);
-  animation: floatB 14s ease-in-out infinite;
-}
-
-/* Gold orb center — Astral only (Light/Dark: no pseudo-element content at all,
-   so #login-screen::before is free for Astral's starfield override below). */
-html.theme-astral #login-screen::before {
-  content: '';
-  position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
-  width: 300px; height: 300px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,214,10,0.07) 0%, transparent 70%);
-  pointer-events: none; z-index: 0;
-  animation: pulseGlow 6s ease-in-out infinite;
-}
 #login-screen::after { display: none; }
 
 /* Minimal Apple-style card: centered, ≤380px, flat + token-driven in Light/Dark.
@@ -476,25 +408,15 @@ html.theme-astral #login-screen::before {
   text-align: center;
   animation: fadeUp 0.5s var(--spring);
 }
-html.theme-astral .login-container {
-  backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
-  border: 1px solid rgba(255,255,255,0.09);
-  box-shadow:
-    0 0 0 1px rgba(255,214,10,0.10),
-    0 20px 60px rgba(0,0,0,0.70),
-    inset 0 1px 0 rgba(255,255,255,0.06);
-}
-/* gold top trim — Astral only */
-html.theme-astral .login-container::before {
-  content: '';
-  position: absolute; top: 0; left: 10%; right: 10%; height: 1.5px;
-  background: var(--grad-gold);
-  border-radius: var(--pill);
-  opacity: 0.7;
-}
+/* v14 Astral de-structuring pass: the login-container glass/blur/gold-trim
+   showpiece card was removed entirely — Astral's card now falls through to
+   the exact same flat, token-driven base rule Dark uses (its --login-card-bg/
+   --border tokens already give it a distinct tint; see the palette block). */
 
-/* Circular logo (Phase 25 spec). Light/Dark: flat surface + border. Astral
-   keeps the cosmic sheen/gold-trim/glow card. */
+/* Circular logo (Phase 25 spec) — same shape/border in every theme; only the
+   Astral palette tokens differ. The cosmic sheen/gold-trim/rounded-square
+   variant was removed (v14 de-structuring pass) — Astral keeps the same
+   circular logo wrap as Light/Dark. */
 .login-logo-wrap {
   position: relative; overflow: hidden;
   width: 80px; height: 80px; margin: 0 auto 18px;
@@ -504,31 +426,10 @@ html.theme-astral .login-container::before {
   display: flex; align-items: center; justify-content: center;
   padding: 6px;
 }
-html.theme-astral .login-logo-wrap {
-  border-radius: 22px;
-  background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
-  border: 1px solid rgba(255,214,10,0.35);
-  box-shadow: 0 0 18px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
-}
-/* top gold trim line — Astral only */
-html.theme-astral .login-logo-wrap::after {
-  content: '';
-  position: absolute; top: 0; left: 12%; right: 12%; height: 1.5px;
-  background: var(--grad-gold);
-  border-radius: var(--pill); opacity: 0.80;
-}
-/* static inner sheen — Astral only */
-html.theme-astral .login-logo-wrap::before {
-  content: '';
-  position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 60%);
-  border-radius: inherit; pointer-events: none;
-}
 .login-logo-img {
   width: 100%; height: 100%; object-fit: contain;
   border-radius: 50%; position: relative; z-index: 1;
 }
-html.theme-astral .login-logo-img { border-radius: 16px; }
 .login-logo-fallback {
   width: 100%; height: 100%;
   background: var(--primary-fill, var(--primary));
@@ -537,20 +438,21 @@ html.theme-astral .login-logo-img { border-radius: 16px; }
   display: flex; align-items: center; justify-content: center; margin: 0 auto;
   position: relative; z-index: 1;
 }
-html.theme-astral .login-logo-fallback { background: var(--grad-pk-bl); border-radius: 16px; }
+/* Color-only: Astral's brand gradient fill instead of the flat --primary; same
+   circular shape as Light/Dark (the 16px rounded-square override was removed). */
+html.theme-astral .login-logo-fallback { background: var(--grad-pk-bl); }
 .login-title {
   font-family: var(--font-display);
   font-size: var(--fs-3xl); font-weight: 800;
   color: var(--text);
   margin-bottom: 4px; letter-spacing: -0.4px;
 }
-/* Astral keeps its signature animated gradient title (continuous animation is
-   allowed only in Astral, per the WS42 performance budget). */
+/* Color-only: Astral's signature gradient-fill title text. The continuous
+   gradRun animation (motion, not color) was removed — v14 de-structuring pass. */
 html.theme-astral .login-title {
   background: var(--grad-pk-bl);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text; background-size: 200% 200%;
-  animation: gradRun 5s ease infinite;
+  background-clip: text;
 }
 .login-sub { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 20px; }
 .login-form { text-align: left; }
@@ -1342,8 +1244,10 @@ body.sidebar-open .bottom-nav { display: none !important; }
 /* Labels hidden — pill nav is icon-only */
 .bottom-nav-item .bn-label { display: none; }
 .bottom-nav-item.active { color: var(--primary); }
+/* Color-only: Astral's active tab uses its brand-pink accent instead of
+   --primary. The extra icon scale + glow drop-shadow (motion/glow, not
+   color) were removed — v14 de-structuring pass. */
 html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
-html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 .bottom-nav-item .bn-badge {
   position: absolute; top: 4px; right: 6px;
   /* v14 a11y fix: --pink-badge-bg (not --pink) — see notif-badge above for
@@ -1376,40 +1280,16 @@ html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); fil
 }
 @media (hover:hover) {
   .kpi-card:hover { box-shadow: var(--sh); border-color: var(--border-strong); }
-  /* Lift-on-hover + shimmer + glow stripe are showpiece-only (Astral); Light/Dark
-     stay flat per Phase 9 — no gradient/glow "hero" treatment on stat tiles. */
-  html.theme-astral .kpi-card:hover { transform: translateY(-3px); }
 }
-/* shimmer on hover — Astral only */
-html.theme-astral .kpi-card::before {
-  content: '';
-  position: absolute; inset-y: 0; left: 0; width: 40%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
-  transform: translateX(-100%) skewX(-12deg);
-  transition: none;
-}
-html.theme-astral .kpi-card:hover::before { animation: shimmer 0.7s ease forwards; }
-/* top gradient stripe — Astral only; Light/Dark keep the plain bordered card */
-html.theme-astral .kpi-card::after {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0; height: 2px;
-  background: var(--grad-pk-bl);
-  border-radius: var(--r) var(--r) 0 0;
-}
-html.theme-astral .kpi-card.accent::after { background: var(--grad-amber); box-shadow: 0 0 8px var(--gold-glow); }
-html.theme-astral .kpi-card.green::after  { background: var(--grad-green);  box-shadow: 0 0 8px rgba(48,209,88,0.30); }
-html.theme-astral .kpi-card.warn::after   { background: var(--grad-amber); }
-html.theme-astral .kpi-card.red::after    { background: var(--grad-red);    box-shadow: 0 0 8px rgba(255,69,58,0.30); }
-/* Light/Dark identity cue: a thin left border in the accent color instead of a
-   glow stripe — same "which stat is this" signal, zero glow/gradient. */
+/* v14 Astral de-structuring pass: the hover-lift transform, the shimmer-sweep
+   ::before, the gradient ::after stripe (+ its per-variant glow shadows), and
+   the border-left negation were all removed. Astral's KPI cards now use the
+   exact same structure as Dark's: a plain bordered card with a 3px accent-
+   color left border (below) — no gradient stripe, no glow, no extra lift. */
 .kpi-card.accent { border-left: 3px solid var(--warning); }
 .kpi-card.green  { border-left: 3px solid var(--success); }
 .kpi-card.warn   { border-left: 3px solid var(--warning); }
 .kpi-card.red    { border-left: 3px solid var(--danger); }
-html.theme-astral .kpi-card.accent,
-html.theme-astral .kpi-card.green,
-html.theme-astral .kpi-card.warn,
-html.theme-astral .kpi-card.red { border-left: 1px solid var(--border); }
 
 .kpi-label {
   font-size: var(--fs-2xs); font-weight: 600;
@@ -1545,7 +1425,8 @@ html.theme-astral .kpi-card.red { border-left: 1px solid var(--border); }
   box-shadow: var(--sh-md), 0 0 0 1px rgba(255,214,10,0.12);
   color: #fff;
 }
-/* animated gold shine — Astral-only (perf budget: no infinite animation outside Astral) */
+/* static gold sheen — shared by every theme (no animation anywhere, including
+   Astral — v14 de-structuring pass removed the Astral-only infinite shine). */
 .id-card::before {
   content: '';
   position: absolute; top: -2px; left: -120%; width: 80%; height: calc(100% + 4px);
@@ -1553,7 +1434,6 @@ html.theme-astral .kpi-card.red { border-left: 1px solid var(--border); }
   transform: skewX(-15deg) translateX(0%);
   border-radius: inherit;
 }
-html.theme-astral .id-card::before { animation: goldShine 4s ease-in-out infinite; }
 /* top gold border */
 .id-card::after {
   content: '';
@@ -1875,7 +1755,8 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
   display: flex; align-items: center; justify-content: center; gap: 6px;
 }
 .id-flip-hint span { opacity: 0.5; }
-html.theme-astral .id-flip-hint span { animation: ptr-bounce 1.8s ease-in-out infinite; }
+/* v14 de-structuring pass: Astral's infinite bounce animation on this hint
+   removed — same static hint as Light/Dark in every theme. */
 .id-flip-dots {
   display: flex; justify-content: center; gap: 6px; margin-top: 8px;
 }
@@ -1952,12 +1833,13 @@ html.theme-astral .id-flip-hint span { animation: ptr-bounce 1.8s ease-in-out in
 .chip-count.on { background: var(--danger-badge-bg, #e5484d); color: #fff; }
 .chip-tab.active .chip-count.on { background: var(--danger-badge-bg, #e5484d); color: #fff; }
 @media (pointer:coarse){ .chip-tab { min-height: 38px; } }
+/* Color-only: Astral's gradient-fill active chip instead of the flat
+   --primary-soft/--primary pair. The glow box-shadow + gradRun animation
+   (motion, not color) were removed — v14 de-structuring pass. */
 html.theme-astral .chip-tab.active {
-  background: var(--grad-pk-bl); background-size: 200% 200%;
-  color: #fff; box-shadow: 0 2px 12px rgba(155,168,255,0.35);
-  animation: gradRun 5s ease infinite;
+  background: var(--grad-pk-bl);
+  color: #fff;
 }
-@media (prefers-reduced-motion: reduce) { html.theme-astral .chip-tab.active { animation: none; } }
 
 /* ══════════════════════════════
    ITEM LISTS
@@ -2172,8 +2054,8 @@ html.theme-astral .chip-tab.active {
   background: var(--s1); border-radius: var(--r);
   border: 1px solid var(--border); padding: 22px;
 }
-/* Glass blur is Astral-only (perf budget: backdrop-filter restricted to topbar/modal/bottom-nav in Astral only). */
-html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+/* v14 de-structuring pass: Astral's backdrop-filter blur on .quote-sheet was
+   removed — same flat surface as every other theme. */
 .quote-sheet h3 { font-size: 1.0625rem; font-weight: 800; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
 
 /* ══════════════════════════════
@@ -2344,7 +2226,8 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
   padding:max(20px, env(safe-area-inset-top,0px)) max(20px, env(safe-area-inset-right,0px))
     max(20px, env(safe-area-inset-bottom,0px)) max(20px, env(safe-area-inset-left,0px)); }
 html.theme-dark .dialog-overlay, html.theme-astral .dialog-overlay { background: rgba(0,0,0,.6); }
-html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
+/* v14 de-structuring pass: Astral's extra backdrop-filter blur on this scrim
+   was removed — same flat scrim as Dark (shared rule above). */
 .dialog-overlay.hidden{ display:none; }
 .dialog-box{ background:var(--modal-bg); border:1px solid var(--border); border-radius:var(--r-lg);
   box-shadow:var(--sh-lg); width:100%; max-width:400px; padding:22px; animation:popIn .22s var(--spring); }
@@ -2457,19 +2340,13 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
   padding: 48px 20px; text-align: center;
   animation: statePulse 1.8s ease-in-out infinite;
 }
-/* Astral keeps the showpiece text-shimmer (blur/motion budget exception). */
-html.theme-astral .loading-placeholder {
-  background: linear-gradient(90deg, var(--text-muted) 25%, rgba(255,255,255,0.25) 50%, var(--text-muted) 75%);
-  background-size: 800px 100%;
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-  animation: skeleton 1.8s ease-in-out infinite;
-}
+/* v14 de-structuring pass: Astral's gradient-sweep text-shimmer was removed —
+   same flat statePulse fade (above) as every other theme. */
 
 /* v13 Phase 128 — Loading skeletons. One loading language for list/table/card
    screens: token-based surface blocks pulsing via the existing statePulse
-   keyframe (Phase 57). Astral gets the shimmer treatment (mirrors
-   .loading-placeholder's astral override) per the blur/motion budget — Light/Dark
-   stay a flat opacity pulse, no gradient animation. JS adoption (ui-states.js /
+   keyframe (Phase 57) in every theme, including Astral (v14 de-structuring
+   pass removed its gradient-sweep variant). JS adoption (ui-states.js /
    withLoadingAndError) is deferred; these are pure, ready-to-use CSS primitives. */
 .skl-text, .skl-row, .skl-card {
   background: var(--surface-2);
@@ -2521,15 +2398,8 @@ html.theme-astral .loading-placeholder {
 .skl-row.skl-row-cols { gap: 20px; }
 .skl-row.skl-row-cols .skl-text { flex: 1; margin-top: 0; }
 .skl-row.skl-row-cols .skl-text + .skl-text { margin-top: 0; }
-/* Astral-only shimmer variant — swaps the flat pulse for the sweep gradient used
-   by .loading-placeholder, staying inside the "showpiece exception" carve-out. */
-html.theme-astral .skl-text,
-html.theme-astral .skl-row .skl-row-avatar,
-html.theme-astral .skl-card .skl-text {
-  background: linear-gradient(90deg, var(--surface-2) 25%, rgba(255,255,255,0.18) 50%, var(--surface-2) 75%);
-  background-size: 800px 100%;
-  animation: skeleton 1.8s ease-in-out infinite;
-}
+/* v14 de-structuring pass: Astral's sweep-gradient shimmer variant was
+   removed — same flat statePulse skeleton (above) as every other theme. */
 
 .empty-state { text-align: center; padding: 56px 20px; color: var(--text-muted); }
 .empty-state .empty-icon { font-size: 3.25rem; margin-bottom: 14px; opacity: 0.30; }
@@ -2544,10 +2414,10 @@ html.theme-astral .skl-card .skl-text {
   background: var(--primary);
   transition: width 0.7s var(--ease);
 }
-/* Animated gradient run is Astral-only (perf budget: no infinite animation outside Astral). */
+/* Color-only: Astral's gradient fill instead of the flat --primary. The
+   gradRun animation (motion, not color) was removed — v14 de-structuring pass. */
 html.theme-astral .progress-bar-fill {
-  background: var(--grad-pk-bl); background-size: 200% 200%;
-  animation: gradRun 3s ease infinite;
+  background: var(--grad-pk-bl);
 }
 
 /* ══════════════════════════════
@@ -2561,10 +2431,10 @@ html.theme-astral .progress-bar-fill {
   color: var(--on-primary); font-weight: 700; border-radius: 50%;
   box-shadow: var(--sh-pink);
 }
-/* Animated gradient run is Astral-only (perf budget: no infinite animation outside Astral). */
+/* Color-only: Astral's gradient fill instead of the flat --primary. The
+   gradRun animation (motion, not color) was removed — v14 de-structuring pass. */
 html.theme-astral #mini-cal td.today {
-  background: var(--grad-pk-bl); background-size: 200% 200%;
-  animation: gradRun 4s ease infinite;
+  background: var(--grad-pk-bl);
 }
 #mini-cal td.other-month { opacity: 0.25; }
 #mini-cal td:not(.other-month):hover { background: var(--s2); }
@@ -2652,15 +2522,16 @@ html.theme-astral #mini-cal td.today {
   .page-panel { top: env(safe-area-inset-top, 0px); }
   /* Primary nav bottom bar — shown on mobile, hidden on desktop. */
   .bottom-nav { display: flex !important; }
-  /* Show the small tab labels (icon + label, like Facebook) — the base rule
-     hides them for the Astral icon-only pill; re-enable for light/dark bars. */
-  html:not(.theme-astral) .bottom-nav-item .bn-label {
+  /* Show the small tab labels (icon + label, like Facebook) — v14 de-structuring
+     pass: Astral no longer gets a separate icon-only pill, so this now applies
+     to every theme identically (the :not(.theme-astral) scoping was removed). */
+  .bottom-nav-item .bn-label {
     display: block; font-size: 0.5625rem; font-weight: 600;
     margin-top: 2px; line-height: 1; letter-spacing: -0.01em;
     max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  html:not(.theme-astral) .bottom-nav-item .bn-icon { font-size: var(--fs-xl); }
-  html:not(.theme-astral) .bottom-nav-item .bn-icon svg { width: 22px; height: 22px; }
+  .bottom-nav-item .bn-icon { font-size: var(--fs-xl); }
+  .bottom-nav-item .bn-icon svg { width: 22px; height: 22px; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .form-row { grid-template-columns: 1fr; }
@@ -2708,7 +2579,7 @@ html.theme-astral #mini-cal td.today {
      otherwise this tier has no primary nav. The #topbar stays visible on this
      tier, so tn-tabs just holds the brand wordmark. */
   .bottom-nav { display: flex !important; }
-  html:not(.theme-astral) .bottom-nav-item .bn-label {
+  .bottom-nav-item .bn-label {
     display: block; font-size: var(--fs-xs); font-weight: 600; margin-top: 2px; line-height: 1;
   }
   .main-content {
@@ -2737,7 +2608,6 @@ html.theme-astral #mini-cal td.today {
      was always beaten by later same-breakpoint-or-narrower rules (the ≤640px
      density pass at the end of this file) — dead weight, removed at the
      source (SEAMLESS MOBILE PASS v2 consolidation). */
-  /* .bn-label hidden globally via pill nav styles */
   .page-header { flex-wrap: wrap; gap: 8px; }
   .login-role-cards { gap: 8px; }
   .login-role-card { padding: 12px 14px; }
@@ -2920,10 +2790,14 @@ html.theme-dark {
 html.theme-dark body { background: var(--bg); }
 
 /* ══════════════════════════════════════════════════
-   ASTRAL THEME — WS42 Phase 4 — the showpiece
-   Deep-space canvas, mesh/aurora drift + CSS starfield, glass chrome
-   (backdrop-filter scoped to topbar/modal/bottom-nav only — Batch B wires
-   the actual component rules; this block owns the palette + background).
+   ASTRAL THEME — WS42 Phase 4, de-structured v14
+   A pure recolor of Dark: same layout/shape/spacing/blur(none)/motion(none)
+   as Dark everywhere in the app — only this palette (deep-space canvas,
+   lavender primary, brand-pink/blue/gold accents) differs. The former
+   mesh/aurora drift, CSS starfield, and glass/blur chrome (backdrop-filter
+   scoped to topbar/modal/bottom-nav) were removed in the v14 "Astral should
+   just be about colors, not styles" pass — see the removed-rule comments
+   throughout this file for what used to live here.
    :root already carries these values as the astral-ish fallback; this
    block restates them explicitly so every session has one true theme.
 ══════════════════════════════════════════════════ */
@@ -2963,69 +2837,23 @@ html.theme-astral {
   --bubble-out-bg:   linear-gradient(135deg,#FF2D78,#0A84FF);
   --bubble-out-text: #FFFFFF;
   --theme-color:     #070710;
-  /* Astral is the only theme allowed backdrop-filter + infinite animation (perf budget) */
-  --glass-blur:    blur(18px) saturate(160%);
-  --glass-blur-sm: blur(14px) saturate(140%);
-  --glass-blur-lg: blur(24px) saturate(160%);
+  /* v14 de-structuring pass: alias the glow-colored shadow tokens to the
+     plain --sh (same fix Light/Dark already apply in their own blocks above)
+     so Astral never gets an ambient pink/blue/gold glow that Dark doesn't
+     have — e.g. topbar-avatar/sidebar-avatar hover, notif-btn hover,
+     profile-photo-large, mini-cal today. Color-only palette otherwise. */
+  --sh-xs: var(--sh-sm); --sh-md: var(--sh); --sh-pink: var(--sh); --sh-blue: var(--sh); --sh-gold: var(--sh);
 }
+/* Color-only: Astral's gradient canvas instead of Dark's flat --bg. No
+   decorative overlay layers, no animation — see below. */
 html.theme-astral body { background: linear-gradient(150deg, #070710 0%, #0D0D2B 35%, #120820 65%, #070710 100%); }
-html.theme-astral body::before {
-  content: '';
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background:
-    radial-gradient(ellipse 70% 60% at 10% 20%,  rgba(255,45,120,0.13) 0%, transparent 65%),
-    radial-gradient(ellipse 60% 50% at 90% 80%,  rgba(10,132,255,0.11) 0%, transparent 65%),
-    radial-gradient(ellipse 50% 50% at 55% 45%,  rgba(255,214,10,0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 80% 80% at 50% 100%, rgba(139,92,246,0.07) 0%, transparent 60%);
-  background-size: 200% 200%, 200% 200%, 200% 200%, 200% 200%;
-  animation: meshDrift 18s ease-in-out infinite;
-}
-/* decorative floating orb top-right */
-html.theme-astral body::after {
-  content: '';
-  position: fixed; top: -160px; right: -120px; z-index: 0; pointer-events: none;
-  width: 500px; height: 500px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,45,120,0.10) 0%, transparent 70%);
-  animation: floatB 14s ease-in-out infinite;
-}
-/* Starfield — two cheap radial-gradient dot layers, slow transform parallax.
-   Pure CSS, no images, ≤ a few KB of rules. Disabled under reduced-motion. */
-@keyframes starDriftA { from { transform: translate3d(0,0,0); } to { transform: translate3d(-60px,-40px,0); } }
-@keyframes starDriftB { from { transform: translate3d(0,0,0); } to { transform: translate3d(50px,30px,0); } }
-html.theme-astral #app-shell::before,
-html.theme-astral #login-screen::before {
-  content: '';
-  position: fixed; inset: -10% ; z-index: 0; pointer-events: none; opacity: 0.55;
-  background-image:
-    radial-gradient(1.4px 1.4px at 20% 30%, rgba(255,255,255,0.55) 50%, transparent 52%),
-    radial-gradient(1.2px 1.2px at 60% 70%, rgba(255,255,255,0.40) 50%, transparent 52%),
-    radial-gradient(1px 1px at 80% 15%, rgba(255,255,255,0.35) 50%, transparent 52%),
-    radial-gradient(1.6px 1.6px at 35% 85%, rgba(255,255,255,0.45) 50%, transparent 52%),
-    radial-gradient(1px 1px at 90% 55%, rgba(255,255,255,0.30) 50%, transparent 52%);
-  background-repeat: repeat;
-  background-size: 340px 340px;
-  animation: starDriftA 90s linear infinite;
-}
-html.theme-astral #app-shell::after,
-html.theme-astral #login-screen::after {
-  content: '';
-  position: fixed; inset: -10%; z-index: 0; pointer-events: none; opacity: 0.35;
-  background-image:
-    radial-gradient(1px 1px at 12% 65%, rgba(200,210,255,0.45) 50%, transparent 52%),
-    radial-gradient(1.3px 1.3px at 48% 22%, rgba(200,210,255,0.35) 50%, transparent 52%),
-    radial-gradient(1px 1px at 72% 88%, rgba(200,210,255,0.30) 50%, transparent 52%),
-    radial-gradient(1.5px 1.5px at 95% 40%, rgba(200,210,255,0.40) 50%, transparent 52%);
-  background-repeat: repeat;
-  background-size: 420px 420px;
-  animation: starDriftB 130s linear infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  html.theme-astral body::before, html.theme-astral body::after,
-  html.theme-astral #app-shell::before, html.theme-astral #app-shell::after,
-  html.theme-astral #login-screen::before, html.theme-astral #login-screen::after {
-    animation: none;
-  }
-}
+/* v14 de-structuring pass ("Astral should just be about colors, not
+   styles" — owner directive): the mesh/aurora drift body::before/::after
+   overlays, the #app-shell/#login-screen CSS starfield layers, and their
+   reduced-motion guard were all removed. Astral had these decorative,
+   infinitely-animated pseudo-element overlays and Dark did not — Astral now
+   renders with zero extra overlays and zero animation, exactly like Dark;
+   only the palette above (and the plain gradient body background) differs. */
 
 /* topbar — border/bg/rainbow-trim now read tokens directly (var(--topbar-bg)/var(--border));
    topbar-brand keeps its own gradient identity (not a plain token). */
@@ -3201,9 +3029,8 @@ html.light .help-section code { background: rgba(0,0,0,0.06); }
 .bottom-nav-item.active .bn-icon svg {
   transform: scale(1.10);
 }
-html.theme-astral .bottom-nav-item.active .bn-icon svg {
-  filter: drop-shadow(0 0 6px var(--pink-glow));
-}
+/* v14 de-structuring pass: Astral's glow drop-shadow filter on the active
+   icon was removed — same plain scale as every other theme. */
 
 /* Topbar icons */
 .notif-btn svg {
@@ -3298,12 +3125,10 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
   box-shadow: var(--sh);
   border-color: var(--primary-light);
 }
-/* Glass surface + blur are Astral-only (perf budget). */
-html.theme-astral .team-member-card {
-  background: var(--glass-surface); border-color: var(--glass-border);
-  backdrop-filter: var(--glass-blur-sm); -webkit-backdrop-filter: var(--glass-blur-sm);
-}
-html.theme-astral .team-member-card:hover { box-shadow: 0 16px 40px rgba(0,0,0,0.3); }
+/* v14 de-structuring pass: Astral's glass-surface background/border, blur,
+   and heavier hover glow shadow were removed — this card now falls through
+   to the base rule above (its own --surface/--border palette tokens still
+   give it a distinct tint) and the shared .team-member-card:hover box-shadow. */
 /* Cheap CSS-only list-enter stagger (no JS): first 8 cards fade/rise in, capped. */
 .team-masonry > .team-member-card { animation: pageEnter 200ms var(--ease, ease-out) both; }
 .team-masonry > .team-member-card:nth-child(1) { animation-delay: 0ms; }
@@ -3397,9 +3222,11 @@ html.theme-astral .team-member-card:hover { box-shadow: 0 16px 40px rgba(0,0,0,0
 /* light mode */
 
 /* ── Employee of the Month (Barro Industries) ── */
-/* v12 WS42 Phase 24 — Light/Dark: flat --surface card, a thin gold left-accent
-   border for identity (no gradient, no blur — Phase 9/performance-budget rule:
-   backdrop-filter is Astral-only). Astral keeps the full gold glass treatment. */
+/* v12 WS42 Phase 24 — flat --surface card, a thin gold left-accent border for
+   identity (no gradient, no blur). v14 de-structuring pass: Astral's separate
+   "full gold glass treatment" (its own border-radius, gradient background,
+   backdrop-filter, and glow shadow — which also dropped the left-accent
+   border) was removed; Astral now uses this exact same card as every theme. */
 .eom-banner {
   position: relative;
   border-radius: var(--r-lg);
@@ -3409,14 +3236,6 @@ html.theme-astral .team-member-card:hover { box-shadow: 0 16px 40px rgba(0,0,0,0
   border: 1px solid var(--border);
   border-left: 3px solid #FFB800;
   box-shadow: var(--sh-sm);
-}
-html.theme-astral .eom-banner {
-  border-radius: 20px;
-  border: 1px solid rgba(255,196,0,0.35);
-  background: linear-gradient(135deg, rgba(255,196,0,0.16) 0%, rgba(255,138,0,0.10) 45%, rgba(255,255,255,0.04) 100%);
-  backdrop-filter: var(--glass-blur-sm, blur(16px) saturate(140%));
-  -webkit-backdrop-filter: var(--glass-blur-sm, blur(16px) saturate(140%));
-  box-shadow: 0 10px 30px rgba(255,170,0,0.12);
 }
 .eom-ribbon {
   font-size: var(--fs-xs); font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
@@ -3630,57 +3449,14 @@ html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !im
    Written as cascade overrides — all prior rules still apply.
 ═══════════════════════════════════════════════════════════ */
 
-/* ── Glass design tokens — WS42 Phase 27 fix: this block was a bare :root
-   (applies to every theme), which leaked real backdrop-filter blur + glass
-   surface/border/shadow values into Light/Dark for any component that
-   referenced them without a non-glass fallback (.quote-sheet, alert banners,
-   quick-action buttons, dept/policy cards, upload area, team member cards —
-   all now fixed to reference these only under html.theme-astral). Scoping
-   the tokens themselves closes the leak at the source; html.theme-astral
-   already redefines --glass-blur/-sm/-lg earlier (2698 region) with lighter
-   values — this block's stronger values win here by source order and become
-   Astral's effective glass strength (harmless: Astral has no blur budget). */
-html.theme-astral {
-  --glass-blur:      blur(28px) saturate(160%) brightness(1.06);
-  --glass-blur-sm:   blur(16px) saturate(140%) brightness(1.04);
-  --glass-blur-lg:   blur(44px) saturate(180%) brightness(1.08);
-  --glass-surface:   rgba(255,255,255,0.072);
-  --glass-surface-2: rgba(255,255,255,0.110);
-  --glass-border:    rgba(255,255,255,0.145);
-  --glass-border-sm: rgba(255,255,255,0.095);
-  /* Specular edge lighting — top bright / bottom dark / side subtle */
-  --glass-spec:    inset 0 1px 0 rgba(255,255,255,0.18),
-                   inset 0 -1px 0 rgba(0,0,0,0.12),
-                   inset 1px 0 0 rgba(255,255,255,0.07),
-                   inset -1px 0 0 rgba(0,0,0,0.06);
-  --glass-spec-sm: inset 0 1px 0 rgba(255,255,255,0.13),
-                   inset 0 -1px 0 rgba(0,0,0,0.09);
-  --glass-shadow:    0 8px 32px rgba(0,0,0,0.38), 0 2px 8px rgba(0,0,0,0.22);
-  --glass-shadow-lg: 0 22px 64px rgba(0,0,0,0.58), 0 4px 16px rgba(0,0,0,0.28);
-}
+/* v14 de-structuring pass: this entire "Liquid Glass" token block
+   (--glass-blur/-surface/-border/-spec/-shadow, all Astral-exclusive) was
+   removed, along with the iridescent/glassBreath keyframes it fed. Every
+   component below that used to read these tokens for a bespoke glass
+   treatment now falls through to the same base rule Dark uses — see the
+   removed-rule comments at each section. */
 
-/* ── Liquid glass animations ── */
-@keyframes iridescent {
-  0%,100% { background-position: 0% 50%; }
-  50%      { background-position: 100% 50%; }
-}
-@keyframes glassBreath {
-  0%,100% { opacity: 0.80; }
-  50%     { opacity: 1; }
-}
-
-/* ══════ BODY — richer ambient light field ══════ */
-body::before {
-  background:
-    radial-gradient(ellipse 80% 70% at 8%  15%, rgba(255,45,120,0.18) 0%, transparent 62%),
-    radial-gradient(ellipse 70% 60% at 92% 85%, rgba(10,132,255,0.16) 0%, transparent 62%),
-    radial-gradient(ellipse 55% 55% at 52% 42%, rgba(255,214,10,0.09) 0%, transparent 60%),
-    radial-gradient(ellipse 90% 90% at 50% 100%,rgba(139,92,246,0.10) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 50% at 85% 20%, rgba(0,212,170,0.07) 0%, transparent 60%);
-  background-size: 200% 200%, 200% 200%, 200% 200%, 200% 200%, 200% 200%;
-}
-
-/* ══════ TOPBAR ══════ WS42 Phase 6 — token-driven; glass chrome Astral-only (perf budget) */
+/* ══════ TOPBAR ══════ WS42 Phase 6 — token-driven */
 .topbar {
   height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
   padding-top: env(safe-area-inset-top, 0px);
@@ -3693,40 +3469,19 @@ body::before {
   border-bottom: 1px solid var(--border);
   box-shadow: var(--sh-sm);
 }
-html.theme-astral .topbar {
-  background: rgba(7,7,16,0.58);
-  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 1px 28px rgba(0,0,0,0.35);
-}
-html.theme-astral .topbar::after {
-  content: '';
-  position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(255,45,120,0.55) 15%,
-    rgba(10,132,255,0.55) 40%,
-    rgba(0,212,170,0.45) 62%,
-    rgba(255,214,10,0.50) 82%,
-    transparent 100%);
-  background-size: 200% 100%;
-  animation: iridescent 6s ease infinite;
-  opacity: 0.55;
-}
-@media (prefers-reduced-motion: reduce) {
-  html.theme-astral .topbar::after { animation: none; }
-}
+/* v14 de-structuring pass: Astral's glass-blur topbar background/border/
+   shadow, and its separate animated rainbow-trim ::before (+ reduced-motion
+   guard), were removed — Astral's topbar is now the exact same bar as
+   Dark's, just tinted by its own --topbar-bg/--border tokens above. */
 
-/* ══════ SIDEBAR ══════ WS42 Phase 7 — token-driven, no blur (perf budget: sidebar excluded) */
+/* ══════ SIDEBAR ══════ WS42 Phase 7 — token-driven */
 #sidebar {
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   box-shadow: none;
 }
-html.theme-astral #sidebar {
-  border-right: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 4px 0 28px rgba(0,0,0,0.22);
-}
+/* v14 de-structuring pass: Astral's glow border-right/box-shadow override
+   was removed — same plain border + no shadow as Dark. */
 #sidebar::before {
   background: linear-gradient(180deg,
     rgba(255,45,120,0.45) 0%,
@@ -3735,6 +3490,11 @@ html.theme-astral #sidebar {
   opacity: 0.55; width: 1.5px;
 }
 html.light #sidebar::before, html.theme-dark #sidebar::before { opacity: 0; }
+/* v14 de-structuring pass: Light/Dark already zero out this rainbow accent
+   line; Astral was the only theme still showing it (a decorative-pseudo
+   left over from the glass design, not a color choice) — zeroed here too so
+   the sidebar edge is identical in every theme. */
+html.theme-astral #sidebar::before { opacity: 0; }
 
 /* ══════ NOTIFICATION PANEL ══════ WS42 Phase 10 (drawer/dropdown treatment) */
 .notif-panel {
@@ -3742,17 +3502,15 @@ html.light #sidebar::before, html.theme-dark #sidebar::before { opacity: 0; }
   border: 1px solid var(--border);
   box-shadow: var(--sh-lg);
 }
-html.theme-astral .notif-panel {
-  background: rgba(9,9,20,0.80);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow-lg), var(--glass-spec);
-}
+/* v14 de-structuring pass: Astral's glass background/border/shadow override
+   was removed — falls through to the rule above (--notif-bg/--border already
+   give it a distinct tint). */
 .notif-panel-header {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
 
-/* ══════ CARDS ══════ WS42 Phase 9 — token-driven, solid in Light/Dark; Astral keeps glass */
+/* ══════ CARDS ══════ WS42 Phase 9 — token-driven, same structure in every theme */
 .card {
   position: relative; overflow: hidden;
   border-radius: var(--r); margin-bottom: 16px;
@@ -3766,56 +3524,31 @@ html.theme-astral .notif-panel {
 }
 .card::before { background: none; }
 /* v12 WS42 Phase 24 — shared "hero card" treatment for dashboard highlight
-   cards (Current Standing, partner intro cards, etc). Light/Dark: flat
-   --surface + a normal-weight primary border (no gradient/glow — Phase 9
-   rule). Astral keeps its signature soft gradient + glow identity. */
+   cards (Current Standing, partner intro cards, etc). Flat --surface + a
+   normal-weight primary border (no glow — Phase 9 rule). */
 .dash-hero-card { border: 1.5px solid var(--primary); }
+/* Color-only: Astral's soft gradient identity instead of the flat --surface.
+   The extra ambient glow shadow (structural, not color) was removed — v14
+   de-structuring pass; same box-shadow as every other theme (base .card rule
+   above). */
 html.theme-astral .dash-hero-card {
   background: linear-gradient(135deg, var(--surface), var(--surface-2));
-  box-shadow: var(--sh-sm), 0 0 20px rgba(139,92,246,0.12);
 }
 .card-header {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
-html.theme-astral .card {
-  background: var(--glass-surface);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), var(--glass-spec);
-}
-@media (hover:hover) {
-  html.theme-astral .card:hover {
-    border-color: rgba(255,255,255,0.20);
-    box-shadow: 0 14px 44px rgba(0,0,0,0.50), var(--glass-spec);
-  }
-}
-html.theme-astral .card::before {
-  background: linear-gradient(180deg,
-    rgba(255,255,255,0.09) 0%,
-    rgba(255,255,255,0.02) 42%,
-    transparent 100%);
-}
-html.theme-astral .card-header {
-  background: rgba(255,255,255,0.025);
-  border-bottom: 1px solid var(--glass-border-sm);
-}
+/* v14 de-structuring pass: Astral's glass .card/.card:hover/.card::before/
+   .card-header overrides (glass-surface background, glow border/shadow, and
+   a decorative gradient-sheen pseudo-element) were removed entirely — Astral
+   now falls through to the exact same rules as Dark, above. */
 
-/* ══════ KPI CARDS ══════ WS42 Phase 24 — sheen overlay is Astral-only now
-   (was unscoped, leaking a faint gradient sheen into Light/Dark — Phase 9/24
-   rule: no gradient/glow on stat tiles outside Astral). */
-html.theme-astral .kpi-card::before {
-  background: linear-gradient(180deg,
-    rgba(255,255,255,0.11) 0%,
-    rgba(255,255,255,0.03) 38%,
-    transparent 100%);
-  pointer-events: none; width: 100%;
-}
-html.theme-astral .kpi-card { background: var(--glass-surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow), var(--glass-spec-sm); }
-@media (hover:hover) {
-  html.theme-astral .kpi-card:hover { border-color: rgba(255,255,255,0.22); box-shadow: 0 18px 48px rgba(0,0,0,0.52), var(--glass-spec-sm); }
-}
+/* ══════ KPI CARDS ══════ WS42 Phase 24 */
+/* v14 de-structuring pass: Astral's sheen-overlay ::before, glass-surface
+   background/border/shadow, and glow hover state were removed — same plain
+   bordered card (base .kpi-card rule, further up) as every other theme. */
 
-/* ══════ MODAL ══════ WS42 Phase 10 — token-driven; glass chrome Astral-only */
+/* ══════ MODAL ══════ WS42 Phase 10 — token-driven, same structure in every theme */
 .modal-overlay {
   background: rgba(0,0,0,0.40);
 }
@@ -3844,36 +3577,14 @@ html.theme-dark .modal-overlay, html.theme-astral .modal-overlay { background: r
   border: 1px solid var(--border);
 }
 .modal-close:hover { background: var(--surface-3); }
-html.theme-astral .modal-overlay { backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
-html.theme-astral .modal-box {
-  background: rgba(9,9,20,0.50);
-  backdrop-filter: var(--glass-blur-lg); -webkit-backdrop-filter: var(--glass-blur-lg);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow-lg), var(--glass-spec), 0 0 0 1px rgba(255,45,120,0.10);
-}
-html.theme-astral .modal-box::before {
-  content: '';
-  position: absolute; top: 0; left: 8%; right: 8%;
-  border-radius: var(--pill);
-  background: linear-gradient(90deg,
-    transparent,
-    rgba(255,45,120,0.60),
-    rgba(10,132,255,0.52),
-    rgba(255,214,10,0.48),
-    transparent);
-  background-size: 200% 100%;
-  animation: iridescent 5s ease infinite;
-  opacity: 0.75; height: 1px;
-}
-@media (prefers-reduced-motion: reduce) {
-  html.theme-astral .modal-box::before { animation: none; }
-}
-html.theme-astral .modal-header { background: rgba(255,255,255,0.025); border-bottom: 1px solid var(--glass-border-sm); }
-html.theme-astral .modal-footer { background: rgba(255,255,255,0.015); border-top: 1px solid var(--glass-border-sm); }
-html.theme-astral .modal-close { background: rgba(255,255,255,0.07); border: 1px solid var(--glass-border-sm); }
-html.theme-astral .modal-close:hover { background: rgba(255,255,255,0.13); }
+/* v14 de-structuring pass: Astral's backdrop-filter blur on the overlay, its
+   glass .modal-box (background/blur/border/shadow), its animated iridescent
+   trim ::before (+ reduced-motion guard), and its glass modal-header/footer/
+   close overrides were all removed — Astral's modal is now the exact same
+   shape/shadow as Dark's, just tinted by its own --modal-bg/--border/
+   --surface-2 tokens above. */
 
-/* ══════ DRAWER ══════ WS42 Phase 10 — token-driven, no blur (perf budget).
+/* ══════ DRAWER ══════ WS42 Phase 10 — token-driven, same structure in every theme.
    The base .drawer{} rule (background/border-left/box-shadow) was merged into
    the consolidated Drawer section near its first definition (Batch 2 / spec
    2d) — background and border-left were exact duplicates of that rule's
@@ -3882,8 +3593,9 @@ html.theme-astral .modal-close:hover { background: rgba(255,255,255,0.13); }
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
 }
-html.theme-astral .drawer { background: rgba(8,8,20,0.50); border-left: 1px solid var(--glass-border); box-shadow: -14px 0 64px rgba(0,0,0,0.62), var(--glass-spec-sm); }
-html.theme-astral .drawer-header { background: rgba(255,255,255,0.025); border-bottom: 1px solid var(--glass-border-sm); }
+/* v14 de-structuring pass: Astral's glass .drawer/.drawer-header overrides
+   were removed — falls through to the base rules (--drawer-bg/--surface-2/
+   --border tokens still give it a distinct tint). */
 
 /* ══════ SUBTAB BAR ══════ token-driven, no blur */
 .subtab-bar {
@@ -3898,13 +3610,10 @@ html.theme-astral .drawer-header { background: rgba(255,255,255,0.025); border-b
 .subtab-btn:hover:not(.active) {
   background: var(--surface-3);
 }
-html.theme-astral .subtab-bar { background: rgba(255,255,255,0.045); border: 1px solid var(--glass-border-sm); box-shadow: var(--glass-spec-sm), 0 2px 14px rgba(0,0,0,0.22); }
-html.theme-astral .subtab-btn.active {
-  box-shadow: 0 2px 18px rgba(255,45,120,0.40),
-    inset 0 1px 0 rgba(255,255,255,0.24),
-    inset 0 -1px 0 rgba(0,0,0,0.12);
-  text-shadow: 0 1px 6px rgba(255,45,120,0.45);
-}
+/* v14 de-structuring pass: Astral's glass .subtab-bar override and its
+   glow box-shadow/text-shadow .subtab-btn.active override were removed here
+   (a second, color-bearing .subtab-btn.active override survives further
+   down — see that section for what was kept). */
 
 /* ══════ ITEM CARDS (tasks, list items) — token-driven, no blur ══════ */
 .item-card:hover {
@@ -3916,25 +3625,13 @@ html.theme-astral .subtab-btn.active {
   pointer-events: none !important; /* this override cancels the off-screen transform, so it must also stay non-interactive or it blocks every click on the card */
 }
 .item-card:hover::before { animation: none !important; }
-html.theme-astral .item-card { background: var(--glass-surface); border: 1px solid var(--glass-border-sm); box-shadow: var(--glass-spec-sm), 0 2px 10px rgba(0,0,0,0.20); }
-html.theme-astral .item-card:hover { background: var(--glass-surface-2); border-color: rgba(255,255,255,0.18); box-shadow: 0 10px 32px rgba(0,0,0,0.38), var(--glass-spec-sm); }
-html.theme-astral .item-card::before { background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, transparent 55%); }
+/* v14 de-structuring pass: Astral's glass .item-card/:hover/::before overrides
+   were removed — falls through to the base .item-card rule (further up),
+   whose --surface/--border tokens still give Astral a distinct tint. */
 
-/* ══════ BOTTOM NAV rainbow trim — Astral only ══════ */
-html.theme-astral .bottom-nav::before {
-  background: linear-gradient(90deg,
-    transparent 0%,
-    rgba(255,45,120,0.50) 20%,
-    rgba(10,132,255,0.45) 50%,
-    rgba(255,214,10,0.42) 80%,
-    transparent 100%);
-  background-size: 200% 100%;
-  animation: iridescent 7s ease infinite;
-  opacity: 0.50;
-}
-@media (prefers-reduced-motion: reduce) {
-  html.theme-astral .bottom-nav::before { animation: none; }
-}
+/* v14 de-structuring pass: the Astral-only animated rainbow-trim
+   .bottom-nav::before (+ reduced-motion guard) was removed — Dark has no
+   equivalent pseudo-element, so Astral's bottom nav no longer has one either. */
 
 /* ══════ FORM INPUTS ══════ token-driven, no blur */
 .form-group input,
@@ -3984,126 +3681,49 @@ html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.th
 .btn-outline:disabled { opacity: .6; cursor: not-allowed; }
 @media (hover:hover) { .btn-outline:disabled:hover { background: transparent; border-color: var(--border); color: var(--text-2); } }
 
-/* ══════ ALERT BANNERS ══════ Glass blur is Astral-only (perf budget). */
-html.theme-astral .alert-banner {
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  box-shadow: var(--glass-spec-sm), 0 4px 18px rgba(0,0,0,0.24);
-}
+/* ══════ ALERT BANNERS ══════ */
+/* v14 de-structuring pass: Astral's backdrop-filter blur + glow box-shadow
+   override was removed — same flat banner as every theme. (.alert-warn/
+   .alert-danger below are unthemed base rules, unchanged.) */
 .alert-warn {
   background: rgba(255,170,0,0.08);
   border-color: rgba(255,170,0,0.24);
-  box-shadow: 0 0 22px rgba(255,170,0,0.08), var(--glass-spec-sm, 0 0 0 transparent);
+  box-shadow: 0 0 22px rgba(255,170,0,0.08);
 }
 .alert-danger {
   background: rgba(255,69,58,0.08);
   border-color: rgba(255,69,58,0.24);
-  box-shadow: 0 0 22px rgba(255,69,58,0.08), var(--glass-spec-sm, 0 0 0 transparent);
+  box-shadow: 0 0 22px rgba(255,69,58,0.08);
 }
 
-/* ══════ LOGIN CARD ══════ WS42 Phase 25 — token-driven; glass chrome + the
-   animated iridescent trim are Astral-only now (perf budget: continuous
-   animation and backdrop-filter outside Astral are both prohibited). The
-   Light/Dark base card lives up in the main login block; this is Astral's
-   extra glass layer on top of it. */
-html.theme-astral .login-container {
-  background: rgba(10,10,22,0.50);
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow-lg), var(--glass-spec),
-    0 0 0 1px rgba(255,214,10,0.12);
-}
-html.theme-astral .login-container::before {
-  background: linear-gradient(90deg,
-    transparent,
-    rgba(255,45,120,0.62),
-    rgba(10,132,255,0.52),
-    rgba(255,214,10,0.55),
-    transparent);
-  background-size: 200% 100%;
-  animation: iridescent 5s ease infinite;
-  opacity: 0.80; height: 1.5px;
-}
+/* ══════ LOGIN CARD ══════ WS42 Phase 25 — token-driven, same structure in
+   every theme. v14 de-structuring pass: Astral's extra glass layer on top of
+   the shared login card (background/blur/border/shadow) and its animated
+   iridescent trim ::before were removed entirely. */
 
-/* ══════ LOGIN ROLE CARDS ══════ WS42 Phase 25 — Astral-only glass; Light/Dark
-   use the flat segmented-control styling defined in the main login block. */
-html.theme-astral .login-role-card {
-  background: rgba(255,255,255,0.055);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 10px rgba(0,0,0,0.24);
-}
-@media (hover:hover) {
-  html.theme-astral .login-role-card:hover {
-    background: rgba(255,255,255,0.09);
-    border-color: rgba(255,255,255,0.22);
-    box-shadow: var(--glass-spec-sm), 0 6px 28px rgba(0,0,0,0.36);
-  }
-}
+/* ══════ LOGIN ROLE CARDS ══════ WS42 Phase 25 — same flat segmented-control
+   styling (defined in the main login block) in every theme now; Astral's
+   glass override + hover glow were removed — v14 de-structuring pass. */
 
-/* ══════ QUICK ACTION BUTTONS ══════ Glass blur is Astral-only (perf budget);
-   Light/Dark keep the flat --s1/--s2/--s3 look defined in the base rule above. */
-html.theme-astral .quick-action-btn {
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 10px rgba(0,0,0,0.20);
-}
-html.theme-astral .quick-action-btn:hover {
-  background: var(--glass-surface-2);
-  border-color: rgba(255,255,255,0.18);
-  box-shadow: var(--glass-spec-sm), 0 6px 22px rgba(0,0,0,0.32);
-}
+/* ══════ QUICK ACTION BUTTONS ══════ same flat --s1/--s2/--s3 look (base rule
+   above) in every theme now; Astral's glass background/blur/border/shadow +
+   hover override were removed — v14 de-structuring pass. */
 
-/* ══════ DEPT CARDS ══════ Glass blur is Astral-only (perf budget);
-   Light/Dark keep the flat --s1 card defined in the base rule above. */
-html.theme-astral .dept-card {
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 14px rgba(0,0,0,0.22);
-}
-html.theme-astral .dept-card:hover {
-  border-color: rgba(255,255,255,0.18);
-  box-shadow: 0 12px 40px rgba(0,0,0,0.44), var(--glass-spec-sm),
-    0 0 28px rgba(255,45,120,0.08);
-}
+/* ══════ DEPT CARDS ══════ same flat --s1 card (base rule above) in every
+   theme now; Astral's glass background/blur/border/shadow + hover glow were
+   removed — v14 de-structuring pass. */
 
-/* ══════ POLICY CARDS ══════ Glass blur is Astral-only (perf budget);
-   Light/Dark keep the flat --s1 card defined in the base rule above. */
-html.theme-astral .policy-card {
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 12px rgba(0,0,0,0.20);
-}
-html.theme-astral .policy-card:hover {
-  border-color: rgba(255,255,255,0.18);
-  box-shadow: 0 12px 38px rgba(0,0,0,0.42), var(--glass-spec-sm);
-}
+/* ══════ POLICY CARDS ══════ same flat --s1 card (base rule above) in every
+   theme now; Astral's glass background/blur/border/shadow + hover glow were
+   removed — v14 de-structuring pass. */
 
 /* ══════ DATA TABLE HEADER ══════ (token-driven — see base rule) */
 
-/* ══════ UPLOAD AREA ══════ Glass blur is Astral-only (perf budget);
-   Light/Dark keep the flat --s0/dashed-border look defined in the base rule above. */
-html.theme-astral .upload-area {
-  background: rgba(255,255,255,0.03);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 2px dashed rgba(255,255,255,0.12);
-}
-html.theme-astral .upload-area:hover, html.theme-astral .upload-area.drag-over {
-  background: rgba(255,45,120,0.06);
-  border-color: rgba(255,45,120,0.42);
-  box-shadow: 0 0 28px rgba(255,45,120,0.10);
-}
+/* ══════ UPLOAD AREA ══════ same flat --s0/dashed-border look (base rule
+   above) in every theme now; Astral's glass background/blur + hover/drag-over
+   glow were removed — v14 de-structuring pass. */
 
-/* ══════ SIDEBAR OVERLAY ══════ (blur removed — perf budget restricts backdrop-filter to topbar/modal/bottom-nav) */
+/* ══════ SIDEBAR OVERLAY ══════ (blur removed — backdrop-filter restricted to topbar/modal/bottom-nav, which no longer use it either) */
 
 /* ══════ LIGHT MODE TINTS ══════ WS42 Batch B — topbar/#sidebar/modal-box/drawer/
    notif-panel/bottom-nav/card/kpi-card/item-card/subtab-bar/btn-secondary/form-group
@@ -5134,11 +4754,10 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   padding: 0 6px;
   gap: 0;
 }
-html.theme-astral .top-nav-strip {
-  background: rgba(7,7,16,0.88);
-  backdrop-filter: blur(32px) saturate(160%); -webkit-backdrop-filter: blur(32px) saturate(160%);
-  border-bottom: 0.5px solid rgba(255,255,255,0.09);
-}
+/* v14 de-structuring pass: Astral's backdrop-filter blur + hairline border
+   override on the mobile top-nav-strip was removed — falls through to the
+   base rule (its own --topbar-bg/--border tokens already give it the same
+   tint). */
 .top-nav-item {
   padding: 6px 11px;
   border-radius: 10px;
@@ -5155,8 +4774,9 @@ html.theme-astral .top-nav-strip {
 .top-nav-item.active .bn-icon {
   transform: scale(1.10);
 }
+/* Color-only: Astral's brand-pink active tab. The icon glow drop-shadow
+   filter (not color) was removed — v14 de-structuring pass. */
 html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(255,45,120,0.10); }
-html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rgba(255,45,120,0.50)); }
 /* Phase 6: desktop icon-tab strip centered in the topbar band */
 @media (min-width: 1024px) {
   .top-nav-strip {
@@ -5167,7 +4787,6 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
     padding-top: env(safe-area-inset-top, 0px);
     z-index: var(--z-topbar-2); /* above .topbar (100) so the centered icon-tabs are visible/clickable */
   }
-  html.theme-astral .top-nav-strip { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; }
   .top-nav-item { flex-direction: column; width: 48px; min-height: auto; border-radius: 0; padding: 6px 0; }
   .top-nav-item.active { background: none; border-bottom: 3px solid var(--primary); border-radius: 0; }
   html.theme-astral .top-nav-item.active { background: none; }
@@ -5247,14 +4866,10 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
     border-radius: 0 !important;
     align-self: stretch !important;
     background: var(--bg) !important;
-    /* Astral's glass .modal-box sets its own backdrop-filter; opaque bg
-       above already makes it invisible, but drop it too so mobile doesn't
-       pay for a blur compositing layer with nothing translucent left to blur. */
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
   .modal-box::after { display: none; }
-  html.theme-astral .modal-box::before { content: none; }
   .modal-header {
     padding-top: max(16px, env(safe-area-inset-top, 0px));
     padding-left: max(20px, env(safe-area-inset-left, 0px));
@@ -5311,7 +4926,10 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
 @media (hover:hover) {
   .nav-item:hover { background: var(--surface-2); }
 }
-html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: var(--pink); border-radius: 10px; }
+/* Color-only: Astral's brand-pink active nav pill. The border-radius: 10px
+   override (a rounded-rectangle shape, not the full var(--pill) every other
+   theme uses) was removed — v14 de-structuring pass; same pill shape now. */
+html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: var(--pink); }
 
 /* v13 Phase 143 — hover completeness: consolidated mouse-only hover affordances
    for interactive classes that had no hover state at all. Matches the token
@@ -5388,7 +5006,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
 .notif-item-time  { font-size: var(--fs-xs); }
 .notif-item:active { background: var(--s2); transition: background 80ms; }
 
-/* ── Bottom nav (WS42 Phase 8) — token-driven, solid; Astral keeps the floating glass pill ── */
+/* ── Bottom nav (WS42 Phase 8) — token-driven, solid, same full-width bar in every theme ── */
 .bottom-nav {
   display: none;
   position: fixed;
@@ -5421,22 +5039,13 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
 }
 .bottom-nav-item.active::after { transform: translateX(-50%) scaleX(1); }
 .bottom-nav-item:active .bn-icon { transform: scale(0.92); transition-duration: 120ms; }
-/* Astral showpiece: floating glass pill (kept from the original design) */
-html.theme-astral .bottom-nav {
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-  left: 50%; right: auto; transform: translateX(-50%);
-  width: auto; max-width: 380px; min-width: 250px;
-  height: 58px; padding-bottom: 0;
-  background: rgba(7,7,16,0.46);
-  backdrop-filter: var(--glass-blur-lg); -webkit-backdrop-filter: var(--glass-blur-lg);
-  border-radius: 24px;
-  border: 1px solid rgba(255,255,255,0.10);
-  border-top: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 -4px 28px rgba(0,0,0,0.32);
-  padding-left: 10px; padding-right: 10px;
-}
-html.theme-astral .bottom-nav-item.active::after { display: none; }
-html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
+/* v14 de-structuring pass (owner directive: "Astral should just be about
+   colors, not styles"): the detached floating glass pill — its own bottom/
+   left/width/height/background/backdrop-filter/border-radius/border/box-shadow
+   — was removed entirely, along with the active-tab underline suppression and
+   the extra icon scale+glow. Astral's bottom nav is now the exact same
+   full-width bar as every other theme, just tinted by its own
+   --bottom-nav-bg/--border/--primary tokens above. */
 
 /* ── 'More' tab + sheet (v14 mobile-shell batch, ruled decision N3) ──────────
    Any NAV_REGISTRY.bottom variant with more than 5 items (post-Profile-strip)
@@ -5506,12 +5115,12 @@ html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); fil
   color: var(--primary);
   box-shadow: none;
 }
+/* Color-only: Astral's brand-pink active subtab. The glow + specular-inset
+   box-shadow (structural, not color) was removed — v14 de-structuring pass;
+   same box-shadow:none as every other theme. */
 html.theme-astral .subtab-btn.active {
   background: rgba(255,45,120,0.18);
   color: var(--pink);
-  box-shadow: 0 1px 8px rgba(255,45,120,0.22),
-    inset 0 1px 0 rgba(255,255,255,0.14),
-    inset 0 -1px 0 rgba(0,0,0,0.10);
 }
 
 /* ── Drawer — full-screen slide-up on mobile ──
@@ -5649,10 +5258,12 @@ html.theme-astral #splash-screen {
   border: 1px solid var(--border);
   box-shadow: var(--sh);
 }
+/* Color-only: Astral's dark navy/gold-trim gradient card. The glow + inset-
+   specular box-shadow (structural, not color) was removed — v14
+   de-structuring pass; same box-shadow: var(--sh) as every other theme. */
 html.theme-astral .splash-logo-card {
   background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
   border: 1px solid rgba(255,214,10,0.35);
-  box-shadow: 0 0 18px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
 }
 .splash-logo {
   width: 100%; height: 100%;
@@ -6096,20 +5707,20 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
    Gradient/-webkit-background-clip:text sites render invisible text under
    forced-colors — the UA suppresses background images/gradients but
    -webkit-text-fill-color:transparent stays, leaving nothing to paint the
-   glyphs with. Force a solid system-color fallback for all 8 sites in the
+   glyphs with. Force a solid system-color fallback for all 7 sites in the
    app that use this technique (login-title, sidebar-user-dept incl. its
-   Light variant, the 3 id-card gradient-text fields, comment-author, the
-   Astral loading-placeholder shimmer). !important is deliberate here — this
-   is the standard, expected way to win forced-colors overrides regardless
-   of each site's own specificity/theme-scoping. ── */
+   Light variant, the 3 id-card gradient-text fields, comment-author — the
+   Astral loading-placeholder gradient-text shimmer was removed in the v14
+   de-structuring pass, so it's no longer one of these sites). !important is
+   deliberate here — this is the standard, expected way to win forced-colors
+   overrides regardless of each site's own specificity/theme-scoping. ── */
 @media (forced-colors: active) {
   .login-title,
   .sidebar-user-dept,
   .id-card-company,
   .id-card-name,
   .id-card-id,
-  .comment-author,
-  html.theme-astral .loading-placeholder {
+  .comment-author {
     background: none !important;
     -webkit-background-clip: initial !important;
     background-clip: initial !important;
