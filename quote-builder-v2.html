@@ -1072,6 +1072,24 @@ tr:hover td{background:#fafbff;}
   <div id="paymentSummary" class="payment-summary"></div>
 </div>
 
+<!-- ── PAYMENT DETAILS (owner request) — per-company bank/e-wallet info for the
+     client. Rendered by renderPaymentDetails(): only shows for Barro Kitchens
+     (CO.BK carries the `pay` config; CO.BS/CO.PT do not). Visible on screen
+     AND in print (not wrapped in .print-only), so the preparer can preview
+     exactly what the client will see on the printed/PDF quote. ── -->
+<div class="section" id="paymentDetailsSection">
+  <div class="sec-title">Payment Details</div>
+  <div class="fg-grid no-print">
+    <div class="fg full">
+      <label class="pc-check" style="padding-top:0;">
+        <input type="checkbox" id="showPaymentDetails" checked onchange="renderPaymentDetails();saveToStorage();">
+        Show payment details on this quote
+      </label>
+    </div>
+  </div>
+  <div id="paymentDetailsBox"></div>
+</div>
+
 <!-- ── REMARKS ── -->
 <div class="section" id="remarksSection">
   <div class="sec-title">Remarks</div>
@@ -1227,11 +1245,22 @@ const CO = {
     sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK',
     thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
     creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
-    logo:'icons/barro-kitchens.png'},
+    logo:'icons/barro-kitchens.png',
+    // pay: Barro Kitchens' own bank account for client payments (owner request).
+    // renderPaymentDetails() gates purely on THIS field's presence — same
+    // technique as the logo:'' suppression below — so BS / CO.PT (neither of
+    // which carries a `pay` key) never print Barro's account info on a
+    // partner's quote.
+    pay:{bank:'UnionBank',accountName:'Narciso Neil Barro',accountNo:'0015 3001 4016',
+      other:['BDO','Metrobank','GCash','GoTyme']}},
   // logo:'' — Brilliant Steel has no logo asset here; an EMPTY value must
   // suppress the mark entirely (showLogo:false below) rather than falling
   // through to js/letterhead.js's app-wide BRAND.logo.print (the BK cube),
   // which would print Barro Kitchens branding on a PARTNER's quote.
+  // No `pay` field either, deliberately: Brilliant Steel (and any CO.PT
+  // generic partner synthesized below) must never show Barro's own UnionBank
+  // account — renderPaymentDetails() only renders a payment block when
+  // co.pay exists.
   BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
     sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
     thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
@@ -1579,6 +1608,7 @@ function setCompany(co){
   const pfc=document.getElementById('pfCreds'); if(pfc) pfc.textContent=c.creds||'';
   buildQuoteNo();
   applyLetterheadHeader();
+  renderPaymentDetails();   // re-gate on the new company — only CO.BK carries a `pay` config
   mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
 }
 
@@ -2582,6 +2612,34 @@ function updateRemarksPrint(){
   saveToStorage();
 }
 
+// PAYMENT DETAILS — per-company bank/e-wallet block (owner request). Gated
+// purely on CO[currentCo].pay's presence (mirrors the CO.BS logo:'' leak fix):
+// only Barro Kitchens carries a `pay` config, so Brilliant Steel and generic
+// (CO.PT) partner quotes render nothing here, ever — no code-string branch to
+// keep in sync if a company is added/renamed later. Also honors the
+// #showPaymentDetails checkbox so a preparer can hide it per-quote. Values are
+// txtEsc()'d before insertion (this standalone doc has no escHtml — see the
+// txtEsc definition/comment near the top of this script block).
+function renderPaymentDetails(){
+  const box=document.getElementById('paymentDetailsBox');
+  const sec=document.getElementById('paymentDetailsSection');
+  if(!box||!sec) return;
+  const co=CO[currentCo]||CO.BK;
+  const show=document.getElementById('showPaymentDetails')?.checked!==false;
+  const pay=co.pay;
+  if(!pay||!show){ sec.style.display='none'; box.innerHTML=''; return; }
+  sec.style.display='';
+  let html=`<table class="pay-tbl"><tbody>`;
+  html+=`<tr class="pay-head"><td colspan="2">Primary Account — ${txtEsc(co.name||'')}</td></tr>`;
+  html+=`<tr><td>Bank</td><td>${txtEsc(pay.bank||'')}</td></tr>`;
+  html+=`<tr><td>Account Name</td><td>${txtEsc(pay.accountName||'')}</td></tr>`;
+  html+=`<tr><td>Account Number</td><td>${txtEsc(pay.accountNo||'')}</td></tr>`;
+  html+=`</tbody></table>`;
+  const others=Array.isArray(pay.other)?pay.other.map(txtEsc).join(', '):'';
+  if(others) html+=`<div class="pay-note">Also accepted (no account number on file — please coordinate with your Barro Kitchens contact): ${others}.</div>`;
+  box.innerHTML=html;
+}
+
 // ── Project timeline / completion ──
 function autoLeadDays(){
   let max=0;
@@ -3265,7 +3323,7 @@ function saveToStorage(){
 
 // Pricing / payment / delivery fields — single source for save, load, payload
 const PRICING_IDS=['showVat','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
-  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails'];
+  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails'];
 function getPricingFields(){
   const o={};
   PRICING_IDS.forEach(id=>{
@@ -3290,6 +3348,7 @@ function applyPricingFields(o){
   renderTimeline();
   updateDiPrint();
   updateRemarksPrint();
+  renderPaymentDetails();
 }
 
 function loadFromStorage(){
@@ -3437,7 +3496,7 @@ function clearForm(){
   applyPricingFields({showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
     commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
     diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
-    interestRate:'0',remarks:'',bankDetails:''});
+    interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true});
   document.getElementById('quoteDate').value=today;
   document.getElementById('filedBadge').classList.remove('show');
   document.getElementById('filedBadge').textContent='✓ FILED';
