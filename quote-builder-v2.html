@@ -520,8 +520,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   .terms-block h4{font-size:8pt;}
   .terms-block p,.terms-block li,.term-content{font-size:7.8pt;line-height:1.35;}
   .term-cb{display:none!important;}
-  .sig-row{margin-top:20px;page-break-inside:avoid;}
+  .sig-row{margin-top:12px;page-break-inside:avoid;}
   .di-empty{display:none!important;}
+  /* Collapse empty spec/dims/notes lines so clean items don't leave tall blank
+     rows on the printed quote (owner: "gap, wasted space"). */
+  .pe-empty{display:none!important;}
   .bill-strip{background:#F5F6FA!important;border:1px solid #DDE2EC;border-radius:5px;padding:5px 9px;
     font-size:8.5pt;line-height:1.4;}
   /* commission + agent box: client copy hides; agent copy shows */
@@ -2051,7 +2054,7 @@ function qqRenderStep2(body){
       <div class="qq-card-price">${p.formulaType==='fixed'?'':'from '}${formatPeso(p.basePrice)}</div>
     </button>`).join('')}</div>`
     : `<div class="empty-state" style="padding:24px;text-align:center;color:var(--gray-dark)">No products in this category.</div>`;
-  const badge = items.length ? `<div class="qq-badge">🧺 ${items.length} item(s) · ${formatPeso(computeTotals().grand)}</div>` : '';
+  const badge = items.length ? `<div class="qq-badge">🧺 ${items.length} item(s) · ${items.reduce((s,i)=>s+(Number(i.qty)||0),0)} unit(s) · ${formatPeso(computeTotals().grand)}</div>` : '';
   body.innerHTML = recentRow + chips + grid + badge;
 }
 function qqFilterCat(cat){ currentCatFilter=cat; qqRender(); }
@@ -2714,9 +2717,9 @@ function renderItems(){
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
           <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${txtEsc(item.name)}</div>
-          <div class="spec-line"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
-          <div class="spec-line"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
-          <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
+          <div class="spec-line ${specText?'':'pe-empty'}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
+          <div class="spec-line ${(item.dims||'')?'':'pe-empty'}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
+          <div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
         </td>
         <td style="text-align:center;">
           <div class="qty-stepper compact" style="justify-content:center;">
@@ -2780,6 +2783,7 @@ function computeTotals(){
 
 function renderTotals(){
   const t=computeTotals();
+  const _iq=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
   let html='';
   html+=`<tr><td>Subtotal</td><td>${formatPeso(t.subtotal)}</td></tr>`;
   if(t.diAdded>0) html+=`<tr><td>Delivery &amp; Installation</td><td>${formatPeso(t.diAdded)}</td></tr>`;
@@ -2788,6 +2792,7 @@ function renderTotals(){
   if(t.discountAmt>0||t.diAdded>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
   if(t.showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(t.vatAmt)}</td></tr>`;
   html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(t.grand)}</td></tr>`;
+  html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${items.length} line item${items.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}</td></tr>`;
   html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}.</td></tr>`;
   const commLabel=t.commMode==='amount' ? 'Referral/Agent Commission (flat)' : `Referral/Agent Commission (${t.commPct}%)`;
   if(t.commissionAmt>0) html+=`<tr class="commission agent-only"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
@@ -2809,7 +2814,8 @@ function updateRunningTotalPill(t){
   const pill=document.getElementById('runningTotalPill'); if(!pill) return;
   if(!items.length){ pill.style.display='none'; return; }
   t=t||computeTotals();
-  pill.textContent=`🧺 ${items.length} item(s) · ${formatPeso(t.grand)}`;
+  const _q=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
+  pill.textContent=`🧺 ${items.length} item(s) · ${_q} unit(s) · ${formatPeso(t.grand)}`;
   pill.style.display='block';
 }
 
