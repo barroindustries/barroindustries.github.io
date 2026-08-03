@@ -39,7 +39,6 @@ window.Chat = (() => {
   let _lastMsgIds = null;                    // WS42 Phase 19: which bubble ids already animated in (send pop-in)
   let _lastRenderOrder = null;               // Phase 63 #2: message-id order of the last DOM render (keyed-diff)
   let _earlierCapped = false;                // Phase 63 #3: true once _earlier has been trimmed to the cap
-  let _wpMenuOpen = false;                   // WS42 Phase 18: wallpaper popover state
   let _isSending = false;                    // Phase 63 #1: shared guard — click AND Enter both route through doSend
   // Phase 63 #5: inbox refresh cascade debounce (leading-immediate, 2s trailing coalesce)
   let _inboxDebTimer = null, _inboxDebPendingSnap = null, _inboxWindowStart = 0;
@@ -73,6 +72,21 @@ window.Chat = (() => {
   // a local const there) so _collectAllImages/_mediaGridHtml/_openMediaTab can
   // all use the exact same rule for "is this attachment an image".
   const _isImageUrl = url => !!url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
+  // Messenger restyle — colored initials fallback (inbox rows, Fix 1): a
+  // stable per-contact/per-group background color instead of always the same
+  // --bubble-out-bg gradient, so a photo-less avatar still reads as visually
+  // distinct at a glance (same idea as Messenger's own colored circles).
+  // Plain hex literals (not CSS custom properties) — mirrors this file's own
+  // existing dotColor map convention (see the presence-dot color lookups
+  // below) rather than depending on --pink/--blue/etc., which aren't defined
+  // as real tokens anywhere in styles.css.
+  const AVATAR_PALETTE = ['#0866FF','#7C3AED','#FF6B9D','#FF9F0A','#30D158','#FF3B30','#5AC8FA','#AF52DE','#34C759','#FF375F'];
+  function _avatarColorFor(seed) {
+    const s = String(seed || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+  }
   // Wave5 M3 — a pending bubble can hold a SINGLE preview object URL
   // (previewUrl, legacy single-file path) and/or an ARRAY of them
   // (previewUrls, multi-photo path) — revoke whichever this bubble actually
@@ -137,8 +151,6 @@ window.Chat = (() => {
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
     if (_markReadTimer)     { clearTimeout(_markReadTimer);      _markReadTimer = null; }
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onViewportResize);
-    if (_wpMenuOpen) document.removeEventListener('click', _wpOutsideClick, true);
-    _wpMenuOpen = false;
     if (_emojiMenuOpen) document.removeEventListener('click', _emojiOutsideClick, true);   // Wave5 M2
     _emojiMenuOpen = false;
     _exitFullscreen();                       // owner req #2: restore app chrome on close
@@ -397,26 +409,38 @@ window.Chat = (() => {
     const pinnedRows = rows.filter(r => _isPinned(r.cv));
     const restRows = rows.filter(r => !_isPinned(r.cv));
 
+    // Messenger restyle Fix 1 — flat, borderless, full-bleed rows: 52px round
+    // avatar (photo when available, colored initials fallback — see
+    // _avatarColorFor), name semibold, 'preview · 2h' as one inline second
+    // line, unread = bold name/preview + a small blue dot on the right (no
+    // numeric badge, no bordered .item-card shell — see the CSS rewrite of
+    // .chat-inbox-row/.ms-avatar-lg). The ⋯ button stays in the DOM for the
+    // desktop hover affordance but is CSS-hidden on touch (swipe reveals the
+    // same actions there instead).
     const rowHtml = ({ cv, title }) => {
       const unread = _isUnread(cv), pinned = _isPinned(cv), muted = _isMuted(cv), archived = _isArchived(cv);
       let avatarHtml;
       if (cv.type === 'dm') {
         const otherUid = (cv.participants || []).find(u => u !== myUid);
-        const pres = _presenceBucket(_presenceByUid[otherUid]?.lastSeen);
+        const otherUser = _presenceByUid[otherUid];   // Wave5-cache users doc (photoUrl) — no extra read
+        const pres = _presenceBucket(otherUser?.lastSeen);
         const dotColor = { green: '#30D158', orange: '#FF9F0A', gray: '#8E8E93' }[pres.dot] || '#8E8E93';
-        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0">${initials(title)}<span class="ms-presence-dot" style="background:${dotColor}"></span></div>`;
+        avatarHtml = otherUser?.photoUrl
+          ? `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0;padding:0"><img src="${escHtml(otherUser.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/><span class="ms-presence-dot" style="background:${dotColor}"></span></div>`
+          : `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0;background:${_avatarColorFor(otherUid||title)}">${initials(title)}<span class="ms-presence-dot" style="background:${dotColor}"></span></div>`;
       } else if (cv.type === 'group') {
         // Wave5 M4 — group avatar renders conv.photoUrl (set via the info
         // page's About section, creator/admin only) with initials fallback.
         avatarHtml = cv.photoUrl
           ? `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;padding:0"><img src="${escHtml(cv.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/></div>`
-          : `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0">${initials(title)}</div>`;
+          : `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${_avatarColorFor(cv.id||title)}">${initials(title)}</div>`;
       } else {
         const cfg = (window.DEPARTMENTS || {})[cv.department] || {};
         avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${cfg.color || 'var(--primary)'}">${cfg.icon || `${emojiIcon('💬',16)}`}</div>`;
       }
       const preview = cv.lastMessageText ? escHtml(cv.lastMessageText) : 'No messages yet';
       const ago = cv.lastMessageAt ? _timeAgo(cv.lastMessageAt) : '';
+      const previewLine = ago ? `${preview} · ${ago}` : preview;
       const cid = escHtml(cv.id);
       // Dept channels: pin/mute work, archive is disabled (membership is
       // derived from department, not owned by the user — nothing to "put
@@ -429,18 +453,17 @@ window.Chat = (() => {
           <button type="button" class="ms-inbox-act ms-inbox-act-mute" data-act="mute" data-cid="${cid}" title="${muted?'Unmute':'Mute'}">${emojiIcon(muted?'bell':'bell-off',16)}</button>
           ${canArchive?`<button type="button" class="ms-inbox-act ms-inbox-act-archive" data-act="archive" data-cid="${cid}" title="${archived?'Unarchive':'Archive'}">${emojiIcon('archive',16)}</button>`:''}
         </div>
-        <div class="item-card chat-inbox-row pressable" data-cid="${cid}" data-unprov="${cv._unprovisioned?'1':''}" data-dept="${escHtml(cv.department||'')}" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+        <div class="chat-inbox-row pressable${unread?' ms-inbox-unread':''}" data-cid="${cid}" data-unprov="${cv._unprovisioned?'1':''}" data-dept="${escHtml(cv.department||'')}">
           ${avatarHtml}
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:6px">
+          <div class="chat-inbox-row-body">
+            <div class="chat-inbox-row-name">
               ${pinned?`<i data-lucide="pin" class="ms-inbox-pin-glyph"></i>`:''}
-              <span style="font-weight:${unread?'700':'500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
+              <span class="chat-inbox-row-name-text">${escHtml(title)}</span>
               ${muted?`<i data-lucide="bell-off" class="ms-inbox-mute-glyph"></i>`:''}
-              ${unread ? '<span class="ms-unread-badge">1+</span>' : ''}
             </div>
-            <div style="font-size:12px;font-weight:${unread?'700':'400'};color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</div>
+            <div class="chat-inbox-row-preview">${previewLine}</div>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${ago}</div>
+          ${unread ? '<span class="ms-unread-dot" aria-label="Unread"></span>' : ''}
           <button type="button" class="ms-row-more-btn" data-cid="${cid}" title="More options" aria-haspopup="menu">${emojiIcon('more-vertical',16)}</button>
         </div>
         <div class="ms-row-menu hidden" data-cid="${cid}" role="menu">
@@ -687,26 +710,13 @@ window.Chat = (() => {
       : conv.type === 'group'
         ? `<span style="font-size:11px;color:var(--text-muted)">${memberCount} member${memberCount!==1?'s':''}</span>`
         : `<span style="font-size:11px;color:var(--text-muted)">Department channel</span>`;
-    // Leave Group (Decision 14/Spec 2a: a participant may remove exactly
-    // themself). No entry point was specified for this in Spec 4/5's given
-    // markup, but Spec 8 test #10 exercises it and the rule exists for it —
-    // a small, self-contained addition, not an architecture call.
-    const leaveBtnHtml = conv.type === 'group'
-      ? `<button id="chat-leave-group-btn" class="btn-secondary btn-sm" style="flex-shrink:0">Leave</button>` : '';
-    // Wave5 M3 (J4) — ⓘ opens the Shared Media/Files/Links info page
-    // (_openMediaTab). Same small-round-button chrome as the wallpaper ⋮.
+    // Messenger restyle Fix 4 — slim header: back + avatar + name/members +
+    // (i) ONLY. Leave (group-only) and the wallpaper ⋮ preset picker used to
+    // live here; both RELOCATED into the info page (_openMediaTab's About
+    // section) — Leave as a red row at the bottom, wallpaper as an inline
+    // "Chat wallpaper" row that expands the SAME WALLPAPERS preset list
+    // in place. Reachable via the exact same (i) button as before.
     const infoBtnHtml = `<button id="chat-info-btn" class="ms-thread-menu-btn" title="Shared media, files &amp; links" aria-label="Shared media, files and links">${emojiIcon('info', 18)}</button>`;
-    // WS42 Phase 18 — ⋮ wallpaper menu (participants can already update the
-    // conv doc for lastMessage*; if a rules edge case denies it, the write
-    // below is wrapped in .catch() and localStorage carries the preference).
-    const wallpaperMenuHtml = `
-      <button id="chat-wallpaper-btn" class="ms-thread-menu-btn" title="Chat wallpaper" aria-haspopup="menu">${emojiIcon('more-vertical', 18)}</button>
-      <div id="chat-wallpaper-menu" class="ms-wallpaper-menu hidden" role="menu">
-        <div class="ms-wallpaper-menu-title">Chat wallpaper</div>
-        ${WALLPAPERS.map(w => `<button type="button" class="ms-wallpaper-opt" data-wp="${w.key}" role="menuitem">
-            <span class="ms-wallpaper-swatch wp-${w.key}"></span>${escHtml(w.label)}
-          </button>`).join('')}
-      </div>`;
     // Messenger body/typing row/composer markup below is byte-identical to
     // the old shell's innerHTML — only the outer wrapper (now openPage's
     // .page-panel) and the header (now injected, back-button-less) changed.
@@ -720,9 +730,7 @@ window.Chat = (() => {
           <div class="ms-thread-title">${escHtml(title)}</div>
           <div class="ms-thread-subtitle">${subtitleHtml}</div>
         </div>
-        ${leaveBtnHtml}
         ${infoBtnHtml}
-        ${wallpaperMenuHtml}
       </div>
       <div id="chat-thread-scroll-wrap" style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
         <div id="chat-thread-scroll" class="messenger-body" style="padding:12px 14px"></div>
@@ -739,11 +747,16 @@ window.Chat = (() => {
         <div id="chat-emoji-grid" class="ms-emoji-grid hidden" role="menu">${
           EMOJI_GRID.map(e => `<button type="button" class="ms-emoji-opt" data-emoji="${e}">${e}</button>`).join('')
         }</div>
-        <label for="chat-file" class="ms-attach-btn" title="Attach file(s)">${emojiIcon('paperclip', 18)}</label>
-        <input type="file" id="chat-file" multiple style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
-        <label for="chat-camera" class="ms-attach-btn" title="Camera">${emojiIcon('camera', 18)}</label>
-        <input type="file" id="chat-camera" accept="image/*" capture="environment" style="display:none"/>
-        <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
+        <button type="button" class="ms-attach-btn ms-attach-toggle" id="chat-attach-toggle" title="Attach" aria-haspopup="true" aria-expanded="false">
+          <svg class="ms-attach-toggle-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        </button>
+        <div id="chat-attach-expand" class="ms-attach-expand hidden">
+          <label for="chat-file" class="ms-attach-btn" title="Attach file(s)">${emojiIcon('paperclip', 18)}</label>
+          <input type="file" id="chat-file" multiple style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
+          <label for="chat-camera" class="ms-attach-btn" title="Camera">${emojiIcon('camera', 18)}</label>
+          <input type="file" id="chat-camera" accept="image/*" capture="environment" style="display:none"/>
+          <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
+        </div>
         <button type="button" class="ms-attach-btn" id="chat-emoji-btn" title="Emoji">${emojiIcon('smile',18)}</button>
         <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…"></textarea>
         <button class="ms-send-btn" id="chat-send" disabled>
@@ -791,29 +804,8 @@ window.Chat = (() => {
 
     _applyWallpaper(conv);
     _enterFullscreenIfPhone();               // owner req #2: Messenger-style full-screen on phone
-    document.getElementById('chat-leave-group-btn')?.addEventListener('click', async () => {
-      if (!(await confirmDialog({ message: 'Leave this group?', danger: true }))) return;
-      await db.collection('conversations').doc(conv.id)
-        .update({ participants: firebase.firestore.FieldValue.arrayRemove(currentUser.uid) })
-        .catch(() => Notifs.showToast('Could not leave group', 'error'));
-      window.Overlay.dismissTop();
-    });
-
-    // Wallpaper popover — toggle + outside-click-to-close (Phase 18).
-    const wpBtn = document.getElementById('chat-wallpaper-btn');
-    const wpMenu = document.getElementById('chat-wallpaper-menu');
-    wpBtn?.addEventListener('click', e => {
-      e.stopPropagation();
-      if (!wpMenu) return;
-      const willOpen = wpMenu.classList.contains('hidden');
-      wpMenu.classList.toggle('hidden');
-      _wpMenuOpen = willOpen;
-      if (willOpen) document.addEventListener('click', _wpOutsideClick, true);
-      else document.removeEventListener('click', _wpOutsideClick, true);
-    });
-    wpMenu?.querySelectorAll('.ms-wallpaper-opt').forEach(btn => {
-      btn.addEventListener('click', () => { _setWallpaper(btn.dataset.wp); _closeWallpaperMenu(); });
-    });
+    // Leave-group and the wallpaper preset picker are wired inside
+    // _openMediaTab's About section now (Fix 4) — nothing to bind here.
 
     // Wave5 M3 (J4) — ⓘ Shared Media/Files/Links info page.
     document.getElementById('chat-info-btn')?.addEventListener('click', () => _openMediaTab(conv));
@@ -830,6 +822,23 @@ window.Chat = (() => {
     const input = document.getElementById('chat-input');
     const sendBtn = document.getElementById('chat-send');
     const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingImages.length || pendingLink); };
+    // Messenger restyle Fix 5 — the 3 attach controls (file/camera/link)
+    // collapse into ONE ➕ button that expands them inline (Messenger-style)
+    // when tapped, and auto-collapses once the composer has text (below, in
+    // the input handler). The emoji button is untouched — it stays its own
+    // persistent icon beside the input, per spec.
+    const attachToggle = document.getElementById('chat-attach-toggle');
+    const attachExpand = document.getElementById('chat-attach-expand');
+    const setAttachExpanded = open => {
+      if (!attachToggle || !attachExpand) return;
+      attachExpand.classList.toggle('hidden', !open);
+      attachToggle.classList.toggle('ms-attach-toggle-open', open);
+      attachToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    attachToggle?.addEventListener('click', e => {
+      e.stopPropagation();
+      setAttachExpanded(!!attachExpand?.classList.contains('hidden'));
+    });
     // Wave5 M1 — per-conversation draft restore (localStorage `bi-chat-draft-{convId}`).
     // Saved on input (debounced 300ms below), cleared on optimistic send,
     // re-saved if that send fails and the text is restored to the composer.
@@ -852,6 +861,7 @@ window.Chat = (() => {
       pendingImages.push(...add);
       filePreview.textContent = `📷 ${pendingImages.length} photo${pendingImages.length > 1 ? 's' : ''} selected`;
       updateSendState();
+      setAttachExpanded(false);
     }
     fileInp.addEventListener('change', e => {
       const files = Array.from(e.target.files || []);
@@ -875,6 +885,7 @@ window.Chat = (() => {
       pendingFile = f || null;
       filePreview.textContent = f ? `📎 ${f.name}` : '';
       updateSendState();
+      setAttachExpanded(false);
     });
     cameraInp?.addEventListener('change', e => {
       const f = e.target.files?.[0];
@@ -889,6 +900,7 @@ window.Chat = (() => {
       fileInp.value = '';
       filePreview.textContent = `🔗 ${url}`;
       updateSendState();
+      setAttachExpanded(false);
     });
 
     // Wave5 M3 (J4) — paste an image from the clipboard directly into the
@@ -1022,6 +1034,7 @@ window.Chat = (() => {
     input.addEventListener('input', () => {
       _autoGrow(input); updateSendState(); window.Chat.onComposerInput();
       _updateMentionTypeahead(input, conv);   // Wave5 M2 (J6)
+      if ((input.value || '').trim()) setAttachExpanded(false);   // Fix 5 — text typed collapses the ➕ expansion
       clearTimeout(_draftSaveTimer);
       _draftSaveTimer = setTimeout(() => _saveDraft(conv.id, input.value), 300);
     });
@@ -1095,16 +1108,12 @@ window.Chat = (() => {
     await db.collection('conversations').doc(_openConvId).update({ wallpaper: key })
       .catch(() => { /* rules denial or offline — localStorage already holds the fallback */ });
   }
-  function _wpOutsideClick(e) {
-    const menu = document.getElementById('chat-wallpaper-menu');
-    const btn = document.getElementById('chat-wallpaper-btn');
-    if (menu && !menu.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) _closeWallpaperMenu();
-  }
-  function _closeWallpaperMenu() {
-    document.getElementById('chat-wallpaper-menu')?.classList.add('hidden');
-    document.removeEventListener('click', _wpOutsideClick, true);
-    _wpMenuOpen = false;
-  }
+  // Messenger restyle Fix 4 — the wallpaper trigger moved from a header ⋮
+  // popover into an inline expand/collapse row inside the info page's About
+  // section (see _openMediaTab's #chat-about-wallpaper-btn/-list wiring), so
+  // the old outside-click popover machinery (_wpOutsideClick/_closeWallpaperMenu)
+  // is gone — an inline row inside an already-scrollable page doesn't need
+  // its own dismiss-on-outside-click handling.
 
   // Wave5 M4 (J9) — single-conversation readAt resolution for the "New
   // messages" divider on thread-open. Prefers the denormalized field already
@@ -1685,10 +1694,11 @@ window.Chat = (() => {
     const rev = _msgRev(m);
 
     // Wave5 M1 (J3) — tombstone: italic "Message removed", no reactions/
-    // picker/heart/copy-affordance (none of those classes are emitted below,
-    // so long-press/tap on this bubble is a no-op — _wireThreadDelegation's
-    // .closest('.chat-bubble-tap, .ms-heart-btn') simply finds nothing).
-    // Only an admin's "Remove permanently" action survives on a tombstone.
+    // picker/copy-affordance (none of those classes are emitted below, so
+    // long-press/tap/double-tap on this bubble is a no-op —
+    // _wireThreadDelegation's .closest('.chat-bubble-tap') simply finds
+    // nothing here). Only an admin's "Remove permanently" action survives on
+    // a tombstone.
     if (isTombstone) {
       const row = `
       <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}" data-rev="${escHtml(rev)}">
@@ -1722,22 +1732,23 @@ window.Chat = (() => {
       : '';
     // Wave5 M1 (J3) — Copy joins the SAME long-press/context-menu picker as
     // the reactions (opened by _openPickerFor via startPress/contextmenu on
-    // .chat-bubble-tap or .ms-heart-btn — unchanged), rather than a new menu.
+    // .chat-bubble-tap — unchanged), rather than a new menu.
     // Wave5 M2 — Forward joins the same picker (same long-press/right-click
     // reach, desktop AND mobile, so no separate hover-only affordance needed).
     const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px;align-items:center">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
     }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button></div>`;
-    // Owner req #3 (Viber-style): a quick heart button beside the bubble —
-    // tap = instant ❤️ toggle (via the SAME toggleReaction data model), while
-    // long-press on the bubble OR the heart opens the full 6-emoji picker
-    // above. Affordance-only change — reactions storage is untouched.
-    const heartedByMe = reactions[currentUser.uid] === '❤️';
-    const heartHtml = `<button class="ms-heart-btn${heartedByMe?' ms-heart-active':''}" data-mid="${escHtml(m.id)}" title="React ❤️">${heartedByMe?'❤️':'🤍'}</button>`;
+    // Messenger restyle Fix 3 — the always-visible quick-heart button beside
+    // every bubble is GONE (owner: single biggest clutter item). Reacting is
+    // now DOUBLE-TAP the bubble = toggle ❤️ (same toggleReaction data model,
+    // see _wireThreadDelegation's bubble click branch), LONG-PRESS = the full
+    // 6-emoji picker above (unchanged). Reactions storage/rendering
+    // (reactionsHtml above) is completely untouched — this only removes the
+    // dedicated tap-target and its markup.
     // Wave5 M2 (J3) — hover-only reply button (desktop; touch uses the
-    // swipe-right gesture wired in _wireThreadDelegation instead). Same
-    // affordance-only pattern as heartHtml — no storage change here, the
-    // click handler arms _replyTarget via _armReply().
+    // swipe-right gesture wired in _wireThreadDelegation instead). Affordance-
+    // only — no storage change here, the click handler arms _replyTarget via
+    // _armReply().
     const replyBtnHtml = `<button class="ms-reply-btn" data-mid="${escHtml(m.id)}" title="Reply">${emojiIcon('corner-up-left',13)}</button>`;
     // Wave5 M2 (J3) — quote block rendered ABOVE the message content when
     // this doc carries replyTo (absent on every pre-M2 doc → renders exactly
@@ -1771,7 +1782,7 @@ window.Chat = (() => {
           ${forwardedHtml}
           ${!isMine && showName ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
           <div class="ms-bubble-row">
-          ${isMine ? heartHtml + replyBtnHtml : ''}
+          ${isMine ? replyBtnHtml : ''}
           <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${replyQuoteHtml}
             ${m.text ? `<div class="ms-text">${_highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions)}</div>` : ''}
@@ -1792,7 +1803,7 @@ window.Chat = (() => {
               ${m.editedAt?'<span class="ms-edited">(edited)</span>':''}
             </div>
           </div>
-          ${!isMine ? replyBtnHtml + heartHtml : ''}
+          ${!isMine ? replyBtnHtml : ''}
           </div>
           ${reactionsHtml}
           ${pickerHtml}
@@ -1897,18 +1908,31 @@ window.Chat = (() => {
     const picker = el.querySelector(`.chat-reaction-picker[data-mid="${CSS.escape(mid)}"]`);
     if (picker) picker.style.display = 'flex';
   }
-  // Owner req #3 — Viber-style: tap the heart = instant ❤️ toggle; LONG-PRESS
-  // (500ms) on the bubble OR the heart opens the full 6-emoji picker instead.
+  // Messenger restyle Fix 3 — LONG-PRESS (500ms) on a bubble still opens the
+  // full 6-emoji picker (unchanged). The old "or the heart" branch is gone
+  // along with the heart button itself.
   // touchstart/touchend timing covers mobile; mousedown/mouseup + contextmenu
   // (right-click / long-press-as-contextmenu on some browsers) covers desktop.
   const LONG_PRESS_MS = 500;
+  // DOUBLE-TAP-TO-HEART decision (documented per the batch brief): a bubble
+  // tap is DELAYED by DOUBLE_TAP_MS before it performs the timestamp toggle,
+  // so a fast second tap on the SAME message can upgrade it into a double-tap
+  // (❤️ toggle) instead. The rejected alternative — toggle the timestamp
+  // instantly on tap 1 and let tap 2 toggle it right back — nets out to "no
+  // visible change" for a genuine double-tap, which reads as a flicker bug
+  // rather than a deliberate gesture, and can't distinguish "about to become
+  // a double-tap" from "really was just one tap" ahead of time. 300ms is the
+  // standard mobile double-tap window and isn't perceptible as lag for a
+  // normal single tap.
+  const DOUBLE_TAP_MS = 300;
   function _wireThreadDelegation(el) {
     if (el.dataset.wired) return;
     el.dataset.wired = '1';
     let pressTimer = null, longPressed = false, pressMid = null;
+    let bubbleTapTimer = null, lastBubbleTap = { mid: null, at: 0 };   // double-tap-to-heart state
     const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
     const startPress = (target, e) => {
-      const holder = target.closest('.chat-bubble-tap, .ms-heart-btn');
+      const holder = target.closest('.chat-bubble-tap');
       if (!holder) return;
       pressMid = holder.dataset.mid; longPressed = false;
       clearPress();
@@ -1926,7 +1950,7 @@ window.Chat = (() => {
     el.addEventListener('mouseup', clearPress);
     el.addEventListener('mouseleave', clearPress);
     el.addEventListener('contextmenu', e => {
-      const holder = e.target.closest('.chat-bubble-tap, .ms-heart-btn');
+      const holder = e.target.closest('.chat-bubble-tap');
       if (holder) { e.preventDefault(); _openPickerFor(el, holder.dataset.mid); }
     });
     // Wave5 M2 (J3) — swipe-right-to-reply, ADDITIVE alongside the long-press
@@ -1960,18 +1984,11 @@ window.Chat = (() => {
       if (delBtn) { e.stopPropagation(); _onDeleteMessage(delBtn.dataset.mid); return; }
       const hardDelBtn = e.target.closest('.chat-msg-harddel-btn');
       if (hardDelBtn) { e.stopPropagation(); _onHardDeleteMessage(hardDelBtn.dataset.mid); return; }
-      const heartBtn = e.target.closest('.ms-heart-btn');
-      if (heartBtn) {
-        e.stopPropagation();
-        if (longPressed) { longPressed = false; return; }   // long-press already opened the picker — don't also toggle
-        toggleReaction(heartBtn.dataset.mid, '❤️');
-        return;
-      }
       // Wave5 M3 (J1) — any message image (legacy single fileUrl OR a new
       // media-grid tile) opens the in-app lightbox instead of the old
       // window.open(). Checked BEFORE the generic bubble-tap-toggle below so
       // a long-press that already opened the reaction picker doesn't ALSO
-      // pop the lightbox (longPressed guard, same pattern as heartBtn above).
+      // pop the lightbox (longPressed guard, same pattern used throughout).
       const imgTap = e.target.closest('.chat-img-tap');
       if (imgTap) {
         e.stopPropagation();
@@ -1979,9 +1996,12 @@ window.Chat = (() => {
         _openLightboxFor(imgTap.dataset.mid, parseInt(imgTap.dataset.idx || '0', 10));
         return;
       }
-      // Tapping a bubble toggles its timestamp/status line. A short tap no
-      // longer opens the picker (that's now long-press-only, req #3) — but a
-      // long-press that just fired should also suppress the tap-toggle.
+      // Messenger restyle Fix 3 — single tap toggles the timestamp/status
+      // line (delayed by DOUBLE_TAP_MS, see the constant's comment above); a
+      // second tap on the SAME bubble inside that window cancels the pending
+      // toggle and fires a double-tap ❤️ instead (toggleReaction — identical
+      // data model the old always-visible heart button used). Long-press
+      // (already opened the picker) suppresses both.
       const bubble = e.target.closest('.chat-bubble-tap');
       if (bubble) {
         if (e.target.closest('a') || e.target.closest('img')) return;
@@ -1990,9 +2010,39 @@ window.Chat = (() => {
         const quote = e.target.closest('.ms-reply-quote');
         if (quote) { _scrollToMessage(quote.dataset.targetMid); return; }
         if (longPressed) { longPressed = false; return; }
-        bubble.classList.toggle('ms-time-shown');
+        const mid = bubble.dataset.mid;
+        const now = Date.now();
+        if (bubbleTapTimer && lastBubbleTap.mid === mid && (now - lastBubbleTap.at) < DOUBLE_TAP_MS) {
+          clearTimeout(bubbleTapTimer); bubbleTapTimer = null;
+          lastBubbleTap = { mid: null, at: 0 };
+          toggleReaction(mid, '❤️');
+          _flashHeartBurst(bubble);
+          return;
+        }
+        lastBubbleTap = { mid, at: now };
+        clearTimeout(bubbleTapTimer);
+        bubbleTapTimer = setTimeout(() => {
+          bubbleTapTimer = null;
+          // Re-query rather than close over `bubble`: a snapshot repaint
+          // (reaction/edit/etc.) can swap the underlying node's outerHTML
+          // (see _patchThread) inside this window on a busy thread.
+          const fresh = el.querySelector(`.chat-bubble-tap[data-mid="${CSS.escape(mid)}"]`);
+          if (fresh) fresh.classList.toggle('ms-time-shown');
+        }, DOUBLE_TAP_MS);
       }
     });
+  }
+  // Messenger restyle Fix 3 — brief floating ❤️ burst on a successful
+  // double-tap-to-like: purely cosmetic feedback (no storage, no state),
+  // mirrors the animation-driven cleanup pattern already used elsewhere in
+  // this file (e.g. the "tap the quote to jump there" .ms-flash timeout).
+  function _flashHeartBurst(bubbleEl) {
+    if (!bubbleEl) return;
+    const burst = document.createElement('span');
+    burst.className = 'ms-heart-burst';
+    burst.textContent = '❤️';
+    burst.addEventListener('animationend', () => burst.remove());
+    bubbleEl.appendChild(burst);
   }
   // Wave5 M2 (J3) — swipe-right-to-reply gesture. Tracks one active drag at a
   // time (module-scoped `_swipe`); reset defensively in teardownThread too.
@@ -2437,8 +2487,7 @@ window.Chat = (() => {
   }
 
   // ── Wave5 M2 (J6) — composer emoji picker (REACTIONS + EMOJI_GRID; module-
-  // level so its outside-click listener can be torn down from teardownThread,
-  // mirroring the wallpaper popover's _wpMenuOpen/_wpOutsideClick pattern). ──
+  // level so its outside-click listener can be torn down from teardownThread). ──
   function _closeEmojiGrid() {
     document.getElementById('chat-emoji-grid')?.classList.add('hidden');
     document.removeEventListener('click', _emojiOutsideClick, true);
@@ -2824,6 +2873,23 @@ window.Chat = (() => {
         }).join('')}</div>
         ${isGroupAdmin ? `<button type="button" id="chat-about-addmember-btn" class="btn-secondary btn-sm" style="width:100%">${emojiIcon('users',14)} Add members</button>` : ''}
         ` : ''}
+        <div class="chat-about-rows">
+          <button type="button" id="chat-about-wallpaper-btn" class="chat-about-row" aria-haspopup="true" aria-expanded="false">
+            <span class="chat-about-row-icon">${emojiIcon('image',16)}</span>
+            <span class="chat-about-row-label">Chat wallpaper</span>
+            <span class="chat-about-row-chevron">${emojiIcon('chevron-down',15)}</span>
+          </button>
+          <div id="chat-about-wallpaper-list" class="ms-wallpaper-menu ms-wallpaper-menu-inline hidden" role="menu">
+            ${WALLPAPERS.map(w => `<button type="button" class="ms-wallpaper-opt" data-wp="${w.key}" role="menuitem">
+                <span class="ms-wallpaper-swatch wp-${w.key}"></span>${escHtml(w.label)}
+              </button>`).join('')}
+          </div>
+          ${conv.type === 'group' ? `
+          <button type="button" id="chat-about-leave-btn" class="chat-about-row chat-about-row-danger">
+            <span class="chat-about-row-icon">${emojiIcon('log-out',16)}</span>
+            <span class="chat-about-row-label">Leave group</span>
+          </button>` : ''}
+        </div>
       </div>
       <div class="chat-about-divider"></div>`;
 
@@ -2895,6 +2961,46 @@ window.Chat = (() => {
       });
       document.getElementById('chat-about-addmember-btn')?.addEventListener('click', () => _openAddMembersPicker(conv));
     }
+
+    // Messenger restyle Fix 4 — wallpaper (any conv type) + Leave (group,
+    // any member — unchanged gate from the old header button) now live here
+    // instead of the thread header's ⋮ menu / Leave button. Wallpaper is an
+    // inline expand/collapse row (the SAME WALLPAPERS preset list/markup the
+    // old header popover used, just toggled in place on this page instead of
+    // floating off a header button) rather than a popover — simpler and more
+    // robust inside an already-scrollable page (no outside-click plumbing
+    // needed). _setWallpaper is unchanged: it always targets whatever
+    // conversation is currently open (_openConvId/_openConv), which is this
+    // page's conv since the info page only ever opens from an open thread.
+    document.getElementById('chat-about-wallpaper-btn')?.addEventListener('click', () => {
+      const btn = document.getElementById('chat-about-wallpaper-btn');
+      const list = document.getElementById('chat-about-wallpaper-list');
+      if (!list || !btn) return;
+      const willOpen = list.classList.contains('hidden');
+      list.classList.toggle('hidden', !willOpen);
+      btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+      btn.classList.toggle('chat-about-row-open', willOpen);
+    });
+    document.getElementById('chat-about-wallpaper-list')?.querySelectorAll('.ms-wallpaper-opt').forEach(optBtn => {
+      optBtn.addEventListener('click', () => {
+        _setWallpaper(optBtn.dataset.wp);
+        document.getElementById('chat-about-wallpaper-list')?.classList.add('hidden');
+        const btn = document.getElementById('chat-about-wallpaper-btn');
+        btn?.setAttribute('aria-expanded', 'false');
+        btn?.classList.remove('chat-about-row-open');
+      });
+    });
+    document.getElementById('chat-about-leave-btn')?.addEventListener('click', async () => {
+      if (!(await confirmDialog({ message: 'Leave this group?', danger: true }))) return;
+      await db.collection('conversations').doc(conv.id)
+        .update({ participants: firebase.firestore.FieldValue.arrayRemove(currentUser.uid) })
+        .catch(() => Notifs.showToast('Could not leave group', 'error'));
+      // Leaving makes both this info page AND the thread behind it stale —
+      // close the whole stack back to the inbox (same net effect the old
+      // header Leave button had via a single dismissTop(), just one level
+      // deeper now that Leave lives on a page pushed ON TOP of the thread).
+      window.Overlay.clearAll();
+    });
   }
 
   function _renderThread(opts) {
@@ -2967,11 +3073,17 @@ window.renderChatPage = async function() {
   // thread panel into the right column; this batch only lays the container down.
   // A wrapper div (not a class on #page-content itself) so it never leaks onto
   // the next page's render — it's discarded with the rest of this innerHTML.
+  // Messenger restyle Fix 2 — slim inbox header: no big page title / no big
+  // "+ New Message" band. "Chats" wordmark-weight title left, a small round
+  // compose-icon button right (same New Message picker as before, just a
+  // different trigger). Search + filter chips are unchanged.
   c.innerHTML = `
     <div class="chat-page">
       <div class="chat-page-inbox">
-        <div class="page-header"><h2>${emojiIcon('💬',20)} Chat</h2>
-          <button class="btn-primary btn-sm" id="chat-new-btn">+ New Message</button></div>
+        <div class="ms-inbox-header">
+          <div class="ms-inbox-header-title">Chats</div>
+          <button type="button" class="ms-thread-menu-btn ms-compose-btn" id="chat-new-btn" title="New message" aria-label="New message">${emojiIcon('pen-line',18)}</button>
+        </div>
         <div class="ms-search-wrap"><input id="chat-search-input" class="ms-search-input" placeholder="Search chats" /></div>
         <div id="chat-filter"></div>
         <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>

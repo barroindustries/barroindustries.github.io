@@ -1255,7 +1255,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
    the row has ever been measured — verify against real data in a live
    preview per the WS42 acceptance gate. */
 .task-feed-item { content-visibility: auto; contain-intrinsic-size: auto 48px; }
-.chat-inbox-row { content-visibility: auto; contain-intrinsic-size: auto 56px; }
+.chat-inbox-row { content-visibility: auto; contain-intrinsic-size: auto 64px; }
 .team-masonry > .team-member-card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
 .data-table tbody tr { content-visibility: auto; contain-intrinsic-size: auto 42px; }
 
@@ -4251,7 +4251,10 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 .ms-avatar-mine { background: var(--primary); }
 .ms-avatar-md { width: 36px; height: 36px; font-size: var(--fs-xs); }
-.ms-avatar-lg { width: 44px; height: 44px; font-size: var(--fs-sm); border: 2px solid var(--surface); }
+/* Messenger restyle Fix 1 — 52px inbox-row avatar (owner spec). Only ever
+   used by .chat-inbox-row today, so bumping the size here has no effect on
+   any other screen. */
+.ms-avatar-lg { width: 52px; height: 52px; font-size: var(--fs-md); border: 2px solid var(--surface); }
 .ms-avatar-spacer { width: 24px; flex-shrink: 0; }
 
 .ms-bubble-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 100%; }
@@ -4266,6 +4269,9 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   padding: 8px 12px; border-radius: 18px;
   max-width: 100%; word-break: break-word; overflow-wrap: anywhere;
   cursor: pointer;
+  /* Messenger restyle Fix 3 — positioned ancestor for .ms-heart-burst
+     (double-tap-to-like feedback), which centers itself absolutely. */
+  position: relative;
 }
 .ms-bubble-mine  { background: var(--bubble-out-bg); color: var(--bubble-out-text); }
 .ms-bubble-theirs {
@@ -4308,16 +4314,25 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-actions { display: none; gap: 4px; padding: 0 2px; }
 .ms-row:hover .ms-actions { display: flex; }
 
-/* Viber-style quick-heart button (owner req #3) — always visible next to the
-   bubble; tap = instant ❤️ toggle, long-press (bubble or heart) = full picker. */
-.ms-heart-btn {
-  background: none; border: none; cursor: pointer; padding: 2px 4px;
-  font-size: 14px; line-height: 1; flex-shrink: 0; align-self: flex-end;
-  opacity: .55; transition: opacity .15s, transform .1s;
+/* Messenger restyle Fix 3 — the always-visible quick-heart button (.ms-heart-btn)
+   is gone; reacting is DOUBLE-TAP the bubble now (see chat.js
+   _wireThreadDelegation). This is that gesture's only visual trace: a brief
+   floating ❤️ burst, purely cosmetic (no storage/state), auto-removed by
+   chat.js on animationend. */
+.ms-heart-burst {
+  position: absolute; left: 50%; top: 50%; z-index: 1;
+  transform: translate(-50%, -50%) scale(.3);
+  font-size: 34px; line-height: 1; pointer-events: none;
+  animation: msHeartBurst 650ms cubic-bezier(.17,.89,.32,1.49) forwards;
 }
-.ms-heart-btn:hover { opacity: 1; }
-.ms-heart-btn:active { transform: scale(1.15); }
-.ms-heart-btn.ms-heart-active { opacity: 1; }
+@keyframes msHeartBurst {
+  0%   { transform: translate(-50%, -50%) scale(.3); opacity: 0; }
+  35%  { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+  100% { transform: translate(-50%, -60%) scale(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-heart-burst { animation: none; opacity: 0; }
+}
 
 /* Wave5 M2 (J3) — hover-revealed reply button (desktop only, by design: touch
    devices use the swipe-right gesture instead — see chat.js _onSwipeStart).
@@ -4458,6 +4473,15 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   transition: background .15s, color .15s;
 }
 .ms-attach-btn:hover { background: var(--surface-2); color: var(--text); }
+/* Messenger restyle Fix 5 — the 3 attach controls collapse into one ➕
+   toggle; .ms-attach-expand is just another item in .messenger-input-row's
+   own flex layout (no popover/position:absolute needed — showing/hiding it
+   simply changes which icons occupy the row). The toggle icon rotates 45°
+   into an "×" read while expanded. */
+.ms-attach-expand { display: flex; align-items: center; gap: 2px; }
+.ms-attach-expand.hidden { display: none; }
+.ms-attach-toggle-icon { transition: transform .18s ease; }
+.ms-attach-toggle.ms-attach-toggle-open .ms-attach-toggle-icon { transform: rotate(45deg); }
 .ms-input {
   flex: 1; min-width: 0; border: none; border-radius: var(--pill);
   padding: 9px 16px; background: var(--surface-2); color: var(--text);
@@ -4688,6 +4712,20 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .chat-mediatab-file-date { font-size: var(--fs-2xs); color: var(--text-muted); flex-shrink: 0; }
 
 /* ── Chat inbox rows (Phase 16) ── */
+/* Messenger restyle Fix 2 — slim inbox header (replaces the big .page-header
+   title + big "+ New Message" button band): "Chats" wordmark-weight title
+   left, one small round compose-icon button right. .ms-compose-btn reuses
+   .ms-thread-menu-btn's exact round-icon-button chrome (width/height/hover) —
+   no new button style, just the shared token-driven one. */
+.ms-inbox-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0 4px;
+}
+.ms-inbox-header-title {
+  font-family: var(--font-display); font-size: var(--fs-2xl); font-weight: 800;
+  letter-spacing: -0.4px; color: var(--text);
+}
+.ms-compose-btn { color: var(--primary); }
 .ms-search-wrap { margin: 10px 0; }
 .ms-search-input {
   width: 100%; border: 1px solid var(--border); border-radius: var(--pill);
@@ -4695,18 +4733,44 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   font-size: var(--fs-base); outline: none; transition: box-shadow .15s;
 }
 .ms-search-input:focus { box-shadow: 0 0 0 3px var(--primary-soft); }
-.chat-inbox-row { min-height: 56px; padding: 8px 10px; }
-.chat-inbox-row .ms-unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
-/* Wave5 M1 — numeric unread badge (replaces the plain dot: "1+" since exact
-   per-conversation unread MESSAGE counts aren't available until M4's reads map). */
-.chat-inbox-row .ms-unread-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 18px; padding: 0 5px; flex-shrink: 0;
-  border-radius: var(--pill); background: var(--primary); color: #fff;
-  font-size: 0.625rem; font-weight: 700;
+/* Messenger rows sit contiguous (no card-gap between them) — scoped to
+   #chat-inbox only so .item-list's normal 8px gap is untouched everywhere
+   else it's used (tasks, finance, etc.). */
+#chat-inbox .item-list { gap: 0; }
+/* Messenger restyle Fix 1 — flat, borderless, full-bleed row (no .item-card
+   shell — chat.js no longer applies that class here). Own layout, own hover/
+   active feedback; nothing here is shared with the generic item-card look
+   used by tasks/finance/etc. elsewhere in the app. */
+.chat-inbox-row {
+  min-height: 64px; padding: 8px 14px;
+  display: flex; align-items: center; gap: 12px; cursor: pointer;
+  background: transparent;
+}
+/* Specificity matches .ms-inbox-row-wrap .chat-inbox-row's own unconditional
+   background rule below (Wave5 M4 section) so hover reliably wins regardless
+   of source order. */
+@media (hover: hover) { .ms-inbox-row-wrap .chat-inbox-row:hover { background: var(--surface-2); } }
+.chat-inbox-row-body { flex: 1; min-width: 0; }
+.chat-inbox-row-name { display: flex; align-items: center; gap: 6px; }
+.chat-inbox-row-name-text {
+  font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-inbox-row-preview {
+  font-size: var(--fs-sm); font-weight: 400; color: var(--text-muted); margin-top: 1px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Unread: bold name/preview (Messenger convention) + a small blue dot on the
+   right — no numeric badge (exact per-message unread counts aren't tracked;
+   a dot never overclaims a specific number). */
+.chat-inbox-row.ms-inbox-unread .chat-inbox-row-name-text { font-weight: 700; }
+.chat-inbox-row.ms-inbox-unread .chat-inbox-row-preview { font-weight: 600; color: var(--text); }
+.chat-inbox-row .ms-unread-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--primary);
+  flex-shrink: 0; margin-left: 2px;
 }
 .chat-inbox-row .ms-presence-dot {
-  position: absolute; bottom: -1px; right: -1px; width: 10px; height: 10px;
+  position: absolute; bottom: -1px; right: -1px; width: 12px; height: 12px;
   border-radius: 50%; border: 2px solid var(--surface);
 }
 
@@ -4719,7 +4783,9 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
    real .chat-inbox-row content (which slides left via inline transform, see
    chat.js _onInboxSwipeMove/_toggleConvFlag). position:relative + overflow
    hidden is what lets the actions row hide off the right edge at rest. */
-.ms-inbox-row-wrap { position: relative; overflow: hidden; border-radius: var(--r-sm, 10px); }
+/* Messenger restyle Fix 1 — full-bleed rows (no rounded-card corners; the
+   pinned tint is the only per-row background cue now). */
+.ms-inbox-row-wrap { position: relative; overflow: hidden; }
 .ms-inbox-row-wrap .chat-inbox-row { position: relative; z-index: 1; background: var(--surface); transition: transform .18s ease; }
 .ms-inbox-swipe-actions {
   position: absolute; top: 0; right: 0; bottom: 0; width: 132px;
@@ -4746,8 +4812,11 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-inbox-row-wrap.ms-inbox-pinned .chat-inbox-row { background: color-mix(in srgb, var(--primary) 5%, var(--surface)); }
 .ms-inbox-pin-glyph, .ms-inbox-mute-glyph { width: 12px; height: 12px; color: var(--text-muted); flex-shrink: 0; }
 
-/* Desktop hover ⋯ menu (touch devices use the swipe row instead — the button
-   still renders there but stays out of the way at opacity:0 until tapped). */
+/* Desktop hover ⋯ menu ONLY (Messenger restyle Fix 1: "no visible per-row ⋯
+   on mobile" — swipe reveals the same Pin/Mute/Archive actions there
+   instead, see .ms-inbox-swipe-actions). The button still renders in the DOM
+   on touch devices (its data-cid wiring is unconditional in chat.js) but is
+   fully hidden there rather than dimly visible. */
 .ms-row-more-btn {
   width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
   background: none; border: none; cursor: pointer; color: var(--text-muted);
@@ -4758,7 +4827,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   .ms-inbox-row-wrap:hover .ms-row-more-btn { opacity: .7; }
   .ms-row-more-btn:hover { opacity: 1; background: var(--surface-2); color: var(--text); }
 }
-@media (hover: none) { .ms-row-more-btn { opacity: .55; } }
+@media (hover: none) { .ms-row-more-btn { display: none; } }
 .ms-row-menu {
   position: absolute; top: 44px; right: 10px; z-index: 20;
   background: var(--modal-bg); border: 1px solid var(--border);
@@ -4800,6 +4869,28 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .chat-about-divider { height: 1px; background: var(--border); margin: 4px 0 10px; }
 #chat-about-addmember-btn { margin-top: 10px; }
 
+/* Messenger restyle Fix 4 — settings rows at the bottom of the About section:
+   "Chat wallpaper" (any conv type, expands the SAME preset list the old
+   header ⋮ popover used) and, group-only, a red "Leave group" row — both
+   RELOCATED off the thread header. Plain list-row chrome, no card/border. */
+.chat-about-rows { text-align: left; margin-top: 14px; }
+.chat-about-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 4px; border: none; background: none; cursor: pointer;
+  border-top: 1px solid var(--border); color: var(--text); font-size: var(--fs-base);
+  text-align: left;
+}
+.chat-about-row:hover { background: var(--surface-2); }
+.chat-about-row-icon { display: flex; flex-shrink: 0; color: var(--text-muted); }
+.chat-about-row-label { flex: 1; min-width: 0; }
+.chat-about-row-chevron {
+  display: flex; flex-shrink: 0; color: var(--text-muted);
+  transition: transform .18s ease;
+}
+.chat-about-row.chat-about-row-open .chat-about-row-chevron { transform: rotate(180deg); }
+.chat-about-row-danger { color: var(--danger); }
+.chat-about-row-danger .chat-about-row-icon { color: var(--danger); }
+
 /* ── Thread panel mobile shell (Phase 20) — true fullscreen, 56px header,
    44px back-button hit-area (edge swipe-back also reaches this via Gestures). ── */
 .ms-thread-header {
@@ -4834,6 +4925,15 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   padding: 6px; min-width: 180px; z-index: 20;
 }
 .ms-wallpaper-menu.hidden { display: none; }
+/* Messenger restyle Fix 4 — the SAME .ms-wallpaper-menu/.ms-wallpaper-opt
+   preset-list markup, reused inline inside the info page's About section
+   (chat-about-wallpaper-list) instead of floating off a header ⋮ button:
+   normal document flow, no absolute positioning/shadow/border — it just
+   expands directly under its "Chat wallpaper" trigger row. */
+.ms-wallpaper-menu-inline {
+  position: static; margin: 0; border: none; box-shadow: none;
+  border-radius: 0; padding: 2px 0 6px; min-width: 0;
+}
 .ms-wallpaper-menu-title {
   font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--text-muted); padding: 6px 8px 4px;
