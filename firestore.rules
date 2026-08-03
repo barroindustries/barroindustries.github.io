@@ -372,10 +372,13 @@ service cloud.firestore {
         && request.resource.data.workerId == workerId
         && request.resource.data.get('date', date) == date
         && request.resource.data.get('recordedBy', request.auth.uid) == request.auth.uid
-        && request.resource.data.get('inValid', true) == true
-        && request.resource.data.get('outValid', true) == true
-        && isNonNegNumber(request.resource.data.get('hoursWorked', 0))
-        && request.resource.data.get('hoursWorked', 0) <= 24
+        // v14 P0 pay-integrity — timeIn/timeOut/hoursWorked/inValid/outValid are
+        // now FUNCTION-ONLY: written exclusively by the recordAttendancePunch
+        // callable (Admin SDK, bypasses these rules) after it re-verifies the
+        // geofence + selfie server-side. A self-service client may only write the
+        // pre-punch audit trail (attempts) + an advisory pendingPunch marker — it
+        // can NEVER assert a valid-looking or backdated shift directly.
+        && !request.resource.data.keys().hasAny(['timeIn', 'timeOut', 'hoursWorked', 'inValid', 'outValid'])
         && (resource == null || resource.data.get('recordedBy', '') == request.auth.uid)
       ));
     }
@@ -524,7 +527,7 @@ service cloud.firestore {
       // dm/group: creator must include themself. dept: lazy-create by any member;
       // the doc ID must be exactly 'dept_<department>' and participants must be [].
       allow create: if isAuth() && (
-        ( request.resource.data.get('type','') in ['dm','group']
+        ( request.resource.data.get('type','') in ['dm','group','announcement']
           && request.resource.data.get('createdBy','') == request.auth.uid
           && request.auth.uid in request.resource.data.get('participants', []) )
         ||
@@ -597,7 +600,7 @@ service cloud.firestore {
         // above.
         || ( (resource.data.get('createdBy','') == request.auth.uid || isAdmin())
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name','photoUrl','participants','participantNames','wallpaper']) )
+              .hasOnly(['name','photoUrl','participants','participantNames','wallpaper','pinnedMsgIds']) )
         || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
              && request.resource.data.get('participants', [])
                 == resource.data.get('participants', []).removeAll([request.auth.uid]) )
@@ -608,7 +611,12 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read:   if isAuth() && convMember();
         allow create: if isAuth() && convMember()
-          && request.resource.data.get('authorId','') == request.auth.uid;
+          && request.resource.data.get('authorId','') == request.auth.uid
+          // v14 Wave2 — an announcement channel is post-restricted to its creator
+          // or an admin; everyone else is read-only (client hides the composer too).
+          && ( get(/databases/$(database)/documents/conversations/$(convId)).data.get('type','') != 'announcement'
+               || get(/databases/$(database)/documents/conversations/$(convId)).data.get('createdBy','') == request.auth.uid
+               || isAdmin() );
         // Author edits own message; admin moderates; any member may toggle
         // their OWN key inside the reactions map — and nothing else.
         //
