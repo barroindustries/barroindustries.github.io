@@ -861,8 +861,10 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 }
 
 .notif-btn {
-  position: relative; background: var(--s1);
-  border: 1px solid var(--border); border-radius: var(--r-xs);
+  /* Owner req — seamless top-bar icons: no box border/fill at rest, hover
+     still gives a subtle highlight for affordance. */
+  position: relative; background: transparent;
+  border: none; border-radius: var(--r-xs);
   padding: 7px 10px; cursor: pointer;
   font-size: 1.0625rem; color: var(--text-muted);
   transition: background var(--t1), color var(--t1), box-shadow var(--t2);

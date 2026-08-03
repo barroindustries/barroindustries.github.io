@@ -532,16 +532,11 @@ function showApp() {
 
 // ── Pull-to-Refresh ───────────────────────────────
 function initPullToRefresh() {
-  // v14 (owner: "it keeps refreshing when I quickly scroll back up") —
-  // pull-to-refresh DISABLED. A fast upward flick that overshoots the top
-  // kept arming a refresh, and after two retunes it still misfired. The app
-  // is real-time (Firestore listeners), so manual refresh is redundant; the
-  // gesture is removed entirely rather than tuned again. The #ptr-indicator
-  // is hidden below. To re-enable, delete this early return.
-  const _ind = document.getElementById('ptr-indicator');
-  if (_ind) _ind.style.display = 'none';
-  return;
-  /* eslint-disable no-unreachable */
+  // v14 (owner: "refresh only when at the top-most part of the page then pull
+  // down") — RE-ENABLED with a strict top-only gate: the pull only arms when
+  // the content is ALREADY resting at the EXACT top (scrollTop 0) AND no scroll
+  // happened in the last 400ms. That kills the original misfire (a fast
+  // scroll-back-up overshoot is still-settling momentum, not a deliberate pull).
   const mc  = document.getElementById('main-content');
   const ind = document.getElementById('ptr-indicator');
   if (!mc || !ind) return;
@@ -606,10 +601,10 @@ function initPullToRefresh() {
   let _lastMcScrollAt = 0;
   mc.addEventListener('scroll', () => { _lastMcScrollAt = Date.now(); }, { passive: true });
   mc.addEventListener('touchstart', e => {
-    if (refreshing || mc.scrollTop > 2) return;
+    if (refreshing || mc.scrollTop > 0) return;   // must be resting at the EXACT top
     // momentum guard: a touch landing during/just after scroll momentum is a
     // scroll-stop, never the start of a deliberate pull
-    if (Date.now() - _lastMcScrollAt < 200) return;
+    if (Date.now() - _lastMcScrollAt < 400) return;   // let momentum fully settle first
     startY    = e.touches[0].clientY;
     startTime = Date.now();
     lastDy    = 0;
