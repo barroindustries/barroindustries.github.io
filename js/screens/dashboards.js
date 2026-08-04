@@ -434,10 +434,137 @@ async function renderProductDatabase() {
         </div>`;
       }).join('')}
     </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h3 style="font-size:14px;font-weight:700">${emojiIcon('📊',16)} Volume Pricing (Quantity Breaks)</h3>
+      </div>
+      <div class="card-body">
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">Per-line quantity-break discount, keyed off each line's own qty — no cross-line aggregation (two 5-unit lines of the same product are NOT one 10-unit line). Breaks count pieces per line, not meters/area — ten 500mm shelves on one line is qty 10; one 6-meter counter is qty 1. Saving here does not live-update an already-open builder tab — it picks up the new tiers on its next load or "↻ Reload DB".</p>
+        <div id="pdb-vt-empty" style="display:none;font-size:12px;color:var(--text-muted);padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:10px">No tiers — volume discounts are OFF. Quotes are unchanged until you add one.</div>
+        <div class="table-wrap">
+          <table class="data-table" id="pdb-vt-table">
+            <thead><tr><th>Min Qty</th><th>Discount %</th><th></th></tr></thead>
+            <tbody id="pdb-vt-tbody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;flex-wrap:wrap;gap:8px">
+          <button class="btn-secondary btn-sm" id="pdb-vt-add" type="button">+ Add tier</button>
+          <button class="btn-primary btn-sm" id="pdb-vt-save" type="button">Save Volume Pricing</button>
+        </div>
+        <div id="pdb-vt-preview" style="font-size:12px;color:var(--text-muted);margin-top:8px"></div>
+      </div>
+    </div>
   `;
   // Icons render once at mount — syncCoefLabel toggles visibility/text only on
   // each formula change, it must not re-scan the DOM for icons every time.
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+
+  // ── PRICING-TIERS-SPEC.md §3.1/§5.1 — Volume Pricing (Quantity Breaks) ──
+  // Draft array of {minQty, discountPct} (values may be '' mid-edit); seeded
+  // from the raw stored value (not builder-side normalizeVolumeTiers) so a
+  // malformed row left by a hand-edited doc is visible and fixable here
+  // rather than silently dropped. The builder's own normalizeVolumeTiers()
+  // is the defense-in-depth layer that keeps a bad doc from ever mispricing
+  // a live quote regardless of what this editor shows.
+  let vtTiers = (Array.isArray(meta.volumeTiers) ? meta.volumeTiers : [])
+    .map(t => ({ minQty: (t && t.minQty) ?? '', discountPct: (t && t.discountPct) ?? '' }));
+
+  const vtCleanRow = t => ({ minQty: Math.floor(Number(t.minQty)), discountPct: Number(t.discountPct) });
+
+  function renderVtTable() {
+    const tbody = document.getElementById('pdb-vt-tbody');
+    const empty = document.getElementById('pdb-vt-empty');
+    if (!tbody) return;
+    if (!vtTiers.length) {
+      tbody.innerHTML = '';
+      if (empty) empty.style.display = '';
+    } else {
+      if (empty) empty.style.display = 'none';
+      tbody.innerHTML = vtTiers.map((t, i) => `
+        <tr data-i="${i}">
+          <td><input type="number" step="1" min="2" class="pdb-vt-minqty" data-i="${i}" value="${escHtml(String(t.minQty ?? ''))}" style="width:100px"></td>
+          <td><input type="number" step="0.5" min="0" max="50" class="pdb-vt-pct" data-i="${i}" value="${escHtml(String(t.discountPct ?? ''))}" style="width:100px"></td>
+          <td style="text-align:right"><button type="button" class="btn-secondary btn-sm pdb-vt-remove" data-i="${i}" title="Remove tier">✕</button></td>
+        </tr>`).join('');
+    }
+    updateVtPreview();
+  }
+
+  function updateVtPreview() {
+    const preview = document.getElementById('pdb-vt-preview');
+    if (!preview) return;
+    const clean = vtTiers.map(vtCleanRow).filter(t => Number.isFinite(t.minQty) && Number.isFinite(t.discountPct)).sort((a, b) => a.minQty - b.minQty);
+    if (!clean.length) { preview.textContent = ''; return; }
+    const sampleQty = 12;
+    let best = null;
+    clean.forEach(t => { if (sampleQty >= t.minQty) best = t; });
+    preview.textContent = best
+      ? `e.g. a ${sampleQty}-unit line gets −${best.discountPct}%`
+      : `e.g. a ${sampleQty}-unit line gets no discount yet (lowest tier starts at ${clean[0].minQty})`;
+  }
+
+  renderVtTable();
+
+  document.getElementById('pdb-vt-add').addEventListener('click', () => {
+    if (vtTiers.length >= 10) { Notifs.showToast('Maximum 10 tiers', 'error'); return; }
+    vtTiers.push({ minQty: '', discountPct: '' });
+    renderVtTable();
+  });
+
+  document.getElementById('pdb-vt-tbody').addEventListener('click', e => {
+    if (!e.target.classList.contains('pdb-vt-remove')) return;
+    const i = parseInt(e.target.dataset.i, 10);
+    vtTiers.splice(i, 1);
+    renderVtTable();
+  });
+
+  document.getElementById('pdb-vt-tbody').addEventListener('input', e => {
+    const i = parseInt(e.target.dataset.i, 10);
+    if (!vtTiers[i]) return;
+    if (e.target.classList.contains('pdb-vt-minqty')) vtTiers[i].minQty = e.target.value;
+    else if (e.target.classList.contains('pdb-vt-pct')) vtTiers[i].discountPct = e.target.value;
+    updateVtPreview();
+  });
+
+  document.getElementById('pdb-vt-save').addEventListener('click', async () => {
+    const btn = document.getElementById('pdb-vt-save');
+    const rows = vtTiers.map(vtCleanRow);
+    // Blocking validation (§5.1)
+    for (const t of rows) {
+      if (!Number.isFinite(t.minQty) || t.minQty < 2) { Notifs.showToast('Min qty must be a whole number of 2 or more — a 1-qty tier is a base-price cut.', 'error'); return; }
+      if (!Number.isFinite(t.discountPct) || t.discountPct <= 0 || t.discountPct > 50) { Notifs.showToast('Discount % must be greater than 0 and at most 50.', 'error'); return; }
+    }
+    const seen = new Set();
+    for (const t of rows) {
+      if (seen.has(t.minQty)) { Notifs.showToast(`Duplicate min qty: ${t.minQty}. Each tier needs a unique min qty.`, 'error'); return; }
+      seen.add(t.minQty);
+    }
+    if (rows.some(t => t.discountPct > 30) && !await confirmDialog({ message: 'One or more tiers discount more than 30%. Save anyway?' })) return;
+    rows.sort((a, b) => a.minQty - b.minQty);
+    // Non-blocking warning: a higher tier discounting LESS than the tier below it.
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i].discountPct < rows[i - 1].discountPct) {
+        if (!await confirmDialog({ message: `Tier ${rows[i].minQty}+ units (${rows[i].discountPct}%) discounts LESS than tier ${rows[i - 1].minQty}+ units (${rows[i - 1].discountPct}%). Save anyway?` })) return;
+        break;
+      }
+    }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      // Top-level field on productMeta/config, merge:true — never nested
+      // inside `constants` (§1.2), which catalog-import spread-merges and
+      // would clobber the ladder.
+      await db.collection('productMeta').doc('config').set({ volumeTiers: rows }, { merge: true });
+      window.logAudit && window.logAudit('update', 'productMeta', 'config', { volumeTiers: rows.length });
+      Notifs.showToast('Volume pricing saved. Open builder tabs pick it up on next load or "↻ Reload DB".', 'success');
+      vtTiers = rows.map(t => ({ minQty: t.minQty, discountPct: t.discountPct }));
+      renderVtTable();
+    } catch (e) {
+      Notifs.showToast('Error saving volume pricing', 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save Volume Pricing';
+    }
+  });
 
   const coefLabelFor = ft => ft === 'per_area' ? 'Price per extra sqm (₱)' : 'Price per extra mm (₱)';
   const syncCoefLabel = prefix => {

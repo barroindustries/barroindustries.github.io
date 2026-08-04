@@ -209,6 +209,13 @@ tr:hover td{background:#fafbff;}
 .dims-edit{font-size:11px;color:var(--text);flex:1;line-height:1.4;}
 .price-print{display:none;}
 .lead-in{width:90px!important;text-align:center;}
+/* PRICING-TIERS-SPEC.md §3.2 — per-line quantity-break note under Amount.
+   NOT .no-print: it renders on the client's A4 printout deliberately
+   (transparency is the point of published quantity breaks). The "off" chip
+   variant (vol-note-off, rep waived an applicable break) IS .no-print in
+   the HTML — visible to the rep only, invisible to the client. */
+.vol-note{font-size:10px;color:var(--red);margin-top:2px;cursor:pointer;line-height:1.3;}
+.vol-note.vol-note-off{color:var(--gray-dark);font-style:italic;}
 [contenteditable][data-ph]:empty:before{content:attr(data-ph);color:#bbb;font-style:italic;}
 .empty-state{text-align:center;padding:40px;color:var(--gray-dark);}
 
@@ -517,6 +524,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   .spec-edit{font-size:8pt;color:#333;}
   .dims-edit{font-size:8pt;color:#333;}
   .notes-cell{font-size:8pt;color:#333;}
+  .vol-note{font-size:7.5pt;color:#333;margin-top:1px;}
   .totals-tbl{min-width:0;width:48%;margin-left:auto;page-break-inside:avoid;break-inside:avoid;}
   .totals-tbl td{font-size:9pt;padding:2.5px 8px;}
   .totals-tbl tr.grand td{font-size:10.5pt;}
@@ -1433,6 +1441,10 @@ const IS_TOUCH=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
 let _dragIdx=null;
 let currentCatFilter='all', focusedSearchIdx=-1;
 let DB={products:[],categories:[],laborRoles:[],constants:{}};
+// PRICING-TIERS-SPEC.md — per-item quantity-break volume discounts. Global,
+// set by loadDatabase (§4). Always an array; [] = feature off (§1.4 safety
+// contract: no config ⇒ no breaks ⇒ computeTotals stays byte-identical).
+let VOLUME_TIERS=[];
 let selectedProduct=null;
 // Measurement unit handling — all dimensions are stored/priced in mm internally.
 // Imperial units (in/ft) display as fractions to the nearest 1/16".
@@ -1531,6 +1543,11 @@ let draftSaveTimer=null, draftAckTimer=null;
 //  then falls back to embedded fallback data.
 // ═══════════════════════════════════════════════════════════════════
 async function loadDatabase(force) {
+  // PRICING-TIERS-SPEC.md §4 — reset every run so a "Reload DB" that lands
+  // on a fallback path (JSON/embedded) can never retain stale tiers from a
+  // previous successful Firestore load. Only the Firestore success branch
+  // below may repopulate this.
+  VOLUME_TIERS=[];
   setStatus('loading','Loading product database…');
 
   // file:// protocol blocks Firestore/fetch — skip directly to embedded data
@@ -1604,6 +1621,11 @@ async function loadDatabase(force) {
       laborRoles: meta.laborRoles || [],
       constants: meta.constants || {},
     };
+    // PRICING-TIERS-SPEC.md §4 — the only branch that can populate
+    // VOLUME_TIERS; every other return/throw path below leaves it at the
+    // [] reset above (fallback direction: never undercharge on a degraded
+    // load).
+    VOLUME_TIERS = normalizeVolumeTiers(meta.volumeTiers);
     setStatus('online',`✅ Live database — ${DB.products.length} products in ${DB.categories.length} categories`);
     initUI();
     return;
@@ -2557,6 +2579,67 @@ function onMeasureUnitChange(){
 // recomputePrice()) instead of being silently treated as free.
 let calcPriceWarning='';
 
+// ═══════════════════════════════════════════════════════════════════
+//  PRICING-TIERS-SPEC.md — per-item quantity-break volume discounts
+//  Opt-in (§1.4): VOLUME_TIERS is [] until productMeta/config.volumeTiers
+//  is configured. Every helper below degrades to "no break" on empty,
+//  missing, or malformed config — never a wrong total. The break applies
+//  to item.amount at READ time only (§2.1); unitPrice/amount themselves
+//  stay GROSS everywhere and are never mutated by this feature.
+// ═══════════════════════════════════════════════════════════════════
+
+// Defensive normalization (defense in depth against a hand-edited doc), §4.
+function normalizeVolumeTiers(raw){
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  return raw
+    .map(t => ({ minQty: Math.floor(Number(t && t.minQty)), discountPct: Number(t && t.discountPct) }))
+    .filter(t => Number.isFinite(t.minQty) && t.minQty >= 1
+              && Number.isFinite(t.discountPct) && t.discountPct > 0 && t.discountPct < 100
+              && !seen.has(t.minQty) && seen.add(t.minQty))
+    .sort((a,b) => a.minQty - b.minQty);
+}
+
+// Pure. Returns null (no break) or {minQty, pct, amt} — amt in WHOLE PESOS.
+// Single source of truth for the tier math (§2.2) — computeTotals, the
+// per-line note, and the payload stamp all call this, never re-derive.
+function volumeBreakFor(item, tiers = VOLUME_TIERS){
+  if (!tiers.length) return null;                    // safety contract, §1.4
+  if (item.volumeBreakOff) return null;              // per-line opt-out, §2.5
+  const qty = Number(item.qty) || 0;
+  let best = null;
+  for (const t of tiers){ if (qty >= t.minQty) best = t; }   // pre-sorted asc → last hit = highest tier
+  if (!best) return null;
+  const gross = Number(item.amount) || 0;            // the SAME number subtotal sums — never re-derive
+  const amt = Math.round(gross * best.discountPct / 100);
+  return amt > 0 ? { minQty: best.minQty, pct: best.discountPct, amt } : null;
+}
+
+// Display-only (§3.2 "off" chip): what WOULD apply if this line weren't
+// opted out. Delegates to volumeBreakFor for the actual tier lookup (never
+// re-implements the qty>=minQty loop) by cloning with the opt-out cleared.
+function volumeBreakIgnoringOff(item, tiers = VOLUME_TIERS){
+  return volumeBreakFor({ ...item, volumeBreakOff:false }, tiers);
+}
+
+// Per-line waiver (§3.2): clicking a line's volume-discount note (applied
+// or the muted "off" chip) toggles item.volumeBreakOff. Breaks are always
+// recomputed live from (qty, amount, VOLUME_TIERS) on every render — this
+// flag is the only thing persisted, riding along with items[] through
+// localStorage/editableState/duplicate/LOAD_QUOTE with no extra plumbing.
+function toggleVolumeBreak(idx){
+  const item=items[idx]; if(!item) return;
+  const turningOff = !item.volumeBreakOff;
+  const msg = turningOff
+    ? "Waive the volume discount on this line? The client price will go up."
+    : "Re-apply the volume discount on this line?";
+  if(!confirm(msg)) return;
+  item.volumeBreakOff = turningOff;
+  saveToStorage();
+  renderItems();
+  showToast(turningOff ? 'Volume discount waived on this line.' : 'Volume discount re-applied on this line.');
+}
+
 function computePrice(p){
   if(!p) return 0;
   let price = p.basePrice||0;
@@ -2769,6 +2852,17 @@ function renderItems(){
       // would just sit there inert; up/down buttons are the real control there.
       const dragAttrs=IS_TOUCH?'':`draggable="true" ondragstart="onItemDragStart(event,${idx})" ondragend="onItemDragEnd(event)"`;
       const dragHandle=IS_TOUCH?'':`<span class="drag-handle" ${dragAttrs} title="Drag to reorder">⠿</span>`;
+      // PRICING-TIERS-SPEC.md §3.2 — per-line quantity-break note. With
+      // VOLUME_TIERS=[] (no tiers configured) both vb and vbOff are always
+      // null and volNoteHtml stays '' — zero DOM change from today (§1.4).
+      const vb=volumeBreakFor(item);
+      const vbOff=(!vb && item.volumeBreakOff)?volumeBreakIgnoringOff(item):null;
+      let volNoteHtml='';
+      if(vb){
+        volNoteHtml=`<div class="vol-note" onclick="toggleVolumeBreak(${idx})" title="Tap to waive this line's volume discount">Vol −${vb.pct}% (${vb.minQty}+ units): −${formatPeso(vb.amt)}</div>`;
+      } else if(vbOff){
+        volNoteHtml=`<div class="vol-note vol-note-off no-print" onclick="toggleVolumeBreak(${idx})" title="Tap to re-apply this line's volume discount">Vol discount off — tap to apply (−${formatPeso(vbOff.amt)})</div>`;
+      }
       html+=`<tr class="item-row" data-idx="${idx}" ondragover="onItemRowDragOver(event,${idx})" ondragleave="onItemRowDragLeave(event)" ondrop="onItemRowDrop(event,${idx})">
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
@@ -2786,7 +2880,7 @@ function renderItems(){
         </td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
         <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
-        <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}</td>
+        <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}${volNoteHtml}</td>
         <td style="text-align:center;"><input class="cell-unit lead-in" type="text" value="${item.leadTime||''}" placeholder="e.g. 7-14 days" onchange="updateLead(${idx},this)"></td>
         <td class="no-print" style="text-align:center;">
           <div class="row-actions">
@@ -2810,6 +2904,12 @@ function renderItems(){
 
 function computeTotals(){
   const subtotal=items.reduce((s,i)=>s+i.amount,0);
+  // PRICING-TIERS-SPEC.md §2.3 — NEW. With VOLUME_TIERS=[] (no tiers
+  // configured) volumeBreakFor always returns null, so this reduces to 0 and
+  // preDiscount below is float-exact-identical to subtotal+diAdded (§1.4).
+  const volumeBreakTotal=items.reduce((s,i)=>{
+    const b=volumeBreakFor(i); return s+(b?b.amt:0);
+  },0);
   const consts=DB.constants||{};
   const vatRate=consts.vat||0.12;
   const showVat=document.getElementById('showVat')?.checked;
@@ -2825,7 +2925,10 @@ function computeTotals(){
   const diInclude=(document.getElementById('diInclude')?.value||'yes')==='yes';
 
   const diAdded=diInclude?diAmount:0;
-  const preDiscount=subtotal+diAdded;
+  // PRICING-TIERS-SPEC.md §2.3 — CHANGED. was: subtotal+diAdded. VAT and
+  // commission below are UNCHANGED TEXT — they derive from preDiscount, so
+  // both land on post-break figures automatically.
+  const preDiscount=subtotal-volumeBreakTotal+diAdded;
   // Discount applied BELOW items, before VAT — same position for both modes.
   const discountAmt=discMode==='amount' ? Math.max(0,Math.min(discAmtCustom,preDiscount)) : preDiscount*(discPct/100);
   const net=preDiscount-discountAmt;
@@ -2834,7 +2937,7 @@ function computeTotals(){
   // Commission computed on the grand total — same position for both modes.
   const commissionAmt=commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100);
 
-  return {subtotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
+  return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
 function renderTotals(){
@@ -2842,10 +2945,16 @@ function renderTotals(){
   const _iq=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
   let html='';
   html+=`<tr><td>Subtotal</td><td>${formatPeso(t.subtotal)}</td></tr>`;
+  // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
+  // D&I. With t.volumeBreakTotal===0 (no tiers configured) this renders
+  // nothing (§1.4).
+  if(t.volumeBreakTotal>0) html+=`<tr class="discount"><td>Volume Discount (qty breaks)</td><td>−${formatPeso(t.volumeBreakTotal)}</td></tr>`;
   if(t.diAdded>0) html+=`<tr><td>Delivery &amp; Installation</td><td>${formatPeso(t.diAdded)}</td></tr>`;
   const discLabel=t.discMode==='amount' ? 'Discount (flat)' : `Discount (${t.discPct}%)`;
   if(t.discountAmt>0) html+=`<tr class="discount"><td>${discLabel}</td><td>−${formatPeso(t.discountAmt)}</td></tr>`;
-  if(t.discountAmt>0||t.diAdded>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
+  // widened §3.3 — was: t.discountAmt>0||t.diAdded>0 — otherwise a
+  // break-only quote prints Subtotal → VAT → Grand with an unexplained gap.
+  if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
   if(t.showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(t.vatAmt)}</td></tr>`;
   html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(t.grand)}</td></tr>`;
   html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${items.length} line item${items.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}</td></tr>`;
@@ -4235,6 +4344,17 @@ function buildQuotePayload(){
   const co = currentCo;
   const quoteNo = document.getElementById('quoteNo').value;
   const t = computeTotals();
+  // PRICING-TIERS-SPEC.md §2.5 — outputs only; recomputed fresh from
+  // (qty, amount, VOLUME_TIERS) on every payload build and never read back
+  // into the math. Stamp the applied tier onto each item (a record of what
+  // was actually filed) and delete any stale stamp left from a prior state
+  // (different tiers/qty/off-toggle) when no break applies now — with
+  // VOLUME_TIERS=[] every item just gets its stale stamps cleaned, never set.
+  items.forEach(i=>{
+    const b=volumeBreakFor(i);
+    if(b){ i.volumeBreakPct=b.pct; i.volumeBreakAmt=b.amt; }
+    else { delete i.volumeBreakPct; delete i.volumeBreakAmt; }
+  });
   const grand = t.grand;
   const dp = getDpAmount(grand);
   const balance = Math.max(0,grand-dp);
@@ -4283,6 +4403,7 @@ function buildQuotePayload(){
     quoteDate:     document.getElementById('quoteDate')?.value||'',
     items:         items,
     subtotal:      t.subtotal,
+    volumeBreakTotal: t.volumeBreakTotal,  // PRICING-TIERS-SPEC.md §2.5 — always present, 0 when off
     deliveryInstall:{ amount:t.diAmount, includedInTotal:t.diInclude,
                       free:document.getElementById('diFree')?.checked||false,
                       method:document.getElementById('diMethod')?.value||'',
