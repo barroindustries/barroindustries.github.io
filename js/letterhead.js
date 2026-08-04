@@ -13,7 +13,10 @@
                                      : String(s == null ? '' : s).replace(/[&<>"']/g,
                         c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])));
 
-  // Absolute logo URL — resolves inside window.open('','_blank') docs (no base href).
+  // Absolute logo URL — resolves inside window.open('','_blank') docs (no base
+  // href); also fine in the in-app openPrintableDoc host (js/print-docs.js) —
+  // same-origin absolute URL, works both on-screen and as an html2canvas
+  // capture source.
   function absLogo(path) {
     try { return location.origin + location.pathname.replace(/[^/]*$/, '') + path; }
     catch (_) { return path; }

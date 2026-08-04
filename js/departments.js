@@ -2289,7 +2289,6 @@ function buildBillingInvoiceHTML(p, inv) {
   const f = n => (parseFloat(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
   const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
   const balanceAfter = (Number(inv.balanceBefore)||0) - (Number(inv.amount)||0);
-  const safeName = (inv.no||'invoice').replace(/[^a-zA-Z0-9-]/g,'');
   const docTitle = inv.kind === 'downpayment' ? 'DOWNPAYMENT INVOICE' : 'BILLING INVOICE';
   const _lh = window.buildLetterhead ? window.buildLetterhead({
     docTitle,
@@ -2385,28 +2384,16 @@ ${_lh ? _lh.printCSS : ''}`;
     </tr>
   </table>`}`;
 
-  const extraScript = `
-async function downloadJPEG() {
-  const btn = document.querySelector('.bar button:nth-child(3)');
-  if(btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
-  if (!window.html2canvas) {
-    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
-  }
-  const el = document.getElementById('invoice-page');
-  const canvas = await html2canvas(el, { scale:2, useCORS:true, backgroundColor:'#fff', logging:false });
-  const link = document.createElement('a');
-  link.download = '${safeName}.jpg';
-  link.href = canvas.toDataURL('image/jpeg', 0.95);
-  link.click();
-  if(btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
-}`;
-
+  // v14 doc-print overhaul (DOCUMENTS-PRINT-SPEC.md §6.1) — this used to
+  // lazy-load html2canvas from cdnjs.cloudflare.com for a hand-rolled Save
+  // as JPEG button, which index.html's CSP script-src (`'self' gstatic
+  // unpkg jsdelivr` only) has never allowed, so Save as JPEG failed on
+  // every device. openPrintableDoc's built-in #pd-jpeg-btn now covers this
+  // for free via the local vendored html2canvas + pdf-lite pipeline.
   window.openPrintableDoc({
     title: `${docTitle} — ${inv.no||''}`,
     pageId: 'invoice-page',
     barLabel: `${emojiIcon('🧾',16)} ${docTitle} — ${escHtml(inv.no||'')}`,
-    extraButtons: `<button onclick="downloadJPEG()">${emojiIcon('📷',16)} Save as JPEG</button>`,
-    extraScript,
     bodyHtml, pageCss,
     accent: '#1E3A5F',
     bgColor: '#f0f0f0',

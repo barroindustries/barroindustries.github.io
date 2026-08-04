@@ -2482,7 +2482,11 @@ function renderIDCard(containerId, u) {
   });
 }
 
-// ── CR80 ID-card print (new-window document.write; front+back per card) ──
+// ── CR80 ID-card print — DOCUMENTS-PRINT-SPEC.md §5A: converted to an
+// openPrintableDoc caller (in-app openPage host, same cure as the other
+// seven printable docs) instead of its own bespoke window.open+
+// document.write host. Signature unchanged — all three call sites (app.js
+// employee self-card ×2 above, hr.js worker single/batch IDs) work as-is.
 window.printIDCards = function(data, tokens) {
   const B = window.BRAND || {};
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -2519,39 +2523,48 @@ window.printIDCards = function(data, tokens) {
     </div>`;
 
   const body = data.map((d,i)=>cardFront(d, (tokens||[])[i]) + cardBack(d)).join('');
-  const w = window.open('', '_blank');
-  if (!w) { alert('Please allow pop-ups to print ID cards.'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ID Cards — Barro Industries</title><style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#eee;padding:12px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
-    .cr80{width:85.6mm;height:53.98mm;background:#fff;color:#111;border-radius:3mm;overflow:hidden;padding:4mm;position:relative;box-shadow:0 1px 4px rgba(0,0,0,.2)}
-    .front{border-top:3mm solid ${navy}}
-    .top{display:flex;align-items:center;gap:2mm;margin-bottom:2mm}
-    .logo{height:8mm;width:8mm;object-fit:contain}
-    .co{font-size:10pt;font-weight:800;color:${navy};letter-spacing:.3px}
-    .cosub{font-size:6pt;letter-spacing:2px;color:#777}
-    .mid{display:flex;gap:3mm;align-items:flex-start}
-    .p{width:18mm;height:22mm;object-fit:cover;border:0.4mm solid #ccc;border-radius:1.5mm;flex:0 0 auto}
-    .ph{display:flex;align-items:center;justify-content:center;font-size:20pt;background:#f2f2f2}
-    .info{flex:1;min-width:0}
-    .nm{font-size:11pt;font-weight:800;line-height:1.1}
-    .rl{font-size:7.5pt;color:#555;margin:.5mm 0}
-    .dt{font-size:7pt;color:#444;line-height:1.4}
-    .qr{width:20mm;height:20mm;flex:0 0 auto}.qr svg{width:100%;height:100%}
-    .qrfb{font-size:4pt;word-break:break-all;color:#333}
-    .bot{position:absolute;left:4mm;right:4mm;bottom:2.5mm;display:flex;justify-content:space-between;font-size:6.5pt;color:#666;border-top:0.3mm solid #eee;padding-top:1mm}
-    .back{border-top:3mm solid ${navy};display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
-    .bkco{font-size:11pt;font-weight:800;color:${navy}}
-    .bktag{font-size:6.5pt;color:#666;margin-top:.5mm}
-    .bkrule{width:60%;height:0.3mm;background:#ddd;margin:2mm 0}
-    .bknote{font-size:6.5pt;color:#555;line-height:1.5;max-width:70mm}
-    .bkbrand{font-size:6pt;color:#999;margin-top:2mm;letter-spacing:.5px}
-    @page{size:auto;margin:6mm}
-    @media print{body{background:#fff;padding:0;gap:4mm}.cr80{box-shadow:none;page-break-inside:avoid;break-inside:avoid}}
-  </style></head><body>${body}
-  <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
-  </body></html>`);
-  w.document.close();
+  // The old body{…display:flex…} rule moves onto .page (the sheet
+  // openPrintableDoc renders into) — everything else here is byte-identical
+  // to the old popup's <style> block, minus the *{…} reset (openPrintableDoc's
+  // own scoped base CSS already provides that) and the body selector itself.
+  const pageCss = `
+  .page{width:210mm;margin:0 auto;background:#fff;padding:12px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .cr80{width:85.6mm;height:53.98mm;background:#fff;color:#111;border-radius:3mm;overflow:hidden;padding:4mm;position:relative;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+  .front{border-top:3mm solid ${navy}}
+  .top{display:flex;align-items:center;gap:2mm;margin-bottom:2mm}
+  .logo{height:8mm;width:8mm;object-fit:contain}
+  .co{font-size:10pt;font-weight:800;color:${navy};letter-spacing:.3px}
+  .cosub{font-size:6pt;letter-spacing:2px;color:#777}
+  .mid{display:flex;gap:3mm;align-items:flex-start}
+  .p{width:18mm;height:22mm;object-fit:cover;border:0.4mm solid #ccc;border-radius:1.5mm;flex:0 0 auto}
+  .ph{display:flex;align-items:center;justify-content:center;font-size:20pt;background:#f2f2f2}
+  .info{flex:1;min-width:0}
+  .nm{font-size:11pt;font-weight:800;line-height:1.1}
+  .rl{font-size:7.5pt;color:#555;margin:.5mm 0}
+  .dt{font-size:7pt;color:#444;line-height:1.4}
+  .qr{width:20mm;height:20mm;flex:0 0 auto}.qr svg{width:100%;height:100%}
+  .qrfb{font-size:4pt;word-break:break-all;color:#333}
+  .bot{position:absolute;left:4mm;right:4mm;bottom:2.5mm;display:flex;justify-content:space-between;font-size:6.5pt;color:#666;border-top:0.3mm solid #eee;padding-top:1mm}
+  .back{border-top:3mm solid ${navy};display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+  .bkco{font-size:11pt;font-weight:800;color:${navy}}
+  .bktag{font-size:6.5pt;color:#666;margin-top:.5mm}
+  .bkrule{width:60%;height:0.3mm;background:#ddd;margin:2mm 0}
+  .bknote{font-size:6.5pt;color:#555;line-height:1.5;max-width:70mm}
+  .bkbrand{font-size:6pt;color:#999;margin-top:2mm;letter-spacing:.5px}
+  @page{size:auto;margin:6mm}
+  @media print{.page{background:#fff;padding:0;gap:4mm}.cr80{box-shadow:none;page-break-inside:avoid;break-inside:avoid}}`;
+
+  // Behavior delta (accepted, spec §5A): desktop still pops the print dialog
+  // immediately (autoPrint); iOS standalone now SHOWS the cards in-app with
+  // working Print/Save-PDF/JPEG buttons instead of failing silently on the
+  // blocked window.open (the whole point of this conversion).
+  window.openPrintableDoc({
+    title: 'ID Cards — Barro Industries',
+    barLabel: `${emojiIcon('🪪',16)} ID Cards`,
+    bodyHtml: body,
+    pageCss,
+    autoPrint: true
+  });
 };
 
 // ── My Department (supports dual) ─────────────────
