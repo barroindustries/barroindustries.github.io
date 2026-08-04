@@ -1274,12 +1274,31 @@ exports.respondToQuote = functions
             throw new functions.https.HttpsError('failed-precondition', 'This quotation has expired — please request an updated quote.');
           }
         }
-        tx.update(mirrorRef, {
+        // Reveal-on-accept (go-live decision) — bankDetails are NEVER on the
+        // mirror pre-accept (buildPublicQuoteDoc writes ''), so a link-holder
+        // cannot read the deposit account from the raw doc before accepting.
+        // On ACCEPT only, pull them from the source quote and write them onto
+        // the mirror in this same atomic step. Both reads (mirror above, source
+        // here) precede the write — valid transaction ordering. shareToken must
+        // still match, so a stale/re-shared mirror can't reveal a moved quote's
+        // account.
+        let revealedBank = '';
+        if (action === 'accept') {
+          const src = cur.src || {};
+          const scoll = (src.coll === 'bs_quotes' || src.coll === 'bk_quotes') ? src.coll : null;
+          if (scoll && src.id) {
+            const qSnap = await tx.get(db.collection(scoll).doc(src.id));
+            if (qSnap.exists && qSnap.data().shareToken === token) revealedBank = qSnap.data().bankDetails || '';
+          }
+        }
+        const mirrorUpdate = {
           status: newStatus,
           clientResponse: { status: newStatus, name, note, respondedAt: admin.firestore.FieldValue.serverTimestamp() },
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        return cur;
+        };
+        if (revealedBank) mirrorUpdate.bankDetails = revealedBank;
+        tx.update(mirrorRef, mirrorUpdate);
+        return { ...cur, _revealedBank: revealedBank };
       });
     } catch (e) {
       if (e instanceof functions.https.HttpsError) throw e;
@@ -1348,7 +1367,7 @@ exports.respondToQuote = functions
     }
 
     // 5. Return.
-    return { ok: true, status: newStatus };
+    return { ok: true, status: newStatus, bankDetails: (mirrorData && mirrorData._revealedBank) || '' };
   });
 
 // ──────────────────────────────────────────────────────────────────────────

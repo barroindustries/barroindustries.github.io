@@ -425,7 +425,11 @@
       var fn = firebase.app().functions('asia-east1').httpsCallable('respondToQuote');
       fn({ token: token, action: action, name: name, note: note }).then(function(res){
         var status = (res && res.data && res.data.status) || (action==='accept'?'accepted':'changes_requested');
-        var docCopy = Object.assign({}, doc, { clientResponse: { status: status, name: name, note: note } });
+        // Reveal-on-accept: the deposit details aren't on the mirror pre-accept;
+        // respondToQuote returns them on a successful accept so the accepted
+        // state can surface them (payment info the client now needs to pay the DP).
+        var revealedBank = (res && res.data && res.data.bankDetails) || doc.bankDetails || '';
+        var docCopy = Object.assign({}, doc, { clientResponse: { status: status, name: name, note: note }, bankDetails: revealedBank });
         host.innerHTML = respondedStateHtml(docCopy, status);
       }).catch(function(e){
         btnEl.disabled = false; btnEl.textContent = origText;

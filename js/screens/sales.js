@@ -2084,7 +2084,12 @@ window.QUOTE_BRANDS = {
 // for simplicity) never requires hunting through the render/share code —
 // flip this to false AND have functions/index.js's respondToQuote write
 // bankDetails onto the mirror only on accept.
-window.QUOTE_MIRROR_SHOW_BANK_DETAILS_IMMEDIATELY = true;
+// GO-LIVE DECISION (2026-08-04): reveal-on-accept — bankDetails are NOT put on
+// the public mirror at share time (this flag = false), so a link-holder cannot
+// read the deposit account before accepting. functions/index.js respondToQuote
+// writes them onto the mirror ONLY on accept and returns them for the page's
+// accepted state. Flip to true to show them upfront (as printed on the quote).
+window.QUOTE_MIRROR_SHOW_BANK_DETAILS_IMMEDIATELY = false;
 
 // ── buildPublicQuoteDoc — THE allowlist projection (spec §2.3) ───────────
 // Builds a BRAND NEW object field-by-field. NEVER spread/...quoteDoc — this
