@@ -5442,7 +5442,7 @@ async function renderSuggestionBox(wrap) {
       category,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    await Notifs.sendToOwner({ title:'💡 New Suggestion', body:`New "${category}" suggestion submitted.`, icon:'💡', type:'suggestion' });
+    await Notifs.sendToOwner({ title:'💡 New Suggestion', body:`New "${category}" suggestion submitted.`, icon:'💡', type:'suggestion', link:'help' });
     document.getElementById('sug-text').value = '';
     msg.style.display = 'block'; msg.style.color = 'var(--success)';
     msg.textContent = '✓ Submitted! Thank you for your feedback.';
