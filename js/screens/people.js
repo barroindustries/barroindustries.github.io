@@ -2242,7 +2242,7 @@ async function openPresidentCashAdvanceModal(users) {
           createdAt:firebase.firestore.FieldValue.serverTimestamp(),
         });
         window.logAudit && window.logAudit('create','leave',null,{ user:userProfile?.displayName||currentUser.email, type, days });
-        try{ await Notifs.sendToOwner({ title:'🌴 Leave Request', body:`${userProfile?.displayName||currentUser.email} requests ${days}-day ${lt.label} (${startDate}→${endDate}).`, icon:'🌴', type:'leave' }); }catch(_){}
+        try{ await Notifs.sendToOwner({ title:'🌴 Leave Request', body:`${userProfile?.displayName||currentUser.email} requests ${days}-day ${lt.label} (${startDate}→${endDate}).`, icon:'🌴', type:'leave', link:'approvals' }); }catch(_){}
         closeModal(); Notifs.success('Leave request submitted!'); window.renderLeavePage(c);
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
@@ -2291,7 +2291,7 @@ async function openPresidentCashAdvanceModal(users) {
       await applyLeaveApproval(r);   // decrement + write attendance FIRST (single source) — status flips only after this succeeds
       await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
-      try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
+      try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', link:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
       Notifs.success('Leave approved'); window.renderLeavePage(c);
     }catch(ex){ Notifs.showToast('Approve failed: '+(ex.message||ex.code),'error'); }
   }
@@ -2302,7 +2302,7 @@ async function openPresidentCashAdvanceModal(users) {
     try{
       await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
-      try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
+      try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', link:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
       Notifs.error('Leave rejected'); window.renderLeavePage(c);
     }catch(ex){ Notifs.showToast('Reject failed','error'); }
   }
@@ -2319,7 +2319,7 @@ async function openPresidentCashAdvanceModal(users) {
     await applyLeaveApproval(r);    // decrement + write attendance FIRST (single source) — status flips only after this succeeds
     await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
     window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
-    try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
+    try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', link:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
     return r;
   };
   window.rejectLeaveRequest = async function(id, reason){
@@ -2328,7 +2328,7 @@ async function openPresidentCashAdvanceModal(users) {
     const r = { id:s.id, ...s.data() };
     await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason||'', approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
     window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
-    try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
+    try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', link:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
     return r;
   };
 })();

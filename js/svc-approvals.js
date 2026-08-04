@@ -89,7 +89,7 @@
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '✅ Payroll Delete Approved',
       body: `Your request to delete ${name}'s ${month} payroll record has been approved.`,
-      icon: '✅', type: 'payroll_delete_approved'
+      icon: '✅', type: 'payroll_delete_approved', link: 'approvals'
     }));
     return { already: false };
   }
@@ -101,7 +101,7 @@
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '❌ Payroll Delete Denied',
       body: `Your request to delete ${name}'s ${month} payroll record was denied by the President.`,
-      icon: '❌', type: 'payroll_delete_denied'
+      icon: '❌', type: 'payroll_delete_denied', link: 'approvals'
     }));
   }
 
@@ -118,7 +118,7 @@
     });
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '✅ Delete Approved', body: `Your request to delete ${label} was approved.`,
-      icon: '✅', type: 'finance_delete_approved'
+      icon: '✅', type: 'finance_delete_approved', link: 'approvals'
     }));
     return { already: false };
   }
@@ -129,7 +129,7 @@
     });
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '❌ Delete Denied', body: `Your request to delete ${label} was denied by the President.`,
-      icon: '❌', type: 'finance_delete_denied'
+      icon: '❌', type: 'finance_delete_denied', link: 'approvals'
     }));
   }
 
@@ -159,7 +159,7 @@
     window.logAudit && window.logAudit('delete', 'quote', id, { quoteNo: ctx.qno, coll, viaApproval: true });
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: '🗑 Quote Deletion Approved', body: `Your request to delete quote ${ctx.qno} was approved.`,
-      icon: '✅', type: 'delete_approved'
+      icon: '✅', type: 'delete_approved', link: 'approvals'
     }));
   }
   async function deleteQuoteDeny(id, ctx) {
@@ -169,7 +169,7 @@
     });
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: 'Quote Deletion Denied', body: `Your request to delete quote ${ctx.qno} was denied.`,
-      icon: '❌', type: 'delete_denied'
+      icon: '❌', type: 'delete_denied', link: 'approvals'
     }));
   }
   async function deleteClientApprove(id, ctx) {
@@ -178,7 +178,7 @@
     window.logAudit && window.logAudit('delete', 'client', id, { name: ctx.name, viaApproval: true });
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: '🗑 Client Deletion Approved', body: `Your request to delete client "${ctx.name}" was approved.`,
-      icon: '✅', type: 'delete_approved'
+      icon: '✅', type: 'delete_approved', link: 'approvals'
     }));
   }
   async function deleteClientDeny(id, ctx) {
@@ -188,7 +188,7 @@
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: 'Client Deletion Denied', body: `Your request to delete client "${ctx.name}" was denied.`,
-      icon: '❌', type: 'delete_denied'
+      icon: '❌', type: 'delete_denied', link: 'approvals'
     }));
   }
 

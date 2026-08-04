@@ -733,7 +733,7 @@ async function advanceProjectStage(p, nextId){
     const dept=ns.dept;
     try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
-    if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid' }); }catch(_){} }
+    if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid', link:'projects-lifecycle' }); }catch(_){} }
     window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
     Notifs.success('Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -838,7 +838,7 @@ async function openProjectBillingModal(p){
       });
       if (res.existed) { closeModal(); Notifs.showToast('This payment was already posted.','error'); window.renderProjectLifecycle(); return; }
       window.logAudit && window.logAudit('create','payment',p.id,{ amount, type, projectNo:p.projectNo });
-      if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${window.fmtN2(p.contractAmount||0)} collected in full.`, icon:'💰', type:'project_paid' }); }catch(_){} }
+      if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${window.fmtN2(p.contractAmount||0)} collected in full.`, icon:'💰', type:'project_paid', link:'projects-lifecycle' }); }catch(_){} }
       closeModal(); Notifs.success('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
@@ -2376,7 +2376,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
       await notifyFinanceTeam({
         title: '🧾 Purchase for Recordkeeping',
         body: `${p.prNo || p.rfqNo || 'A purchase'} — ${p.supplier || 'supplier'} · ₱${fmt(p.total != null ? p.total : purchTotal(p.items))}. See Finance → Purchases.`,
-        icon: '🧾', type: 'purchase_submitted', dedupKey: `pr-fin-${p.id}`
+        icon: '🧾', type: 'purchase_submitted', link: 'dept:Finance', dedupKey: `pr-fin-${p.id}`
       });
       Notifs.success('Submitted to Finance ✓');
       redo();
@@ -2422,7 +2422,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             await notifyFinanceTeam({
               title: '📦 Purchase Received — record it',
               body: `${p.prNo || p.rfqNo || 'A purchase'} — ${p.supplier || 'supplier'} · ₱${fmt(p.total != null ? p.total : purchTotal(p.items))} was received into stock. Record it in Finance → Purchases.`,
-              icon: '📦', type: 'purchase_submitted', dedupKey: `pr-fin-${p.id}`
+              icon: '📦', type: 'purchase_submitted', link: 'dept:Finance', dedupKey: `pr-fin-${p.id}`
             }).catch(()=>{});
           }
           Notifs.success(res.unmatched.length
@@ -2589,7 +2589,7 @@ async function notifyPoApprovers(p) {
   const data = {
     title: '🛒 Purchase Order Awaiting Approval',
     body: `${p.prNo || p.rfqNo || 'PO'} — ${p.supplier || 'supplier'} · ₱${fmt(total)} (${p.requestingDept || 'Purchasing'}). Approvals → All Requests.`,
-    icon: '🛒', type: 'po_approval', dedupKey: `po-appr-${p.id}`
+    icon: '🛒', type: 'po_approval', link: 'approvals', dedupKey: `po-appr-${p.id}`
   };
   const mgrs = await db.collection('users').where('role', '==', 'manager').get().catch(() => ({ docs: [] }));
   await Promise.all(mgrs.docs.map(d => safeNotify(() => Notifs.send(d.id, data))));
@@ -2621,7 +2621,7 @@ window.approvePurchaseOrder = async function(prId) {
   if (notifyUid) await safeNotify(() => Notifs.send(notifyUid, {
     title: '✅ PO Approved',
     body: `${p.prNo || p.rfqNo || 'Your PO'} (${p.supplier || ''}) was approved — you can now print and order.`,
-    icon: '✅', type: 'po_approval_result', dedupKey: `po-appr-ok-${prId}`
+    icon: '✅', type: 'po_approval_result', link: 'dept:Purchasing', dedupKey: `po-appr-ok-${prId}`
   }));
   return p;
 };
@@ -2645,7 +2645,7 @@ window.rejectPurchaseOrder = async function(prId, reason) {
   if (notifyUid) await safeNotify(() => Notifs.send(notifyUid, {
     title: '❌ PO Rejected',
     body: `${p.prNo || p.rfqNo || 'Your PO'} was rejected${reason ? ': ' + reason : ''}. Revert it to RFQ, adjust, and resubmit.`,
-    icon: '❌', type: 'po_approval_result', dedupKey: `po-appr-no-${prId}`
+    icon: '❌', type: 'po_approval_result', link: 'dept:Purchasing', dedupKey: `po-appr-no-${prId}`
   }));
   return p;
 };

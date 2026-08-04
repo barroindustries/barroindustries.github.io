@@ -606,7 +606,7 @@ window.financeDelete = async function(opts) {
         await safeNotify(() => Notifs.sendToOwner({
           title: '🗑 Finance Delete Request',
           body:  `${window.userProfile?.displayName || u.email || 'Finance'} requested deletion of ${label}. Reason: ${reason}`,
-          icon: '🗑', type: 'finance_delete_request'
+          icon: '🗑', type: 'finance_delete_request', link: 'approvals'
         }));
         closeModal();
         Notifs.success('Deletion request sent to the President for approval.');
@@ -641,7 +641,7 @@ window.requestQuoteDelete = async function(collection, docId, label, createdBy, 
       await safeNotify(() => Notifs.sendToOwner({
         title: '🗑 Quote Delete Requested',
         body: `${(window.userProfile && window.userProfile.displayName) || u.email || 'A user'} requests deleting ${label}.${reason?' Reason: '+reason:''}`,
-        icon: '🗑', type: 'quote_delete_request'
+        icon: '🗑', type: 'quote_delete_request', link: 'approvals'
       }));
       Notifs.success('Delete request sent to the President.'); onDone('requested');
     }).catch(e => Notifs.showToast('Request failed: '+(e.message||e),'error'));
@@ -1616,7 +1616,7 @@ window.RaiseFlow = (function () {
     await safeNotify(() => Notifs.sendToOwner({
       title: '💸 Raise Approval Request',
       body: `${base.requestedByName} requested a raise for ${base.subjectName}: ₱${fmt(cur)} → ₱${fmt(newAmount)} (eff ${eff}).`,
-      icon: '💸', type: 'raise_request'
+      icon: '💸', type: 'raise_request', link: 'approvals'
     }));
     return { outcome: 'requested', id: ref.id };
   }
@@ -1663,7 +1663,7 @@ window.RaiseFlow = (function () {
       await safeNotify(() => Notifs.send(r.subjectId, {
         title: '💸 Salary Update',
         body: `Your ${r.field} changed from ₱${fmt(liveOld)} to ₱${fmt(r.newAmount)}, effective ${r.effectiveDate}.`,
-        icon: '💸', type: 'raise_applied'
+        icon: '💸', type: 'raise_applied', link: 'personal-finance'
       }));
     }
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('users'); dbCacheInvalidate('payroll'); }
@@ -1693,7 +1693,7 @@ window.RaiseFlow = (function () {
     });
     const r = snap.data();
     await safeNotify(() => Notifs.send(r.requestedBy, { title: '✅ Raise Approved',
-      body: `Your raise request for ${r.subjectName} was approved.`, icon: '✅', type: 'raise_request' }));
+      body: `Your raise request for ${r.subjectName} was approved.`, icon: '✅', type: 'raise_request', link: 'approvals' }));
     if ((r.effectiveMonth || r.effectiveDate.slice(0, 7)) <= nowMonth()) await materialize(raiseId);
     return 'approved';
   }
@@ -1709,7 +1709,7 @@ window.RaiseFlow = (function () {
     const r = snap.data();
     await safeNotify(() => Notifs.send(r.requestedBy, { title: '❌ Raise Declined',
       body: `Your raise request for ${r.subjectName} was declined.${reason ? ' Reason: ' + reason : ''}`,
-      icon: '❌', type: 'raise_request' }));
+      icon: '❌', type: 'raise_request', link: 'approvals' }));
     return 'rejected';
   }
 
@@ -2804,7 +2804,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
           : `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} received). Project ${proj.projectNo}. Record income + verify receipt.`,
         icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
       try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
-      try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
+      try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order', link:'projects-lifecycle' }); }catch(_){}
       Notifs.success('Sales order + project '+proj.projectNo+' created'+(autoPosted?' + sale recorded':''));
       if (typeof container!=='undefined' && container) {
         if (d.co==='BK') renderBKQuotationsSummary(container, currentUser, currentRole);
@@ -3292,7 +3292,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       try {
         await db.collection(COLL).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
         if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
-        await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
+        await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request', link:'approvals' });
         Notifs.success('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
     }));
@@ -3700,7 +3700,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         title: `💸 ${dept} logged a ${type==='debit'?'expense':'income'}`,
         body:  `${uName}: ${desc} — ₱${window.fmtN2(amount)}`,
         icon:  type==='debit'?`${emojiIcon('📤',16)}`:`${emojiIcon('📥',16)}`,
-        type:  'finance_entry'
+        type:  'finance_entry', link: 'dept:Finance'
       }).catch(()=>{});
 
       closeModal();

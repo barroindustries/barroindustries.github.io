@@ -868,7 +868,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             await Notifs.sendToOwner({
               title: '🗑 Payroll Delete Request',
               body:  `${window.userProfile?.displayName||currentUser.email} requested deletion of ${name}'s ${month} payroll record. Reason: ${reason}`,
-              icon: '🗑', type: 'payroll_delete_request'
+              icon: '🗑', type: 'payroll_delete_request', link: 'approvals'
             });
             closeModal();
             Notifs.success('Deletion request sent to President for approval.');
@@ -898,7 +898,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             await Notifs.send(req.requestedBy, {
               title: '✅ Payroll Delete Approved',
               body: `Your request to delete ${req.userName}'s ${req.month} payroll record has been approved.`,
-              icon: '✅', type: 'payroll_delete_approved'
+              icon: '✅', type: 'payroll_delete_approved', link: 'approvals'
             });
           }
           Notifs.success('Record deleted and requester notified.');
@@ -916,7 +916,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             await Notifs.send(reqBy, {
               title: '❌ Payroll Delete Denied',
               body: `Your request to delete ${req?.userName||'?'}'s ${req?.month||'?'} payroll record was denied by the President.`,
-              icon: '❌', type: 'payroll_delete_denied'
+              icon: '❌', type: 'payroll_delete_denied', link: 'approvals'
             });
           }
           Notifs.error('Request denied and requester notified.');

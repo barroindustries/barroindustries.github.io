@@ -1035,7 +1035,7 @@ function _showAddDealModal(partners, onSaved) {
       safeNotify(()=>Notifs.send(partnerUid,{
         title:'🤝 New Deal Registered',
         body:`President registered a new deal: ${clientName}. Your 50% share: ₱${fmt(share)}.`,
-        icon:'🤝', type:'partner_deal'
+        icon:'🤝', type:'partner_deal', link:'partner-projects'
       }));
       close(); onSaved?.();
     } catch(e) { btn.disabled=false; btn.textContent='Save Deal'; Notifs.showToast('Error: '+e.message,'error'); }

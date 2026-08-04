@@ -676,7 +676,7 @@ exports.scheduledAttendanceReminder = functions
             notifData: {
               title: `🌅 Good morning, ${name}!`,
               body: "Don't forget to time in today. Wishing you a productive day! 💪",
-              icon: '🌅', type: 'att_morning_remind', link: null,
+              icon: '🌅', type: 'att_morning_remind', link: 'attendance',
               dedupKey: `bi-att-remind-${doc.id}-${todayStr}`
             }
           });
@@ -1486,7 +1486,7 @@ exports.respondToQuote = functions
               title, body,
               icon: newStatus === 'accepted' ? '🎉' : '✏️',
               type: 'quote_response',
-              link: null,
+              link: coll === 'bk_quotes' ? 'bk-quotations' : 'bs-quotations',
               read: false,
               createdAt: admin.firestore.FieldValue.serverTimestamp(),
             }).catch((e) => console.error('[respondToQuote] notify failed for', uid, e.message))

@@ -659,12 +659,12 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
       // notify newly delegated team members
       for (const a of team) {
         if (!prevTeam.has(a.uid) && a.uid!==currentUser.uid) {
-          try { await Notifs.send(a.uid,{title:'🎨 Added to a Design project',body:`You're on "${update.name}"`,icon:'🎨',type:'project_team',dedupKey:`projteam-${p.id}-${a.uid}`}); } catch(_){}
+          try { await Notifs.send(a.uid,{title:'🎨 Added to a Design project',body:`You're on "${update.name}"`,icon:'🎨',type:'project_team',link:'dept:Design',dedupKey:`projteam-${p.id}-${a.uid}`}); } catch(_){}
         }
       }
       // notify Finance when a job-project link is newly set
       if (update.jobProjectId && update.jobProjectId!==prevJob) {
-        try { await Notifs.sendToDept('Finance',{title:'🔗 Design project linked',body:`"${update.name}" linked to job ${update.jobProjectNo||''}`,icon:'🔗',type:'project_link'}); } catch(_){}
+        try { await Notifs.sendToDept('Finance',{title:'🔗 Design project linked',body:`"${update.name}" linked to job ${update.jobProjectNo||''}`,icon:'🔗',type:'project_link',link:'projects-lifecycle'}); } catch(_){}
       }
       Notifs.showToast('Project saved','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not save project','error'); return; }
@@ -805,7 +805,7 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
       if (assignedTo && assignedTo!==currentUser.uid) {
-        try { await Notifs.send(assignedTo,{title:'🎨 Drawing assigned',body:`"${title}" — ${project.name||''}`,icon:'🎨',type:'drawing_assigned',dedupKey:`dwg-assign-${ref.id}`}); } catch(_){}
+        try { await Notifs.send(assignedTo,{title:'🎨 Drawing assigned',body:`"${title}" — ${project.name||''}`,icon:'🎨',type:'drawing_assigned',link:'dept:Design',dedupKey:`dwg-assign-${ref.id}`}); } catch(_){}
       }
       window.logAudit && window.logAudit('create','design_drawing',ref.id,{project:project.name, title});
       Notifs.showToast('Drawing created','success');
@@ -923,16 +923,16 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
     if (to==='for_review') {
       // WS35: tell the approver an approval is waiting (nobody was notified before)
       if (project?.designLead && project.designLead!==currentUser.uid) {
-        await Notifs.send(project.designLead,{title:'🔏 Drawing awaiting your approval',body:`"${d.title}" (${project?.name||d.projectName||''}) Rev ${d.currentRev||'A'} was submitted for review`,icon:'🔏',type:'drawing_for_review',dedupKey:`dwg-rev-${d.id}-${d.currentRev}`});
+        await Notifs.send(project.designLead,{title:'🔏 Drawing awaiting your approval',body:`"${d.title}" (${project?.name||d.projectName||''}) Rev ${d.currentRev||'A'} was submitted for review`,icon:'🔏',type:'drawing_for_review',link:'dept:Design',dedupKey:`dwg-rev-${d.id}-${d.currentRev}`});
       } else {
-        await Notifs.sendToDept('Design',{title:'🔏 Drawing awaiting approval',body:`"${d.title}" Rev ${d.currentRev||'A'} needs a Design Lead or manager to approve`,icon:'🔏',type:'drawing_for_review'});
+        await Notifs.sendToDept('Design',{title:'🔏 Drawing awaiting approval',body:`"${d.title}" Rev ${d.currentRev||'A'} needs a Design Lead or manager to approve`,icon:'🔏',type:'drawing_for_review',link:'dept:Design'});
       }
     }
     if (to==='approved' && d.assignedTo && d.assignedTo!==currentUser.uid) {
-      await Notifs.send(d.assignedTo,{title:'✅ Drawing approved',body:`"${d.title}" was approved`,icon:'✅',type:'drawing_approved',dedupKey:`dwg-appr-${d.id}-${d.currentRev}`});
+      await Notifs.send(d.assignedTo,{title:'✅ Drawing approved',body:`"${d.title}" was approved`,icon:'✅',type:'drawing_approved',link:'dept:Design',dedupKey:`dwg-appr-${d.id}-${d.currentRev}`});
     }
     if (to==='released') {
-      await Notifs.sendToDept('Production',{title:'📐 Drawing released',body:`"${d.title}" (${project?.name||d.projectName||''}) is released for production`,icon:'📐',type:'drawing_released'});
+      await Notifs.sendToDept('Production',{title:'📐 Drawing released',body:`"${d.title}" (${project?.name||d.projectName||''}) is released for production`,icon:'📐',type:'drawing_released',link:'dept:Production'});
       if (project?.jobProjectId) {
         await db.collection('job_projects').doc(project.jobProjectId).update({
           // drawingId + url are WS28's intake hook — its future production flow reads
@@ -1020,7 +1020,7 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
       await db.collection('design_drawings').doc(d.id).update(update);
       Object.assign(d, update);
       if (assignedTo && assignedTo!==prevAssignee && assignedTo!==currentUser.uid) {
-        try { await Notifs.send(assignedTo,{title:'🎨 Drawing assigned',body:`"${update.title}" — ${project?.name||''}`,icon:'🎨',type:'drawing_assigned',dedupKey:`dwg-reassign-${d.id}-${assignedTo}`}); } catch(_){}
+        try { await Notifs.send(assignedTo,{title:'🎨 Drawing assigned',body:`"${update.title}" — ${project?.name||''}`,icon:'🎨',type:'drawing_assigned',link:'dept:Design',dedupKey:`dwg-reassign-${d.id}-${assignedTo}`}); } catch(_){}
       }
       Notifs.showToast('Drawing saved','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not save','error'); return; }

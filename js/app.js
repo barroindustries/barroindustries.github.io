@@ -276,7 +276,7 @@ async function checkBackupHealth() {
       window.Notifs.sendToOwner({
         title: '⚠️ Backup/sync needs attention',
         body: problems.join(' '),
-        icon: '🗄️', type: 'system',
+        icon: '🗄️', type: 'system', link: 'system-health',
         dedupKey: 'backup-health-' + problems.join('|').slice(0, 80),
       }).catch(() => {});
     }
@@ -466,7 +466,7 @@ async function checkPayrollDuties(user) {
       body: isUrgent
         ? `Please complete your self-assessment for ${monthLabel} today before payroll is finalized.`
         : `Reminder: Your self-assessment for ${monthLabel} is due tomorrow. Go to Personal Finance → Self Evaluate.`,
-      icon: isUrgent ? `${emojiIcon('🚨',16)}` : `${emojiIcon('📋',16)}`, type: 'payroll_reminder',
+      icon: isUrgent ? `${emojiIcon('🚨',16)}` : `${emojiIcon('📋',16)}`, type: 'payroll_reminder', link: 'personal-finance',
       dedupKey: `selfassess-${user.uid}-${currentMonth}`
     });
     localStorage.setItem(dedupKey, '1');
@@ -495,7 +495,7 @@ async function checkCAReminder(user) {
     await Notifs.send(user.uid, {
       title: '💳 Payroll in 7 Days — CA Deduction',
       body: `You have ₱${totalBalance.toLocaleString('en-PH')} outstanding CA. Go to Personal Finance to set your preferred deduction amount for this payroll.`,
-      icon: '💳', type: 'ca_deduct_remind',
+      icon: '💳', type: 'ca_deduct_remind', link: 'personal-finance',
       dedupKey: `ca-remind-${todayStr}`
     });
     localStorage.setItem(dedupKey, '1');
@@ -1736,9 +1736,10 @@ async function saveReviewedPartnerQuote(ctx, action) {
     dbCacheInvalidate && dbCacheInvalidate('all-quotes');
     dbCacheInvalidate && dbCacheInvalidate('approvals-pending');
     if (ctx.partnerUid) {
+      const quoteLink = (ctx.quoteColl === 'bk_quotes') ? 'bk-quotations' : 'bs-quotations';
       await Notifs.send(ctx.partnerUid, action === 'approve'
-        ? { title:'✅ Quote Approved!', body:`The president edited and approved "${ctx.quoteNumber}" for ${update.clientName}. It is now filed.`, icon:'✅', type:'quote_approved' }
-        : { title:'↩ Quote Revised & Returned', body:`The president edited "${ctx.quoteNumber}" for ${update.clientName} and returned it.${notes?' Notes: '+notes:''} Open it to review the changes.`, icon:'✎', type:'quote_returned' }).catch(()=>{});
+        ? { title:'✅ Quote Approved!', body:`The president edited and approved "${ctx.quoteNumber}" for ${update.clientName}. It is now filed.`, icon:'✅', type:'quote_approved', link: quoteLink }
+        : { title:'↩ Quote Revised & Returned', body:`The president edited "${ctx.quoteNumber}" for ${update.clientName} and returned it.${notes?' Notes: '+notes:''} Open it to review the changes.`, icon:'✎', type:'quote_returned', link: quoteLink }).catch(()=>{});
     }
     window.logAudit && window.logAudit('update','quote',ctx.quoteId,{ presidentEdited:true, action });
     Notifs.success(action === 'approve' ? 'Approved with edits + partner notified' : 'Edited & returned to partner');
@@ -3815,7 +3816,7 @@ window.addEventListener('message', async (e) => {
       await Notifs.sendToOwner({
         title: '📋 Quote Filed',
         body: `${agentName} filed "${data.fileName}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)}`,
-        icon: '📋', type: 'quote_filed'
+        icon: '📋', type: 'quote_filed', link: (coll === 'bk_quotes') ? 'bk-quotations' : 'bs-quotations'
       });
       if (typeof Notifs?.success === 'function') Notifs.success(`Quote filed${version>1?` as version ${version}`:''} + client saved!`);
     } else {
@@ -3844,7 +3845,7 @@ window.addEventListener('message', async (e) => {
       await Notifs.sendToOwner({
         title: '📤 Quote Awaiting Approval',
         body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.`,
-        icon: '📤', type: 'quote_review_request'
+        icon: '📤', type: 'quote_review_request', link: 'approvals'
       });
       if (typeof Notifs?.success === 'function') Notifs.success('Sent for approval!');
     }

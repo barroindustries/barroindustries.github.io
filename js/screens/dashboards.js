@@ -2537,7 +2537,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         await Notifs.send(presSnap.docs[0].id, {
           title: '🗑️ Payroll Delete Request',
           body: `${userProfile?.displayName||currentUser.email} is requesting to delete the payroll history record for ${btn.dataset.month}. Record ID: ${btn.dataset.id}`,
-          icon: '🗑️', type: 'payroll_delete_request'
+          icon: '🗑️', type: 'payroll_delete_request', link: 'approvals'
         });
       }
       Notifs.success('Deletion request sent to president.');
@@ -2665,7 +2665,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       await Notifs.sendToOwner({
         title: '💳 CA Deduction Request',
         body: `${userProfile.displayName||currentUser.email} requests ₱${formatNum(amt)} CA deduction for ${month} payroll.`,
-        icon: '💳', type: 'ca_deduct_req'
+        icon: '💳', type: 'ca_deduct_req', link: 'approvals'
       });
       closeModal();
       Notifs.success(`CA deduction request (₱${formatNum(amt)}) submitted!`);

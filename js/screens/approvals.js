@@ -421,7 +421,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
-            title:'✅ CA Deduction Approved', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was approved.`, icon:'✅', type:'ca_deduct_reviewed'
+            title:'✅ CA Deduction Approved', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was approved.`, icon:'✅', type:'ca_deduct_reviewed', link:'personal-finance'
           }));
           Notifs.success('CA deduction request approved.');
           loadApprovalsSub('all');
@@ -429,7 +429,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
-            title:'❌ CA Deduction Rejected', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was rejected.`, icon:'❌', type:'ca_deduct_reviewed'
+            title:'❌ CA Deduction Rejected', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was rejected.`, icon:'❌', type:'ca_deduct_reviewed', link:'personal-finance'
           }));
           Notifs.error('CA deduction request rejected.');
           loadApprovalsSub('all');
@@ -474,7 +474,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.sub-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
-            title:'✅ Submission Approved', body:`"${btn.dataset.title}" was approved.`, icon:'✅', type:'submission_reviewed'
+            title:'✅ Submission Approved', body:`"${btn.dataset.title}" was approved.`, icon:'✅', type:'submission_reviewed', link:'submissions'
           }));
           Notifs.success('Submission approved!');
           loadApprovalsSub('all');
@@ -482,7 +482,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.sub-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
-            title:'❌ Submission Rejected', body:`"${btn.dataset.title}" was rejected.`, icon:'❌', type:'submission_reviewed'
+            title:'❌ Submission Rejected', body:`"${btn.dataset.title}" was rejected.`, icon:'❌', type:'submission_reviewed', link:'submissions'
           }));
           Notifs.error('Submission rejected.');
           loadApprovalsSub('all');
@@ -576,7 +576,7 @@ window.renderApprovals = async function(currentUser) {
         try {
           await db.collection(coll).doc(btn.dataset.id).delete();
           window.logAudit && window.logAudit('delete','quote',btn.dataset.id,{ quoteNo:btn.dataset.qno, coll, viaApproval:true });
-          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Quote Deletion Approved', body:`Your request to delete quote ${btn.dataset.qno} was approved.`, icon:'✅', type:'delete_approved' }));
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Quote Deletion Approved', body:`Your request to delete quote ${btn.dataset.qno} was approved.`, icon:'✅', type:'delete_approved', link:'approvals' }));
           Notifs.success('Quote deleted.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
       }));
@@ -584,7 +584,7 @@ window.renderApprovals = async function(currentUser) {
         const coll = btn.dataset.coll || 'bs_quotes';
         try {
           await db.collection(coll).doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
-          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Quote Deletion Denied', body:`Your request to delete quote ${btn.dataset.qno} was denied.`, icon:'❌', type:'delete_denied' }));
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Quote Deletion Denied', body:`Your request to delete quote ${btn.dataset.qno} was denied.`, icon:'❌', type:'delete_denied', link:'approvals' }));
           Notifs.error('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
@@ -594,7 +594,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('clients').doc(btn.dataset.id).delete();
           if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
           window.logAudit && window.logAudit('delete','client',btn.dataset.id,{ name:btn.dataset.name, viaApproval:true });
-          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Client Deletion Approved', body:`Your request to delete client "${btn.dataset.name}" was approved.`, icon:'✅', type:'delete_approved' }));
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Client Deletion Approved', body:`Your request to delete client "${btn.dataset.name}" was approved.`, icon:'✅', type:'delete_approved', link:'approvals' }));
           Notifs.success('Client deleted.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
       }));
@@ -602,7 +602,7 @@ window.renderApprovals = async function(currentUser) {
         try {
           await db.collection('clients').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
           if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
-          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Client Deletion Denied', body:`Your request to delete client "${btn.dataset.name}" was denied.`, icon:'❌', type:'delete_denied' }));
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Client Deletion Denied', body:`Your request to delete client "${btn.dataset.name}" was denied.`, icon:'❌', type:'delete_denied', link:'approvals' }));
           Notifs.error('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
@@ -1233,7 +1233,7 @@ async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
       ...window.quoteStateFields('approved'),
       approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
-    if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved' });
+    if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
@@ -1249,7 +1249,7 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
     if(notes) upd.presidentNotes=notes;
     await db.collection(coll).doc(quoteId).update(upd);
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
-    if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned' });
+    if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
@@ -1286,7 +1286,7 @@ async function openQuoteApprovalReview(ctx, onDone){
     try{
       await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('approved'), approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
-      if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved' });
+      if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
       if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
@@ -1298,7 +1298,7 @@ async function openQuoteApprovalReview(ctx, onDone){
     try{
       await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
-      if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned' });
+      if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
       if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);

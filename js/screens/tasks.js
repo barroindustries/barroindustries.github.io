@@ -1093,12 +1093,12 @@ async function openSubDetail(subId, currentUser, currentRole) {
   renderComments('submissions', subId, 'sub-comments-wrap', currentUser);
   document.getElementById('approve-btn')?.addEventListener('click', async e => {
     await db.collection('submissions').doc(e.currentTarget.dataset.id).update({status:'approved'});
-    if (s.createdBy) await Notifs.send(s.createdBy, {title:'✅ Submission Approved',body:`"${s.title}" was approved.`,icon:'✅',type:'submission_reviewed'});
+    if (s.createdBy) await Notifs.send(s.createdBy, {title:'✅ Submission Approved',body:`"${s.title}" was approved.`,icon:'✅',type:'submission_reviewed',link:'submissions'});
     closeModal(); renderSubmissions(currentUser, currentRole, '');
   });
   document.getElementById('reject-btn')?.addEventListener('click', async e => {
     await db.collection('submissions').doc(e.currentTarget.dataset.id).update({status:'rejected'});
-    if (s.createdBy) await Notifs.send(s.createdBy, {title:'❌ Submission Rejected',body:`"${s.title}" was rejected.`,icon:'❌',type:'submission_reviewed'});
+    if (s.createdBy) await Notifs.send(s.createdBy, {title:'❌ Submission Rejected',body:`"${s.title}" was rejected.`,icon:'❌',type:'submission_reviewed',link:'submissions'});
     closeModal(); renderSubmissions(currentUser, currentRole, '');
   });
 }
@@ -1136,7 +1136,7 @@ function openAddSubModal(currentUser) {
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
     // Notify owner
-    await Notifs.sendToOwner({ title:'📋 New Submission', body:`${name} submitted: "${document.getElementById('s-title').value.trim()}"`, icon:'📋', type:'submission_new' });
+    await Notifs.sendToOwner({ title:'📋 New Submission', body:`${name} submitted: "${document.getElementById('s-title').value.trim()}"`, icon:'📋', type:'submission_new', link:'submissions' });
     closeModal();
     Notifs.success('Submission sent!');
     renderSubmissions(currentUser, window.currentRole || '', (window.currentDepts||[])[0] || '');

@@ -1899,7 +1899,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           deleteRequested:true, deleteReason:reason,
           deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp()
         });
-        await Notifs.sendToOwner({ title:'🗑 Quote Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting quote "${b.dataset.qno}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'quote_delete_request' });
+        await Notifs.sendToOwner({ title:'🗑 Quote Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting quote "${b.dataset.qno}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'quote_delete_request', link:'approvals' });
         Notifs.success('Delete request sent to president');
         window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
@@ -1939,7 +1939,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid
       });
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
-      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
+      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved', link:'bs-quotations' });
       Notifs.success('Quote approved and filed!');
       window.invalidateBsQuotesCache(currentUser.uid);
       renderBSQuotationsSummary(container, currentUser, currentRole);
@@ -1953,7 +1953,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         rejectedAt: firebase.firestore.FieldValue.serverTimestamp(), rejectedBy: currentUser.uid
       });
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'rejected'})));
-      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'❌ Quote Not Approved', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was not approved.`, icon:'❌', type:'quote_rejected' });
+      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'❌ Quote Not Approved', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was not approved.`, icon:'❌', type:'quote_rejected', link:'bs-quotations' });
       Notifs.error('Quote rejected.');
       window.invalidateBsQuotesCache(currentUser.uid);
       renderBSQuotationsSummary(container, currentUser, currentRole);
@@ -2005,7 +2005,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid
         });
         await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
-        if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
+        if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved', link:'bs-quotations' });
         closeModal();
         Notifs.success('Quote edited, approved and filed!');
         window.invalidateBsQuotesCache(currentUser.uid);
@@ -2021,7 +2021,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         if (b.dataset.by) await Notifs.send(b.dataset.by, {
           title: '↩ Quote Returned for Revision',
           body: `"${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was reviewed and returned. Please check the notes and re-submit.`,
-          icon: '✎', type: 'quote_returned'
+          icon: '✎', type: 'quote_returned', link: 'bs-quotations'
         });
         closeModal();
         Notifs.success('Quote updated and returned to submitter.');
