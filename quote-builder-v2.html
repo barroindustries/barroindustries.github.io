@@ -331,7 +331,7 @@ tr:hover td{background:#fafbff;}
   .cell-num,.cell-unit,.edit-price{font-size:16px!important;padding:4px 3px!important;}
   .cell-num{min-height:38px;}
   .totals-box{justify-content:stretch;position:sticky;bottom:0;background:white;
-    padding:8px 0 6px;box-shadow:0 -4px 10px rgba(0,0,0,.08);z-index:20;}
+    padding:8px 0 calc(6px + env(safe-area-inset-bottom,0px));box-shadow:0 -4px 10px rgba(0,0,0,.08);z-index:20;}
   .totals-tbl{width:100%;min-width:0;}
   .terms-grid{grid-template-columns:1fr;}
   .sig-row{grid-template-columns:1fr;gap:14px;}

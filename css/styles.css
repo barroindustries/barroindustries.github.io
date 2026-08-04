@@ -279,6 +279,15 @@ html.theme-astral .btn-primary {
 .btn-link.btn-sm { font-size: var(--fs-sm); }
 .btn-link.btn-lg { font-size: var(--fs-lg); }
 
+@media (pointer: coarse) {
+  /* Row-action icon buttons + removable chips need a real tap target on
+     touch; a 44px ::after overlay would overlap when they cluster ~4px
+     apart, so size the box instead. Desktop keeps the compact padding. */
+  .btn-icon { min-width: 40px; min-height: 40px; display: inline-flex;
+    align-items: center; justify-content: center; }
+  .team-chip, .pt-chip { min-height: 32px; padding: 6px 10px;
+    display: inline-flex; align-items: center; gap: 4px; }
+}
 .btn-icon {
   background: none; border: none; cursor: pointer;
   font-size: 0.9375rem; padding: 6px 8px; border-radius: var(--r-xs);
@@ -6135,7 +6144,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 
   /* 2 — CONTENT PADDING: shell, cards, kpi tiles, gaps */
   .main-content {
-    padding: 10px;
+    padding: 10px max(10px, env(safe-area-inset-right, 0px)) 10px max(10px, env(safe-area-inset-left, 0px));
     padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 18px);
   }
   .card, .kpi-row { margin-bottom: 12px; }

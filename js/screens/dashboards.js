@@ -3527,7 +3527,7 @@ function renderCompanyBiOps(ct) {
 
       <!-- Footer badge -->
       <div style="text-align:center;padding:14px 0 4px">
-        <span style="font-size:10px;font-weight:600;letter-spacing:2px;color:#4a4035">Barro Industries · Operating System · 2026</span>
+        <span style="font-size:10px;font-weight:600;letter-spacing:2px;color:var(--text-muted)">Barro Industries · Operating System · 2026</span>
       </div>
     </div>
   `;

@@ -289,7 +289,7 @@ function renderBackupHealthBanner(problems) {
   div.id = 'backup-health-banner';
   div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:var(--z-system-banner, 9995);background:#b91c1c;color:var(--white,#fff);padding:calc(10px + env(safe-area-inset-top,0px)) calc(44px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
   div.innerHTML = `${emojiIcon('🗄️',16)} <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
-    + `<button aria-label="Dismiss" style="position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));background:none;border:none;color:var(--white,#fff);font-size:18px;cursor:pointer">×</button>`;
+    + `<button aria-label="Dismiss" style="position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));background:none;border:none;color:var(--white,#fff);font-size:18px;cursor:pointer;min-width:44px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:0">×</button>`;
   if (window.lucide) lucide.createIcons({ nodes: [div] });
   div.querySelector('button').onclick = () => div.remove();
   document.body.appendChild(div);
