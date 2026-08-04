@@ -3599,6 +3599,48 @@ window.addEventListener('message', async (e) => {
     return;
   }
 
+  // QUOTE-TEMPLATES-SPEC.md — save the current product/pricing/terms config
+  // as a reusable template. The builder already stripped the client/identity
+  // fields (stripTemplateState()) before posting — this is not the data-safety
+  // boundary, just persistence; never write payload.state through as-is
+  // without the name/shape checks below.
+  if (type === 'QUOTE_SAVE_TEMPLATE') {
+    try {
+      const name = String(payload.name || '').trim().slice(0, 80);
+      const state = payload.state;
+      const co = payload.co === 'BS' ? 'BS' : 'BK';
+      if (!name || !state || typeof state !== 'object') {
+        Notifs?.showToast && Notifs.showToast('Could not save template — missing a name or quote data.', 'error');
+        return;
+      }
+      const agentName = userProfile?.displayName || currentUser.email || '';
+      await db.collection('quote_templates').add({
+        name,
+        co,
+        editableState: state,
+        itemCount: Array.isArray(state.items) ? state.items.length : 0,
+        createdBy: currentUser.uid,
+        createdByName: agentName,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('quote-templates');
+      try { e.source && e.source.postMessage({ type: 'QUOTE_TEMPLATE_SAVED', name }, e.origin); } catch(_){}
+      if (typeof Notifs?.success === 'function') Notifs.success('Template saved: ' + name);
+    } catch (err) {
+      console.error('[QB bridge] QUOTE_SAVE_TEMPLATE failed', err);
+      Notifs?.showToast && Notifs.showToast('Could not save template: ' + (err.message || err.code), 'error');
+    }
+    return;
+  }
+
+  // QUOTE-TEMPLATES-SPEC.md — builder asked to see the template library; show
+  // the native picker (openQuoteTemplatesPicker, defined below this listener).
+  if (type === 'QUOTE_REQUEST_TEMPLATES') {
+    openQuoteTemplatesPicker();
+    return;
+  }
+
   // Wave 3 Q4 — edit-in-place. Builder-driven equivalent of the president's
   // saveReviewedPartnerQuote() .update() path above: the user reopened an
   // existing quote and chose "update original" at File time instead of filing
@@ -3810,6 +3852,94 @@ window.addEventListener('message', async (e) => {
     console.error('[QB bridge]', err);
   }
 });
+
+// QUOTE-TEMPLATES-SPEC.md — native picker for the Sales quote-template
+// library (quote_templates collection). Opened from the QUOTE_REQUEST_TEMPLATES
+// bridge branch above. "Use" pushes the template's (already client-stripped)
+// editableState straight into the still-open builder iframe as LOAD_TEMPLATE;
+// "Delete" is limited to the template's own creator or an admin (president/
+// manager/secretary — mirrors firestore.rules' isAdmin()).
+function _qtTimeAgo(ts) {
+  if (!ts) return '';
+  const date = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
+}
+async function openQuoteTemplatesPicker() {
+  const panel = window.openPage('📋 Quote Templates', '<div class="empty-state">Loading…</div>');
+  const bodyEl = panel.querySelector('.page-panel-body');
+  let docs = [];
+  try {
+    const snap = await dbCachedGet('quote-templates', () => db.collection('quote_templates').orderBy('createdAt', 'desc').get(), 30000);
+    docs = (snap && snap.docs) || [];
+  } catch (err) {
+    console.warn('[quote templates] list fetch failed', err);
+    docs = [];
+  }
+  if (!bodyEl.isConnected) return; // panel was dismissed while the fetch was in flight
+
+  const renderList = () => {
+    if (!docs.length) {
+      bodyEl.innerHTML = `<div class="empty-state">${emojiIcon('📋', 32)}<div>No templates yet — build a quote and tap 💾 Save as Template.</div></div>`;
+      return;
+    }
+    const canAdminDelete = ['president', 'manager', 'secretary'].includes(currentRole);
+    bodyEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px;padding:4px">${docs.map(d => {
+      const t = d.data() || {};
+      const mine = t.createdBy === currentUser.uid;
+      const canDelete = mine || canAdminDelete;
+      const coColor = t.co === 'BS' ? 'var(--purple,#8E44AD)' : 'var(--accent)';
+      return `<div class="card" data-tpl-row="${escHtml(d.id)}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px">
+        <div style="min-width:0;flex:1">
+          <div style="font-weight:700;font-size:14px">${escHtml(t.name || 'Untitled template')}
+            <span class="badge" style="margin-left:6px;font-size:10px;background:${coColor};color:#fff;padding:2px 6px;border-radius:4px">${escHtml(t.co || 'BK')}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${Number(t.itemCount || 0)} item${t.itemCount === 1 ? '' : 's'} · ${escHtml(t.createdByName || '')} · ${escHtml(_qtTimeAgo(t.createdAt))}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn-primary btn-sm" data-use-tpl="${escHtml(d.id)}">Use</button>
+          ${canDelete ? `<button class="btn-danger btn-sm" data-del-tpl="${escHtml(d.id)}">Delete</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+    window.lucide?.createIcons({ nodes: [bodyEl] });
+
+    bodyEl.querySelectorAll('[data-use-tpl]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-use-tpl');
+        const t = docs.find(d => d.id === id)?.data();
+        if (!t || !t.editableState) { Notifs.showToast('Template data missing.', 'error'); return; }
+        const frame = document.getElementById('qb-frame');
+        if (!frame?.contentWindow) { Notifs.showToast('Quote Builder is not open.', 'error'); return; }
+        try { frame.contentWindow.postMessage({ type: 'LOAD_TEMPLATE', payload: { state: t.editableState } }, window.location.origin); }
+        catch (_) {}
+        window.closeModal();
+      });
+    });
+    bodyEl.querySelectorAll('[data-del-tpl]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-del-tpl');
+        const t = docs.find(d => d.id === id)?.data();
+        const ok = await window.confirmDialog({ title: 'Delete template?', message: `Delete "${(t && t.name) || 'this template'}"? This can't be undone.`, danger: true, confirmLabel: 'Delete' });
+        if (!ok) return;
+        try {
+          await db.collection('quote_templates').doc(id).delete();
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('quote-templates');
+          window.logAudit && window.logAudit('delete', 'quote_template', id, { name: t?.name || '' });
+          Notifs?.success ? Notifs.success('Template deleted.') : Notifs?.showToast?.('Template deleted.');
+          docs = docs.filter(d => d.id !== id);
+          renderList();
+        } catch (err) {
+          Notifs?.showToast && Notifs.showToast('Delete failed: ' + (err.message || err.code), 'error');
+        }
+      });
+    });
+  };
+  renderList();
+}
 
 // One-click, idempotent: moves bs_quotes docs misfiled with company:'BK' (the old
 // QUOTE_APPROVAL_REQUESTED hardcode) into bk_quotes, PRESERVING each doc id so

@@ -1017,6 +1017,19 @@ service cloud.firestore {
         || (!isPartner() && docId == 'draft_' + request.auth.uid));
     }
 
+    // ── Quote Templates (QUOTE-TEMPLATES-SPEC.md) ──────
+    // Reusable product/pricing/terms configs saved from the quote builder —
+    // client/identity fields are stripped client-side before this is ever
+    // written, so this collection never carries a specific client's contact
+    // details. Internal Sales library — partners excluded, same as /quotes.
+    match /quote_templates/{id} {
+      allow read:   if isAuth() && !isPartner();               // internal Sales library
+      allow create: if isAuth() && !isPartner()
+                    && request.resource.data.get('createdBy','') == request.auth.uid;
+      allow update, delete: if isAuth() && !isPartner()
+                    && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
+    }
+
     // ── Approval requests ──────────────────────────────
     match /approval_requests/{docId} {
       // Internal workflow data — external partners excluded from reading.

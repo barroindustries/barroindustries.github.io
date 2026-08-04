@@ -1344,6 +1344,10 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="modal-body" id="verifyBody"></div>
     <div class="modal-footer">
       <button class="btn btn-outline no-print" style="background:var(--dark-blue);" onclick="closeVerifyModal()">Cancel</button>
+      <!-- QUOTE-TEMPLATES-SPEC.md — reusable quote templates. Enabled alongside
+           #fileBtn (≥1 line item), toggled from the same buildVerifyModal() pass. -->
+      <button class="btn btn-outline no-print" id="saveTemplateBtn" onclick="saveAsTemplate()" disabled style="background:var(--dark-blue);opacity:.5;">💾 Save as Template</button>
+      <button class="btn btn-outline no-print" id="templatesBtn" onclick="requestTemplates()" disabled style="background:var(--dark-blue);opacity:.5;">📋 Templates</button>
       <button class="btn btn-green" id="fileBtn" onclick="fileQuotation()" disabled style="opacity:.5;">📁 File Quotation</button>
     </div>
   </div>
@@ -4118,6 +4122,13 @@ function buildVerifyModal(){
   const ok=canFile();
   const btn=document.getElementById('fileBtn');
   btn.disabled=!ok;btn.style.opacity=ok?'1':'0.5';
+  // QUOTE-TEMPLATES-SPEC.md — Save/Load Template only need ≥1 line item (not
+  // the full canFile() set — a template has no client/quoteNo yet).
+  const hasItems=items.length>0;
+  const saveTplBtn=document.getElementById('saveTemplateBtn');
+  if(saveTplBtn){ saveTplBtn.disabled=!hasItems; saveTplBtn.style.opacity=hasItems?'1':'0.5'; }
+  const tplBtn=document.getElementById('templatesBtn');
+  if(tplBtn){ tplBtn.disabled=!hasItems; tplBtn.style.opacity=hasItems?'1':'0.5'; }
   // Update button label based on approval toggle
   document.getElementById('reqApprovalCheck')?.addEventListener('change', e => {
     btn.textContent = e.target.checked ? '📤 Submit for Approval' : '📁 File Quotation';
@@ -4313,6 +4324,50 @@ function buildQuotePayload(){
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  QUOTE-TEMPLATES-SPEC.md — reusable quote templates
+//  "Save as Template" snapshots the current product/pricing/terms config
+//  (editableState) with every client/identity + revision-lineage field
+//  stripped, and hands it to the parent app to persist. "Templates" asks the
+//  parent to show its native picker; picking one posts LOAD_TEMPLATE back
+//  into this frame (see the message handler below).
+// ═══════════════════════════════════════════════════════════════════
+// STRIP to '' — client/identity fields a template must never carry.
+const TEMPLATE_IDENTITY_STRIP_FIELDS=['clientName','clientCompany','clientAddress','clientPhone','clientEmail','quoteNo','quoteDate','filedAt'];
+// DROP entirely — revision-lineage fields a template must never carry (belt-
+// and-braces: buildQuotePayload()'s editableState doesn't currently set these,
+// only window._qbReopenState does, but a template snapshot must stay safe even
+// if that ever changes).
+const TEMPLATE_LINEAGE_DROP_FIELDS=['sourceDocId','sourceCollection','rootQuoteId','asRevision'];
+
+// Builds a NEW object — never mutates/returns the live editableState — with
+// the client-identity fields blanked and lineage fields dropped.
+function stripTemplateState(rawEditableState){
+  const state={...(rawEditableState||{})};
+  TEMPLATE_IDENTITY_STRIP_FIELDS.forEach(f=>{ state[f]=''; });
+  TEMPLATE_LINEAGE_DROP_FIELDS.forEach(f=>{ delete state[f]; });
+  return state;
+}
+
+function saveAsTemplate(){
+  if(!items.length){ showToast('Add at least one item before saving a template.','error'); return; }
+  let name=prompt('Name this template (e.g. "3-Burner Range Bundle"):','');
+  if(name===null) return; // user cancelled
+  name=name.trim().slice(0,80);
+  if(!name){ showToast('Template name is required.','error'); return; }
+  const rawState=buildQuotePayload().editableState;
+  const state=stripTemplateState(rawState);
+  try{
+    window.parent.postMessage({ type:'QUOTE_SAVE_TEMPLATE', payload:{ name, co:currentCo, state } }, window.location.origin);
+  }catch(e){ showToast('Could not reach the app to save this template.','error'); }
+}
+
+function requestTemplates(){
+  try{
+    window.parent.postMessage({ type:'QUOTE_REQUEST_TEMPLATES', payload:{} }, window.location.origin);
+  }catch(e){ showToast('Could not reach the app to load templates.','error'); }
+}
+
 // Reload a previously-filed quotation for editing (called from parent app or hash)
 function loadEditableState(state, opts){
   if(!state) return;
@@ -4373,6 +4428,18 @@ window.addEventListener('message',ev=>{
   if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, window.location.origin); }catch(e){} }
   // Wave 3 Q6 — parent acked a cloud draft save; flip the chip to "Saved".
   if(d.type==='QUOTE_DRAFT_SAVED') showDraftSavedChip();
+  // QUOTE-TEMPLATES-SPEC.md — app picked a template ("Use"): load its
+  // (already client-stripped) config in place. asRevision:false is what keeps
+  // this a plain state-load — it skips loadEditableState's `if(opts.asRevision)`
+  // block entirely, so there's no -Rn bump, no quoteStatus/filedAt reset, and
+  // (since state.quoteNo is '') the existing #quoteNo field/mode is left alone.
+  if(d.type==='LOAD_TEMPLATE' && d.payload && d.payload.state){
+    loadEditableState(d.payload.state, { asRevision:false });
+    hideDraftResumeBanner();
+    showToast('📋 Template loaded — fill in the client details, then Verify & File.');
+  }
+  // App confirmed the template save.
+  if(d.type==='QUOTE_TEMPLATE_SAVED') showToast('💾 Template saved: '+(d.name||''));
 });
 
 // ═══════════════════════════════════════════════════════════════════
