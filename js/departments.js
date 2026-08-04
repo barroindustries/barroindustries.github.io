@@ -2150,10 +2150,26 @@ window.disbursePayRun = async function(month, opts = {}) {
   }
 
   // ── 4. Notify ────────────────────────────────────────────────────────
-  await Promise.all(lines.map(line => Notifs.send(line.uid, {
-    title: '💰 Payroll Disbursed', body: `Your ${monthLabel} pay of ₱${fmt(line.finalPay)} has been disbursed.`,
-    icon: '💰', type: 'payroll', dedupKey: `payroll-disbursed-${line.uid}-${month}`
-  })));
+  // PAYSLIP-OVERHAUL-SPEC.md §5/§8 flag 4 — this runs AFTER every money
+  // write above (salary_history freeze, CA deductions, ledger legs) has
+  // already committed, so a notification failure here must NEVER poison a
+  // disbursement that has already moved money. Previously a bare (unwrapped)
+  // await — one bad write (e.g. a notifications rules mismatch, see the
+  // rules-before-js deploy-ordering note below) would throw out of
+  // disbursePayRun entirely, surfacing to the President as a failed
+  // disburse even though the money had already moved. `link`/`month` let
+  // notifications.js's _navigateFromNotif land the employee directly on
+  // this month's payslip instead of a bare personal-finance route.
+  try {
+    await Promise.all(lines.map(line => Notifs.send(line.uid, {
+      title: '💰 Payroll Disbursed',
+      body: `Your ${monthLabel} pay of ₱${fmt(line.finalPay)} has been disbursed. Tap to view your payslip.`,
+      icon: '💰', type: 'payroll', link: 'personal-finance', month,
+      dedupKey: `payroll-disbursed-${line.uid}-${month}`
+    })));
+  } catch (notifyErr) {
+    console.error('disbursePayRun: employee notify failed (money already moved, disbursement continues)', notifyErr);
+  }
 
   // ── 5. Flip state — TERMINAL from here (v12 WS20 D5: no reopen, no recompute) ──
   await runRef.set({

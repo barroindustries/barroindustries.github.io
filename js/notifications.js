@@ -130,7 +130,16 @@ window.Notifs = (() => {
     }
   }
 
-  function _navigateFromNotif(type, taskId, chatId, link) {
+  // PAYSLIP-OVERHAUL-SPEC.md §5 — `month` (YYYY-MM, optional) is the extra
+  // arg a payroll-disburse notification carries (send()'s new field above).
+  // For type==='payroll' with a month present, land on personal-finance THEN
+  // auto-open that month's payslip via renderPersonalFinance's openPayslipMonth
+  // opt (js/screens/dashboards.js) — navigateTo('personal-finance') alone
+  // can't pass opts through (its switch case calls renderPersonalFinance with
+  // no opts), so this calls it a second time, directly, with the month. A
+  // notification from before this shipped has no `month` — the plain
+  // personal-finance route (unchanged) still works for those.
+  function _navigateFromNotif(type, taskId, chatId, link, month) {
     document.getElementById('notif-panel')?.classList.add('hidden');
     document.getElementById('notif-backdrop')?.classList.add('hidden');
     if (type === 'chat_message') {
@@ -154,6 +163,9 @@ window.Notifs = (() => {
       if (typeof navigateTo === 'function') navigateTo('approvals');
     } else if (type === 'payroll' || type === 'kpi_grade' || type === 'self_assessment') {
       if (typeof navigateTo === 'function') navigateTo('personal-finance');
+      if (type === 'payroll' && month && typeof window.renderPersonalFinance === 'function') {
+        window.renderPersonalFinance(window.currentUser, window.currentRole, { openPayslipMonth: month });
+      }
     } else if (link && typeof navigateTo === 'function') {
       navigateTo(link);
     }
@@ -317,7 +329,7 @@ window.Notifs = (() => {
       // inlined (not a styles.css class) per this file's existing toast precedent.
       const unreadDot = !n.read ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${tileColor};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>` : '';
       return `
-      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}" data-link="${escHtml(n.link||'')}">
+      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}" data-link="${escHtml(n.link||'')}" data-month="${escHtml(n.month||'')}">
         <div class="notif-item-main" style="cursor:pointer">
           <div class="notif-item-emoji">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 32)}</div>
           <div class="notif-item-text">
@@ -430,6 +442,7 @@ window.Notifs = (() => {
         const taskId = item?.dataset.taskId || '';
         const chatId = item?.dataset.chatId || '';
         const link = item?.dataset.link || '';
+        const month = item?.dataset.month || '';
         // Auto mark as read on view
         if (item?.classList.contains('unread')) {
           item.classList.remove('unread');
@@ -437,7 +450,7 @@ window.Notifs = (() => {
           item.querySelector('.notif-read-btn')?.remove();
           await markRead(uid, item.dataset.id);
         }
-        _navigateFromNotif(type, taskId, chatId, link);
+        _navigateFromNotif(type, taskId, chatId, link, month);
       });
     });
 
@@ -452,6 +465,7 @@ window.Notifs = (() => {
         const taskId = item.dataset.taskId || '';
         const chatId = item.dataset.chatId || '';
         const link = item.dataset.link || '';
+        const month = item.dataset.month || '';
         // Auto mark as read on open
         if (item.classList.contains('unread')) {
           item.classList.remove('unread');
@@ -459,7 +473,7 @@ window.Notifs = (() => {
           item.querySelector('.notif-read-btn')?.remove();
           await markRead(uid, item.dataset.id);
         }
-        _navigateFromNotif(type, taskId, chatId, link);
+        _navigateFromNotif(type, taskId, chatId, link, month);
       });
     });
   }
@@ -485,7 +499,11 @@ window.Notifs = (() => {
   }
 
   // ── Send notification ─────────────────────────
-  async function send(targetUid, { title, body, icon = `${emojiIcon('🔔',16)}`, type = 'general', link = null, dedupKey = null, taskId = null, chatId = null } = {}) {
+  // PAYSLIP-OVERHAUL-SPEC.md §5 — `month` (YYYY-MM) additive param: lets a
+  // payroll disburse notification deep-link to the exact month's payslip
+  // (see _navigateFromNotif below). Optional — every existing call site
+  // that omits it behaves byte-identically (data.month is simply absent).
+  async function send(targetUid, { title, body, icon = `${emojiIcon('🔔',16)}`, type = 'general', link = null, dedupKey = null, taskId = null, chatId = null, month = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
       // Single-field query — no composite index required
@@ -500,7 +518,8 @@ window.Notifs = (() => {
       ...(window.currentUser && window.currentUser.uid ? { senderUid: window.currentUser.uid } : {}),
       ...(dedupKey ? { dedupKey } : {}),
       ...(taskId ? { taskId } : {}),
-      ...(chatId ? { chatId } : {})
+      ...(chatId ? { chatId } : {}),
+      ...(month ? { month } : {})
     };
     await db.collection('notifications').doc(targetUid).collection('items').add(data);
 

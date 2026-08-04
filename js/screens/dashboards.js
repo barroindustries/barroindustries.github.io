@@ -2555,7 +2555,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">${emojiIcon('📝',14)} Note from HR</div>
           <div style="font-size:13px;color:var(--text);white-space:pre-wrap">${escHtml(frozenThisMonth.hrNote.text)}</div>
         </div>` : ''}
-        <button class="btn-secondary" style="margin-top:14px;width:100%" id="my-payslip-btn">Generate Payslip PDF</button>
+        <button class="btn-secondary" style="margin-top:14px;width:100%" id="my-payslip-btn">Current Month Payslip</button>
       </div>
     </div>
 
@@ -2577,7 +2577,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
                 <td class="tc-detail" data-label="Att">${h.attScore?Math.round(h.attScore*100)+'%':'—'}</td>
                 <td class="tc-net"><strong>₱${formatNum(h.finalPay)}</strong></td>
                 <td class="tc-detail" data-label="Note" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${h.hrNote&&h.hrNote.text?escHtml(h.hrNote.text):''}">${h.hrNote&&h.hrNote.text?escHtml(h.hrNote.text):'—'}</td>
-                <td class="tc-actions">${currentRole==='president'||currentRole==='owner'
+                <td class="tc-actions">
+                  <button class="btn-secondary btn-sm sal-hist-view-btn" data-month="${h.month||''}" style="font-size:11px">View payslip</button>
+                  ${currentRole==='president'||currentRole==='owner'
                   ? `<button class="btn-danger btn-sm ph-delete-btn" data-id="${h.id}" data-month="${h.month||''}">Delete</button>`
                   : currentRole==='finance'
                     ? `<button class="btn-secondary btn-sm ph-req-delete-btn" data-id="${h.id}" data-month="${h.month||''}" style="font-size:11px;color:var(--danger)">Request Delete</button>`
@@ -2671,6 +2673,33 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       btn.disabled = true; btn.textContent = '⏳ Requested';
     });
   });
+
+  // PAYSLIP-OVERHAUL-SPEC.md §5 — "My Payslips". Shared by every Salary
+  // History row's "View payslip" button AND a payroll-disburse
+  // notification's auto-open (opts.openPayslipMonth, wired below). Fetches
+  // salary_history/{uid}_{month} directly by doc id rather than filtering
+  // the already-fetched `salaryHistory` array (capped at the 12 most recent
+  // months, .limit(12) above) — so a notification linking to an older
+  // disbursed month still opens correctly, and every disbursed month is
+  // reachable, not just the recent ones shown in the table.
+  async function _openPayslipForMonth(month) {
+    const uid = currentUser.uid;
+    const shSnap = await db.collection('salary_history').doc(`${uid}_${month}`).get().catch(()=>null);
+    if (!shSnap?.exists) { Notifs.showToast('No payslip found for that month.', 'error'); return; }
+    const model = window.toPayslipModel({...shSnap.data(), uid, month}, 'monthly');
+    model.official = true;
+    model.employee.name = userProfile.displayName||''; model.employee.idNumber = userProfile.employeeId||''; model.employee.department = (userProfile.department||'');
+    model.ytd = await window.payslipYtdMonthly(uid, month.slice(0,4));
+    window.renderPayslipPage(model, ()=>navigateTo('personal-finance'));
+  }
+  document.querySelectorAll('.sal-hist-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => { if (btn.dataset.month) _openPayslipForMonth(btn.dataset.month); });
+  });
+  // Deep-link from a payroll-disburse notification (js/notifications.js's
+  // _navigateFromNotif calls renderPersonalFinance a second time, directly,
+  // with this opt, right after navigateTo('personal-finance') renders the
+  // plain screen) — auto-opens that exact month's payslip.
+  if (opts.openPayslipMonth) _openPayslipForMonth(opts.openPayslipMonth);
 
   // Self Evaluation button
   document.getElementById('self-eval-btn')?.addEventListener('click', () => {
@@ -3053,7 +3082,17 @@ function openWorkerProfilePanel(uid, name, preloaded) {
       model = window.toPayslipModel({...shSnap.data(), uid, month}, 'monthly');
       model.official = true;
     } else {
-      model = window.toPayslipModel({ uid, month, name, base:preloaded?.salary||0, allowance:preloaded?.allowance||0, deductions:preloaded?.deductions||0 }, 'monthly');
+      // PAYSLIP-OVERHAUL-SPEC.md §6 — statutory-0 fix. This bare-object model
+      // never called computeStatutory, so SSS/PhilHealth/Pag-IBIG/Tax always
+      // read as 0 and net was silently overstated. Route through the ONE pay
+      // engine first, exactly like renderPersonalFinance's my-payslip-btn
+      // (this file, ~line 2737) already does — `preloaded` doesn't carry
+      // sss/philhealth/pagibig/tax (only salary/allowance/deductions, see the
+      // view-profile-btn dataset a few hundred lines up), so computePayLine
+      // falls back to the same WS21 statutory-table suggestion the roster
+      // preview uses whenever a field isn't hand-typed — never a hard 0.
+      const line = window.computePayLine({ id: uid, displayName: name, salary: preloaded?.salary||0, allowance: preloaded?.allowance||0, deductions: preloaded?.deductions||0 }, { month, policy:'flat' });
+      model = window.toPayslipModel({...line, uid:uid, month}, 'monthly');
       model.official = false;
     }
     model.ytd = await window.payslipYtdMonthly(uid, year);

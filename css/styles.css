@@ -6003,6 +6003,38 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .payslip-print thead{display:table-header-group;}
   .payslip-print tr,.payslip-print .ps-sigs,.payslip-print .lh-sig-row{page-break-inside:avoid;break-inside:avoid;}
   @page{size:A4 portrait;margin:11mm 10mm 7mm;}
+  /* PAYSLIP-OVERHAUL-SPEC.md §3 — neutralize the on-screen scale-to-fit
+     transform + fixed box model for print; @page margins take over so the
+     .a4-sheet's own padding/shadow/border would just double them. */
+  .a4-stage{transform:none!important;height:auto!important;width:auto!important}
+  .a4-sheet{transform:none!important;width:100%!important;min-height:0;
+            padding:0!important;box-shadow:none;border:none}
+}
+
+/* ── §3 A4 on-screen preview — fixed-layout sheet + scale-to-fit ──────────
+   PAYSLIP-OVERHAUL-SPEC.md §3. .a4-stage is the scroll/centering container
+   (renderPayslipPage / the Print-All flow, js/screens/hr.js); .a4-sheet is
+   the fixed 794×1123px (210×297mm @96dpi) "paper" — a stable layout width
+   so the letterhead's two-column header never reflows/collides on a narrow
+   viewport; window.fitA4Sheet() sets --a4-scale so it visually shrinks to
+   fit instead. Forced-light so dark/Astral themes can't bleed into the
+   "paper" look — every token used inside buildPayslipHTML (hr.js's hrNote
+   box, ps-sec-h, etc.) is re-pinned to a light value for anything nested
+   under .a4-sheet, regardless of what html.theme-dark/astral set at the root. */
+.a4-stage{
+  --a4-scale:1;
+  display:flex;justify-content:center;
+  width:calc(794px * var(--a4-scale));
+  height:calc(1123px * var(--a4-scale));
+  margin:0 auto;padding:16px 8px;
+}
+.a4-sheet{
+  width:794px;min-height:1123px;flex-shrink:0;
+  background:#fff;color-scheme:light;
+  padding:42px 38px 26px;
+  box-shadow:0 2px 16px rgba(0,0,0,.22);border:1px solid #ddd;
+  transform:scale(var(--a4-scale,1));transform-origin:top left;
+  --surface:#fff;--surface2:#f4f4f4;--border:#ddd;--text:#222;--text-muted:#666;
 }
 
 /* ── BIR suite prints — books/worksheets/FS (v12 WS39) ───────────────────

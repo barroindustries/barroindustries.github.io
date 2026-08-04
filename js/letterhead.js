@@ -30,7 +30,14 @@
 
     // ── Entity identity lines (left column) ──
     const idLines = [];
-    if (ent.registration) idLines.push(esc(ent.registration));
+    // PAYSLIP-OVERHAUL-SPEC.md §2 — additive opt, default off (every other
+    // caller — BIR docs, invoices, quotes — keeps its existing registration
+    // banner byte-identical). The payslip template is the only caller that
+    // passes suppressRegistration:true, because brandEntity('bir').registration
+    // is currently the literal placeholder string "BIR registration pending
+    // accountant confirmation (D6)" — an internal to-do note, not something
+    // that belongs on an employee-facing document.
+    if (ent.registration && !o.suppressRegistration) idLines.push(esc(ent.registration));
     if (ent.address)      idLines.push(esc(ent.address));
     const contactBits = [];
     if (ent.phone) contactBits.push(esc(ent.phone));

@@ -1737,7 +1737,32 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       // Interim projection — no computed line for this month yet.
       const emp = employees.find(u=>u.id===b.dataset.uid);
       if (!emp) return;
-      model = window.toPayslipModel({ ...emp, uid:emp.id, month, base:emp.salary }, 'monthly');
+      // PAYSLIP-OVERHAUL-SPEC.md §6 — the statutory-0 bug. This branch used to
+      // spread the raw merged user+payroll doc straight into toPayslipModel,
+      // which only reads STORED fields (g(source,'sss') etc, hr.js's
+      // toPayslipModel) — any employee with no hand-typed sss/philhealth/
+      // pagibig/tax on payroll/{uid} showed a hard 0 for all three AND a
+      // silently overstated net (never ran through computeStatutory at all).
+      // Fix: route through the ONE pay engine first — exactly like
+      // dashboards.js's my-payslip-btn (renderPersonalFinance) already does —
+      // so the same "hand-typed wins, else the WS21 statutory-table
+      // suggestion" rule the roster preview itself uses applies here too.
+      const line = window.computePayLine(emp, { month, policy:'flat' });
+      model = window.toPayslipModel({...line, uid:emp.id, month}, 'monthly');
+      // computePayLine's return object carries only pay-math fields (no
+      // employeeId/department/jobTitle/gov IDs) — restore those display-only
+      // passthrough fields from `emp` (same zero-risk pattern dashboards.js's
+      // my-payslip-btn already uses for name/idNumber/department) so this
+      // button doesn't regress fields the roster already had on file. Never
+      // touches computePayLine's math outputs.
+      model.employee.name       = emp.displayName || emp.email || '';
+      model.employee.idNumber   = emp.employeeId || '';
+      model.employee.department = emp.department || (Array.isArray(emp.departments) && emp.departments.length ? emp.departments.join(', ') : '');
+      model.employee.jobTitle   = emp.title || '';
+      model.employee.tin        = emp.tinNum || '';
+      model.employee.sss        = emp.ssNum || '';
+      model.employee.philhealth = emp.phNum || '';
+      model.employee.pagibig    = emp.pagibigNum || '';
       model.official = false;
     }
     model.ytd = await window.payslipYtdMonthly(b.dataset.uid, window.bizYear?window.bizYear():new Date().getFullYear());
@@ -1766,13 +1791,23 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       return mdl;
     }));
     const host = document.getElementById('page-content');
+    // PAYSLIP-OVERHAUL-SPEC.md §3 — each payslip gets its own stage/sheet;
+    // page-break-after:always stays on the .payslip-print div itself (same
+    // element it was always on — .a4-sheet/.payslip-print share one div,
+    // per renderPayslipPage's wrapper above), .a4-stage is purely the extra
+    // outer centering box. Desktop-oriented flow (window.print() only, no
+    // Web Share path — batch-PDF-on-iOS is flagged as a follow-up, not in
+    // scope) — fitA4Sheet still runs a one-shot {live:false} fit so a phone
+    // opening this screen before hitting Print doesn't get a fixed 794px
+    // sheet wider than its viewport (horizontal scroll).
     host.innerHTML = `
       <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
         <button class="btn-secondary btn-sm" id="ps-back-btn">← Back</button>
         <button class="btn-primary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print All</button>
       </div>
-      ${models.map(mdl => `<div class="payslip-print" style="page-break-after:always">${window.buildPayslipHTML(mdl)}</div>`).join('')}`;
+      ${models.map(mdl => `<div class="a4-stage"><div class="a4-sheet payslip-print" style="page-break-after:always">${window.buildPayslipHTML(mdl)}</div></div>`).join('')}`;
     if (window.lucide) lucide.createIcons({ nodes: [host] });
+    if (typeof window.fitA4Sheet === 'function') window.fitA4Sheet(host, { live:false });
     document.getElementById('ps-back-btn').addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
   });
 }
@@ -3264,9 +3299,27 @@ window.toPayslipModel = function(source, kind) {
     const other = source.otherDeductions ?? source.deductions ?? 0;
     const caBefore = source.caBalance ?? source.caBalanceBefore ?? 0;
     const caInst = source.caPlanned ?? source.caDeducted ?? 0;
+    // PAYSLIP-OVERHAUL-SPEC.md §2 — human docNumber instead of the raw
+    // Firestore uid (was `PS-{month}-{uid}`, printing a 28-char Firebase Auth
+    // uid on an employee-facing document, TWICE — header + footer). Prefers
+    // the real employeeId when the source carries one; falls back to the
+    // last 4 chars of the uid (uppercased) — still filesystem-safe
+    // ([A-Z0-9-] only) and never the raw id. Month digits only (dash
+    // stripped) so it reads as a serial, not a date fragment.
+    const _uidRef = source.uid || source.userId || '';
+    const _monthKey = String(source.month || source.runMonth || '').replace(/-/g,'');
+    const _empIdPart = (source.employeeId && String(source.employeeId).trim())
+      || _uidRef.slice(-4).toUpperCase();
     return {
       kind:'monthly', official:true,
-      docNumber:`PS-${source.month || source.runMonth}-${source.uid || source.userId}`,
+      docNumber:`PS-${_monthKey}-${_empIdPart}`,
+      // Raw doc id/uid — never printed; kept for debugging/audit panels and
+      // as the write target for §1's identity-only edit panel.
+      sourceRef: _uidRef,
+      // Raw 'YYYY-MM' (WITH the dash, unlike docNumber's stripped serial) —
+      // §1's edit panel needs this to address salary_history/{uid}_{month}
+      // and pay_runs/{month} directly.
+      monthKey: String(source.month || source.runMonth || ''),
       periodLabel:window.fmtMonthLabel(source.month||source.runMonth),
       payDateLabel: source.payDateLabel || '',
       // v12 WS39 — statutory IDs now live on payroll/{uid} (frozen onto the pay-
@@ -3298,8 +3351,26 @@ window.toPayslipModel = function(source, kind) {
   const dg = source.deductions?.govt || {};
   const ee = { sss:dg.sss||0, philhealth:g(dg,'philhealth')||0, pagibig:g(dg,'pagibig')||0, tax:source.deductions?.other?.taxes||0 };
   const er = source.employerShare ? { sss:source.employerShare.sss||0, philhealth:source.employerShare.philhealth||0, pagibig:source.employerShare.pagibig||0 } : null;
+  // PAYSLIP-OVERHAUL-SPEC.md §2 — human docNumber (was the raw `payslips`
+  // auto-id, e.g. "sIA8AHYbLWXvDJ4…"). Workers carry a BI-W-### human id
+  // (nextWorkerIdNumber, hr.js) — prefer that; fall back to the last 4 chars
+  // of the saved doc id, then the worker_profiles doc id (collectPayslipData
+  // always sets `workerId`), then a literal 'DRAFT' for an in-memory preview
+  // that was never saved and has neither. Derived at render time — nothing
+  // is retro-written to any saved doc.
+  const _wStart = String(source.payPeriodStart || '').replace(/-/g,'');
+  const _wIdPart = (source.workerIdNum && String(source.workerIdNum).trim())
+    || (source.id ? String(source.id).slice(-4).toUpperCase() : '')
+    || (source.workerId ? String(source.workerId).slice(-4).toUpperCase() : '')
+    || 'DRAFT';
   return {
-    kind:'weekly', official:true, docNumber:source.id||'',
+    kind:'weekly', official:true, docNumber:`PS-W-${_wStart}-${_wIdPart}`,
+    // Raw doc id (payslips/{id}) — never printed; blank for an unsaved
+    // preview. profileId (worker_profiles/{id}) is always present
+    // (collectPayslipData always sets workerId=profile.id) — §1's edit
+    // panel writes identity fields there regardless of save state.
+    sourceRef: source.id || '',
+    profileId: source.workerId || '',
     periodLabel:`${source.payPeriodStart||''} – ${source.payPeriodEnd||''}`,
     payDateLabel:source.payDate||'',
     employee:{ name:source.workerName||'', idNumber:source.workerIdNum||'', jobTitle:source.jobTitle||'',
@@ -3397,6 +3468,13 @@ window.payslipYtdWeekly = async function(workerId, year) {
 
 // The ONE branded template — renders a PayslipModel to inner HTML (no <html>
 // wrapper; hosted by renderPayslipPage inside #page-content).
+// PAYSLIP-OVERHAUL-SPEC.md §2 — blank gov-ID/employee-ID cells rendered as
+// empty <td>s, reading as broken. A muted "— not on file" placeholder pairs
+// with §1's edit affordance (which lets finance/president backfill these in
+// place instead of digging through the Edit Payroll modal separately).
+function _notOnFile(v) {
+  return v ? escHtml(v) : `<span style="color:var(--text-muted,#888);font-style:italic;font-size:10px">— not on file</span>`;
+}
 window.buildPayslipHTML = function(model) {
   const f = n => (parseFloat(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
   const m = model, s = m.statutory, er = s.er;
@@ -3404,11 +3482,17 @@ window.buildPayslipHTML = function(model) {
   const badge = m.official ? '' : `<div class="ps-badge-proj">PROJECTION — not yet disbursed</div>`;
   // Payslips are BIR/DOLE-facing — DTI trade name + real TIN (matches what this
   // template has always printed, and WS14's own resolution for this doc type).
+  // PAYSLIP-OVERHAUL-SPEC.md §2 — suppressRegistration:true drops
+  // brandEntity('bir').registration, which today is the literal placeholder
+  // string "BIR registration pending accountant confirmation (D6)" — an
+  // internal to-do note, not something that belongs on an employee-facing
+  // document. footerNote drops the periodLabel repeat (already shown
+  // top-right via dateLabel) and prints the new human docNumber once.
   const _lh = window.buildLetterhead ? window.buildLetterhead({
     docTitle: 'PAYSLIP', entity: window.brandEntity ? window.brandEntity('bir') : null,
     accent: '#1E3A5F', docNumber: m.docNumber, dateLabel: m.periodLabel,
-    signatures: m.signatures,
-    footerNote: 'System-generated payslip · ' + escHtml(m.docNumber) + ' · ' + escHtml(m.periodLabel)
+    signatures: m.signatures, suppressRegistration: true,
+    footerNote: 'System-generated payslip · ' + escHtml(m.docNumber)
   }) : null;
   const perf = m.performance ? `
     <div class="ps-sec-h">Performance</div>
@@ -3434,10 +3518,10 @@ window.buildPayslipHTML = function(model) {
   ${badge}
   <div class="ps-sec-h">Employee</div>
   <table class="ps-t">
-    <tr><td class="lbl">Name</td><td>${escHtml(m.employee.name)}</td><td class="lbl">TIN</td><td>${escHtml(m.employee.tin)}</td></tr>
-    <tr><td class="lbl">ID</td><td>${escHtml(m.employee.idNumber)}</td><td class="lbl">SSS</td><td>${escHtml(m.employee.sss)}</td></tr>
-    <tr><td class="lbl">Job Title</td><td>${escHtml(m.employee.jobTitle)}</td><td class="lbl">PhilHealth</td><td>${escHtml(m.employee.philhealth)}</td></tr>
-    <tr><td class="lbl">Department</td><td>${escHtml(m.employee.department)}</td><td class="lbl">Pag-IBIG</td><td>${escHtml(m.employee.pagibig)}</td></tr>
+    <tr><td class="lbl">Name</td><td>${escHtml(m.employee.name)}</td><td class="lbl">TIN</td><td>${_notOnFile(m.employee.tin)}</td></tr>
+    <tr><td class="lbl">ID</td><td>${_notOnFile(m.employee.idNumber)}</td><td class="lbl">SSS</td><td>${_notOnFile(m.employee.sss)}</td></tr>
+    <tr><td class="lbl">Job Title</td><td>${escHtml(m.employee.jobTitle)}</td><td class="lbl">PhilHealth</td><td>${_notOnFile(m.employee.philhealth)}</td></tr>
+    <tr><td class="lbl">Department</td><td>${escHtml(m.employee.department)}</td><td class="lbl">Pag-IBIG</td><td>${_notOnFile(m.employee.pagibig)}</td></tr>
     <tr><td class="lbl">Pay Period</td><td>${escHtml(m.periodLabel)}</td><td class="lbl">Pay Date</td><td>${escHtml(m.payDateLabel||'—')}</td></tr>
   </table>
 
@@ -3510,10 +3594,27 @@ window.buildPayslipHTML = function(model) {
 // the panel closes (Back button, a same-stack {replace:true} push, or
 // Overlay.clearAll()) — the same contract every other backFn caller in this
 // file already relies on.
-window.renderPayslipPage = function(model, backFn) {
+// PAYSLIP-OVERHAUL-SPEC.md §1 — client-side gate for the "✎ Edit details"
+// button. Deliberately narrower than hr.js's own canFinance/isFinancePriv()
+// (= canEditDept('Finance'), which also admits 'secretary'): firestore.rules'
+// isMoneyAdmin() — the actual write authority on payroll/{uid} and
+// salary_history/{uid}_{month} — is president/manager/finance ONLY (WS19
+// money-tier narrowing deliberately excludes secretary). Mirroring the
+// broader canFinance gate here would show secretary a button whose Save
+// always fails server-side; mirroring the real isMoneyAdmin() boundary
+// instead keeps the UI honest AND matches the spec's own verification
+// checklist ("secretary sees view-only"). Pure client-side UX — no rules
+// change, no write path is loosened either way.
+function _payslipCanEdit() {
+  return ['president','manager','finance'].includes(window.currentRole);
+}
+window.renderPayslipPage = function(model, backFn, hostOpts) {
+  hostOpts = hostOpts || {};
+  const _canEdit = _payslipCanEdit();
   const headerRightHTML = `
-    <button class="btn-primary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print / Save PDF</button>
+    <button class="btn-primary btn-sm" id="ps-print-btn">${emojiIcon('🖨',16)} Print / Save PDF</button>
     <button class="btn-secondary btn-sm" id="ps-jpeg-btn">${emojiIcon('📷',16)} Save as JPEG</button>
+    ${_canEdit?`<button class="btn-secondary btn-sm" id="ps-edit-btn">${emojiIcon('✎',16)} Edit details</button>`:''}
     ${model.proofUrl?`<a class="btn-secondary btn-sm" href="${safeHttpUrl(model.proofUrl)}" target="_blank">${emojiIcon('📎',16)} Transfer Proof</a>`:''}
   `;
   // CONFIDENTIALITY FIX (v14 HR remediation) — this panel is an openPage host
@@ -3545,28 +3646,448 @@ window.renderPayslipPage = function(model, backFn) {
       .payslip-print,.payslip-print *{visibility:visible!important}
     }
   </style>`;
-  const bodyHTML = `${_psPrintCss}<div class="payslip-print">${buildPayslipHTML(model)}</div>`;
+  // PAYSLIP-OVERHAUL-SPEC.md §3 — the on-screen A4 sheet. .payslip-print
+  // stays on the SAME div as .a4-sheet (not a wrapper around it) so the
+  // confidentiality visibility rule above (`.payslip-print,.payslip-print
+  // *{visibility:visible!important}`) still covers every descendant
+  // unchanged; .a4-stage is a new OUTER container purely for centering +
+  // the scale-to-fit transform (css/styles.css) and isn't targeted by that
+  // rule at all — nothing in it needs to be, it has no content of its own.
+  const bodyHTML = `${_psPrintCss}<div class="a4-stage"><div class="a4-sheet payslip-print">${buildPayslipHTML(model)}</div></div>`;
+  let _fitCleanup = null;
+  // §1's edit panel's Save handler re-renders this same payslip page with
+  // {replace:true} so the fix is visible immediately, in the SAME stack
+  // slot the edit panel was occupying (not stacked deeper) — forwarded here
+  // as hostOpts.replace so a normal renderPayslipPage(model, backFn) call
+  // (every existing caller) is untouched (replace defaults false).
   const panel = window.openPage(`${emojiIcon('🖨',16)} Payslip — ${escHtml(model.employee?.name||'')}`, bodyHTML, '', {
     headerRightHTML,
-    onClose: () => { if (backFn) backFn(); }
+    replace: hostOpts.replace === true,
+    onClose: () => { if (_fitCleanup) _fitCleanup(); if (backFn) backFn(); }
   });
-  panel.querySelector('#ps-jpeg-btn')?.addEventListener('click', () => window.downloadPayslipJPEG(model));
+  panel.querySelector('#ps-print-btn')?.addEventListener('click', (e) => _handlePayslipPrintOrPdf(model, panel, e.currentTarget));
+  panel.querySelector('#ps-jpeg-btn')?.addEventListener('click', () => window.downloadPayslipJPEG(model, panel));
+  panel.querySelector('#ps-edit-btn')?.addEventListener('click', () => window.openPayslipEditPanel && window.openPayslipEditPanel(model, backFn));
   if (window.lucide) lucide.createIcons({ nodes: [panel] });
+  if (typeof window.fitA4Sheet === 'function') _fitCleanup = window.fitA4Sheet(panel);
   return panel;
 };
 
-// JPEG export — migrated from the old popup's inline script to the in-page container.
-window.downloadPayslipJPEG = async function(model) {
-  const btn = document.getElementById('ps-jpeg-btn');
-  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
-  if (!window.html2canvas) {
-    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+// ═══════════════════════════════════════════════════════════
+//  §1 — "✎ Edit details": the payslip is a RENDERING, not a second money
+//  editor. This panel edits IDENTITY/GOV-ID fields ONLY, in place; money
+//  already has three sanctioned pre-disburse editors (Edit Payroll modal,
+//  Adjust modal, Give Raise) and this never duplicates their math — it only
+//  deep-links to whichever applies for the run's current state.
+//  buildPayslipHTML stays pure (model in -> HTML out).
+//
+//  Money-sensitivity hard constraints (PAYSLIP-OVERHAUL-SPEC.md §1/§8):
+//   - NEVER write salary/allowance/deductions/sss/philhealth/pagibig/tax/
+//     caDeducted/netPay/finalPay from here or ANY edit UI.
+//   - The salary_history patch whitelist is EXACTLY {userName, tinNum,
+//     ssNum, phNum, pagibigNum} — nothing else ever lands on that mirror
+//     from this panel, monthly or weekly.
+//   - js/money-core.js is never imported/called from this panel at all —
+//     it has no money math to do.
+//   - Every identity backfill is audit-logged (window.logAudit).
+// ═══════════════════════════════════════════════════════════
+window.openPayslipEditPanel = async function(model, backFn) {
+  if (!_payslipCanEdit()) return; // defensive — the button itself is already gated
+  const isWeekly = model.kind === 'weekly';
+
+  // ── State-aware Section B signal (read-only lookups, no writes) ────────
+  let sectionBHtml, moneyLinkTarget = null; // moneyLinkTarget: 'projection'|'computed'|null(weekly uses weeklyStatus instead)
+  let weeklyStatus = null;
+  if (isWeekly) {
+    if (model.sourceRef) {
+      const psSnap = await db.collection('payslips').doc(model.sourceRef).get().catch(()=>null);
+      weeklyStatus = psSnap?.exists ? (psSnap.data().status || 'draft') : null;
+    }
+    if (!model.sourceRef) {
+      sectionBHtml = `<div style="font-size:11px;color:var(--text-muted)">This is an unsaved preview — pay figures come from the Payslip Generator and aren't on file yet.</div>`;
+    } else if (weeklyStatus === 'submitted') {
+      sectionBHtml = `<div class="badge badge-gray">${emojiIcon('🔒',12)} Submitted — figures locked</div>`;
+    } else {
+      sectionBHtml = `<button type="button" class="btn-secondary btn-sm" id="pe-money-link">Edit in Payslip Generator</button>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Hours, rate, allowances, and deductions are edited from the Payslip Generator, not here.</div>`;
+      moneyLinkTarget = 'weekly';
+    }
+  } else if (model.official) {
+    sectionBHtml = `<div class="badge badge-gray">${emojiIcon('🔒',12)} Disbursed — figures locked</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px">This month is historical truth. A genuine correction goes through the President-approved delete (Finance → Payroll → Salary History), never an in-place edit.</div>`;
+  } else {
+    // Not yet disbursed — tell "computed run, not yet verified/disbursed"
+    // apart from "pure live projection, no run yet" by checking pay_runs
+    // directly (model itself can't reliably tell these apart — both build
+    // through computePayLine as of §6, which always fills kpiScore/perfFactor).
+    let isComputed = false;
+    if (model.monthKey && model.sourceRef) {
+      const runSnap = await db.collection('pay_runs').doc(model.monthKey).get().catch(()=>null);
+      isComputed = !!(runSnap?.exists && (runSnap.data().lines||[]).some(l => l.uid === model.sourceRef));
+    }
+    moneyLinkTarget = isComputed ? 'computed' : 'projection';
+    sectionBHtml = `<button type="button" class="btn-secondary btn-sm" id="pe-money-link">${isComputed ? 'Adjust this computed line' : 'Edit live pay settings'}</button>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Opens Finance → Payroll — use ${isComputed ? "this employee's row ✎ Adjust button" : "this employee's row ✎ Edit button"} to change pay figures.</div>`;
   }
-  const el = document.querySelector('.payslip-print');
-  const canvas = await html2canvas(el, { scale:2, useCORS:true, backgroundColor:'#fff', logging:false });
-  const link = document.createElement('a');
-  link.download = `payslip-${(model.employee.name||'employee').replace(/\s+/g,'-')}-${(model.docNumber||'').replace(/[^a-zA-Z0-9-]/g,'')}.jpg`;
-  link.href = canvas.toDataURL('image/jpeg', 0.95);
-  link.click();
-  if (btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
+
+  const idLabel = isWeekly ? 'Worker ID (BI-W-###)' : 'Employee ID';
+  const nameLabel = isWeekly ? 'Worker Name' : 'Name';
+  const bodyHTML = `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">${emojiIcon('🪪',14)} Identity and government-ID fields only, backfilled here so blank cells on the payslip can be corrected without hunting through ${isWeekly?'the worker profile':'Edit Payroll'}. Pay figures (base/allowance/deductions/statutory/CA/net) are never edited on this panel — see "Pay figures" below for where they actually live.</div>
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Employee &amp; Government IDs</div>
+    <div class="form-group"><label>${nameLabel}</label><input id="pe-name" value="${escHtml(model.employee.name)}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Job Title</label><input id="pe-title" value="${escHtml(model.employee.jobTitle)}"/></div>
+      <div class="form-group"><label>Department</label><input id="pe-dept" value="${escHtml(model.employee.department)}"/></div>
+    </div>
+    <div class="form-group"><label>${idLabel}</label><input id="pe-empid" value="${escHtml(model.employee.idNumber)}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>TIN</label><input id="pe-tin" value="${escHtml(model.employee.tin)}" placeholder="000-000-000-000"/></div>
+      <div class="form-group"><label>SSS No.</label><input id="pe-sss" value="${escHtml(model.employee.sss)}" placeholder="00-0000000-0"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>PhilHealth No.</label><input id="pe-ph" value="${escHtml(model.employee.philhealth)}"/></div>
+      <div class="form-group"><label>Pag-IBIG MID</label><input id="pe-pib" value="${escHtml(model.employee.pagibig)}"/></div>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Pay figures</div>
+      ${sectionBHtml}
+    </div>
+  `;
+
+  // Stacked push (replace:false) per §1's implementation shape — sits on
+  // top of the payslip panel; the payslip panel itself is only replaced
+  // once Save actually persists something (renderPayslipPage's
+  // hostOpts.replace, wired below).
+  const panel = openPage(`${emojiIcon('✎',16)} Edit details — ${escHtml(model.employee.name||'')}`, bodyHTML,
+    `<button class="btn-primary" id="pe-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  if (window.lucide) lucide.createIcons({ nodes: [panel] });
+
+  panel.querySelector('#pe-money-link')?.addEventListener('click', () => {
+    Notifs.showToast('Opening Payroll — pay figures are edited there, never on the payslip itself.');
+    if (moneyLinkTarget === 'weekly') {
+      if (typeof renderFinanceHRProfiles === 'function') renderFinanceHRProfiles(deptContainer(), window.currentUser, window.currentRole);
+      else navigateTo('dept:HR');
+    } else if (typeof window.renderFinance === 'function') {
+      window.renderFinance(window.currentUser, window.currentRole, 'Payroll');
+    } else {
+      navigateTo('dept:Finance');
+    }
+  });
+
+  panel.querySelector('#pe-save-btn')?.addEventListener('click', () => window.busy(panel.querySelector('#pe-save-btn'), async () => {
+    // ID formats are free-text (existing convention, no validation beyond
+    // trim — matches the Edit Payroll modal's own gov-ID inputs, hr.js).
+    const name  = document.getElementById('pe-name')?.value.trim()  || '';
+    const title = document.getElementById('pe-title')?.value.trim() || '';
+    const dept  = document.getElementById('pe-dept')?.value.trim()  || '';
+    const empId = document.getElementById('pe-empid')?.value.trim()|| '';
+    const tin   = document.getElementById('pe-tin')?.value.trim()   || '';
+    const sss   = document.getElementById('pe-sss')?.value.trim()   || '';
+    const ph    = document.getElementById('pe-ph')?.value.trim()    || '';
+    const pib   = document.getElementById('pe-pib')?.value.trim()   || '';
+    if (!name) { Notifs.showToast('Name is required.', 'error'); return; }
+
+    // Per-target try/catch — firestore.rules gates users/{uid} (Name/
+    // Department/Job Title/Employee ID: isSeniorAdmin — president/manager
+    // ONLY) more tightly than payroll/{uid} (TIN/SSS/PhilHealth/Pag-IBIG:
+    // isMoneyAdmin — president/manager/finance). A finance-role save can
+    // legitimately succeed on one target and be denied on the other; each
+    // write is isolated so a denial on one never silently swallows (or
+    // blocks) the other, and the toast reports exactly what did/didn't save
+    // — never a single opaque "failed" with no explanation.
+    const results = [];
+    const attempt = async (label, fn) => {
+      try { await fn(); results.push({ label, ok:true }); }
+      catch (err) { console.error(`payslip edit panel: "${label}" save failed`, err); results.push({ label, ok:false, err }); }
+    };
+
+    if (isWeekly) {
+      if (model.profileId) {
+        await attempt('Identity & gov IDs (worker profile)', () => db.collection('worker_profiles').doc(model.profileId).set({
+          name, jobTitle: title, department: dept, idNumber: empId,
+          tinNum: tin, ssNum: sss, phNum: ph, pagibigNum: pib
+        }, { merge:true }));
+        window.logAudit && window.logAudit('payslip-id-backfill', 'worker_profiles', model.profileId,
+          { fields:['name','jobTitle','department','idNumber','tinNum','ssNum','phNum','pagibigNum'] });
+      }
+      // A saved payslips doc (draft OR submitted) gets the same identity
+      // patch — money stays locked by not being in this write at all, not
+      // by a status check (§1's weekly row in the editable-fields matrix).
+      if (model.sourceRef) {
+        await attempt('Saved payslip record', () => db.collection('payslips').doc(model.sourceRef).set({
+          workerName: name, tinNum: tin, ssNum: sss, phNum: ph, pagibigNum: pib
+        }, { merge:true }));
+      }
+    } else {
+      const uid = model.sourceRef;
+      if (uid) {
+        await attempt('Name / Department / Job Title / Employee ID', () => db.collection('users').doc(uid).set({
+          displayName: name, title, department: dept, employeeId: empId
+        }, { merge:true }));
+        await attempt('TIN / SSS / PhilHealth / Pag-IBIG', () => db.collection('payroll').doc(uid).set({
+          tinNum: tin, ssNum: sss, phNum: ph, pagibigNum: pib
+        }, { merge:true }));
+        window.logAudit && window.logAudit('payslip-id-backfill', 'users', uid,
+          { fields:['displayName','title','department','employeeId','tinNum','ssNum','phNum','pagibigNum'] });
+        if (model.official && model.monthKey) {
+          // §8 hard constraint — the ONLY salary_history patch whitelist:
+          // {userName, tinNum, ssNum, phNum, pagibigNum}. NEVER salary/
+          // allowance/deductions/sss/philhealth/pagibig/tax/caDeducted/
+          // netPay/finalPay from this panel.
+          await attempt('Disbursed record (salary_history mirror)', () => db.collection('salary_history').doc(`${uid}_${model.monthKey}`).set({
+            userName: name, tinNum: tin, ssNum: sss, phNum: ph, pagibigNum: pib
+          }, { merge:true }));
+          window.logAudit && window.logAudit('payslip-id-backfill', 'salary_history', `${uid}_${model.monthKey}`,
+            { fields:['userName','tinNum','ssNum','phNum','pagibigNum'] });
+        }
+      }
+    }
+
+    if (!results.length) { Notifs.showToast('Nothing to save — this payslip has no writable record on file yet.', 'error'); return; }
+    const failed = results.filter(r => !r.ok);
+    const anyPermissionDenied = failed.some(f => f.err && (f.err.code === 'permission-denied' || /permission/i.test(f.err.message||'')));
+    if (failed.length === results.length) {
+      Notifs.showToast(`Could not save (${failed.map(f=>f.label).join(', ')})${anyPermissionDenied ? ' — you may need President/Manager access for some of these fields.' : '.'}`, 'error');
+      return;
+    }
+    if (failed.length) {
+      Notifs.showToast(`Saved: ${results.filter(r=>r.ok).map(r=>r.label).join('; ')}. Could NOT save: ${failed.map(f=>f.label).join('; ')}${anyPermissionDenied ? ' (needs President/Manager).' : '.'}`, 'error');
+    } else {
+      Notifs.success('Details updated.');
+    }
+
+    // Re-render the payslip with the fix visible immediately (§1: "re-run
+    // the model build + re-render the payslip page, replace:true"). Every
+    // OTHER call site's original raw source object isn't reachable from
+    // here, so this updates the model's display fields from exactly what
+    // was just confirmed persisted (never from what merely got typed) and
+    // re-renders in place — money fields on `model` are untouched, since
+    // nothing above ever wrote money.
+    const okLabels = new Set(results.filter(r=>r.ok).map(r=>r.label));
+    const identityOk = isWeekly
+      ? okLabels.has('Identity & gov IDs (worker profile)') || okLabels.has('Saved payslip record')
+      : okLabels.has('Name / Department / Job Title / Employee ID') || okLabels.has('TIN / SSS / PhilHealth / Pag-IBIG');
+    if (identityOk) {
+      if (!isWeekly && okLabels.has('Name / Department / Job Title / Employee ID')) {
+        model.employee.name = name; model.employee.jobTitle = title;
+        model.employee.department = dept; model.employee.idNumber = empId;
+      } else if (isWeekly && okLabels.has('Identity & gov IDs (worker profile)')) {
+        model.employee.name = name; model.employee.jobTitle = title;
+        model.employee.department = dept; model.employee.idNumber = empId;
+      }
+      if (okLabels.has('TIN / SSS / PhilHealth / Pag-IBIG') || okLabels.has('Saved payslip record') || okLabels.has('Identity & gov IDs (worker profile)')) {
+        model.employee.tin = tin; model.employee.sss = sss;
+        model.employee.philhealth = ph; model.employee.pagibig = pib;
+      }
+    }
+    window.renderPayslipPage(model, backFn, { replace:true });
+  }));
+};
+
+// ═══════════════════════════════════════════════════════════
+//  §4 — Print / Save PDF + Save as JPEG (payslip overhaul)
+//  Root causes fixed here (see PAYSLIP-OVERHAUL-SPEC.md §4):
+//   1. Save-as-JPEG loaded html2canvas from cdnjs, which index.html's CSP
+//      script-src does NOT allowlist — the dynamic <script> load failed on
+//      EVERY device (not just iOS), with no try/catch, leaving the button
+//      stuck on "Generating…" forever.
+//   2. window.print() is a no-op/unreliable inside an iOS Add-to-Home-Screen
+//      standalone webview (no browser chrome to host the print sheet); the
+//      old JPEG fallback's data-URL link.click() is separately unreliable
+//      in standalone mode too.
+//  Fix: vendor html2canvas locally (js/vendor/html2canvas.min.js, same-origin
+//  — CSP 'self' allows it, works offline via sw.js's PRECACHE), capture to a
+//  Blob, and hand the file to the native Web Share sheet on iOS standalone
+//  (Save Image / Save to Files / AirPrint / Mail) with a same-repo
+//  dependency-free JPEG→PDF wrapper (js/pdf-lite.js) for the PDF path.
+//  Desktop/Android/regular-Safari keep window.print(). No pop-ups, no new
+//  window, no cross-origin script — fully same-document.
+// ═══════════════════════════════════════════════════════════
+
+let _html2canvasLoadPromise = null;
+function _ensureHtml2Canvas() {
+  if (window.html2canvas) return Promise.resolve();
+  if (_html2canvasLoadPromise) return _html2canvasLoadPromise;
+  _html2canvasLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'js/vendor/html2canvas.min.js';
+    s.onload = () => resolve();
+    s.onerror = () => { _html2canvasLoadPromise = null; reject(new Error('Could not load the export library — check your connection and try again.')); };
+    document.head.appendChild(s);
+  });
+  return _html2canvasLoadPromise;
+}
+let _pdfLiteLoadPromise = null;
+function _ensurePdfLite() {
+  if (window.jpegToPdf) return Promise.resolve();
+  if (_pdfLiteLoadPromise) return _pdfLiteLoadPromise;
+  _pdfLiteLoadPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'js/pdf-lite.js';
+    s.onload = () => resolve();
+    s.onerror = () => { _pdfLiteLoadPromise = null; reject(new Error('Could not load the PDF export helper.')); };
+    document.head.appendChild(s);
+  });
+  return _pdfLiteLoadPromise;
+}
+
+function _isIOSStandalone() {
+  try {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints||0) > 1);
+    const standalone = window.navigator.standalone === true
+      || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    return isIOS && standalone;
+  } catch (_) { return false; }
+}
+
+// One capture pipeline (§4 point 2). Clones `.payslip-print` (the SAME div
+// that carries `.a4-sheet`) at scale 1 off-viewport — html2canvas honors CSS
+// transforms inconsistently, so the LIVE scaled element is never captured
+// directly (spec: clone-capture, it's deterministic) — captures at scale:2
+// for print sharpness, removes the clone. `panelEl` scopes the query to a
+// specific panel (defensive — payslip panels can theoretically stack via
+// {replace:true}); falls back to a bare document query, same as before.
+async function capturePayslipCanvas(panelEl, opts) {
+  opts = opts || {};
+  await _ensureHtml2Canvas();
+  const root = panelEl || document;
+  const src = root.querySelector('.payslip-print');
+  if (!src) throw new Error('Could not find the payslip content to capture.');
+  const clone = src.cloneNode(true);
+  clone.style.transform = 'none'; // neutralize the live scale-to-fit transform — capture at true 1x
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  try {
+    return await window.html2canvas(clone, { scale: opts.scale || 2, useCORS:true, backgroundColor:'#fff', logging:false });
+  } finally {
+    wrap.remove();
+  }
+}
+
+function _canvasToJpegBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Could not render the image.')), 'image/jpeg', 0.92);
+  });
+}
+
+// Save as JPEG (§4 point 3) — Blob + Web Share (files) when available
+// (iOS standalone: Save Image/Save to Files/AirDrop/Messages/Print — the
+// reliable, user-visible-success path); otherwise a plain Blob-URL anchor
+// download (never a data: URL — those are separately unreliable in iOS
+// standalone per the root-cause note above). Every failure surfaces via a
+// toast; the button ALWAYS comes back off "Generating…" (finally), so it
+// can never get stuck — the exact symptom this replaces.
+window.downloadPayslipJPEG = async function(model, panelEl) {
+  const root = panelEl || document;
+  const btn = root.querySelector ? root.querySelector('#ps-jpeg-btn') : document.getElementById('ps-jpeg-btn');
+  const origLabel = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+  try {
+    let canvas = await capturePayslipCanvas(panelEl);
+    let blob;
+    try {
+      blob = await _canvasToJpegBlob(canvas);
+    } catch (_) {
+      // huge-canvas fallback — cap scale to 1 and retry once (§4 edge case).
+      canvas = await capturePayslipCanvas(panelEl, { scale: 1 });
+      blob = await _canvasToJpegBlob(canvas);
+    }
+    const fname = `${(model.docNumber||'payslip').replace(/[^a-zA-Z0-9-]/g,'')}.jpg`;
+    const file = new File([blob], fname, { type: 'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: `Payslip — ${model.employee?.name||''}` });
+      } catch (shareErr) {
+        if (!shareErr || shareErr.name !== 'AbortError') throw shareErr; // AbortError = user cancelled, not a failure
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = fname; link.href = url; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+  } catch (err) {
+    console.error('downloadPayslipJPEG failed', err);
+    Notifs.showToast('Could not generate the JPEG — ' + (err && err.message ? err.message : 'please try again.'), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = origLabel || `${emojiIcon('📷',16)} Save as JPEG`; }
+  }
+};
+
+// Print / Save PDF (§4 point 4). iOS standalone only: capture → JPEG →
+// wrap in a single-page A4 PDF (js/pdf-lite.js) → share sheet (Save to
+// Files / Print / Mail). Every other platform keeps window.print() — the
+// existing confidentiality-scoped print CSS + styles.css print blocks
+// already work correctly in desktop/regular-mobile browsers.
+async function sharePayslipPDF(model, panelEl) {
+  await _ensurePdfLite();
+  const canvas = await capturePayslipCanvas(panelEl);
+  const blob = await _canvasToJpegBlob(canvas);
+  const jpegBuf = await blob.arrayBuffer();
+  const pdfBytes = window.jpegToPdf(jpegBuf, canvas.width, canvas.height);
+  const fname = `${(model.docNumber||'payslip').replace(/[^a-zA-Z0-9-]/g,'')}.pdf`;
+  const file = new File([pdfBytes], fname, { type: 'application/pdf' });
+  if (!(navigator.canShare && navigator.canShare({ files: [file] }))) {
+    const e = new Error('SHARE_UNAVAILABLE'); e.code = 'SHARE_UNAVAILABLE'; throw e;
+  }
+  await navigator.share({ files: [file], title: `Payslip — ${model.employee?.name||''}` });
+}
+
+async function _handlePayslipPrintOrPdf(model, panelEl, btnEl) {
+  if (!_isIOSStandalone()) { window.print(); return; }
+  const origLabel = btnEl ? btnEl.innerHTML : '';
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Generating…'; }
+  try {
+    await sharePayslipPDF(model, panelEl);
+  } catch (err) {
+    if (err && err.name === 'AbortError') {
+      // user cancelled the share sheet — not a failure, swallow silently.
+    } else if (err && err.code === 'SHARE_UNAVAILABLE') {
+      // Old-iOS last resort (§4 point 4c): attempt native print anyway, and
+      // point the user at the JPEG button which has its own fallback path.
+      Notifs.showToast('Sharing isn’t available on this device — trying Print, or use Save as JPEG instead.', 'error');
+      try { window.print(); } catch (_) {}
+    } else {
+      console.error('sharePayslipPDF failed', err);
+      Notifs.showToast('Could not generate the PDF — ' + (err && err.message ? err.message : 'please try again.'), 'error');
+    }
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = origLabel || `${emojiIcon('🖨',16)} Print / Save PDF`; }
+  }
+}
+
+// PAYSLIP-OVERHAUL-SPEC.md §3 — scales every `.a4-stage` inside `root` so its
+// `.a4-sheet` (fixed 794×1123 "paper") always fits the available width with
+// no horizontal scroll, phone or desktop, by setting the `--a4-scale` custom
+// property the CSS transform reads. `root` is normally an openPage panel
+// (uses `.page-panel-body`'s width); Print-All (hr.js) passes `#page-content`
+// with `{live:false}` — a one-shot fit with no persistent resize listener,
+// since that screen fully replaces its DOM on the next navigation anyway and
+// a live listener there would leak on every "Print All" click. The panel
+// case IS live (resize/orientationchange) and returns a cleanup fn that
+// renderPayslipPage chains into its onClose.
+window.fitA4Sheet = function(root, opts) {
+  opts = opts || {};
+  if (!root) return () => {};
+  const recalc = () => {
+    const stages = root.querySelectorAll ? root.querySelectorAll('.a4-stage') : [];
+    stages.forEach(stage => {
+      const bodyEl = stage.closest('.page-panel-body') || stage.parentElement || root;
+      const w = (bodyEl && bodyEl.clientWidth) || root.clientWidth || window.innerWidth;
+      const scale = Math.max(0.1, Math.min(1, (w - 16) / 794));
+      stage.style.setProperty('--a4-scale', String(scale));
+    });
+  };
+  recalc();
+  if (opts.live === false) return () => {};
+  window.addEventListener('resize', recalc);
+  window.addEventListener('orientationchange', recalc);
+  return () => {
+    window.removeEventListener('resize', recalc);
+    window.removeEventListener('orientationchange', recalc);
+  };
 };

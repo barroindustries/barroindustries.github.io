@@ -304,7 +304,13 @@ service cloud.firestore {
       //  • must start UNREAD with a server timestamp (no backdating / pre-read),
       //  • title/body length-capped so a sender can't blast oversized pushes.
       allow create: if isAuth()
-        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId','senderUid'])
+        // PAYSLIP-OVERHAUL-SPEC.md §5 — `month` (YYYY-MM) lets a payroll
+        // disburse notification deep-link straight to that month's payslip
+        // (js/notifications.js send()/_navigateFromNotif). Every other
+        // existing Notifs.send*() call site never sets it, so this is purely
+        // additive — an old client (or one that never passes month) still
+        // satisfies hasOnly() unchanged.
+        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId','senderUid','month'])
         && request.resource.data.read == false
         && request.resource.data.createdAt == request.time
         && isBoundedString(request.resource.data.get('title', ''), 200)
@@ -323,6 +329,7 @@ service cloud.firestore {
         && isBoundedString(request.resource.data.get('dedupKey', ''), 300)
         && isBoundedString(request.resource.data.get('taskId', ''), 200)
         && isBoundedString(request.resource.data.get('chatId', ''), 200)
+        && isBoundedString(request.resource.data.get('month', ''), 7)
         // Phase 68 quota observer (functions/index.js sendNotificationQuota) keys off
         // senderUid — optional (system/scheduled sends omit it), but when present it
         // must be truthful: a caller can't attribute a notif to another sender.
