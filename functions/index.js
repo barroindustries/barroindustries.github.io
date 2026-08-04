@@ -963,9 +963,67 @@ exports.scheduledDailyDigestChecks = functions
       console.error('[scheduledDailyDigestChecks] quote follow-ups failed:', e.message);
     }
 
+    // ── 6. AR aging — job_projects with a PAST-DUE billing invoice (invoice.due
+    //      before today) and a still-outstanding balance, so Finance chases
+    //      collection instead of letting receivables silently age. AR is DERIVED
+    //      (contractAmount − amountCollected, clamped ≥0) — never the stored
+    //      arBalance, which is known to drift (see production.js renderProject-
+    //      Lifecycle). Dept-targeted: president/manager/finance + Finance dept.
+    //      Links to projects-lifecycle, where Record Payment lives.
+    let arAgingCount = 0;
+    try {
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const [arUsersSnap, projSnap] = await Promise.all([
+        db.collection('users').get(),
+        db.collection('job_projects').get()
+      ]);
+      const overdue = [];
+      projSnap.docs.forEach(d => {
+        const p = { id: d.id, ...d.data() };
+        if (p.stage === 'cancelled') return;
+        const ar = Math.max(0, (Number(p.contractAmount) || 0) - (Number(p.amountCollected) || 0));
+        if (ar <= 0) return;
+        const pastDues = (Array.isArray(p.invoices) ? p.invoices : [])
+          .map(iv => (iv && typeof iv.due === 'string' && /^\d{4}-\d{2}-\d{2}/.test(iv.due)) ? iv.due.slice(0, 10) : null)
+          .filter(due => due && due < todayStr);
+        if (!pastDues.length) return;
+        const oldest = pastDues.sort()[0];
+        const daysOverdue = Math.round((Date.parse(todayStr + 'T00:00:00Z') - Date.parse(oldest + 'T00:00:00Z')) / DAY_MS);
+        overdue.push({ p, ar, daysOverdue });
+      });
+
+      arAgingCount = overdue.length;
+      if (overdue.length) {
+        overdue.sort((a, b) => b.daysOverdue - a.daysOverdue);
+        const totalAr = overdue.reduce((s, o) => s + o.ar, 0);
+        const label = o => `${o.p.clientName || o.p.projectNo || 'project'} (₱${(Number(o.ar) || 0).toLocaleString('en-PH')}, ${o.daysOverdue}d)`;
+        const shown = overdue.slice(0, 4).map(label).join(', ');
+        const more = overdue.length > 4 ? ` +${overdue.length - 4} more` : '';
+        const title = `💰 ${overdue.length} overdue receivable${overdue.length > 1 ? 's' : ''}`;
+        const body = `₱${totalAr.toLocaleString('en-PH')} past due across ${overdue.length} project${overdue.length > 1 ? 's' : ''}: ${shown}${more}. Open Projects to record collection.`;
+        arUsersSnap.docs.forEach(doc => {
+          const u = doc.data();
+          if (u.status === 'inactive' || u.pendingPasswordSetup) return;
+          const depts = Array.isArray(u.departments) ? u.departments
+            : (typeof u.department === 'string' && u.department ? [u.department] : []);
+          if (!['president', 'manager', 'finance'].includes(u.role) && !depts.includes('Finance')) return;
+          toNotify.push({
+            ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
+            notifData: {
+              title, body, icon: '💰', type: 'ar_aging', link: 'projects-lifecycle',
+              dedupKey: `ar-aging-${doc.id}-${todayStr}`
+            }
+          });
+        });
+      }
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] AR aging failed:', e.message);
+    }
+
     try {
       stats.notified = await commitInChunks(db, toNotify, null);
-      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr} (gov bids flagged: ${govDeadlineCount}, quotes to follow up: ${quoteFollowupCount})`);
+      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr} (gov bids flagged: ${govDeadlineCount}, quotes to follow up: ${quoteFollowupCount}, overdue receivables: ${arAgingCount})`);
     } catch (err) {
       stats.errors++;
       console.error('[scheduledDailyDigestChecks] commit failed:', err);
