@@ -3650,6 +3650,24 @@ window.addEventListener('message', async (e) => {
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
       window.logAudit && window.logAudit('update', 'quote', docId, { source: 'quote-builder-v2', inPlaceEdit: true });
       if (typeof Notifs?.success === 'function') Notifs.success('Quote updated in place.');
+
+      // CLIENT-QUOTE-PAGE-SPEC.md §5.2/§6.3 — if a client link was already
+      // shared for this quote (quote.shareToken set), best-effort re-project
+      // the public mirror so an in-place edit doesn't leave the client
+      // looking at a stale offer. Preserves clientResponse/status/sharedAt
+      // (window.resyncPublicQuoteMirror, js/screens/sales.js) — never mints
+      // a new token, never resurrects a revoked mirror, and NEVER blocks or
+      // fails this handler: the mirror is a convenience snapshot, not the
+      // system of record, so any error here is only logged.
+      try {
+        const freshSnap = await db.collection(collection).doc(docId).get();
+        const freshQuote = freshSnap.exists ? { id: docId, ...freshSnap.data() } : null;
+        if (freshQuote && freshQuote.shareToken && typeof window.resyncPublicQuoteMirror === 'function') {
+          await window.resyncPublicQuoteMirror(collection, docId, freshQuote);
+        }
+      } catch (mirrorErr) {
+        console.warn('[QB bridge] public quote mirror re-sync failed (non-blocking)', mirrorErr);
+      }
     } catch (err) {
       console.error('[QB bridge] QUOTE_UPDATE failed', err);
       Notifs?.showToast && Notifs.showToast('Update failed: ' + (err.message || err.code), 'error');

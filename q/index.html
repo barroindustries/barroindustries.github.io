@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>View Your Quotation — Barro Industries</title>
+<meta name="theme-color" content="#0F6CBD"/>
+<meta name="robots" content="noindex"/>
+<meta name="description" content="View your quotation from Barro Industries and Accept or Request changes — no login needed."/>
+<link rel="icon" href="/icons/favicon.png"/>
+<!-- Rich link preview so a shared link shows a branded, trustworthy card. Deliberately
+     GENERIC — this is static HTML served to every token, so it must never bake a
+     specific client's name/amount into it (spec §3). -->
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="Barro Industries"/>
+<meta property="og:title" content="View Your Quotation — Barro Industries"/>
+<meta property="og:description" content="Review your quotation and Accept or Request changes — no login needed."/>
+<meta property="og:image" content="https://barroindustries-operatingsystem.ravenmails.com/icons/icon-512.png"/>
+<meta property="og:image:width" content="512"/>
+<meta property="og:image:height" content="512"/>
+<meta property="og:url" content="https://barroindustries-operatingsystem.ravenmails.com/q/"/>
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="View Your Quotation — Barro Industries"/>
+<meta name="twitter:description" content="Review your quotation and Accept or Request changes — no login needed."/>
+<meta name="twitter:image" content="https://barroindustries-operatingsystem.ravenmails.com/icons/icon-512.png"/>
+<style>
+  :root{
+    --ink:#242424; --muted:#616161;
+    --line:#E1DFDD; --bg:#FAF9F8; --card:#FFFFFF; --ok:#107C41; --warn:#B98900; --danger:#C4314B;
+    --accent:#0F6CBD; --accent-2:#2886DE;
+    --r:12px; --shadow:0 2px 10px rgba(0,0,0,.06);
+    --font:'Segoe UI',-apple-system,system-ui,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.5;
+    -webkit-font-smoothing:antialiased;min-height:100dvh;padding:16px 16px 96px}
+  .wrap{max-width:740px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:12px;padding:8px 2px 18px}
+  .brand img{width:42px;height:42px;border-radius:9px;object-fit:contain;background:#fff;border:1px solid var(--line)}
+  .brand-name{font-size:17px;font-weight:800;background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand-sub{font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+  .state{text-align:center;padding:52px 20px;color:var(--muted)}
+  .state .ic{font-size:44px;margin-bottom:12px}
+  .state h3{font-size:16px;font-weight:700;color:var(--ink);margin-bottom:6px}
+
+  .ribbon{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#fff;
+    background:var(--danger);border-radius:10px;padding:8px 14px;margin-bottom:14px}
+
+  .hero-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .hero-no{font-size:21px;font-weight:800;margin:2px 0 6px;color:var(--ink)}
+  .hero-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
+  .pill{display:inline-flex;align-items:center;font-size:11.5px;font-weight:700;padding:4px 12px;border-radius:999px;
+    background:rgba(15,108,189,.1);color:var(--accent)}
+  .pill.warn{background:rgba(185,137,0,.14);color:var(--warn)}
+  .sect-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin:0 0 12px}
+  .kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .kv .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .kv .v{font-size:13.5px;font-weight:600;margin-top:2px;color:var(--ink)}
+  @media(max-width:420px){ .kv-grid{grid-template-columns:1fr} }
+
+  table.items{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.items th{text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+    padding:0 6px 8px;border-bottom:2px solid var(--line)}
+  table.items td{padding:10px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+  table.items tr:last-child td{border-bottom:none}
+  .it-name{font-weight:700;color:var(--ink)}
+  .it-meta{font-size:11px;color:var(--muted);margin-top:2px}
+  .num{text-align:right;white-space:nowrap}
+
+  .pay-row{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;padding:6px 0}
+  .pay-row .lbl{color:var(--muted)}
+  .pay-row.total{border-top:1px solid var(--line);margin-top:6px;padding-top:12px;font-weight:800;font-size:16px}
+  .pay-row.disc .v{color:var(--ok)}
+
+  .note-box{font-size:12.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);
+    border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-word}
+
+  .photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .q-photo{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--bg)}
+  .q-photo img{width:100%;height:110px;object-fit:cover;display:block}
+  .q-photo .cap{font-size:10.5px;color:var(--muted);padding:6px 8px}
+
+  .actionbar{position:sticky;bottom:12px;background:var(--card);border:1px solid var(--line);
+    border-radius:var(--r);box-shadow:0 6px 24px rgba(0,0,0,.12);padding:14px;margin-top:6px}
+  .actionbar-btns{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{appearance:none;border:none;border-radius:10px;font-size:14px;font-weight:700;padding:13px 16px;
+    cursor:pointer;flex:1;min-width:150px;text-align:center;font-family:inherit}
+  .btn-accept{background:linear-gradient(90deg,var(--accent),var(--accent-2));color:#fff}
+  .btn-accept:disabled{opacity:.5;cursor:not-allowed}
+  .btn-secondary{background:var(--bg);color:var(--ink);border:1.5px solid var(--line)}
+  .btn-danger{background:var(--danger);color:#fff}
+  .btn-block{width:100%;flex:none}
+
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.03em;margin-bottom:5px}
+  .field input,.field textarea{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;
+    font-size:14px;font-family:inherit;background:#fff;color:var(--ink)}
+  .field textarea{resize:vertical;min-height:80px}
+  .form-err{font-size:12px;color:var(--danger);font-weight:600;margin:-4px 0 10px;display:none}
+  .form-err.show{display:block}
+
+  .resp-state{text-align:center;padding:10px 4px 4px}
+  .resp-ic{font-size:40px;margin-bottom:8px}
+  .resp-title{font-size:16px;font-weight:800;margin-bottom:6px}
+  .resp-body{font-size:13px;color:var(--muted);line-height:1.6}
+  .resp-note{margin-top:12px;text-align:left;font-size:12.5px;background:var(--bg);border:1px solid var(--line);
+    border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word}
+
+  .foot{text-align:center;font-size:11px;color:var(--muted);padding:18px 0 8px;line-height:1.7}
+
+  @media print{
+    body{background:#fff;padding:0}
+    .actionbar,.foot .no-print{display:none}
+    .card{box-shadow:none;border:1px solid #ccc;break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand" id="brand-row">
+    <img id="brand-logo" src="" alt="" style="display:none" onerror="this.style.display='none'"/>
+    <div>
+      <div class="brand-name" id="brand-name">Barro Industries</div>
+      <div class="brand-sub" id="brand-sub">Your Quotation</div>
+    </div>
+  </div>
+  <div id="root">
+    <div class="state"><div class="ic">📄</div><div>Loading your quotation…</div></div>
+  </div>
+  <div class="foot">
+    <span id="brand-creds"></span>
+    <div class="no-print" style="margin-top:6px">Questions about this quotation? Contact your Barro Industries sales representative.</div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script>
+(function(){
+  var cfg = {
+    apiKey:"AIzaSyA1-fDeMCxTsUm29O49l954Ez5BqbyHijk",
+    authDomain:"barro-industries.firebaseapp.com",
+    projectId:"barro-industries",
+    storageBucket:"barro-industries.firebasestorage.app",
+    messagingSenderId:"700081895848",
+    appId:"1:700081895848:web:265511313b4ff74575459d"
+  };
+  var root = document.getElementById('root');
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function peso(n){ n=Number(n)||0; return '₱'+n.toLocaleString('en-PH',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+  function stateMsg(ic,title,sub){
+    root.innerHTML = '<div class="state"><div class="ic">'+ic+'</div><h3>'+esc(title)+'</h3>'+(sub?'<div>'+esc(sub)+'</div>':'')+'</div>';
+  }
+  // ISO 'YYYY-MM-DD' → 'Jan 15, 2026'. Never trust the string blindly — a
+  // malformed/empty date must degrade to '' rather than "Invalid Date".
+  function fmtDate(iso){
+    if(!iso) return '';
+    var d = new Date(iso+'T00:00:00');
+    if(isNaN(d)) return '';
+    return d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'});
+  }
+  function daysUntil(iso){
+    if(!iso) return null;
+    var d = new Date(iso+'T00:00:00');
+    if(isNaN(d)) return null;
+    var today = new Date(); today.setHours(0,0,0,0);
+    return Math.ceil((d - today) / 86400000);
+  }
+  // Token = whatever follows '?', same short-link parse as /t/ — accepts
+  // /q/?<TOKEN> (bare) so the shared URL stays short. 8-24 chars so a future
+  // token-length change never strands an already-shared link (spec §3.1).
+  var token = (location.search.replace(/^\?/,'').split('&')[0] || '').trim();
+  if (!/^[2-9a-zA-Z]{8,24}$/.test(token)){
+    stateMsg('🔗','This link looks incomplete','Please use the exact link your sales representative sent you.');
+    return;
+  }
+
+  firebase.initializeApp(cfg);
+  var db = firebase.firestore();
+
+  db.collection('public_quotes').doc(token).get().then(function(snap){
+    if (!snap.exists){
+      stateMsg('📭','This quote link is no longer available','Please contact your sales representative for an updated link.');
+      return;
+    }
+    render(snap.data());
+  }).catch(function(e){
+    stateMsg('⚠️','Could not load your quotation','Please try again in a moment. ('+esc(e.code||e.message||'error')+')');
+  });
+
+  // ── Branding ──────────────────────────────────────────
+  var ACCENTS = {
+    BK: { a:'#0F6CBD', a2:'#2886DE', logo:'/icons/barro-kitchens.png' },
+    BS: { a:'#2c3e50', a2:'#546e7a', logo:'' },
+    PT: { a:'#455a64', a2:'#78909c', logo:'' }
+  };
+  function applyBrand(doc){
+    var co = (doc.co==='BK'||doc.co==='BS') ? doc.co : 'PT';
+    var acc = ACCENTS[co] || ACCENTS.PT;
+    document.documentElement.style.setProperty('--accent', acc.a);
+    document.documentElement.style.setProperty('--accent-2', acc.a2);
+    var brand = doc.brand || {};
+    document.getElementById('brand-name').textContent = brand.name || 'Barro Industries';
+    document.getElementById('brand-sub').textContent = brand.sub || 'Your Quotation';
+    document.getElementById('brand-creds').textContent = brand.creds || 'Barro Industries';
+    var meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', acc.a);
+    var logoEl = document.getElementById('brand-logo');
+    if (acc.logo){ logoEl.src = acc.logo; logoEl.alt = esc(brand.name||''); logoEl.style.display=''; }
+  }
+
+  // ── Render ────────────────────────────────────────────
+  function render(doc){
+    applyBrand(doc);
+    var expired = false;
+    var daysLeft = daysUntil(doc.validUntil);
+    if (doc.validUntil && daysLeft !== null && daysLeft < 0) expired = true;
+
+    var respStatus = (doc.clientResponse && doc.clientResponse.status) || 'pending';
+
+    var html = '';
+    html += heroHtml(doc, expired, daysLeft);
+    html += itemsHtml(doc);
+    html += totalsHtml(doc);
+    html += paymentHtml(doc);
+    html += timelineHtml(doc);
+    if (doc.remarks) html += '<div class="card"><div class="sect-title">Remarks</div><div class="note-box">'+esc(doc.remarks)+'</div></div>';
+    html += photosHtml(doc);
+
+    root.innerHTML = html;
+
+    // Idempotent on refresh — a quote that already has a recorded response
+    // renders that state directly, never the action bar again.
+    var actionHost = document.createElement('div');
+    root.appendChild(actionHost);
+    if (respStatus !== 'pending') {
+      actionHost.innerHTML = respondedStateHtml(doc, respStatus);
+    } else {
+      actionHost.innerHTML = actionBarHtml(doc, expired);
+      wireActionBar(actionHost, doc, expired);
+    }
+  }
+
+  function heroHtml(doc, expired, daysLeft){
+    var pill = '';
+    if (expired) {
+      pill = '<span class="pill warn">Expired '+esc(fmtDate(doc.validUntil))+'</span>';
+    } else if (doc.validUntil) {
+      pill = '<span class="pill">Valid until '+esc(fmtDate(doc.validUntil))+(daysLeft!=null && daysLeft>=0 ? ' · '+daysLeft+' day'+(daysLeft===1?'':'s')+' left' : '')+'</span>';
+    }
+    var ribbon = expired ? '<div class="ribbon">⚠️ This quotation has expired — you can still request changes, or contact your sales representative for an updated quote.</div>' : '';
+    var rows = [];
+    if (doc.subject) rows.push(['Subject', doc.subject]);
+    if (doc.purpose) rows.push(['Purpose', doc.purpose]);
+    if (doc.salesperson) rows.push(['Prepared by', doc.salesperson]);
+    var clientLine = [doc.clientName, doc.clientCompany].filter(Boolean).join(' — ');
+    if (clientLine) rows.push(['For', clientLine]);
+    var kv = rows.length ? '<div class="kv-grid" style="margin-top:14px">'+rows.map(function(r){
+      return '<div class="kv"><div class="k">'+esc(r[0])+'</div><div class="v">'+esc(r[1])+'</div></div>';
+    }).join('')+'</div>' : '';
+    return ribbon + '<div class="card">'
+      + '<div class="hero-label">Quotation</div>'
+      + '<div class="hero-no">'+esc(doc.quoteNumber||'Your Quotation')+'</div>'
+      + '<div class="hero-row">'
+      +   (doc.quoteDate ? '<span style="font-size:12px;color:var(--muted)">'+esc(fmtDate(doc.quoteDate))+'</span>' : '')
+      +   pill
+      + '</div>'
+      + kv
+      + '</div>';
+  }
+
+  function itemsHtml(doc){
+    var items = Array.isArray(doc.items) ? doc.items : [];
+    if (!items.length) return '';
+    var rows = items.map(function(it){
+      var meta = [it.dims, it.specStr].filter(Boolean).join(' · ');
+      return '<tr>'
+        + '<td><div class="it-name">'+esc(it.name||'')+'</div>'+(meta?'<div class="it-meta">'+esc(meta)+'</div>':'')+(it.leadTime?'<div class="it-meta">Lead time: '+esc(it.leadTime)+'</div>':'')+'</td>'
+        + '<td class="num">'+esc(it.qty!=null?it.qty:'')+(it.unit?' '+esc(it.unit):'')+'</td>'
+        + '<td class="num">'+peso(it.unitPrice)+'</td>'
+        + '<td class="num" style="font-weight:700">'+peso(it.amount)+'</td>'
+        + '</tr>';
+    }).join('');
+    return '<div class="card"><div class="sect-title">Items</div>'
+      + '<div style="overflow-x:auto"><table class="items">'
+      + '<thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit Price</th><th class="num">Amount</th></tr></thead>'
+      + '<tbody>'+rows+'</tbody></table></div></div>';
+  }
+
+  function totalsHtml(doc){
+    var rows = [];
+    rows.push(['Subtotal', peso(doc.subtotal), '']);
+    if (doc.discountAmount) rows.push(['Discount'+(doc.discountPct?' ('+doc.discountPct+'%)':''), '−'+peso(doc.discountAmount), 'disc']);
+    if (doc.discountAmount) rows.push(['Net Amount', peso(doc.netAmount), '']);
+    if (doc.vatIncluded) rows.push(['VAT', peso(doc.vatAmount), '']);
+    var di = doc.deliveryInstall || {};
+    if (di.free) {
+      rows.push(['Delivery / Installation', 'FREE', 'disc']);
+    } else if (di.amount) {
+      rows.push(['Delivery / Installation'+(di.includedInTotal?' (included above)':''), peso(di.amount), '']);
+    }
+    var rowsHtml = rows.map(function(r){
+      return '<div class="pay-row'+(r[2]?' '+r[2]:'')+'"><span class="lbl">'+esc(r[0])+'</span><span class="v">'+esc(r[1])+'</span></div>';
+    }).join('');
+    var diNote = (di.method || di.notes) ? '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">'+esc([di.method, di.notes].filter(Boolean).join(' · '))+'</div>' : '';
+    return '<div class="card"><div class="sect-title">Summary</div>'
+      + rowsHtml
+      + '<div class="pay-row total"><span>Total</span><span>'+peso(doc.total)+'</span></div>'
+      + diNote
+      + '</div>';
+  }
+
+  function paymentHtml(doc){
+    var pay = doc.payment || {};
+    var rows = [];
+    if (pay.downPayment) rows.push(['Down Payment'+(pay.downPaymentMode?' ('+esc(pay.downPaymentMode)+(String(pay.downPaymentMode).match(/^\d+$/)?'%':'')+')':''), peso(pay.downPayment)]);
+    if (pay.balance) rows.push(['Balance'+(pay.balanceMode?' ('+esc(pay.balanceMode)+')':''), peso(pay.balance)]);
+    if (pay.interestRate) rows.push(['Interest Rate', pay.interestRate+'%']);
+    if (!rows.length && !doc.bankDetails) return '';
+    var rowsHtml = rows.map(function(r){
+      return '<div class="pay-row"><span class="lbl">'+r[0]+'</span><span class="v">'+esc(r[1])+'</span></div>';
+    }).join('');
+    // bankDetails shown ONLY when non-empty — mirrors the internal builder's
+    // gating so a partner/Brilliant Steel quote never carries Barro's own
+    // account (spec §7.3); the mirror simply never has it populated for those.
+    var bank = doc.bankDetails ? '<div class="sect-title" style="margin-top:16px">Payment / Deposit Details</div><div class="note-box">'+esc(doc.bankDetails)+'</div>' : '';
+    return '<div class="card"><div class="sect-title">Payment Terms</div>'+rowsHtml+bank+'</div>';
+  }
+
+  function timelineHtml(doc){
+    var tl = doc.timeline || {};
+    var rows = [];
+    if (tl.startDate) rows.push(['Start Date', fmtDate(tl.startDate)]);
+    if (tl.leadDays) rows.push(['Lead Time', tl.leadDays+' day'+(tl.leadDays===1?'':'s')]);
+    if (tl.completionDate) rows.push(['Est. Completion', fmtDate(tl.completionDate)]);
+    if (!rows.length) return '';
+    return '<div class="card"><div class="sect-title">Timeline</div><div class="kv-grid">'
+      + rows.map(function(r){ return '<div class="kv"><div class="k">'+esc(r[0])+'</div><div class="v">'+esc(r[1])+'</div></div>'; }).join('')
+      + '</div></div>';
+  }
+
+  function photosHtml(doc){
+    var photos = Array.isArray(doc.photos) ? doc.photos.filter(function(p){ return p && p.url; }) : [];
+    if (!photos.length) return '';
+    var grid = photos.map(function(p){
+      return '<div class="q-photo">'
+        + '<img src="'+esc(p.url)+'" alt="'+esc(p.caption||'Reference photo')+'" loading="lazy" onerror="this.closest(\'.q-photo\').style.display=\'none\'"/>'
+        + (p.caption ? '<div class="cap">'+esc(p.caption)+'</div>' : '')
+        + '</div>';
+    }).join('');
+    return '<div class="card"><div class="sect-title">Photos</div><div class="photo-grid">'+grid+'</div></div>';
+  }
+
+  // ── Action bar: Accept / Request changes ───────────────
+  // Shared by the initial render AND wireActionBar's reset() (Back button) so
+  // the two-button state has exactly one source of truth.
+  // Expired: the Accept button is not rendered at all (spec §3.1 step 3 —
+  // "hide the Accept button; keep Request-changes"), not merely disabled.
+  function defaultButtonsHtml(expired){
+    return '<div class="actionbar-btns">'
+      +   (expired ? '' : '<button class="btn btn-accept" id="q-btn-accept">✓ Accept this quotation</button>')
+      +   '<button class="btn btn-secondary'+(expired?' btn-block':'')+'" id="q-btn-changes">Request changes</button>'
+      + '</div>';
+  }
+  function actionBarHtml(doc, expired){
+    return '<div class="actionbar" id="q-actionbar"><div id="q-ab-body">'+defaultButtonsHtml(expired)+'</div></div>';
+  }
+
+  function wireActionBar(host, doc, expired){
+    var body = host.querySelector('#q-ab-body');
+
+    function showAcceptForm(){
+      body.innerHTML =
+          '<div style="font-size:13px;font-weight:700;margin-bottom:10px">You\'re accepting <strong>'+esc(doc.quoteNumber||'this quotation')+'</strong> for <strong>'+peso(doc.total)+'</strong>.</div>'
+        + '<div class="field"><label>Your Name</label><input id="q-acc-name" value="'+esc(doc.clientName||'')+'" maxlength="120"/></div>'
+        + '<div class="field"><label>Note (optional)</label><textarea id="q-acc-note" maxlength="2000" placeholder="Anything your sales representative should know"></textarea></div>'
+        + '<div class="form-err" id="q-acc-err"></div>'
+        + '<div class="actionbar-btns">'
+        +   '<button class="btn btn-accept" id="q-acc-confirm">Confirm Accept</button>'
+        +   '<button class="btn btn-secondary" id="q-acc-cancel">‹ Back</button>'
+        + '</div>';
+      document.getElementById('q-acc-cancel').addEventListener('click', reset);
+      document.getElementById('q-acc-confirm').addEventListener('click', function(){
+        submit('accept', document.getElementById('q-acc-name').value, document.getElementById('q-acc-note').value, document.getElementById('q-acc-err'), this);
+      });
+    }
+
+    function showChangesForm(){
+      body.innerHTML =
+          '<div style="font-size:13px;font-weight:700;margin-bottom:10px">Tell us what needs to change on <strong>'+esc(doc.quoteNumber||'this quotation')+'</strong>.</div>'
+        + '<div class="field"><label>Your Name</label><input id="q-chg-name" value="'+esc(doc.clientName||'')+'" maxlength="120"/></div>'
+        + '<div class="field"><label>What would you like changed?</label><textarea id="q-chg-note" maxlength="2000" placeholder="e.g. adjust quantity, change finish, revisit pricing…"></textarea></div>'
+        + '<div class="form-err" id="q-chg-err"></div>'
+        + '<div class="actionbar-btns">'
+        +   '<button class="btn btn-accept" id="q-chg-confirm">Send Request</button>'
+        +   '<button class="btn btn-secondary" id="q-chg-cancel">‹ Back</button>'
+        + '</div>';
+      document.getElementById('q-chg-cancel').addEventListener('click', reset);
+      document.getElementById('q-chg-confirm').addEventListener('click', function(){
+        var note = document.getElementById('q-chg-note').value;
+        var err = document.getElementById('q-chg-err');
+        if (!note.trim()){ err.textContent = 'Please describe what you\'d like changed.'; err.classList.add('show'); return; }
+        submit('request_changes', document.getElementById('q-chg-name').value, note, err, this);
+      });
+    }
+
+    function reset(){ body.innerHTML = defaultButtonsHtml(expired); wireButtons(); }
+    function wireButtons(){
+      var b1 = document.getElementById('q-btn-accept'); if (b1) b1.addEventListener('click', showAcceptForm);
+      var b2 = document.getElementById('q-btn-changes'); if (b2) b2.addEventListener('click', showChangesForm);
+    }
+    wireButtons();
+
+    function submit(action, name, note, errEl, btnEl){
+      errEl.classList.remove('show');
+      btnEl.disabled = true;
+      var origText = btnEl.textContent; btnEl.textContent = 'Sending…';
+      var fn = firebase.app().functions('asia-east1').httpsCallable('respondToQuote');
+      fn({ token: token, action: action, name: name, note: note }).then(function(res){
+        var status = (res && res.data && res.data.status) || (action==='accept'?'accepted':'changes_requested');
+        var docCopy = Object.assign({}, doc, { clientResponse: { status: status, name: name, note: note } });
+        host.innerHTML = respondedStateHtml(docCopy, status);
+      }).catch(function(e){
+        btnEl.disabled = false; btnEl.textContent = origText;
+        errEl.textContent = (e && e.message) ? e.message : 'Something went wrong — please try again.';
+        errEl.classList.add('show');
+      });
+    }
+  }
+
+  function respondedStateHtml(doc, status){
+    var cr = doc.clientResponse || {};
+    if (status === 'accepted') {
+      return '<div class="card resp-state">'
+        + '<div class="resp-ic">✅</div>'
+        + '<div class="resp-title" style="color:var(--ok)">Thank you!</div>'
+        + '<div class="resp-body">'+esc((doc.brand&&doc.brand.name)||'We')+' has been notified — your sales representative will contact you for next steps.</div>'
+        + (cr.note ? '<div class="resp-note">'+esc(cr.note)+'</div>' : '')
+        + '</div>'
+        + paymentHtml(doc);
+    }
+    return '<div class="card resp-state">'
+      + '<div class="resp-ic">✏️</div>'
+      + '<div class="resp-title" style="color:var(--warn)">Your requested changes were sent.</div>'
+      + '<div class="resp-body">Your sales representative will follow up with an updated quotation.</div>'
+      + (cr.note ? '<div class="resp-note">'+esc(cr.note)+'</div>' : '')
+      + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

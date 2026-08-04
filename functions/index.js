@@ -1195,6 +1195,163 @@ exports.onBsQuoteWon = functions
   .onUpdate(makeOnQuoteWonHandler('bs_quotes'));
 
 // ──────────────────────────────────────────────────────────────────────────
+//  respondToQuote — CLIENT-QUOTE-PAGE-SPEC.md §4.2.
+//
+//  The public client-facing quote page (/q/?<token>) has NO login and NO
+//  Firebase Auth session at all — not even anonymous auth. This callable is
+//  therefore the ONLY write path for a client's Accept / Request-changes
+//  response: firestore.rules' public_quotes block (see the match block next
+//  to order_tracking) has no public create/update/delete rule anywhere, by
+//  design (spec §4.1) — a rules-based public write could only ever touch the
+//  mirror doc, but this feature also needs the INTERNAL bs_quotes/bk_quotes
+//  doc's status flipped and Sales notified, both impossible for an anonymous
+//  client under any rules. The Admin SDK bypasses rules entirely, so this one
+//  function does all three server-side: validate+clamp untrusted input
+//  (mirrors sendPushOnNotification's defensive style above — this is the
+//  first Firestore-facing value written by a fully anonymous stranger
+//  anywhere in this codebase), a Firestore TRANSACTION on the mirror doc for
+//  a database-enforced once-only/replay guard (not just a UI-level check),
+//  then a best-effort sync onto the internal quote + notifications.
+//
+//  Client call site: /q/index.html, via
+//    firebase.app().functions('asia-east1').httpsCallable('respondToQuote')({token, action, name, note})
+//  The region argument on the client is MANDATORY — without it the SDK
+//  targets us-central1 (where this function does not exist) and every call
+//  fails. No context.auth check here on purpose: the caller is, by design,
+//  never signed in.
+// ──────────────────────────────────────────────────────────────────────────
+exports.respondToQuote = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    // 1. Validate & clamp. token is the public_quotes/{token} doc id — same
+    // 8-24 char unambiguous-alphabet shape /q/index.html itself validates
+    // client-side (spec §3.1: 8-24 so a future token-length change never
+    // strands an already-shared link).
+    const token  = (data && typeof data.token === 'string') ? data.token : '';
+    const action = (data && typeof data.action === 'string') ? data.action : '';
+    if (!/^[2-9a-zA-Z]{8,24}$/.test(token)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid or missing token.');
+    }
+    if (action !== 'accept' && action !== 'request_changes') {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid action.');
+    }
+    const name = ((data && typeof data.name === 'string') ? data.name : '').trim().slice(0, 120);
+    // Strip real control characters only (keep \n/\r/\t — this is a
+    // free-text note, not a single-line field) then clamp length.
+    const stripControlChars = (s) => String(s == null ? '' : s).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    const note = stripControlChars((data && typeof data.note === 'string') ? data.note : '').slice(0, 2000).trim();
+    if (action === 'request_changes' && !note) {
+      throw new functions.https.HttpsError('invalid-argument', 'A note is required to request changes.');
+    }
+
+    const db = admin.firestore();
+    const mirrorRef = db.collection('public_quotes').doc(token);
+    const newStatus = action === 'accept' ? 'accepted' : 'changes_requested';
+
+    // 2. Transaction on the mirror — not-exists / already-responded / expired
+    // are all checked and written atomically so a replayed/parallel call can
+    // never double-record a response (the once-only guard lives HERE, at the
+    // database, not in the UI).
+    let mirrorData;
+    try {
+      mirrorData = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(mirrorRef);
+        if (!snap.exists) {
+          throw new functions.https.HttpsError('not-found', 'This quote link is no longer available.');
+        }
+        const cur = snap.data() || {};
+        const curResponseStatus = (cur.clientResponse && cur.clientResponse.status) || 'pending';
+        if (curResponseStatus !== 'pending') {
+          throw new functions.https.HttpsError('failed-precondition', 'A response was already recorded for this quotation.');
+        }
+        // Accept is blocked past validUntil (server-enforced — client-side
+        // hiding of the button is cosmetic only). Request-changes stays open
+        // past expiry on purpose: "please re-quote" is exactly the message an
+        // expired client sends.
+        if (action === 'accept' && cur.validUntil) {
+          const todayStr = manilaDate();
+          if (todayStr > cur.validUntil) {
+            throw new functions.https.HttpsError('failed-precondition', 'This quotation has expired — please request an updated quote.');
+          }
+        }
+        tx.update(mirrorRef, {
+          status: newStatus,
+          clientResponse: { status: newStatus, name, note, respondedAt: admin.firestore.FieldValue.serverTimestamp() },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return cur;
+      });
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[respondToQuote] transaction failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not record your response — please try again.');
+    }
+
+    // 3. Best-effort: sync the internal quote + notify Sales/president. Never
+    // rolled into the client's response — the transaction above already
+    // committed, so any failure here is logged, not surfaced to the caller.
+    try {
+      const src = (mirrorData && mirrorData.src) || {};
+      // Never trust src.coll as a raw path segment — allowlist first.
+      const coll = (src.coll === 'bs_quotes' || src.coll === 'bk_quotes') ? src.coll : null;
+      const quoteId = (typeof src.id === 'string' && src.id) ? src.id : '';
+      if (coll && quoteId) {
+        const qRef = db.collection(coll).doc(quoteId);
+        const qSnap = await qRef.get();
+        // Only flip the internal quote if it still points at THIS mirror — a
+        // stale mirror left over from a re-share/revision must never touch a
+        // quote that has since moved on.
+        if (qSnap.exists && qSnap.data().shareToken === token) {
+          const internalStatus = newStatus === 'accepted' ? 'accepted' : 'needs_revision';
+          const clientResponse = { status: newStatus, name, note, respondedAt: admin.firestore.FieldValue.serverTimestamp() };
+          await qRef.update({
+            status: internalStatus,
+            clientResponse,
+            clientRespondedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          // Notify: quote creator + the president (if different).
+          const notifyUids = new Set();
+          const createdBy = qSnap.data().createdBy;
+          if (createdBy) notifyUids.add(createdBy);
+          try {
+            const presSnap = await db.collection('users').where('role', '==', 'president').limit(1).get();
+            presSnap.docs.forEach((d) => notifyUids.add(d.id));
+          } catch (e) {
+            console.error('[respondToQuote] president lookup failed:', e.message);
+          }
+
+          const title = newStatus === 'accepted' ? 'Quote accepted 🎉' : 'Changes requested';
+          const clientName = mirrorData.clientName || name || 'Client';
+          const quoteNumber = mirrorData.quoteNumber || quoteId;
+          const total = Number(mirrorData.total) || 0;
+          const noteSuffix = note ? (' — ' + note.slice(0, 140)) : '';
+          const body = `${clientName} · ${quoteNumber} · ₱${total.toLocaleString('en-PH')}${noteSuffix}`;
+
+          // Exact Notifs.send shape (js/notifications.js) so the existing
+          // in-app inbox/toast pipeline + sendPushOnNotification (above) pick
+          // this up with zero client-side changes.
+          await Promise.all(Array.from(notifyUids).map((uid) =>
+            db.collection('notifications').doc(uid).collection('items').add({
+              title, body,
+              icon: newStatus === 'accepted' ? '🎉' : '✏️',
+              type: 'quote_response',
+              link: null,
+              read: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            }).catch((e) => console.error('[respondToQuote] notify failed for', uid, e.message))
+          ));
+        }
+      }
+    } catch (e) {
+      console.error('[respondToQuote] internal quote sync failed (client response was already recorded):', e.message);
+    }
+
+    // 5. Return.
+    return { ok: true, status: newStatus };
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
 //  recordAttendancePunch (v14 P0 attendance-integrity fix)
 //
 //  THE PROBLEM THIS CLOSES: js/screens/worker.js's Type-B self-service

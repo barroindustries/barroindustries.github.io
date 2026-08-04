@@ -1846,6 +1846,48 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
+    // ── Public client-facing quote mirror (share-with-client) ───────────
+    // Each doc id is a 12-char unguessable token; /q/?<token> resolves it.
+    // Holds ONLY the sanitized client-safe projection built by
+    // buildPublicQuoteDoc() (js/screens/sales.js) — NEVER capital/labor costs,
+    // commission, editableState, uids, or client contact details. `get` is
+    // PUBLIC (client opens the link with no account); `list` is DENIED (no
+    // enumeration). There is NO public write: the client's accept/request-
+    // changes goes through the respondToQuote callable (functions/index.js),
+    // which bypasses rules via the Admin SDK — so every write rule here is
+    // authenticated-staff-only. Partner branch mirrors order_tracking: a
+    // partner may mint/maintain a mirror ONLY for a quote THEY created.
+    match /public_quotes/{token} {
+      allow get:  if true;
+      allow list: if false;
+
+      function srcQuote(rd) {
+        return get(/databases/$(database)/documents/$(rd.get('src', {}).get('coll', 'bs_quotes'))/$(rd.get('src', {}).get('id', '_none_'))).data;
+      }
+      function srcIsMine(rd) {
+        return rd.get('src', {}).get('coll', '') in ['bs_quotes', 'bk_quotes']
+            && rd.get('src', {}).get('id', '') != ''
+            && exists(/databases/$(database)/documents/$(rd.get('src', {}).get('coll', ''))/$(rd.get('src', {}).get('id', '')))
+            && srcQuote(rd).get('createdBy', '') == request.auth.uid;
+      }
+      // A staff/partner write may never fabricate or alter a client response:
+      // create must start it 'pending'; update must leave it untouched or
+      // reset it to 'pending' (deliberate "re-open for response" after a fix).
+      function responseUntouchedOrReset() {
+        return request.resource.data.get('clientResponse', {}).get('status', 'pending') == 'pending'
+            || request.resource.data.get('clientResponse', {}) == resource.data.get('clientResponse', {});
+      }
+
+      allow create: if isAuth()
+        && request.resource.data.get('clientResponse', {}).get('status', '') == 'pending'
+        && (!isPartner() || srcIsMine(request.resource.data));
+      allow update: if isAuth()
+        && responseUntouchedOrReset()
+        && (!isPartner() || (srcIsMine(resource.data) && srcIsMine(request.resource.data)));
+      allow delete: if isAuth()
+        && (!isPartner() || srcIsMine(resource.data));
+    }
+
     // ── Public ID verification (QR scan target, WS27) ───
     // Each doc id is an unguessable token; the public /v/?<token> page resolves
     // it. Holds ONLY a public-safe projection (name/photo/id-no/dept/title/

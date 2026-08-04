@@ -1060,11 +1060,13 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0)}</div>
           <span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
+          ${window.quoteShareChipHtml(q)}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end;align-items:center">
           ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
           ${!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="This quote was filed before edit history was captured (or the snapshot write failed) — there's nothing here to reopen or revise.">No editable snapshot</span>`:''}
+          ${window.QUOTE_SHAREABLE_STATUSES.includes(q.status)?`<button class="btn-secondary btn-sm bk-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}
           ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
@@ -1104,6 +1106,8 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       window.reopenQuoteFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
     container.querySelectorAll('.bk-rev-btn').forEach(b=>b.addEventListener('click', e=>
       window.newRevisionFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
+    container.querySelectorAll('.bk-share-btn').forEach(b=>b.addEventListener('click', e=>
+      window.shareQuoteWithClient('bk_quotes', e.currentTarget.dataset.id, ()=>renderBKQuotationsSummary(container, currentUser, currentRole))));
     container.querySelectorAll('.bk-del-btn').forEach(b=>b.addEventListener('click', e=>{
       const d=e.currentTarget.dataset;
       window.requestQuoteDelete('bk_quotes', d.id, d.label, d.by, ()=>renderBKQuotationsSummary(container, currentUser, currentRole));
@@ -1749,6 +1753,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
                 ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
                 ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
+                ${window.quoteShareChipHtml(q)}
                 <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
               </td>
               <td class="tc-actions" style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
@@ -1760,6 +1765,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
                 ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
                 ${(status==='filed'||status==='approved')&&!q.editableState?`<span style="font-size:10px;color:var(--text-muted);align-self:center" title="No editable snapshot was saved for this quote, so Reopen has nothing to load and New Revision isn't offered.">no snapshot</span>`:''}
+                ${window.QUOTE_SHAREABLE_STATUSES.includes(status)?`<button class="btn-secondary btn-sm bs-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}
                 ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
                 ${canDeleteDirect
                   ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>`
@@ -1914,6 +1920,12 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
   el.querySelectorAll('.bs-so-btn').forEach(btn => {
     btn.addEventListener('click', e => openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container));
   });
+  // Share a client-facing link (CLIENT-QUOTE-PAGE-SPEC.md) — no login needed,
+  // Accept / Request changes writes back via the respondToQuote callable.
+  el.querySelectorAll('.bs-share-btn').forEach(btn => {
+    btn.addEventListener('click', e =>
+      window.shareQuoteWithClient('bs_quotes', e.currentTarget.dataset.id, () => renderBSQuotationsSummary(container, currentUser, currentRole)));
+  });
   el.querySelectorAll('.bs-approve-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
@@ -2014,3 +2026,347 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
     });
   });
 }
+
+// ══════════════════════════════════════════════════
+//  SALES — Share Quote With Client (CLIENT-QUOTE-PAGE-SPEC.md)
+//
+//  A salesperson taps 🔗 Share on a filed/approved/accepted quote card and
+//  gets a public, no-login link (/q/?<token>) the client can open on their
+//  phone to review the quote and Accept / Request changes. The design north
+//  star (spec §0): the worst a bad actor holding the link can do is read ONE
+//  quote's client-facing fields and accept/decline it ONCE — nothing else.
+//
+//  Access model: the link resolves a SANITIZED MIRROR doc
+//  (public_quotes/{token}), never the internal bs_quotes/bk_quotes doc
+//  itself — a token-on-quote rules design would leak capitalMaterials/
+//  capitalLabor/commission/editableState to anyone holding the link, and
+//  Firestore rules cannot hide fields within a readable doc or inspect array
+//  contents. buildPublicQuoteDoc() below is therefore the ONE function
+//  allowed to write that mirror — it builds a BRAND NEW object field-by-
+//  field (never spreads/...quoteDoc) — and every mirror .set() in this app
+//  (mint, re-sync here, re-sync from the QUOTE_UPDATE bridge in js/app.js)
+//  MUST go through it. The client's Accept/Request-changes response never
+//  writes directly to Firestore at all — it goes through the respondToQuote
+//  Cloud Function (functions/index.js), which is the ONLY write path; there
+//  is no public write rule anywhere in firestore.rules for this collection.
+// ══════════════════════════════════════════════════
+
+// Card-action gate (spec §5.1): re-surfacing the link after acceptance is
+// allowed on purpose — never for drafts/pending-approval/rejected/needs-
+// revision, where there's nothing client-ready to share yet.
+window.QUOTE_SHAREABLE_STATUSES = ['filed', 'approved', 'accepted'];
+
+// Public brand strings ONLY (name/sub/creds/thanks — the four fields the
+// public page prints). Deliberately DUPLICATED from quote-builder-v2.html's
+// CO map (spec §5.2): that map lives inside the builder iframe and isn't
+// reachable from this app frame. This is DATA, not code — keep the two in
+// sync by hand if the BK/BS letterhead ever changes.
+window.QUOTE_BRANDS = {
+  BK: {
+    name: 'BARRO KITCHENS', sub: 'By Barro Industries OPC',
+    creds: 'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    thanks: 'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
+  },
+  BS: {
+    name: 'BRILLIANT STEEL CORPORATION', sub: '',
+    creds: 'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300',
+    thanks: 'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
+  },
+};
+
+// v1 bankDetails visibility (spec §7.3) — included on the mirror and shown
+// whenever non-empty, gated so a partner/BS quote never carries Barro's own
+// account in the first place (mirrors quote-builder-v2.html's co.pay
+// gating — only CO.BK carries a `pay` block, so bankDetails is only ever
+// non-empty on a BK quote to begin with). ONE constant, right next to
+// buildPublicQuoteDoc, so a future "reveal only after accept" hardening
+// (Neil to decide — spec flags this as a safer v1.1 option, not taken here
+// for simplicity) never requires hunting through the render/share code —
+// flip this to false AND have functions/index.js's respondToQuote write
+// bankDetails onto the mirror only on accept.
+window.QUOTE_MIRROR_SHOW_BANK_DETAILS_IMMEDIATELY = true;
+
+// ── buildPublicQuoteDoc — THE allowlist projection (spec §2.3) ───────────
+// Builds a BRAND NEW object field-by-field. NEVER spread/...quoteDoc — this
+// is the ONLY line of defense keeping capitalMaterials/capitalLabor/
+// laborHours/formulaType/commissionPct/commissionAmount/editableState/
+// laborState/waiveFlags/createdBy/createdByRole/clientId/leadSource/
+// location/parentQuoteId/rootQuoteId/clientAddress/clientPhone/clientEmail/
+// photos[].path off the public internet. Any field NOT explicitly assigned
+// below simply does not exist on the returned object — Code review gate
+// (spec §2.3): any .set() on public_quotes that doesn't call this function
+// is a bug.
+window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
+  q = q || {};
+  const items = Array.isArray(q.items) ? q.items.map(it => ({
+    name:      (it && it.name) || '',
+    dims:      (it && it.dims) || '',
+    specStr:   (it && it.specStr) || '',
+    qty:       Number(it && it.qty) || 0,
+    unit:      (it && it.unit) || '',
+    unitPrice: Number(it && it.unitPrice) || 0,
+    amount:    Number(it && it.amount) || 0,
+    leadTime:  (it && it.leadTime) || '',
+  })) : [];
+  // Tokened Storage download URLs only — never the storage `path`, never a
+  // raw offline-only dataUrl (buildQuotePayload already strips dataUrl
+  // before persisting, but this projection re-asserts it independently).
+  const photos = Array.isArray(q.photos) ? q.photos
+    .filter(p => p && p.url)
+    .map(p => ({ url: p.url, caption: p.caption || '', itemIndex: (p.itemIndex != null ? p.itemIndex : null) }))
+    : [];
+  const di  = q.deliveryInstall || {};
+  const pay = q.payment || {};
+  const tl  = q.timeline || {};
+  const co  = (q.company === 'BK' || q.company === 'BS') ? q.company : 'PT';
+  return {
+    v: 1,
+    co,
+    brand: {
+      name:   (brand && brand.name)   || '',
+      sub:    (brand && brand.sub)    || '',
+      creds:  (brand && brand.creds)  || '',
+      thanks: (brand && brand.thanks) || '',
+    },
+    quoteNumber: q.quoteNumber || '',
+    quoteDate:   q.quoteDate || '',
+    validUntil:  q.validUntil || '',
+    subject:     q.subject || '',
+    purpose:     q.purpose || '',
+    clientName:    q.clientName || '',
+    clientCompany: q.clientCompany || '',
+    salesperson:   q.salesperson || '',
+    items,
+    subtotal:       Number(q.subtotal) || 0,
+    discountPct:    Number(q.discountPct) || 0,
+    discountAmount: Number(q.discountAmount) || 0,
+    netAmount:      Number(q.netAmount) || 0,
+    vatIncluded:    !!q.vatIncluded,
+    vatAmount:      Number(q.vatAmount) || 0,
+    total:          Number(q.total) || Number(q.grandTotal) || 0,
+    deliveryInstall: {
+      amount:          Number(di.amount) || 0,
+      includedInTotal: !!di.includedInTotal,
+      free:            !!di.free,
+      method:          di.method || '',
+      notes:           di.notes || '',
+    },
+    payment: {
+      downPaymentMode: pay.downPaymentMode || '',
+      downPayment:     Number(pay.downPayment) || 0,
+      balance:         Number(pay.balance) || 0,
+      balanceMode:     pay.balanceMode || '',
+      interestRate:    Number(pay.interestRate) || 0,
+    },
+    bankDetails: window.QUOTE_MIRROR_SHOW_BANK_DETAILS_IMMEDIATELY ? (q.bankDetails || '') : '',
+    timeline: {
+      startDate:      tl.startDate || '',
+      leadDays:       Number(tl.leadDays) || 0,
+      completionDate: tl.completionDate || '',
+    },
+    remarks: q.remarks || '',
+    photos,
+    status: 'pending',
+    clientResponse: { status: 'pending' },
+    src: { coll: coll || '', id: docId || '' },
+    sharedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    sharedByName: (window.userProfile && userProfile.displayName) || (window.currentUser && currentUser.email) || '',
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+};
+
+// Resolve the four public brand strings for a quote. BK/BS are static
+// (QUOTE_BRANDS above); a generic (non-Brilliant-Steel) partner quote
+// (company:'PT') is branded with the partner COMPANY'S name — sourced from
+// the quote's CREATOR's own user profile (same `users/{uid}.company` field
+// partnerCompanyName() reads for portal branding), not the current viewer's
+// profile, since the person clicking Share may be internal Sales staff, not
+// the partner who filed the quote. Mirrors quote-builder-v2.html's CO.PT
+// synthesis (~line 1665) field-for-field, minus `sig` (not part of the
+// public brand allowlist).
+window.resolveQuoteBrand = async function(quote) {
+  const co = quote.company === 'BK' ? 'BK' : (quote.company === 'BS' ? 'BS' : 'PT');
+  if (co === 'BK' || co === 'BS') return { co, brand: window.QUOTE_BRANDS[co] };
+  let coName = 'Partner';
+  try {
+    if (quote.createdBy) {
+      const us = await db.collection('users').doc(quote.createdBy).get();
+      if (us.exists && us.data().company) coName = us.data().company;
+    }
+  } catch (_) { /* best-effort — falls back to 'Partner' */ }
+  return {
+    co,
+    brand: {
+      name: coName,
+      sub: 'In partnership with Barro Industries',
+      creds: coName + '  •  In partnership with Barro Industries OPC',
+      thanks: 'Thank you for considering ' + coName + '. We look forward to working with you.',
+    },
+  };
+};
+
+// 12-char crypto-random token, same 54-char unambiguous alphabet (no
+// 0/O/1/I/l) as window.makeTrackCode (js/departments.js) — longer than
+// order-tracking's 8 because a quote leaks full pricing + client identity
+// (spec §2.2). 54^12 ≈ 6.4×10²⁰ combinations.
+window.makeShareToken = function(len) {
+  len = len || 12;
+  const A = '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ';
+  let out = '';
+  try {
+    const a = new Uint32Array(len);
+    (window.crypto || window.msCrypto).getRandomValues(a);
+    for (let i = 0; i < len; i++) out += A[a[i] % A.length];
+  } catch (_) {
+    for (let j = 0; j < len; j++) out += A[Math.floor(Math.random() * A.length)];
+  }
+  return out;
+};
+// Collision-checked mint against public_quotes — an unauthenticated `get` on
+// a public collection needs no auth, so the check always works even for a
+// partner caller (same uniqueTrackCode() pattern, js/departments.js).
+window.uniquePublicQuoteToken = async function() {
+  for (let i = 0; i < 5; i++) {
+    const code = window.makeShareToken(12);
+    try {
+      const s = await db.collection('public_quotes').doc(code).get();
+      if (!s.exists) return code;
+    } catch (_) { return code; }   // read blocked → collision odds are negligible anyway
+  }
+  return window.makeShareToken(16);
+};
+window.publicQuoteUrl = function(token) { return `${location.origin}/q/?${token}`; };
+
+// Re-sync an EXISTING mirror after the underlying quote changed — used by
+// BOTH shareQuoteWithClient's "already shared" re-share path below AND the
+// QUOTE_UPDATE bridge's best-effort re-projection (js/app.js, spec §5.2/
+// §6.3, "the mirror is a snapshot; an edit after sharing doesn't silently
+// mutate what the client already saw" — this is the one place that DOES
+// intentionally refresh it, on an explicit re-share or explicit in-place
+// edit). Full overwrite of everything buildPublicQuoteDoc produces (so a
+// field removed from the quote doesn't linger on the mirror), EXCEPT
+// clientResponse/status/sharedAt, which are preserved from the existing
+// mirror so a client's already-recorded response is never clobbered. Never
+// mints a new token and never resurrects a revoked (deleted) mirror — minting
+// only happens in shareQuoteWithClient. Returns true if it resynced, false
+// if there was nothing to resync (no shareToken, or the mirror is gone).
+window.resyncPublicQuoteMirror = async function(coll, docId, quote) {
+  const token = quote && quote.shareToken;
+  if (!token) return false;
+  const ref = db.collection('public_quotes').doc(token);
+  const existing = await ref.get();
+  if (!existing.exists) return false;
+  const old = existing.data() || {};
+  const { brand } = await window.resolveQuoteBrand(quote);
+  const fresh = window.buildPublicQuoteDoc(quote, brand, coll, docId);
+  fresh.clientResponse = old.clientResponse || { status: 'pending' };
+  fresh.status = old.status || 'pending';
+  fresh.sharedAt = old.sharedAt || firebase.firestore.FieldValue.serverTimestamp();
+  await ref.set(fresh, { merge: false });
+  return true;
+};
+
+// Delete the mirror + clear the quote's shareToken (spec §5.3). The link
+// instantly renders the public page's "no longer available" state — dead
+// link, not a 404-equivalent's evil twin; re-sharing always mints a NEW
+// token, an old one never comes back.
+window.revokeQuoteShare = async function(coll, docId, token) {
+  if (token) { try { await db.collection('public_quotes').doc(token).delete(); } catch (_) { /* best-effort */ } }
+  await db.collection(coll).doc(docId).update({
+    shareToken: firebase.firestore.FieldValue.delete(),
+    shareRevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  });
+};
+
+// 🔗 shared / response-state chip — used by every quote list that renders a
+// shareToken/clientResponse (BK cards + BS table here; the partner own-
+// quotes table in js/screens/partners.js calls this as a bare global).
+// clientResponse lives on the INTERNAL quote doc too, not just the mirror —
+// functions/index.js's respondToQuote writes it there (spec §4.2 step 3) so
+// this needs no extra read.
+window.quoteShareChipHtml = function(q) {
+  if (!q || !q.shareToken) return '';
+  const cr = q.clientResponse || null;
+  if (cr && cr.status === 'accepted') {
+    return `<span class="badge badge-green" style="font-size:9px;margin-left:4px" title="${escHtml(cr.note || '')}">${emojiIcon('✅',9)} client accepted${cr.name ? ' — ' + escHtml(cr.name) : ''}</span>`;
+  }
+  if (cr && cr.status === 'changes_requested') {
+    return `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="${escHtml(cr.note || '')}">${emojiIcon('✏️',9)} changes requested${cr.name ? ' — ' + escHtml(cr.name) : ''}</span>`;
+  }
+  return `<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🔗',9)} shared</span>`;
+};
+
+// ── The share action itself ───────────────────────────────────────────
+// Wired as a 🔗 Share button on every filed/approved/accepted quote card
+// (spec §5.1: BS flat list, BK quotations summary, partner own-quotes
+// table). `onDone` is an optional re-render callback (same convention as
+// window.requestQuoteDelete) so the caller's list refreshes and picks up
+// the new 🔗 shared chip / shareToken.
+window.shareQuoteWithClient = async function(coll, docId, onDone) {
+  try {
+    const snap = await db.collection(coll).doc(docId).get();
+    if (!snap.exists) { Notifs.showToast('Quote not found', 'error'); return; }
+    const quote = { id: docId, ...snap.data() };
+    if (!window.QUOTE_SHAREABLE_STATUSES.includes(quote.status)) {
+      Notifs.showToast('Only filed, approved, or accepted quotes can be shared', 'info');
+      return;
+    }
+    let token = quote.shareToken || null;
+    const resynced = token ? await window.resyncPublicQuoteMirror(coll, docId, quote) : false;
+    if (!resynced) {
+      token = await window.uniquePublicQuoteToken();
+      const { brand } = await window.resolveQuoteBrand(quote);
+      const mirrorDoc = window.buildPublicQuoteDoc(quote, brand, coll, docId);
+      await db.collection('public_quotes').doc(token).set(mirrorDoc);
+      await db.collection(coll).doc(docId).update({
+        shareToken: token,
+        sharedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      quote.shareToken = token;
+    }
+    const url = window.publicQuoteUrl(token);
+    window.showShareQuoteModal(url, quote, coll, token, onDone);
+    if (typeof onDone === 'function') onDone();
+  } catch (err) {
+    console.error('[shareQuoteWithClient] failed', err);
+    Notifs.showToast('Could not create share link: ' + (err.message || err.code), 'error');
+  }
+};
+
+// Share modal — clone of window.showOrderTrackModal (js/departments.js)
+// plus a native-share button (mobile PH — Viber/WhatsApp hand-off is the
+// whole point, spec §5.2 step 5) and a Revoke action (spec §5.3).
+window.showShareQuoteModal = function(url, quote, coll, token, onDone) {
+  const qno = quote.quoteNumber || quote.id;
+  openModal(`${emojiIcon('🔗',16)} Client Quote Link`, `
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Share this link with <strong>${escHtml(quote.clientName || 'the client')}</strong> for quotation <strong>${escHtml(qno)}</strong>. They can open it any time — <strong>no login needed</strong> — to review and Accept or Request changes. Internal costs, commission and your margin are never shown.</p>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="qshare-url" readonly value="${escHtml(url)}" style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px" onclick="this.select()"/>
+      <button class="btn-primary btn-sm" id="qshare-copy" style="white-space:nowrap">Copy</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+      <a href="${escHtml(url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--primary);font-weight:600">Preview the client view ↗</a>
+      ${window.navigator && navigator.share ? `<button class="btn-secondary btn-sm" id="qshare-native">Share…</button>` : ''}
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:14px">Filing a new revision for this client? Revoke this link first so they never see a superseded offer — a new revision needs its own share.</p>
+  `, `<button class="btn-danger btn-sm" id="qshare-revoke" style="margin-right:auto">Revoke link</button><button class="btn-secondary" onclick="closeModal()">Done</button>`);
+  const copyBtn = document.getElementById('qshare-copy');
+  copyBtn?.addEventListener('click', async () => {
+    const inp = document.getElementById('qshare-url');
+    try { await navigator.clipboard.writeText(inp.value); } catch (_) { inp.select(); try { document.execCommand('copy'); } catch (__) {} }
+    copyBtn.textContent = '✓ Copied'; setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1600);
+    Notifs.showToast('Quote link copied', 'success');
+  });
+  document.getElementById('qshare-native')?.addEventListener('click', async () => {
+    try { await navigator.share({ title: 'Quotation ' + qno, url }); } catch (_) { /* user cancelled — ignore */ }
+  });
+  document.getElementById('qshare-revoke')?.addEventListener('click', async () => {
+    if (!(await confirmDialog({ message: 'Revoke this share link? The client will no longer be able to open it. Re-sharing mints a brand-new link.', danger: true }))) return;
+    try {
+      await window.revokeQuoteShare(coll, quote.id, token);
+      closeModal();
+      Notifs.success('Share link revoked.');
+      if (typeof onDone === 'function') onDone();
+    } catch (ex) { Notifs.showToast('Revoke failed: ' + (ex.message || ex.code), 'error'); }
+  });
+};
