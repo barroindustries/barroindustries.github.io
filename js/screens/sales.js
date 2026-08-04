@@ -880,9 +880,14 @@ async function salesSopSave(container) {
 // `latest` array + a Set of superseded (older-revision) ids, so KPI totals stop
 // double-counting R1 + R2 + … of the same quote.
 window.latestQuoteRevisions = function(quotes){
-  const revOf = q => { const m=String(q.quoteNumber||q.editableState?.quoteNo||'').match(/-R(\d+)\s*$/i); return m?parseInt(m[1],10):1; };
+  // Dash-OPTIONAL /-?R\d+/ — the v14 compact filed format is dash-free before
+  // the R (…260803-013R1, not …-013-R1), so the old dash-required /-R\d+/
+  // matched NOTHING: every revision got revOf=1 and a distinct lineage, so R1
+  // and R2 of one quote were never grouped and BOTH counted (inflated the BK
+  // quotations KPIs). Same fix already applied to app.js revOf + bumpRevisionNo.
+  const revOf = q => { const m=String(q.quoteNumber||q.editableState?.quoteNo||'').match(/-?R(\d+)\s*$/i); return m?parseInt(m[1],10):1; };
   const lineageOf = q => {
-    const base = String(q.quoteNumber||q.editableState?.quoteNo||'').replace(/-R\d+\s*$/i,'').trim();
+    const base = String(q.quoteNumber||q.editableState?.quoteNo||'').replace(/-?R\d+\s*$/i,'').trim();
     const client = (q.clientName||'').trim().toLowerCase();
     return base ? (base+'||'+client) : ('id::'+q.id);   // unnumbered → its own lineage (no dedup)
   };

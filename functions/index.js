@@ -890,9 +890,82 @@ exports.scheduledDailyDigestChecks = functions
       console.error('[scheduledDailyDigestChecks] gov bidding deadlines failed:', e.message);
     }
 
+    // ── 5. Quote-expiry follow-ups — LATEST-revision, in-play (filed/approved,
+    //      not yet converted) quotes whose validUntil is within HORIZON_DAYS
+    //      (or already lapsed), so Sales chases them before they die — with
+    //      priority messaging for ones shared via the /q/ client page that the
+    //      client hasn't answered. Ports js/screens/sales.js latestQuoteRevisions
+    //      (window.* unavailable here) with the dash-OPTIONAL /-?R\d+/ so the
+    //      compact "…013R1" numbers group correctly and superseded R1s are
+    //      excluded. Dept-targeted: president/manager + Sales.
+    let quoteFollowupCount = 0;
+    try {
+      const HORIZON_DAYS = 3;
+      const horizonStr = new Date(Date.parse(todayStr + 'T00:00:00Z') + HORIZON_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const IN_PLAY = ['filed', 'approved'];
+      const revOf = q => { const m = String(q.quoteNumber || (q.editableState && q.editableState.quoteNo) || '').match(/-?R(\d+)\s*$/i); return m ? parseInt(m[1], 10) : 1; };
+      const lineageOf = q => {
+        const base = String(q.quoteNumber || (q.editableState && q.editableState.quoteNo) || '').replace(/-?R\d+\s*$/i, '').trim();
+        const client = (q.clientName || '').trim().toLowerCase();
+        return base ? (base + '||' + client) : ('id::' + q.id);
+      };
+      const latestOf = (quotes) => {
+        const best = new Map();
+        quotes.forEach(q => {
+          const k = lineageOf(q), cur = best.get(k);
+          const better = !cur || revOf(q) > revOf(cur) ||
+            (revOf(q) === revOf(cur) && ((q.createdAt && q.createdAt.seconds) || 0) >= ((cur.createdAt && cur.createdAt.seconds) || 0));
+          if (better) best.set(k, q);
+        });
+        return [...best.values()];
+      };
+
+      const [qUsersSnap, bsSnap, bkSnap] = await Promise.all([
+        db.collection('users').get(),
+        db.collection('bs_quotes').get(),
+        db.collection('bk_quotes').get()
+      ]);
+      const allQuotes = [...bsSnap.docs, ...bkSnap.docs].map(d => ({ id: d.id, ...d.data() }));
+      const due = latestOf(allQuotes).filter(q =>
+        IN_PLAY.includes(q.status) &&
+        typeof q.validUntil === 'string' && /^\d{4}-\d{2}-\d{2}/.test(q.validUntil) &&
+        q.validUntil <= horizonStr &&   // expiring within the horizon (or already past)
+        !q.salesOrderId                  // not already converted to an order
+      );
+      quoteFollowupCount = due.length;
+
+      if (due.length) {
+        const awaiting = due.filter(q => q.shareToken && (!q.clientResponse || q.clientResponse.status === 'pending'));
+        const label = q => `${q.quoteNumber || String(q.id).slice(-6).toUpperCase()} · ${q.clientName || 'client'}`;
+        const shown = (awaiting.length ? awaiting : due).slice(0, 4).map(label).join(', ');
+        const more = due.length > 4 ? ` +${due.length - 4} more` : '';
+        const title = `🔔 ${due.length} quote${due.length > 1 ? 's' : ''} to follow up`;
+        const body = awaiting.length
+          ? `${awaiting.length} shared quote${awaiting.length > 1 ? 's' : ''} awaiting a client reply & expiring soon: ${shown}${more}. Follow up before they lapse.`
+          : `${due.length} quote${due.length > 1 ? 's' : ''} expiring soon: ${shown}${more}. Follow up or re-quote.`;
+        qUsersSnap.docs.forEach(doc => {
+          const u = doc.data();
+          if (u.status === 'inactive' || u.pendingPasswordSetup) return;
+          const depts = Array.isArray(u.departments) ? u.departments
+            : (typeof u.department === 'string' && u.department ? [u.department] : []);
+          if (!['president', 'manager'].includes(u.role) && !depts.includes('Sales')) return;
+          toNotify.push({
+            ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
+            notifData: {
+              title, body, icon: '🔔', type: 'quote_followup', link: 'dept:Sales',
+              dedupKey: `quote-fu-${doc.id}-${todayStr}`
+            }
+          });
+        });
+      }
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] quote follow-ups failed:', e.message);
+    }
+
     try {
       stats.notified = await commitInChunks(db, toNotify, null);
-      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr} (gov bids flagged: ${govDeadlineCount})`);
+      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr} (gov bids flagged: ${govDeadlineCount}, quotes to follow up: ${quoteFollowupCount})`);
     } catch (err) {
       stats.errors++;
       console.error('[scheduledDailyDigestChecks] commit failed:', err);
