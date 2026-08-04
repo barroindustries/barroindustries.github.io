@@ -1267,6 +1267,18 @@ const GEO_ACCURACY_FLOOR_M = 100;
 // copy is what actually determines needsReview on the paid record).
 const MAX_SHIFT_HOURS = 16;
 
+// v14 P1.x offline-punch-time fix (OFFLINE-PUNCH-SPEC.md) — the
+// `queuedPunchAt` trust contract. Oldest on-site instant a queued offline
+// replay may claim. Matches the resolver depth (effective day + 1 prior day
+// ≈ 48h): older punches can't land on a resolvable record anyway, and a
+// >2-day self-served backdate is an HR manual-entry case, never a
+// self-service one.
+const QUEUED_PUNCH_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+// Device clocks (source of queuedAt = Date.now()) may skew slightly ahead
+// of the server. Within this grace the claim is clamped to server-now;
+// beyond it the claim is discarded as implausible (see classification).
+const QUEUED_PUNCH_FUTURE_GRACE_MS = 2 * 60 * 1000;
+
 // Same great-circle formula as js/geo-core.js's window.haversineMeters,
 // hand-copied — see the comment block above on why this file can't
 // require() that sibling module.
@@ -1346,7 +1358,14 @@ async function resolveActiveRecordServer(base, todayStr) {
     return { dateStr: todayStr, ref: todayRef, data: todayData };
   }
   if (!todayData || !todayData.timeIn) {
-    const yestStr = manilaDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    // v14 P1.x offline-punch-time fix — "yesterday" must be relative to the
+    // EFFECTIVE day (todayStr, which for a queued replay can itself be a
+    // past Manila day), never the server's own clock. Pure calendar-string
+    // decrement, TZ-independent (Asia/Manila has no DST). For a live punch
+    // todayStr === the server's own Manila day, so this yields the identical
+    // result as the old Date.now()-based computation — one code path, no
+    // branch needed.
+    const yestStr = new Date(Date.parse(todayStr + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
     const yestRef = base.doc(yestStr);
     const yestSnap = await yestRef.get();
     const yestData = yestSnap.exists ? yestSnap.data() : null;
@@ -1368,6 +1387,55 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
   if (kind !== 'in' && kind !== 'out') {
     throw new functions.https.HttpsError('invalid-argument', 'kind must be "in" or "out".');
   }
+
+  // v14 P1.x offline-punch-time fix (OFFLINE-PUNCH-SPEC.md §1.2) —
+  // `queuedPunchAt` trust contract. Parsed/classified immediately, BEFORE any
+  // Firestore/Storage work, so a hard reject (too-old) costs nothing. Exactly
+  // one of four states: absent (live punch — byte-identical to pre-fix
+  // behavior), valid, degraded (malformed/future — claim discarded, punch
+  // kept), too-old (hard reject, nothing written).
+  const rawQueuedAt = data && data.queuedPunchAt;          // epoch ms, optional
+  const nowMs = Date.now();                                 // one server "now" for classification
+
+  let queuedReplay = false;      // true for BOTH valid and degraded claims
+  let effectiveMs = nowMs;       // the instant that gets RECORDED
+  let claimDegraded = null;      // 'malformed' | 'future' | null
+
+  if (rawQueuedAt !== undefined && rawQueuedAt !== null) {
+    queuedReplay = true;
+    const isPositiveFiniteNumber = typeof rawQueuedAt === 'number' && Number.isFinite(rawQueuedAt) && rawQueuedAt > 0;
+
+    if (isPositiveFiniteNumber && rawQueuedAt < nowMs - QUEUED_PUNCH_MAX_AGE_MS) {
+      // too-old — HARD REJECT before any doc writes. Honoring it is a 48h+
+      // backdating hole; recording it at server-now would fabricate a shift
+      // on today's date the worker never punched. HR kiosk hand-entry is the
+      // designed correction path.
+      throw new functions.https.HttpsError('failed-precondition',
+        'This queued punch is more than 48 hours old and can no longer be self-submitted — ask HR/Finance to enter this shift manually.',
+        { permanent: true, reason: 'queued-punch-too-old' });
+    }
+
+    if (isPositiveFiniteNumber && rawQueuedAt <= nowMs + QUEUED_PUNCH_FUTURE_GRACE_MS) {
+      // valid — never a future time (future-skew clamp).
+      effectiveMs = Math.min(rawQueuedAt, nowMs);
+    } else {
+      // degraded — malformed (non-number/NaN/±Infinity/<=0) or >2min future.
+      // Why not reject: rejecting turns a client bug / bad device clock into
+      // a lost punch for an honest worker, while accepting-at-server-now
+      // gives an attacker exactly what they'd get with no parameter at all —
+      // nothing. Never backdates.
+      claimDegraded = isPositiveFiniteNumber ? 'future' : 'malformed';
+      effectiveMs = nowMs;
+    }
+  }
+
+  // Derived values used everywhere below. For a live punch (queuedReplay ===
+  // false) effectiveTs is a fresh Timestamp.now() — same call, same spot,
+  // same behavior as before this fix; the live path is unchanged.
+  const effectiveTs = queuedReplay ? admin.firestore.Timestamp.fromMillis(effectiveMs)
+                                    : admin.firestore.Timestamp.now();
+  const lagMin = queuedReplay ? Math.max(0, Math.round((nowMs - effectiveMs) / 60000)) : 0;
+
   const lat = Number(data && data.lat);
   const lng = Number(data && data.lng);
   const accuracy = Number(data && data.accuracy);
@@ -1435,38 +1503,93 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
   }
 
   const base = db.collection('attendance_worker').doc(profileId).collection('records');
-  const todayStr = manilaDate();
+  // v14 P1.x offline-punch-time fix — serverTodayStr is the server's own
+  // Manila calendar day (for guards/audit); todayStr is the punch's
+  // EFFECTIVE Manila day and drives all record targeting. For a live punch
+  // these are identical (effectiveTs === a fresh Timestamp.now()), so the
+  // live path is unchanged. For a queued replay, todayStr can be up to 2
+  // calendar days before serverTodayStr and never after it (future clamp).
+  const serverTodayStr = manilaDate();
+  const todayStr = manilaDate(effectiveTs.toDate());
 
   let targetDateStr, targetRef, existingData;
+  let laterShiftOpen = false;
+  let outBeforeIn = false;
   if (kind === 'in') {
     // Block a second concurrent Time In while a shift — today's, or an
-    // unclosed prior day's — is already open.
+    // unclosed prior day's — is already open. Evaluated against the
+    // EFFECTIVE day, so a queued past-day replay is checked against ITS own
+    // day, not the server's calendar today. Covers the duplicate-replay case
+    // too: if a replay's first attempt actually landed server-side but the
+    // client saw a network error and retries, the retry hits this guard and
+    // the client drops the dupe (worker.js §3.3).
     const active = await resolveActiveRecordServer(base, todayStr);
     if (active.data && active.data.timeIn && !active.data.timeOut) {
       throw new functions.https.HttpsError('failed-precondition',
-        `You already have an open shift from ${active.dateStr} (timed in ${active.data.timeIn}) — time out first.`);
+        `You already have an open shift from ${active.dateStr} (timed in ${active.data.timeIn}) — time out first.`,
+        { permanent: true, reason: 'shift-already-open' });
     }
+
+    // NEW (OFFLINE-PUNCH-SPEC §1.5.2) — already-recorded guard: a Time In
+    // already on file for the effective day, open OR closed, can never be
+    // overwritten by a second 'in' — otherwise a crafted queued replay could
+    // move an already-recorded timeIn EARLIER (the clobber-backdate attack).
+    // Reuses this read as existingData below rather than re-fetching after
+    // field assembly. Applied to live punches too — deliberate tightening
+    // that also fixes the latent quirk where a second live 'in' on a
+    // completed day silently overwrote timeIn.
     targetDateStr = todayStr;
     targetRef = base.doc(todayStr);
     const freshSnap = await targetRef.get();
     existingData = freshSnap.exists ? freshSnap.data() : {};
+    if (existingData.timeIn) {
+      throw new functions.https.HttpsError('failed-precondition',
+        `A Time In is already recorded for ${todayStr}.`,
+        { permanent: true, reason: 'already-recorded' });
+    }
+
+    // NEW (OFFLINE-PUNCH-SPEC §1.5.3) — later-open-shift check, queued
+    // past-day 'in' only: a queued 'in' landing on a PAST effective day must
+    // not be rejected just because the worker has since punched in again
+    // live on a later day — that's real, separate history (e.g. Monday's
+    // queued 'in' never synced; Tuesday's live 'in' is legitimate).
+    // needsReview is already forced for a queued claim, so HR sees the
+    // dangling open pair. Never redirects the target — the record still
+    // lands on todayStr (the effective day). At most 2 doc reads (48h max
+    // window).
+    if (queuedReplay && todayStr < serverTodayStr) {
+      let cursor = todayStr;
+      while (cursor < serverTodayStr) {
+        cursor = new Date(Date.parse(cursor + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+        const laterSnap = await base.doc(cursor).get();
+        const laterData = laterSnap.exists ? laterSnap.data() : null;
+        if (laterData && laterData.timeIn && !laterData.timeOut) { laterShiftOpen = true; break; }
+      }
+    }
   } else {
+    // Effective todayStr — a punch queued 23:50 that replays 00:10 next
+    // Manila day has effective day = the PRIOR day and resolves that day's
+    // open shift directly; a shift that crossed midnight before the punch
+    // still resolves via the resolver's own prior-day branch (now
+    // effective-relative, see resolveActiveRecordServer above).
     const active = await resolveActiveRecordServer(base, todayStr);
     if (!active.data || !active.data.timeIn || active.data.timeOut) {
-      throw new functions.https.HttpsError('failed-precondition', 'No open shift found to time out.');
+      throw new functions.https.HttpsError('failed-precondition', 'No open shift found to time out.',
+        { permanent: true, reason: 'no-open-shift' });
     }
     targetDateStr = active.dateStr;
     targetRef = active.ref;
     existingData = active.data;
   }
 
-  // A single concrete server timestamp used for BOTH the stored inAt/outAt
-  // and the hoursWorked math below — Timestamp.now() (not the
+  // effectiveTs (classified above) is used for BOTH the stored inAt/outAt and
+  // the hoursWorked math below — a concrete Timestamp value (not the
   // FieldValue.serverTimestamp() sentinel) because we need its actual value
   // immediately, in this same invocation, not just once Firestore resolves
-  // the write.
-  const nowTs = admin.firestore.Timestamp.now();
-  const timeStr = manilaTimeHM(nowTs.toDate());
+  // the write. For a live punch it's the same Timestamp.now() this used to
+  // be inline here; nowMs (classification-time Date.now()) is the separate
+  // provenance/audit "now" used below.
+  const timeStr = manilaTimeHM(effectiveTs.toDate());
   const distanceM = Math.round(match.nearest.distanceM);
   const accuracyRounded = Math.round(accuracy);
 
@@ -1483,7 +1606,14 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
     fields.inSiteId = match.nearest.siteId;
     fields.inSelfieUrl = selfieUrl;
     fields.inValid = true;
-    fields.inAt = nowTs;
+    fields.inAt = effectiveTs;
+    if (queuedReplay) {
+      // Per-kind provenance (OFFLINE-PUNCH-SPEC §1.7) — absent entirely on
+      // live punches (see the `if (queuedReplay)` guard).
+      fields.inPunchSource = 'queued';
+      fields.inSyncLagMin = lagMin;
+      if (claimDegraded) fields.inClaimDegraded = claimDegraded;
+    }
   } else {
     fields.timeOut = timeStr;
     fields.outLat = lat;
@@ -1493,7 +1623,12 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
     fields.outSiteId = match.nearest.siteId;
     fields.outSelfieUrl = selfieUrl;
     fields.outValid = true;
-    fields.outAt = nowTs;
+    fields.outAt = effectiveTs;
+    if (queuedReplay) {
+      fields.outPunchSource = 'queued';
+      fields.outSyncLagMin = lagMin;
+      if (claimDegraded) fields.outClaimDegraded = claimDegraded;
+    }
 
     // hoursWorked from IMMUTABLE SERVER timestamps — never the device clock.
     let inMs = null;
@@ -1508,7 +1643,12 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
       if (!isNaN(fallback.getTime())) { inMs = fallback.getTime(); needsReview = true; }
     }
     if (inMs != null) {
-      hoursWorked = Math.max(0, (nowTs.toMillis() - inMs) / 3600000);
+      hoursWorked = Math.max(0, (effectiveTs.toMillis() - inMs) / 3600000);
+      // Claimed out before the recorded in (OFFLINE-PUNCH-SPEC §1.6) — the
+      // Math.max(0, …) above already clamps to 0 hours (can never overpay);
+      // this just flags it for HR. Review is already forced whenever this
+      // matters (queuedReplay), but the flag is harmless to compute either way.
+      if (effectiveTs.toMillis() < inMs) outBeforeIn = true;
     } else {
       hoursWorked = 0;
       needsReview = true; // couldn't derive a trustworthy in-time at all
@@ -1516,6 +1656,39 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
     if (hoursWorked > MAX_SHIFT_HOURS) needsReview = true;
     fields.hoursWorked = Math.round(hoursWorked * 100) / 100;
     if (needsReview) fields.needsReview = true;
+  }
+
+  // Forced review (OFFLINE-PUNCH-SPEC §1.7) — ANY claimed time, both kinds,
+  // is always lower-trust: every request carrying queuedPunchAt gets
+  // needsReview:true, even a 30-second lag. Never set to false here — this
+  // only ever ADDS the flag, never clobbers a prior true from the branch
+  // above.
+  if (queuedReplay) fields.needsReview = true;
+
+  const writeFields = { ...fields };
+  if (queuedReplay) {
+    // Server-written audit entry (OFFLINE-PUNCH-SPEC §1.7) — appended to the
+    // same attempts[] array the client and geofence-failure paths already
+    // use, inside this one write. ISO strings only — FieldValue.
+    // serverTimestamp() is illegal inside arrayUnion, never a sentinel here.
+    const corroborated = !!(existingData && existingData.pendingPunch &&
+      existingData.pendingPunch.queuedAt === rawQueuedAt);
+    writeFields.attempts = admin.firestore.FieldValue.arrayUnion({
+      kind, valid: true, queuedReplay: true,
+      claimedPunchAt: new Date(effectiveMs).toISOString(),      // what got recorded
+      rawQueuedPunchAt: Number.isFinite(rawQueuedAt) ? new Date(rawQueuedAt).toISOString() : String(rawQueuedAt),
+      serverSyncAt: new Date(nowMs).toISOString(),
+      syncLagMin: lagMin,
+      ...(claimDegraded ? { claimDegraded } : {}),
+      ...(laterShiftOpen ? { laterShiftOpen: true } : {}),
+      ...(outBeforeIn ? { outBeforeIn: true } : {}),
+      // Soft corroboration only — an HR signal, never gates acceptance (the
+      // client's advisory pendingPunch marker write is best-effort and can
+      // legitimately be absent).
+      corroborated,
+      note: 'Offline queued replay — recorded at the claimed on-site time; flagged for HR review.',
+      atServer: new Date(nowMs).toISOString()
+    });
   }
 
   await targetRef.set({
@@ -1528,12 +1701,15 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
     // geofence+selfie server-verified (js/screens/hr.js _hrVerifiedBadge reads it).
     // HR-kiosk hand-entries never set it, so they correctly show no verified badge.
     serverVerified: true,
-    ...fields
+    ...writeFields
   }, { merge: true });
 
-  const message = kind === 'in'
+  let message = kind === 'in'
     ? `Timed in at ${timeStr} — ${match.nearest.name}`
     : `Timed out at ${timeStr}`;
+  if (queuedReplay) {
+    message += ` (${targetDateStr}, synced ${lagMin} min late — flagged for HR review)`;
+  }
 
   return {
     ok: true,
@@ -1541,6 +1717,10 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
     timeStr,
     siteName: match.nearest.name,
     hoursWorked: kind === 'out' ? fields.hoursWorked : null,
-    needsReview
+    needsReview: !!fields.needsReview,
+    queuedReplay,
+    lagMin,
+    recordedDate: targetDateStr,
+    ...(claimDegraded ? { claimDegraded } : {})
   };
 });
