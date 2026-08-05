@@ -2200,8 +2200,42 @@ html.theme-astral .chip-tab.active {
 .page-panel-back{ background:none; border:none; color:var(--primary-light); cursor:pointer; padding:4px; display:flex; }
 .page-panel-title{ flex:1; font-size:var(--fs-lg); font-weight:700; color:var(--text);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* SAFE-AREA DOUBLE-COUNT — the footless-panel case (recon Hazard 11, third
+   site). The same correction already carried by .page-panel-foot (≤768px
+   block, ~line 2616) and .messenger-input-row (~line 4396), needed here too
+   because openPage() HIDES the foot outright when a page passes no footerHTML
+   (`foot.classList.toggle('hidden', !footerHTML)` in js/app.js, plus
+   `.page-panel-foot.hidden{display:none}` just below). On those pages — the
+   worker-profile panel and friends — .page-panel-body IS the window's bottom
+   edge and inherits none of the foot's fix. Under the v14 mobile window model
+   that edge now ends at the TOP OF THE KEYBOARD, where the home indicator is
+   not drawn, yet iOS keeps reporting a non-zero env(safe-area-inset-bottom);
+   left alone the last row sits ~34px above the keys — exactly the dead band
+   the foot fix exists to remove.
+   Subtract --kb-h (published on <html> by window.ViewportSync, js/config.js)
+   and clamp at 0. Same expression as the other two sites, not a second
+   formulation:
+     keyboard up   → max(0px, 34px - ~300px) = 0px  → flat 16px
+     keyboard down → max(0px, 34px - 0px)    = 34px → the old
+                                                      calc(16px + inset)
+   Edited in place inside the shorthand rather than re-declared as a longhand,
+   so the landscape left/right insets and the 16px top on this same line are
+   untouched.
+   NO-OP AT REST, at every width and on desktop. Two independent guards, either
+   one alone sufficient: (a) with the keyboard down --kb-h is 0px, so
+   max(0px, inset - 0px) is just `inset` and the whole calc collapses to the
+   previous calc(16px + inset); (b) on any screen with no home indicator the
+   inset is 0px, so the max() clamps to 0px no matter what --kb-h says. Desktop
+   satisfies both. A --kb-h that was never published falls back to 0px via the
+   var() fallback, i.e. today's behaviour is also the worst failure mode.
+   Deliberately NOT width-scoped, matching .messenger-input-row (~line 4396).
+   The only state where it changes anything above the 768px window tier is a
+   tablet with the software keyboard UP, and there the effect is invisible: at
+   those widths .page-panel still uses the base `bottom:0`, so the last
+   `inset`-worth of padding sits at the physical bottom of the screen — inside
+   the band the keyboard is drawing over. Nothing the user can see moves. */
 .page-panel-body{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;
-  padding:16px max(16px, env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px, env(safe-area-inset-left,0px)); }
+  padding:16px max(16px, env(safe-area-inset-right,0px)) calc(16px + max(0px, env(safe-area-inset-bottom,0px) - var(--kb-h, 0px))) max(16px, env(safe-area-inset-left,0px)); }
 .page-panel-foot{ flex-shrink:0; border-top:1px solid var(--border);
   padding:12px max(16px, env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px, env(safe-area-inset-left,0px));
   display:flex; gap:8px; justify-content:flex-end; background:var(--surface); }
@@ -2525,8 +2559,87 @@ html.theme-astral #mini-cal td.today {
   }
   /* Full-screen page panel (openPage) — was pinned below the old #topbar;
      now covers from the very top, same as it used to cover the old
-     top-nav-strip underneath the topbar. */
-  .page-panel { top: env(safe-area-inset-top, 0px); }
+     top-nav-strip underneath the topbar.
+
+     v14 MOBILE WINDOW MODEL (Batch 2) — anchor the panel to the VISUAL
+     viewport instead of the layout viewport. The base rule's `bottom:0`
+     tracks the LAYOUT viewport, and iOS does not shrink the layout viewport
+     for the soft keyboard: it keeps its size and PANS it upward. So a
+     bottom-anchored panel kept its footer/composer exactly where the keyboard
+     now is — the single defect this whole batch exists to fix.
+     --vv-top / --vvh are published on <html> by window.ViewportSync
+     (js/config.js) from visualViewport.offsetTop / .height, so top+height
+     together describe precisely the strip of screen the user can actually
+     see, keyboard up or down, and the panel's flex column (head / body /
+     foot) lays itself out inside that strip for free.
+
+     `bottom:auto` is MANDATORY, not tidiness: the base rule sets `bottom:0`,
+     and top+bottom+height over-constrains an absolutely-positioned box — the
+     UA would drop `height` and keep `bottom`, silently reverting the fix.
+
+     Driven via top/height and deliberately NOT via transform: .page-panel's
+     slide-in animation owns `transform` (`transition:transform .3s`, base
+     rule above), so a translate here would fight the open/close animation and
+     the two would interleave mid-slide.
+
+     At rest --vv-top is 0px, i.e. the panel is full-bleed from the very top
+     of the screen — this generalizes to every page what the chat thread panel
+     already did on its own. The notch clearance it used to get from
+     `top: env(safe-area-inset-top)` moves into .page-panel-head's own
+     padding-top, immediately below. */
+  .page-panel {
+    top: var(--vv-top, 0px);
+    height: var(--vvh, 100%);
+    bottom: auto;
+  }
+  /* Notch clearance for the window's own header row, now that the window
+     itself starts at y=0 instead of being inset by the safe area. Longhand so
+     the landscape left/right insets already in the base rule's `padding`
+     shorthand (see .page-panel-head above) survive untouched — this
+     re-declares the top edge only. */
+  .page-panel-head { padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+  /* SAFE-AREA DOUBLE-COUNT (recon Hazard 11). The foot pads
+     `calc(12px + env(safe-area-inset-bottom))` to clear the home indicator.
+     That was right while the panel ended at the bottom of the SCREEN; now it
+     ends at the TOP EDGE OF THE KEYBOARD, where the home indicator is not
+     drawn at all — yet iOS does NOT report env(safe-area-inset-bottom) as 0
+     while the keyboard is up. Left alone it opens a ~34px dead gap between
+     the footer buttons and the keys on every one of the ~108 footer-bearing
+     pages.
+     Subtract the keyboard height from the inset and clamp the result at 0:
+       keyboard up   (--kb-h ≈ 300px) → max(0px, 34px - 300px) = 0px → flat 12px
+       keyboard down (--kb-h: 0px)    → max(0px, 34px - 0px)   = 34px → the
+                                        old calc(12px + inset), unchanged.
+     If --kb-h were never published at all the var() fallback of 0px yields
+     that same old value, so the worst failure mode is today's behaviour. */
+  .page-panel-foot {
+    padding-bottom: calc(12px + max(0px, env(safe-area-inset-bottom, 0px) - var(--kb-h, 0px)));
+  }
+  /* ── OCCLUSION. While a window is open on the phone tier the shell behind it
+     must not paint. The window is opaque and covers the viewport, but
+     #topbar / #top-nav-strip / #bottom-nav are position:fixed siblings on
+     <body> with their own stacking contexts — on iOS they can still bleed at
+     the notch/home-indicator bands and, worse, stay tappable underneath.
+     body.page-open is owned SOLELY by Overlay._sync() (js/config.js); feature
+     code never adds or removes it, so it cannot desynchronize from the scroll
+     lock (the lock's kind list is a superset of the cover list).
+     `visibility` and not `display`: display:none on #topbar would collapse
+     .main-content's margin-top and shift/scroll the page underneath, so
+     closing the window would land the user somewhere else. visibility keeps
+     the layout frozen exactly as it was.
+     The .35s delay applies ONLY to hiding, and it is load-bearing: the
+     window's entrance is a 300ms transform slide, so the shell has to stay
+     painted for the whole slide — otherwise the user watches a half-slid
+     panel over a blank screen. On close the element stops matching this rule
+     entirely, so there is no transition to delay and the shell repaints in
+     the same frame. */
+  body.page-open #topbar,
+  body.page-open #top-nav-strip,
+  body.page-open #bottom-nav,
+  body.page-open .main-content {
+    visibility: hidden;
+    transition: visibility 0s linear .35s;
+  }
   /* Primary nav bottom bar — shown on mobile, hidden on desktop. */
   .bottom-nav { display: flex !important; }
   /* Show the small tab labels (icon + label, like Facebook) — v14 de-structuring
@@ -3794,55 +3907,73 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   }
 }
 
-/* ── Owner req #2 — full-screen chat on phone (Facebook Messenger style).
-   chat.js toggles `body.chat-fullscreen` when a conversation opens/closes on
-   a ≤640px viewport (_enterFullscreenIfPhone/_exitFullscreen). Desktop/tablet
-   (>640px, the two-pane scaffolding above) is completely untouched — this
-   block only ever applies inside the same media query the rest of the
-   phone-tier CSS uses. */
-@media (max-width: 640px) {
-  body.chat-fullscreen #topbar,
-  body.chat-fullscreen #top-nav-strip,
-  body.chat-fullscreen #bottom-nav {
-    display: none !important;
-  }
-  /* The thread panel already renders position:fixed (chat.js inline style)
-     anchored below the topbar; once the topbar is hidden, reclaim that space
-     so the slim .ms-thread-header becomes the only chrome on screen. */
-  /* Full-BLEED cover (edge to edge), so nothing behind — the chat inbox in
-     #page-content — can peek through. Insetting by the safe-area (the old bug)
-     left a strip at the notch/home-indicator where the inbox showed through.
-     Instead the panel covers the whole viewport and the header/composer below
-     pad themselves for the safe areas. */
-  body.chat-fullscreen #chat-thread-panel {
-    top: 0 !important;
-    /* Wave1 P0 fix #1 — soft-keyboard offset. A plain `bottom:0!important`
-       here permanently pinned the panel to the viewport's ORIGINAL bottom
-       edge, hiding the composer behind the on-screen keyboard on every
-       phone: chat.js's visualViewport 'resize' handler (_onViewportResize)
-       used to write a plain inline `bottom` style, which this !important
-       rule always won over. --kb-offset is set by that same handler (and
-       reset to 0 on blur/keyboard-close) — this rule is now the actual
-       source of truth for the panel's bottom offset on phone. */
-    bottom: var(--kb-offset, 0) !important;
-    left: 0 !important;
-    right: 0 !important;
-    /* v14 CSS/a11y audit: was a raw 4-digit literal (5000) — same numeric
-       value as --z-dialog, so this is a zero-visual-change token swap. */
-    z-index: var(--z-dialog);
-  }
-  /* Header clears the notch; composer already pads for the home indicator via
-     .messenger-input-row's own safe-area-bottom padding. */
-  body.chat-fullscreen #chat-thread-panel .ms-thread-header {
-    /* The base rule fixes height:56px; with box-sizing:border-box a large
-       padding-top would overflow upward and clip the title/Back/Leave under
-       the notch. Grow the header instead: min-height carries the inset. */
-    height: auto !important;
-    min-height: calc(56px + env(safe-area-inset-top, 0px)) !important;
-    padding-top: calc(8px + env(safe-area-inset-top, 0px)) !important;
-    padding-bottom: 8px !important;
+/* ── Chat thread window — what survives of `body.chat-fullscreen`.
+
+   That class and its entire ≤640px block are DELETED as of the v14 mobile
+   window model. The chat thread panel is an ordinary openPage .page-panel
+   (chat.js just stamps id="chat-thread-panel" on it), so it now inherits the
+   shared phone-tier window behaviour from the ≤768px block far above —
+   visual-viewport anchoring (--vv-top/--vvh), the body.page-open occlusion of
+   #topbar/#top-nav-strip/#bottom-nav, and the body scroll lock — instead of
+   hand-rolling a parallel, 640px-only version of all three. The soft-keyboard
+   offset it used to carry (`bottom: var(--kb-offset)`) is likewise obsolete:
+   --vvh already ends the window at the top edge of the keyboard, and it does
+   so for every page rather than for chat alone.
+
+   The block also had to go rather than simply be re-scoped 640px → 768px:
+   its `height:auto !important` on the header would then have grown
+   .ms-thread-header from 56px to 61px on EVERY device including zero-inset
+   ones (recon §6.5 Delta 2).
+
+   Two of its effects were genuinely load-bearing and are re-expressed below.
+   Both selectors are id-scoped — specificity (1,1,0) — so they beat the
+   class-level base rules further down the file regardless of source order,
+   with no !important needed. They are NOT scoped alike, though: (1) is
+   phone-tier only and (2) applies at every width. See each.
+
+   1. Notch clearance on the thread header, WITHOUT growing it — inside
+      @media (max-width:768px) ONLY. The base rule (.ms-thread-header) is a
+      hard `height:56px` under the global box-sizing:border-box, so a height
+      that INCLUDES the inset plus a matching padding-top leaves the content
+      box at exactly 56px:
+        zero-inset device → height: calc(56px + 0px) = 56px, padding-top: 0
+                            — byte-identical to today.
+        iPhone with notch  → header occupies 56px + inset, of which the inset
+                            is padding, so all 56px of chrome sits below the
+                            status bar.
+      The width scoping is load-bearing, not tidiness. This rule's entire
+      premise is that the window's top edge IS the top of the screen, with
+      nothing but the status bar above it — and that is true only inside the
+      ≤768px block far above, which re-anchors .page-panel to
+      `top: var(--vv-top, 0px)` (at rest: 0). Above 768px the base .page-panel
+      rule still applies —
+        top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px))
+      — which has ALREADY cleared both the status bar and the app topbar, so
+      adding the inset again here counts it twice. Confirmed failure: iPad
+      Pro 11" portrait (834px) installed to the home screen, where
+      env(safe-area-inset-top) is ~20-24px — the thread header rendered
+      76-80px tall with a 20-24px empty band at its top, sitting below a
+      topbar that had already cleared the status bar, and the message list
+      lost exactly that much height.
+
+   2. Exactly ONE header per window. openPage renders its own generic
+      .page-panel-head (back chevron + plain-text title) ABOVE chat's much
+      richer .ms-thread-header (avatar + presence subtitle + ⓘ / wallpaper
+      menu, whose popover is position:relative-parented to it and so cannot be
+      split into openPage's header slot). That left two stacked bars. chat.js
+      has been suppressing it with an inline `style.display='none'`
+      (js/chat.js:1076) and explicitly flagged the real fix as belonging to
+      "the CSS owner" (js/chat.js:944-948) — this is that fix. Deliberately
+      left unscoped, unlike (1): a duplicate header bar is wrong at every
+      width, and hiding one makes no assumption about where the window's top
+      edge is, so it has nothing to double-count. ── */
+@media (max-width: 768px) {
+  #chat-thread-panel .ms-thread-header {
+    height: calc(56px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
   }
 }
+#chat-thread-panel .page-panel-head { display: none; }
 
 /* ── Owner req (2026-08-03 mobile-shell batch) — Quote Builder fullscreen on
    phone/tablet, mirroring body.chat-fullscreen directly above. app.js's
@@ -4243,6 +4374,27 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
    (js/departments.js) shares this same .messenger-input-row class and keeps
    its border (a real "own section" of a page, not this request). */
 #chat-thread-panel .messenger-input-row { border-top: none; }
+/* SAFE-AREA DOUBLE-COUNT (recon Hazard 11) — the composer's twin of the
+   .page-panel-foot fix in the ≤768px block. The shorthand above adds
+   env(safe-area-inset-bottom) for the home indicator on the premise (stated in
+   its own comment) that every consumer is a bottom:0-anchored full-screen
+   surface. Under the v14 mobile window model that surface now ends at the TOP
+   EDGE OF THE KEYBOARD, where the home indicator is not drawn — but iOS still
+   reports a non-zero inset, so the composer would float ~34px above the keys.
+   Subtract the keyboard height (--kb-h, published on <html> by
+   window.ViewportSync in js/config.js) and clamp at 0:
+     keyboard up   → max(0px, 34px - ~300px) = 0px  → flat 8px
+     keyboard down → max(0px, 34px - 0px)    = 34px → unchanged from before
+   Longhand, so the 8px top / 10px sides of the shorthand above survive.
+   Deliberately NOT width-scoped and NOT scoped to #chat-thread-panel: the same
+   row is also the task/doc comment composer (js/departments.js), which flows
+   inside .page-panel-body's scroller rather than being viewport-anchored. Its
+   keyboard-CLOSED value is unchanged, so this is a no-op for that consumer and
+   for every viewport wider than a phone (--kb-h is 0px there, and the inset is
+   0px on non-notched screens). */
+.messenger-input-row {
+  padding-bottom: calc(8px + max(0px, env(safe-area-inset-bottom, 0px) - var(--kb-h, 0px)));
+}
 .ms-attach-btn {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -5032,9 +5184,31 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
   }
   .modal-box {
     position: fixed !important;
-    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    /* v14 MOBILE WINDOW MODEL (Batch 2) — identical defect to .page-panel's,
+       identical fix. This box is position:fixed with top:0/bottom:0 and
+       height:100dvh, and 100dvh does NOT shrink for the soft keyboard: `dvh`
+       tracks the retracting URL bar (the LAYOUT viewport), not the keyboard.
+       Every full-cover modal with a form in it therefore put its last field
+       and its footer buttons underneath the keys. --vv-top/--vvh (published on
+       <html> by window.ViewportSync, js/config.js) describe the actually
+       visible strip, keyboard up or down.
+       `bottom:auto` is mandatory: top+bottom+height over-constrains the box,
+       and the UA resolves that by dropping `height` — leaving bottom:0 in
+       charge and silently reverting the fix.
+       min-height:100dvh is GONE outright (it would force the box taller than
+       the visible strip). max-height, however, could NOT simply be deleted:
+       its job here was never 100dvh as a limit but beating two competing
+       declarations — `max-height: 92dvh !important` from the ≤768px
+       bottom-sheet block and `max-height: 94dvh` on .modal-box.modal-full —
+       either of which would clamp a full-cover modal back to ~92% of the
+       screen. It becomes `none !important`, which keeps winning exactly the
+       same two cascade fights while letting `height` alone decide the size.
+       Every other !important in this rule is left precisely where it was:
+       this block is a per-property DELTA over the ≤768px baseline (see the
+       block comment above) and each one beats a specific competitor. */
+    top: var(--vv-top, 0px) !important; left: 0 !important; right: 0 !important; bottom: auto !important;
     width: 100% !important; max-width: 100% !important;
-    height: 100dvh !important; min-height: 100dvh !important; max-height: 100dvh !important;
+    height: var(--vvh, 100dvh) !important; max-height: none !important;
     margin: 0 !important;
     border-radius: 0 !important;
     align-self: stretch !important;
@@ -5974,6 +6148,15 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   #page-content,#page-content *{visibility:visible;}
   .no-print{display:none!important;}
 
+  /* recon Hazard 7 — neutralize the phone scroll lock for printing. While any
+     overlay is open, window.ScrollLock (js/config.js) parks <body> at
+     `position:fixed; top:-<scrollY>px; overflow:hidden`, which is a
+     viewport-sized, viewport-CLIPPED box. Printing from that state paginates
+     only the visible slice and drops everything below it — so this ships with
+     the lock or desktop Ctrl+P breaks. Costs nothing when no lock is held:
+     these are already body's used values in the unlocked state. */
+  body{position:static!important;top:auto!important;height:auto!important;overflow:visible!important;}
+
   /* dark/Astral fallback: force light, legible chrome-free output everywhere */
   body,#page-content,.card,.data-table,.data-table th,.data-table td,
   table,th,td{background:#fff!important;color:#000!important;box-shadow:none!important;filter:none!important;}
@@ -6219,9 +6402,20 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 
   /* 5 — SURFACES: page-panel body, modal/dialog body.
      .page-panel-head keeps its height — it's a touch target (back button/title). */
+  /* This shorthand RE-DECLARES all four sides at the compact 12px density, so
+     it would overwrite the keyboard-aware bottom padding set on the base
+     .page-panel-body rule (~line 2238) on exactly the widths that have a
+     keyboard — every real phone. Carry the same correction through here at the
+     12px density: subtract --kb-h from the home-indicator inset and clamp at
+     0, so a FOOTLESS window (openPage() hides .page-panel-foot when a page
+     passes no footerHTML) ends flush against the keys instead of ~34px above
+     them. Keyboard down → --kb-h is 0px → max() returns the inset → this is
+     byte-for-byte the previous calc(12px + inset). See the long note on the
+     base rule for the full rationale. */
   .page-panel-body {
     padding: 12px max(12px, env(safe-area-inset-right,0px))
-      calc(12px + env(safe-area-inset-bottom,0px)) max(12px, env(safe-area-inset-left,0px));
+      calc(12px + max(0px, env(safe-area-inset-bottom,0px) - var(--kb-h, 0px)))
+      max(12px, env(safe-area-inset-left,0px));
   }
   /* v14 hotfix (owner-reported, repeat #3): this density-pass shorthand used
      to reset ALL FOUR sides flat, silently wiping the safe-area-inset-top

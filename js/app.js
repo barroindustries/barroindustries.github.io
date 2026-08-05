@@ -41,6 +41,69 @@ window.Session = {
   }
 };
 
+// ── Session-boundary overlay reset (mobile window model, 2026-08) ──────────
+// Sign-out is a session boundary, and it was the ONE boundary the Overlay stack
+// never heard about. showLogin() only unhides #login-screen and hides
+// #app-shell — but every overlay surface is a SIBLING of #app-shell
+// (#modal-overlay / #profile-drawer / #drawer-overlay / #dialog-overlay in
+// index.html, and openPage panels appended straight to <body>), and each one
+// carries an inline z-index of 300+ handed out by Overlay.push() against
+// #login-screen's z-index:1. So signing out with anything open left that panel
+// painted OVER the login screen, with Overlay._stack, window._pageStack and the
+// body classes all intact into the next session. The profile-drawer Sign Out is
+// the deterministic case — it fires while the drawer is ITSELF an open Overlay
+// entry (pushed in openProfileDrawer).
+//
+// That was already a bug standing alone, but it is also a hard prerequisite for
+// the mobile window model: body.page-open and the ScrollLock refcount are now
+// DERIVED from Overlay._stack (Overlay._sync in js/config.js), so a stack that
+// survives the session boundary hands the login screen a `position:fixed` body
+// and a blanked-out shell.
+//
+// Every step is a no-op when nothing is open, so this is idempotent and cheap
+// enough to wire into all four sign-out paths AND the null-user branch of
+// onAuthStateChanged (the catch-all for the removed-user / wrong-portal paths
+// and for anything added later).
+window.resetSessionOverlays = function resetSessionOverlays() {
+  const O = window.Overlay;
+  if (O) {
+    // Runs every registered teardown (page panels, modals, dialogs, the
+    // drawer, the sidebar, qb-fullscreen) — the same work Back would have done,
+    // just all of it at once.
+    try { O.clearAll(); } catch (e) { console.warn('[resetSessionOverlays] clearAll', e); }
+    O._stack.length = 0;
+    // clearAll() deliberately leaves the stale history entries in place and asks
+    // the NEXT navigateTo to absorb one of them via replaceState (the iOS race
+    // fix — see config.js). Across a session boundary there is no next
+    // navigateTo to absorb anything, and a leftover count would make the first
+    // navigation of the *next* session silently replace instead of push.
+    O._pendingRewind = 0;
+    // Reconcile the derived state (body.page-open + the ScrollLock refcount)
+    // against the now-empty stack. Never toggle page-open by hand here:
+    // _sync tracks what it applied in _coverOn/_lockHeld, and a hand-removed
+    // class would leave that bookkeeping believing it is still on — the next
+    // window would then fail to re-add it.
+    try { O._sync(); } catch (_) {}
+  }
+  // Panel teardown defers the DOM removal by 300ms so the slide-out can play.
+  // There is nothing to play out over here and a panel lingering above the
+  // login screen is exactly the bug, so drop them now; the pending timeouts are
+  // already isConnected-guarded, so this cannot double-remove.
+  try { document.querySelectorAll('.page-panel').forEach(el => el.remove()); } catch (_) {}
+  if (window._pageStack) window._pageStack.length = 0;
+  // Surfaces whose body class outlives the Overlay stack on its own. The qb
+  // scroll lock is NOT released here — it is derived from the stack, so the
+  // O._sync() above already dropped it; this call only clears the body class
+  // and the exit pill, which are the parts _sync does not own.
+  try { exitQbFullscreen(); } catch (_) {}
+  try { closeSidebar(); } catch (_) {}
+  try { closeProfileDrawer(); } catch (_) {}
+  // Last, because it zeroes the refcount outright: everything above that still
+  // held a lock has released it by now, so this only mops up a leaked count.
+  if (window.ScrollLock) { try { window.ScrollLock._reset(); } catch (_) {} }
+  _syncMainInert();
+};
+
 // ── Boot ──────────────────────────────────────────
 // Tracks the uid we've already run the full disruptive bootstrap for, so token
 // refreshes (which re-fire onAuthStateChanged for the SAME user) don't yank the
@@ -154,6 +217,12 @@ document.addEventListener('DOMContentLoaded', () => {
       _bootstrappedUid = null;
       stopClaimsListener();
       Session.runCleanups();
+      // Catch-all for the session boundary: the four explicit sign-out paths
+      // reset synchronously (before auth.signOut() even resolves) so nothing is
+      // left painted during the round trip, but this branch also catches the
+      // removed-user gate above, the wrong-portal gate, and any future path —
+      // it is idempotent, so running it twice on those paths costs nothing.
+      window.resetSessionOverlays();
       showLogin();
     }
   });
@@ -225,6 +294,7 @@ function startForceLogoutListener(uid) {
       baselineFL = flTime;
       if (data?.excludeUid !== uid) {
         Notifs.stopListener();
+        window.resetSessionOverlays();   // session boundary — see resetSessionOverlays
         auth.signOut();
         Notifs.showToast('You have been signed out by an administrator.', 'info');
       }
@@ -422,6 +492,7 @@ function resetLogoutTimer() {
   clearTimeout(logoutTimer);
   logoutTimer = setTimeout(() => {
     Notifs.stopListener();
+    window.resetSessionOverlays();   // session boundary — see resetSessionOverlays
     auth.signOut();
     Notifs.info('Signed out due to inactivity.');
   }, window.AUTO_LOGOUT_MS);
@@ -1041,7 +1112,9 @@ function initLogin() {
     if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('pw-toggle')] });
   });
   document.getElementById('logout-btn')?.addEventListener('click', () => {
-    Notifs.stopListener(); auth.signOut();
+    Notifs.stopListener();
+    window.resetSessionOverlays();   // session boundary — see resetSessionOverlays
+    auth.signOut();
   });
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('login-screen')] });
 }
@@ -1576,11 +1649,45 @@ function _qbBuildExitPill() {
 // Builder page) instead of leaving the app or navigating away — same
 // lightweight "push a teardown, no visible panel" pattern notifications.js
 // uses for its push-permission prompt card.
+// ── Mobile window model (2026-08) — the scroll lock is DERIVED, not held here ─
+// This pair used to acquire/release ScrollLock itself, behind a _qbScrollLocked
+// flag, on the argument that qb-fullscreen "paints no panel of its own" and is
+// entered/exited from renderQuoteBuilderIframe and navigateTo outside the
+// stack. That made it the ONE lock Overlay._sync did not own — and therefore
+// the one lock nothing reconciled on a breakpoint crossing. iPhone portrait
+// (393px) → open the Quote Builder → rotate to landscape (852px): body
+// .qb-fullscreen's CSS stops matching so the app chrome comes back, but the
+// body was still position:fixed;overflow:hidden — the page clipped to one
+// 390px-tall viewport with no way to scroll out of it, and no exit pill left to
+// tap because the chrome was back. A hand-held lock cannot fix that; only
+// something listening on the media query can.
+//
+// So 'qb-fullscreen' is now listed in Overlay._LOCK_KINDS (js/config.js) and
+// _sync owns it exactly like 'page'/'modal'/'dialog'/'lightbox': acquired on
+// the push below, released when the entry is popped, and re-reconciled by the
+// matchMedia change listener config.js wires at 768px/639px. It is deliberately
+// NOT a cover kind — the quote-builder CSS hides the chrome itself, and
+// body.page-open on top of that would also blank the iframe's own container.
+//
+// What is left here is the class + the exit pill, and that is why the old
+// _qbScrollLocked bookkeeping is gone rather than merely unused: with no lock
+// of its own, exitQbFullscreen() is trivially safe to call when fullscreen was
+// never entered — which is how it is called from renderQuoteBuilderIframe
+// (before entering) and from navigateTo (on every navigation away). Both of
+// those sites also run AFTER navigateTo's Overlay.clearAll(), which has already
+// popped the entry and run THIS function as its teardown, so there is never a
+// stale 'qb-fullscreen' entry to double-push on and never a lock left behind.
 function enterQbFullscreen() {
   if (!_qbIsMobile()) return;
   if (document.body.classList.contains('qb-fullscreen')) return; // already entered — idempotent
   document.body.classList.add('qb-fullscreen');
   _qbBuildExitPill();
+  // The push is what takes the scroll lock (Overlay.push → Overlay._sync).
+  // Ordering note, since the old code claimed the opposite: push() does its
+  // history.pushState BEFORE calling _sync, and that is the ordering ScrollLock
+  // depends on — the base entry is recorded while the document is still
+  // scrollable, so history.scrollRestoration='manual' never has to outlive the
+  // lock (see the _forceScrollRestoration comment in js/config.js).
   if (window.Overlay) window.Overlay.push('qb-fullscreen', () => exitQbFullscreen());
 }
 function exitQbFullscreen() {
@@ -2857,9 +2964,13 @@ function openProfileDrawer() {
       })()}
     </div>
 
-    <!-- ── Sign out ── -->
+    <!-- ── Sign out ──
+         resetSessionOverlays() FIRST: this button lives inside the drawer, and
+         the drawer is itself an open Overlay entry (pushed below), so this is
+         the one sign-out path that ALWAYS has a live overlay to tear down.
+         Without it the drawer stays painted over the login screen. -->
     <div style="padding:0 0 calc(24px + env(safe-area-inset-bottom,0px))">
-      <button class="btn-danger profile-signout-btn" onclick="auth.signOut()">Sign Out</button>
+      <button class="btn-danger profile-signout-btn" onclick="window.resetSessionOverlays(); auth.signOut()">Sign Out</button>
     </div>
   `;
   const wasOpen = drawer.classList.contains('open');
@@ -3005,10 +3116,79 @@ function _focusEnter(container){
   if (items.length) items[0].focus();
   else { if (!container.hasAttribute('tabindex')) container.setAttribute('tabindex','-1'); container.focus(); }
 }
+// Restore focus to whatever opened the window. Deliberately a STAGED attempt —
+// one synchronous try, then up to two deferred retries — and the staging is
+// load-bearing on the phone shell:
+//
+//   Overlay._popOne() runs `teardown()` and only THEN `_sync()` (js/config.js).
+//   So at the instant a teardown calls us, body.page-open is STILL applied and
+//   `.main-content` still computes visibility:hidden (css/styles.css, the
+//   `body.page-open #topbar, … .main-content { visibility: hidden }` rule of
+//   the mobile window model). Blink and WebKit both refuse focus to anything
+//   that is not visible, so the bare `trigger.focus()` that used to be the
+//   whole of this function was a SILENT no-op for every trigger living in the
+//   shell: on iPhone, closing a page dropped focus to <body> and the next Tab
+//   restarted from the top of the document — a keyboard/switch-control user
+//   lost their place completely. Dropping `inert` first (which _syncMainInert
+//   already does, right above both call sites) does not help; visibility is
+//   the blocker, not inertness. The same applies to a page closing over a page
+//   underneath: the panel below is still .page-under/visibility:hidden while
+//   the teardown runs and only gets revealed a few lines later.
+//
+// Stage 1 is synchronous and unconditional, so DESKTOP — where page-open never
+// applies — behaves exactly as before: the first try lands, nothing is ever
+// scheduled, no frame of delay is introduced anywhere.
+// Stage 2 is a MICROTASK, which is the earliest moment after the synchronous
+// _sync() (both _popOne and clearAll call teardown() then _sync() in the same
+// task, so no repaint has to happen first) and, being pre-rAF, it also lands
+// before any newly-opened panel's rAF _focusEnter — so if a teardown navigates
+// somewhere new, that new surface still wins the focus.
+// Stage 3 is one rAF, belt-and-braces for a path that somehow reaches _sync()
+// asynchronously. Both retries are skipped the moment an earlier one worked,
+// so the whole thing self-limits to at most three focus() calls and normally
+// costs exactly one.
 function _focusReturn(trigger){
-  if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
-    try { trigger.focus(); } catch(_){}
-  }
+  // No trigger to return to. `document.activeElement` is <body> whenever
+  // nothing was focused when the window opened, and focusing <body>/<html> is
+  // both a no-op and indistinguishable from "focus was lost" — treat those as
+  // "no trigger" rather than retrying against them forever. Non-elements and
+  // anything without .focus() (null/undefined included) bail here too.
+  if (!trigger || typeof trigger.focus !== 'function') return;
+  if (trigger === document.body || trigger === document.documentElement) return;
+
+  // Whatever holds focus right now — normally a control INSIDE the window being
+  // torn down, since the focus trap kept it there and the panel is still in the
+  // DOM (page panels are removed 300ms later; #modal-overlay is static and only
+  // hidden). The retries compare against this snapshot instead of against
+  // <body>: "focus is still sitting where it was" means nobody else claimed it,
+  // while "focus has moved somewhere NEW" (a page opened by this same teardown,
+  // an autofocused field, a click elsewhere) means it is not ours to take back.
+  const at0 = document.activeElement;
+
+  // Returns true when there is nothing left to do — restored, given up on, or
+  // deliberately yielded — and false only when the trigger is still a valid
+  // target that simply is not focusable yet.
+  const tryFocus = (isRetry) => {
+    if (!trigger.isConnected) return true;            // re-rendered away mid-teardown — stop
+    const active = document.activeElement;
+    if (active === trigger) return true;              // already restored; never focus() twice
+    if (isRetry && active && active !== at0 &&
+        active !== document.body && active !== document.documentElement) {
+      return true;                                    // something else legitimately took focus
+    }
+    try { trigger.focus(); } catch(_){ return true; }
+    // focus() forces the pending style recalc itself, so this read is the
+    // authoritative "did it actually take?" — false means still not focusable
+    // (shell hidden, or a permanently unfocusable trigger, which the bounded
+    // retry count covers).
+    return document.activeElement === trigger;
+  };
+
+  if (tryFocus(false)) return;
+  const stage3 = () => { tryFocus(true); };
+  const stage2 = () => { if (!tryFocus(true)) requestAnimationFrame(stage3); };
+  if (typeof queueMicrotask === 'function') queueMicrotask(stage2);
+  else Promise.resolve().then(stage2);               // older WebKit
 }
 
 // ── Modal / Page panel (v12 WS10/WS11 — Overlay-registered, device Back closes) ──
@@ -3064,7 +3244,13 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   // tear a modal down via this callback without necessarily going through closeModal().
   const teardown = () => {
     ov.classList.add('hidden'); ov.classList.remove('active'); window._cheatSheetOpen = false;
-    _focusTrapDetach(box); _focusReturn(_trigger);
+    _focusTrapDetach(box);
+    // BEFORE _focusReturn, always: the trigger usually lives inside
+    // #main-content, and focus() is a no-op on a descendant of an inert
+    // subtree. Overlay has already popped this entry by the time a teardown
+    // runs, so the predicate here reads the post-close truth.
+    _syncMainInert();
+    _focusReturn(_trigger);
   };
   // v14 Batch1 1b — modal-over-modal: swap content in place instead of pushing
   // a second history entry, so one Back always closes the (top) modal. The
@@ -3076,6 +3262,7 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   } else {
     window.Overlay.push('modal', teardown, ov);
   }
+  _syncMainInert();   // 'modal' is a cover kind — see _syncMainInert
 };
 // ── v14 Batch1 1a — true page stack ─────────────────────────────────────────
 // _pageStack holds every currently-open page panel, bottom to top. Opening a
@@ -3090,6 +3277,69 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
 // name is still added for a future selector hook; it carries no rule yet.
 window._pageStack = window._pageStack || [];
 let _pageSeq = 0;
+
+// ── Mobile window model (2026-08) — base-route inert sync ───────────────────
+// body.page-open (which stops the shell chrome and .main-content painting) and
+// the body scroll lock are BOTH owned centrally by Overlay._sync (js/config.js)
+// — app.js must never toggle either, or _sync's _coverOn/_lockHeld bookkeeping
+// desynchronises from the DOM. The one piece of that occlusion _sync cannot
+// own is the `inert` attribute: it is an app.js-side DOM detail, so it is
+// applied here, from the SAME predicate _sync uses for the class (phone shell
+// AND some entry whose kind is in _COVER_KINDS) so the two can never disagree.
+//
+// WHY inert at all: visibility:hidden already drops the base route out of the
+// tab order in every current engine, but it does NOT stop programmatic focus,
+// and the app focuses things behind windows routinely (buildNav, render*
+// functions writing #page-content, the _focusReturn on panel close). An inert
+// #main-content makes "the window has focus" true by construction, which is
+// what stops iOS scrolling the locked document toward a hidden input.
+//
+// Called from exactly the four transitions that can flip the predicate:
+// openPage push / openPage teardown / openModal push / openModal teardown.
+// Those are the only sites in the whole app that push a 'page' or 'modal'
+// entry (verified: js/chat.js pushes 'lightbox', js/notifications.js
+// 'push-prompt', app.js's own 'sidebar' / 'drawer' / 'qb-fullscreen' — none of
+// them are cover kinds), plus resetSessionOverlays and the breakpoint crossing
+// below. Every teardown runs AFTER Overlay has already popped its entry
+// (_popOne pops, then calls teardown; clearAll likewise), so reading _stack
+// inside a teardown reads the post-close truth — no off-by-one.
+function _syncMainInert() {
+  const O = window.Overlay;
+  const phone = !!(window.isPhoneShell && window.isPhoneShell());
+  // Read Overlay._COVER_KINDS — never a local copy of the set. It is a LIVE
+  // GETTER (js/config.js): ['page','modal'] at ≤639px, ['page'] above, because
+  // a modal is a full-cover opaque page only below 640px and is still a
+  // ≤768px bottom sheet over a translucent scrim in the 640-768 band. Reading
+  // the getter is what makes it impossible for `inert` and body.page-open to
+  // disagree. The fallback is EMPTY, not a hardcoded duplicate of the set: if
+  // Overlay is somehow missing, `want` is false either way, and an inlined copy
+  // here is exactly the drift this line exists to prevent.
+  const cover = (O && O._COVER_KINDS) || [];
+  const want = !!(phone && O && O._stack.some(e => cover.indexOf(e.kind) !== -1));
+  const mc = document.getElementById('main-content');
+  // Feature-detected (iOS 15.5+ / Safari 15.5+); on anything older the
+  // visibility:hidden half of the occlusion still stands on its own.
+  if (mc && 'inert' in HTMLElement.prototype) mc.inert = want;
+}
+// Crossing a breakpoint with a window open (iPad rotating, a desktop window
+// dragged narrow) changes the answer — mirror the reconcile config.js wires for
+// Overlay._sync, on BOTH of its queries, so the two predicates always flip on
+// the same events:
+//   768px — the phone tier itself (isPhoneShell); nothing above it stays inert.
+//   639px — whether 'modal' counts as a cover kind at all. A tablet rotating
+//           600px → 700px crosses 639 WITHOUT crossing 768, so a 768-only
+//           listener would leave #main-content inert behind a 640-768px bottom
+//           sheet that no longer covers it (visible, dimmed, and unclickable)
+//           — or, in the other direction, non-inert behind a full-cover modal.
+(function () {
+  try {
+    ['(max-width: 768px)', '(max-width: 639px)'].forEach(function (q) {
+      const mq = window.matchMedia(q);
+      if (mq.addEventListener) mq.addEventListener('change', _syncMainInert);
+      else if (mq.addListener) mq.addListener(_syncMainInert);    // older WebKit
+    });
+  } catch (_) {}
+})();
 // Full-screen routed panel — SAME signature as openModal. Forms swap openModal→openPage.
 // New (all optional, backward-compatible) opts:
 //   headerRightHTML — string rendered right of the title (caller wires listeners
@@ -3105,7 +3355,51 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   opts = opts || {};
   const _trigger = document.activeElement;
   const stack = window._pageStack;
-  const doReplace = opts.replace === true && stack.length > 0;
+  // The topKind() half is NOT redundant with stack.length (recon §4.3(2)):
+  // stack.length interrogates window._pageStack, but the replace is executed
+  // against Overlay._stack by replaceTop() below — two different stacks. With
+  // only the _pageStack test, a replace fired while a NON-page entry sits on
+  // top of the Overlay stack overwrites that entry's kind/teardown, and the
+  // discarded teardown is the only thing that would ever have removed it. The
+  // live case: chat gates its conversation switch on _pageStack alone
+  // (js/chat.js, the `alreadyOpen` test in openConversation), blind to a
+  // 'lightbox' pushed above it (js/chat.js, Overlay.push('lightbox', …) in the
+  // image viewer), so a deep-linked conversation switch with an image open
+  // strands that lightbox — a fixed inset:0 element, above everything, forever.
+  // Falling back to a normal push (one extra history entry, the documented
+  // no-op fallback) is strictly better than orphaning a surface. Mirrors the guard openModal
+  // has always had at its own replaceTop (topKind() === 'modal').
+  //
+  // KNOWN ISSUE (accepted trade, not a regression — 2026-08 window-model review)
+  // The fallback push keeps the panel it was asked to replace alive underneath,
+  // as .page-under. Same live case as above: chat thread open → tap an image
+  // ('lightbox' pushed) → tap a notification for a DIFFERENT conversation.
+  // Because the top entry is the lightbox, this pushes a second thread panel
+  // instead of replacing the first, so Back #1 reveals the previous
+  // conversation's DEAD panel (its Firestore subscriptions were torn down by
+  // the switch and its composer silently no-ops), Back #2 closes the lightbox,
+  // Back #3 finally leaves. Three presses with a dead thread shown in between.
+  //
+  // Deliberately NOT "fixed" here, because every candidate fix is worse:
+  //   • Popping the lightbox first (Overlay._popOne / splicing Overlay._stack)
+  //     runs its teardown but consumes NO history entry — _stack and the
+  //     history depth desync, and the orphaned entry costs the user the same
+  //     third Back press (popstate maps a stale t:'overlay' entry back to its
+  //     base page). It also reaches into another module's internals from here.
+  //   • Letting the replace through cross-kind is what Overlay.replaceTop's
+  //     orphan-teardown branch already handles (js/config.js) — but this
+  //     function has by then already destroyed the old page panel, so the old
+  //     page's Overlay entry survives with a teardown pointing at a removed
+  //     node: still three Backs, plus a stray _onClose fire on the second.
+  //   • The only clean fix is dismissing the lightbox through history
+  //     (dismissTop → popstate), which is ASYNC — openPage would have to become
+  //     async or re-enter itself from a popstate handler.
+  // The real fix belongs in the caller: js/chat.js decides `replace:` purely
+  // from window._pageStack's top id (js/chat.js, `const alreadyOpen = …
+  // 'chat-thread-panel'`) and should dismiss its own lightbox before switching
+  // threads. Tracked as a chat.js follow-up, deliberately not done from here.
+  const doReplace = opts.replace === true && stack.length > 0 &&
+                    window.Overlay.topKind() === 'page';
 
   let prevTop = null;
   if (doReplace) {
@@ -3157,7 +3451,13 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   _focusTrapAttach(p);
 
   const teardown = () => {
-    p.classList.remove('open'); _focusTrapDetach(p); _focusReturn(_trigger);
+    p.classList.remove('open'); _focusTrapDetach(p);
+    // BEFORE _focusReturn, always — focus() is a no-op on a descendant of an
+    // inert subtree and the trigger usually lives in #main-content. Overlay
+    // pops the entry before invoking a teardown, so this reads the post-close
+    // truth (and correctly STAYS inert when a page remains underneath).
+    _syncMainInert();
+    _focusReturn(_trigger);
     if (p._onClose) { try { p._onClose(); } catch(_){} }
     const idx = stack.indexOf(p);
     if (idx !== -1) stack.splice(idx, 1);
@@ -3177,6 +3477,10 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   } else {
     window.Overlay.push('page', teardown, p);
   }
+  // After the push, so the predicate sees this page on the Overlay stack. The
+  // scroll lock and body.page-open were already applied by Overlay._sync from
+  // inside that same call — nothing to do for them here (see _syncMainInert).
+  _syncMainInert();
   return p;
 };
 // Generic dismiss — closes whatever overlay is on top (dialog | modal | page | panel).

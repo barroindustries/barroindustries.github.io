@@ -55,19 +55,87 @@
   // popup document but would leak into the live app now that this <style> tag
   // rides inside an openPage panel body. Same declarations, `.pd-stage`-scoped
   // selectors. The old fixed `.bar` toolbar is gone entirely — openPage's own
-  // headerRightHTML (§3) replaces it. ──
+  // headerRightHTML (§3) replaces it.
+  //
+  // ── WHY every rule below is ALSO mirrored onto `.pd-print` ────────────────
+  // `.pd-stage`-only scoping silently broke every JPEG/PDF export. The capture
+  // target is the SHEET (`.page.pd-print`, a CHILD of `.pd-stage`), and
+  // _captureDocCanvas clones that sheet into a bare <div> hung off <body> —
+  // where it has no `.pd-stage` ancestor and so matched NONE of these rules.
+  // What it got instead was whatever it inherited from <body>: `color:
+  // var(--text)`, `font-family:var(--font)`, `font-size:var(--fs-base)`, and no
+  // table styling at all — css/styles.css has no global table/th/td rule outside
+  // its own @media print block, and callers supply only DELTAS (production.js's
+  // delivery receipt sets `th{background:#1E3A5F}` and `table{margin-bottom}`
+  // but relies on THIS file for the borders, the padding and the collapse).
+  //
+  // Measured in headless Chrome against the real css/styles.css, cloning the
+  // real panel DOM exactly the way _captureDocCanvas does — 25 computed
+  // properties × 6 real caller pageCss blocks × both themes:
+  //
+  //   property          live sheet       ORPHANED CLONE (before)  after
+  //   color             #000             dark  #E4E6EB            #000
+  //                                      light #1C1E21
+  //   font-family       Arial            Times                    Arial
+  //   font-size         11px             16px                     11px
+  //   td border         1px solid #444   0px none                 1px solid #444
+  //   td padding        5px 7px          0                        5px 7px
+  //   table width       688px            245px (shrink-to-fit)    688px
+  //   border-collapse   collapse         separate                 collapse
+  //   td.c text-align   center           start                    center
+  //   tr.blank td h     23px             18px                     23px
+  //   .wm position      absolute         static                   absolute
+  //   .wm transform     rotate(-24deg)   none                     rotate(-24deg)
+  //   .wm font-size     64px             16px                     64px
+  //
+  // On the default dark theme that is #E4E6EB text on the sheet's own #fff (and
+  // on html2canvas's backgroundColor:'#fff') — ~1.1:1 contrast, i.e. the export
+  // came out a BLANK WHITE SHEET. Every openPrintableDoc caller was hit:
+  // delivery receipts, job orders, POs, receiving reports, billing invoices, ID
+  // cards, AEC/ROC lead sheets. Only the payslip escaped, because
+  // `.payslip-print` carries its styling on the SAME element that gets captured
+  // (css/styles.css) rather than on an ancestor — which is why nobody noticed.
+  //
+  // The fix is deliberately ADDITIVE: every rule keeps its existing
+  // `.pd-stage`-rooted selector and gains a `.pd-print`-rooted twin of
+  // IDENTICAL specificity, so the live preview's cascade cannot move. That
+  // parity is load-bearing, not cosmetic — callers are full of bare, low
+  // specificity selectors that LOSE to this block today and must keep losing:
+  //   · crm.js / sales.js lead sheets ship `th,td{font-size:9.5px}` (0,0,1),
+  //     beaten today by `.pd-stage th,.pd-stage td` (0,1,1). The twin
+  //     `.pd-print th,.pd-print td` is also (0,1,1), so it stays beaten.
+  //     Descoping this block to a bare `th,td` instead would have handed the
+  //     caller the win and visibly shrunk the on-screen lead sheets.
+  //   · departments.js's invoice ships `td,th{border:1px solid #000}` (0,0,1) —
+  //     same story: still overridden to #444, exactly as it is today.
+  //   · every caller's `.page{width:210mm;padding:14mm;…}` (0,1,0) must keep
+  //     BEATING this block's page rule, so that one is mirrored as
+  //     `.pd-print.page` — (0,2,0), matching `.pd-stage .page` exactly, rather
+  //     than the (0,1,0) a bare `.pd-print` would have given it. Same reason
+  //     `position:relative` survives there, which is what keeps the absolutely
+  //     positioned `.wm` watermark's containing block intact in the clone.
+  // Verified empirically: all 25 properties byte-identical old-vs-new on the
+  // LIVE preview for all 6 caller shapes in both themes, and the clone now
+  // matches the live preview on all 25.
+  //
+  // `.pd-stage`'s own chrome (`margin:0 auto;padding:16px 8px` — the padding
+  // _fitDocSheet reads back via padX(stage)) is split into its own rule and is
+  // deliberately NOT mirrored: the clone is off-viewport and must not pick up a
+  // 16px/8px band the live sheet does not have. It stays AFTER the reset rule,
+  // which is the only ordering constraint in this block. ──
   const BASE_CSS = `
-.pd-stage,.pd-stage *{box-sizing:border-box;margin:0;padding:0}
-.pd-stage{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0 auto;padding:16px 8px}
-.pd-stage table{width:100%;border-collapse:collapse}
-.pd-stage th,.pd-stage td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
-.pd-stage td.c{text-align:center}
-.pd-stage td.r{text-align:right}
-.pd-stage td.b{font-weight:700}
-.pd-stage tr.blank td{height:22px}
-.pd-stage .page{position:relative;background:#fff;color-scheme:light;
+.pd-stage,.pd-stage *,.pd-print,.pd-print *{box-sizing:border-box;margin:0;padding:0}
+.pd-stage,.pd-print{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000}
+.pd-stage{margin:0 auto;padding:16px 8px}
+.pd-stage table,.pd-print table{width:100%;border-collapse:collapse}
+.pd-stage th,.pd-stage td,.pd-print th,.pd-print td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
+.pd-stage td.c,.pd-print td.c{text-align:center}
+.pd-stage td.r,.pd-print td.r{text-align:right}
+.pd-stage td.b,.pd-print td.b{font-weight:700}
+.pd-stage tr.blank td,.pd-print tr.blank td{height:22px}
+.pd-stage .page,.pd-print.page{position:relative;background:#fff;color-scheme:light;
   --surface:#fff;--surface2:#f4f4f4;--border:#ddd;--text:#222;--text-muted:#666}
-.pd-stage .wm{position:absolute;top:45%;left:0;right:0;text-align:center;transform:rotate(-24deg);
+.pd-stage .wm,.pd-print .wm{position:absolute;top:45%;left:0;right:0;text-align:center;transform:rotate(-24deg);
     font-size:64px;font-weight:900;letter-spacing:6px;color:rgba(192,57,43,.13);
     z-index:5;pointer-events:none}
 @media print{
@@ -155,6 +223,43 @@
   // if a caller ever omits pageId weirdly. Clone-capture exactly like
   // capturePayslipCanvas: clone the sheet, neutralize its live scale-to-fit
   // transform, capture off-viewport at the requested scale, remove the clone.
+  //
+  // ── WHY the ScrollLock.withUnlocked() wrapper below (mobile-window recon,
+  // Hazard 6) ──────────────────────────────────────────────────────────────
+  // The mobile window model locks background scrolling by putting
+  // `position:fixed; top:-<scrollY>px; left:0; right:0; width:100%;
+  // overflow:hidden` on <body> for as long as any page/modal is open — and a
+  // printable doc is itself an openPage panel, so the lock is ALWAYS held while
+  // this runs on the phone shell.
+  //
+  // js/vendor/html2canvas.min.js reads `pageYOffset` (3×), `scrollY` (5×),
+  // `pageXOffset`, `scrollX` (5×) and `windowBounds` (7×) to derive its default
+  // capture window, and it clones the whole document — INCLUDING <body>'s inline
+  // style — into an offscreen iframe, where `position:fixed; top:-1234px` would
+  // be inherited. Whether that actually corrupts the capture was never verified:
+  // the recon's "the fixed wrapper should stay viewport-anchored, so it probably
+  // survives" is static inference over minified control flow, not a measurement.
+  //
+  // This is the ONLY export path on iOS standalone — every payslip, quote,
+  // invoice, delivery receipt, PO and count form ships through it — so we do not
+  // gamble on "probably". Rather than measure the interaction, we make the lock
+  // provably ABSENT for the duration of the capture: withUnlocked() fully
+  // releases regardless of refcount depth, runs the capture against a normal
+  // scrollable document (exactly the conditions html2canvas was written for),
+  // then re-applies the lock at the SAME scroll offset in a `finally` — so a
+  // throwing capture cannot strand the app unlocked.
+  //
+  // The unlock is deliberately scoped as tightly as possible: it starts at the
+  // appendChild (the first moment the offscreen wrapper is subject to body's
+  // layout) and ends when the wrapper is removed. `_ensureHtml2Canvas()` stays
+  // OUTSIDE it — no reason to leave the shell scrollable across a script fetch.
+  // At refcount 0 (every desktop case, and any phone case with no panel open)
+  // withUnlocked is a pure pass-through: it touches no DOM at all.
+  //
+  // This is the single chokepoint — every capture in this module, including
+  // _captureDocJpeg's scale-1 retry, funnels through here — so wrapping it here
+  // rather than at each caller makes "html2canvas never runs under the lock" a
+  // property of the function, not of its call sites.
   async function _captureDocCanvas(panel, o, opts) {
     opts = opts || {};
     await _ensureHtml2Canvas();
@@ -168,12 +273,28 @@
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
     wrap.appendChild(clone);
-    document.body.appendChild(wrap);
-    try {
-      return await window.html2canvas(clone, { scale: opts.scale || 2, useCORS: true, backgroundColor: '#fff', logging: false });
-    } finally {
-      wrap.remove();
-    }
+    // Guarded so this module keeps working if config.js ever fails to define
+    // ScrollLock (or is reordered after this file): fall back to calling fn()
+    // straight through, i.e. exactly today's behaviour.
+    //
+    // This module CAN overlap two withUnlocked() windows, so it relies on that
+    // function's reentrancy handling (_uDepth) rather than assuming exclusivity:
+    // #pd-print-btn and #pd-jpeg-btn each disable only THEMSELVES (see
+    // _handleDocPrintOrPdf / _downloadDocJPEG below), so tapping one and then
+    // the other while the first is still capturing is a two-tap gesture, not a
+    // race you have to engineer. Nothing here nests a second run() inside a
+    // first, though: the SHARE_UNAVAILABLE print retry only fires after
+    // _shareDocPDF has already settled, and _captureDocJpeg's scale-1 fallback
+    // is strictly sequential after the scale-2 attempt rejects.
+    const run = window.ScrollLock?.withUnlocked?.bind(window.ScrollLock) || ((fn) => fn());
+    return await run(async () => {
+      document.body.appendChild(wrap);
+      try {
+        return await window.html2canvas(clone, { scale: opts.scale || 2, useCORS: true, backgroundColor: '#fff', logging: false });
+      } finally {
+        wrap.remove();
+      }
+    });
   }
 
   function _canvasToJpegBlob(canvas) {
@@ -248,6 +369,31 @@
     const { canvas, blob } = await _captureDocJpeg(panel, o);
     const jpegBuf = await blob.arrayBuffer();
 
+    // ── On the "captureScale compares the CLONE against the LIVE sheet, so any
+    // divergence skews the page slicing" concern raised against the BASE_CSS
+    // scoping bug above: it does not, and it never did. sheetWidthPx CANCELS
+    // OUT of pageHeightPx algebraically —
+    //     sheetWidthPx * (canvas.width / sheetWidthPx) * ratio  ==  canvas.width * ratio
+    // — so the slice height is a function of the CAPTURED canvas alone and is
+    // self-consistent no matter how far the clone's layout drifts from the live
+    // sheet's. captureScale is kept as a named intermediate because it is the
+    // honest description of what the canvas is (device px per CSS px of sheet),
+    // not because the arithmetic needs it.
+    //
+    // The one place sheetWidthPx genuinely decides something is `landscape`
+    // above, and that is measured off the LIVE sheet on purpose: orientation is
+    // a property of the document being printed, not of the capture.
+    //
+    // Measured anyway, same harness as BASE_CSS: live-vs-clone width skew is
+    // exactly 1.0000x for all five real caller shapes in both themes, BEFORE
+    // and AFTER the scoping fix — every caller pins `.page{width:210mm|297mm}`
+    // with a bare selector that survives the orphaning, and css/styles.css's
+    // global `*{box-sizing:border-box}` kept the clone border-box even while
+    // BASE_CSS's own reset was missing. A synthetic caller that omits
+    // `.page{width}` does diverge (0.19x, unchanged by this fix, since the
+    // cause is the absent width and not the lost BASE_CSS) — harmless for the
+    // slicing per the cancellation above, but such a doc would export at
+    // content width instead of sheet width, so: pin .page's width in pageCss.
     const captureScale = canvas.width / sheetWidthPx;
     const ratio = landscape ? (595.28 / 841.89) : (841.89 / 595.28);
     const pageHeightPx = Math.max(1, Math.round(sheetWidthPx * captureScale * ratio));
@@ -288,7 +434,18 @@
   }
 
   async function _handleDocPrintOrPdf(o, panel, btn) {
-    if (!_isIOSStandalone()) { window.print(); return; }
+    // Same escape hatch as _captureDocCanvas, for the OTHER delivery mechanism
+    // (recon Hazard 7). window.print() paginates from the document flow, and the
+    // global @media print block resets #page-content's position but never body's
+    // — so under the lock the printer would get only the visible viewport slice
+    // and clip everything below it. This is not the iOS-standalone path (that
+    // one goes through _shareDocPDF → html2canvas), but it IS the path for
+    // Android Chrome and for iPhone Safari opened as a tab rather than from the
+    // Home Screen, both of which sit on the phone shell and so DO hold the lock.
+    // Unlocking here fixes it in the export path itself instead of depending on
+    // a css/styles.css print rule this batch does not own.
+    const run = window.ScrollLock?.withUnlocked?.bind(window.ScrollLock) || ((fn) => fn());
+    if (!_isIOSStandalone()) { await run(() => { window.print(); }); return; }
     const origLabel = btn ? btn.innerHTML : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
     try {
@@ -298,7 +455,7 @@
         // user cancelled the share sheet — not a failure, swallow silently.
       } else if (err && err.code === 'SHARE_UNAVAILABLE') {
         if (window.Notifs && Notifs.showToast) Notifs.showToast('Sharing isn’t available on this device — trying Print, or use Save as JPEG instead.', 'error');
-        try { window.print(); } catch (_) {}
+        try { await run(() => { window.print(); }); } catch (_) {}
       } else {
         console.error('openPrintableDoc: PDF export failed', err);
         if (window.Notifs && Notifs.showToast) Notifs.showToast('Could not generate the PDF — ' + (err && err.message ? err.message : 'please try again.'), 'error');
@@ -323,9 +480,77 @@
       if (!sheet || !stage) return;
       const w = sheet.offsetWidth, h = sheet.offsetHeight;
       if (!w || !h) return;
+      // ── Gutter: MEASURED, not the old hardcoded 16 (mobile-window recon
+      // cleanup #19). Two independent paddings eat into the width the scaled
+      // sheet can occupy, and the flat 16 modelled exactly one of them.
+      //
+      //  1. .pd-stage is border-box with `padding:16px 8px` (BASE_CSS above),
+      //     and its width is set to w*scale below — so its CONTENT box is only
+      //     w*scale-16 wide while the scaled sheet is w*scale, because the sheet
+      //     is transform-scaled from the stage's CONTENT-box top-left
+      //     (transform-origin:top left, and transforms do not affect layout).
+      //     The sheet therefore always overhangs the stage's own border box by
+      //     stagePadLeft (8px) on the right. `margin:0 auto` does NOT rescue
+      //     that: as soon as w*scale exceeds the host's content width the auto
+      //     margins resolve to 0, the stage sits flush left, and the overhang
+      //     lands straight in the host's padding. This 16 is the ONLY thing the
+      //     old constant was accounting for — it is literally padX(stage).
+      //  2. …but `avail` is a clientWidth, which INCLUDES the host's OWN padding,
+      //     and the old constant subtracted none of it. .page-panel-body is
+      //     16px on the sides at desktop and 12px under the ≤640px density block
+      //     (css/styles.css — search `.page-panel-body`: the base rule and the
+      //     @media (max-width:640px) one; line numbers deliberately not quoted
+      //     here, they drift every batch). So padX(host) is 32 or 24 and the old
+      //     formula overshot by exactly that. Both are also `max(Npx,
+      //     env(safe-area-inset-left/right))`, so on a notched iPhone in
+      //     landscape they jump to ~44px a side — unrepresentable as a constant
+      //     at all.
+      //
+      // Note this is NOT a case of the CSS drifting out from under a constant:
+      // .page-panel-body's padding is byte-identical to what it was when the 16
+      // was written. The 16 was wrong on the day it landed; it just failed
+      // quietly, as a horizontal scrollbar nobody filed.
+      //
+      // Measured in Chrome against this exact cascade, both formulas run side by
+      // side on the same DOM (scrollWidth/clientWidth is .page-panel-body's):
+      //
+      //   host width / sheet      old `- 16`                    measured gutter
+      //   375 phone,  portrait    +16.0px past the content      +0.0px past,
+      //                           box, 383 vs 375 — REAL        375 vs 375, none
+      //                           horizontal scroll
+      //   1000 desktop, LANDSCAPE +24.0px past, 1016 vs 1000    +0.0px, 1000/1000
+      //                           — REAL horizontal scroll
+      //   1100 desktop, LANDSCAPE +24.0px past, 1116 vs 1100    +0.0px, 1100/1100
+      //                           — REAL horizontal scroll
+      //   1200 desktop, portrait  scale clamps to 1 both ways — byte-identical
+      //
+      // On the review note that landscape sheets (w≈1123) come out ~3% smaller
+      // in the 1000-1170px desktop band (at 1100px: 1084px wide → 1052px): that
+      // band is EXACTLY where the old constant was overflowing. Those 1084px did
+      // not fit — they pushed the panel body's scrollWidth to 1116 and gave the
+      // doc panel a horizontal scrollbar. The 3% is the sheet being made to fit
+      // the box it is in. So the gutter is deliberately NOT width-scoped or
+      // orientation-scoped: it is the same geometry at every width, and the only
+      // reason landscape shows the largest delta is that it is the one case
+      // whose scale is not already clamped to 1 (portrait A4 is 794px, which
+      // fits any desktop panel outright, so desktop portrait is unchanged).
+      //
+      // Reading both paddings live via getComputedStyle keeps this correct for
+      // the safe-area case in (2), and means a future density-pass edit to
+      // .page-panel-body can't silently reintroduce the same class of bug.
       const bodyEl = sheet.closest('.page-panel-body') || panel;
-      const avail = (bodyEl && bodyEl.clientWidth) || panel.clientWidth || window.innerWidth;
-      const scale = Math.max(0.05, Math.min(1, (avail - 16) / w));
+      // Track WHICH element `avail` came from, so the padding subtracted below
+      // always belongs to the same box that supplied the width.
+      let host = bodyEl, avail = (bodyEl && bodyEl.clientWidth) || 0;
+      if (!avail) { host = panel; avail = panel.clientWidth || 0; }
+      if (!avail) { host = null;  avail = window.innerWidth; }   // last resort: no box to measure
+      const padX = (el) => {
+        if (!el) return 0;
+        const cs = getComputedStyle(el);
+        return (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+      };
+      const gutter = padX(host) + padX(stage);
+      const scale = Math.max(0.05, Math.min(1, (avail - gutter) / w));
       stage.style.width = (w * scale) + 'px';
       stage.style.height = (h * scale) + 'px';
       sheet.style.transform = 'scale(' + scale + ')';
@@ -386,7 +611,13 @@ ${PRINT_CSS}
     if (o.autoPrint) {
       setTimeout(() => {
         if (!_isIOSStandalone()) {
-          window.print();
+          // Third print/capture site — same Hazard 7 unlock as
+          // _handleDocPrintOrPdf. This one fires from a timer with nothing
+          // awaiting it, so the promise is explicitly swallowed: withUnlocked
+          // always returns one, and an unhandled rejection here would surface as
+          // a console error on a path that previously could not reject.
+          const run = window.ScrollLock?.withUnlocked?.bind(window.ScrollLock) || ((fn) => fn());
+          Promise.resolve(run(() => { window.print(); })).catch(() => {});
         } else if (window.Notifs && Notifs.showToast) {
           Notifs.showToast('Use Print / Save PDF above.');
         }

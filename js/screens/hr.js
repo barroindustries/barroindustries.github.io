@@ -3949,23 +3949,47 @@ function _isIOSStandalone() {
 // for print sharpness, removes the clone. `panelEl` scopes the query to a
 // specific panel (defensive — payslip panels can theoretically stack via
 // {replace:true}); falls back to a bare document query, same as before.
+//
+// SCROLL-LOCK IMMUNITY (mobile window model): the payslip is rendered inside a
+// page-panel, so on the phone shell window.ScrollLock is HELD while these
+// buttons are reachable — <body> carries `position:fixed; top:-Npx;
+// overflow:hidden`. html2canvas clones the document into an offscreen iframe
+// INCLUDING body's inline style, and derives its capture window from live
+// window scroll offsets; a negatively-offset, overflow-hidden, out-of-flow body
+// is exactly the shape that produces blank/clipped/shifted captures. Rather
+// than measure whether this particular version of html2canvas survives it, we
+// make the lock provably ABSENT for the duration: ScrollLock.withUnlocked()
+// fully releases (whatever the refcount), runs the capture against a normal
+// scrollable document at the original scroll offset, then re-applies the lock
+// at the SAME offset — in a finally, so a throwing capture cannot strand the
+// app unlocked. The optional-chained bind + identity fallback keeps this a
+// no-op on any load order where config.js has not defined ScrollLock yet
+// (and on desktop, where nothing ever acquires), so the capture path never
+// depends on the window model being present.
+//
+// The ensure-loaded step stays OUTSIDE the unlocked window on purpose: it is a
+// network/script fetch that can take arbitrarily long, and there is no reason to
+// leave the document scrollable behind an open panel while it runs.
 async function capturePayslipCanvas(panelEl, opts) {
   opts = opts || {};
   await _ensureHtml2Canvas();
-  const root = panelEl || document;
-  const src = root.querySelector('.payslip-print');
-  if (!src) throw new Error('Could not find the payslip content to capture.');
-  const clone = src.cloneNode(true);
-  clone.style.transform = 'none'; // neutralize the live scale-to-fit transform — capture at true 1x
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
-  wrap.appendChild(clone);
-  document.body.appendChild(wrap);
-  try {
-    return await window.html2canvas(clone, { scale: opts.scale || 2, useCORS:true, backgroundColor:'#fff', logging:false });
-  } finally {
-    wrap.remove();
-  }
+  const run = window.ScrollLock?.withUnlocked?.bind(window.ScrollLock) || (fn => fn());
+  return await run(async () => {
+    const root = panelEl || document;
+    const src = root.querySelector('.payslip-print');
+    if (!src) throw new Error('Could not find the payslip content to capture.');
+    const clone = src.cloneNode(true);
+    clone.style.transform = 'none'; // neutralize the live scale-to-fit transform — capture at true 1x
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;';
+    wrap.appendChild(clone);
+    document.body.appendChild(wrap);
+    try {
+      return await window.html2canvas(clone, { scale: opts.scale || 2, useCORS:true, backgroundColor:'#fff', logging:false });
+    } finally {
+      wrap.remove();
+    }
+  });
 }
 
 function _canvasToJpegBlob(canvas) {

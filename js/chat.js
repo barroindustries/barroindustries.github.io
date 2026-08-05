@@ -36,8 +36,14 @@ window.Chat = (() => {
   let _inboxUnsub = null;                    // (1) conversations array-contains
   let _threadUnsubs = [];                    // (2-4) messages/readers/typing for the ONE open thread
   let _openConvId = null, _openConv = null;
-  let _threadPanelEl = null;                 // v14 Phase2b — the openPage-returned panel element
-                                              // (visualViewport handler targets THIS, not an id lookup)
+  let _threadPanelEl = null;                 // v14 Phase2b — the openPage-returned panel element.
+                                              // The soft-keyboard re-pin (_onViewportResize) uses it as
+                                              // its liveness guard, and _buildThreadPanel binds the
+                                              // panel-level 'focusin' re-pin to it — never an id lookup.
+  let _kbRepinTimers = [];                   // 2026-08 mobile-window model — the pending post-focus
+                                              // re-pin timers scheduled by _scheduleKbRepin. Cleared by
+                                              // teardownThread so a keyboard that opens as the panel is
+                                              // closing can't scroll a thread that no longer exists.
   let _convs = [], _deptConvs = [], _myReads = {};   // inbox state
   let _msgs = [], _earlier = [], _readers = [], _typing = [];  // thread state
   let _presenceTimer = null, _typingExpireTimer = null, _markReadTimer = null;
@@ -245,15 +251,32 @@ window.Chat = (() => {
     if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
     if (_markReadTimer)     { clearTimeout(_markReadTimer);      _markReadTimer = null; }
-    if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onViewportResize);
+    // BOTH visualViewport signals, mirroring the add in _buildThreadPanel. This
+    // used to remove 'resize' only; now that 'scroll' is bound too (a pure iOS
+    // pan fires nothing else — see _onViewportResize), forgetting it here would
+    // strand a live listener holding this module's closure past the thread's
+    // own lifetime, and let a later pan scroll a torn-down thread.
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', _onViewportResize);
+      window.visualViewport.removeEventListener('scroll', _onViewportResize);
+    }
+    // The panel-level 'focusin' listener needs no removal — it is bound to the
+    // panel element itself, which openPage's teardown removes from the DOM. Its
+    // in-flight timers do, though: they outlive the element.
+    _kbRepinTimers.forEach(t => clearTimeout(t)); _kbRepinTimers = [];
     if (_emojiMenuOpen) document.removeEventListener('click', _emojiOutsideClick, true);   // Wave5 M2
     _emojiMenuOpen = false;
-    // Wave1 P0 fix #1 — don't leak the keyboard-offset var onto <html> past
-    // this thread's own lifetime (harmless elsewhere today, but it's a
-    // document-level custom property, not scoped to this panel).
-    document.documentElement.style.removeProperty('--kb-offset');
     _initialMarkReadPending = false;          // Wave1 P1 fix #7 — never carries into the next thread-open
-    _exitFullscreen();                       // owner req #2: restore app chrome on close
+    // NOTE (2026-08 mobile-window model): there is deliberately no chrome
+    // restore and no CSS-variable cleanup left here. The old bespoke mechanism
+    // (a chat-only full-screen body class plus a chat-only keyboard-offset
+    // custom property on <html>, both owned by this file — grep the 2026-08
+    // window-model commit if you need the retired names) is retired: an open
+    // thread is now just a page on the generic window stack, so hiding and
+    // restoring the topbar/nav is Overlay's job
+    // (body.page-open, driven by Overlay._sync) and the visual-viewport
+    // variables belong to window.ViewportSync in js/config.js, which is
+    // app-lifetime, not thread-lifetime, and must not be cleared from here.
     _threadPanelEl = null;
   }
 
@@ -939,13 +962,25 @@ window.Chat = (() => {
   // headerRightHTML while its (CSS `position:relative`-parented) popover
   // menu stayed in the body would separate them across two DOM locations —
   // the popover is positioned relative to .ms-thread-header, so it needs to
-  // stay together with its button. Net effect: openPage's native header bar
-  // (back chevron + title text, title passed through for a11y/aria-labelledby)
-  // now renders ABOVE .ms-thread-header — an extra slim bar that didn't exist
-  // before, most visible in phone full-screen mode where the CSS previously
-  // intended .ms-thread-header to be the ONLY chrome. Fixing that fully needs
-  // a CSS change (hiding .page-panel-head under body.chat-fullscreen), which
-  // is out of scope for a js/chat.js-only batch — flagged for the CSS owner.
+  // stay together with its button.
+  //
+  // ONE HEADER PER WINDOW (2026-08 mobile-window model) — this comment used to
+  // end by flagging an unresolved defect: openPage's native header bar rendered
+  // ABOVE .ms-thread-header, an extra slim bar that didn't exist before the
+  // Phase2b rebuild, and fixing it needed a CSS change that was "out of scope
+  // for a js/chat.js-only batch — flagged for the CSS owner". That fix has
+  // shipped. styles.css now carries `#chat-thread-panel .page-panel-head
+  // { display: none }` — unconditionally, at every width, not gated on a phone
+  // media query — so .ms-thread-header is the window's single header on phone
+  // and desktop alike, and nothing in THIS file hides that bar any more (the
+  // old inline `genericHead.style.display='none'` stopgap is gone too).
+  //
+  // The `title` argument is still passed to openPage even though the element
+  // that displays it is display:none: openPage puts it in .page-panel-title and
+  // points the panel's aria-labelledby at that node, and a node referenced by
+  // aria-labelledby contributes its text to the accessible name even when it is
+  // hidden. So the panel keeps its accessible name for free — do not "clean up"
+  // the argument.
   function _buildThreadPanel(conv) {
     const { title, avatarHtml } = _headerTitleAndAvatar(conv);
     const memberCount = (conv.participants || []).length;
@@ -1053,11 +1088,13 @@ window.Chat = (() => {
       replace: alreadyOpen,
       onClose: () => window.Chat.teardownThread()
     });
-    p.id = 'chat-thread-panel';   // preserve the id: styles.css keys the phone
-                                  // chat-fullscreen top/z overrides AND the
-                                  // .messenger-body max-height:none override
+    p.id = 'chat-thread-panel';   // preserve the id: styles.css keys the generic
+                                  // head hide, the phone thread-header notch
+                                  // inset, the >=1024px two-pane left offset AND
+                                  // the .messenger-body max-height:none override
                                   // off this exact "#chat-thread-panel" id.
-    _threadPanelEl = p;           // visualViewport handler targets this, not a lookup
+    _threadPanelEl = p;           // liveness guard + focusin host for the soft-keyboard
+                                  // re-pin below — never an id lookup
 
     // openPage's generic .page-panel-body is padded + its own overflow:auto
     // scroll container; the messenger layout owns its OWN internal scroll
@@ -1069,16 +1106,19 @@ window.Chat = (() => {
     const bodyEl = p.querySelector('.page-panel-body');
     if (bodyEl) bodyEl.style.cssText = 'flex:1;min-height:0;overflow:hidden;padding:0;display:flex;flex-direction:column;';
 
-    // Chat renders its own messenger header (avatar/presence/wallpaper), so
-    // the generic .page-panel-head would be a duplicate bar — hide it and
-    // route the messenger header's own back chevron through the stack.
-    const genericHead = p.querySelector('.page-panel-head');
-    if (genericHead) genericHead.style.display = 'none';
+    // Chat renders its own messenger header (avatar/presence/search/info), so
+    // the generic .page-panel-head would be a duplicate bar. It is hidden by
+    // CSS now (`#chat-thread-panel .page-panel-head { display:none }`, see the
+    // ONE HEADER PER WINDOW note above) rather than by an inline style from
+    // here — all that's left is routing the messenger header's own back chevron
+    // through the window stack, so Back/Esc/swipe-back/the chevron are one path.
     document.getElementById('chat-panel-back')
       ?.addEventListener('click', () => window.Overlay.dismissTop());
 
     _applyWallpaper(conv);
-    _enterFullscreenIfPhone();               // owner req #2: Messenger-style full-screen on phone
+    // (No fullscreen toggle here any more — see teardownThread's note. A thread
+    // is a page on the generic window stack, and the <=768px shell rules cover
+    // it exactly like every other page.)
     // Leave-group and the wallpaper preset picker are wired inside
     // _openMediaTab's About section now (Fix 4) — nothing to bind here.
 
@@ -1466,14 +1506,15 @@ window.Chat = (() => {
     });
     sendBtn.addEventListener('click', doSend);
 
-    // Wave1 P0 fix #1 — force the keyboard-offset CSS var back to 0 on blur
-    // too (not just the visualViewport 'resize' the keyboard's own close
-    // normally fires), so a blur that races ahead of — or instead of — that
-    // resize event never leaves the composer permanently lifted.
-    input.addEventListener('blur', () => {
-      document.documentElement.style.setProperty('--kb-offset', '0px');
-      if (_threadPanelEl) _threadPanelEl.style.bottom = '0px';
-    });
+    // (The composer 'blur' handler that used to live here is gone. It existed
+    // solely to force the retired keyboard-offset custom property back to 0 and
+    // zero the panel's inline `bottom` when a blur raced ahead of — or fired
+    // instead of — the keyboard's own visualViewport 'resize'. Neither value
+    // exists any more: the panel no
+    // longer carries an inline bottom, so there is nothing that can get stuck
+    // lifted. Enter-to-send is unaffected — that is the separate 'keydown'
+    // listener above, and the typing beacon's own blur/idle handling lives in
+    // onComposerInput/_clearOwnTyping.)
 
     // Wave5 M1 (J7) — scroll-to-bottom FAB: appears >300px up, badge tallies
     // messages that arrived while scrolled up (_renderThread), tap smooth-
@@ -1487,9 +1528,35 @@ window.Chat = (() => {
       _updateScrollFab(scrollEl);
     });
 
-    // On-screen-keyboard handling (Phase 19): keep the composer + last message
-    // visible without a layout jump when visualViewport resizes (keyboard open/close).
-    if (window.visualViewport) window.visualViewport.addEventListener('resize', _onViewportResize, { passive: true });
+    // On-screen-keyboard handling (Phase 19, re-based on the 2026-08 window
+    // model): keep the LAST MESSAGE visible when the keyboard opens or closes.
+    // Three signals feed the one handler, because which of them iOS actually
+    // fires for a keyboard is not something this codebase has measured on the
+    // target device (an iPhone installed to the home screen), and
+    // window.ViewportSync (js/config.js) publishes CSS variables rather than an
+    // event we could subscribe to — it exposes only .refresh(). So chat keeps
+    // its OWN listeners, now purely for the scroll re-pin:
+    //   • vv 'resize' — the keyboard shrinks the visual viewport. The only
+    //     signal the old handler bound.
+    //   • vv 'scroll' — a PURE PAN: iOS slides the layout viewport up to reveal
+    //     the caret without resizing anything, so offsetTop changes and 'resize'
+    //     never fires at all. This is the case the old handler missed outright.
+    //   • 'focusin' on the panel, re-fired at +250ms/+700ms (_scheduleKbRepin),
+    //     because iOS standalone is known to swallow vv events around the
+    //     keyboard's show/hide animation — the same belt-and-braces pattern
+    //     ViewportSync itself uses, for the same reason.
+    // The handler is idempotent and read-mostly (it no-ops unless the reader was
+    // already at the bottom), so firing more often than strictly necessary costs
+    // nothing.
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', _onViewportResize, { passive: true });
+      window.visualViewport.addEventListener('scroll', _onViewportResize, { passive: true });
+    }
+    // 'focusin', not 'focus': focus doesn't bubble, and this one panel-level
+    // listener has to cover the composer textarea, the in-thread search input
+    // (which never had any keyboard handling of its own) and anything added
+    // later. Bound to the panel element, so it is removed with it.
+    p.addEventListener('focusin', _scheduleKbRepin);
   }
 
   // WS42 Phase 19 — auto-grow the composer textarea up to a 5-line cap (the
@@ -1500,17 +1567,16 @@ window.Chat = (() => {
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
   }
-  // ── Full-screen thread on phone (owner req #2, Messenger-style) — ≤640px
-  // hides the app topbar/top-nav-strip/bottom-nav via a body class; CSS does
-  // the rest (see .chat-fullscreen rules in styles.css). Desktop (>640px)
-  // is untouched — the class is simply never applied there.
-  function _isPhoneWidth() { return window.innerWidth <= 640; }
-  function _enterFullscreenIfPhone() {
-    if (_isPhoneWidth()) document.body.classList.add('chat-fullscreen');
-  }
-  function _exitFullscreen() {
-    document.body.classList.remove('chat-fullscreen');
-  }
+  // ── (Retired 2026-08: the bespoke full-screen mechanism that used to live
+  // here — _isPhoneWidth()/_enterFullscreenIfPhone()/_exitFullscreen(), toggling
+  // a chat-only body class at a one-off 640px breakpoint. It predated the generic
+  // window model and duplicated it badly: its own breakpoint (640 vs the shell's
+  // 768, so 641-768px phones-in-landscape got the app chrome AND a full-cover
+  // thread), its own chrome-hiding rules, and its own keyboard geometry. All
+  // three are now generic — the <=768px .page-panel rules cover an open thread
+  // exactly like an open task detail, isPhoneShell() (js/config.js) is the one
+  // phone-tier check, and Overlay owns body.page-open. Deleted rather than
+  // re-pointed at 768px: nothing chat-specific was left in it. ──
   // Wave1 P1 fix #7 / P2 fix #17 — shared "is the reader at/near the bottom
   // of the thread" check (same 60px threshold _renderThread's own atBottom
   // calc uses), reused by the read-receipt gate, the image-decode re-snap,
@@ -1518,25 +1584,47 @@ window.Chat = (() => {
   function _isNearBottomEl(el) {
     return !!el && (el.scrollHeight - el.scrollTop - el.clientHeight < 60);
   }
+  // Soft-keyboard / visual-viewport handler. PANEL GEOMETRY IS NO LONGER THIS
+  // FILE'S BUSINESS. It used to write two things here — a keyboard-offset
+  // custom property on <html> (consumed by a now-deleted phone-only
+  // `#chat-thread-panel { bottom: var(...) !important }` rule) and a matching
+  // inline `panel.style.bottom` for the widths that rule didn't cover. Both are
+  // gone: the window model anchors every open page to the VISUAL viewport
+  // (`top: var(--vv-top); height: var(--vvh)`) from ViewportSync's variables,
+  // which is strictly better than lifting a bottom edge — it fixes the top edge
+  // sliding under the status bar during an iOS pan, which no amount of `bottom`
+  // ever could — and it is one rule for every window instead of a chat-only
+  // special case. Chat writing its own geometry on top of that would fight it.
+  //
+  // What CSS genuinely cannot do is the reason this handler still exists: the
+  // message list is a scroll container, and shortening it (keyboard up) or
+  // growing it back (keyboard down) leaves a reader who was pinned to the newest
+  // message staring at the middle of the thread instead. So all that is left
+  // here is the re-pin.
   function _onViewportResize() {
-    const vv = window.visualViewport; if (!vv) return;
-    const panel = _threadPanelEl; if (!panel || !panel.isConnected) return;   // openPage-returned panel (Phase2b #3)
-    const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    // Wave1 P0 fix #1 — CSS var instead of a plain inline `bottom` write: the
-    // phone chat-fullscreen rule (styles.css) used to pin `bottom:0!important`
-    // unconditionally, which a plain inline style write can't reliably beat
-    // on every engine, hiding the composer behind the open keyboard. The CSS
-    // rule now reads `bottom:var(--kb-offset,0)!important`, so this var is
-    // the real source of truth on phone; the direct inline write right after
-    // still covers desktop/tablet, where that !important rule never applies.
-    document.documentElement.style.setProperty('--kb-offset', offset + 'px');
-    panel.style.bottom = offset + 'px';
+    // Liveness guard (Phase2b #3): a vv event can land after teardownThread has
+    // run but before the panel element is off the DOM, and during an
+    // opts.replace swap two panels briefly coexist.
+    if (!_threadPanelEl || !_threadPanelEl.isConnected) return;
     const scroll = document.getElementById('chat-thread-scroll');
     // Wave1 P2 fix #17 — only re-pin to the bottom if the reader was ALREADY
     // there before the keyboard/viewport change; otherwise this silently
     // yanked anyone scrolled up reading older history back down every time
     // the soft keyboard opened or closed.
     if (scroll && _isNearBottomEl(scroll)) scroll.scrollTop = scroll.scrollHeight;
+  }
+  // Re-run the re-pin ACROSS the keyboard's own show/hide animation. A single
+  // synchronous pass at focus time measures the pre-keyboard layout and achieves
+  // nothing, and iOS standalone is known to swallow the visualViewport events
+  // that would otherwise cover the gap. Offsets mirror ViewportSync's
+  // (js/config.js) deliberately — same failure, same remedy. Bounded at two
+  // pending timers: each call cancels the previous pair, so rapid re-focus
+  // (composer -> search -> composer) cannot pile them up, and teardownThread
+  // clears whatever is still pending.
+  function _scheduleKbRepin() {
+    _kbRepinTimers.forEach(t => clearTimeout(t));
+    _kbRepinTimers = [setTimeout(_onViewportResize, 250), setTimeout(_onViewportResize, 700)];
+    _onViewportResize();
   }
 
   // ── Wallpaper (Phase 18) — conv-doc field first, localStorage fallback;

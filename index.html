@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <!-- interactive-widget=resizes-content is ANDROID HARDENING — it is NOT the iOS fix.
+       Chromium >=108 defaults an installed PWA to keyboard-overlays-content, so raising the
+       soft keyboard shrinks visualViewport but leaves the layout viewport (innerHeight) at its
+       full height. This key restores layout-viewport resizing, so innerHeight stays ==
+       visualViewport.height and ViewportSync's --kb-h computes to 0 there — i.e. the whole
+       var-driven keyboard geometry degrades to a harmless no-op on Android instead of
+       double-compensating. iOS Safari / standalone IGNORES this key entirely; the iOS keyboard
+       fix is ViewportSync + --vvh/--vv-top/--kb-h in js/config.js. Do not read this line as
+       the fix, and do not remove the iOS work believing this covers it. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"/>
   <!-- v12/v13 Phase 30 — CSP: 'unsafe-inline' stays on script-src because the app
        still relies on inline onclick=/onchange= handlers throughout departments.js/
        app.js/modules.js (Phase-50 goal is to remove those, then tighten this).
@@ -182,7 +191,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.65 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.66 · Barro Industries</div>
   </div>
 </div>
 

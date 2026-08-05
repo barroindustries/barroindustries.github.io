@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.65';
+window.APP_VERSION = '14.0.66';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1215,18 +1215,57 @@ window.Overlay = {
     const base = { page: window.currentPage || 'dashboard', subtab: window.currentSubtab || null };
     try { history.pushState({ t:'overlay', kind, oid:id, base, d:(window._navDepth||0) }, '', location.hash); } catch(_){}
     if (typeof window.devCheckStacking === 'function') { try { window.devCheckStacking(); } catch(_){} }
+    this._sync();                                              // ← mobile window model (see _sync)
     return id;
   },
   // Swap the top entry's kind/teardown/el WITHOUT touching history — used by
   // modal-over-modal (openModal) and opts.replace (openPage) so "one Back"
   // still closes the (now-different) surface. Re-applies the same z the top
   // slot already had (stack depth is unchanged by a swap).
+  //
+  // ── The discarded-teardown leak, and why the fix is CONDITIONAL ───────────
+  // Overwriting `top.teardown` throws the previous closure away. Whether that
+  // is a leak depends ENTIRELY on whether the caller already hand-rolled the
+  // equivalent cleanup, and the two live callers do:
+  //
+  //   • openModal's modal-over-modal branch (js/app.js:3074-3075) only replaces
+  //     when topKind()==='modal', reuses the ONE static #modal-overlay node, and
+  //     has ALREADY re-shown it (js/app.js:3058-3059) by the time it calls us.
+  //     Running the old teardown here would do `ov.classList.add('hidden')` on
+  //     the modal that was just opened — it would blank the screen.
+  //   • openPage's opts.replace branch (js/app.js:3111-3119) has already popped
+  //     _pageStack, called prevTop._onClose(), detached the focus trap and
+  //     removed the node. Running the old teardown here would fire _onClose a
+  //     SECOND time — and onClose is not always idempotent: the payslip page
+  //     wires `onClose: () => { _fitCleanup(); backFn(); }` (js/screens/hr.js:3666)
+  //     and re-opens itself with {replace:true} (js/screens/hr.js:3884), so a
+  //     double-fire would run its navigate-back callback twice.
+  //
+  // So an UNCONDITIONAL `top.teardown()` here is a regression on both live
+  // paths. The genuinely orphaned case is the CROSS-KIND clobber: openPage's
+  // doReplace test reads window._pageStack (js/app.js:3107-3108) and never
+  // checks what is actually on top of THIS stack (unlike openModal, which
+  // guards on topKind()==='modal'). A deep-linked conversation switch while a
+  // chat image lightbox is open (js/chat.js:1051 vs js/chat.js:3985) therefore
+  // overwrites the lightbox entry, and its teardown — the only thing that
+  // removes the lightbox element and its keydown listener — is never called.
+  // That element then sits in the DOM, above everything, forever.
+  //
+  // Discriminator: a caller that replaces a DIFFERENT kind than it is pushing
+  // did not know what it was clobbering, so it cannot have cleaned it up.
+  // `kind === top.kind` → today's exact behaviour (zero change for both live
+  // callers); `kind !== top.kind` → run the orphaned teardown. Fields are
+  // swapped FIRST so a teardown that reads Overlay sees the new truth, and it
+  // is wrapped in try/catch + `_closing` exactly like _popOne's.
   replaceTop(kind, teardown, el){
     if (!this._stack.length) return this.push(kind, teardown, el);
     const top = this._stack[this._stack.length - 1];
+    const orphan = (top.kind !== kind) ? top.teardown : null;
     top.kind = kind; top.teardown = teardown; top.el = el || null;
     if (el) { try { el.style.zIndex = String(300 + this._stack.length * 2); } catch(_){} }
+    if (orphan) { this._closing = true; try { orphan(); } catch(_){} this._closing = false; }
     if (typeof window.devCheckStacking === 'function') { try { window.devCheckStacking(); } catch(_){} }
+    this._sync();                                              // ← mobile window model (see _sync)
     return top.id;
   },
   topEl(){ const top = this._stack[this._stack.length - 1]; return top ? top.el : null; },
@@ -1236,6 +1275,7 @@ window.Overlay = {
     const top = this._stack.pop(); if (!top) return;
     if (navigator.maxTouchPoints > 0) window.haptic && window.haptic('light'); // v14 G2 — swipe/back dismiss, touch only
     this._closing = true; try { top.teardown(); } catch(_){} this._closing = false;
+    this._sync();                                              // ← mobile window model (see _sync)
   },
   clearAll(){
     if (!this._stack.length) return;
@@ -1249,8 +1289,433 @@ window.Overlay = {
     // Remaining stale entries are harmless — the popstate handler already
     // maps t:'overlay' entries to their base page on future Back presses.
     this._pendingRewind = (this._pendingRewind || 0) + n;
+    this._sync();                                              // ← mobile window model (see _sync)
+  },
+
+  // ── Mobile window model (2026-08) — derived scroll-lock + occlusion ────────
+  // On the phone shell an open window must (a) stop the document behind it from
+  // scrolling and (b) hide the app chrome it covers. BOTH states are DERIVED
+  // from _stack here, at the four (and only four) places that mutate it —
+  // push / replaceTop / _popOne / clearAll — instead of being acquired and
+  // released by the feature code that opens each surface.
+  //
+  // WHY derived and not a caller-side acquire/release pair (this is the whole
+  // point — do not "simplify" it back):
+  //   • replaceTop DISCARDS the previous entry's teardown on the same-kind path
+  //     (by design — see the comment above it), so a release living in that
+  //     teardown would never run. Every openPage({replace:true}) and every
+  //     modal-over-modal would permanently increment the refcount and the lock
+  //     would survive forever, leaving the app unscrollable.
+  //   • openModal can push a SECOND 'modal' entry pointing at the SAME static
+  //     #modal-overlay node (js/app.js:3074-3078), so push-counting counts one
+  //     visible surface twice.
+  //   • clearAll pops and tears down in a tight loop, and dismissTop() is
+  //     ASYNC (history.back() → popstate), so a popstate can land after the
+  //     stack is already empty (recon 4.3(3)).
+  // A pure function of _stack, reconciled against what is currently applied, is
+  // immune to all three: whatever path got us here, the state matches the stack.
+  //
+  // Kind sets:
+  //   _LOCK_KINDS  — surfaces that own the phone viewport's scroll: pages,
+  //     modals (a modal IS a full-screen page at phone width), dialogs (opaque
+  //     at ≤639px, and promptDialog reliably raises the keyboard — iOS
+  //     auto-scrolls the DOCUMENT to a focused input unless the document cannot
+  //     scroll), the chat lightbox (fixed, inset:0), and qb-fullscreen.
+  //
+  //     'qb-fullscreen' was the ONE lock _sync did not own: enterQbFullscreen /
+  //     exitQbFullscreen (js/app.js) acquired and released ScrollLock by hand,
+  //     so NOTHING reconciled it on a breakpoint crossing. iPhone portrait
+  //     (393px) → open the Quote Builder → rotate to landscape (852px): the
+  //     body.qb-fullscreen CSS stops matching so the chrome comes back, but the
+  //     body was still position:fixed;overflow:hidden — the page clipped to one
+  //     390px-tall viewport with no way to scroll out of it. It already pushes a
+  //     real Overlay entry (js/app.js, enterQbFullscreen), so listing it here is
+  //     the entire fix: _sync sees it like every other kind, and the hand-rolled
+  //     acquire/release pair in app.js is gone. It is NOT a cover kind — the
+  //     quote-builder CSS hides the chrome itself, and body.page-open on top of
+  //     that would also blank the iframe's own container.
+  //   _COVER_KINDS — the SUBSET that drives body.page-open (the CSS hides
+  //     topbar / top-nav-strip / bottom-nav / main-content). Dialogs and the
+  //     lightbox are deliberately NOT here: a bare confirm() over the dashboard
+  //     is a centred box at 640-768px, and blanking the whole shell behind it
+  //     would look broken.
+  //
+  //     'modal' is in the set only BELOW 640px, and that is why this is a live
+  //     getter and not a constant. It is the same argument as the dialog one
+  //     above: a modal is a full-cover opaque page only at ≤639px
+  //     (css/styles.css §"WS42 Phase 10 — mobile bottom sheet refinement" —
+  //     .modal-overlay goes opaque, .modal-box goes position:fixed/full-height).
+  //     In the 640-768px band it is still the ≤768px bottom sheet
+  //     (max-height:92dvh over a translucent scrim), so ~8% of the screen above
+  //     it is a dimmed view of the page — and body.page-open turned exactly that
+  //     strip flat blank. On an iPad mini in portrait (744px) every modal made
+  //     the app read as wiped. Evaluated per call so a rotation across 640px
+  //     is picked up (the matchMedia reconcile below listens on BOTH queries).
+  //     Exposed as a GETTER, not a method, so js/app.js's _syncMainInert — which
+  //     reads Overlay._COVER_KINDS as an array to drive #main-content's `inert`
+  //     from the same predicate — keeps working untouched and can never disagree
+  //     with this pass.
+  //
+  //   Because COVER ⊆ LOCK and both are computed in the same pass, page-open can
+  //   never be on while the scroll is unlocked.
+  // Deliberately excluded from both:
+  //   'sidebar'       — already carries body.sidebar-open{overflow:hidden}
+  //                     (css/styles.css:1214); a second mechanism would fight it.
+  //   'drawer'        — a bottom sheet, not a full cover; unchanged behaviour.
+  //   'push-prompt'   — a small toast-like card.
+  _LOCK_KINDS:  ['page', 'modal', 'dialog', 'lightbox', 'qb-fullscreen'],
+  get _COVER_KINDS() { return this._fullCoverModalTier() ? ['page', 'modal'] : ['page']; },
+  // ≤639px is where .modal-box becomes a full-cover opaque page. Same fallback
+  // shape as isPhoneShell() for engines that throw on matchMedia.
+  _fullCoverModalTier() {
+    try { return window.matchMedia('(max-width: 639px)').matches; }
+    catch (_) { return (window.innerWidth || 0) <= 639; }
+  },
+  _lockHeld: false, _coverOn: false,
+  _sync(){
+    // Everything below is a no-op above 768px: `phone` is false, so both wants
+    // are false, and the first _sync on a desktop boot finds both flags already
+    // false and touches nothing.
+    const phone = !!(window.isPhoneShell && window.isPhoneShell());
+    const st = this._stack;
+    const cover = this._COVER_KINDS;                 // live getter — read ONCE per pass
+    const wantLock  = phone && st.some(e => this._LOCK_KINDS.indexOf(e.kind) !== -1);
+    const wantCover = phone && st.some(e => cover.indexOf(e.kind) !== -1);
+    const SL = window.ScrollLock;
+    if (SL) {
+      // Self-heal: ScrollLock._reset() (session boundary) drops the lock behind
+      // our back, so also re-acquire when we THINK we hold one but don't.
+      if (wantLock && (!this._lockHeld || !SL.isLocked())) { this._lockHeld = true; try { SL.acquire(); } catch(_){} }
+      else if (!wantLock && this._lockHeld)                { this._lockHeld = false; try { SL.release(); } catch(_){} }
+    }
+    if (wantCover !== this._coverOn) {
+      this._coverOn = wantCover;
+      try { document.body.classList.toggle('page-open', wantCover); } catch(_){}
+    }
   }
 };
+
+// ── Mobile window model (2026-08) — shared primitives ─────────────────────
+// Three globals consumed by css/styles.css, js/app.js and js/chat.js. They are
+// defined HERE because config.js is the earliest script in index.html's defer
+// chain that everything else can depend on (firebase-config → config → drive →
+// notifications → departments → app → modules), so every later consumer can
+// assume they exist. Consumers still guard with `window.X &&` so no file hard-
+// depends on load order.
+//
+// isPhoneShell: THE phone-tier check for the window model. 768px is the mobile
+// shell breakpoint (top-nav-strip / bottom-nav / sidebar collapse, and
+// body.qb-fullscreen); chat's old one-off 640px check is retired. Everything
+// below is inert above 768px — nothing acquires, nothing is classed.
+window.isPhoneShell = function () {
+  try { return window.matchMedia('(max-width: 768px)').matches; }
+  catch (_) { return (window.innerWidth || 0) <= 768; }
+};
+
+// ── ViewportSync — the single owner of the visual-viewport CSS variables ────
+// Publishes on <html>, on every device (the vars are harmless on desktop —
+// nothing reads them there):
+//   --vvh     visualViewport.height  — height of the VISIBLE area
+//   --vv-top  visualViewport.offsetTop — how far iOS panned the layout viewport
+//             to reveal a focused input (0 at rest)
+//   --kb-h    innerHeight - vv.height - vv.offsetTop, clamped at 0 — the soft
+//             keyboard's height; 0 when it is closed
+//
+// WHY: position:fixed resolves against the LAYOUT viewport. The iOS keyboard
+// never shrinks that viewport — it overlays it and PANS it to reveal the caret.
+// So a `fixed; inset:0` panel keeps its full pre-keyboard height and its footer
+// sits underneath the keyboard. Anchoring a panel to the VISUAL rect
+// (top: var(--vv-top); height: var(--vvh)) is the only geometry the keyboard
+// cannot break, and --kb-h lets a composer pad itself instead of guessing.
+//
+// WHY SO MANY LISTENERS: whether iOS reports the keyboard pan as a visualViewport
+// 'resize', a visualViewport 'scroll' (a pure pan changes offsetTop with no
+// resize — the old chat handler missed exactly this), or a document 'scroll',
+// is UNMEASURED on the target device (iPhone, installed to the home screen).
+// Binding all of them makes the fix independent of that unknown instead of
+// resting on an assumption; the write is rAF-coalesced and change-gated, so the
+// extra signals cost nothing. focusin/focusout additionally schedule re-syncs at
+// +250ms and +700ms because iOS standalone is known to swallow vv events around
+// keyboard show/hide (the keyboard animation outlives the event).
+window.ViewportSync = window.ViewportSync || (function () {
+  var raf = 0;
+  var last = { vvh: '', top: '', kb: '' };          // write-only-on-change
+  function set(de, name, val, key) {
+    if (last[key] === val) return;
+    last[key] = val;
+    try { de.style.setProperty(name, val); } catch (_) {}
+  }
+  function apply() {
+    raf = 0;
+    var de = document.documentElement;
+    if (!de) return;
+    var vv = window.visualViewport;
+    var ih = window.innerHeight || 0;
+    var h, t;
+    if (vv) { h = vv.height; t = vv.offsetTop || 0; }
+    else    { h = ih;        t = 0; }               // no visualViewport → assume no keyboard
+    var kb = Math.max(0, Math.round(ih - h - t));
+    set(de, '--vvh',    Math.round(h) + 'px', 'vvh');
+    set(de, '--vv-top', Math.round(t) + 'px', 'top');
+    set(de, '--kb-h',   kb + 'px',            'kb');
+  }
+  function schedule() { if (!raf) raf = requestAnimationFrame(apply); }
+  var vv = window.visualViewport;
+  if (vv) {
+    vv.addEventListener('resize', schedule, { passive: true });
+    vv.addEventListener('scroll', schedule, { passive: true });
+  }
+  window.addEventListener('scroll', schedule, { passive: true });
+  window.addEventListener('resize', schedule, { passive: true });
+  window.addEventListener('orientationchange', schedule, { passive: true });
+  ['focusin', 'focusout'].forEach(function (t) {
+    window.addEventListener(t, function () {
+      schedule();
+      setTimeout(schedule, 250);
+      setTimeout(schedule, 700);
+    }, { passive: true });
+  });
+  apply();                                          // publish before first paint
+  return { refresh: schedule };
+})();
+
+// ── ScrollLock — refcounted, iOS-proof body scroll lock ────────────────────
+// NEVER called by feature code, with exactly one exception: withUnlocked(),
+// which print/capture code wraps around html2canvas and window.print(). The only
+// caller of acquire()/release() is Overlay._sync(), which derives the desired
+// state from the overlay stack — including qb-fullscreen, which used to
+// acquire/release by hand (see _LOCK_KINDS). Refcounted so stacked windows
+// neither double-lock nor early-unlock; the exact scroll offset is restored on
+// the final release.
+//
+// WHY position:fixed and not overflow:hidden — `overflow:hidden` on body does
+// propagate to the viewport (that is how body.sidebar-open works today), but it
+// does NOT stop iOS from auto-scrolling the document to a focused input, which
+// is the failure this exists to kill.
+//
+// HARD CONSTRAINTS baked into the implementation below — read before touching:
+//   • NEVER put transform / filter / perspective / backdrop-filter /
+//     will-change:transform / contain:paint|layout|strict|content /
+//     container-type / translate / rotate / scale on <body>. Any one of them
+//     makes body the containing block for EVERY position:fixed descendant at
+//     once — and ~24 of this app's surfaces (topbar, top-nav-strip, bottom-nav,
+//     sidebar, page panels, modals, dialogs, drawers, toasts, splash, PTR
+//     indicator, the gesture pill…) are direct fixed children of body. The
+//     inset:0 ones would resize to body's full document height. `position:fixed`
+//     on body itself is safe: it does not create a containing block for fixed
+//     descendants.
+//   • left/right/width are MANDATORY, not hardening. An out-of-flow box with
+//     left/right/width:auto is shrink-to-fit; measured against this exact
+//     html/body cascade, body collapsed 375px → ~30px under
+//     `position:fixed; top:-Ypx` alone.
+//   • html{scroll-behavior:smooth} (css/styles.css:70) would ANIMATE the
+//     restore, so scroll-behavior is forced to 'auto' across the scrollTo and
+//     put back afterwards.
+window.ScrollLock = window.ScrollLock || {
+  _n: 0,                       // refcount
+  _y: 0,                       // scrollY captured at the 0→1 transition
+  _gen: 0,                     // lock generation — bumped on every fresh 0→1
+                               // acquire AND by _reset(); see withUnlocked
+  _restoreSet: false,          // have we forced history.scrollRestoration?
+  _prevRestore: null,          // …and what it was before we forced it
+  _uDepth: 0,                  // withUnlocked reentrancy depth
+  _uUnlocked: false,           // did a withUnlocked actually drop a LIVE lock?
+  _uY: 0,                      // offset to re-apply when the last one exits
+  _uGen: 0,                    // _gen at the instant of that unlock
+  isLocked() { return this._n > 0; },
+  depth()    { return this._n; },
+
+  acquire() {
+    if (++this._n > 1) return;                      // already locked — just count
+    this._gen++;                                    // a NEW lock: see withUnlocked
+    this._apply(window.scrollY || window.pageYOffset || 0);
+  },
+  release() {
+    if (this._n === 0) return;                      // unbalanced release — ignore
+    if (--this._n > 0) return;                      // still held by someone else
+    this._restore(true);
+    this._unforceScrollRestoration();               // fully released → hand history back to the UA
+  },
+
+  // Fully unlock for the duration of fn(), then re-lock at the SAME offset,
+  // regardless of how deep the refcount is. For code that genuinely needs a
+  // scrollable document — html2canvas derives its capture window from live
+  // window scroll offsets and clones body's inline style into an offscreen
+  // iframe, and window.print() paginates from the document flow. The refcount
+  // is untouched (so callers' own release() calls stay balanced, and _reset()
+  // and Overlay._sync() keep working normally across the await). Restores in a
+  // finally so a throwing fn cannot strand the app unlocked.
+  //
+  // ── WHY the finally cannot simply trust its entry-time snapshot ────────────
+  // fn() is a 1-3s html2canvas capture of an A4 at scale 2, and the world is
+  // fully live for that whole window. The naive `if (held) this._apply(y)` had
+  // two ways to re-freeze a body that nobody can ever unfreeze again, because
+  // _apply() writes position:fixed directly while _n is 0 and Overlay._lockHeld
+  // is false — there is no refcount left to release and _sync's self-heal only
+  // ever ADDS a lock:
+  //   1. The lock legitimately went away during fn(). Payslip open (_n=1,
+  //      _y=640) → tap "Save as JPEG" → tap Back mid-capture → _popOne → _sync →
+  //      release() → _n=0, body unlocked. The capture resolves and the finally
+  //      re-applies top:-640px over a page with no window open. It also happens
+  //      with NO user action at all: auto-logout / force-logout call
+  //      ScrollLock._reset() (js/app.js resetSessionOverlays), so the capture
+  //      re-freezes the LOGIN SCREEN, shifted off-screen, until a hard reload.
+  //   2. Two captures overlap. The payslip header offers "Save as JPEG" and
+  //      "Print / Save PDF" side by side and each disables only ITSELF
+  //      (js/screens/hr.js), so tapping both is a two-tap gesture, not a race
+  //      you have to engineer. Both computed held=true; whichever finished first
+  //      re-locked the body while the other capture was still measuring — under
+  //      exactly the lock this wrapper exists to eliminate, handing an employee a
+  //      blank or half-height payslip.
+  // So the re-lock is guarded by THREE conditions, all required:
+  //   • _uDepth back to 0 — the last overlapping caller is the one that re-locks
+  //     (unlock happens on 0→1, re-apply on 1→0, decremented in a finally so a
+  //     throw inside fn() cannot leak depth).
+  //   • _gen unchanged since the unlock — _reset() and every fresh 0→1 acquire
+  //     bump it, so a capture whose world was torn down (or whose lock was
+  //     released and then re-taken at a DIFFERENT offset, which _apply(_uY) would
+  //     clobber) never re-applies.
+  //   • _n > 0 — the lock is still genuinely wanted right now.
+  // The unlock side is symmetric: whoever gets here first and finds a live lock
+  // performs it (normally the outermost call; a later one only ever qualifies if
+  // the lock was taken AFTER the outer call started, in which case the body
+  // really is fixed again and this capture would otherwise measure a frozen
+  // document).
+  async withUnlocked(fn) {
+    this._uDepth++;
+    if (this._n > 0 && !this._uUnlocked) {
+      this._uUnlocked = true;
+      this._uGen = this._gen;
+      this._uY   = this._y;
+      this._restore(true);
+    }
+    try {
+      return await fn();
+    } finally {
+      if (--this._uDepth <= 0) {
+        this._uDepth = 0;                           // clamp: never go negative
+        const relock = this._uUnlocked && this._gen === this._uGen && this._n > 0;
+        const y = this._uY;
+        this._uUnlocked = false;
+        if (relock) this._apply(y);                 // re-apply at the SAME y, not a re-read
+      }
+    }
+  },
+
+  // Emergency full unlock — session boundary (logout / force-logout), where the
+  // stack is being torn down wholesale and any remaining refcount is garbage.
+  // Deliberately does NOT restore the scroll offset: the document it belonged
+  // to is being replaced by the login screen, and top is the right place to be.
+  // Overlay._sync() self-heals its own bookkeeping afterwards.
+  _reset() {
+    this._n = 0;
+    this._gen++;                                    // invalidate any in-flight withUnlocked…
+    this._uUnlocked = false;                        // …and the re-lock it was holding
+    this._restore(false);
+    this._unforceScrollRestoration();
+  },
+
+  // ── internals ──
+
+  // history.scrollRestoration defaults to 'auto', which snapshots scroll AT
+  // pushState TIME — and every overlay open is a pushState. Under the lock that
+  // snapshot is 0, and the UA re-applies it on the Back that triggers our
+  // unlock, racing the manual restore in the same frame. Forced lazily, on the
+  // 0→1 lock: that way it can only ever be set on the phone shell (nothing above
+  // 768px acquires) and desktop history behaviour is untouched.
+  //
+  // It IS reverted now, on the full release (refcount 0). Leaving it 'manual'
+  // for the rest of the session was a real regression: navigateTo does not
+  // scroll to top, so ordinary in-app Back relied on the UA's 'auto' restore.
+  // Open+close ONE task detail and, for the rest of the session, Dashboard →
+  // Tasks → scroll → Finance → Back landed on Tasks at offset 0. It survived
+  // rotating back above 768px, because nothing ever put it back.
+  //
+  // Reverting does NOT re-open the race the original comment feared. Per spec a
+  // pushState entry inherits the CURRENT entry's scroll-restoration mode, and
+  // Overlay.push() pushes BEFORE _sync() acquires — so the base entry is always
+  // navigated away from while the document is still scrollable and unforced, and
+  // the UA records its true offset. The entries created while locked (overlay on
+  // overlay) inherit 'manual' from the overlay entry that acquire() forced, so
+  // the UA still never fights our manual restore on the way back down the stack.
+  //
+  // The withUnlocked() temporary release must NOT flap this: it calls _restore()/
+  // _apply() directly and never touches the refcount, so the force/unforce pair
+  // lives in acquire()/_apply and release()/_reset() only — never in _restore().
+  _forceScrollRestoration() {
+    if (this._restoreSet) return;
+    this._restoreSet = true;
+    try {
+      if ('scrollRestoration' in history) {
+        this._prevRestore = history.scrollRestoration;   // usually 'auto'
+        history.scrollRestoration = 'manual';
+      }
+    } catch (_) {}
+  },
+  _unforceScrollRestoration() {
+    if (!this._restoreSet) return;
+    this._restoreSet = false;
+    const prev = this._prevRestore;
+    this._prevRestore = null;
+    if (!prev) return;                               // never captured → nothing to put back
+    try { if ('scrollRestoration' in history) history.scrollRestoration = prev; } catch (_) {}
+  },
+
+  _apply(y) {
+    this._y = y || 0;
+    this._forceScrollRestoration();
+    const b = document.body;
+    if (!b) return;
+    b.style.position = 'fixed';
+    b.style.top      = (-this._y) + 'px';
+    b.style.left     = '0';
+    b.style.right    = '0';
+    b.style.width    = '100%';
+    b.style.overflow = 'hidden';
+  },
+  _restore(restoreScroll) {
+    const b = document.body;
+    if (b) {
+      b.style.position = '';
+      b.style.top      = '';
+      b.style.left     = '';
+      b.style.right    = '';
+      b.style.width    = '';
+      b.style.overflow = '';
+    }
+    if (!restoreScroll) return;
+    const de = document.documentElement;
+    const prev = de ? de.style.scrollBehavior : '';
+    if (de) de.style.scrollBehavior = 'auto';        // beat html{scroll-behavior:smooth}
+    try { window.scrollTo(0, this._y); } catch (_) {}
+    if (de) de.style.scrollBehavior = prev;
+  }
+};
+
+// Crossing the phone breakpoint (an iPad rotating, a desktop window being
+// dragged narrow) changes what isPhoneShell() answers while a window is already
+// open — reconcile so a lock taken on the phone tier is released on the way up,
+// and re-taken on the way back down. Fires only on the crossing, not on resize.
+//
+// BOTH queries matter, and they are not the same crossing:
+//   768px — the lock/cover tier itself (isPhoneShell).
+//   639px — whether 'modal' is a cover kind (Overlay._COVER_KINDS is a live
+//           getter over this width; see its comment). A device that rotates
+//           600px → 700px crosses 639 WITHOUT crossing 768, and body.page-open
+//           would otherwise stay on over a 640-768px bottom-sheet modal — the
+//           exact blank-shell defect the getter exists to prevent.
+// _sync is idempotent (it reconciles against _lockHeld/_coverOn), so on a phone
+// rotation that crosses both, the two firings cost one extra no-op pass.
+(function () {
+  try {
+    const onChange = function () { if (window.Overlay && window.Overlay._sync) window.Overlay._sync(); };
+    ['(max-width: 768px)', '(max-width: 639px)'].forEach(function (q) {
+      const mq = window.matchMedia(q);
+      if (mq.addEventListener) mq.addEventListener('change', onChange);
+      else if (mq.addListener) mq.addListener(onChange);        // older WebKit
+    });
+  } catch (_) {}
+})();
 
 // ── Confirm / prompt dialogs (v12 WS11) — replace native confirm()/prompt() ──
 // Both resolve on: OK click, Cancel click, backdrop click, Esc, or device Back
