@@ -3110,6 +3110,19 @@ function _focusTrapDetach(container){
     container._focusTrapHandler = null;
   }
 }
+// Initial focus for a freshly opened window: the first focusable descendant.
+// For BOTH window types that is the exit control by construction, and it is
+// deliberate rather than accidental — openPage's `.page-panel-back` is the
+// first child of `.page-panel-head`, and (as of the 2026-08 exit-control move)
+// #modal-close is the first child of `.modal-header`. Verified unchanged by
+// that move: #modal-close was already items[0] beforehand, since the only
+// element ahead of it in the header was the non-focusable <h3 id="modal-title">
+// — so relocating it within the same header changes nothing here. Focusing the
+// way OUT rather than the first form field is the wanted behaviour on the phone
+// shell: it announces the window and its escape route to VoiceOver/switch
+// control without summoning the keyboard, which would immediately shrink --vvh
+// on a window the user has not even read yet. Callers that want a field focused
+// do it themselves after openModal/openPage returns.
 function _focusEnter(container){
   if (!container) return;
   const items = _focusableEls(container);
@@ -3227,7 +3240,27 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   // Render any <i data-lucide> the caller put in the body/footer — many call
   // sites relied on this and their icons showed as blank gaps (openPage
   // already does a createIcons pass; openModal never did).
-  if (window.lucide) lucide.createIcons({ nodes: [modalBody, footer] });
+  //
+  // The HEADER is in this pass too, and it is not cosmetic there: as of the
+  // 2026-08 exit-control change #modal-close is the window's ONLY visible way
+  // out and its glyph is a STATIC <i data-lucide="arrow-left"> in index.html,
+  // not markup this function writes. Static icons are otherwise rendered by the
+  // single document-wide lucide.createIcons() in the post-login init — which is
+  // the wrong lifetime to depend on for an exit control: it has already run
+  // long before most modals open (so a re-entrant modal is fine), but a modal
+  // opened on a path that has NOT reached it yet (the boot-time "Add Your Phone
+  // Number" prompt, or Lucide's own deferred <script> still in flight when the
+  // pass fires) would show an empty 44x44 button and no way out but Escape or
+  // device Back — neither of which exists on an iPhone in standalone PWA mode.
+  // Doing it here makes the arrow's rendering a property of opening the modal.
+  // Idempotent and effectively free after the first pass: createIcons REPLACES
+  // the <i> with an <svg> and drops the data-lucide attribute, so on every
+  // later open the header simply has nothing left to match. The listener is
+  // bound to the #modal-close BUTTON, never to the glyph, so the swap cannot
+  // detach it. Guarded with window.lucide? for the same reason as everywhere
+  // else — Lucide is a deferred CDN script and may legitimately be absent.
+  const modalHead = document.querySelector('#modal-box .modal-header');
+  if (window.lucide) lucide.createIcons({ nodes: [modalBody, footer, modalHead].filter(Boolean) });
   const box=document.getElementById('modal-box');
   if(box){ box.classList.remove('modal-wide','modal-full');
     if(opts.size==='wide') box.classList.add('modal-wide');
@@ -3271,12 +3304,170 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
 // destroying it, and pushes ONE new Overlay entry. Back therefore pops pages
 // one at a time, Apple push/pop style, instead of destroying+recreating.
 //
-// NOTE for the Batch 2 (CSS) agent: `.page-under` should become a real CSS
-// class (`visibility:hidden`) — this batch can only edit JS files, so the
-// hide is applied as an inline style (el.style.visibility) below. The class
-// name is still added for a future selector hook; it carries no rule yet.
+// `.page-under` is a REAL CSS class (css/styles.css) and owns the whole hide:
+// a visibility:hidden floor at every width (unchanged, all engines), plus an
+// additive content-visibility:hidden on the phone (<=768px, screen only,
+// #chat-thread-panel excluded) so a buried window's subtree stops being laid
+// out at all — one window rendered at a time. The inline el.style.visibility
+// stopgap this code used to carry is gone: an inline declaration outranks the
+// class, can only ever reproduce the weaker floor, and needs its own reset on
+// reveal. Do not re-add it.
 window._pageStack = window._pageStack || [];
 let _pageSeq = 0;
+
+// ── Buried-window scroll memo (2026-08) ─────────────────────────────────────
+// Every scroll offset inside a panel is snapshotted before that panel is
+// buried under a new one, and re-applied when it is revealed again. See the
+// call sites in openPage (burial) and its teardown (reveal) for WHY the memo
+// exists at all; this block only explains WHICH nodes it covers and WHY the
+// covering query looks like this.
+//
+// A panel is NOT one scroller. The live counter-example is the task window:
+//   • `.page-panel-body` — the panel's own scroll region (js/screens/tasks.js
+//     rewrites its inline style to overflow-y:auto for this panel),
+//   • `#task-info-scroll` — an inline-styled overflow-y:auto region capped at
+//     max-height:42% (js/screens/tasks.js),
+//   • `#msbody-<id>` (.messenger-body) — the comment list, capped at
+//     max-height:380px (css/styles.css; the max-height:none escape hatch keys
+//     off #task-fullscreen-panel / #chat-thread-panel and NOTHING is given the
+//     id task-fullscreen-panel any more, so the cap is live), pinned to the
+//     newest message exactly once at render time (js/departments.js) and never
+//     re-pinned afterwards.
+// Tap Edit from a task window and the task panel is buried; come Back and, if
+// the engine did not retain the offsets, the user lands on the OLDEST comment
+// with nothing in the app that would ever scroll it back down. The previous
+// version of this memo remembered `.page-panel-body` alone, so it fixed the
+// one scroller that was already fine and missed the two that hurt.
+//
+// scrollLeft matters as much as scrollTop: `.subtab-bar` / `.chip-tabs` hold
+// the ACTIVE chip scrolled into view, and `.table-wrap` / `.table-scroll` hold
+// a ledger's horizontal position. Both were ignored entirely before.
+//
+// WHY a targeted selector and not querySelectorAll('*') — measured on real
+// openPage panels in this app, not assumed (Chrome 140 / M-series, viewport
+// 500x635 so the <=768px content-visibility rule is live; per-call mean of 150
+// iterations). Panel = a .page-panel holding a .messenger-body of N messages:
+//     nodes in panel     '*' walk      this selector
+//          1,011          0.48 ms        0.18 ms
+//          5,011          1.68 ms        0.62 ms
+//         15,011          4.59 ms        1.85 ms
+// (a realistic task window — 60 info rows, 30 chips, a 20x24 table and 300
+// comments — is only 907 nodes and costs 0.23 ms here.) Both forms are linear
+// in panel size, and almost all of the '*' cost is the scrollTop/scrollLeft
+// getters rather than the query (a bare querySelectorAll('*') is ~0.05 ms per
+// 3,000 nodes) — which is exactly the work a ledger panel's thousands of <td>s
+// can never repay, since none of them is ever a scroller. ~2.5x is not a
+// dramatic win on today's panels; it is taken because the '*' form is
+// UNBOUNDED in DOM size on a path that runs on EVERY window open, and on a
+// phone (2-3x slower again) the big-panel end of that table is a visible hitch.
+//
+// The usual price of a targeted selector is a list that silently rots — which
+// is the very failure being fixed here, so it is not left to vigilance:
+// _memoScrollLint below re-runs the '*' walk on localhost/?dev only and shouts
+// if it finds a scroller this selector missed. Prod pays nothing for it. Same
+// dev-only-lint shape as devCheckStacking further down.
+//
+// COVERAGE is exhaustive, not a guess. Two — and only two — things make an
+// element scrollable in this app:
+//   1. a CSS rule declaring overflow{,-x,-y}:auto|scroll. css/styles.css is the
+//      only stylesheet that has any (css/tokens.css and index.html's inline
+//      <style> blocks have none, and no JS file injects a <style> rule with
+//      one), and the class list below is the complete set of its selectors,
+//      derived mechanically. Regenerate after a stylesheet change with:
+//        python3 - <<'EOF'
+//        import re
+//        css = re.sub(r'/\*.*?\*/', '', open('css/styles.css').read(), flags=re.S)
+//        print(sorted({s.strip() for m in re.finditer(r'([^{}]+)\{([^{}]*)\}', css)
+//              if re.search(r'overflow(-x|-y)?\s*:\s*(auto|scroll)', m.group(2))
+//              for s in m.group(1).split(',') if s.strip()}))
+//        EOF
+//   2. an inline overflow declaration written by JS — 14 of them across js/,
+//      including the two task-window scrollers above. Those are caught
+//      structurally by [style*="overflow"] rather than by name, so a new
+//      inline scroller needs no edit here (assigning el.style.overflowY also
+//      rewrites the style attribute, so the CSSOM form matches too).
+// A few of the class selectors (.sidebar-nav, .drawer-body, .modal-body,
+// .notif-list, #tn-tabs, .top-nav-strip) live outside page panels and will
+// never match inside one. They are kept anyway: an unmatched selector costs
+// essentially nothing, and pruning them is how the list starts rotting.
+//
+// KNOWN LIMIT: a cross-document scroller — the quote-builder <iframe> hosted
+// inside a panel — is not reachable from here and is not covered.
+const _PANEL_SCROLLER_SEL = [
+  '[style*="overflow"]',
+  '#tn-tabs', '.chat-about-members', '.chip-tabs', '.comment-list',
+  '.drawer-body', '.messenger-body', '.modal-body', '.ms-input',
+  '.ms-mention-dd', '.ms-pinned-list', '.notif-list', '.page-panel-body',
+  '.sidebar-nav', '.subtab-bar', '.table-scroll', '.table-wrap',
+  '.top-nav-strip'
+].join(',');
+
+// Dev-only guard on the selector list above. Runs the querySelectorAll('*')
+// walk the memo deliberately does NOT pay for in production and reports any
+// element that is scrolled somewhere but was not matched — i.e. a scroller
+// introduced without extending _PANEL_SCROLLER_SEL. Cheap to ignore (localhost
+// or ?dev only), and it is what lets the selector be a list at all. Each
+// offending element is reported once via a WeakSet so a re-render cannot spam
+// the console; same contract as _zLintFlagged / devCheckStacking below.
+let _memoLintOn = null;
+const _memoLintFlagged = new WeakSet();
+function _memoScrollLint(panel, memo) {
+  if (_memoLintOn === null) {
+    try {
+      _memoLintOn = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ||
+        new URLSearchParams(location.search).has('dev');
+    } catch(_) { _memoLintOn = false; }
+  }
+  if (!_memoLintOn) return;
+  try {
+    const seen = new Set();
+    for (let i = 0; i < memo.length; i++) seen.add(memo[i][0]);
+    const all = panel.querySelectorAll('*');
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      if (!(el.scrollTop || el.scrollLeft) || seen.has(el) || _memoLintFlagged.has(el)) continue;
+      _memoLintFlagged.add(el);
+      console.error('[scroll-memo] scroller missed by _PANEL_SCROLLER_SEL — ' +
+        'its offset will not survive being buried. Add its selector:', el);
+    }
+  } catch(_){}
+}
+
+// Snapshot every scroller inside `panel` that is actually scrolled somewhere.
+// Elements sitting at 0/0 are dropped: there is nothing to restore, and not
+// keeping a reference to them is what stops the memo from pinning a panel's
+// worth of detached DOM alive across a re-render.
+function _memoPanelScroll(panel) {
+  const memo = [];
+  try {
+    const nodes = panel.querySelectorAll(_PANEL_SCROLLER_SEL);
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i], top = el.scrollTop, left = el.scrollLeft;
+      if (top || left) memo.push([el, top, left]);
+    }
+  } catch(_){}
+  _memoScrollLint(panel, memo);
+  return memo;
+}
+
+// Re-apply a snapshot. Defensive on every axis because a lot can have happened
+// to the subtree while it was buried — a live Firestore listener can re-render
+// a comment list, an edit can replace a whole section — so a memoised node may
+// be detached, re-parented out of this panel, or no longer overflow at all.
+// A replaced node is deliberately left alone: its fresh render does its own
+// positioning (js/departments.js pins a newly rendered comment list to the
+// newest message), and forcing a stale offset onto it would fight that.
+function _restorePanelScroll(panel, memo) {
+  if (!memo || !memo.length) return;
+  for (let i = 0; i < memo.length; i++) {
+    try {
+      const el = memo[i][0], top = memo[i][1], left = memo[i][2];
+      if (!el || !el.isConnected || !panel.contains(el)) continue;
+      if (top  && el.scrollHeight > el.clientHeight) el.scrollTop  = top;
+      if (left && el.scrollWidth  > el.clientWidth)  el.scrollLeft = left;
+    } catch(_){}
+  }
+}
 
 // ── Mobile window model (2026-08) — base-route inert sync ───────────────────
 // body.page-open (which stops the shell chrome and .main-content painting) and
@@ -3439,8 +3630,32 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   // Hide (not destroy) the page we're stacking over — skipped on `replace`,
   // since that path already tore the old top down above.
   if (!doReplace && prevTop && prevTop.isConnected) {
+    // Scroll-offset memo, taken BEFORE the panel is buried. On the phone
+    // `.page-under` now carries content-visibility:hidden (css/styles.css),
+    // which skips the whole subtree's layout. The spec says a UA "should
+    // retain" layout state across that, but that is a SHOULD, and Blink is not
+    // WebKit. Measured 2026-08 on a real task panel buried by a real Edit push,
+    // computed content-visibility confirmed `hidden`: Chrome 140 retained all
+    // five offsets exactly (400 / 250 / 11052 vertical, 300 / 700 horizontal),
+    // and a standalone replica held them through ~1s of buried time with forced
+    // relayout churn in between. That settles Blink and says nothing about iOS
+    // WebKit, which is the target. The memo makes the question moot in both
+    // directions, so it stays until someone measures WebKit itself — and it is
+    // NOT dead weight either way, since it is also what survives a re-layout
+    // that legitimately clamps an offset. Restored in the teardown below.
+    //
+    // Snapshotting EVERY scroller in the panel, not just `.page-panel-body`:
+    // panels routinely nest independent scroll regions (a task window has
+    // three) and two of them scroll horizontally. See _PANEL_SCROLLER_SEL
+    // above for the covered set, its cost, and why it is a targeted query.
+    prevTop._scrollMemo = _memoPanelScroll(prevTop);
     prevTop.classList.add('page-under');
-    prevTop.style.visibility = 'hidden';
+    // No inline `style.visibility` here any more. `.page-under` is a real CSS
+    // rule (css/styles.css) and on the phone it layers content-visibility:
+    // hidden on top of the visibility floor, so the buried window's subtree
+    // stops being LAID OUT, not merely painted. An inline declaration can only
+    // reproduce the floor, would outrank anything the class ever adds, and
+    // needs a matching inline reset on reveal. Do not re-add it.
   }
   stack.push(p);
 
@@ -3468,7 +3683,23 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
     const newTop = stack[stack.length - 1];
     if (newTop && newTop.isConnected) {
       newTop.classList.remove('page-under');
-      newTop.style.visibility = '';
+      // Restore the memo from the burial above. Deferred by one frame on
+      // purpose: dropping .page-under also drops content-visibility:hidden,
+      // and the subtree has to be laid out again before a scroller has a
+      // scrollHeight for scrollTop to bite on — set it in the same tick and it
+      // silently clamps to 0. That applies to every memoised node, not just
+      // the panel body, and the same is true of scrollLeft/scrollWidth. rAF is
+      // guarded because teardown can also run from a non-browser-ish path
+      // (clearAll during logout teardown).
+      const _restore = () => {
+        _restorePanelScroll(newTop, newTop._scrollMemo);
+        // Drop the snapshot once it has been spent: its entries are strong
+        // references to elements, and a panel can be buried and revealed many
+        // times over its life. A fresh burial takes a fresh memo.
+        newTop._scrollMemo = null;
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(_restore);
+      else _restore();
     }
   };
 
@@ -3485,9 +3716,72 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
 };
 // Generic dismiss — closes whatever overlay is on top (dialog | modal | page | panel).
 window.closeModal=function(){ window.Overlay.dismissTop(); };
+// ── Scrim-tap dismissal — OFF at the full-cover modal tier (2026-08) ────────
+// WHY there is a gate at all. #modal-overlay is `inset:0`, i.e. sized to the
+// LAYOUT viewport; #modal-box at the full-cover tier is `top:var(--vv-top);
+// height:var(--vvh)`, i.e. sized to the VISUAL viewport (see ViewportSync in
+// js/config.js for why the box has to be anchored that way — the iOS keyboard
+// never shrinks the layout viewport, it overlays and PANS it, so a layout-sized
+// panel puts its footer under the keyboard). Those two rects are equal only
+// while the keyboard is closed and the page is not panned. The whole point of
+// the full-cover tier is that the box IS the window and the scrim is not
+// supposed to be reachable — but the geometry cannot guarantee it:
+//
+//   FAILING SCENARIO (measured shape, iPhone standalone PWA). User is typing
+//   in a modal form; the keyboard is up, so --vvh is ~370px while the overlay
+//   is still ~812px tall. The keyboard retracts (Done, a scroll, a focus loss).
+//   visualViewport 'resize'/'scroll' fires, ViewportSync republishes --vvh on
+//   the next frame — but for that gap the ~440px band the keyboard just vacated
+//   is BARE OVERLAY, not box. A tap there (and a tap right after a keyboard
+//   dismissal is the single most likely next tap) hit the scrim and silently
+//   destroyed everything the user had typed, with no confirm and no undo.
+//
+// The same tap on an openPage panel does nothing at all: page windows have no
+// scrim and no tap-outside affordance anywhere in this app. Since the owner's
+// standard is that the two window types are one window model — "an independent
+// window, not overlays of different pages" — the modal matches the 133-call-site
+// majority and loses the affordance too. Nothing is lost by it: #modal-close
+// (now the top-left Back arrow), Escape, and the device Back button all still
+// tear the modal down through the same Overlay.dismissTop() path.
+//
+// WHY 639px (Overlay._fullCoverModalTier) AND NOT 768px (isPhoneShell):
+//   • 639 is where .modal-box actually becomes an opaque full-cover page — it
+//     is the same predicate that already decides whether 'modal' counts as a
+//     cover kind (Overlay._COVER_KINDS), hence whether body.page-open paints
+//     and whether #main-content goes inert (_syncMainInert above). Calling the
+//     method rather than re-writing its media query is what keeps all of those
+//     answers in lockstep; an inlined `matchMedia('(max-width:639px)')` here is
+//     exactly the drift _syncMainInert's comment warns about.
+//   • In the 640-768px band the modal is a bottom SHEET over a deliberately
+//     translucent, deliberately visible scrim. There the scrim is a real,
+//     legible affordance the user can see and aim at, the box never claims that
+//     area, and tapping the dimmed page to dismiss is the expected sheet
+//     gesture. isPhoneShell()'s 768 would delete a working affordance in a band
+//     where the defect above cannot occur (the scrim is meant to be exposed
+//     there, so there is no "vacated band" surprise).
+//   • Desktop (>768) is untouched either way.
+// Unknown tier ⇒ treat as full-cover ⇒ do NOT dismiss. If Overlay is somehow
+// missing the method we are in a broken build, and the safe failure here is
+// asymmetric: refusing to dismiss costs one extra tap on a Back arrow that is
+// always present, while dismissing wrongly costs an unsaved form.
+function _scrimTapDismissAllowed() {
+  const O = window.Overlay;
+  if (!O || typeof O._fullCoverModalTier !== 'function') return false;
+  try { return !O._fullCoverModalTier(); } catch (_) { return false; }
+}
 document.addEventListener('DOMContentLoaded',()=>{
+  // Bound by ID, and the id is the contract: #modal-close keeps its id through
+  // the 2026-08 exit-control move (last child of .modal-header, circled ✕ ➜
+  // FIRST child, class .modal-back, arrow-left glyph), so this binding — the
+  // only #modal-close reference in this file — survives it untouched. It binds
+  // the BUTTON, never the glyph inside it, so lucide swapping the inner
+  // <i data-lucide> for an <svg> cannot detach it either.
   document.getElementById('modal-close')?.addEventListener('click',() => window.Overlay.dismissTop());
-  document.getElementById('modal-overlay')?.addEventListener('click',e=>{if(e.target===document.getElementById('modal-overlay')) window.Overlay.dismissTop();});
+  document.getElementById('modal-overlay')?.addEventListener('click',e=>{
+    if (e.target !== document.getElementById('modal-overlay')) return;   // tap landed inside the box
+    if (!_scrimTapDismissAllowed()) return;                              // full-cover tier — see above
+    window.Overlay.dismissTop();
+  });
 });
 
 // ── v14 Batch1 1e — dev-only z-index stacking lint ──────────────────────────

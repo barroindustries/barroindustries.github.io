@@ -257,14 +257,37 @@
     document.removeEventListener('touchcancel', edgeTouchCancel, { passive: true });
   }
 
-  // ── Sheet swipe-dismiss (mobile bottom sheets — modal-box / drawer) ──────
-  let sheet = null; // { el, startY, lastDy, startTime }
+  // ── Sheet swipe-dismiss (mobile bottom sheets — .drawer ONLY) ────────────
+  // v14 one-window pass (owner decision 2026-08-05): `.modal-box` was REMOVED
+  // from this gesture. Rationale — at the phone tier `.modal-box` is styled as
+  // a FULL-COVER opaque window (see the ≤640px block in css/styles.css), which
+  // makes it visually indistinguishable from a pushed `.page-panel`. But the
+  // two obeyed different physics: you could grab a modal's header, drag it
+  // down 120px and watch the "window" slide off the bottom like a sheet, while
+  // doing the exact same thing on a pushed page did nothing at all. Same
+  // visual object, two different ways to leave it — the "redundancies" the
+  // owner called out. Every full-cover window now leaves the SAME single way:
+  // Back (#nav-back-btn / .page-panel-back / a close button / Escape /
+  // right-edge-swipe → Overlay.dismissTop()). No drag-dismiss on windows.
+  //
+  // `.drawer` (#profile-drawer) intentionally KEEPS its drag: the owner chose
+  // to keep drawers as slide-over surfaces, explicitly outside the window
+  // model, so the handle lookup below is narrowed rather than deleted.
+  //
+  // Removing `.modal-box` cannot strand a half-applied transform on a modal:
+  // the transform this gesture writes is an INLINE style set only after
+  // sheetTouchStart() has already accepted an element, and sheetTouchStart()
+  // can no longer accept a `.modal-box` at all — so no modal ever enters the
+  // tracked state, and there is no code path left that writes to one. (Inline
+  // styles from a previous page load don't survive: modals are re-rendered
+  // into fresh DOM, and the old transform died with the old node.)
+  let sheet = null; // { el, startY, lastDy, startTime } — el is always a `.drawer`
 
   function sheetHandleEl(target) {
-    const header = target && target.closest && target.closest('.modal-header, .drawer-header');
+    const header = target && target.closest && target.closest('.drawer-header');
     if (!header) return null;
     if (!(window.matchMedia && window.matchMedia(SHEET_DX_MQ).matches)) return null;
-    const box = header.closest('.modal-box, .drawer');
+    const box = header.closest('.drawer');
     return box || null;
   }
 

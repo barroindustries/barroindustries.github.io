@@ -191,7 +191,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.66 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.67 · Barro Industries</div>
   </div>
 </div>
 
@@ -313,9 +313,42 @@
 ══════════════════════════════════ -->
 <div id="modal-overlay" class="modal-overlay hidden">
   <div id="modal-box" class="modal-box">
+    <!-- 2026-08 window-parity pass — the exit control moved from a TRAILING
+         circled ✕ to a LEADING back arrow, so the two full-screen window types
+         on the phone (.page-panel, 133 call sites, and this #modal-box, 21) are
+         left the same single way from the same place. Owner's standard: "an
+         independent window, not overlays of different pages … no overlaps, no
+         redundancies." Notes for whoever edits this next:
+         • id="modal-close" is DELIBERATELY unchanged. The id — not the class,
+           not the position — is the contract every existing handler binds
+           against (js/app.js's DOMContentLoaded binds the BUTTON by id, never
+           the glyph inside it, so lucide swapping the <i> for an <svg> cannot
+           detach it). Renaming it to something arrow-ish to "match" would
+           silently remove the only exit control from 21 modal screens.
+         • The class is now .modal-back, NOT .modal-close. The .modal-close
+           rules in css/styles.css are precisely the 26px bordered circle this
+           replaces, and they have to stay where they are for
+           js/screens/partners.js's #deal-modal-close, which still wears that
+           look. Note the ≥44px touch-target rules there key off .modal-close
+           too, so .modal-back must carry its own (contract: ≥44×44).
+         • Glyph is <i data-lucide="arrow-left"></i> — byte-identical to the
+           markup openPage() emits for .page-panel-back, so both windows draw
+           the same icon out of the same lucide build instead of two hand-copied
+           path sets that can drift apart on a version bump. Static markup is
+           safe here even though openModal() runs no scoped createIcons pass
+           over the header: showApp() does one document-wide
+           lucide.createIcons() (the same pass the profile drawer's static
+           arrow-left below has always depended on), and this node is never
+           re-created — openModal() only rewrites #modal-title/-body/-footer.
+         • The trailing spacer mirrors the 40px header-right slot openPage()
+           always emits and leaves empty on the overwhelming majority of pages.
+           It buys two things: the title column starts and ends at the same x in
+           both window types, and .modal-header's justify-content:space-between
+           can't fling the now-SECOND-child title over to the right edge. -->
     <div class="modal-header">
+      <button class="modal-back" id="modal-close" aria-label="Back"><i data-lucide="arrow-left"></i></button>
       <h3 id="modal-title">Modal</h3>
-      <button class="modal-close" id="modal-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
+      <div class="modal-header-right" aria-hidden="true" style="min-width:40px"></div>
     </div>
     <div id="modal-body" class="modal-body"></div>
     <div id="modal-footer" class="modal-footer hidden"></div>

@@ -99,13 +99,33 @@ button, a, input, select, textarea, summary,
 
 /* WS42 Phase 13 — ≥44px effective hit-area for small icon buttons on touch,
    via an invisible ::after overlay rather than visually enlarging the icon
-   (which would look oversized next to its siblings on a compact row). */
+   (which would look oversized next to its siblings on a compact row).
+
+   .modal-back / .page-panel-back — the two WINDOW BACK ARROWS — joined this
+   list in the v14 exit-control fix. They were the only controls in the app
+   whose 44px floor was WIDTH-gated instead of POINTER-gated: the real box
+   geometry that gives them 44x44 (`padding:10px; margin:-6px`) lives in the
+   ≤768px block (~line 2948), and `.modal-close` — the class the modal's button
+   used to carry, and the only entry in this list that ever covered it — was
+   dropped from that button when it became a back arrow (index.html ~348 keeps
+   the id, not the class). Measured on #modal-close at 768x900 (iPad portrait,
+   coarse pointer) and at 812x375 (iPhone landscape): min-width auto,
+   min-height auto, box 28 x 31.5 — 16px and 12.5px under the contract, on the
+   ONE control the user needs in order to leave the window at all. A coarse
+   pointer at ≥769px — any iPad in landscape, any touch laptop — is exactly the
+   case a width-gated rule cannot see, so the floor has to be stated here too.
+   Redundant with the ≤768px geometry wherever both match (same 44x44, same
+   centre), so there is no fight and no growth; the ::after is absolutely
+   positioned and therefore never becomes a second flex item in these
+   `display:flex` buttons. */
 @media (pointer: coarse) {
-  .modal-close, .ms-act-btn, .ms-attach-btn, .ms-send-btn, .drawer-back-btn,
+  .modal-close, .modal-back, .page-panel-back,
+  .ms-act-btn, .ms-attach-btn, .ms-send-btn, .drawer-back-btn,
   .topbar-avatar, .ms-thread-menu-btn {
     position: relative;
   }
-  .modal-close::after, .ms-act-btn::after, .ms-attach-btn::after,
+  .modal-close::after, .modal-back::after, .page-panel-back::after,
+  .ms-act-btn::after, .ms-attach-btn::after,
   .ms-send-btn::after, .drawer-back-btn::after,
   .topbar-avatar::after, .ms-thread-menu-btn::after {
     content: '';
@@ -2197,7 +2217,30 @@ html.theme-astral .chip-tab.active {
   /* WS42 Phase 11: landscape left/right notch clearance */
   padding:12px max(16px, env(safe-area-inset-right,0px)) 12px max(16px, env(safe-area-inset-left,0px));
   background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
-.page-panel-back{ background:none; border:none; color:var(--primary-light); cursor:pointer; padding:4px; display:flex; }
+/* WINDOW EXIT CONTROL — ONE declaration list for BOTH window types, at EVERY
+   width. The v14 "one window" pass moved openModal's exit control to a
+   top-left back arrow (index.html ~348: `<button class="modal-back"
+   id="modal-close">`), but the styling written for it went only into
+   @media (max-width: 639px). Above that breakpoint `.modal-back` matched no
+   rule in this file at all and fell through to the User-Agent button sheet.
+   Measured on #modal-close at 1280x800, 700x800 and 812x375 (iPhone
+   LANDSCAPE), all three themes: 28 x 31.5px, background rgb(239,239,239),
+   border 2px OUTSET rgb(0,0,0), color rgb(0,0,0), Arial 13.33px,
+   border-radius 0 — a Windows-95 push button. In Dark and Astral that is a
+   light-grey bevelled block sitting on a near-black header, and on the owner's
+   iPhone it appears MID-GESTURE the moment he rotates an open modal to
+   landscape (812pt > 639).
+   Fixed by sharing .page-panel-back's list rather than writing a second one:
+   the owner chose "back arrow, top-left" as the universal window affordance,
+   and the 133 .page-panel windows already draw it exactly this way at every
+   width — so a desktop modal matching them is the consistent outcome of that
+   decision, not a new one. Sharing the selector also makes the two controls
+   byte-identical by construction, which is the property the parity block at
+   the end of this file was trying to achieve by hand-copying values.
+   The 44x44 tap-target half of this lives in two other places on purpose —
+   `@media (pointer: coarse)` (~line 121) and the ≤768px block (~line 2948) —
+   because it is a hit-area concern, not an appearance one. */
+.page-panel-back, .modal-back{ background:none; border:none; color:var(--primary-light); cursor:pointer; padding:4px; display:flex; }
 .page-panel-title{ flex:1; font-size:var(--fs-lg); font-weight:700; color:var(--text);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* SAFE-AREA DOUBLE-COUNT — the footless-panel case (recon Hazard 11, third
@@ -2243,9 +2286,93 @@ html.theme-astral .chip-tab.active {
 /* Batch 1 (V14 Wave 1, page-stack primitives): a page-panel pushed under a
    newer one gets this class instead of being removed — stays in the DOM
    (scroll position + form state preserved) but invisible until it's back on
-   top. Real home for what Batch 1's JS currently does via an inline style
-   stopgap; a later pass switches it to use this class. */
+   top.
+   ── v14.0.67 "one window" pass ───────────────────────────────────────────
+   visibility:hidden is the FLOOR and stays at every width and on every engine
+   (incl. iOS < 18): not painted, not hit-tested, out of the a11y tree and out
+   of the focus order, box and layout state retained. It is also the one
+   occlusion primitive @media print can still override FROM A DESCENDANT
+   (`body *{visibility:hidden}` + `#page-content *{visibility:visible}`, see
+   the generic print system near the end of this file), so the whole print
+   path stays untouched by anything below.
+   This declaration is byte-for-byte what shipped before the "one window"
+   pass, and it is deliberately NOT width-scoped and deliberately carries no
+   transition: at >768px the desktop slide is still on and a buried panel must
+   keep behaving exactly as it always has. The phone-only additions live in
+   the @media block immediately below.
+   The inline `el.style.visibility` writes that used to do this job in
+   js/app.js are GONE — an inline declaration outranks this rule and would
+   defeat both the phone additions below and any future change here. Do not
+   re-add them. */
 .page-under{ visibility:hidden; }
+
+/* Phone shell only, and SCREEN only — the "one window at a time" primitive.
+   content-visibility:hidden (Safari/iOS 18.0+, Chrome 85+) is strictly
+   ADDITIVE on top of the visibility floor above: it turns on layout + style +
+   paint + size containment, so a buried window's entire subtree is SKIPPED —
+   it stops being laid out at all. That is the point: window.ViewportSync
+   (js/config.js) republishes --vvh/--vv-top on vv-resize, vv-scroll, scroll,
+   resize, orientationchange and focusin/focusout, i.e. continuously while the
+   soft keyboard animates, and every one of those ticks currently re-lays-out
+   every buried panel in the stack even though not a pixel of them is on
+   screen. With this rule the phone lays out exactly one window.
+
+   The @supports gate is DOCUMENTATION, not mechanism: an engine that doesn't
+   know content-visibility drops the declaration at parse time anyway, and the
+   `visibility:hidden` above IS the fallback — iOS < 18 degrades to exactly
+   today's shipped behaviour, never to something worse.
+
+   NO contain-intrinsic-size, deliberately: .page-panel is position:fixed with
+   left:0;right:0 from its base rule and, inside this same 768px tier, an
+   explicit top + height (see the .page-panel override in the <=768px block
+   below). Both axes are fully determined by the element's own properties, so
+   size containment has nothing to collapse and an intrinsic size would be
+   cargo cult.
+
+   `screen` scoping is what keeps @media print's descendant overrides working:
+   unlike visibility, content-visibility CANNOT be undone from a descendant,
+   so a buried panel holding a print target would otherwise print blank.
+
+   #chat-thread-panel is EXCLUDED. Its onSnapshot listeners are Overlay-scoped
+   and keep firing while it is buried (js/chat.js), and every gate they run
+   through is _isNearBottomEl — scrollHeight - scrollTop - clientHeight, all 0
+   in a skipped subtree, so the `< 60` test is permanently true. That would
+   write a FALSE read receipt for a thread nobody is looking at, and pin the
+   reader to the top of the thread on reveal. The id is stamped on the panel
+   synchronously right after openPage() returns (js/chat.js), i.e. long before
+   anything can be pushed on top of it, so this :not() always matches when it
+   matters. Lift the exclusion only after those reads are guarded with a
+   closest('.page-under') test. */
+@media screen and (max-width: 768px) {
+  /* NO delayed-hide transition here, deliberately — the "one blank frame at
+     stack depth >= 1" hazard that `body.page-open`'s .35s delay USED TO guard
+     against (that delay is 0s as of the v14.0.67 motion pass, for the very
+     reason spelled out in #2 below) does not exist on this path either, and
+     three separate findings say adding a delay here would be worse than
+     useless:
+     1. content-visibility is NOT a transitionable property, so the subtree
+        stops being rendered the instant .page-under lands no matter what the
+        visibility transition says — the delay cannot cover the frame it was
+        meant to cover.
+     2. There is no frame to cover. With `transition:none` below, the incoming
+        panel is at translateX(0) in its FIRST painted frame: openPage()
+        buries the old panel and appends the new one in one task, and the rAF
+        that adds `.open` runs in the next frame's rendering steps BEFORE that
+        frame's paint. Both panels have identical geometry and background at
+        this tier, so the screen is never uncovered. The identical argument
+        is what retired body.page-open's own .35s delay in the same pass (its
+        stated purpose was covering a 300ms slide that no longer exists at
+        this tier — see the OCCLUSION comment further down this block).
+     3. Omitting it keeps `.page-under` byte-for-byte what shipped, at every
+        width, so content-visibility is the ONLY behavioural delta here and
+        desktop cannot be touched by accident.
+     If you ever do add one, note it must be written `.page-panel.page-under`
+     (0,2,0): a bare `.page-under` loses to `.page-panel{transition:none}`
+     below, which is equal specificity and later in the file. Measured. */
+  @supports (content-visibility: hidden) {
+    .page-under:not(#chat-thread-panel) { content-visibility: hidden; }
+  }
+}
 
 /* ── Confirm / prompt dialog (v12 WS11 — confirmDialog/promptDialog) ── */
 .dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.4);
@@ -2267,7 +2394,51 @@ html.theme-dark .dialog-overlay, html.theme-astral .dialog-overlay { background:
   padding: 16px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
 }
-.modal-header h3 { font-size: var(--fs-lg); font-weight: 700; color: var(--text); letter-spacing: -0.2px; }
+/* `letter-spacing: -0.2px` REMOVED. It was the last typographic difference
+   between the two window titles: measured at 375x812 in all three themes,
+   .page-panel-title (~line 2244) tracked `normal` while this one tracked
+   -0.2px, so the SAME string, set from the same `title` argument, in the same
+   window role, truncated at a DIFFERENT CHARACTER depending on which window
+   type happened to render it. Aligned onto `normal` — the page window's value
+   — on the same grounds as the rest of this pass: .page-panel is the
+   133-call-site majority against openModal's 21, so the side that is wrong far
+   more often is the side that moves. `normal` is also the local default (no
+   other heading in this file tightens tracking), so this is a value already in
+   use, not one invented for the occasion. */
+.modal-header h3 { font-size: var(--fs-lg); font-weight: 700; color: var(--text); }
+
+/* ── HEADER LAYOUT for the openModal window, at EVERY width ──
+   index.html (~348) emits THREE header children UNCONDITIONALLY —
+   [button.modal-back][h3#modal-title][div.modal-header-right, a 40px spacer] —
+   an exact mirror of the markup openPage() builds for .page-panel-head
+   (js/app.js ~3617). The layout that compensates for the third child was
+   written only inside @media (max-width: 639px), so above that the base
+   `justify-content: space-between` above kept distributing the free space
+   AROUND what is now a middle child: measured at 1280x800, #modal-title's left
+   edge sat 222.7px in from the header's content box (baseline: flush left at
+   20px), and at 812x375 the title rendered dead centre.
+   The two declarations are copied from .page-panel-head (~line 2216), not
+   re-derived, so the two window types cannot drift: flex-start plus a 12px
+   gap, title takes the remaining track. `min-width: 0` is what makes the
+   ellipsis possible — a flex item's default `min-width: auto` refuses to
+   shrink below its own text, so a long title would push the header into
+   overflow instead of truncating. .page-panel-title gets that for free (it is
+   a block-level flex:1 already carrying the same nowrap/hidden/ellipsis
+   triple).
+   SCOPED TO .modal-box DELIBERATELY. These class names are not private to this
+   window: js/screens/partners.js (~970) hand-builds the New Partner Deal
+   dialog as .modal-overlay > .modal (NO .modal-box) and reuses all of
+   .modal-header / .modal-body / .modal-footer. That dialog still has the OLD
+   two-child [title][✕] header, where space-between is correct and flex-start
+   would jam the ✕ up against the title — and where `flex:1 + ellipsis` on the
+   h3 would truncate a long client name that currently wraps. Every rule in
+   this pass that could reach it is scoped the same way; see the SCOPE note in
+   the parity block at the end of this file. */
+.modal-box .modal-header { justify-content: flex-start; gap: 12px; }
+.modal-box .modal-header h3 {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .modal-close {
   background: var(--s2); border: 1px solid var(--border);
   font-size: var(--fs-md); cursor: pointer; color: var(--text-muted);
@@ -2592,6 +2763,29 @@ html.theme-astral #mini-cal td.today {
     height: var(--vvh, 100%);
     bottom: auto;
   }
+  /* ONE WINDOW AT A TIME — on the phone the entrance is a SWAP, not a slide.
+     The 300ms translateX travel is precisely what makes a pushed page read as
+     a sheet laid OVER a lit page rather than as the next window: the shell
+     behind it stays fully painted for the whole slide (the .35s visibility
+     delay body.page-open used to carry below existed specifically to keep it
+     painted — it is 0s now, dropped in this same pass because the slide it
+     covered is gone), only ONE layer moves, and there is no dim, no
+     counter-parallax and no
+     leading-edge shadow to sell the depth. Owner's report, verbatim: pages
+     "overlapped each other", they should be "a different window, no overlaps".
+     This is byte-for-byte what the prefers-reduced-motion branch already does
+     (~line 2195), and the same fix already shipped for openModal at <=639px
+     after the 2026-08-03 "popup floating in front of the previous page"
+     report. Consistency with an approved fix, not a new motion language.
+
+     `transition:none`, NOT `transform:none` — this is the footgun. The rest
+     state MUST stay translateX(100%) so a CLOSING panel leaves the screen in
+     the same frame .open is removed. Killing the transform instead would
+     leave the closed panel sitting opaque over the already-repainted shell
+     until openPage's 300ms removal timeout fires, and Back would look frozen.
+
+     Desktop (>768px) is untouched and keeps the slide. */
+  .page-panel { transition: none; }
   /* Notch clearance for the window's own header row, now that the window
      itself starts at y=0 instead of being inset by the safe area. Longhand so
      the landscape left/right insets already in the base rule's `padding`
@@ -2627,18 +2821,66 @@ html.theme-astral #mini-cal td.today {
      .main-content's margin-top and shift/scroll the page underneath, so
      closing the window would land the user somewhere else. visibility keeps
      the layout frozen exactly as it was.
-     The .35s delay applies ONLY to hiding, and it is load-bearing: the
-     window's entrance is a 300ms transform slide, so the shell has to stay
-     painted for the whole slide — otherwise the user watches a half-slid
-     panel over a blank screen. On close the element stops matching this rule
-     entirely, so there is no transition to delay and the shell repaints in
-     the same frame. */
+     THE .35s HIDE DELAY IS GONE (v14.0.67 motion pass). The comment that used
+     to sit here justified it as load-bearing — "the window's entrance is a
+     300ms transform slide, so the shell has to stay painted for the whole
+     slide, otherwise the user watches a half-slid panel over a blank screen".
+     That slide does not exist at this tier any more: `.page-panel {
+     transition: none; }` is ~40 lines above, inside this same @media block,
+     and openModal's sheetRise was deleted in the same pass (~line 5288).
+     There is no longer anything for the shell to stay painted FOR, so the
+     delay is now `0s` — the shell stops painting in the same frame the window
+     appears.
+
+     VERIFIED there is no frame where the shell is hidden but the window is
+     not yet painted (that would flash blank):
+       • openPage() (js/app.js) appends the panel, schedules
+         `requestAnimationFrame(() => p.classList.add('open'))`, and calls
+         Overlay.push() — whose _sync() applies body.page-open — all inside ONE
+         task. rAF callbacks run in the next frame's rendering steps BEFORE
+         that frame's paint, so the first frame that has the shell hidden is
+         the same frame that has the panel at translateX(0) (instant, no
+         transition), opaque `background:var(--bg)`, spanning
+         top:var(--vv-top) → +var(--vvh). This is finding #2 of the .page-under
+         block's own comment (~line 2314), re-verified for this path.
+       • openModal() (js/app.js) has the same shape: `.hidden` off / `.active`
+         on, then Overlay.push() in the same task; at ≤639px the overlay is
+         already opaque `background: var(--bg)` across inset:0.
+       • Nothing else can turn page-open on. It is a pure function of
+         Overlay._stack (js/config.js _sync), and 'modal' is a cover kind only
+         below 640px (_COVER_KINDS getter) — in the 640-768px band a modal is a
+         translucent-scrim bottom sheet and page-open never applies, so this
+         rule cannot blank the strip above one.
+
+     WHY NOT just leave a harmless 350ms: it is harmless only while every
+     window is BOTH opaque and full-bleed. It is invisible today purely by
+     coincidence of those two facts. The moment one stops holding — an Astral
+     panel background, a non-zero --vv-top band with the keyboard up, any
+     inset or translucent window — the shell paints through the window for
+     350ms and the "overlays of different pages" defect returns, in the one
+     place nobody would look for it. Removing it makes that regression
+     impossible instead of latent, and costs nothing measurable now.
+
+     The `transition` shorthand is KEPT (as `visibility 0s linear 0s`) rather
+     than deleted: the shorthand also resets any other transition on these four
+     elements while a window is open, which is today's shipped behaviour, and
+     it pins visibility to instant even if some later rule ever gives #topbar a
+     transition that would otherwise catch it.
+
+     On close the elements stop matching this rule entirely, so there is no
+     transition to run and the shell repaints in the same frame — unchanged by
+     any of the above.
+
+     `.page-under` (the buried-window primitive, ~line 2264) has NO matching
+     delay to remove: it is a bare `visibility:hidden` with no transition at
+     all, and the ≤768px block that adds content-visibility to it documents at
+     length why it never got one. Nothing to do there. */
   body.page-open #topbar,
   body.page-open #top-nav-strip,
   body.page-open #bottom-nav,
   body.page-open .main-content {
     visibility: hidden;
-    transition: visibility 0s linear .35s;
+    transition: visibility 0s linear 0s;
   }
   /* Primary nav bottom bar — shown on mobile, hidden on desktop. */
   .bottom-nav { display: flex !important; }
@@ -2664,7 +2906,46 @@ html.theme-astral #mini-cal td.today {
   .btn-primary, .btn-secondary, .btn-danger, .btn-outline, .btn-success { min-height: 44px; }
   /* bottom-nav-item tap target provided by pill container height */
   .notif-btn, .theme-toggle-btn { min-width: 44px; min-height: 44px; }
-  .modal-close { min-width: 44px; min-height: 44px; }
+  /* .modal-back joins .modal-close here because index.html's #modal-close
+     button DROPPED the .modal-close class when it became a back arrow (it
+     keeps only the id, which is what every handler binds to), which silently
+     took this floor off the modal's only exit control. Belt-and-braces beside
+     the real 10px/-6px geometry below: 10+24+10 satisfies this exactly, so it
+     adds nothing while the Lucide glyph renders, and it catches the case where
+     the glyph does not inject (a 20px-wide button). The negative margin below
+     keeps the OUTER footprint at 32px either way, so growing the minimum here
+     can never shove the title. */
+  .modal-close, .modal-back { min-width: 44px; min-height: 44px; }
+  /* The window's BACK ARROW was the one control this 44px floor never covered.
+     Measured at 375x812: .page-panel-back is 32x32 (`padding:4px` around a 24px
+     Lucide arrow-left, base rule ~line 2243) — the primary exit control of all
+     133 openPage windows, and the smallest tap target in the header row, 12px
+     under the minimum the three buttons above already meet.
+     GROW THE HIT AREA, NOT THE GLYPH. A bare `min-width/min-height: 44px` (the
+     technique used one line up) would work for .modal-close because that one is
+     a centered circle in its own corner, but here it would widen the flex item
+     from 32px to 44px and shove .page-panel-title 12px to the right — the title
+     would visibly jump between a page window and any header that doesn't have a
+     back arrow. So: pad out by 6px on every side (4px → 10px, giving exactly
+     10+24+10 = 44) and pull the same 6px back off with a negative margin, which
+     leaves the OUTER box 32x32 for layout purposes and the arrow itself on the
+     exact pixel it occupied before.
+       icon left edge  = head padding 16 + margin -6 + padding 10 = 20px (was 16+4)
+       title left edge = (16-6) + 44 - 6 + gap 12 = 60px (was 16+32+12)
+       head height     = 12 + (44-12) + 12 + 1px border = 57px (unchanged)
+     — all three verified equal to the pre-change measurement.
+     This is the same intent as the `@media (pointer: coarse)` invisible-::after
+     overlay near the top of this file (~line 121), done with real box geometry
+     instead, so the 44x44 shows up in getBoundingClientRect() and in the
+     accessibility/hit-test tree rather than only in a pseudo-element. Both
+     back arrows now take it from ONE selector list, so the two windows' exit
+     controls are byte-identical by construction. That matters because
+     .modal-back used to be floored only inside the ≤639px parity block at the
+     end of this file, which left it measuring 28 x 31.5 on an iPad (768x900)
+     and on a phone in landscape (812x375). Above 768px the `pointer: coarse`
+     ::after overlay (~line 121), which now names both selectors too, is what
+     holds the floor for touch hardware. */
+  .page-panel-back, .modal-back { padding: 10px; margin: -6px; }
   /* Roomier subtab chips for finger taps */
   .subtab-btn { min-height: 40px; padding-top: 9px; padding-bottom: 9px; }
   /* Table scroll on mobile */
@@ -5118,11 +5399,13 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
   .top-nav-item .tn-label { display: none; }
 }
 
-/* ── Bottom sheet modal on mobile ── */
-@keyframes sheetRise {
-  from { transform: translateY(60px); opacity: 0.7; }
-  to   { transform: translateY(0);    opacity: 1; }
-}
+/* ── Bottom sheet modal on mobile ──
+   `@keyframes sheetRise` (translateY(60px) + opacity .7 → 0/1 over 360ms)
+   used to be declared here. It is DELETED, not merely left unreferenced — see
+   the `animation: none` on .modal-box below for the why. Grepped css/js/html
+   before removing: the declaration below was its only consumer anywhere in the
+   repo. Do not re-add it; a named entrance keyframe sitting in the file is an
+   invitation to re-wire the entrance this pass deliberately removed. */
 @media (max-width: 768px) {
   .modal-overlay {
     align-items: flex-end !important;
@@ -5135,7 +5418,53 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
     border-radius: 22px 22px 0 0 !important;
     margin: 0 !important;
     align-self: flex-end !important;
-    animation: sheetRise 0.36s var(--ios-spring) both !important;
+    /* ONE WINDOW AT A TIME, part 2 — on the phone/tablet tier the modal
+       entrance is a SWAP, byte-for-byte the same decision .page-panel took at
+       this tier (`transition: none`, ~line 2701 in the ≤768px block above).
+
+       The app shipped TWO kinds of full-screen window with two different
+       entrances. Tap a task row: openPage's window replaces the screen with
+       zero motion. On that window tap Edit: openModal's window — visually
+       identical, equally opaque, equally full-cover at ≤639px — rose 60px and
+       faded in from opacity 0.7 over 360ms. Same surface, same geometry, two
+       physics. That is the "redundancies" half of the owner's brief ("an
+       independent window, not overlays of different pages … no overlaps, no
+       redundancies"), and the 60px rise is also the exact cue that reads as a
+       sheet sliding OVER the previous screen rather than as the next window.
+
+       `animation: none`, not a shorter duration: any non-zero entrance still
+       spends frames with the window somewhere other than where it will be,
+       which is the whole of what's being removed.
+
+       This ONE declaration kills BOTH entrances that can reach a modal at
+       this tier — the sheetRise that used to be declared right here
+       (!important) and the base `animation: popIn 0.26s var(--spring)`
+       (~line 3835, no !important) that it was overriding. Neither can win
+       against `none !important`.
+
+       SCOPE: ≤768px only. Above 768px nothing is touched and desktop modals
+       keep popIn exactly as before.
+
+       The 640-768px band is deliberately included even though a modal is
+       still a bottom SHEET there, not a full-cover window (this same block's
+       align-items:flex-end + max-height:92dvh; the full-cover treatment
+       starts in the ≤639px block below, and Overlay's _COVER_KINDS getter in
+       js/config.js promotes 'modal' to a cover kind only below 640px). The
+       owner was told and accepted it: one motion language for openModal at
+       every phone/tablet width beats a sheet that animates at 700px and a
+       window that doesn't at 620px.
+
+       NO CONFLICT with the reduced-motion branch at the end of this section
+       (`@media (prefers-reduced-motion: reduce) { .modal-box { animation:
+       none !important } }`): identical property, identical value, later in
+       the file, and it still owns >768px on its own.
+
+       CLOSE PATH: unaffected, and it never depended on the open animation.
+       Teardown is `#modal-overlay.classList.add('hidden')` →
+       `.hidden{display:none !important}` (js/app.js, openModal's teardown) —
+       a display flip with no exit animation and no read of the entrance's end
+       state, so the dropped `both` fill-mode was holding nothing. */
+    animation: none !important;
   }
   /* Pull handle */
   .modal-box::after {
@@ -5175,8 +5504,12 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
      the page behind show through the top gap, and the scrim itself goes
      fully opaque so there's zero background bleed even mid-transition.
      Pull-handle / glass-shimmer decorations are dropped — they're "sheet"
-     affordances that no longer make sense on a full page. Enter animation
-     stays the existing transform/opacity-only sheetRise (untouched). */
+     affordances that no longer make sense on a full page.
+     ENTER ANIMATION: none. This block adds nothing of its own — the ≤768px
+     baseline above now carries `animation: none !important` on .modal-box, so
+     a full-cover modal simply replaces the screen in one frame, identically
+     to a .page-panel. (It used to read "stays the existing transform/opacity
+     -only sheetRise (untouched)"; sheetRise is gone — v14.0.67 motion pass.) */
   .modal-overlay {
     background: var(--bg) !important;
     backdrop-filter: none !important;
@@ -5211,23 +5544,47 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
     height: var(--vvh, 100dvh) !important; max-height: none !important;
     margin: 0 !important;
     border-radius: 0 !important;
+    /* PARITY 3 — BORDER + SHADOW. This rule already reset radius/background/
+       backdrop-filter, but NOT the two decorations .modal-box carries from its
+       base rule (~line 3957: `border: 1px solid var(--border)` +
+       `box-shadow: var(--sh-lg)`). Off-screen on a centered desktop dialog;
+       on a full-cover phone window they are drawn ON the screen edges:
+       measured at 375x812 light, a 1px rgba(16,24,40,0.1) hairline framing all
+       four sides plus a rgba(16,24,40,0.14) 0 12px 32px drop shadow with
+       nothing behind it to fall on. Worse, the 1px border INSETS the whole
+       flex column: .modal-header measured x=1 width=373 against
+       .page-panel-head's x=0 width=375, so the modal's title, back arrow and
+       footer buttons all sat one pixel in from where a page window puts them.
+       .page-panel has neither decoration at any width — it is the 133-call-site
+       majority and the parity target. `0` not `none` for border so the shorthand
+       cannot resurrect a style/color; both need !important only because the
+       whole rule is !important-per-property by design (see the note above) and
+       consistency here is cheaper than reasoning about which competitor each
+       one beats. >=640px is untouched: desktop modals keep border + shadow. */
+    border: 0 !important;
+    box-shadow: none !important;
     align-self: stretch !important;
     background: var(--bg) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
   .modal-box::after { display: none; }
-  .modal-header {
-    padding-top: max(16px, env(safe-area-inset-top, 0px));
-    padding-left: max(20px, env(safe-area-inset-left, 0px));
-    padding-right: max(20px, env(safe-area-inset-right, 0px));
-  }
-  .modal-footer {
-    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
-    padding-left: max(20px, env(safe-area-inset-left, 0px));
-    padding-right: max(20px, env(safe-area-inset-right, 0px));
-  }
-  .modal-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+  /* MOVED — the .modal-header / .modal-body / .modal-footer padding that used
+     to live here (16/20/20px sides, max(14px, env-bottom) on the foot,
+     calc(20px + env-bottom) on the body) was DEAD CODE and is gone.
+     The v14 ≤640px density pass at the end of this file re-declares
+     `.modal-body{padding:14px}` and `.modal-footer{padding:10px 14px}` as flat
+     FOUR-SIDED SHORTHANDS. ≤640px matches every real phone width, so it always
+     matches together with this ≤639px block, and being later in the file it
+     won every one of those properties outright — including the two bottom
+     safe-area corrections, which is how a full-cover modal's Save/Cancel row
+     ended up 10px off the bottom of an iPhone (inside the home-indicator band)
+     while a page window's sat at 46px. Re-declaring them here again would just
+     lose the same cascade fight a second time.
+     They now live — corrected, and aligned to the page window's values rather
+     than restored as-was — in the "FULL-COVER MODAL ⇄ PAGE WINDOW PARITY"
+     block at the very END of this file, which is the first position later in
+     the cascade than the density pass. Search for that heading. */
   /* Confirm/prompt dialogs: the box itself stays centered (unlike openModal)
      — only the scrim goes opaque, so no previous page shows behind it either. */
   .dialog-overlay {
@@ -6471,6 +6828,190 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .kpi-icon-wrap svg { width: 12px !important; height: 12px !important; }
   .kpi-label { font-size: var(--fs-2xs); margin-bottom: 4px; }
   .kpi-value { font-size: clamp(17px, 5.6vw, 22px); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FULL-COVER MODAL ⇄ PAGE WINDOW PARITY — v14 "one window" pass, phone tier.
+
+   The app has TWO kinds of full-screen window on a phone: openPage panels
+   (.page-panel, 133 call sites) and openModal surfaces (#modal-overlay >
+   #modal-box, 21 call sites). Earlier passes made them ENTER and LEAVE
+   identically — both instant, both anchored to --vvh/--vv-top, both occluding
+   the shell. A measured audit at 375x812 then found that they still did not
+   LOOK the same once open. Owner's brief, verbatim: "an independent window, not
+   overlays of different pages … no overlaps, no redundancies." Two chrome
+   colours, two content insets and two exit controls for the same gesture is
+   exactly the "redundancies" half of that.
+
+   THE PAGE WINDOW IS THE TARGET, not a new middle ground: it is the 133-call-
+   site majority, it is what the owner sees on nearly every navigation, and it
+   already handles the notch, the home indicator and the software keyboard
+   correctly. Every value below is copied from a .page-panel-* rule earlier in
+   this file, not invented here. Where a page rule carries a safe-area or
+   keyboard expression, the SAME expression is used — not a variant — so the
+   two windows cannot drift apart the next time one of them is tuned.
+
+   WHY THIS BLOCK IS AT THE VERY END OF THE FILE, and not merged into the
+   ≤639px "full-cover" block ~3000 lines up where it belongs topically:
+   the v14 ≤640px density pass (the block immediately above this one) declares
+   `.modal-header{padding:12px 14px}`, `.modal-body{padding:14px}` and
+   `.modal-footer{padding:10px 14px}` as flat four-sided SHORTHANDS. ≤640px
+   matches every real phone width, so it always matches together with the
+   ≤639px block, and being later in the file it wins every padding property at
+   equal specificity. That is precisely how the ≤639px block's bottom
+   safe-area handling became dead code (see the MOVED breadcrumb there). Any
+   fix written above the density pass loses the same fight again. Equal
+   specificity + later position is the whole mechanism — deliberately NO
+   `!important` here, so this stays overridable by anything more specific and
+   the cascade order remains the only thing to reason about.
+
+   SCOPE — TWO AXES. Both were wrong in the first cut of this block, in the
+   same way: style was media-scoped for a MARKUP change that was not.
+
+   BY WIDTH. What remains below is ≤639px only, matching the tier at which
+   Overlay's _COVER_KINDS (js/config.js) promotes 'modal' to a cover kind and
+   the ≤639px block turns .modal-box into a full-cover window. 640-768px keeps
+   the bottom-sheet baseline; ≥640px desktop modals keep --surface-2 chrome,
+   their border, shadow and radius, all untouched.
+   What did NOT belong here — and has MOVED OUT, to unconditional rules earlier
+   in the file — is everything that follows from the markup rather than from
+   the full-cover presentation. index.html emits the three-child
+   [back][title][spacer] header at EVERY width; it is not media-queried. Left
+   media-scoped, the exit control fell through to the UA button sheet and the
+   title was flung to the middle of the header on every desktop modal AND on
+   any phone in landscape (812pt > 639) — i.e. mid-rotation, on the owner's own
+   device. Those rules now live with .page-panel-back (~line 2243), with
+   .modal-header (~line 2393), and in the two 44px-floor sites (~line 121 and
+   ~line 2918/2948).
+   CORRECTION for anyone who has read an older revision of this comment: it
+   used to assert that "≥640px desktop modals keep … the right-side circular
+   close button". That has not been true since the markup change — the control
+   is a top-left back arrow at every width. The circular .modal-close treatment
+   (~line 2442, ~line 3976) is NOT dead code and must not be deleted: it is
+   still the live style for js/screens/partners.js's #deal-modal-close (~970),
+   the only remaining element in the app wearing that class.
+
+   BY SELECTOR. Every rule below is scoped `.modal-box …`, never bare
+   `.modal-header` / `.modal-body` / `.modal-footer`. Those three names are not
+   private to this window — js/screens/partners.js (~970) hand-builds the New
+   Partner Deal dialog as .modal-overlay > .modal (no .modal-box) and reuses
+   all three. It is a small centred dialog; none of the full-cover rationale
+   above applies to it, yet the bare selectors leaked the whole treatment onto
+   it. Measured at 375x812 against a structural replica: header/footer
+   background --surface-2 → --surface (white strips against the --bg scrim,
+   losing the tonal step that is the ONLY thing giving that otherwise
+   transparent .modal box a visible body — there is no `.modal` rule in this
+   file), header padding 12px 14px → 12px 16px, body 14px → 12px, footer
+   10px 14px → 12px 16px, and its <h3> picked up flex:1/min-width:0/nowrap/
+   ellipsis so a long client name truncated instead of wrapping.
+   Scoping to .modal-box also changes the mechanism by which these rules win:
+   (0,2,0) beats the v14 density pass's (0,1,0) on SPECIFICITY, so the
+   "must sit later in the file than the density pass" constraint described
+   above is now belt-and-braces rather than the sole mechanism. The block stays
+   at the end of the file regardless — moving it would silently re-open that
+   fight the moment any of these rules is re-scoped back.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 639px) {
+
+  /* ── PARITY 1 — CHROME COLOUR. The most perceptible of the differences and
+     the one that made a modal read as a different KIND of surface: the modal's
+     header/footer are var(--surface-2) (~line 3968/3972, the desktop dialog
+     treatment — a raised strip against the dialog body) while a page window's
+     head/foot are var(--surface). Measured side by side, dark #24282D vs
+     #1A1D21, light #F2F4F7 vs #FFFFFF. On a centered desktop dialog the tonal
+     step is doing real work; on a full-cover window there is no dialog to step
+     up FROM, so it just reads as "a different app screen".
+     Colour only — the 1px var(--border) bottom/top rules those same selectors
+     carry are correct and kept, because .page-panel-head/-foot carry the
+     identical hairline. Above 639px --surface-2 stands — as it also does, at
+     every width, for the Partners deal dialog these selectors used to reach
+     (see the BY SELECTOR note above). */
+  .modal-box .modal-header { background: var(--surface); }
+  .modal-box .modal-footer { background: var(--surface); }
+
+  /* ── PARITY 5a — HEADER LAYOUT. MOVED OUT of this media query, to
+     `.modal-box .modal-header` / `.modal-box .modal-header h3` beside the
+     .modal-header base rule (~line 2393). The markup it compensates for —
+     index.html's three-child [back][title][spacer] header — is emitted at
+     every width, so the layout that makes it correct has to be stated at every
+     width too; measured at 1280x800 the title's left edge was 222.7px in from
+     the header content box instead of flush at 20px. Full rationale, and the
+     .modal-box scoping that keeps it off the Partners dialog, are at the new
+     site. Nothing to declare here: those rules already apply on this tier.
+
+     ── PARITY 5b / 5c — EXIT CONTROL AND ITS 44x44 TAP TARGET. Also MOVED OUT,
+     for the same reason: .modal-back is in the markup at every width, and left
+     styled only here it fell through to the UA button sheet above 639px —
+     measured 28 x 31.5px, rgb(239,239,239) fill, 2px OUTSET black border, on
+     desktop and on any phone in landscape.
+       • Appearance is now the SHARED selector list
+         `.page-panel-back, .modal-back` (~line 2243), so the two windows' exit
+         controls are one declaration list and cannot drift apart.
+       • The 44x44 floor is `.page-panel-back, .modal-back{padding:10px;
+         margin:-6px}` in the ≤768px block (~line 2948), plus the
+         `@media (pointer: coarse)` ::after overlay (~line 121) which covers
+         coarse pointers WIDER than 768px (iPad landscape, touch laptops).
+     The rules that stood here also carried `width/height: auto` and a `:hover`
+     reset in order to beat .modal-close's 26px circle and its --surface-3
+     hover chip. Both are dead weight now and were dropped rather than moved:
+     the button dropped the .modal-close CLASS when it became a back arrow
+     (index.html ~348 — it keeps only the id, which is what every handler binds
+     to), so no .modal-close rule has selected it since. To be explicit,
+     because it is the obvious next cleanup and it would be WRONG: the
+     .modal-close rules themselves (~line 2442, ~line 2449, ~line 3976,
+     ~line 3980, and the ≤768px floor ~line 2918) are NOT dead — grep confirms
+     js/screens/partners.js:970 still renders #deal-modal-close with that
+     class, and it is the only element left that does. Leave them. */
+
+  /* ── PARITY 4 — CONTENT INSETS, and a real landscape defect with them.
+     Measured at 375x812: modal header/footer sides 14px vs the page window's
+     16px, modal body 14px vs the page body's 12px. Small numbers, but they are
+     what makes a form's fields fail to line up with the same form's fields on
+     the screen it was opened from.
+     The landscape defect: the density pass's flat `padding: 12px 14px` on
+     .modal-header WIPES the `max(20px, env(safe-area-inset-left/right))` the
+     ≤639px block used to set, so on a notched iPhone held sideways the modal's
+     title and exit control sit UNDER THE NOTCH while .page-panel-head clears
+     it via the `max(16px, env(...))` in its base shorthand. Restored below, at
+     the page window's 16px floor rather than the old 20px.
+     Each of the three is the page window's own expression, copied:
+       header ← .page-panel-head (~2216) + its ≤768px notch top-up (~2794)
+       body   ← .page-panel-body as re-declared by the density pass (~6772),
+                which is why the body floor is 12px and not 16px
+       foot   ← .page-panel-foot (~2282) + its ≤768px keyboard correction (~2809)
+     PARITY 2 — the bottom safe-area, the one outright DEFECT in this set —
+     rides along in the body and foot shorthands. `calc(12px + max(0px,
+     env(safe-area-inset-bottom,0px) - var(--kb-h,0px)))` is the codebase's
+     standard keyboard-aware inset, used verbatim at four other sites
+     (.page-panel-body, .page-panel-foot, .messenger-input-row, the density
+     pass's .page-panel-body) — deliberately not a fifth formulation:
+       keyboard down → max(0px, 34px - 0px)    = 34px → 46px, clear of the
+                                                 home indicator
+       keyboard up   → max(0px, 34px - ~300px) = 0px  → flat 12px, flush to
+                                                 the keys with no dead band
+     Before this, the density pass's flat `padding: 10px 14px` put a full-cover
+     modal's Save/Cancel row 10px off the bottom of an iPhone — inside the
+     home-indicator band, on 21 call sites — while the page window it was
+     opened from put the same buttons at 46px. --kb-h is published on <html> by
+     window.ViewportSync (js/config.js); if it were never published the var()
+     fallback of 0px collapses the max() to the plain inset, so the worst
+     failure mode is the pre-keyboard-model behaviour rather than a broken one. */
+  .modal-box .modal-header {
+    padding: calc(12px + env(safe-area-inset-top, 0px))
+             max(16px, env(safe-area-inset-right, 0px))
+             12px
+             max(16px, env(safe-area-inset-left, 0px));
+  }
+  .modal-box .modal-body {
+    padding: 12px max(12px, env(safe-area-inset-right, 0px))
+      calc(12px + max(0px, env(safe-area-inset-bottom, 0px) - var(--kb-h, 0px)))
+      max(12px, env(safe-area-inset-left, 0px));
+  }
+  .modal-box .modal-footer {
+    padding: 12px max(16px, env(safe-area-inset-right, 0px))
+      calc(12px + max(0px, env(safe-area-inset-bottom, 0px) - var(--kb-h, 0px)))
+      max(16px, env(safe-area-inset-left, 0px));
+  }
 }
 
 /* v14 (owner: "receivables look bad") — analytics two-panel rows (Top Clients |
