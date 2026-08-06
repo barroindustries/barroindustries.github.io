@@ -4782,36 +4782,86 @@ function _atLoginScreen() {
 // v14: mid-session SW-update PILL removed (owner: no update banner —
 // silent updates, standing preference from commit c554c09). Updates apply
 // silently on the next login-screen visit / reload; no mid-session prompt.
+// ── 2026-08-07 — SILENT AUTO-APPLY AT A SAFE MOMENT (owner-chosen) ──────────
+// The login-screen-only rule above left a real hole, and it cost a full day:
+// Pages deploys had ALSO been failing silently, and once that was fixed the
+// owner's browser was still running a build EIGHT versions old. Firebase auth
+// uses 10-day LOCAL persistence so background push survives, so a signed-in user
+// can go days without ever seeing the login screen — the only apply path there
+// was. Three separate fixes for a reported mobile defect were debugged at length
+// while never actually running on his device.
+// The standing preference (commit c554c09) is NO BANNER, and that stands. The
+// remedy is not to nag but to apply at a moment where a reload costs nothing:
+// when the app is HIDDEN. Reloading a backgrounded tab is invisible — the user
+// returns to the new version with no interruption and nothing to dismiss.
+// Guarded so it can never eat work in progress: nothing applies while any
+// overlay/panel/modal is open, or while a composer or textarea holds typed text.
+// When neither holds, the update simply waits for the next hidden moment.
+function _swWorkInProgress() {
+  try {
+    const st = window.Overlay && window.Overlay._stack;
+    if (Array.isArray(st) && st.length) return true;        // a panel/modal/dialog is open
+  } catch (_) {}
+  try {
+    // Typed-but-unsent text is the other thing a reload would destroy. Only
+    // free-text sinks — filters and selects carry values constantly and are
+    // reconstructed on load, so they must not block an update forever.
+    const sinks = document.querySelectorAll('textarea, [contenteditable="true"]');
+    for (const el of sinks) {
+      // getClientRects(), NOT offsetParent: offsetParent is null for any
+      // position:fixed element, and this app's composers live inside fixed
+      // panels — an offsetParent check silently skipped exactly the fields
+      // worth protecting. (Caught by the verification harness for this change.)
+      if (!el.getClientRects().length) continue;             // genuinely not on screen
+      const v = (el.value != null ? el.value : el.textContent) || '';
+      if (v.trim()) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+function _swApplyWaiting(reg) {
+  if (!reg || !reg.waiting || !navigator.serviceWorker.controller) return false;
+  _swReloading = true;                                       // controllerchange below reloads us
+  reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+  return true;
+}
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     // A new SW that finished installing before this page loaded is already waiting.
-    if (reg.waiting && navigator.serviceWorker.controller) {
-      if (_atLoginScreen()) {
-        _swReloading = true;
-        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      }
-      // else mid-session: do nothing — the update applies silently at the next
-      // login-screen visit / reload (owner preference: no update banner).
+    if (reg.waiting && navigator.serviceWorker.controller && _atLoginScreen()) {
+      _swApplyWaiting(reg);                                  // no session to disrupt
     }
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
       if (!newWorker) return;
       newWorker.addEventListener('statechange', () => {
         // installed + already controlled → an UPDATE (not first install).
-        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-          if (_atLoginScreen()) {
-            _swReloading = true;
-            newWorker.postMessage({ type: 'SKIP_WAITING' }); // silent apply, login only
-          }
-          // else mid-session: silent — applies at next login/reload (no banner).
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller && _atLoginScreen()) {
+          _swReloading = true;
+          newWorker.postMessage({ type: 'SKIP_WAITING' });   // silent apply, login screen
         }
+        // else mid-session: left waiting for the hidden-tab apply below. Still
+        // no banner, still no forced mid-work reload.
       });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        // Back in front: ask the network whether a newer build exists, so the
+        // next time this tab is hidden there is something ready to apply. This
+        // is what makes a deploy reachable the same day instead of whenever a
+        // login screen next happens to appear.
+        reg.update().catch(() => {});
+        return;
+      }
+      // Hidden — the safe moment. Apply only if nothing is in progress.
+      if (reg.waiting && !_swWorkInProgress()) _swApplyWaiting(reg);
     });
   }).catch(console.warn);
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    // Reload only for OUR silent login-screen apply. A controllerchange we didn't
-    // initiate (a waiting SW activating later, e.g. after other tabs close) must NOT
-    // force-reload a user who may be mid-task.
+    // Reload only for an apply WE triggered (login screen, or the hidden-tab
+    // path above). A controllerchange we did not initiate — e.g. a waiting SW
+    // activating because another tab closed — must never force-reload a user
+    // who may be mid-task.
     if (_swReloading) location.reload();
   });
 }

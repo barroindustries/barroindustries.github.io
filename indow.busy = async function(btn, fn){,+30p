@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.81';
+window.APP_VERSION = '14.0.79';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1441,29 +1441,8 @@ window.ViewportSync = window.ViewportSync || (function () {
     // the viewport, which is what "no keyboard" should always mean. Above it,
     // vv.height is tracked verbatim — real keyboard geometry is unchanged, and
     // that is the part the whole visual-viewport anchoring exists to get right.
-    // A SOFT KEYBOARD CANNOT BE OPEN IF NOTHING IS FOCUSED. That is the real
-    // signal, and it is device-independent — unlike the pixel threshold below,
-    // which was wrong on its own and shipped a visible bug:
-    // the owner's iPhone reports a visual viewport ~90px SHORTER than the layout
-    // viewport at rest, with no keyboard on screen. The threshold classified
-    // that as a keyboard, so `html.kb-open` was permanently set and EVERY window
-    // (`height: var(--vvh)`) rendered ~90px short — the "big space below" he
-    // reported on the chat composer AND on the New Task footer, across four
-    // attempted fixes. Requiring focus makes the shortfall harmless: no focused
-    // field, no keyboard, window fills the viewport.
-    // The px floor is kept as a secondary guard so a focused field with a
-    // trivial viewport change (an accessory bar, a rounding wobble) still is not
-    // mistaken for a keyboard. Real iPhone keyboards are ~260-340pt.
-    var ae = null;
-    try { ae = document.activeElement; } catch (_) {}
-    var focusCanSummonKeyboard = !!(ae && (
-      ae.isContentEditable ||
-      (ae.tagName === 'TEXTAREA' && !ae.readOnly && !ae.disabled) ||
-      (ae.tagName === 'INPUT' && !ae.readOnly && !ae.disabled &&
-        !/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/i.test(ae.type || 'text'))
-    ));
     var KB_MIN_PX = 90;
-    var kb = (focusCanSummonKeyboard && kbRaw >= KB_MIN_PX) ? kbRaw : 0;
+    var kb = kbRaw >= KB_MIN_PX ? kbRaw : 0;
     if (!kb) h = Math.max(h, ih - t);
     set(de, '--vvh',    Math.round(h) + 'px', 'vvh');
     set(de, '--vv-top', Math.round(t) + 'px', 'top');
