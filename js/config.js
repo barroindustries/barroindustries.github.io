@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.70';
+window.APP_VERSION = '14.0.71';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1454,7 +1454,21 @@ window.ViewportSync = window.ViewportSync || (function () {
     var h, t;
     if (vv) { h = vv.height; t = vv.offsetTop || 0; }
     else    { h = ih;        t = 0; }               // no visualViewport → assume no keyboard
-    var kb = Math.max(0, Math.round(ih - h - t));
+    var kbRaw = Math.max(0, Math.round(ih - h - t));
+    // A soft keyboard is never SMALL. iPhone keyboards are ~260-340pt; even a
+    // compact/floating one clears 150. So a shortfall of a few dozen px is not
+    // a keyboard — it is iOS reporting a visual viewport slightly shorter than
+    // the layout viewport with nothing presented. Honouring that verbatim made
+    // `height: var(--vvh)` leave a dead band of exactly that size UNDER the
+    // window: owner-reported twice as "there's a space below" in a chat thread,
+    // measured at ~60 CSS px beneath the composer with no keyboard on screen.
+    // Below the threshold we treat it as no keyboard and let the window fill
+    // the viewport, which is what "no keyboard" should always mean. Above it,
+    // vv.height is tracked verbatim — real keyboard geometry is unchanged, and
+    // that is the part the whole visual-viewport anchoring exists to get right.
+    var KB_MIN_PX = 90;
+    var kb = kbRaw >= KB_MIN_PX ? kbRaw : 0;
+    if (!kb) h = Math.max(h, ih - t);
     set(de, '--vvh',    Math.round(h) + 'px', 'vvh');
     set(de, '--vv-top', Math.round(t) + 'px', 'top');
     set(de, '--kb-h',   kb + 'px',            'kb');
