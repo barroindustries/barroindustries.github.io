@@ -1,0 +1,23 @@
+Publish this repo as-is. Do NOT run it through Jekyll.
+
+GitHub Pages runs Jekyll over a repo by default. This site has no Jekyll content
+— it is a hand-written static PWA (index.html + js/ + css/ served verbatim), so
+Jekyll can only cost build time and invent failure modes. On 2026-08-06 the Pages
+build began failing ("Page build failed") on every push from v14.0.75 onward
+while v14.0.74 stayed live, which silently stranded four commits: the Firestore
+persistence fix, the payroll Type A/B merge, a dead-code sweep, and the fix for
+"Create task not working". Everything looked shipped — git push succeeded, the
+version bumped — but nothing reached anyone.
+
+The presence of this file (its contents are irrelevant) tells Pages to skip
+Jekyll and publish the tree directly.
+
+If a deploy ever appears not to arrive again, check the build status rather than
+assuming a caching problem:
+  gh api repos/barroindustries/barroindustries.github.io/pages/builds \
+    --jq '.[0:5][] | "\(.status) \(.created_at) \(.commit[0:7]) :: \(.error.message // "-")"'
+And note the second half of that failure mode: even once a build succeeds, the
+service worker installs the new version into `waiting` and js/app.js only sends
+it SKIP_WAITING when the user is sitting on the LOGIN screen. With 10-day auth
+persistence a signed-in user may never see that screen, so a successful deploy
+can still take days to reach them.
