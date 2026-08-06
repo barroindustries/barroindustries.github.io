@@ -261,7 +261,20 @@ async function _resolveActiveRecord(profileId) {
   const todayStr = window.bizDate();
   const base = db.collection('attendance_worker').doc(profileId).collection('records');
   const todayRef = base.doc(todayStr);
-  const todaySnap = await todayRef.get();
+  // source:'server' — REQUIRED, and it must stay in lockstep with Firestore
+  // offline persistence being enabled (js/firebase-config.js). These are the
+  // only reads in the app where a read THROWING is load-bearing: the offline
+  // punch queue detects offline from the rejection (_isNetworkish below), and
+  // the double-Time-In guard documented above depends on seeing the SERVER's
+  // record. With persistence on, a plain .get() offline resolves from cache
+  // instead of rejecting — an empty or stale record — so the queue would never
+  // arm and the guard would silently pass, letting a worker open a second
+  // concurrent shift while the first is still unclosed. Pinning to the server
+  // restores the pre-persistence behaviour on exactly this path: offline now
+  // rejects with 'unavailable', which is what the existing queue already
+  // handles. Both callers (_loadClockCard and the punch itself) want server
+  // truth, so there is no path that wants the cached answer here.
+  const todaySnap = await todayRef.get({ source: 'server' });
   const todayData = todaySnap.exists ? todaySnap.data() : null;
   if (todayData && todayData.timeIn && !todayData.timeOut) {
     return { dateStr: todayStr, ref: todayRef, data: todayData };
@@ -269,7 +282,7 @@ async function _resolveActiveRecord(profileId) {
   if (!todayData || !todayData.timeIn) {
     const yestStr = window.bizDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
     const yestRef = base.doc(yestStr);
-    const yestSnap = await yestRef.get();
+    const yestSnap = await yestRef.get({ source: 'server' });   // same reason as todaySnap above
     const yestData = yestSnap.exists ? yestSnap.data() : null;
     if (yestData && yestData.timeIn && !yestData.timeOut) {
       return { dateStr: yestStr, ref: yestRef, data: yestData };

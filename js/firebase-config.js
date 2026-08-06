@@ -52,11 +52,30 @@ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {
 // Firestore offline persistence — caches all reads to IndexedDB so the app
 // loads instantly from disk on the next visit while fresh data syncs in background.
 // Multi-tab: falls back gracefully if another tab already owns the lock.
-// `enableIndexedDbPersistence` was removed from the compat SDK in newer Firebase
-// versions (confirmed gone in 10.12.2) — feature-detect so older/newer SDKs both
-// degrade gracefully instead of throwing an uncaught TypeError at boot.
-if (typeof db.enableIndexedDbPersistence === 'function') {
-  db.enableIndexedDbPersistence({ synchronizeTabs: true }).catch(err => {
+// THE IDENTIFIER MATTERS: on the COMPAT SDK this app loads (see index.html —
+// firebase-firestore-compat.js, 10.12.2) the instance method is
+// `enablePersistence`. `enableIndexedDbPersistence` is the MODULAR API's name
+// and does not exist on firebase.firestore(); the old comment here asserted it
+// "was removed from the compat SDK, confirmed gone in 10.12.2", and that wrong
+// claim is what produced the bug — the feature-detect below was permanently
+// false, the else branch ran on every load, and persistence was NEVER enabled
+// once. Measured on the live instance at 10.12.2:
+//   typeof db.enableIndexedDbPersistence -> "undefined"
+//   typeof db.enablePersistence          -> "function"
+// So every cold boot and every reload paid full network latency for all of the
+// dashboard's queries, and dbCachedGet's in-memory TTLs never survived a
+// refresh. The feature-detect is KEPT so a future SDK swap degrades instead of
+// throwing at boot — it just has to test the name that actually exists.
+//
+// FRESHNESS IS UNAFFECTED WHEN ONLINE, which is why this is safe on a system
+// where the President reads money: with the compat SDK a plain .get() uses
+// source:'default', which round-trips the server whenever the client is online.
+// Persistence changes warm-start and OFFLINE behaviour only. The one place that
+// genuinely depends on an offline read THROWING is the attendance punch path —
+// see the `source:'server'` pins in js/screens/worker.js _resolveActiveRecord,
+// which must stay in lockstep with this being enabled.
+if (typeof db.enablePersistence === 'function') {
+  db.enablePersistence({ synchronizeTabs: true }).catch(err => {
     if (err.code === 'failed-precondition') {
       // Multiple tabs open — persistence available in one tab only
       console.warn('[Firestore] Offline persistence unavailable: multiple tabs open.');
@@ -69,5 +88,5 @@ if (typeof db.enableIndexedDbPersistence === 'function') {
     }
   });
 } else {
-  console.warn('[Firestore] enableIndexedDbPersistence not available on this SDK version — skipping offline persistence.');
+  console.warn('[Firestore] enablePersistence not available on this SDK version — skipping offline persistence.');
 }
