@@ -2340,9 +2340,31 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     document.querySelectorAll('.view-profile-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const { uid, name, salary, allowance, deductions, mdone, mtotal } = btn.dataset;
+        // Statutory-config spec (2026-08-06) — the panel's Payslip button runs a
+        // computePayLine projection (openWorkerProfilePanel below). Carry this
+        // employee's statutory CONFIG across so that projection matches the
+        // engine: without it, resolveStatutoryEE takes its legacy branch and an
+        // EXEMPT employee is shown full table deductions — a manager-facing net
+        // the pay run will never produce. No new Firestore read: `users` above
+        // comes from dbCachedGet('users'), which config.js forces through
+        // fetchUsersWithPayroll, so the whole payroll/{uid} doc (statConfig and
+        // the flat amounts) is already merged in memory. It cannot ride on
+        // btn.dataset — statConfig is a map and dataset values are strings.
+        const _pu = users.find(x => x.id === uid) || {};
+        const _stat = {};
+        if (_pu.statConfig) _stat.statConfig = _pu.statConfig;
+        // Only 'fixed' needs its typed amount carried. 'exempt' and 'auto'
+        // ignore emp[k] entirely, and a key with NO mode falls to the legacy
+        // `emp[k] || table` branch — where an ABSENT amount is exactly what the
+        // bare object has always passed, so an unconfigured employee keeps
+        // projecting byte-identically to today (the pre-existing typed-override
+        // divergence stays out of scope, per STATUTORY-CONFIG-SPEC §11).
+        ['sss','philhealth','pagibig','tax'].forEach(k => {
+          if (_pu.statConfig && _pu.statConfig[k] === 'fixed') _stat[k] = _pu[k] || 0;
+        });
         openWorkerProfilePanel(uid, name, {
           salary: +salary, allowance: +allowance, deductions: +deductions,
-          mDone: +mdone, mTotal: +mtotal
+          mDone: +mdone, mTotal: +mtotal, ..._stat
         });
       });
     });
@@ -3175,12 +3197,26 @@ function openWorkerProfilePanel(uid, name, preloaded) {
       // never called computeStatutory, so SSS/PhilHealth/Pag-IBIG/Tax always
       // read as 0 and net was silently overstated. Route through the ONE pay
       // engine first, exactly like renderPersonalFinance's my-payslip-btn
-      // (this file, ~line 2737) already does — `preloaded` doesn't carry
-      // sss/philhealth/pagibig/tax (only salary/allowance/deductions, see the
-      // view-profile-btn dataset a few hundred lines up), so computePayLine
-      // falls back to the same WS21 statutory-table suggestion the roster
-      // preview uses whenever a field isn't hand-typed — never a hard 0.
-      const line = window.computePayLine({ id: uid, displayName: name, salary: preloaded?.salary||0, allowance: preloaded?.allowance||0, deductions: preloaded?.deductions||0 }, { month, policy:'flat' });
+      // (this file, ~line 2737) already does — with nothing hand-typed,
+      // computePayLine falls back to the same WS21 statutory-table suggestion
+      // the roster preview uses, never a hard 0.
+      //
+      // Statutory-config spec (2026-08-06): `preloaded` now also carries the
+      // employee's statConfig — and, for 'fixed' items only, the typed amount —
+      // put there by the .view-profile-btn handler in renderPersonalFinance
+      // above (which reads them off the already-merged users cache, no extra
+      // read). Passing them through is what keeps this projection honest: an
+      // EXEMPT employee otherwise hit resolveStatutoryEE's legacy branch here
+      // and was shown the full table deduction, i.e. a net ~₱1,825 below what
+      // Compute will actually pay. Built as a separate object and spread so an
+      // employee with no config contributes NO keys at all — the bare object,
+      // and therefore the projection, stays byte-identical to before.
+      const _statFields = {};
+      if (preloaded?.statConfig) _statFields.statConfig = preloaded.statConfig;
+      ['sss','philhealth','pagibig','tax'].forEach(k => {
+        if (preloaded && preloaded[k] != null) _statFields[k] = preloaded[k];
+      });
+      const line = window.computePayLine({ id: uid, displayName: name, salary: preloaded?.salary||0, allowance: preloaded?.allowance||0, deductions: preloaded?.deductions||0, ..._statFields }, { month, policy:'flat' });
       model = window.toPayslipModel({...line, uid:uid, month}, 'monthly');
       model.official = false;
     }

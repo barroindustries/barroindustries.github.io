@@ -47,6 +47,38 @@ window.vatSplit = function(entered, treatment) {
   return { recorded: +a.toFixed(2), net, vat: +(a - net).toFixed(2) };
 };
 
+// ---- statutory-config spec (2026-08-06) — per-type EE/ER resolution -------
+// Pure; no DOM, no Firestore, no clock (file contract, header above).
+// `emp` optionally carries statConfig ({sss|philhealth|pagibig|tax:
+// 'auto'|'fixed'|'exempt'}) plus the legacy flat amount fields (emp.sss …).
+// `stat` is a computeStatutory() result or null.
+// ABSENT statConfig (or an absent per-type key) reproduces the legacy
+// `typed || table` fallthrough BYTE-FOR-BYTE — including the pinned quirk
+// that a hand-typed 0 falls through to the table (tests/money.test.mjs
+// "quirk (pinned, not fixed)"). Precedence when a mode IS set:
+// exempt > fixed > auto.
+//   'exempt' -> 0; the ER share for that agency is also 0 (no obligation —
+//               an exempt person is simply not on that agency's remittance).
+//   'fixed'  -> the flat amount field (0 when empty); ER stays table-computed
+//               (er is never hand-typed — unchanged WS21 rule).
+//   'auto'   -> the table value, even when a stale typed amount is present.
+window.resolveStatutoryEE = function(emp, stat) {
+  const cfg = (emp && emp.statConfig) || {};
+  const ee = (k) => {
+    const mode = cfg[k];
+    if (mode === 'exempt') return 0;
+    if (mode === 'fixed')  return emp[k] || 0;
+    if (mode === 'auto')   return stat ? stat.ee[k] : 0;
+    return emp[k] || (stat ? stat.ee[k] : 0); // legacy — unchanged
+  };
+  const er = (k) => (cfg[k] === 'exempt') ? 0 : (stat ? stat.er[k] : 0);
+  return {
+    sss: ee('sss'), philhealth: ee('philhealth'),
+    pagibig: ee('pagibig'), tax: ee('tax'),
+    er: { sss: er('sss'), philhealth: er('philhealth'), pagibig: er('pagibig') }
+  };
+};
+
 // ---- moved verbatim from js/departments.js ≈3194-3243 ----
 window.computePayLine = function(emp, ctx) {
   const policy = ctx.policy || 'flat';
@@ -73,11 +105,13 @@ window.computePayLine = function(emp, ctx) {
   const stat = window.computeStatutory
     ? window.computeStatutory({ grossPay: gross, year: statYear })
     : null;
-  const sss        = emp.sss        || (stat ? stat.ee.sss : 0);
-  const philhealth = emp.philhealth || (stat ? stat.ee.philhealth : 0);
-  const pagibig    = emp.pagibig    || (stat ? stat.ee.pagibig : 0);
-  const tax        = emp.tax        || (stat ? stat.ee.tax : 0);
-  const er         = stat ? stat.er : { sss:0, philhealth:0, pagibig:0 };
+  // Statutory-config spec (2026-08-06) — the second permitted edit to this
+  // frozen function (after §A4). resolveStatutoryEE (above) reproduces the
+  // old five lines byte-for-byte whenever emp.statConfig is absent — every
+  // existing payroll/{uid} doc, every pinned test, every call site that
+  // predates statConfig computes identically. New modes: exempt (a real 0,
+  // EE and ER), fixed (typed amount wins even at 0), auto (table always).
+  const { sss, philhealth, pagibig, tax, er } = window.resolveStatutoryEE(emp, stat);
   const statutoryTotal = sss + philhealth + pagibig + tax;
 
   const kpiScore   = ctx.kpiScore != null ? ctx.kpiScore : 1;
@@ -360,6 +394,7 @@ window.applyPayLineOverride = function(line, ovr) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     vatSplit: window.vatSplit,
+    resolveStatutoryEE: window.resolveStatutoryEE,
     computePayLine: window.computePayLine,
     computeBreakeven: window.computeBreakeven,
     monthBounds: window.monthBounds,

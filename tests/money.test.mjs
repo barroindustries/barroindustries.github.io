@@ -49,7 +49,7 @@ window.bizYear = () => 2026;
 
 const statutory = require('../js/statutory-tables.js');
 const money = require('../js/money-core.js');
-const { vatSplit, computePayLine, computeBreakeven, monthBounds, computeKpiForMonth, applyPayLineOverride } = money;
+const { vatSplit, computePayLine, computeBreakeven, monthBounds, computeKpiForMonth, applyPayLineOverride, resolveStatutoryEE } = money;
 const { computeStatutory } = statutory;
 
 // window.ledgerKind lives in js/config.js (the ONE place P&L income/expense
@@ -937,5 +937,171 @@ describe('applyPayLineOverride — js/money-core.js §C2 (output override, layer
     assert.deepEqual(out.overrideMeta.fields, []);
     assert.equal(out.finalPay, baseLine.finalPay);
     assert.equal(out.effectiveGross, baseLine.effectiveGross);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// resolveStatutoryEE + statConfig (statutory-config spec, 2026-08-06)
+//
+// The feature: an explicit per-person SWITCH for each statutory item, so "0"
+// stops meaning both "not due" and "someone forgot". Precedence per type:
+// exempt > fixed > auto > legacy-fallthrough.
+//
+// The load-bearing property these tests exist to defend: an employee with NO
+// statConfig computes BYTE-IDENTICALLY to pre-spec behavior, forever. That
+// includes the deliberately-pinned typed-0-falls-through quirk above
+// ("quirk (pinned, not fixed)"), which is UNCHANGED — the cure for it is
+// opting in to mode 'fixed', not a silent behavior change for everyone.
+// Year is pinned to 2026 by the window.bizYear stub at the top of this file;
+// STATUTORY[2026] is still a placeholder table (see header).
+// ═══════════════════════════════════════════════════════════
+describe('resolveStatutoryEE + statConfig (statutory-config spec)', () => {
+  // The exact :205 fixture and its :210 pinned result, restated here so these
+  // tests fail loudly if the legacy baseline itself ever drifts.
+  const FIXTURE_A = { id: 'u1', displayName: 'Juan', salary: 20000, allowance: 2000, deductions: 500 };
+  const PINNED_A = {
+    uid: 'u1', name: 'Juan', payClass: 'regular',
+    base: 20000, allowance: 2000, otherDeductions: 500,
+    sss: 1100, philhealth: 550, pagibig: 200, tax: 0,
+    er: { sss: 2200, philhealth: 550, pagibig: 200 },
+    kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',
+    caBalance: 0, caPlanned: 0, caPlan: [],
+    gross: 22000, effectiveGross: 22000, statutoryTotal: 1850,
+    netBeforeCA: 19650, finalPay: 19650,
+  };
+
+  it('LEGACY IDENTITY: statConfig undefined and statConfig {} both reproduce the exact pinned line', () => {
+    assert.deepEqual(computePayLine({ ...FIXTURE_A, statConfig: undefined }, { policy: 'flat' }), PINNED_A);
+    assert.deepEqual(computePayLine({ ...FIXTURE_A, statConfig: {} }, { policy: 'flat' }), PINNED_A);
+    // and the no-field-at-all case, which is what every existing payroll/{uid} doc looks like
+    assert.deepEqual(computePayLine(FIXTURE_A, { policy: 'flat' }), PINNED_A);
+  });
+
+  it("exempt-all: EE zeroed AND er zeroed (an exempt person is not on that agency's remittance at all)", () => {
+    const line = computePayLine(
+      { ...FIXTURE_A, statConfig: { sss: 'exempt', philhealth: 'exempt', pagibig: 'exempt', tax: 'exempt' } },
+      { policy: 'flat' }
+    );
+    assert.deepEqual(
+      { sss: line.sss, philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax },
+      { sss: 0, philhealth: 0, pagibig: 0, tax: 0 }
+    );
+    assert.deepEqual(line.er, { sss: 0, philhealth: 0, pagibig: 0 });
+    assert.equal(line.statutoryTotal, 0);
+    // net rises by exactly the old statutory total: 19650 + 1850
+    assert.equal(line.finalPay, 21500);
+    // untouched-math guard: everything outside statutory is byte-identical
+    assert.equal(line.gross, PINNED_A.gross);
+    assert.equal(line.effectiveGross, PINNED_A.effectiveGross);
+    assert.equal(line.otherDeductions, PINNED_A.otherDeductions);
+  });
+
+  it('PARTIAL config resolves PER TYPE: sss exempt only — sss+er.sss zeroed, other three exactly the pinned values', () => {
+    const line = computePayLine({ ...FIXTURE_A, statConfig: { sss: 'exempt' } }, { policy: 'flat' });
+    assert.equal(line.sss, 0);
+    assert.equal(line.er.sss, 0);
+    assert.deepEqual(
+      { philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax },
+      { philhealth: PINNED_A.philhealth, pagibig: PINNED_A.pagibig, tax: PINNED_A.tax }
+    );
+    // the other two ER legs stay table-computed
+    assert.deepEqual(
+      { philhealth: line.er.philhealth, pagibig: line.er.pagibig },
+      { philhealth: PINNED_A.er.philhealth, pagibig: PINNED_A.er.pagibig }
+    );
+    assert.equal(line.statutoryTotal, 750); // 1850 - 1100
+  });
+
+  it("auto BEATS a stale hand-typed amount: the :245 fixture's 800/300/100/50 are ignored, table wins", () => {
+    const line = computePayLine(
+      {
+        id: 'u3', displayName: 'Pedro', salary: 15000, allowance: 0, deductions: 200,
+        sss: 800, philhealth: 300, pagibig: 100, tax: 50,
+        statConfig: { sss: 'auto', philhealth: 'auto', pagibig: 'auto', tax: 'auto' },
+      },
+      { policy: 'flat' }
+    );
+    // = computeStatutory({grossPay:15000, year:2026}).ee
+    assert.deepEqual(
+      { sss: line.sss, philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax },
+      { sss: 750, philhealth: 375, pagibig: 200, tax: 0 }
+    );
+    // er unchanged from the :258 pin — 'auto' is not exemption
+    assert.deepEqual(line.er, { sss: 1500, philhealth: 375, pagibig: 200 });
+  });
+
+  it('fixed HONOURS a typed 0 (the quirk, cured — opt-in only) and keeps table ER', () => {
+    const line = computePayLine(
+      { id: 'u5', displayName: 'Liza', salary: 12000, allowance: 0, deductions: 0,
+        sss: 0, philhealth: 0, pagibig: 0, tax: 0, statConfig: { sss: 'fixed' } },
+      { policy: 'flat' }
+    );
+    assert.equal(line.sss, 0); // would be 600 under legacy — see the pinned quirk test above
+    assert.equal(line.er.sss, 1200); // table ER for gross 12000, NOT zeroed by 'fixed'
+    // the three unconfigured types still take the legacy fallthrough (typed 0 -> table)
+    assert.deepEqual(
+      { philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax },
+      { philhealth: 300, pagibig: 200, tax: 0 }
+    );
+  });
+
+  it('fixed uses the typed amount when non-zero, and ER stays table-computed (er is never hand-typed)', () => {
+    const line = computePayLine(
+      { id: 'u9', salary: 15000, allowance: 0, deductions: 0, sss: 123.45,
+        statConfig: { sss: 'fixed' } },
+      { policy: 'flat' }
+    );
+    assert.equal(line.sss, 123.45);
+    assert.deepEqual(line.er, { sss: 1500, philhealth: 375, pagibig: 200 });
+  });
+
+  it('UNKNOWN/garbage mode values fall back to legacy rather than throwing', () => {
+    for (const junk of ['AUTO', 'Exempt', 'nope', '', 0, 1, null, true, {}, [], NaN]) {
+      const line = computePayLine(
+        { ...FIXTURE_A, statConfig: { sss: junk, philhealth: junk, pagibig: junk, tax: junk } },
+        { policy: 'flat' }
+      );
+      assert.deepEqual(line, PINNED_A, `mode ${JSON.stringify(junk)} should be legacy-identical`);
+    }
+    // a statConfig that is itself garbage must also not throw
+    for (const junk of [null, 0, '', false, NaN]) {
+      assert.deepEqual(computePayLine({ ...FIXTURE_A, statConfig: junk }, { policy: 'flat' }), PINNED_A);
+    }
+  });
+
+  it('direct resolveStatutoryEE with stat:null — every mode returns 0, no throw (no-table safety)', () => {
+    assert.deepEqual(
+      resolveStatutoryEE({ sss: 500, statConfig: { sss: 'auto' } }, null),
+      { sss: 0, philhealth: 0, pagibig: 0, tax: 0, er: { sss: 0, philhealth: 0, pagibig: 0 } }
+    );
+    // 'fixed' still honours the typed amount with no table present
+    assert.equal(resolveStatutoryEE({ sss: 500, statConfig: { sss: 'fixed' } }, null).sss, 500);
+    // legacy fallthrough with no table: typed wins, else 0
+    assert.equal(resolveStatutoryEE({ sss: 500 }, null).sss, 500);
+    assert.equal(resolveStatutoryEE({}, null).sss, 0);
+    // NOTE (spec observation, deliberately NOT pinned as safe): the spec's
+    // resolver guards `(emp && emp.statConfig)` but the legacy/fixed branches
+    // dereference `emp[k]` unguarded, so resolveStatutoryEE(undefined, …)
+    // throws. That is NOT a regression and not reachable from computePayLine,
+    // which dereferences `emp.salary` (money-core.js:53) long before calling
+    // the resolver — a nullish emp already threw pre-spec. Left exactly as the
+    // spec specifies rather than silently hardening frozen money code.
+  });
+
+  it('TYPE B DEFAULT STAYS ZERO: a worker with no statConfig and no typed amounts, with no table available, deducts nothing', () => {
+    const saved = window.computeStatutory;
+    window.computeStatutory = undefined; // the Type B path never touches the tables today
+    try {
+      const line = computePayLine({ id: 'w1', salary: 4000, allowance: 0, deductions: 0 }, { policy: 'flat' });
+      assert.deepEqual(
+        { sss: line.sss, philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax },
+        { sss: 0, philhealth: 0, pagibig: 0, tax: 0 }
+      );
+      assert.deepEqual(line.er, { sss: 0, philhealth: 0, pagibig: 0 });
+      assert.equal(line.statutoryTotal, 0);
+      assert.equal(line.finalPay, 4000);
+    } finally {
+      window.computeStatutory = saved;
+    }
   });
 });

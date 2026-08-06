@@ -539,8 +539,52 @@ window.birRenderWhtBody = async function (bodyEl, state) {
     const dg = p.deductions?.govt || {};
     const taxW = p.deductions?.other?.taxes || 0;
     recomputedTax += taxW;
-    rows.push({ name: p.workerName || '—', gross: p.grossPay || 0, sssEE: dg.sss || 0, sssER: null,
-      phEE: dg.philhealth || 0, phER: null, hdmfEE: dg.pagibig || 0, hdmfER: null, tax: taxW, weekly: true });
+    // Statutory-config spec §5.3(5) — surface the employer share the app has
+    // ACTUALLY RECORDED for this weekly worker. collectPayslipData (js/screens/
+    // hr.js) stores a real `employerShare` {sss,philhealth,pagibig} on a
+    // payslip whose worker is configured 'auto', and toPayslipModel prints
+    // those figures on the payslip handed to the employee. This row used to
+    // hardcode null for all three, so an ER the app had recorded AND printed
+    // still rendered '—†' on the 1601-C and exported blank in the CSV —
+    // invisible on the very document used to file and remit.
+    // A cell still renders '—†' whenever the value is genuinely not tracked:
+    // no employerShare on the doc (every weekly payslip written before this
+    // feature, and every unconfigured worker after it — the byte-identical
+    // path), or a missing/non-numeric key on it. Nothing here is recomputed:
+    // it is the stored number or nothing.
+    //
+    // R4 — a STORED ZERO IS AMBIGUOUS AND IS NOT AN ASSERTION OF NIL.
+    // The writer (js/screens/hr.js, the `er` object in the prefill block)
+    // fills the table ER only for a key configured 'auto' and emits a literal
+    // 0 for every other key. So a 0 in this map means one of three different
+    // things, and only ONE of them is "no employer share is due":
+    //   • 'fixed'      → js/money-core.js:74 keeps the ER TABLE-COMPUTED for
+    //                    this mode on the Type A path ((cfg[k]==='exempt') ? 0
+    //                    : stat.er[k]), pinned by tests/money.test.mjs
+    //                    ("fixed … keeps table ER"). Real money is owed —
+    //                    ~₱600/month of SSS ER alone — and printing 0.00 on
+    //                    the document used to FILE AND REMIT positively
+    //                    asserts that it is not.
+    //   • key absent   → nothing is tracked for that agency (the legacy weekly
+    //                    state); the honest render is the dagger.
+    //   • 'exempt'     → genuinely nil — the only case 0.00 would be truthful.
+    // The payslip doc carries the three numbers and NOTHING ELSE (no
+    // statConfig), so this reader cannot tell them apart. Between "print a
+    // dagger where the truth was nil" (costs a manual check) and "print 0.00
+    // where ~₱7,200/yr/worker is owed" (under-remittance on a filed return),
+    // only the first is safe. So a non-positive figure reads as not-tracked.
+    // Every real 'auto' ER is strictly positive (statutory-tables.js clamps
+    // SSS to mscMin and PhilHealth to its floor, so both ER shares exceed 0 at
+    // any gross), so this narrowing hides no figure the app actually recorded.
+    // THE REAL FIX BELONGS IN THE WRITER, WHICH THIS FILE DOES NOT OWN:
+    // js/screens/hr.js must match Type A — emit the table ER for 'fixed' as
+    // well as 'auto', null/omit the key when it is unconfigured, and leave 0
+    // to mean 'exempt' alone. Once it does, the `> 0` below reverts to a plain
+    // Number.isFinite and an exempt agency correctly prints 0.00.
+    const erW = p.employerShare;
+    const erOf = (k) => (erW && Number.isFinite(erW[k]) && erW[k] > 0) ? erW[k] : null;
+    rows.push({ name: p.workerName || '—', gross: p.grossPay || 0, sssEE: dg.sss || 0, sssER: erOf('sss'),
+      phEE: dg.philhealth || 0, phER: erOf('philhealth'), hdmfEE: dg.pagibig || 0, hdmfER: erOf('pagibig'), tax: taxW, weekly: true });
   });
   const whtLeg = whtLegSnap.docs[0]?.data()?.amount || 0;
   const sssLegAmt = sssLegSnap.docs[0]?.data()?.amount || 0;
@@ -572,10 +616,32 @@ window.birRenderWhtBody = async function (bodyEl, state) {
     <td class="num">${fmt(r.hdmfEE)} / ${r.hdmfER == null ? '—<sup>†</sup>' : fmt(r.hdmfER)}</td>
     <td class="num">₱${fmt(r.tax)}</td>
   </tr>`).join('');
+  // The '†' footnote defines a symbol — print it while some cell still carries
+  // one. Today every weekly row is untracked, so it renders exactly as before;
+  // it disappears only once no dagger is left on the page.
+  // R4 — `|| !rows.some(r => r.weekly)` restores STRICT identity for the one
+  // state this suppression reached without anybody configuring a worker: a
+  // month whose payroll is all monthly employees has no weekly row, hence no
+  // dagger, and previously still printed this footnote (it was unconditional
+  // at HEAD). A regenerated 1601-C for such a month must be byte-identical to
+  // the copy already filed, orphan footnote and all — a silent diff on a filed
+  // return is worse than a line defining an unused symbol. The empty-payroll
+  // month behaves the same way, also as at HEAD. Suppression now happens only
+  // when weekly rows exist AND every one of them is fully tracked, which is
+  // unreachable until a worker is configured.
+  const anyUntrackedER = rows.some(r => r.sssER == null || r.phER == null || r.hdmfER == null)
+    || !rows.some(r => r.weekly);
+  // Reconciliation hazard, new with tracked weekly ER: the weekly path posts
+  // netPay only and books no ER expense (WS24 decision 3, unchanged), so the
+  // SSSPAY-/PHPAY-/HDMFPAY-{month} legs in the cross-check below EXCLUDE these
+  // figures. Say so, or an accountant totalling the ER column will think the
+  // legs are short. Shown only when such a figure is actually on the page.
+  const anyTrackedWeeklyER = rows.some(r => r.weekly && (r.sssER != null || r.phER != null || r.hdmfER != null));
   const table = `<table class="bir-t"><thead><tr><th>Employee</th><th>Gross</th><th>SSS EE/ER</th><th>PhilHealth EE/ER</th><th>Pag-IBIG EE/ER</th><th>Tax Withheld</th></tr></thead>
     <tbody>${bodyRows || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No payroll for this month</td></tr>'}</tbody>
     <tfoot><tr class="bir-total-row"><td colspan="5">TOTAL Tax Withheld (per-employee)</td><td class="num">₱${fmt(recomputedTax)}</td></tr></tfoot></table>
-    <div style="font-size:9pt;color:#666;margin-top:4px">† weekly/production workers' employer share is manual-only (not tracked in-app, WS24 decision 3).</div>
+    ${anyUntrackedER ? `<div style="font-size:9pt;color:#666;margin-top:4px">† weekly/production workers' employer share is manual-only (not tracked in-app, WS24 decision 3).</div>` : ''}
+    ${anyTrackedWeeklyER ? `<div style="font-size:9pt;color:#666;margin-top:4px">Note: a weekly/production worker's employer share shown above is the amount recorded on that worker's payslip — it is NOT posted to the ledger, so the agency remittance legs below exclude it; remit it manually (WS24 decision 3).</div>` : ''}
     <div class="bir-sec-h">Agency remittance cross-check (vs. posted ledger legs)</div>
     <table class="bir-t"><tbody>
       <tr><td>Withholding Tax Payable (WHTPAY-${escHtml(month)})</td><td class="num">₱${fmt(whtLeg)}</td></tr>

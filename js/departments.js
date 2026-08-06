@@ -1971,10 +1971,71 @@ window.disbursePayRun = async function(month, opts = {}) {
   // frozen plan — see the aggregation loop for the reconciliation + the
   // needsReview flag left on salary_history when the two disagree.
   const actualCaByUid = {};
+
+  // ── R1 ROOT CAUSE (money-critical) — actualCa collapsed to 0 on a RESUME ──
+  // CashAdvance.deduct is idempotent PER MONTH: js/config.js:2578 skips any CA
+  // whose payments[] already carries {source:'payroll', month:<this month>} and
+  // therefore returns [] on a second pass over the SAME frozen lines. That made
+  // `actualCaByUid[uid]` 0 on every Resume Disburse (hr.js's "Resume Disburse"
+  // button) and on every reopen→recompute→re-disburse of a month whose CA batch
+  // had already committed — even though the employees' CA balances HAD been
+  // reduced and the money HAD been collected. Downstream that produced two real
+  // money errors below: caPlannedAgg went to 0 (so the CADEDUCT credit that
+  // retires 'Advances to Employees' vanished — the receivable never comes down)
+  // and netCashAgg grew by the same amount (so Cash was credited more than
+  // actually left the bank). It also raised a bogus caReconcile "shortfall"
+  // flag for the full installment on every resume.
+  //
+  // FIX: payments[] on the cash_advances doc is the AUTHORITATIVE record of what
+  // this month's payroll actually collected — it survives across passes, which
+  // deduct()'s return value does not. When this run may have been disbursed
+  // before, take the per-CA amount from THIS call when we have it, and otherwise
+  // recover it from the CA's recorded payments[].
+  //
+  // SCOPED DELIBERATELY: a run that has never entered disburse (state 'verified'
+  // and never reopened) CANNOT have a prior payroll payment for this month, so
+  // it takes no extra read and behaves byte-identically to before. reopenedAt is
+  // sticky (computePayRun/reopenPayRun both write {merge:true} and never clear
+  // it), and 'disbursed' is terminal, so this flag is a safe over-approximation:
+  // if it were ever wrong it would be wrong in the direction of the OLD
+  // behaviour, never worse.
+  const isRerunOfThisMonth = run.state === 'disbursing' || !!run.reopenedAt;
+
+  // Sum what a PREVIOUS pass already recorded against this month for the CAs in
+  // this plan. Failure-tolerant on purpose (see R2's reasoning below): a read
+  // that fails falls back to the frozen plan amount — the same figure the
+  // employee-visible salary_history/payslip already shows — rather than
+  // aborting a disburse that has already moved money.
+  const recoverPostedCa = async (caPlan, postedNowByCa) => {
+    let sum = 0;
+    for (const p of (caPlan || [])) {
+      if (!p || !p.caId) continue;
+      if (postedNowByCa[p.caId] != null) { sum += postedNowByCa[p.caId]; continue; } // deducted by THIS call
+      let snap = null;
+      try { snap = await db.collection('cash_advances').doc(p.caId).get(); }
+      catch (err) {
+        console.error('disbursePayRun: could not re-read cash advance', p.caId, '— falling back to the frozen plan amount', err);
+        sum += (p.amount || 0);
+        continue;
+      }
+      if (!snap.exists) continue; // CA gone — nothing was collected against it
+      sum += (snap.data().payments || [])
+        .filter(pm => pm && pm.source === 'payroll' && pm.month === month)
+        .reduce((s, pm) => s + (pm.amount || 0), 0);
+    }
+    return +sum.toFixed(2);
+  };
+
   await Promise.all(lines.map(async (line) => {
     if (line.caPlan && line.caPlan.length) {
       const res = await window.CashAdvance.deduct(line.uid, month, line.caPlan, currentUser?.uid);
-      actualCaByUid[line.uid] = res.reduce((s,r)=>s+(r.amount||0), 0);
+      let actual = res.reduce((s,r)=>s+(r.amount||0), 0);
+      if (isRerunOfThisMonth) {
+        const postedNowByCa = {};
+        res.forEach(r => { postedNowByCa[r.caId] = (postedNowByCa[r.caId] || 0) + (r.amount || 0); });
+        actual = await recoverPostedCa(line.caPlan, postedNowByCa);
+      }
+      actualCaByUid[line.uid] = actual;
       if (res.length) await db.collection('salary_history').doc(`${line.uid}_${month}`)
         .set({ caDeductions: res }, { merge:true }).catch(()=>{});
     }
@@ -1999,6 +2060,90 @@ window.disbursePayRun = async function(month, opts = {}) {
       account: entry.account, category: entry.category, description: entry.description,
       amount: entry.amount, source: entry.source, extra
     }));
+  };
+
+  // ── Defect 8 (statutory-config spec) — a leg that computes to ZERO must
+  //    CLEAR a previously-posted leg carrying the same ref, never silently
+  //    skip the write.
+  //
+  //    WHY THIS WAS LATENT UNTIL NOW: computeStatutory clamps the SSS MSC up
+  //    to mscMin (js/statutory-tables.js:53-54), so line.er was always ≳₱750
+  //    even at gross 0, and every agency aggregate was always positive — the
+  //    old `if (erTotal > 0)` / `if (amount <= 0) return` guards were
+  //    unreachable-as-false. `statConfig.{k} === 'exempt'` (resolveStatutoryEE,
+  //    js/money-core.js) makes a genuine ₱0 reachable for the FIRST time, and
+  //    upsertByRef is only ever called for the legs we DO post — so nothing
+  //    else in the system overwrites a row this run no longer wants.
+  //
+  //    THE FAILING SEQUENCE this closes: Disburse posts SSSPAY-{month} and the
+  //    per-uid -ER debits, then aborts before the terminal state flip below
+  //    (browser closed / network drop). The President unlocks the stuck
+  //    'disbursing' run via reopenPayRun (which does not touch the ledger),
+  //    HR sets everyone to Exempt, and Compute→Verify→Disburse runs again.
+  //    The per-uid PAY- debits are overwritten (they have no guard), but the
+  //    stale SSSPAY credit and stale -ER debits used to SURVIVE — a phantom
+  //    liability for a remittance that is no longer owed, and Payroll Expense
+  //    overstated, i.e. the month's trial balance stops netting to zero.
+  //
+  //    CHOICE — ZERO IN PLACE, not delete, and not a reversing/contra entry:
+  //      (a) `allow delete` on /ledger is PRESIDENT-ONLY (firestore.rules
+  //          :1514). Disburse is reachable by money-tier finance admins, so a
+  //          raw .delete() here would be permission-denied for exactly the
+  //          people who run payroll — it would fail (or, if swallowed, leave
+  //          the stale row anyway, which is the bug). Ledger.remove() is worse:
+  //          it files a President APPROVAL REQUEST (financeDelete) and returns
+  //          without deleting anything, so the books would stay wrong until a
+  //          human clicked something.
+  //      (b) This ledger models corrections as OVERWRITE-IN-PLACE on a
+  //          deterministic ref (that is the whole point of Ledger.upsertByRef —
+  //          see resyncLedgerForSource, :435), never as contra entries. A
+  //          reversing entry would also break re-run idempotency: disburse
+  //          twice and you would post two reversals against one original.
+  //      (c) Zeroing goes through the SAME upsertByRef path, so finance_rollup
+  //          self-corrects for free (old row synced at -1, the ₱0 row at +1 —
+  //          net effect: the old amount is backed out, count unchanged).
+  //    IDEMPOTENT EITHER WAY: re-running Disburse rebuilds the identical ₱0
+  //    row (deterministic ref → same doc, {merge:true}); a nil leg that was
+  //    never posted stays absent no matter how many times this runs.
+  //
+  //    The existence probe keeps the ledger clean: a nil leg that has NO row
+  //    yet is simply not written (an all-exempt company must not accrue four
+  //    junk ₱0.00 rows every month forever).
+  //
+  //    R2 — THE PROBE MUST NEVER BE ABLE TO ABORT A DISBURSE. It runs AFTER
+  //    salary_history is frozen and AFTER the cash advances have been deducted,
+  //    i.e. after real money has moved. The first cut of this helper copied
+  //    Ledger._findLegacyRef's "throws propagate — never treated as empty"
+  //    contract, but that contract belongs to a read whose failure aborts
+  //    BEFORE any write; here it converts a transient offline/permission blip
+  //    into a PARTIALLY-APPLIED disburse (CA balances reduced, ledger legs
+  //    missing, run stuck in 'disbursing'). It also made the read reachable on
+  //    a completely ordinary run: taxAgg === 0 is routine at these salary
+  //    levels, so every disburse started issuing a query the old
+  //    `if (amount <= 0) return` never issued.
+  //
+  //    TWO GUARDS, both failing in the SAME safe direction — "leave the row
+  //    alone", which is exactly the pre-existing (HEAD) behaviour:
+  //      1. Skip the probe entirely unless this month may already have ledger
+  //         rows (isRerunOfThisMonth, derived above). A stale row for these
+  //         deterministic month-scoped refs can only exist if disbursePayRun
+  //         already ran for THIS month — which requires state 'disbursing'
+  //         (aborted mid-run) or a reopen (reopenedAt, sticky). Nothing else in
+  //         the codebase writes SSSPAY-/PHPAY-/HDMFPAY-/WHTPAY-/CADEDUCT-/
+  //         NETPAY-/PAY-*-ER refs (bir.js only READS them). So a first-ever
+  //         disburse issues ZERO extra reads and is byte-identical to HEAD.
+  //      2. If the probe does run and fails, treat it as "no prior row" and
+  //         skip the write. Failing to clear a stale row leaves the OLD
+  //         behaviour standing (a known, separately-visible bookkeeping error a
+  //         human can correct); aborting here leaves money half-moved.
+  const upsertLedgerOrClear = async (ref, entry) => {
+    if ((entry.amount || 0) > 0) { await upsertLedger(ref, entry); return; }
+    if (!isRerunOfThisMonth) return; // this month has never been disbursed — no stale row can exist
+    const prior = await db.collection('ledger').where('refNumber','==',ref).limit(1).get()
+      .catch(err => { console.error('disbursePayRun: stale-leg probe failed for', ref, '— leaving any existing row untouched', err); return null; });
+    if (!prior || !prior.docs.length) return; // nothing was ever posted for this ref — stay out of the ledger
+    await upsertLedger(ref, { ...entry, amount: 0,
+      description: `${entry.description} — ₱0.00 (nil this run; previously posted amount cleared)` });
   };
   const addedByName = window.userProfile?.displayName || currentUser?.email;
 
@@ -2065,7 +2210,11 @@ window.disbursePayRun = async function(month, opts = {}) {
       addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     const erTotal = (line.er?.sss||0)+(line.er?.philhealth||0)+(line.er?.pagibig||0);
-    if (erTotal > 0) await upsertLedger(`PAY-${month}-${line.uid}-ER`, {
+    // Defect 8 — was `if (erTotal > 0) await upsertLedger(...)`, which SKIPPED
+    // (leaving a stale employer-share debit posted by an earlier, aborted
+    // disburse of the same month) instead of clearing it. An all-exempt
+    // employee has erTotal === 0 and must carry NO employer-share expense.
+    await upsertLedgerOrClear(`PAY-${month}-${line.uid}-ER`, {
       date: month+'-01', type:'debit', accountType:'expense', account:'Payroll Expense',
       description: `Employer statutory share — ${line.name} (${monthLabel})`, amount: erTotal,
       category:'Payroll Expense', source:'Finance', refNumber:`PAY-${month}-${line.uid}-ER`,
@@ -2089,8 +2238,14 @@ window.disbursePayRun = async function(month, opts = {}) {
   }
 
   const aggLeg = async (ref, account, amount) => {
-    if (amount <= 0) return;
-    await upsertLedger(ref, {
+    // Defect 8 — was `if (amount <= 0) return;`. A month in which nobody owes
+    // an agency anything (every employee 'exempt', or the whole run re-computed
+    // to zero after a partially-written disburse was reopened) must CLEAR that
+    // agency's payable credit, not leave the previous figure standing as a
+    // phantom liability. upsertLedgerOrClear keeps the "never post a brand-new
+    // ₱0 row" behaviour of the old guard, so a nil agency that was never posted
+    // still produces no ledger row at all.
+    await upsertLedgerOrClear(ref, {
       date: month+'-01', type:'credit', accountType:'liability', account,
       description: `${account} — ${monthLabel} payroll`, amount,
       category:'Payroll Expense', source:'Finance', refNumber: ref,
@@ -2118,6 +2273,26 @@ window.disbursePayRun = async function(month, opts = {}) {
   // CashAdvance.recordPayment's manual "Record Payment" button (js/config.js)
   // has the identical gap and needs the same fix there — out of this file's
   // scope, flagged for a config.js-scoped follow-up.
+  // R1 — these two legs stay on the ORIGINAL `> 0` guard, deliberately, and are
+  // the ONLY legs that do. The clear-on-zero behaviour above is safe precisely
+  // because the ER and agency legs are a PURE FUNCTION of the frozen run.lines:
+  // re-derive them on any later pass and you get the same answer, so a zero
+  // really does mean "this run owes nothing here" and the stale row really is
+  // garbage. CADEDUCT and NETPAY are NOT re-derivable that way — both are
+  // driven by actualCa, i.e. by what CashAdvance.deduct could still collect at
+  // the moment it ran. A zero here is ambiguous: it can mean "no CA repayment
+  // this run" OR "the repayment was already collected by an earlier pass /
+  // belongs to an employee who has since dropped out of the run". Clearing on
+  // that ambiguity DESTROYS a correct credit for money that genuinely left the
+  // employees' CA balances — 'Advances to Employees' would never be retired and
+  // Cash would be over-credited by the same amount, which is the exact
+  // receivable-never-comes-down bug the v14 note above exists to kill.
+  // The resume case that used to produce a spurious zero here is fixed at the
+  // ROOT (recoverPostedCa, above), so on a Resume Disburse caPlannedAgg is once
+  // again the real figure and this leg simply re-posts the identical amount.
+  // The residual "employee dropped from the run between two passes leaves an
+  // orphan leg" case is a genuine pre-existing gap that needs a per-run manifest
+  // or a ref-prefix sweep, NOT a per-leg guard change — flagged, not patched.
   if (caPlannedAgg > 0) await upsertLedger(`CADEDUCT-${month}`, {
     date: month+'-01', type:'credit', accountType:'asset', account:'Advances to Employees',
     description: `Cash advance repayments — ${monthLabel} payroll`, amount: caPlannedAgg,

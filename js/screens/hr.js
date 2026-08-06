@@ -1167,10 +1167,25 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       // Hand-typed value wins; otherwise WS21's statutory table suggests the amount
       // (the "Auto-computed if 0" placeholder text is finally backed by real math).
       const sug      = window.computeStatutory ? window.computeStatutory({ grossPay: gross, year: statYear }) : null;
-      const sss      = u.sss        || (sug ? sug.ee.sss : 0);
-      const ph       = u.philhealth || (sug ? sug.ee.philhealth : 0);
-      const pagibig  = u.pagibig    || (sug ? sug.ee.pagibig : 0);
-      const tax      = u.tax        || (sug ? sug.ee.tax : 0);
+      // Statutory-config spec (2026-08-06) §4.3 — LOCKSTEP with the engine.
+      // These four lines used to DUPLICATE money-core's `typed || table`
+      // expression. The moment statConfig exists, a duplicated copy becomes a
+      // preview that CONTRADICTS Compute (an 'exempt' employee showing a table
+      // deduction here and zero after Compute). Both sides now call the ONE
+      // resolver — window.resolveStatutoryEE (js/money-core.js) — so drift is
+      // structurally impossible. With no statConfig the resolver reproduces the
+      // old expression byte-for-byte, so every employee on record today renders
+      // exactly as before.
+      const _stat    = window.resolveStatutoryEE
+        ? window.resolveStatutoryEE(u, sug)
+        : { sss:        u.sss        || (sug ? sug.ee.sss : 0),
+            philhealth: u.philhealth || (sug ? sug.ee.philhealth : 0),
+            pagibig:    u.pagibig    || (sug ? sug.ee.pagibig : 0),
+            tax:        u.tax        || (sug ? sug.ee.tax : 0) };
+      const sss      = _stat.sss;
+      const ph       = _stat.philhealth;
+      const pagibig  = _stat.pagibig;
+      const tax      = _stat.tax;
       const plan     = _planByUser[u.id] || { caBalance:0, mode:'full', caPlanned:0, plan:[] };
       const caBalance= plan.caBalance;
       const caAdv    = plan.caPlanned;
@@ -1254,6 +1269,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">${emojiIcon('⚠',10)} unverified rates</span>` : '';
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
+        // Statutory-config spec §4.1 — the currently-saved mode per contribution
+        // type. Anything that is not one of the three real modes (an absent
+        // statConfig, an absent key, or garbage) reads as 'default', which is
+        // exactly how window.resolveStatutoryEE treats it: today's legacy
+        // "typed amount wins, else the table" behaviour.
+        const _scOf = (k) => (emp.statConfig && ['auto','fixed','exempt'].includes(emp.statConfig[k])) ? emp.statConfig[k] : 'default';
 
         // ── WINDOW FIRST, DATA SECOND (v14.0.71) ──────────────────────────
         // Two Firestore round-trips (the KPI batch, then the linked
@@ -1378,13 +1399,60 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </div>
           <div class="form-row">
             <div class="form-group"><label>Other Deductions</label><input id="ep-deduct" type="number" value="${emp.deductions||0}" inputmode="decimal"/></div>
-            <div class="form-group"><label>SSS${unverifiedBadge}</label><input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.sss):'0.00'}" inputmode="decimal"/></div>
+            <div class="form-group"><label>SSS${unverifiedBadge}</label>
+              <div style="display:flex;gap:6px">
+                <select id="ep-sss-mode" style="flex:none;width:112px;padding:8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+                  <option value="default" ${_scOf('sss')==='default'?'selected':''}>Default</option>
+                  <option value="auto"    ${_scOf('sss')==='auto'?'selected':''}>Auto (table)</option>
+                  <option value="fixed"   ${_scOf('sss')==='fixed'?'selected':''}>Fixed ₱</option>
+                  <option value="exempt"  ${_scOf('sss')==='exempt'?'selected':''}>Exempt</option>
+                </select>
+                <input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.sss):'0.00'}" inputmode="decimal" style="flex:1"/>
+              </div>
+            </div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.philhealth):'0.00'}" inputmode="decimal"/></div>
-            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.pagibig):'0.00'}" inputmode="decimal"/></div>
+            <div class="form-group"><label>PhilHealth</label>
+              <div style="display:flex;gap:6px">
+                <select id="ep-ph-mode" style="flex:none;width:112px;padding:8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+                  <option value="default" ${_scOf('philhealth')==='default'?'selected':''}>Default</option>
+                  <option value="auto"    ${_scOf('philhealth')==='auto'?'selected':''}>Auto (table)</option>
+                  <option value="fixed"   ${_scOf('philhealth')==='fixed'?'selected':''}>Fixed ₱</option>
+                  <option value="exempt"  ${_scOf('philhealth')==='exempt'?'selected':''}>Exempt</option>
+                </select>
+                <input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.philhealth):'0.00'}" inputmode="decimal" style="flex:1"/>
+              </div>
+            </div>
+            <div class="form-group"><label>Pag-IBIG</label>
+              <div style="display:flex;gap:6px">
+                <select id="ep-pi-mode" style="flex:none;width:112px;padding:8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+                  <option value="default" ${_scOf('pagibig')==='default'?'selected':''}>Default</option>
+                  <option value="auto"    ${_scOf('pagibig')==='auto'?'selected':''}>Auto (table)</option>
+                  <option value="fixed"   ${_scOf('pagibig')==='fixed'?'selected':''}>Fixed ₱</option>
+                  <option value="exempt"  ${_scOf('pagibig')==='exempt'?'selected':''}>Exempt</option>
+                </select>
+                <input id="ep-pi" type="number" value="${emp.pagibig||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.pagibig):'0.00'}" inputmode="decimal" style="flex:1"/>
+              </div>
+            </div>
           </div>
-          <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.tax):'0.00'}" inputmode="decimal"/></div>
+          <div class="form-group"><label>Tax</label>
+            <div style="display:flex;gap:6px">
+              <select id="ep-tax-mode" style="flex:none;width:112px;padding:8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+                <option value="default" ${_scOf('tax')==='default'?'selected':''}>Default</option>
+                <option value="auto"    ${_scOf('tax')==='auto'?'selected':''}>Auto (table)</option>
+                <option value="fixed"   ${_scOf('tax')==='fixed'?'selected':''}>Fixed ₱</option>
+                <option value="exempt"  ${_scOf('tax')==='exempt'?'selected':''}>Exempt</option>
+              </select>
+              <input id="ep-tax" type="number" value="${emp.tax||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.tax):'0.00'}" inputmode="decimal" style="flex:1"/>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+            <strong>Default</strong> = a typed amount wins; a typed ₱0 falls back to the table (old behaviour).
+            <strong>Auto</strong> = always the table amount for the run month.
+            <strong>Fixed</strong> = always the typed amount, even ₱0.
+            <strong>Exempt</strong> = do not deduct — the employer share for that item is dropped too, and the
+            employee is left off that agency's remittance.
+          </div>
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
             <label style="font-weight:600">${emojiIcon('🪪',16)} Statutory IDs <span style="font-size:11px;color:var(--text-muted)">(required for Alphalist / BIR 2316)</span></label>
             <div class="form-row">
@@ -1435,6 +1503,28 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         // would otherwise stay blank gaps.
         if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
 
+        // Statutory-config spec §4.1 — the amount input is INERT under 'auto'
+        // (the table always wins) and 'exempt' (always 0), so grey it out
+        // instead of letting HR type a number that silently does nothing.
+        // Under 'default'/'fixed' it stays fully editable, exactly as today.
+        // Display only — it never changes what is written (a disabled input
+        // still exposes .value to the save handler below).
+        const _epStatPairs = [['ep-sss-mode','ep-sss'],['ep-ph-mode','ep-ph'],['ep-pi-mode','ep-pi'],['ep-tax-mode','ep-tax']];
+        const _epSyncStatInputs = () => {
+          _epStatPairs.forEach(([modeId, inputId]) => {
+            const sel = document.getElementById(modeId), inp = document.getElementById(inputId);
+            if (!sel || !inp) return;
+            const inert = (sel.value === 'auto' || sel.value === 'exempt');
+            inp.disabled = inert;
+            inp.style.opacity = inert ? '0.55' : '';
+            inp.title = sel.value === 'exempt' ? 'Exempt — not deducted; this amount is ignored'
+                      : sel.value === 'auto'   ? 'Auto — the statutory table amount is used; this amount is ignored'
+                      : '';
+          });
+        };
+        _epStatPairs.forEach(([modeId]) => document.getElementById(modeId)?.addEventListener('change', _epSyncStatInputs));
+        _epSyncStatInputs();
+
         // ── LISTENERS AFTER THE FILL ──────────────────────────────────────
         // Everything from here down is unchanged; it simply runs one await
         // later than it used to. Wiring it any earlier would bind nothing,
@@ -1467,6 +1557,22 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             philhealth: parseFloat(document.getElementById('ep-ph').value)||0,
             pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
+            // Statutory-config spec §4.2 — MODE only; the amounts stay in the
+            // four flat fields above (one source of truth per amount).
+            // 'default' MUST mean the key is ABSENT, so the resolver runs its
+            // legacy branch rather than seeing a stale mode string — hence
+            // FieldValue.delete() inside the merged map. Four deletes leave an
+            // empty map, which the resolver treats exactly like an absent one.
+            statConfig: (() => {
+              const m = {};
+              [['sss','ep-sss-mode'],['philhealth','ep-ph-mode'],['pagibig','ep-pi-mode'],['tax','ep-tax-mode']]
+                .forEach(([k, elId]) => {
+                  const v = document.getElementById(elId)?.value;
+                  m[k] = (v === 'auto' || v === 'fixed' || v === 'exempt')
+                    ? v : firebase.firestore.FieldValue.delete();
+                });
+              return m;
+            })(),
             // v12 WS39 — statutory IDs (alphalist/2316 prerequisite). Free-text,
             // same field names as worker_profiles so toPayslipModel reads one
             // vocabulary across both payroll cycles.
@@ -1478,16 +1584,63 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           if (emp) emp.payClass = document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular';
           window.logAudit && window.logAudit('update','payroll',uid,{ allowance:parseFloat(document.getElementById('ep-allow').value)||0 });
 
+          // Statutory-config spec §4.2 — the modes actually chosen, read back
+          // from the same selects the write above used.
+          const _epModeOf = (elId) => { const v = document.getElementById(elId)?.value; return (v==='auto'||v==='fixed'||v==='exempt') ? v : 'default'; };
+          const _epModes  = { sss:_epModeOf('ep-sss-mode'), philhealth:_epModeOf('ep-ph-mode'), pagibig:_epModeOf('ep-pi-mode'), tax:_epModeOf('ep-tax-mode') };
+
           // Override tracking (v12 WS21 decision 4) — flag divergence from the
           // computed suggestion for later audit review; never blocks the save.
           if (sug) {
             [['sss',sug.ee.sss,'ep-sss'],['philhealth',sug.ee.philhealth,'ep-ph'],['pagibig',sug.ee.pagibig,'ep-pi'],['tax',sug.ee.tax,'ep-tax']]
               .forEach(([field, computed, elId]) => {
+                // Statutory-config spec §4.2 — under auto/exempt the typed amount
+                // is inert (nothing reads it), so "divergence" from the table is
+                // noise, not an override worth auditing.
+                if (_epModes[field] === 'auto' || _epModes[field] === 'exempt') return;
                 const typed = parseFloat(document.getElementById(elId).value)||0;
                 if (typed && Math.abs(typed-computed) > 0.01) {
                   window.logAudit && window.logAudit('statutory-override','payroll',uid,{ field, computed, entered: typed });
                 }
               });
+          }
+
+          // Statutory-config spec §4.2 — one audit row when the MODES changed
+          // (who/when; the WHY for an exemption stays with the accountant, §10.4).
+          {
+            const _before = emp.statConfig || {};
+            const _after  = {};
+            Object.keys(_epModes).forEach(k => { if (_epModes[k] !== 'default') _after[k] = _epModes[k]; });
+            const _norm = (o) => ['sss','philhealth','pagibig','tax'].map(k => `${k}:${o[k]||'default'}`).join(',');
+            if (_norm(_before) !== _norm(_after)) {
+              window.logAudit && window.logAudit('statutory-config','payroll',uid,{ before:_before, after:_after });
+            }
+            // D6 — keep the in-memory roster row honest. loadPayrollTable(month)
+            // at the bottom of this handler re-renders the roster from the SAME
+            // `employees` array captured once at the top of
+            // renderPayrollManagement — it does NOT re-read the payroll docs.
+            // Patching only statConfig therefore paired a NEW mode with a STALE
+            // amount: "SSS = Fixed ₱500" saved against emp.sss still 0 made the
+            // resolver return 0, so the roster showed −₱0.00 (and a net ₱500 too
+            // high) while the very next Compute deducted ₱500. Display-only and
+            // self-healing on navigation, but it broke the same-screen
+            // before/after check the rollout plan (spec §7) tells the owner to
+            // verify every flip with. Patch every statutory amount this handler
+            // just wrote, alongside the mode.
+            if (emp) {
+              emp.statConfig = _after;
+              emp.sss        = parseFloat(document.getElementById('ep-sss').value)||0;
+              emp.philhealth = parseFloat(document.getElementById('ep-ph').value)||0;
+              emp.pagibig    = parseFloat(document.getElementById('ep-pi').value)||0;
+              emp.tax        = parseFloat(document.getElementById('ep-tax').value)||0;
+              // …and the other two pay fields this same handler writes above
+              // (allowance/deductions). Pre-existing staleness, but leaving them
+              // out made the patch ASYMMETRIC: statutory refreshed on the roster
+              // while an allowance edit saved in the same click still showed the
+              // old number until navigation.
+              emp.allowance  = parseFloat(document.getElementById('ep-allow').value)||0;
+              emp.deductions = parseFloat(document.getElementById('ep-deduct').value)||0;
+            }
           }
 
           // Cash-advance choice for THIS run (v12 WS22). Writes payroll_ca_overrides
@@ -2277,6 +2430,13 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   const depts = ['Barro Kitchens','Barro Industries','Brilliant Steel','Finance','HR','Operations','General'];
   const empTypes = ['Regular','Part-time','Contractual','Project-based'];
   const workTypes = ['Onsite','Online','Hybrid','Remote'];
+  // Statutory-config spec (2026-08-06) §5.1 — currently-saved statutory mode
+  // per contribution type. An absent field, an absent key, or garbage all read
+  // as 'default', which for Type B means EXACTLY today's behaviour: nothing is
+  // computed and nothing is deducted (per the owner, production workers are not
+  // yet regularised, so nothing is due). 'exempt' is the same zero — it just
+  // records that the decision was made deliberately rather than never made.
+  const _hrpScOf = (k) => (profile?.statConfig && ['auto','fixed','exempt'].includes(profile.statConfig[k])) ? profile.statConfig[k] : 'default';
 
   openPage(`${isEdit?'Edit':'Add'} Worker Profile`, `
     <div class="form-row">
@@ -2338,6 +2498,59 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     <div class="form-row">
       <div class="form-group"><label>Pag-IBIG</label><input id="hrp-pib" value="${escHtml(profile?.pagibigNum||'')}"/></div>
       <div class="form-group"><label>TIN</label><input id="hrp-tin" value="${escHtml(profile?.tinNum||'')}"/></div>
+    </div>
+    <div style="margin:4px 0 12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface))">
+      <label style="font-weight:600">Statutory Deductions (SSS / PhilHealth / Pag-IBIG / Tax)</label>
+      <div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">
+        Default: <strong>not deducted</strong> — today's behaviour for workers who are not yet
+        regularised. When a worker regularises, switch each item to <strong>Auto</strong> (monthly table
+        amount, deducted once a month on the month's last payslip) or <strong>Fixed</strong> (a set
+        monthly ₱ amount, same once-a-month timing). Amounts stay editable on every payslip.
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>SSS</label>
+          <select id="hrp-stat-sss-mode">
+            <option value="default" ${_hrpScOf('sss')==='default'?'selected':''}>Default — not deducted</option>
+            <option value="auto" ${_hrpScOf('sss')==='auto'?'selected':''}>Auto — monthly table</option>
+            <option value="fixed" ${_hrpScOf('sss')==='fixed'?'selected':''}>Fixed monthly ₱</option>
+            <option value="exempt" ${_hrpScOf('sss')==='exempt'?'selected':''}>Exempt — confirmed not due</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Fixed ₱ (if Fixed)</label><input id="hrp-stat-sss-amt" type="number" inputmode="decimal" value="${profile?.sss||0}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>PhilHealth</label>
+          <select id="hrp-stat-ph-mode">
+            <option value="default" ${_hrpScOf('philhealth')==='default'?'selected':''}>Default — not deducted</option>
+            <option value="auto" ${_hrpScOf('philhealth')==='auto'?'selected':''}>Auto — monthly table</option>
+            <option value="fixed" ${_hrpScOf('philhealth')==='fixed'?'selected':''}>Fixed monthly ₱</option>
+            <option value="exempt" ${_hrpScOf('philhealth')==='exempt'?'selected':''}>Exempt — confirmed not due</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Fixed ₱ (if Fixed)</label><input id="hrp-stat-ph-amt" type="number" inputmode="decimal" value="${profile?.philhealth||0}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Pag-IBIG</label>
+          <select id="hrp-stat-pib-mode">
+            <option value="default" ${_hrpScOf('pagibig')==='default'?'selected':''}>Default — not deducted</option>
+            <option value="auto" ${_hrpScOf('pagibig')==='auto'?'selected':''}>Auto — monthly table</option>
+            <option value="fixed" ${_hrpScOf('pagibig')==='fixed'?'selected':''}>Fixed monthly ₱</option>
+            <option value="exempt" ${_hrpScOf('pagibig')==='exempt'?'selected':''}>Exempt — confirmed not due</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Fixed ₱ (if Fixed)</label><input id="hrp-stat-pib-amt" type="number" inputmode="decimal" value="${profile?.pagibig||0}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Tax</label>
+          <select id="hrp-stat-tax-mode">
+            <option value="default" ${_hrpScOf('tax')==='default'?'selected':''}>Default — not deducted</option>
+            <option value="auto" ${_hrpScOf('tax')==='auto'?'selected':''}>Auto — monthly table</option>
+            <option value="fixed" ${_hrpScOf('tax')==='fixed'?'selected':''}>Fixed monthly ₱</option>
+            <option value="exempt" ${_hrpScOf('tax')==='exempt'?'selected':''}>Exempt — confirmed not due</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Fixed ₱ (if Fixed)</label><input id="hrp-stat-tax-amt" type="number" inputmode="decimal" value="${profile?.tax||0}"/></div>
+      </div>
     </div>
     <div class="form-group"><label>Address</label><input id="hrp-addr" value="${escHtml(profile?.address||'')}"/></div>
     <div class="form-row">
@@ -2439,6 +2652,12 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       }
       if (saveBtn) saveBtn.disabled = false;
     }
+    // Statutory-config spec §5.1 — per-type mode chosen on this form.
+    // 'default' means the key must be ABSENT on the doc so every reader takes
+    // the no-config path (Type B: compute nothing, deduct nothing).
+    const _wpModeOf = (elId) => { const v = document.getElementById(elId)?.value; return (v==='auto'||v==='fixed'||v==='exempt') ? v : 'default'; };
+    const _wpModes  = { sss:_wpModeOf('hrp-stat-sss-mode'), philhealth:_wpModeOf('hrp-stat-ph-mode'), pagibig:_wpModeOf('hrp-stat-pib-mode'), tax:_wpModeOf('hrp-stat-tax-mode') };
+
     const data = {
       name,
       idNumber: document.getElementById('hrp-id').value.trim(),
@@ -2464,6 +2683,22 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       phNum: document.getElementById('hrp-ph').value.trim(),
       pagibigNum: document.getElementById('hrp-pib').value.trim(),
       tinNum: document.getElementById('hrp-tin').value.trim(),
+      // Statutory-config spec §5.1 — modes (FieldValue.delete() = key absent =
+      // today's default: nothing computed, nothing deducted) plus the flat
+      // fixed AMOUNTS. The four numbers are inert on an unconfigured profile:
+      // nothing reads them until that type's mode is 'fixed'. No name clash —
+      // the government ID strings on this doc are ssNum/phNum/pagibigNum/tinNum.
+      statConfig: (() => {
+        const m = {};
+        Object.keys(_wpModes).forEach(k => {
+          m[k] = _wpModes[k] === 'default' ? firebase.firestore.FieldValue.delete() : _wpModes[k];
+        });
+        return m;
+      })(),
+      sss:        parseFloat(document.getElementById('hrp-stat-sss-amt')?.value)||0,
+      philhealth: parseFloat(document.getElementById('hrp-stat-ph-amt')?.value)||0,
+      pagibig:    parseFloat(document.getElementById('hrp-stat-pib-amt')?.value)||0,
+      tax:        parseFloat(document.getElementById('hrp-stat-tax-amt')?.value)||0,
       address: document.getElementById('hrp-addr').value.trim(),
       phone: document.getElementById('hrp-phone').value.trim(),
       status: document.getElementById('hrp-status').value,
@@ -2474,6 +2709,17 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
     await db.collection('worker_profiles').doc(profileId).set(data, { merge: true });
+    // Statutory-config spec §5.1 — audit the MODE change only. Silent when
+    // nothing changed, which is every save on an unconfigured worker.
+    {
+      const _before = (profile && profile.statConfig) || {};
+      const _after  = {};
+      Object.keys(_wpModes).forEach(k => { if (_wpModes[k] !== 'default') _after[k] = _wpModes[k]; });
+      const _norm = (o) => ['sss','philhealth','pagibig','tax'].map(k => `${k}:${o[k]||'default'}`).join(',');
+      if (_norm(_before) !== _norm(_after)) {
+        window.logAudit && window.logAudit('statutory-config','worker_profiles',profileId,{ before:_before, after:_after });
+      }
+    }
     // v12 WS28 — keep the public-safe roster projection in step (name/title/dept/
     // status/photo ONLY — never rates/CA/gov IDs). Best-effort: a denied projection
     // write must not fail the profile save.
@@ -2925,6 +3171,42 @@ async function openPayslipHistory(currentUser, currentRole) {
 // Compact edit of a filed payslip's amounts (recomputes net; keeps ledger in sync).
 function openPayslipEdit(ps, currentUser, onSave) {
   const r = ps.regular||{}, ot = ps.overtime||{}, al = ps.allowances||{}, g = ps.deductions?.govt||{}, o = ps.deductions?.other||{};
+  // ── Statutory-config spec — D5 (employer share on a hand-edited payslip) ──
+  // Until this feature, weekly payslips ALWAYS stored `employerShare: null`
+  // (v12 WS24 decision 3), so this panel rewriting deductions.govt.* and never
+  // touching employerShare was harmless. A worker configured `auto` now gets a
+  // real ER pair written by the generator — the table ER for the exact bracket
+  // the table EE amount came from. Correcting the EE figure here (₱650 → ₱400)
+  // while leaving ER at ₱1,300 persists, and PRINTS, an EE/ER pair that exists
+  // on no SSS/PhilHealth/Pag-IBIG schedule.
+  //
+  // Of the three options (recompute ER, clear it, block the edit) this clears
+  // it, because:
+  //   • Recomputing is not possible here and would be a confident wrong number.
+  //     The ER bracket was keyed on the worker's MONTH-to-date gross (spec §5.2
+  //     rule A); this doc stores only the WEEK's grossPay, and the month's other
+  //     payslips are not loaded. Re-bracketing on the weekly gross would land in
+  //     a different, lower bracket. Worse, a hand-set EE amount is by definition
+  //     off-table — there is no bracket it belongs to.
+  //   • Blocking would take away finance's ability to correct a filed payslip,
+  //     a live capability regression for a defect that only affects a display
+  //     figure.
+  //   • Clearing restores `employerShare: null` — the pre-existing, already
+  //     understood state that every reader handles: buildPayslipHTML's erCell
+  //     renders "—" and the BIR 1601-C worksheet falls back to its "computed
+  //     manually" dagger. "We no longer know" is the honest answer, and it is
+  //     also the true one, since the remittance for a hand-adjusted figure is a
+  //     manual accountant computation either way (spec §10.5).
+  // Only the three ER-bearing EE amounts trigger it — tax has no employer share,
+  // and edits to hours/CA/loans/paid leave ER untouched.
+  const _erNote = ps.employerShare ? `
+    <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 8px;line-height:1.5">
+      This payslip carries a recorded employer share (SSS ₱${fmt(ps.employerShare.sss||0)} ·
+      PhilHealth ₱${fmt(ps.employerShare.philhealth||0)} · Pag-IBIG ₱${fmt(ps.employerShare.pagibig||0)}).
+      Changing SSS / PhilHealth / Pag-IBIG below <strong>clears it</strong> — a hand-set employee
+      amount no longer matches any table bracket, so the employer share reverts to
+      &ldquo;computed manually&rdquo; rather than printing a pair that cannot exist.
+    </div>` : '';
   openPage(`${emojiIcon('✎',16)} Edit Payslip — ${escHtml(ps.workerName||'')}`, `
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''}</div>
     <div class="form-row">
@@ -2935,6 +3217,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
       <div class="form-group"><label>Overtime Pay (₱)</label><input id="pe-ot" type="number" value="${ot.total||0}" inputmode="decimal"/></div>
       <div class="form-group"><label>Allowances total (₱)</label><input id="pe-allow" type="number" value="${al.total||0}" inputmode="decimal"/></div>
     </div>
+    ${_erNote}
     <div class="form-row">
       <div class="form-group"><label>SSS</label><input id="pe-sss" type="number" value="${g.sss||0}" inputmode="decimal"/></div>
       <div class="form-group"><label>PhilHealth</label><input id="pe-ph" type="number" value="${g.philhealth||0}" inputmode="decimal"/></div>
@@ -2967,7 +3250,16 @@ function openPayslipEdit(ps, currentUser, onSave) {
     const govTotal=sss+ph+pib, otherTotal=ca+loans+tax;
     const grossPay = reg+otT+alT, totalDeductions = govTotal+otherTotal;
     const totalPay = grossPay-totalDeductions, netPay = totalPay-paid;
+    // D5 — see the rationale above _erNote. Drop a stored employer share the
+    // moment one of its three paired employee amounts is actually moved; leave
+    // it alone for a pure hours/CA/tax/paid correction.
+    const _oldG = ps.deductions?.govt || {};
+    const _clearEr = !!ps.employerShare && (
+         Math.abs((_oldG.sss||0)        - sss) > 0.001
+      || Math.abs((_oldG.philhealth||0) - ph)  > 0.001
+      || Math.abs((_oldG.pagibig||0)    - pib) > 0.001);
     await db.collection('payslips').doc(ps.id).update({
+      ...(_clearEr ? { employerShare: null } : {}),
       'regular.ratePerHr':rph, 'regular.hrsWorked':hrs, 'regular.dailyRate':parseFloat((rph*8).toFixed(2)), 'regular.total':reg,
       'overtime.total':otT, 'allowances.total':alT, 'allowances.meal':alT,
       'deductions.govt.sss':sss, 'deductions.govt.philhealth':ph, 'deductions.govt.pagibig':pib, 'deductions.govt.total':govTotal,
@@ -2995,8 +3287,11 @@ function openPayslipEdit(ps, currentUser, onSave) {
     ps.allowances= {...(ps.allowances||{}), total:alT, meal:alT};
     ps.deductions= { govt:{sss,philhealth:ph,pagibig:pib,total:govTotal}, other:{cashAdvance:ca,loans,taxes:tax,total:otherTotal} };
     ps.grossPay=grossPay; ps.totalDeductions=totalDeductions; ps.totalPay=totalPay; ps.paid=paid; ps.netPay=netPay;
+    if (_clearEr) ps.employerShare = null;   // D5 — in-memory copy must match the doc
     closeModal();
-    Notifs.success('Payslip updated.');
+    Notifs.success(_clearEr
+      ? 'Payslip updated — the recorded employer share was cleared because an employee statutory amount changed.'
+      : 'Payslip updated.');
     onSave && onSave();
   }));
 }
@@ -3140,6 +3435,19 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     }
     if (window.lucide) lucide.createIcons();
   };
+  // ── Statutory-config spec — D1 (the "Load from kiosk" under-deduction) ────
+  // The statutory prefill below can only listen for 'input' events, and NOTHING
+  // in this modal that moves gross programmatically fires one: "Load from
+  // kiosk" assigns ps-tin-*/ps-tout-* directly, and recomputeHours() then
+  // assigns ps-hrs / ps-meal / ps-ot-hrs directly. Gross jumped a full week
+  // while the auto statutory amounts stayed keyed to the pre-load gross —
+  // under-deducting the worker, under-remitting the EE share, and leaving
+  // ps-er-json stale. recomputeHours is the ONE funnel every programmatic gross
+  // change already passes through (the kiosk button's last act is to call it),
+  // so it is where the prefill gets re-run. The prefill assigns itself to this
+  // hook once it has decided the worker is configured; for every unconfigured
+  // worker it stays null and this is a dead branch.
+  let psStatRefresh = null;
   const recomputeHours = () => {
     let total = 0, daysOver4 = 0, otHrsTotal = 0;
     for (let i = 0; i < 7; i++) {
@@ -3164,12 +3472,236 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     const otHrsInput = document.getElementById('ps-ot-hrs');
     if (otHrsInput && !otHrsEdited) otHrsInput.value = otHrsTotal.toFixed(2);
     updateSourceBadges();
+    // D1 — ps-hrs / ps-meal / ps-ot-hrs were just written programmatically, so
+    // no 'input' event will reach the statutory prefill. Re-run it here (async,
+    // internally sequenced) so the auto amounts always track the gross that is
+    // actually on the form. Null for every worker without a statConfig.
+    if (psStatRefresh) psStatRefresh();
   };
   document.querySelectorAll('.ps-time-input').forEach(inp => {
     inp.addEventListener('input', recomputeHours);
     inp.addEventListener('input', () => { inp.dataset.source = 'manual'; });
   });
   recomputeHours();
+
+  // ── Statutory-config spec (2026-08-06) §5.3 — OPT-IN Type B prefill ────
+  // THE DEFAULT IS UNCHANGED AND ZERO. Per the owner, production workers are
+  // not yet regularised, so SSS/PhilHealth/Pag-IBIG/tax are genuinely NOT DUE
+  // for them and the zeros this form has always rendered are CORRECT. With no
+  // `statConfig` on the worker_profiles doc — every worker on record today —
+  // the guard at the top of the block below returns immediately: no Firestore
+  // read, no listener, no hint, no hidden input, no DOM touch of any kind. The
+  // deduction fields keep the literal value="0" from the markup above and
+  // collectPayslipData reads exactly what it read yesterday. Nothing past that
+  // guard can run for an unconfigured worker.
+  //
+  // Cadence (spec §5.2, rule A — the owner confirms this with his accountant
+  // BEFORE the first worker is switched to auto/fixed): SSS/PhilHealth/Pag-IBIG
+  // are MONTHLY obligations with monthly brackets, so a configured worker is
+  // deducted the FULL MONTHLY amount ONCE — on the month's last weekly payslip
+  // — with the bracket keyed on the month's real gross (already-saved payslips
+  // for the month + this form's gross). Every field stays editable (the owner's
+  // "allow to edit"); a manual edit pins that field for the rest of the
+  // session, mirroring the foodEdited/otHrsEdited pattern above.
+  (async () => {
+    const cfg    = profile && profile.statConfig;
+    const MODES  = ['auto','fixed','exempt'];
+    const FIELDS = [['sss','ps-sss'],['philhealth','ps-ph'],['pagibig','ps-pib'],['tax','ps-tax']];
+    // UNCONFIGURED — byte-identical to today. Also covers an empty map and a
+    // map holding only unrecognised values.
+    if (!cfg || typeof cfg !== 'object') return;
+    if (!FIELDS.some(([k]) => MODES.includes(cfg[k]))) return;
+
+    // 'exempt' is a one-time, unchanging state: zero, locked, labelled.
+    FIELDS.forEach(([k, id]) => {
+      if (cfg[k] !== 'exempt') return;
+      const inp = document.getElementById(id);
+      if (!inp) return;
+      inp.value = '0';
+      inp.disabled = true;
+      inp.style.opacity = '0.55';
+      inp.title = 'Exempt — configured on the worker profile';
+    });
+
+    // auto/fixed only from here down.
+    const AUTOFIX = FIELDS.filter(([k]) => cfg[k] === 'auto' || cfg[k] === 'fixed');
+    if (!AUTOFIX.length) return;
+
+    // Manual-edit pins — once HR types in a field, this block stops writing to
+    // it for the rest of the session.
+    const edited = {};
+    AUTOFIX.forEach(([k, id]) => document.getElementById(id)?.addEventListener('input', () => { edited[k] = true; }));
+
+    // Hint line + hidden ER carrier, appended to the Deductions card. Both are
+    // created here (never in the base markup) so an unconfigured worker's DOM
+    // is untouched. If the card cannot be located the block degrades to
+    // prefill-only and employerShare stays null exactly as before.
+    const dedCard = document.getElementById('ps-tax')?.closest('.form-group')?.parentElement?.parentElement;
+    let hintEl = null, erInput = null;
+    if (dedCard) {
+      hintEl = document.createElement('div');
+      hintEl.id = 'ps-stat-hint';
+      hintEl.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5';
+      dedCard.appendChild(hintEl);
+      erInput = document.createElement('input');
+      erInput.type = 'hidden';
+      erInput.id = 'ps-er-json';
+      dedCard.appendChild(erInput);
+    }
+
+    // Month-to-date gross: this worker's already-saved payslips whose period
+    // starts inside THIS FORM'S START MONTH and STRICTLY BEFORE this form's own
+    // period start. Reuses the existing composite index (workerId ASC,
+    // payPeriodStart ASC) — no new index. Cached per start so retyping an
+    // amount is free.
+    //
+    // D3 — the upper bound used to be the period END (Saturday), which the spec
+    // (§5.3(2)) prescribed verbatim. THE SPEC WAS WRONG. A payslip already saved
+    // for the SAME week has payPeriodStart = that week's Monday, which is < the
+    // Saturday end — so re-opening the generator for a week that was already
+    // filed (to fix a typo) counted that week's gross in mtdGross AND added the
+    // form's own gross on top: a worker with four ₱3,000 weeks filed showed a
+    // ₱15,000 month instead of ₱12,000, jumping an SSS bracket and
+    // OVER-deducting. The form's own ps-start is the correct exclusive bound:
+    // it counts every EARLIER payslip of the month exactly once and can never
+    // count this period twice, whether it is a fresh draft or a regeneration.
+    const mtdCache = {};
+    const loadMtd = async (start) => {
+      // D7 — BOTH bounds now live in ps-start space, the SAME field the query
+      // filters on. The floor used to be derived from the period END while the
+      // ceiling was ps-start, so a week straddling a month boundary
+      // (Mon 2026-08-31 → Sat 09-05) sat BELOW September's floor and AT/ABOVE
+      // August's exclusive ceiling: counted in NEITHER month. 8 of the 12 months
+      // of 2026 mis-bracket that way (Jan, Apr, May, Jul, Aug, Sep, Oct, Dec).
+      // With one field on both ends, consecutive Mon–Sat weeks tile the year:
+      // every week is counted in exactly one month, never twice.
+      // start >= monthStart by construction, so the range can never invert; a
+      // week that starts ON the 1st gives an empty range = ₱0 to date, correct.
+      const monthStart = start.slice(0,7) + '-01';
+      if (start in mtdCache) return mtdCache[start];
+      const snap = await db.collection('payslips')
+        .where('workerId','==',profile.id)
+        .where('payPeriodStart','>=', monthStart)
+        .where('payPeriodStart','<', start)
+        .get().catch(()=>({docs:[]}));
+      mtdCache[start] = { gross: snap.docs.reduce((s,d)=>s+(d.data().grossPay||0),0), count: snap.docs.length };
+      return mtdCache[start];
+    };
+
+    // Same gross expression collectPayslipData uses (rate×hrs + OT + allowances).
+    const formGross = () => {
+      const n = (id) => parseFloat(document.getElementById(id)?.value)||0;
+      return n('ps-rph')*n('ps-hrs') + n('ps-ot-rate')*n('ps-ot-hrs') + n('ps-meal') + n('ps-transport') + n('ps-rent');
+    };
+
+    let seq = 0;
+    const apply = async () => {
+      const my    = ++seq;
+      const end   = document.getElementById('ps-end')?.value || '';
+      const start = document.getElementById('ps-start')?.value || '';
+      // D3 — ps-start is now load-bearing (it bounds the month-to-date query),
+      // so it is validated exactly as strictly as ps-end. A half-typed date
+      // leaves the previous, still-correct amounts standing rather than
+      // silently recomputing against a bogus period.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(end) || !/^\d{4}-\d{2}-\d{2}$/.test(start)) return;
+      const mtd = await loadMtd(start);
+      if (my !== seq) return;                       // a later edit already superseded this pass
+      // ── BUSINESS RULE (D7), stated explicitly because it decides WHICH MONTH
+      // a contribution is remitted in — FLAG FOR THE ACCOUNTANT before the first
+      // worker is switched to auto/fixed:
+      //   A pay week belongs to the month its START (Monday) falls in.
+      // So Mon 2026-08-31 → Sat 09-05 is an AUGUST week, not a September one.
+      // This is the only choice consistent with the query field: `payslips` are
+      // bracketed by payPeriodStart (the composite index this screen reuses) and
+      // payslipYtdWeekly already ranges the YEAR on payPeriodStart too. Deriving
+      // the month floor from the start and the last-week test from the END mixed
+      // the two spaces and lost whole weeks (see loadMtd). Everything below is in
+      // start-space.
+      // Last pay week of the month = the NEXT week's start lands in a different
+      // month. Since starts step by exactly 7 days, each month has exactly one.
+      // Pure — reuses this function's own addDays.
+      const isLastPayWeek = addDays(start, 7).slice(0,7) !== start.slice(0,7);
+      const statYear      = parseInt(start.slice(0,4),10);   // the contribution month's year, not the end's
+      const monthGross    = mtd.gross + formGross();
+      const sug = window.computeStatutory
+        ? window.computeStatutory({ grossPay: monthGross, year: statYear })
+        : null;
+      const er = { sss:0, philhealth:0, pagibig:0 };
+      let anyAuto = false;
+      AUTOFIX.forEach(([k, id]) => {
+        // D4 — THE EMPLOYER SHARE IS COMPUTED FIRST AND UNCONDITIONALLY.
+        // These two statements used to sit BELOW the `edited[k]` bail-out, so
+        // hand-adjusting one auto-managed EE figure by a single peso silently
+        // dropped that agency's ER — and if it was the only auto key, cleared
+        // anyAuto and with it the WHOLE ps-er-json block, so the payslip
+        // printed "—" for all three employer rows. That contradicts this
+        // codebase's own invariant (js/money-core.js: "ER stays table-computed
+        // (er is never hand-typed)") and the same rule the Type A resolver
+        // follows for 'fixed'. The employer's liability is set by the table and
+        // the month's gross; what HR typed in the employee's column does not
+        // change what the company owes.
+        // 'fixed' KEEPS THE TABLE ER, exactly as Type A does. money-core's
+        // resolver is `(cfg[k]==='exempt') ? 0 : stat.er[k]` — only `exempt`
+        // zeroes the employer share; `fixed` sets the EMPLOYEE's column and
+        // leaves the company's liability to the table. This block used to fill
+        // er[k] only for 'auto', so `fixed`, `exempt` and unconfigured keys ALL
+        // landed in the payslip doc as a literal 0 — and payslips/* stores the
+        // three numbers WITHOUT statConfig, so js/bir.js is structurally unable
+        // to tell those three apart. A `fixed` worker therefore rendered 0.00 in
+        // the 1601-C employer columns: a positive assertion that nothing is owed,
+        // on the document used to file and remit, worth ~P600/month/worker.
+        // Now `exempt` alone leaves er[k] at 0; both other configured modes carry
+        // the table figure, so a 0 in the doc unambiguously means "not tracked"
+        // and bir.js's dagger treatment is correct again for exactly those rows.
+        if (cfg[k] === 'auto' || cfg[k] === 'fixed') {
+          anyAuto = true;                             // "any configured key" — drives ps-er-json below
+          if (isLastPayWeek && sug && k !== 'tax') er[k] = sug.er[k] || 0;
+        }
+        const inp = document.getElementById(id);
+        if (!inp || edited[k]) return;              // EE amount only: HR typed here — hands off
+        const amt = !isLastPayWeek ? 0
+          : cfg[k] === 'auto' ? (sug ? (sug.ee[k]||0) : 0)
+          : (parseFloat(profile[k]) || 0);          // 'fixed' — the flat monthly amount
+        inp.value = amt.toFixed(2);
+      });
+      // ER suggestion (display + BIR 1601-C only — the weekly ledger leg still
+      // posts netPay and books no ER expense; v12 WS24 decision 3 unchanged).
+      if (erInput) erInput.value = (anyAuto && isLastPayWeek) ? JSON.stringify(er) : '';
+      if (hintEl) {
+        const bits = [];
+        bits.push(isLastPayWeek
+          ? `Auto amounts use this month's total gross to date (₱${fmt(monthGross)}${mtd.count?` — includes ₱${fmt(mtd.gross)} from ${mtd.count} saved payslip${mtd.count>1?'s':''} this month; delete any wrong draft first`:''}). Editable.`
+          : `Statutory is deducted once a month, on the month's last payslip (monthly brackets).`);
+        if (sug && sug.unverified) {
+          bits.push(`<span style="color:var(--warning)">${emojiIcon('⚠',11)} Statutory table for ${escHtml(String(statYear))} is UNVERIFIED placeholder rates — have the accountant verify before relying on these amounts.</span>`);
+        }
+        hintEl.innerHTML = bits.join('<br/>');
+        if (window.lucide) lucide.createIcons({ nodes: [hintEl] });
+      }
+    };
+
+    // MANUAL edits — every amount input that moves gross. (ps-hrs, ps-ot-hrs
+    // and ps-meal are listed because HR may override them by hand, which fires
+    // 'input' and does NOT go through recomputeHours.)
+    ['ps-rph','ps-hrs','ps-ot-rate','ps-ot-hrs','ps-meal','ps-transport','ps-rent']
+      .forEach(id => document.getElementById(id)?.addEventListener('input', apply));
+    // D7 — ps-start alone drives the month bracket now; ps-end is still bound
+    // because apply() bails while EITHER date is half-typed, so completing ps-end
+    // has to re-run the pass that bail skipped.
+    document.getElementById('ps-end')?.addEventListener('change', apply);
+    document.getElementById('ps-start')?.addEventListener('change', apply);
+    // D1 — PROGRAMMATIC gross changes. recomputeHours() is the single funnel
+    // for them: it is what the ".ps-time-input" listeners call, and it is the
+    // last thing "Load from kiosk" does after assigning the times directly. The
+    // previous direct '.ps-time-input' → apply binding here covered ONLY the
+    // hand-typed case (recomputeHours fires no events) and left the kiosk
+    // button — the recommended flow — computing statutory on a pre-load gross.
+    // Binding through the hook instead also removes the double-run that a
+    // direct listener plus the hook would cause on every keystroke in a time
+    // field.
+    psStatRefresh = apply;
+    await apply();
+  })();
 
   // ── v12 WS26 / v14 HR remediation P0 — pull HR-kiosk-recorded worker
   // attendance (attendance_worker/{profile.id}/records) into this SAME time-
@@ -3492,7 +4024,16 @@ function collectPayslipData(profile, currentUser) {
       govt: { sss, philhealth: ph, pagibig: pib, total: govTotal },
       other: { cashAdvance: ca, loans, taxes: tax, total: otherTotal }
     },
-    employerShare: null, // v12 WS24 decision 3 — weekly ER manual-only for now; WS21/WS39 may populate later
+    // Statutory-config spec §5.3(5) — ER carried from the generator's table
+    // suggestion when the worker is configured 'auto' (display + BIR 1601-C
+    // only; the WPAY ledger leg still posts netPay and books no ER expense —
+    // weekly ER stays out of the books, exactly as v12 WS24 decision 3 decided).
+    // #ps-er-json only exists for a CONFIGURED worker on a last pay week;
+    // absent element or empty value -> null, byte-identical to before.
+    employerShare: (() => { try {
+      const el = document.getElementById('ps-er-json');
+      return el && el.value ? JSON.parse(el.value) : null;
+    } catch(_) { return null; } })(),
     caBalanceBefore,
     caBalanceAfter,
     totalDeductions,
