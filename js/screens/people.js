@@ -1991,22 +1991,16 @@ async function openPresidentCashAdvanceModal(users) {
     'Finance/admin approve or reject. An approval automatically decrements your balance and notifies you either way.',
     'Vacation and Sick balances accrue annually; admins run Annual Accrual or make a one-off adjustment from Leave Management.'
   ];
-  // Delegate to the unified status registry (Phase 116) — kept as a one-line
-  // shim in case another module still calls lvBadge() directly.
-  const lvBadge = s => window.statusBadgeClass('leave', s || 'pending');
+  // Leave status badges go through the unified status registry (Phase 116):
+  // call window.statusBadge2('leave', status) / window.statusBadgeClass('leave', status)
+  // directly. The old local lvBadge() shim was deleted (Wave 8 cleanup, 2026-08-05)
+  // — it had zero callers tree-wide, in this file or any other.
   const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
 
-  // Inclusive working-day count, excluding Sundays (Manila "Sunday = no work").
-  // Superseded by leaveWorkingDays below (which also excludes PH holidays, matching
-  // payroll's countWorkDays); left in place, no other caller references it.
-  function workingDays(start, end){
-    if(!start||!end) return 0;
-    const s=new Date(start+'T00:00:00'), e=new Date(end+'T00:00:00');
-    if(isNaN(s)||isNaN(e)||e<s) return 0;
-    let n=0; const d=new Date(s);
-    while(d<=e){ if(d.getDay()!==0) n++; d.setDate(d.getDate()+1); if(n>366) break; }
-    return n;
-  }
+  // The Sundays-only workingDays() helper was deleted here (Wave 8 cleanup,
+  // 2026-08-05): leaveWorkingDays below fully supersedes it (same signature,
+  // also excludes PH holidays to match payroll's countWorkDays) and it had
+  // zero callers tree-wide.
   // Inclusive working-day count, excluding Sundays AND PH holidays — matches
   // payroll's countWorkDays so a leave range never charges a day payroll ignores.
   function leaveWorkingDays(start, end){

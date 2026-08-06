@@ -4189,8 +4189,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     let uploadedFile = null, uploadedRaw = null;
     Drive.renderUploadArea('fn-upload-area', (r, file) => { uploadedFile = r; uploadedRaw = file; }, { label: 'Choose file', dept, subfolder: 'Files' });
     document.getElementById('save-fn-btn').addEventListener('click', async () => {
-      const s = await db.collection('users').doc(currentUser.uid).get();
-      const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      const uploaderName = (window.userProfile && userProfile.displayName) || currentUser.email;
       let folderId = document.getElementById('fn-folder').value;
       if (folderId === '__new__') {
         const newName = document.getElementById('fn-folder-new').value.trim();
@@ -4245,8 +4244,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       const name = document.getElementById('nf-name').value.trim();
       if (!name) { Notifs.showToast('Enter a folder name','error'); return; }
       if (RESERVED_FOLDER_NAMES.includes(name.toLowerCase())) { Notifs.showToast('Reserved name','error'); return; }
-      const s = await db.collection('users').doc(currentUser.uid).get();
-      const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      const uploaderName = (window.userProfile && userProfile.displayName) || currentUser.email;
       const ref = await db.collection('hub_folders').add({
         name, parentId: null, scope: scopeKey, department: dept,
         createdBy: currentUser.uid, createdByName: uploaderName,
@@ -4277,8 +4275,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       if (!title) { err.textContent='Enter a title.'; err.classList.remove('hidden'); return; }
       if (!url)   { err.textContent='Enter a URL.'; err.classList.remove('hidden'); return; }
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;  // tolerate bare domains
-      const s = await db.collection('users').doc(currentUser.uid).get();
-      const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      const uploaderName = (window.userProfile && userProfile.displayName) || currentUser.email;
       const now = new Date().toISOString();
       const folderId = document.getElementById('lk-folder').value || null;
       await db.collection(collection).add({

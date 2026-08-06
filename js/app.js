@@ -429,6 +429,16 @@ function startClaimsListener(uid) {
   _claimsUnsub = db.collection('users').doc(uid).onSnapshot(snap => {
     if (!snap.exists) return;
     const data = snap.data();
+    // Keep the cached display name live off this already-open listener. Callers
+    // across the app read window.userProfile.displayName instead of re-fetching
+    // their own users doc before every write (saves a blocking round-trip in
+    // front of task/file mutations); self-edits write back locally, and this
+    // closes the last gap — an ADMIN renaming you mid-session. Runs before every
+    // early-return below on purpose: it is independent of the claims re-gate.
+    if (window.userProfile && userProfile.id === uid) {
+      userProfile.displayName = data.displayName || userProfile.displayName;
+      window.userProfile = userProfile;
+    }
     const ts = data.claimsUpdatedAt;
     const ms = (ts && ts.toMillis) ? ts.toMillis() : 0;
     const role  = data.role || '';
@@ -1438,8 +1448,9 @@ function buildSidebarNav() {
 // on the top-bar avatar → 'my-profile', so a duplicate tab is redundant).
 // v14 C1 — reads NAV_REGISTRY.bottom[variant] directly (same variant resolution
 // as the sidebar via _navVariant()) instead of picking between the 5 hand-rolled
-// *_BOTTOM_NAV globals; those globals still exist (config.js), now derived FROM
-// the registry, kept only for back-compat.
+// *_BOTTOM_NAV globals. Those globals were kept for back-compat after C1 and
+// have now been DELETED (nothing read them — proven by a whole-tree grep
+// including computed `window[...]` access), so NAV_REGISTRY is the only source.
 function _primaryNavItems() {
   const items = (window.NAV_REGISTRY.bottom[_navVariant()] || []);
   return items.filter(item => item.page !== 'my-profile');

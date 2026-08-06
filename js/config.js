@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.74';
+window.APP_VERSION = '14.0.75';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -175,21 +175,6 @@ window.computeHoursBetween = function(inDate, outDate) {
 
 // ── Holiday admin overrides (sync in-memory cache, filled at boot) ─
 window._holidayOverrides = window._holidayOverrides || {};   // { [year]: overridesMap }
-
-// ── Google Drive API Config ──────────────────────
-window.DRIVE_CONFIG = {
-  CLIENT_ID:    'YOUR_GOOGLE_OAUTH_CLIENT_ID',
-  API_KEY:      'YOUR_GOOGLE_API_KEY',
-  FOLDER_ID:    '1cJjMhdHgzbk-f9b94dmBh3WnFXWvZLQM',  // Operations folder in Drive
-  SCOPES:       'https://www.googleapis.com/auth/drive.file',
-  DRIVE_ENABLED: false
-};
-
-// ── Google Sheets (Brilliant Steel Clients) ──────
-window.SHEETS_CONFIG = {
-  SPREADSHEET_ID: '1wnOdoC58ppYXBK3F1tJwzMrDKv8rjfhlDK2yirmKb5s',
-  ENABLED: false
-};
 
 // ── EmailJS Config ───────────────────────────────
 window.EMAIL_CONFIG = {
@@ -631,16 +616,6 @@ window.NAV_REGISTRY = {
     ]
   }
 };
-
-// Back-compat named globals, derived from NAV_REGISTRY.bottom — nothing in the
-// codebase reads these besides the old buildBottomNav (now registry-driven,
-// see app.js), but they're kept as real arrays (not aliases) in case any
-// future/dev code inspects them directly, same shape as before C1.
-window.BOTTOM_NAV_ITEMS          = window.NAV_REGISTRY.bottom.staff;
-window.PRESIDENT_BOTTOM_NAV      = window.NAV_REGISTRY.bottom.admin;
-window.PARTNER_BOTTOM_NAV        = window.NAV_REGISTRY.bottom.partnerBS;
-window.PARTNER_GENERIC_BOTTOM_NAV= window.NAV_REGISTRY.bottom.genericPartner;
-window.BRILLIANT_BOTTOM_NAV      = window.NAV_REGISTRY.bottom.bsOnly;
 
 // ── Users + payroll merge ─────────────────────────
 // Pay fields (salary/allowance/deductions) live in a PROTECTED payroll/{uid}

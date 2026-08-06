@@ -2435,8 +2435,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const myTasks  = myTasksSnap.docs.map(d=>d.data());
   const doneTasks= myTasks.filter(t=>DONE_TASK_STATUSES_PR.includes(t.status));
   const taskPct  = myTasks.length ? Math.round(doneTasks.length/myTasks.length*100) : 0;
-  const kpiProfile = await db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null);
-  const targetScore   = kpiProfile?.exists ? (kpiProfile.data().targetScore||80) : 80;
+  // kpiTargetSnap (fetched in the Promise.all above) IS this same
+  // kpi_targets/{uid} doc — re-reading it here cost a second, fully sequential
+  // round trip after the parallel batch had already resolved.
+  const targetScore   = kpiTargetSnap?.exists ? (kpiTargetSnap.data().targetScore||80) : 80;
   const outcomeMet    = taskPct >= targetScore;
 
   // Computed earnings — v12 WS20 D8: the SAME pure computePayLine the real
