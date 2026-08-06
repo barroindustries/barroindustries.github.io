@@ -2245,7 +2245,7 @@ html.theme-astral .chip-tab.active {
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* SAFE-AREA DOUBLE-COUNT — the footless-panel case (recon Hazard 11, third
    site). The same correction already carried by .page-panel-foot (≤768px
-   block, ~line 2616) and .messenger-input-row (~line 4396), needed here too
+   block, ~line 2809) and .messenger-input-row (~line 4639), needed here too
    because openPage() HIDES the foot outright when a page passes no footerHTML
    (`foot.classList.toggle('hidden', !footerHTML)` in js/app.js, plus
    `.page-panel-foot.hidden{display:none}` just below). On those pages — the
@@ -2271,7 +2271,7 @@ html.theme-astral .chip-tab.active {
    inset is 0px, so the max() clamps to 0px no matter what --kb-h says. Desktop
    satisfies both. A --kb-h that was never published falls back to 0px via the
    var() fallback, i.e. today's behaviour is also the worst failure mode.
-   Deliberately NOT width-scoped, matching .messenger-input-row (~line 4396).
+   Deliberately NOT width-scoped, matching .messenger-input-row (~line 4639).
    The only state where it changes anything above the 768px window tier is a
    tablet with the software keyboard UP, and there the effect is invisible: at
    those widths .page-panel still uses the base `bottom:0`, so the last
@@ -6761,7 +6761,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
      .page-panel-head keeps its height — it's a touch target (back button/title). */
   /* This shorthand RE-DECLARES all four sides at the compact 12px density, so
      it would overwrite the keyboard-aware bottom padding set on the base
-     .page-panel-body rule (~line 2238) on exactly the widths that have a
+     .page-panel-body rule (~line 2280) on exactly the widths that have a
      keyboard — every real phone. Carry the same correction through here at the
      12px density: subtract --kb-h from the home-indicator inset and clamp at
      0, so a FOOTLESS window (openPage() hides .page-panel-foot when a page
