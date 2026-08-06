@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.72';
+window.APP_VERSION = '14.0.73';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1472,6 +1472,25 @@ window.ViewportSync = window.ViewportSync || (function () {
     set(de, '--vvh',    Math.round(h) + 'px', 'vvh');
     set(de, '--vv-top', Math.round(t) + 'px', 'top');
     set(de, '--kb-h',   kb + 'px',            'kb');
+    // `kb-open` on <html> is what lets the CSS stop deriving a window's BOTTOM
+    // edge from the visual viewport when there is no keyboard to track.
+    //
+    // Clamping --vvh above was not enough, and the reason is worth recording:
+    // it clamps against window.innerHeight, so if the layout viewport ALSO
+    // reads short, max() of two short numbers is still short. The owner
+    // reported the resulting dead band under the chat composer three times,
+    // and a light-theme screenshot proved it was page-painted background (it
+    // followed the theme), i.e. the panel genuinely was not reaching the
+    // bottom of a viewport that extended past it.
+    //
+    // With no keyboard presented, a window's bottom edge should not be a
+    // measurement at all — it should just be the bottom of the viewport. So
+    // the CSS pins `bottom: 0` at rest and only switches to the measured
+    // `height: var(--vvh)` while this class is present. That is immune to
+    // whatever visualViewport reports at rest, on any engine, forever.
+    // The threshold is shared with `kb` above deliberately: the class and the
+    // var must never disagree about whether a keyboard is up.
+    try { de.classList.toggle('kb-open', kb > 0); } catch (_) {}
   }
   function schedule() { if (!raf) raf = requestAnimationFrame(apply); }
   var vv = window.visualViewport;

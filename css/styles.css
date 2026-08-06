@@ -2913,8 +2913,26 @@ html.theme-astral #mini-cal td.today {
      already did on its own. The notch clearance it used to get from
      `top: env(safe-area-inset-top)` moves into .page-panel-head's own
      padding-top, immediately below. */
+  /* AT REST the bottom edge is `bottom: 0` — NOT a measurement. Deriving it
+     from the visual viewport with no keyboard presented is what left a dead
+     band under the chat composer (owner-reported three times, ~60 CSS px, and
+     a light-theme screenshot proved it was page-painted background, i.e. the
+     panel really was short of a viewport that extended past it). Clamping
+     --vvh against window.innerHeight did not fix it, because when the layout
+     viewport reads short too, max() of two short numbers is still short.
+     With nothing to track, "the bottom of the window" should simply be the
+     bottom of the viewport — no measurement can be wrong if none is taken. */
   .page-panel {
     top: var(--vv-top, 0px);
+    bottom: 0;
+    height: auto;
+  }
+  /* Keyboard up → switch to the measured visual-viewport rect. `kb-open` is set
+     by ViewportSync (js/config.js) off the SAME threshold that produces --kb-h,
+     so the class and the var can never disagree. This is the geometry the whole
+     visual-viewport anchoring exists for: the panel's bottom edge becomes the
+     keyboard's top edge, and --vv-top counters iOS's focus-reveal pan. */
+  html.kb-open .page-panel {
     height: var(--vvh, 100%);
     bottom: auto;
   }
@@ -6051,9 +6069,13 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
        Every other !important in this rule is left precisely where it was:
        this block is a per-property DELTA over the ≤768px baseline (see the
        block comment above) and each one beats a specific competitor. */
-    top: var(--vv-top, 0px) !important; left: 0 !important; right: 0 !important; bottom: auto !important;
+    /* Bottom edge at rest is `bottom: 0`, not a measurement — same reasoning as
+       .page-panel's (see the ≤768px block): a visual-viewport height taken with
+       no keyboard presented left a dead band below the surface. `html.kb-open`
+       (below) switches to the measured rect only while a keyboard is actually up. */
+    top: var(--vv-top, 0px) !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
     width: 100% !important; max-width: 100% !important;
-    height: var(--vvh, 100dvh) !important; max-height: none !important;
+    height: auto !important; max-height: none !important;
     margin: 0 !important;
     border-radius: 0 !important;
     /* PARITY 3 — BORDER + SHADOW. This rule already reset radius/background/
@@ -6079,6 +6101,11 @@ html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(25
     background: var(--bg) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+  }
+  /* Keyboard up → measured visual-viewport rect, same switch .page-panel uses. */
+  html.kb-open .modal-box {
+    height: var(--vvh, 100dvh) !important;
+    bottom: auto !important;
   }
   .modal-box::after { display: none; }
   /* MOVED — the .modal-header / .modal-body / .modal-footer padding that used
