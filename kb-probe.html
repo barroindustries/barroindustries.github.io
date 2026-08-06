@@ -105,7 +105,14 @@
     <table id="h2ctbl"></table>
   </div>
 
-  <h2>7 · Results</h2>
+  <h2>7 · Window geometry — THE ONE THAT MATTERS</h2>
+  <div class="card">
+    <p class="sub" style="margin:0 0 8px">This is the dead band under every full-screen window,
+    measured rather than guessed. <b>fixed bottom:0 gap</b> should be <b>0</b>.</p>
+    <table id="geotbl"></table>
+  </div>
+
+  <h2>8 · Results</h2>
   <button id="copybtn" class="primary">Copy all results</button>
   <p class="noteA">Paste the copied text back into the chat, or just screenshot sections 1–6.</p>
 
@@ -392,6 +399,7 @@
     }
     var txt = 'KEYBOARD PROBE RESULTS\n' + new Date().toString() +
       dump('envtbl','ENVIRONMENT') + dump('vvtbl','LIVE VIEWPORT') +
+      dump('geotbl','WINDOW GEOMETRY') +
       dump('kbtbl','KEYBOARD') + dump('locktbl','SCROLL LOCK') + dump('h2ctbl','HTML2CANVAS') +
       '\n== EVENT LOG (last 60) ==\n' + logLines.slice(-60).join('\n') + '\n';
     function fallback(){
@@ -406,8 +414,48 @@
     } else fallback();
   });
 
+  // ── window geometry ──────────────────────────────────────────────────────
+  // Five fixes for a "big space below every full-screen window" on this device
+  // failed because each one trusted a number that could not be observed from
+  // outside. These are the primitives every one of those fixes assumed.
+  // The app pins a window with `position:fixed; top:var(--vv-top); bottom:0`,
+  // so if `fixed bottom:0 gap` is not 0, EVERY css fix so far was aimed wrong.
+  const geoProbe = document.createElement('div');
+  geoProbe.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:1px;visibility:hidden';
+  const dvhProbe = document.createElement('div');
+  dvhProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:100dvh;visibility:hidden';
+  const vhProbe = document.createElement('div');
+  vhProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:100vh;visibility:hidden';
+  document.body.appendChild(geoProbe); document.body.appendChild(dvhProbe); document.body.appendChild(vhProbe);
+
+  function paintGeo(){
+    const vv = window.visualViewport, i = insets();
+    const ih = window.innerHeight;
+    const fixedBottom = Math.round(geoProbe.getBoundingClientRect().bottom);
+    const gap = ih - fixedBottom;
+    // What the app's ViewportSync would compute from these same numbers.
+    const kbRaw = vv ? Math.max(0, Math.round(ih - vv.height - (vv.offsetTop||0))) : 0;
+    rows('geotbl', [
+      ['fixed bottom:0 gap', px(gap) + ' px', gap === 0 ? 'ok' : 'bad'],
+      ['fixed bottom:0 lands at', px(fixedBottom) + ' px'],
+      ['window.innerHeight', px(ih) + ' px'],
+      ['100dvh measures', px(Math.round(dvhProbe.getBoundingClientRect().height)) + ' px'],
+      ['100vh measures', px(Math.round(vhProbe.getBoundingClientRect().height)) + ' px'],
+      ['screen.height (CSS px)', px(Math.round(screen.height)) ],
+      ['vv.height / offsetTop', vv ? px(vv.height) + ' / ' + px(vv.offsetTop) : '—'],
+      ['app would compute --kb-h', px(kbRaw) + ' px', kbRaw >= 90 ? 'warn' : ''],
+      ['safe-area top / bottom', px(i.top) + ' / ' + px(i.bottom)],
+      ['▶ VERDICT', gap !== 0
+          ? 'bottom:0 does NOT reach the screen — every CSS fix so far was aimed wrong'
+          : (kbRaw >= 90 ? 'bottom:0 is fine; the app is being told a keyboard is open (kb-h ' + kbRaw + ')'
+                         : 'both primitives look correct here'),
+        gap !== 0 || kbRaw >= 90 ? 'bad' : 'ok']
+    ]);
+  }
+
   // ── boot ─────────────────────────────────────────────────────────────────
-  paintEnv(); paintVV(); paintKB(); paintLock();
+  paintEnv(); paintVV(); paintKB(); paintLock(); paintGeo();
+  setInterval(paintGeo, 500);
   setInterval(paintVV, 500);
   log('probe ready · standalone=' + standalone + ' · vv=' + (vv?'yes':'no') +
       ' · innerH=' + window.innerHeight);
