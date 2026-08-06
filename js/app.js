@@ -3837,6 +3837,33 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   // getComputedStyle().opacity is the explicit, self-documenting flush.
   void getComputedStyle(p.querySelector('.page-panel-body')).opacity;
   requestAnimationFrame(() => { p.classList.add('open'); _focusEnter(p); });
+  // ── TEMPORARY panel-geometry readout (2026-08-07) ───────────────────────
+  // Six attempts at the owner's "big space below every window" have missed. His
+  // device now reports every viewport primitive as CORRECT (ih 852, vv 852/0,
+  // --kb-h 0, kbOpen N, fixedGap 0, saB 34) and the same layout reproduced at
+  // 393x852 with those exact insets is flush — panel 0..852, footer ending at
+  // 852. So the numbers and the repro both say there is no gap, and his screen
+  // says there is. The only way to settle that is to measure the real panel on
+  // the real device, so this prints the rects into the panel itself: one
+  // screenshot of any window now carries its own geometry.
+  // REMOVE once the cause is found. Diagnostic noise, not a feature.
+  setTimeout(() => {
+    if (!p.isConnected) return;
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:0;bottom:0;z-index:9;pointer-events:none;' +
+      'font:9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;color:#0f0;background:rgba(0,0,0,.72);padding:2px 4px';
+    const foot = p.querySelector('.page-panel-foot');
+    const body = p.querySelector('.page-panel-body');
+    const r = p.getBoundingClientRect();
+    const fr = foot && foot.offsetParent !== null ? foot.getBoundingClientRect() : null;
+    const br = body ? body.getBoundingClientRect() : null;
+    d.textContent =
+      `vh${window.innerHeight} pnl${Math.round(r.top)}-${Math.round(r.bottom)}` +
+      (br ? ` bdy-${Math.round(br.bottom)}` : '') +
+      (fr ? ` ft-${Math.round(fr.bottom)}` : ' ft:none') +
+      ` gap${Math.round(window.innerHeight - r.bottom)}`;
+    p.appendChild(d);
+  }, 400);
   _focusTrapAttach(p);
 
   const teardown = () => {
