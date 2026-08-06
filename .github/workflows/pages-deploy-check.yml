@@ -1,0 +1,87 @@
+name: Pages deploy check
+
+# WHY THIS EXISTS
+# ---------------
+# On 2026-08-06 every GitHub Pages build from v14.0.75 onward failed with
+# "Page build failed" while v14.0.74 stayed live. Nothing surfaced it: `git push`
+# succeeded, the pre-commit version bump ran, CI was green, and the app kept
+# serving the last good build. Four commits were silently stranded — including
+# the fix for an owner-reported bug he then re-reported twice, and three separate
+# fixes for a mobile defect that were debugged for hours while never actually
+# running on his device.
+#
+# A deploy that fails silently is worse than one that fails loudly, so this job
+# waits for the Pages build for THIS commit and fails if it did not publish.
+# A red check on the commit is the signal; there is no other.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: read
+
+jobs:
+  verify-published:
+    name: Pages build for this commit actually published
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for the Pages build to settle, then check it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Pages builds are queued, so poll rather than sleeping a fixed amount.
+          # ~6 minutes total: comfortably longer than a normal build, short enough
+          # that a hung build still reports rather than running until the job cap.
+          for i in $(seq 1 36); do
+            sleep 10
+            json="$(gh api "repos/$REPO/pages/builds" 2>/dev/null || echo '[]')"
+            # The build for OUR sha specifically — not merely the latest, which
+            # could belong to a newer push and mask this commit's failure.
+            status="$(printf '%s' "$json" | jq -r --arg sha "$SHA" \
+              'map(select(.commit == $sha)) | .[0].status // "pending"')"
+            error="$(printf '%s' "$json" | jq -r --arg sha "$SHA" \
+              'map(select(.commit == $sha)) | .[0].error.message // ""')"
+            echo "[$i] status=$status ${error:+error=$error}"
+            case "$status" in
+              built)
+                echo "::notice::Pages published ${SHA:0:7}."
+                exit 0 ;;
+              errored)
+                echo "::error::Pages build FAILED for ${SHA:0:7}: ${error:-no message}."
+                echo "::error::The site is still serving the previous build — this commit reached nobody."
+                echo "::error::First check .nojekyll still exists (Jekyll processing is the known cause)."
+                exit 1 ;;
+            esac
+          done
+          echo "::error::Pages build for ${SHA:0:7} never completed within ~6 minutes."
+          echo "::error::Treat as NOT deployed until confirmed: gh api repos/$REPO/pages/builds"
+          exit 1
+
+      - name: Confirm the live site serves this commit's version
+        if: success()
+        env:
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Belt and braces: a "built" status still does not prove the CDN is
+          # serving it. Compare the deployed APP_VERSION against the one in this
+          # commit, which the pre-commit hook keeps in js/config.js.
+          want="$(grep -oE "APP_VERSION *= *'[^']+'" js/config.js | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)"
+          if [ -z "$want" ]; then echo "::warning::could not read APP_VERSION; skipping"; exit 0; fi
+          for i in $(seq 1 12); do
+            got="$(curl -fsS --max-time 15 "https://barroindustries-operatingsystem.ravenmails.com/js/config.js?cb=$RANDOM" 2>/dev/null \
+                   | grep -oE "APP_VERSION *= *'[^']+'" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)"
+            echo "[$i] live=$got want=$want"
+            [ "$got" = "$want" ] && { echo "::notice::Live site serves $want."; exit 0; }
+            sleep 15
+          done
+          echo "::warning::Live site has not served $want within ~3 minutes (CDN lag, or a custom-domain problem)."
+          echo "::warning::Build reported 'built', so this is a propagation warning, not a build failure."
