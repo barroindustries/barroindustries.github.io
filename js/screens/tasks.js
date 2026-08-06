@@ -1005,6 +1005,14 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     `<button class="btn-primary" id="save-edit-btn" disabled>Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
     { onClose: () => { panel._fillAbandoned = true; } });   // see pageStillLive()
   const bodyEl = panel.querySelector('.page-panel-body');
+  // SCOPED LOOKUPS — do NOT use document.getElementById here. openPage appends
+  // a NEW panel to <body> per call and keeps buried ones in the DOM
+  // (.page-under), plus teardown defers removal by 300ms — so two panels can
+  // carry these same ids at once and a global lookup resolves to the FIRST in
+  // document order, i.e. the wrong (invisible) one. That is exactly how
+  // "create task not working" happened: the enable+bind landed on a buried
+  // button and the visible Create stayed disabled and dead. Reproduced.
+  const $p = (id) => panel.querySelector('#' + id);
   let employees=[];
   if (isAdmin) {
     const empSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
@@ -1052,36 +1060,36 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
   // Hydrates the ✕ glyphs on the assignee chips — openPage's own sweep ran in
   // the tap frame, before any of this markup existed.
   window.lucide?.createIcons({ nodes: [bodyEl] });
-  const saveEditBtn = document.getElementById('save-edit-btn');
+  const saveEditBtn = $p('save-edit-btn');
   if (saveEditBtn) saveEditBtn.disabled = false;
 
   let curAssignees=t.assignedTo.map((uid,i)=>({uid,name:t.assignedToNames[i]||uid}));
-  document.getElementById('assignee-chips')?.querySelectorAll('.badge').forEach(chip=>{
+  $p('assignee-chips')?.querySelectorAll('.badge').forEach(chip=>{
     chip.addEventListener('click',()=>{ curAssignees=curAssignees.filter(a=>a.uid!==chip.dataset.uid); chip.remove(); });
   });
-  document.getElementById('et-add-assignee')?.addEventListener('change',e=>{
+  $p('et-add-assignee')?.addEventListener('change',e=>{
     const uid=e.target.value; const name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
     if (!uid||curAssignees.some(a=>a.uid===uid)){e.target.value='';return;}
     curAssignees.push({uid,name});
-    const chips=document.getElementById('assignee-chips');
+    const chips=$p('assignee-chips');
     const chip=document.createElement('span'); chip.className='badge badge-blue'; chip.style.cursor='pointer'; chip.dataset.uid=uid;
     chip.textContent=`${name} ✕`;
     chip.addEventListener('click',()=>{ curAssignees=curAssignees.filter(a=>a.uid!==uid); chip.remove(); });
     chips?.appendChild(chip); e.target.value='';
   });
 
-  document.getElementById('save-edit-btn').addEventListener('click', async()=>{
-    const title=document.getElementById('et-title').value.trim();
+  $p('save-edit-btn').addEventListener('click', async()=>{
+    const title=$p('et-title').value.trim();
     if (!title){Notifs.showToast('Title required','error');return;}
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const update={
       title,
-      description:document.getElementById('et-desc').value.trim(),
-      priority:document.getElementById('et-priority').value,
-      dueDate:document.getElementById('et-due').value,
-      status:document.getElementById('et-status').value,
-      department:document.getElementById('et-dept').value,
+      description:$p('et-desc').value.trim(),
+      priority:$p('et-priority').value,
+      dueDate:$p('et-due').value,
+      status:$p('et-status').value,
+      department:$p('et-dept').value,
       lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,
       lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -1131,6 +1139,14 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     `<button class="btn-primary" id="create-task-btn" disabled>Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
     { onClose: () => { panel._fillAbandoned = true; } });   // see pageStillLive()
   const bodyEl = panel.querySelector('.page-panel-body');
+  // SCOPED LOOKUPS — do NOT use document.getElementById here. openPage appends
+  // a NEW panel to <body> per call and keeps buried ones in the DOM
+  // (.page-under), plus teardown defers removal by 300ms — so two panels can
+  // carry these same ids at once and a global lookup resolves to the FIRST in
+  // document order, i.e. the wrong (invisible) one. That is exactly how
+  // "create task not working" happened: the enable+bind landed on a buried
+  // button and the visible Create stayed disabled and dead. Reproduced.
+  const $p = (id) => panel.querySelector('#' + id);
   const empSnap  = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
   // CLOSED MID-FLIGHT — bail before touching a dead panel, and before
   // Drive.renderUploadArea() below mounts an uploader into nothing.
@@ -1176,42 +1192,42 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
   // Hydrates the priority/📎 glyphs — openPage's own sweep ran in the tap frame,
   // before any of this markup existed.
   window.lucide?.createIcons({ nodes: [bodyEl] });
-  const createTaskBtn = document.getElementById('create-task-btn');
+  const createTaskBtn = $p('create-task-btn');
   if (createTaskBtn) createTaskBtn.disabled = false;
 
   let taskAttachments=[];
   Drive.renderUploadArea('task-attach-area',r=>{taskAttachments.push(r);},{label:`${emojiIcon('📎',16)} Attach file or link`,dept:'tasks',subfolder:'attachments'});
 
   let newAssignees=[];
-  document.getElementById('t-assignee-sel').addEventListener('change',e=>{
+  $p('t-assignee-sel').addEventListener('change',e=>{
     const uid=e.target.value; const name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
     if (!uid||newAssignees.some(a=>a.uid===uid)){e.target.value='';return;}
     newAssignees.push({uid,name});
-    const chips=document.getElementById('new-assignee-chips');
+    const chips=$p('new-assignee-chips');
     const chip=document.createElement('span'); chip.className='badge badge-blue'; chip.style.cursor='pointer';
     chip.textContent=`${name} ✕`;
     chip.addEventListener('click',()=>{ newAssignees=newAssignees.filter(a=>a.uid!==uid); chip.remove(); });
     chips.appendChild(chip); e.target.value='';
   });
 
-  document.getElementById('create-task-btn').addEventListener('click', async()=>{
-    const title=document.getElementById('t-title').value.trim();
+  $p('create-task-btn').addEventListener('click', async()=>{
+    const title=$p('t-title').value.trim();
     if (!title){Notifs.showToast('Enter a task title','error');return;}
     // Re-audit 2026-08-03: an empty Department silently dropped the task into an
     // invisible "Unassigned" bucket — never matched by a Manager Dashboard's
     // depts.includes(t.department) scoping, excluded from renderDeptTasks
     // entirely — even though it may still have named assignees.
-    if (!document.getElementById('t-dept').value){Notifs.showToast('Select a department','error');return;}
+    if (!$p('t-dept').value){Notifs.showToast('Select a department','error');return;}
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const creatorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
-    const desc=document.getElementById('t-desc').value.trim();
-    const notes=document.getElementById('t-notes').value.trim();
+    const desc=$p('t-desc').value.trim();
+    const notes=$p('t-notes').value.trim();
     const taskRef = await db.collection('tasks').add({
       title, description:notes?`${desc}\n\n${emojiIcon('📝',16)} Instructions: ${notes}`:desc,
-      priority:document.getElementById('t-priority').value,
-      status:document.getElementById('t-status').value,
-      dueDate:document.getElementById('t-due').value,
-      department:document.getElementById('t-dept').value,
+      priority:$p('t-priority').value,
+      status:$p('t-status').value,
+      dueDate:$p('t-due').value,
+      department:$p('t-dept').value,
       assignedTo:newAssignees.map(a=>a.uid),
       assignedToNames:newAssignees.map(a=>a.name),
       attachments:taskAttachments,
@@ -1225,7 +1241,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created',dedupKey:`task-created-${taskId}`});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     closeModal(); Notifs.success('Task created!');
-    renderTasks(currentUser,currentRole,document.getElementById('t-dept')?.value||'');
+    renderTasks(currentUser,currentRole,$p('t-dept')?.value||'');
   });
 }
 
