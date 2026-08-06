@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.76';
+window.APP_VERSION = '14.0.77';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -219,7 +219,7 @@ window.DEPARTMENTS = {
     key: 'HR', icon: '👥', lucideIcon: 'users', color: '#E64980',
     // renderHR's card list (departments.js:3153-3159); 'Accounts & Logins' only
     // shows for president/manager, kept in its real position for accuracy.
-    subtabs: ['People & Roles', 'Payroll', 'Worker Payslips', 'Accounts & Logins', 'Leave', 'Attendance'], navOrder: 3
+    subtabs: ['People & Roles', 'Payroll', 'Accounts & Logins', 'Leave', 'Attendance'], navOrder: 3
   },
   'Sales': {
     key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#F76707',

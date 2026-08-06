@@ -194,7 +194,12 @@ const FINANCE_GROUPS = [
   // v14 post-release — Break-even lands as a Reports sub-chip (owner request:
   // "Add a computation for breakeven. Rents etc.").
   { key:'Reports',               label:'Reports',               members:['Reports','Balance Sheet','Cash Flow','Bank Rec','Break-even'] },
-  { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','HR Profiles','Cash Advances','SSS / Gov'] },
+  // 2026-08-06 owner request ("Better if its just / Payroll / Then / Type a /
+  // Type b"): 'Payroll' and 'HR Profiles' were the SAME pair of screens under
+  // two chips. They are now one chip — window.renderPayrollHub (js/screens/
+  // hr.js) with Type A / Type B tabs inside. 'HR Profiles' is gone from the
+  // chip row but is NOT gone as a route: see FINANCE_LEGACY_KEYS below.
+  { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','Cash Advances','SSS / Gov'] },
   { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
   { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR'] },
   { key:'Records',               label:'Records',               members:['Records','Tasks'] },
@@ -202,16 +207,36 @@ const FINANCE_GROUPS = [
 const FINANCE_KEY_TO_GROUP = {};
 FINANCE_GROUPS.forEach(g => g.members.forEach(m => { FINANCE_KEY_TO_GROUP[m] = g.key; }));
 
+// ── Retired subtab keys that must still ROUTE ─────────────────────────────
+// A key that is no longer in any group's `members` is orphaned in
+// FINANCE_KEY_TO_GROUP, and renderFinanceNav's unknown-key guard below
+// (`if (!FINANCE_KEY_TO_GROUP[subtab]) subtab = 'Overview'`) would silently
+// bounce it to Overview — so loadFinanceContent's `case 'HR Profiles'` would
+// become dead code and every stored deep link to it would land on the wrong
+// screen. Those links are real and outlive the rename: window.setSubroute
+// writes the subtab into history state / the URL hash, so a bookmark, a
+// back/forward entry, or a push-notification `link` captured before today
+// still arrives here as 'HR Profiles'.
+// Mapping value = the chip that REPLACED the retired key. It keeps the key
+// resolvable for the group lookup and tells the sub-chip row which chip to
+// light up; loadFinanceContent still receives the ORIGINAL key, so it can
+// open the merged screen on the matching tab (here: Type B).
+const FINANCE_LEGACY_KEYS = { 'HR Profiles': 'Payroll' };
+Object.keys(FINANCE_LEGACY_KEYS).forEach(k => {
+  const g = FINANCE_KEY_TO_GROUP[FINANCE_LEGACY_KEYS[k]];
+  if (g) FINANCE_KEY_TO_GROUP[k] = g;
+});
+
 window.renderFinance = async function(currentUser, currentRole, subtab = window.initialSubtab('Overview')) {
   const c = deptContainer();
   const isPres = (typeof isPresident==='function') && isPresident();
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('💰',20)} Finance & HR</h2></div>
     ${window.sopPanel('How Finance works', [
-      'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, HR Profiles, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
+      'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
       'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow, Bank Reconciliation and Break-even.',
-      'Payroll runs through Compute → Verify → Disburse; the same Payroll & HR group handles weekly worker payslips, cash advances and government contributions.',
+      'Payroll is one screen with two tabs: Type A (regular staff, monthly — Compute → Verify → Disburse) and Type B (Production workers, weekly payslips, profiles & ID cards). It opens on Type A.',
       `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`,
       isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
     ].filter(Boolean))}
@@ -232,9 +257,14 @@ function renderFinanceNav(currentUser, currentRole, subtab) {
   const group = FINANCE_GROUPS.find(g => g.key === groupKey) || FINANCE_GROUPS[0];
   const wrap = document.getElementById('fin-tabs-wrap');
   if (!wrap) return; // navigated away mid-render
+  // A retired key has no chip of its own — highlight the chip that replaced it
+  // (so an old 'HR Profiles' link shows "Payroll" active, not a row with
+  // nothing selected). `subtab` itself is passed through to the content
+  // dispatcher unchanged so it can still open the right tab inside.
+  const chipKey = FINANCE_LEGACY_KEYS[subtab] || subtab;
   wrap.innerHTML = `
     ${window.chipTabs(FINANCE_GROUPS.map(g=>({key:g.key,label:g.label})), groupKey, {cls:'fin-group-tabs'})}
-    ${group.members.length > 1 ? window.chipTabs(group.members.map(m=>({key:m,label:m})), subtab, {cls:'fin-sub-tabs'}) : ''}
+    ${group.members.length > 1 ? window.chipTabs(group.members.map(m=>({key:m,label:m})), chipKey, {cls:'fin-sub-tabs'}) : ''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [wrap] });
   loadFinanceContent(currentUser, currentRole, subtab);
@@ -316,7 +346,18 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Cash Flow':     await window.renderCashFlowReport(content, currentUser, currentRole); break;
     case 'Bank Rec':      await window.renderBankRec(content, currentUser, currentRole); break;
     case 'Break-even':    await renderBreakevenTab(content, currentUser, currentRole); break;
-    case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
+    // One Payroll screen; Type A (monthly) / Type B (weekly Production) are
+    // chip-tabs INSIDE it — see window.renderPayrollHub in js/screens/hr.js.
+    // The `?:` is a load-order belt-and-braces, not a real branch: index.html
+    // loads js/screens/hr.js (:496) BEFORE js/screens/finance.js (:523) and
+    // both are `defer`, so the hub is always defined by the time any nav can
+    // fire. Falling back to the bare renderer keeps this file free of a hard
+    // dependency on that ordering if the script list is ever reshuffled.
+    case 'Payroll':
+      await (window.renderPayrollHub
+        ? window.renderPayrollHub(content, currentUser, currentRole, 'A')
+        : renderPayrollManagement(content, currentUser, currentRole));
+      break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
@@ -336,8 +377,14 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
       bindFileCollection('fin-sss', currentUser, 'Finance', 'SSS');
       break;
+    // Back-compat route only — 'HR Profiles' no longer has a chip (see
+    // FINANCE_LEGACY_KEYS above), but stored deep links still carry the key.
+    // Land them on Type B, the tab that now holds exactly this screen, rather
+    // than on a destination that no longer exists in the nav.
     case 'HR Profiles':
-      await renderFinanceHRProfiles(content, currentUser, currentRole);
+      await (window.renderPayrollHub
+        ? window.renderPayrollHub(content, currentUser, currentRole, 'B')
+        : renderFinanceHRProfiles(content, currentUser, currentRole));
       break;
     case 'Cash Advances':
       await renderFinanceCA(content, currentUser, currentRole);

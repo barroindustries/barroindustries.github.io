@@ -11,7 +11,10 @@
    window.openScheduledRaises — the RaiseFlow lifecycle SERVICE they call
    stays in departments.js, see below), the HR hub card launcher
    (window.renderHR), the payroll reconciliation screen (buildThreeWayRecon/
-   threeWayReconTableHTML/openPayrollReconciliation), Payroll Management
+   threeWayReconTableHTML/openPayrollReconciliation), the Payroll hub
+   (window.renderPayrollHub — the Type A / Type B chip-tab wrapper that is now
+   the single entry point for BOTH payroll screens; see its own header block),
+   Payroll Management
    (renderPayrollManagement, incl. its nested loadPayrollTable/
    loadPayRunStrip and Payroll History table), and the HR Profiles +
    Worker Payslip suite (nextWorkerIdNumber/syncWorkerDirectory/
@@ -353,8 +356,9 @@ window.renderHR = async function(currentUser, currentRole){
   const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
   const cards = [
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
-    { icon:'💰', title:'Payroll',        desc:'Monthly run — Compute → Verify → Disburse', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
-    { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips, profiles & ID cards', go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
+    // One card, two tabs (owner: "Better if its just / Payroll / Then / Type a
+    // / Type b"). Opens the hub, which lands on Type A by default.
+    { icon:'💰', title:'Payroll',        desc:'Type A monthly run (Compute → Verify → Disburse) + Type B weekly Production payslips', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
     ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
     { icon:'📍', title:'Work Sites',     desc:'Geofenced Time In/Out locations for Type-B (Production) self-service', go:()=>openWorkSitesPage(currentUser, currentRole) },
     { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
@@ -364,8 +368,8 @@ window.renderHR = async function(currentUser, currentRole){
     <div class="page-header"><h2>${emojiIcon('👥',20)} Human Resources</h2></div>
     ${window.sopPanel('How HR works', [
       'People & Roles — set each person’s role, department(s) and employee class (Regular monthly vs Production weekly).',
-      'Payroll — run the monthly cycle: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
-      'Worker Payslips — generate weekly payslips for Production workers (hourly attendance, fixed weekly rate).',
+      'Payroll → Type A — the monthly cycle for regular staff: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
+      'Payroll → Type B — generate weekly payslips for Production workers (hourly attendance, fixed weekly rate), plus their worker profiles and ID cards.',
       'Leave — employees request leave; finance/admin approve and balances update automatically.',
       'Attendance — review daily attendance and approve time-in extension requests.'
     ])}
@@ -648,6 +652,125 @@ function _kpiMonthBreakdown(userTasks, month) {
   return { doneInM, inScopeCount };
 }
 
+// ── Payroll hub — one screen, two chip-tabs (owner request, 2026-08-06) ───
+// "Better if its just / Payroll / Then / Type a / Type b", and — asked which
+// should open first — "Open on type a".
+//
+// The two payroll screens used to be two separate subtabs under two different
+// names: HR called them "Payroll" + "Worker Payslips", Finance called the same
+// pair "Payroll" + "HR Profiles". They are now ONE screen with two chip-tabs,
+// reusing the Type A / Type B vocabulary the app already uses in the Employee
+// Type selector:
+//     Type A = regular staff, paid MONTHLY  (Compute → Verify → Disburse)
+//     Type B = Production workers, paid WEEKLY (payslips, profiles, ID cards)
+//
+// This is a NAVIGATION wrapper ONLY. renderPayrollManagement and
+// renderFinanceHRProfiles keep their exact signatures and are otherwise
+// untouched — no payroll/statutory math, no Firestore query or write, and no
+// rules are involved in this change.
+//
+// LAYOUT CONTRACT (load-bearing — do NOT flatten the pane into `host`):
+//     host                             ← the container the caller passed
+//     ├─ .chip-tabs.payroll-hub-tabs   ← the tab bar, owned by this function
+//     └─ #payroll-hub-pane             ← the SUB-container handed to the two
+//                                        renderers
+// Both renderers own their container outright: renderPayrollManagement opens
+// with `container.innerHTML = skeletonHtml('rows')`, and renderFinanceHRProfiles
+// re-renders ITSELF on ~6 actions (add/edit/delete profile, ID modal, raise —
+// see the `()=>renderFinanceHRProfiles(container,currentUser,currentRole)`
+// callbacks below) using the SAME container it was handed. Giving them the
+// PANE instead of `host` is exactly what makes those self-refreshes safe: they
+// may rebuild #payroll-hub-pane as often as they like and the SIBLING tab bar —
+// along with the listeners bindChipTabs attached to it — is never in the blast
+// radius. The pane element is created once here and never replaced, so the
+// closures that captured it stay valid across every self-refresh.
+window.renderPayrollHub = async function(container, currentUser, currentRole, tab) {
+  const host = container || (typeof deptContainer === 'function' ? deptContainer() : null);
+  if (!host) return;
+  const active = (tab === 'B') ? 'B' : 'A';   // anything else (incl. undefined) ⇒ Type A
+
+  // ── RE-ENTRY GUARD — this is a MONEY bug if it is missing. ────────────────
+  // The tab row is made inert during a load (below), which stops a second load
+  // starting from a tab CLICK. It does nothing about re-entering this function,
+  // and loadFinanceContent(…, 'Payroll') enters it on every Finance chip click.
+  //
+  // Why re-entry is not merely wasteful: both renderers write with
+  // `container.innerHTML` but then bind with GLOBAL document.getElementById —
+  // hr.js's pr-month-sel / gen-payroll-btn / payroll-tbody / print-payroll-btn,
+  // and Type B's hrp-add-btn / hrp-sync-dir-btn. If a rebuild swaps the pane
+  // while a render is still awaiting its Firestore reads, that render paints
+  // into the DETACHED pane and then binds its handlers onto the LIVE one.
+  // Measured: entering twice while the first load is in flight left TWO click
+  // handlers on Compute, so one tap ran computePayRun TWICE. The reverse
+  // completion order threw (getElementById → null) and painted the error into
+  // the detached pane, where it is invisible and its retry is unreachable.
+  //
+  // So: mount ONCE per host, and route every later entry through the same
+  // loader, which serialises (latest-wins) instead of starting a second render.
+  if (typeof host._payrollHubLoad === 'function' && host.querySelector('#payroll-hub-pane')) {
+    return host._payrollHubLoad(active);
+  }
+
+  host.innerHTML = `
+    ${window.chipTabs([
+      { key:'A', label:'Type A — Monthly' },
+      { key:'B', label:'Type B — Weekly (Production)' }
+    ], active, { cls:'payroll-hub-tabs' })}
+    <div id="payroll-hub-pane">${window.skeletonHtml('rows')}</div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+  const tabsRow = host.querySelector('.payroll-hub-tabs');
+  const pane    = host.querySelector('#payroll-hub-pane');
+
+  // Both renderers paint their own skeleton on their very first line, so a
+  // switch never leaves stale content on screen and no extra skeleton is
+  // needed here. What IS worth guarding is OVERLAP: each renderer awaits
+  // several Firestore reads and only then binds listeners via
+  // document.getElementById(...), so two loads in flight at once would leave
+  // the first one's bindings hunting for the second one's DOM. The tab row is
+  // therefore made inert for the duration of a load (same shape as
+  // window.busy's button lock), and re-enabled in a `finally` so a failed read
+  // can never strand the tabs.
+  // Latest-wins serialisation. A load requested while one is in flight is
+  // REMEMBERED, not started — the running render keeps sole ownership of the
+  // pane (and therefore of the global ids it will bind), and the newest
+  // requested tab renders once it finishes. Two renders can never overlap, so
+  // the double-bind above is structurally impossible rather than merely
+  // unlikely. `pending` holds only the newest request; rapid taps collapse.
+  let busy = false, pending = null;
+  const setActiveChip = (key) => {
+    if (!tabsRow) return;
+    tabsRow.querySelectorAll('.chip-tab').forEach(b => {
+      b.classList.toggle('active', b.dataset.chip === key);
+    });
+  };
+  const loadTab = async (key) => {
+    const want = (key === 'B') ? 'B' : 'A';
+    if (busy) { pending = want; return; }        // newest wins; the in-flight render finishes untouched
+    busy = true;
+    setActiveChip(want);                          // programmatic entries must move the chip too —
+                                                  // bindChipTabs only toggles it on a real click
+    if (tabsRow) { tabsRow.style.pointerEvents = 'none'; tabsRow.style.opacity = '0.6'; }
+    try {
+      if (want === 'B') await renderFinanceHRProfiles(pane, currentUser, currentRole);
+      else              await renderPayrollManagement(pane, currentUser, currentRole);
+    } catch (e) {
+      _hrPanelError(pane, e, () => loadTab(want));
+    } finally {
+      busy = false;
+      if (tabsRow) { tabsRow.style.pointerEvents = ''; tabsRow.style.opacity = ''; }
+      if (pending !== null) { const next = pending; pending = null; await loadTab(next); }
+    }
+  };
+  host._payrollHubLoad = loadTab;                 // the re-entry guard above routes through this
+
+  // Scoped to the tab bar element itself (the finance.js precedent), never to
+  // `host` — otherwise a chip rendered by a sub-screen inside the pane would
+  // get swept up by the same querySelectorAll.
+  window.bindChipTabs(tabsRow, (key) => { loadTab(key); });
+  await loadTab(active);
+};
+
 async function renderPayrollManagement(container, currentUser, currentRole) {
   // 8-point #3 (Wave 7 Pass 3) — this screen had no loading state at all
   // before this pass: the container sat on whatever the previous Finance
@@ -679,7 +802,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     return depts.length === 1 && depts[0] === 'Brilliant Steel';
   };
   const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
-  // Production-class staff are paid WEEKLY via Worker Payslips (HR → Payslips),
+  // Production-class staff are paid WEEKLY via Payroll → Type B,
   // NOT in the monthly run. Excluding them here is the single-source fix that
   // stops a production worker being paid both weekly AND monthly (double pay).
   const productionStaff = allStaff.filter(u=>u.payClass==='production');
@@ -760,7 +883,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     ${raiseBanner}
     <div id="pr-unpaid-card" style="margin-bottom:14px"></div>
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
-    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via Worker Payslips (HR → Payslips) and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
+    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via <strong>Payroll → Type B</strong> and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
     <div class="card">
       <div class="card-body" style="padding:0">
         <div id="payroll-table-caption" style="padding:8px 16px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--border)"></div>
@@ -1373,7 +1496,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               <option value="regular" ${_payClass==='regular'?'selected':''}>Type A — Regular, monthly (KPI + attendance)</option>
               <option value="production" ${_payClass==='production'?'selected':''}>Type B — Production, weekly (hourly attendance, 8-hr day)</option>
             </select>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Type A staff are paid monthly here. Type B (Production) workers are paid weekly via the Payslip generator, excluded from this monthly run, and — if their Worker Profile's "Linked Login Account" is set to this uid (HR → Worker Payslips → the profile's edit form) — can self-service Time In/Out with geofencing from their own phone (HR → Work Sites).</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Type A staff are paid monthly here. Type B (Production) workers are paid weekly on the Type B tab, excluded from this monthly run, and — if their Worker Profile's "Linked Login Account" is set to this uid (Payroll → Type B → the profile's edit form) — can self-service Time In/Out with geofencing from their own phone (HR → Work Sites).</div>
           </div>
           <div style="margin-top:4px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface))">
             <label style="font-weight:600">${emojiIcon('bar-chart-2',16)} KPI Computation — ${window.fmtMonthLabel ? window.fmtMonthLabel(month) : month}</label>
@@ -3073,7 +3196,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         if (!ps) return;
         const model = window.toPayslipModel(ps, 'weekly');
         model.ytd = await window.payslipYtdWeekly(ps.workerId, (ps.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-        window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole));
+        window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B'));
       });
     });
     document.querySelectorAll('.ps-advance-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -3803,7 +3926,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     const model = window.toPayslipModel(d, 'weekly');
     model.official = false; // never yet saved — a draft/projection by construction
     model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-    window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole));
+    window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B'));
   });
 
   // DOUBLE-SUBMIT / DOUBLE-DEDUCT FIX (v14 HR remediation) — `psSaving` is an
@@ -3857,7 +3980,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       Notifs.success('Payslip saved as draft! Verify and file it from Payslip History.');
       const model = window.toPayslipModel({...d, id: ref.id}, 'weekly');
       model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-      setTimeout(() => window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole)), 400);
+      setTimeout(() => window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B')), 400);
       // psSaving intentionally left true / button left disabled — closeModal()
       // just tore this panel's DOM down, so there is nothing left to re-submit.
     } catch (err) {
@@ -4580,7 +4703,9 @@ window.openPayslipEditPanel = async function(model, backFn) {
   panel.querySelector('#pe-money-link')?.addEventListener('click', () => {
     Notifs.showToast('Opening Payroll — pay figures are edited there, never on the payslip itself.');
     if (moneyLinkTarget === 'weekly') {
-      if (typeof renderFinanceHRProfiles === 'function') renderFinanceHRProfiles(deptContainer(), window.currentUser, window.currentRole);
+      // Weekly = Type B. Route through the hub so the tab bar comes back with
+      // the screen (the old call rendered a bare, tab-less Worker Profiles).
+      if (typeof window.renderPayrollHub === 'function') window.renderPayrollHub(deptContainer(), window.currentUser, window.currentRole, 'B');
       else navigateTo('dept:HR');
     } else if (typeof window.renderFinance === 'function') {
       window.renderFinance(window.currentUser, window.currentRole, 'Payroll');
