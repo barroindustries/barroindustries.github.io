@@ -574,17 +574,90 @@ async function checkCAReminder(user) {
 }
 
 // ── Splash ────────────────────────────────────────
+// v14.0.68 (owner: "it feels slow"). The floor was 1600ms and it was the single
+// largest item in the whole warm-launch budget — bigger than everything the app
+// actually DOES on boot combined. It is not overlapped work either: app.js is
+// second-to-last in index.html's defer chain, so _splashStart is stamped AFTER
+// the SDK + config + drive + notifications + departments scripts have already
+// parsed. Measured warm domContentLoadedEventEnd: ~122ms. The app was
+// interactive in about a tenth of a second and then deliberately sat still for
+// 1.6 more. No amount of animation can rescue a wait we chose to create, so the
+// floor drops to 400ms — still long enough for the BK cube to register as a
+// brand beat rather than a flash, short enough that a warm launch feels like an
+// app resuming instead of an app booting.
+//
+// The floor is a MINIMUM, not a schedule: hideSplash() is called by showLogin()
+// and showApp(), i.e. only once auth has actually resolved, so a genuinely cold
+// start (measured domInteractive ~1031ms) still holds the splash until there is
+// something real to show. Lowering the floor cannot expose an unpainted app.
 const _splashStart = Date.now();
-const _SPLASH_MIN_MS = 1600;
+const _SPLASH_MIN_MS = 400;
 function hideSplash() {
   const splash = document.getElementById('splash-screen');
   if (!splash || splash.classList.contains('hiding')) return;
   const wait = Math.max(0, _SPLASH_MIN_MS - (Date.now() - _splashStart));
   setTimeout(() => {
     splash.classList.add('hiding');
-    setTimeout(() => { splash.style.display = 'none'; }, 420);
+    // display:none is driven by the ACTUAL end of the fade, not by a hardcoded
+    // duration. The old 420 was hand-matched to `transition: opacity 0.4s` in
+    // css/styles.css, which meant the two numbers had to be edited together
+    // forever — and this pass shortens that CSS duration in a different file.
+    // A stale constant here is not a harmless mismatch: if the JS timer is the
+    // shorter of the two, display:none lands mid-fade and the splash visibly
+    // POPS out at half opacity. transitionend removes the coupling entirely.
+    // The timer is kept purely as a safety net for the cases where
+    // transitionend legitimately never fires — a zero/absent transition (the
+    // prefers-reduced-motion kill switch collapses it to 0.001ms, which does
+    // still fire, but a future `transition:none` would not), or the element
+    // being display-swapped by something else mid-fade. Whichever comes first
+    // wins; `_done` is idempotent so a late second call is a no-op.
+    let _splashHidden = false;
+    const _done = () => {
+      if (_splashHidden) return;
+      _splashHidden = true;
+      splash.removeEventListener('transitionend', _onEnd);
+      splash.style.display = 'none';
+    };
+    // transitionend BUBBLES, so this must reject events from descendants —
+    // otherwise a future CSS edit that gives, say, .splash-progress a short
+    // transition would hide the whole splash the instant that bar finished,
+    // mid-fade. Measured today: zero descendants of #splash-screen have any
+    // transition at all, so this guard is protecting a property that currently
+    // holds by accident and would fail silently and confusingly if it stopped.
+    // Explicit removeEventListener instead of `{ once: true }` for the same
+    // reason — `once` would be spent by the first BUBBLED event and then not be
+    // there for the real one.
+    const _onEnd = (e) => { if (e.target === splash) _done(); };
+    splash.addEventListener('transitionend', _onEnd);
+    setTimeout(_done, 450);
   }, wait);
 }
+
+// ── iOS :active-state enabler (v14.0.68) ──────────
+// css/styles.css sets `-webkit-tap-highlight-color: transparent` on <html>,
+// which is INHERITED, so iOS Safari's default grey press flash is gone from
+// every element in the document and has to be replaced by explicit :active
+// rules. Those rules have a well-known iOS quirk: on a NON-interactive element
+// (a <div class="item-card">, a <tr>, a chip built from a <div>) WebKit only
+// applies :active if the element — or one of its ancestors — carries a touch
+// listener. Without one, the press style is written but never painted, which is
+// exactly the "I tapped and nothing happened" the owner is reporting.
+//
+// A document-level touchstart already exists, but only inside startAutoLogout()
+// (see below), which runs AFTER auth. That leaves the login screen — the very
+// first surface anyone touches — with no press feedback at all, and makes the
+// whole effect dependent on an unrelated subsystem's lifetime. This registers
+// one no-op listener at script-parse time instead, so the guarantee holds from
+// the first painted frame and survives sign-out.
+//
+// Deliberately its own listener rather than reusing the auto-logout one:
+// nothing may reset the idle timer before a user is signed in. Passive so it
+// can never delay scrolling, and capture so it is reached even if some
+// descendant stops propagation. It is a genuinely empty function — the entire
+// point is the listener's EXISTENCE, not its body.
+try {
+  document.addEventListener('touchstart', function _iosActiveEnabler(){}, { passive: true, capture: true });
+} catch (_) { /* pre-DOM / non-browser host — nothing to enable */ }
 
 // ── Screens ───────────────────────────────────────
 function showLogin() {
@@ -2198,6 +2271,41 @@ function updateNavBackBtn() {
 }
 window.navBack = function() { history.back(); };   // the top-bar chevron === device Back
 
+// ── Route-aware skeleton shape (v14.0.68) ─────────
+// navigateTo() has always flashed skeletonHtml('rows') — list-item anatomy,
+// avatar + two text lines — no matter where you were going. On a dashboard or
+// the Departments grid that placeholder actively MIS-predicts the content: you
+// see four list rows, then they are replaced by a KPI/card grid, and the swap
+// reads as two separate loads rather than one screen arriving. A placeholder
+// only buys perceived speed while it resembles what lands; when it doesn't, it
+// costs.
+//
+// This is a shape hint only — same markup budget, same lifetime, no extra work.
+// Unknown/new pages fall through to 'rows', which is both the old behaviour and
+// the correct default (most screens in the app really are lists), so adding a
+// route to the switch below without touching this map is not a regression.
+// Kinds are the three skeletonHtml() understands (js/ui-states.js): 'rows',
+// 'cards', 'table'.
+const _SKELETON_KIND = {
+  // Card/tile grids — KPI tiles, dept tiles, people tiles, profile blocks.
+  dashboard: 'cards', company: 'cards', analytics: 'cards',
+  'my-dept': 'cards', departments: 'cards', team: 'cards',
+  'team-directory': 'cards', 'my-profile': 'cards',
+  'system-health': 'cards', 'files-hub': 'cards',
+  'partner-projects': 'cards', 'projects-lifecycle': 'cards',
+  // Tabular screens — these paint a <table> or a column-aligned list.
+  'bs-quotations': 'table', 'bk-quotations': 'table', 'bs-clients': 'table',
+  'sales-orders': 'table', inventory: 'table', 'cash-advances': 'table',
+  'product-database': 'table', 'audit-log': 'table', holidays: 'table',
+  attendance: 'table', 'personal-finance': 'table',
+  // Everything else (tasks, approvals, posts, memos, chat, files, leave,
+  // notifications, search, help, sops, submissions, progress, dept:* …)
+  // is genuinely list-shaped and keeps 'rows' via the default below.
+};
+function _skeletonKindFor(page) {
+  return _SKELETON_KIND[page] || 'rows';
+}
+
 function navigateTo(page, opts) {
   opts = opts || {};
   const subtab = (opts.subtab !== undefined) ? opts.subtab : null;
@@ -2244,7 +2352,7 @@ function navigateTo(page, opts) {
       if (existing) existing.destroy();
     });
   }
-  c.innerHTML = window.skeletonHtml('rows');
+  c.innerHTML = window.skeletonHtml(_skeletonKindFor(page));
 
   // dept: prefix for dual dept tabs
   if (page.startsWith('dept:')) {
@@ -2975,7 +3083,35 @@ function openProfileDrawer() {
   `;
   const wasOpen = drawer.classList.contains('open');
   drawer.classList.remove('hidden');
-  setTimeout(()=>drawer.classList.add('open'),10);
+  // Double rAF, not setTimeout(10) (v14.0.68). The class must land on a frame
+  // AFTER the one that removed `.hidden`, or the browser coalesces both into a
+  // single style recalc and the transform transition never starts (it has no
+  // "from" value to interpolate out of). setTimeout(10) achieved that by
+  // accident and paid up to a full extra frame for it — a 10ms timer fired
+  // mid-frame waits until the NEXT paint anyway, so on a busy frame the drawer
+  // visibly started late. Two rAFs are the precise expression of the same
+  // intent: first callback = the frame the un-hide is committed on, second =
+  // the earliest frame the transition can legally begin. Guarded because this
+  // also has to survive a non-rendering host (rAF is absent/never-firing in a
+  // backgrounded tab), where falling straight through to the class is correct —
+  // the drawer simply appears already open, which is the right end state.
+  // The typeof guard alone is NOT enough, and this was measured, not assumed:
+  // in a tab that is not currently rendering, `requestAnimationFrame` is still a
+  // function and still accepts the callback — it simply never invokes it until
+  // the tab renders again. The old setTimeout(10) had no such failure mode. So
+  // the rAF pair is the fast path and a timer is the floor: whichever runs
+  // first wins, and classList.add is idempotent so the loser is a no-op. Without
+  // the floor, a drawer opened as the app is being backgrounded (an incoming
+  // call, a notification banner) comes back with the scrim up, the Overlay
+  // entry pushed, and the drawer itself still off-screen — i.e. a tap-blocking
+  // dead screen whose only exit is device Back.
+  const _openDrawer = () => drawer.classList.add('open');
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => requestAnimationFrame(_openDrawer));
+    setTimeout(_openDrawer, 60);
+  } else {
+    _openDrawer();
+  }
   overlay.classList.remove('hidden'); overlay.classList.add('active');
   // v13 Phase 105 -- register with the Overlay history stack so device/browser
   // Back closes the drawer instead of leaving it open while the page behind it
@@ -3661,7 +3797,34 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
 
   document.body.appendChild(p);
   p.querySelector('.page-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
-  window.lucide?.createIcons();
+  // SCOPED to this panel (v14.0.68). This used to be a document-wide sweep, and
+  // it ran on the frame immediately before the entrance — createIcons() walks
+  // every `[data-lucide]` in the document and replaces each with an <svg>, so on
+  // a page that already has a few hundred hydrated icons it was ~25-40ms of
+  // forced restyle landing exactly where the window is supposed to appear.
+  // Scoping it costs nothing in coverage: every icon this function is
+  // responsible for lives inside `p` — the back arrow written just above, the
+  // caller's bodyHTML, footerHTML, opts.headerRightHTML, and the title glyph
+  // that _setPanelTitle() prepends but deliberately leaves unhydrated because
+  // the panel was still detached when it ran (see the comment there). Icons
+  // OUTSIDE the panel were never this call's job; they are hydrated by their
+  // own scoped passes (openModal, buildNav, each render*), and anything that
+  // was silently free-riding on this sweep was already a latent bug on any path
+  // that doesn't open a window.
+  window.lucide?.createIcons({ nodes: [p] });
+  // Force a style flush so the entrance transition actually has a before-change
+  // style to interpolate FROM. `.page-panel .page-panel-body` starts at
+  // opacity:0 and goes to 1 under `.open` (styles.css) — but rAF callbacks run
+  // BEFORE the frame's style pass, so without a flush here the element's very
+  // first computed opacity is already 1 and no transition is ever created.
+  // Measured: with no flush the fade never ran on a stacked window or on ANY
+  // desktop window; it only appeared to work because ScrollLock.acquire()
+  // happens to read window.scrollY — and that only runs for the FIRST window
+  // (it early-returns once the refcount is held). Depending on that was a
+  // silent coupling to an unrelated subsystem: if ScrollLock ever stopped
+  // reading scrollY, every window entrance would go dead with no other symptom.
+  // getComputedStyle().opacity is the explicit, self-documenting flush.
+  void getComputedStyle(p.querySelector('.page-panel-body')).opacity;
   requestAnimationFrame(() => { p.classList.add('open'); _focusEnter(p); });
   _focusTrapAttach(p);
 
@@ -4481,7 +4644,16 @@ function _qtTimeAgo(ts) {
   return Math.floor(diff / 86400) + 'd ago';
 }
 async function openQuoteTemplatesPicker() {
-  const panel = window.openPage('📋 Quote Templates', '<div class="empty-state">Loading…</div>');
+  // Skeleton, not a "Loading…" text sink (v14.0.68). This call site already
+  // does the right structural thing — it pushes the window SYNCHRONOUSLY and
+  // fills the body when the read lands, so the window exists in the tap frame
+  // instead of after a round trip — but it announced that wait with centred
+  // text, which reads as an error/empty state and gives no hint of the shape
+  // that is coming. skeletonHtml('rows') matches what renderList() actually
+  // paints (a vertical stack of template cards) and is the same primitive every
+  // other async screen uses (js/ui-states.js). Purely how it appears while
+  // loading — the loaded output is byte-identical.
+  const panel = window.openPage('📋 Quote Templates', window.skeletonHtml('rows'));
   const bodyEl = panel.querySelector('.page-panel-body');
   let docs = [];
   try {

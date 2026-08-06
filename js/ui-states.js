@@ -82,7 +82,15 @@ window.withLoadingAndError = async function (container, fetcher, renderer, opts)
   var esc = window.escHtml || function (s) { return String(s == null ? '' : s); };
 
   container.innerHTML = window.skeletonHtml(opts.skeleton, opts.skeletonCount);
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
+  // NO icon sweep on this line — deliberate (v14.0.68 smoothness pass).
+  // skeletonHtml() is the pure builder 30 lines up in this same file, and all
+  // three of its kinds emit nothing but .skl-wrap / .skl-row / .skl-card /
+  // .skl-text divs: there is not one data-lucide node in any of them
+  // (re-verified in-browser against all three kinds, 2026-08-05). The
+  // lucide.createIcons() call that used to sit here therefore had no visual
+  // effect at all, while paying the full document-wide cost documented at the
+  // bottom of this function — and paying it on the exact frame the skeleton
+  // paints, i.e. the frame the user is already waiting on.
 
   try {
     var data = await fetcher();
@@ -107,7 +115,36 @@ window.withLoadingAndError = async function (container, fetcher, renderer, opts)
       });
     }
   }
-  // Always re-scope lucide to this container after any injection above
-  // (loading placeholder has no icons, but empty/error/renderer output can).
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
+  // ── ONE icon sweep, and only when it can actually do something ──────────
+  // This is the sweep that matters: renderEmptyState() and the error block
+  // above both build their glyph with emojiIcon(), which returns
+  // `<i data-lucide="…">` (js/config.js:373), and renderer(data) output is
+  // usually full of icons too — so hydration belongs here, after the
+  // injection, never before it.
+  //
+  // WHY THE GUARD IS THE REAL SCOPING MECHANISM (v14.0.68):
+  // lucide 0.468.0 — the UMD build pinned in index.html — does NOT support the
+  // `nodes` option. Its createIcons() body is an unconditional
+  // `document.querySelectorAll('[data-lucide]')`; the substring "nodes" does
+  // not occur in the function at all. Passing { nodes: [container] } scopes
+  // NOTHING — every call re-creates every icon in the whole document. Worse,
+  // a hydrated icon keeps its data-lucide attribute on the replacement <svg>,
+  // so already-drawn icons are re-matched and rebuilt on every later sweep:
+  // the cost tracks total page icon count, not what we just injected.
+  // Measured in-browser 2026-08-05: 0.66ms @13 icons, 1.41ms @73, 3.23ms @163,
+  // 5.40ms @313 — on a Mac; the phone is several times slower again.
+  // So asking "did WE just inject an un-hydrated icon?" is the only scoping
+  // actually available: `[data-lucide]:not(svg)` matches the `<i>` form lucide
+  // has yet to replace, and skips the document-wide rebuild entirely when
+  // there is nothing to hydrate. { nodes: [container] } is kept only so this
+  // call starts scoping for free if lucide ever implements it — inert today.
+  //
+  // CONTRACT this makes explicit: renderer(data) must inject its icons INSIDE
+  // `container`. All four call sites already do (each assigns to the very
+  // container it was handed), but it used to be incidental — a renderer that
+  // painted icons elsewhere was silently rescued by the document-wide sweep,
+  // and now would not be.
+  if (window.lucide && container.querySelector('[data-lucide]:not(svg)')) {
+    lucide.createIcons({ nodes: [container] });
+  }
 };

@@ -774,7 +774,11 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 4px 8px;
   display: none; transition: background var(--t1), color var(--t1);
 }
-.menu-toggle:hover { background: var(--s2); color: var(--text); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .menu-toggle:hover { background: var(--s2); color: var(--text); } }
 
 .topbar-logo { display: flex; align-items: center; gap: 10px; flex: 1; }
 
@@ -901,7 +905,11 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   font-size: 1.0625rem; color: var(--text-muted);
   transition: background var(--t1), color var(--t1), box-shadow var(--t2);
 }
-.notif-btn:hover { background: var(--s2); color: var(--text); box-shadow: var(--sh-pink); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .notif-btn:hover { background: var(--s2); color: var(--text); box-shadow: var(--sh-pink); } }
 .notif-badge {
   position: absolute; top: 1px; right: 1px;
   /* v14 a11y fix: --grad-pk-bl-badge (darkened pink→blue) not --grad-pk-bl —
@@ -922,7 +930,14 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   transition: transform var(--t1), box-shadow var(--t2);
   overflow: hidden;
 }
-.topbar-avatar:hover { transform: scale(1.08); box-shadow: var(--sh-pink); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+/* This one was the worst of the set: :hover GROWS the avatar to 1.08 on the
+   same property the new :active uses to shrink it, so on the phone tapping
+   your own avatar left it permanently enlarged. */
+@media (hover:hover) { .topbar-avatar:hover { transform: scale(1.08); box-shadow: var(--sh-pink); } }
 
 /* v12 WS41 topbar-depts-btn/topbar-chat-btn mobile-hide rule retired WS42
    nav-consolidation — both buttons were removed from index.html (Chat lives
@@ -957,7 +972,10 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .notif-backdrop { position: fixed; inset: 0; z-index: var(--z-panel-scrim); }
 .notif-item {
   padding: 11px 14px; border-bottom: 1px solid var(--border);
-  cursor: default; transition: background var(--t1);
+  /* var(--ease) named explicitly — same gap as .item-card: without it this ran
+     the UA default `ease` while the rest of the press system ran --ease, and the
+     notification inbox is one of the highest-traffic tap surfaces in the app. */
+  cursor: default; transition: background var(--t1) var(--ease);
   position: relative;
   display: flex; align-items: center; gap: 10px;
 }
@@ -1029,7 +1047,18 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   padding-left: env(safe-area-inset-left, 0px);
   z-index: var(--z-shell); display: flex; flex-direction: column;
   overflow: hidden;
-  transition: transform var(--t3) var(--ease);
+  /* v14.0.68: was var(--t3) (340ms). The drawer/sidebar is the ONE surface in
+     the app where the travel IS the affordance -- it has a scrim and it is
+     swipe-dismissible, so the user has to see where it came from and which
+     edge to throw it back at. It therefore keeps a real slide while windows
+     do not. But 340ms across a full-height panel was the longest interactive
+     motion left in the app; 240ms is about the floor at which a full-height
+     slide still reads as a slide rather than a jump. Written as a literal
+     instead of by editing --t3 in css/tokens.css deliberately: exactly two
+     rules consume --t3 (this one and .drawer below) and both are handled
+     here, so the token's future consumers are not pre-committed -- and
+     tokens.css is not this pass's file to change. */
+  transition: transform 240ms var(--ease);
 }
 
 /* vertical gradient accent on left edge */
@@ -1092,10 +1121,14 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   position: relative; border-radius: 0;
   margin: 1px 0;
 }
-.nav-item:hover {
-  background: var(--s1); color: var(--text);
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) {
+  .nav-item:hover { background: var(--s1); color: var(--text); }
+  .nav-item:hover .nav-icon { animation: iconPop 0.3s var(--spring); }
 }
-.nav-item:hover .nav-icon { animation: iconPop 0.3s var(--spring); }
 /* Wave5 M1 — sidebar (desktop) nav badge. Bottom-nav already has a working
    .bottom-nav-item .bn-badge rule (positioned inside .bn-icon-wrap); the
    sidebar had no badge slot at all, so this is new. Reuses the SAME .bn-badge
@@ -1217,6 +1250,21 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* v14.0.68 smoothness pass — ONE entrance per navigation, not two.
+   navigateTo() paints window.skeletonHtml(...) into #page-content first and
+   swaps the real markup in when the read lands (js/app.js ~2247). Both are
+   freshly-inserted DIRECT children, so the rule above fires the 160ms
+   pageEnter TWICE for a single tap: the skeleton fades up, then a few hundred
+   ms later the real content fades up again. Two entrances read as two page
+   loads -- exactly the "why did that load twice" texture being reported as
+   slowness. A skeleton is a placeholder, not content: it should simply BE
+   there in the frame the tap produces. The real content keeps its entrance,
+   which is now the only one the user ever sees.
+   `.skl-wrap` is the wrapper every skeletonHtml() variant emits
+   (js/ui-states.js ~55/60/65). The shimmer INSIDE it (.skl-text/.skl-row/
+   .skl-card statePulse, ~line 2696) is untouched -- that is the loading cue
+   and it still plays. */
+#page-content > .skl-wrap { animation: none; }
 
 /* WS42 Phase 27 — content-visibility on heavy repeating list rows, so the
    browser can skip layout/paint work for off-screen rows in long lists
@@ -1310,7 +1358,14 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
   border: 1px solid var(--border);
   box-shadow: var(--sh-sm);
   transition: transform var(--t2), box-shadow var(--t2), border-color var(--t2);
-  animation: fadeUp 0.4s var(--ease) both;
+  /* v14.0.68: `animation: fadeUp 0.4s var(--ease) both` removed. The KPI row
+     already arrives inside #page-content's 160ms pageEnter (~line 1245); this
+     second, slower 400ms fade-and-rise ran ON TOP of it, so the first thing
+     the user looks at after every dashboard navigation was still visibly
+     moving 400ms in. The end state is byte-identical -- fadeUp's `to` frame is
+     opacity:1/translateY(0), which is the card's normal rest state -- so this
+     is a pure settle-time change with no look change. @keyframes fadeUp
+     (~line 27) stays: .login-card still uses it (~line 438). */
 }
 @media (hover:hover) {
   .kpi-card:hover { box-shadow: var(--sh); border-color: var(--border-strong); }
@@ -1407,7 +1462,11 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
   transition: background var(--t1), color var(--t1), border-color var(--t1);
   text-align: left; min-height: 44px;
 }
-.quick-action-btn:hover { background: var(--s2); color: var(--text); border-color: rgba(255,255,255,0.15); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .quick-action-btn:hover { background: var(--s2); color: var(--text); border-color: rgba(255,255,255,0.15); } }
 .quick-action-btn:active { background: var(--s3); transform: scale(0.98); }
 .quick-action-btn svg { width: 16px; height: 16px; stroke: currentColor; flex-shrink: 0; }
 
@@ -1427,7 +1486,11 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
 }
 
 /* ── Cards ── (base .card rule merged into LIQUID GLASS copy below) */
-.card:hover { border-color: rgba(255,255,255,0.12); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .card:hover { border-color: rgba(255,255,255,0.12); } }
 /* subtle gradient interior */
 .card::before {
   content: '';
@@ -1641,7 +1704,15 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
      were removed; @keyframes splashBarRun is kept — the new .splash-bar::after
      still references it by name. */
   position: fixed; inset: 0; z-index: var(--z-splash);
-  transition: opacity 0.4s ease, visibility 0.4s ease;
+  /* v14.0.68: 0.4s -> 0.18s. This fade is the TAIL of the launch budget, not
+     part of it -- app.js holds the splash for _SPLASH_MIN_MS and then waits a
+     hide timeout sized to MATCH this duration before removing the node, so
+     every millisecond here is a millisecond of warm launch during which the
+     app is already interactive underneath. 180ms still reads as a dissolve
+     rather than a cut. Keep this number and app.js's hide timeout in step: if
+     one moves the other has to move with it, or the splash node is removed
+     mid-fade (flicker) or lingers inert over the app. */
+  transition: opacity 0.18s ease, visibility 0.18s ease;
 }
 #splash-screen.hiding {
   opacity: 0;
@@ -1794,7 +1865,11 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
    solid color, no background-position for gradRun to animate), same
    specificity, later in source. Never painted in any theme; see that block
    for the live active-subtab style. */
-.subtab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .subtab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); } }
 /* v14 CSS/a11y audit — desktop-mouse users have no visual cue that this row
    (and #tn-tabs) scrolls once the native scrollbar is hidden below (touch
    users already have the swipe affordance). Edge-fade mask restores a "there
@@ -1856,7 +1931,13 @@ html.theme-astral .chip-tab.active {
   background: var(--surface); border-radius: var(--r);
   border: 1px solid var(--border); padding: 13px 15px;
   cursor: pointer; position: relative; overflow: hidden;
-  transition: background var(--t2), box-shadow var(--t2), transform var(--t1), border-color var(--t2);
+  /* Timing function named explicitly: without it this ran the UA default
+     `ease` while every other press surface ran var(--ease), and .item-card is
+     the most-tapped surface in the app. (68 other `transition:` declarations in
+     this file still omit a timing function — sweeping them all is a whole-app
+     feel change with no way to validate it, so only the press surfaces this
+     pass touches are converted.) */
+  transition: background var(--t2) var(--ease), box-shadow var(--t2) var(--ease), transform var(--t1) var(--ease), border-color var(--t2) var(--ease);
   border-left: 3px solid transparent;
 }
 .item-card::before {
@@ -1866,11 +1947,22 @@ html.theme-astral .chip-tab.active {
   transform: translateX(-100%) skewX(-12deg);
   pointer-events: none; /* decorative shimmer only — must never intercept clicks on card content */
 }
-.item-card:hover {
-  background: var(--s2); transform: translateY(-1px);
-  box-shadow: var(--sh-sm);
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+/* The list row is the single most-tapped surface in the app and the clearest
+   case of the latch: :hover lifts it translateY(-1px) on the SAME property
+   :active uses to press it in, so :active won only while the finger was down
+   and :hover took over the moment it lifted. The net visible result of
+   tapping a row was a permanent LIFT -- the opposite of a press. */
+@media (hover:hover) {
+  .item-card:hover {
+    background: var(--s2); transform: translateY(-1px);
+    box-shadow: var(--sh-sm);
+  }
+  .item-card:hover::before { animation: shimmer 0.5s ease forwards; }
 }
-.item-card:hover::before { animation: shimmer 0.5s ease forwards; }
 /* WS42 Phase 13 — .pressable-equivalent feedback baked directly into the row
    class (rather than sweeping every JS template literal that builds .item-card
    to add the utility class): same transform/opacity-only press feedback. */
@@ -2144,7 +2236,11 @@ html.theme-astral .chip-tab.active {
   background: var(--grad-pk-bl); border-radius: var(--r) var(--r) 0 0;
   opacity: 0.7;
 }
-.dept-card:hover { box-shadow: var(--sh-sm), 0 0 24px rgba(255,45,120,0.08); transform: translateY(-2px); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .dept-card:hover { box-shadow: var(--sh-sm), 0 0 24px rgba(255,45,120,0.08); transform: translateY(-2px); } }
 .dept-name { font-size: 0.9375rem; font-weight: 700; margin-bottom: 4px; color: var(--text); }
 .dept-head { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: 12px; }
 .dept-members { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -2210,7 +2306,24 @@ html.theme-astral .chip-tab.active {
    set by openPage()) so there's nothing to cross-fade against. */
 .page-panel{ position:fixed; top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
   left:0; right:0; bottom:0; background:var(--bg); z-index:var(--z-page-panel); display:flex; flex-direction:column;
-  transform:translateX(100%); transition:transform .3s cubic-bezier(.4,0,.2,1); overflow:hidden; }
+  /* v14.0.68 -- `transition:none` PROMOTED FROM THE <=768px BLOCK TO THE BASE
+     RULE. It used to read `transform .3s cubic-bezier(.4,0,.2,1)` here and be
+     cancelled only under @media (max-width:768px) (~line 2938), which left
+     the ORIGINAL owner-reported defect fully live above that breakpoint: on
+     desktop and on iPad LANDSCAPE (812pt > 768) a pushed window still slid
+     300ms across a fully-painted topbar / nav strip / main content, i.e.
+     literally "overlays of different pages". The phone tier was fixed in
+     v14.0.67 and the wide tier was not; this makes them the same window.
+     The entrance is a SWAP everywhere now, and the motion that sells it lives
+     on the panel's BODY instead (see .page-panel .page-panel-body below).
+
+     `transition:none`, NOT `transform:none` -- this is the footgun, restated
+     here because the rule now carries it at every width. The rest state MUST
+     stay translateX(100%) so a CLOSING panel leaves the screen in the same
+     frame `.open` is removed. Killing the transform instead would leave the
+     closed panel sitting opaque over the already-repainted shell until
+     openPage's 300ms removal timeout fires, and Back would look frozen. */
+  transform:translateX(100%); transition:none; overflow:hidden; }
 .page-panel.open{ transform:translateX(0); }
 @media (prefers-reduced-motion: reduce) { .page-panel { transition: none; } }
 .page-panel-head{ display:flex; align-items:center; gap:12px;
@@ -2241,6 +2354,45 @@ html.theme-astral .chip-tab.active {
    `@media (pointer: coarse)` (~line 121) and the ≤768px block (~line 2948) —
    because it is a hit-area concern, not an appearance one. */
 .page-panel-back, .modal-back{ background:none; border:none; color:var(--primary-light); cursor:pointer; padding:4px; display:flex; }
+
+/* ── WINDOW ENTRANCE -- v14.0.68 ───────────────────────────────────────────
+   The problem this solves: v14.0.67 removed the 300ms slide (correctly -- it
+   was what made a pushed window read as a sheet laid over a lit page) and
+   removed openModal's sheetRise with it. That killed the overlap, and it also
+   killed every cue that a tap had been received, so a window that takes
+   200-600ms to fetch its data now shows the user NOTHING between finger-up
+   and content. The reported symptom flipped from "overlapping" to "slow".
+
+   The panel itself still does NOT animate -- `transition:none` and a rest
+   state of translateX(100%), base rule ~line 2298. It SWAPS. Two screens on
+   screen at once stays structurally impossible, not merely avoided. The
+   motion goes on the panel's CONTENTS instead, and that is safe for one
+   specific, verified reason: by the first frame the panel exists it is
+   already opaque (`background:var(--bg)`) and full-bleed, and at the phone
+   tier body.page-open has already dropped #topbar / #top-nav-strip /
+   #bottom-nav / .main-content to visibility:hidden with a 0s delay (~line
+   3057) in that same frame. So this fade reveals --bg and can never reveal
+   the previous screen. That is the whole reason the entrance lives here and
+   not on .page-panel.
+
+   Deliberately NOT `.page-panel-head` as well: the title and the Back arrow
+   are the acknowledgement that the tap landed, and they must be solid in the
+   first frame. Only the region that is still loading fades.
+
+   OPACITY ONLY -- NOT transform. .page-panel already carries a transform and
+   is therefore the containing block for its position:fixed descendants; the
+   chat reaction picker measures itself against exactly that (js/chat.js
+   _positionPicker, and .chat-reaction-picker ~line 4868). A transform here
+   would insert a SECOND containing block between them and shift the popover.
+
+   A TRANSITION, not an @keyframes. An entrance keyframe with
+   animation-fill-mode:both can stick at opacity:0 when the class lands while
+   the tab is backgrounded and no frame is produced -- the hazard already
+   flagged against `#page-content > *` (~line 1245). A transition's end state
+   is class-derived, so a panel foregrounded later is always correct: no
+   frames ran, the property is simply at its `.open` value. */
+.page-panel .page-panel-body { opacity: 0; transition: opacity 140ms var(--ease); }
+.page-panel.open .page-panel-body { opacity: 1; }
 .page-panel-title{ flex:1; font-size:var(--fs-lg); font-weight:700; color:var(--text);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* SAFE-AREA DOUBLE-COUNT — the footless-panel case (recon Hazard 11, third
@@ -2471,7 +2623,10 @@ html.theme-dark .dialog-overlay, html.theme-astral .dialog-overlay { background:
   box-shadow: var(--sh-lg);
   z-index: var(--z-drawer); display: flex; flex-direction: column;
   transform: translateX(100%);
-  transition: transform var(--t3) var(--ease);
+  /* v14.0.68: 340ms -> 240ms. Same reasoning as #sidebar above -- this is one
+     of the two surfaces that keep a visible slide, shortened to the floor
+     where the travel still reads as travel. */
+  transition: transform 240ms var(--ease);
 }
 .drawer.open { transform: translateX(0); }
 /* Phase 58: inline z-index moved out of index.html:326 (#drawer-overlay) — was a literal 190 override on .modal-overlay */
@@ -2784,8 +2939,14 @@ html.theme-astral #mini-cal td.today {
      leave the closed panel sitting opaque over the already-repainted shell
      until openPage's 300ms removal timeout fires, and Back would look frozen.
 
-     Desktop (>768px) is untouched and keeps the slide. */
-  .page-panel { transition: none; }
+     v14.0.68 UPDATE -- "Desktop (>768px) is untouched and keeps the slide"
+     was the bug: it meant the exact defect this comment describes was still
+     shipping at every width above 768px, including the owner's iPad in
+     landscape. `transition: none` now lives in the BASE .page-panel rule
+     (~line 2298) and applies at every width, so the declaration that used to
+     sit here is gone as a duplicate. The reasoning above is unchanged and is
+     kept HERE because this is where it was written and where it is searched
+     for; only its scope widened. */
   /* Notch clearance for the window's own header row, now that the window
      itself starts at y=0 instead of being inset by the safe area. Longhand so
      the landscape left/right insets already in the base rule's `padding`
@@ -2874,7 +3035,33 @@ html.theme-astral #mini-cal td.today {
      `.page-under` (the buried-window primitive, ~line 2264) has NO matching
      delay to remove: it is a bare `visibility:hidden` with no transition at
      all, and the ≤768px block that adds content-visibility to it documents at
-     length why it never got one. Nothing to do there. */
+     length why it never got one.
+
+     v14.0.68 — WHY THIS BLOCK STAYS INSIDE @media (max-width: 768px) even
+     though `.page-panel { transition: none }` was promoted OUT of it in the
+     same pass. The two are not symmetric, and MEASURED geometry is the
+     reason:
+       • ≤768px the panel is full-bleed — the block above re-declares
+         `top: var(--vv-top, 0px); height: var(--vvh, 100%)`, so it covers the
+         topbar and the nav strip. Hiding them changes nothing visible and
+         only stops them bleeding at the notch band and staying tappable.
+       • >768px the panel is NOT full-bleed. The base rule (~line 2298) starts
+         it at `calc(var(--topbar-h) + env(safe-area-inset-top))` — measured
+         56px at 1280x800 — and #topbar (top:0, height 56px) plus the desktop
+         #top-nav-strip (which ≥1024px is re-anchored to `top:0; height:
+         var(--topbar-h)`, ~line 5891) sit ABOVE that edge, fully exposed.
+         Hiding them there would not occlude anything; it would replace the
+         desktop chrome with a blank 56px band of --bg for as long as any
+         window is open, and take the app's only visible nav with it.
+     The defect this block guards against — shell painting THROUGH a window —
+     is a property of the 300ms slide, not of the shell being visible. With
+     the slide gone at every width there is no frame in which a partially
+     placed panel exposes what is behind it, so >768px needs no occlusion: the
+     window swaps in below a persistent topbar, which is the desktop window
+     model this app already ships. Unifying the MOTION was the fix; unifying
+     the occlusion would have been a layout regression wearing the same name.
+     If a future change makes the desktop panel full-bleed, move this block
+     out to the base cascade at the same time — not before. */
   body.page-open #topbar,
   body.page-open #top-nav-strip,
   body.page-open #bottom-nav,
@@ -3308,7 +3495,7 @@ html.light .task-feed-meta { color: rgba(29,29,31,0.50); }
 
 /* quick actions */
 html.light .quick-action-btn { color: rgba(29,29,31,0.70); }
-html.light .quick-action-btn:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; }
+@media (hover:hover) { html.light .quick-action-btn:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; } }
 
 /* payslip */
 html.light .payslip-row { border-bottom-color: rgba(0,0,0,0.06); color: rgba(29,29,31,0.70); }
@@ -3460,7 +3647,11 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
   border-radius: 14px; padding: 16px; margin-bottom: 14px;
   transition: box-shadow var(--t1);
 }
-.post-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.12); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .post-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.12); } }
 .post-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
 .post-avatar {
   width:38px; height:38px; border-radius:50%;
@@ -3810,7 +4001,11 @@ html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !im
 
 /* ── Departments grid — clickable cards ─────────── */
 .dept-card-clickable { transition: transform var(--t1), box-shadow var(--t1); }
-.dept-card-clickable:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,.18); }
+/* v14.0.68 HOVER-LATCH GUARD -- see the press sweep for the full
+   rationale (~line 6182). On touch, :hover applies on tap and STICKS until the next tap
+   elsewhere, so an unguarded hover is a permanent post-tap state change.
+   Wrapping in @media (hover:hover) is a no-op for mouse users. */
+@media (hover:hover) { .dept-card-clickable:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,.18); } }
 .dept-subtabs-preview { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0 6px; }
 .dept-subtab-chip {
   font-size:var(--fs-2xs); padding:2px 8px;
@@ -3826,9 +4021,18 @@ html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !im
   padding: 10px 14px; border-radius: 10px;
   background: var(--s2); border: 1.5px solid var(--border);
   color: var(--text); font-size: var(--fs-md); font-weight: 600;
-  cursor: pointer; transition: all var(--t1);
+  /* v14.0.68: was `transition: all var(--t1)`. `all` silently animates layout
+     properties (padding, border-width, font-size) if any rule ever changes
+     one, which is both a jank source and impossible to reason about. Named
+     properties only, and an explicit timing function -- the token durations
+     in this file overwhelmingly omit one and silently run the UA default. */
+  cursor: pointer;
+  transition: background 90ms var(--ease), border-color 90ms var(--ease),
+              transform 90ms var(--ease), color 90ms var(--ease);
 }
-.dept-quick-tab:hover { background: var(--s3); border-color: var(--primary-light); transform: translateY(-1px); }
+@media (hover:hover) { .dept-quick-tab:hover { background: var(--s3); border-color: var(--primary-light); transform: translateY(-1px); } }
+.dept-quick-tab:active { transform: scale(0.97); transition-duration: 0s; }
+@media (prefers-reduced-motion: reduce) { .dept-quick-tab:active { transform: none; } }
 
 
 /* ── Remember me / Guest save row ──────────────── */
@@ -4008,8 +4212,8 @@ html.theme-dark .modal-overlay, html.theme-astral .modal-overlay { background: r
   box-shadow: none;
   text-shadow: none;
 }
-.subtab-btn:hover:not(.active) {
-  background: var(--surface-3);
+@media (hover:hover) {
+  .subtab-btn:hover:not(.active) { background: var(--surface-3); }
 }
 /* v14 de-structuring pass: Astral's glass .subtab-bar override and its
    glow box-shadow/text-shadow .subtab-btn.active override were removed here
@@ -4017,15 +4221,15 @@ html.theme-dark .modal-overlay, html.theme-astral .modal-overlay { background: r
    down — see that section for what was kept). */
 
 /* ══════ ITEM CARDS (tasks, list items) — token-driven, no blur ══════ */
-.item-card:hover {
-  background: var(--surface-2);
+@media (hover:hover) {
+  .item-card:hover { background: var(--surface-2); }
 }
 .item-card::before {
   background: none;
   transform: none !important; animation: none !important;
   pointer-events: none !important; /* this override cancels the off-screen transform, so it must also stay non-interactive or it blocks every click on the card */
 }
-.item-card:hover::before { animation: none !important; }
+@media (hover:hover) { .item-card:hover::before { animation: none !important; } }
 /* v14 de-structuring pass: Astral's glass .item-card/:hover/::before overrides
    were removed — falls through to the base .item-card rule (further up),
    whose --surface/--border tokens still give Astral a distinct tint. */
@@ -5984,6 +6188,99 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
 .login-role-card:active { transform: scale(0.97) !important; transition-duration: 70ms !important; }
 .quick-action-btn:active { background: var(--s3) !important; transform: scale(0.99) !important; }
 
+/* ══ PRESS COVERAGE SWEEP — v14.0.68 ═══════════════════════════════════════
+   WHY THIS EXISTS. `html { -webkit-tap-highlight-color: transparent }` (~line
+   71) is INHERITED, so it removed iOS Safari's default grey press flash from
+   EVERY element in the document — and the flash was then replaced for only a
+   partial set (the .btn-* family via --press-scale ~line 6174, .item-card /
+   .notif-item / .chat-inbox-row ~line 1960, the .pressable utility ~line 93).
+   Everything else in this file's interactive vocabulary has produced zero
+   pixels between finger-down and whatever happens next ever since. The most
+   important omission is .page-panel-back / .modal-back: the exit control for
+   every one of the ~161 windows in the app, whose declaration (~line 2347)
+   carries no :active, no :hover and no transition at all.
+
+   That gap is most of what "the clicks feel slow" is. A drill-down that has
+   to await Firestore before its window exists cannot show the window sooner,
+   but it CAN acknowledge the touch in the frame the finger lands — and an
+   acknowledged tap followed by 300ms of work reads as a fast app doing
+   something, while an unacknowledged one reads as a dropped tap.
+
+   PHYSICS — duration on the BASE rule, `transition-duration: 0s` on :active.
+   This is backwards from how the existing press rules in this file are
+   written and the direction matters: a tap is ~80ms end to end, so ANY in-
+   duration means the cue is still travelling when the finger leaves and its
+   target state is never reached. Press must land on contact and ease OUT on
+   release. 90ms out is ~5 frames — visible as a release, short enough not to
+   queue behind the next tap in a fast list-scan.
+
+   transform / opacity / background / color / border-color ONLY. No layout
+   properties: everything here animates on the compositor or is a paint-only
+   change, so a press on a 200-row list cannot trigger layout.
+
+   PLACEMENT is load-bearing. This block sits at top level (no at-rule
+   nesting) and AFTER every component rule it needs to beat — .chip-tab
+   (~1888), .item-card (~1927), .dept-card (~2216), .page-panel-back (~2347),
+   .post-card (~3636), the topbar cluster (~768/~899/~923) — and BEFORE the
+   global prefers-reduced-motion collapse near the end of the file. Two
+   selectors deliberately do NOT appear here because a LATER rule would
+   swallow them: .subtab-btn (~line 6402) and .dept-quick-tab (~line 4010)
+   carry their own press state in place at their own declaration site. */
+.page-panel-back, .modal-back, .modal-close,
+.menu-toggle, .notif-btn, .topbar-avatar,
+.chip-tab, .dept-card, .dept-card-clickable, .post-card,
+.att-status-opt, .bs-qfolder-card {
+  /* box-shadow is in the list even though nothing here presses with one: the
+     shorthand REPLACES each element's existing transition, and .dept-card /
+     .post-card / .dept-card-clickable / .notif-btn all lift with a shadow on
+     desktop hover. Omitting it would leave those shadows snapping on a mouse
+     — a desktop regression paid for a touch fix. */
+  transition: transform 90ms var(--ease), opacity 90ms var(--ease),
+              background 90ms var(--ease), color 90ms var(--ease),
+              border-color 90ms var(--ease), box-shadow 90ms var(--ease);
+}
+/* Icon-sized controls press DEEPER (0.90) than cards (0.97). A 24px glyph
+   scaled 0.97 moves sub-pixel and is invisible; a 340px-wide card scaled 0.90
+   would look like it collapsed. Equal-looking motion needs unequal numbers. */
+.page-panel-back:active, .modal-back:active, .modal-close:active,
+.menu-toggle:active, .notif-btn:active, .topbar-avatar:active {
+  transform: scale(0.90); opacity: 0.75; transition-duration: 0s;
+}
+.chip-tab:active, .dept-card:active, .dept-card-clickable:active,
+.post-card:active, .att-status-opt:active, .bs-qfolder-card:active {
+  transform: scale(0.97); opacity: 0.92; transition-duration: 0s;
+}
+/* Table rows get BACKGROUND, not transform: transform on a <tr> is unreliable
+   across engines and would break the table's own layout box. `.data-table
+   tr:hover td` exists only inside @media (hover:hover) (~line 2013), so on
+   touch a tapped table row had nothing whatsoever — and the finance/HR/CRM
+   screens are almost entirely tables. */
+.data-table tbody tr:active td { background: var(--surface-3); }
+
+/* Correct the press direction on the three rows that ALREADY had a press
+   state. Their :active rule (~line 1960) puts `transition-duration: 90ms` on
+   :active itself, i.e. it animates the press IN and snaps it OUT — the wrong
+   way round per the physics note above. Both END states are unchanged; only
+   which half of the gesture is animated moves. .item-card's base transition
+   (~line 1927) is left declaring its own property list — this overrides the
+   durations only, so its property coverage is untouched. */
+.item-card:active, .notif-item:active, .chat-inbox-row:active { transition-duration: 0s; }
+.item-card { transition-duration: 90ms; }
+
+/* Reduced motion: drop the SCALE only. The global collapse near the end of
+   this file already flattens every duration above to ~0, and opacity /
+   background / colour are not vestibular triggers — so the press still
+   acknowledges the tap, it just stops moving. Same shape as the existing
+   branches at ~line 96 and ~line 1963. */
+@media (prefers-reduced-motion: reduce) {
+  .page-panel-back:active, .modal-back:active, .modal-close:active,
+  .menu-toggle:active, .notif-btn:active, .topbar-avatar:active,
+  .chip-tab:active, .dept-card:active, .dept-card-clickable:active,
+  .post-card:active, .att-status-opt:active, .bs-qfolder-card:active {
+    transform: none;
+  }
+}
+
 /* ── KPI cards — cleaner feel ── (base .kpi-value props ported up from earlier copy; protected clamp/nowrap/tabular-nums lines below are untouched — window.fitKpiValues depends on them) */
 .kpi-value {
   font-family: var(--font-display);
@@ -6016,7 +6313,15 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
 .notif-item-title { font-size: var(--fs-base); font-weight: 600; }
 .notif-item-body  { font-size: var(--fs-md); }
 .notif-item-time  { font-size: var(--fs-xs); }
-.notif-item:active { background: var(--s2); transition: background 80ms; }
+/* Press feedback — the `transition` SHORTHAND here used to undo the app-wide
+   press system for notification rows: being last at equal specificity (0,2,0)
+   it reset transition-duration back to 80ms AND narrowed transition-property to
+   `background` alone, so the press sweep's `transition-duration: 0s` correction
+   (which makes a press snap IN and ease OUT, not the reverse) silently did
+   nothing here. The notification inbox is one of the highest-traffic tap
+   surfaces in the app and was the only row type not matching the system.
+   Longhand `background-color`, so it tints without touching duration/property. */
+.notif-item:active { background: var(--s2); }
 
 /* ── Bottom nav (WS42 Phase 8) — token-driven, solid, same full-width bar in every theme ── */
 .bottom-nav {
@@ -6120,8 +6425,17 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
   font-size: var(--fs-md);
   font-weight: 600;
   padding: 7px 14px;
-  transition: all 200ms var(--ios-spring);
+  /* v14.0.68: was `transition: all 200ms var(--ios-spring)`. Two problems.
+     (1) `all` animates layout properties too. (2) This rule is LATER in the
+     cascade than the press sweep (~line 6182), so its 200ms shorthand
+     silently swallowed the sweep's press timing for subtabs -- the segmented
+     control was the one nav surface with no press feedback at all. Named
+     properties, and the press state below. */
+  transition: background 90ms var(--ease), color 90ms var(--ease),
+              transform 90ms var(--ease);
 }
+.subtab-btn:active { transform: scale(0.97); transition-duration: 0s; }
+@media (prefers-reduced-motion: reduce) { .subtab-btn:active { transform: none; } }
 .subtab-btn.active {
   background: var(--primary-soft);
   color: var(--primary);
