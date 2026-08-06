@@ -4346,13 +4346,31 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 /* Owner request — a thread with only a few messages showed them stuck at the
    TOP with a big empty gap above the composer. Bottom-align the real chat
    thread's message column so short threads hug the composer like a normal
-   chat; a long thread still just scrolls (overflow-y:auto above, unchanged)
-   — flex-end only redistributes leftover space when content is SHORTER than
-   the viewport. Scoped to the #chat-thread-scroll id (js/chat.js's own DM/
-   group/dept thread), not the base .messenger-body class, which the
-   department doc-comments widget (js/departments.js #msbody-*) also uses and
-   isn't part of this request. */
-#chat-thread-scroll { justify-content: flex-end; }
+   chat; a long thread still just scrolls (overflow-y:auto above, unchanged).
+
+   IT MUST NOT BE `justify-content: flex-end` — that was the original rule and
+   it silently made the whole thread UNSCROLLABLE. On an overflowing flex
+   COLUMN (.messenger-body is display:flex/flex-direction:column, ~line 4331)
+   flex-end pushes the surplus out through the START edge, which no engine
+   lets you scroll back to: the box reports scrollHeight === clientHeight and
+   scrollTop is pinned at 0, so every message above the fold is unreachable.
+   Reproduced against this stylesheet at 375x600 with 40 rows — flex-end:
+   scrollHeight 600 / clientHeight 600 / max scrollTop 0, with the first row
+   rendered at -2616px; the same DOM without it: scrollHeight 3232, max
+   scrollTop 2632. The old comment here asserted the opposite ("flex-end only
+   redistributes leftover space when content is SHORTER than the viewport") —
+   that is true of the free-space distribution, but it is not what happens
+   once content overflows.
+
+   `margin-top:auto` on the first item is the canonical equivalent: with free
+   space it absorbs all of it and bottom-aligns the column exactly as before;
+   once content overflows, auto margins resolve to 0, so scrolling is normal.
+
+   Scoped to the #chat-thread-scroll id (js/chat.js's own DM/group/dept
+   thread), not the base .messenger-body class, which the department
+   doc-comments widget (js/departments.js #msbody-*) also uses and isn't part
+   of this request. */
+#chat-thread-scroll > :first-child { margin-top: auto; }
 .messenger-empty {
   text-align: center; font-size: var(--fs-md); color: var(--text-muted);
   padding: 32px 16px;
@@ -4459,6 +4477,53 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-bubble-theirs.ms-grp-mid    { border-radius: 4px 18px 18px 4px; }
 .ms-bubble-theirs.ms-grp-last   { border-radius: 4px 18px 18px 18px; }
 
+/* ── LONG-PRESS-TO-REACT: stop iOS's own long press from competing ─────────
+   Owner report (2026-08): "long press is not working well". Two causes; this
+   is the half that lives in CSS.
+
+   On iOS a ~500ms press on TEXT is ALREADY a system gesture: it raises the
+   selection magnifier and the "Copy · Look Up · Share" callout. chat.js arms
+   its own 500ms picker timer on the same touch (LONG_PRESS_MS, js/chat.js
+   ~2992), so the two run on the same timeline and race. In practice the
+   system UI wins the touch, the finger shifts a pixel dismissing it, and the
+   app's picker either never opens or opens underneath a blue selection
+   highlight over the message text. Nothing in this file was suppressing the
+   native gesture, so the app was competing with the OS for the same press.
+
+   TRADE-OFF, taken deliberately: this GIVES UP long-press-to-select-text on
+   message bubbles, on touch devices only. That is an acceptable exchange
+   because the picker this gesture opens carries an explicit Copy button
+   (js/chat.js ~2593, added in Wave5 M1) which copies the whole message — the
+   exact thing the selection gesture was being used for. Copy is a first-class
+   control in the picker, not a fallback, so the affordance is replaced rather
+   than removed.
+
+   SCOPE — three deliberate narrowings, all load-bearing:
+   1. @media (pointer: coarse). A mouse has no magnifier to fight, so killing
+      selection there would be a pure regression (desktop chat keeps normal
+      click-drag select + Cmd-C). Same gate as the 44px hit-area block at the
+      top of this file (~line 120).
+   2. `.ms-bubble.chat-bubble-tap` — the bubble's OWN tap target only. NOT
+      .messenger-body, NOT .ms-row, NOT the thread panel: the header, day
+      separators, the composer, the reply quote strip's surroundings and the
+      whole chat info page all still select normally.
+   3. Nothing here can reach an <input>/<textarea>. The composer (.ms-input)
+      is a sibling of the scroller, never a descendant of a bubble, and no
+      bubble renders a form control.
+
+   NO EXISTING RULE TO FIGHT: the only user-select declarations in this file
+   are `body.sidebar-open .main-content` (~1235), `.remember-row` (~1724),
+   `.id-flip-scene` (~3839), `.ms-lightbox-img` (~5093) and the explicit
+   `user-select: text` on data surfaces (~1937). None is an ancestor of a
+   bubble, so this neither overrides nor is overridden by any of them. ── */
+@media (pointer: coarse) {
+  .ms-bubble.chat-bubble-tap {
+    -webkit-touch-callout: none;   /* kills the "Copy · Look Up" callout bubble */
+    -webkit-user-select: none;     /* kills the selection+magnifier gesture itself */
+    user-select: none;             /* (the callout rule alone does NOT stop selection) */
+  }
+}
+
 .ms-text { font-size: var(--fs-base); line-height: var(--lh-snug); }
 /* Timestamp/status: hidden by default — tap toggles it (mobile), hover reveals
    it (desktop pointer:fine). Phase 17. */
@@ -4533,6 +4598,249 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 .ms-act-btn:hover { background: var(--surface-2); color: var(--text); }
 .ms-del-btn:hover { color: var(--danger); }
+
+/* ══ LONG-PRESS REACTION PICKER (.chat-reaction-picker) ═══════════════════
+   Owner report (2026-08): the picker's "options are getting cut off".
+
+   WHY IT WAS CLIPPED. It rendered as a plain inline `display:flex` row inside
+   .ms-bubble-wrap with no wrap and no overflow handling, holding SIX reaction
+   emoji + Copy + Forward + (Pin, if the user can manage the conversation) +
+   on touch UIs the edit/remove/remove-permanently buttons that moved in here
+   from the hover-only .ms-actions row — 10+ controls on one unbreakable line,
+   inside a column capped at 72% of the thread width (.ms-row, ~line 4398;
+   85% under 400px). On a 375px phone that column is ~150-280px wide, so
+   everything past roughly the third emoji sat outside the box. Making the row
+   scroll would have hidden the same controls behind a gesture nobody would
+   discover, so it becomes a POPOVER that wraps instead.
+
+   OWNERSHIP SPLIT WITH js/chat.js. That file mounts this element as a
+   position:fixed popover and positions it from the pressed bubble's rect —
+   it owns GEOMETRY (top / left / max-width, written inline) and the
+   open/close toggle. This block owns APPEARANCE plus the one guarantee that
+   matters: the content FITS inside whatever max-width it is handed, at any
+   width, with every button still hittable. Nothing here declares top or left,
+   and the max-width below is a fallback for the un-positioned case only — an
+   inline value from chat.js always wins over it.
+
+   CONTAINING BLOCK — READ BEFORE CHANGING THE GEOMETRY IN chat.js. This
+   popover is NOT positioned against the viewport even though it is
+   position:fixed. Its nearest ancestor with a transform is .page-panel
+   (~line 2211), which carries `transform: translateX(100%)` at rest and
+   `translateX(0)` when open — a non-none transform makes that element the
+   containing block for fixed descendants, at every width, including the
+   phone tier where the slide TRANSITION is disabled but the transform
+   remains. #chat-thread-panel IS a .page-panel (chat.js just stamps the id
+   on an openPage window). So `top`/`left` here resolve from the PANEL's
+   top-left corner, not from (0,0) of the screen, and .page-panel's
+   `overflow:hidden` clips this popover at the panel edge. On phones the panel
+   is the visible strip (`top: var(--vv-top); height: var(--vvh)`, ~line 2761)
+   so panel-space and visual-viewport-space differ by exactly --vv-top; at
+   >=1024px the panel is the right-hand reading pane and is additionally
+   inset by `left: calc(var(--sidebar-w) + 20px + 320px + 16px)` (~line 4176).
+   The upside of the same fact: the fixed popover escapes both the bubble's
+   box and #chat-thread-scroll's overflow clipping, which is what actually
+   fixes the report.
+
+   DISPLAY TOGGLE. Hidden by default here; `.open` shows it. chat.js toggles
+   `style.display` inline instead (_openPickerFor, ~2801), and an inline value
+   beats both of these declarations in BOTH directions, so this pair is inert
+   while that is true and takes over unchanged the moment the inline display
+   is dropped. If chat.js ever switches to a class it must be `.open` — that
+   is the contract this block states. Same story for `position`, `flex-wrap`
+   and `max-width`: chat.js writes all three inline (~2811-2870) with the same
+   values this block declares, so the two agree and the declarations here are
+   the standalone fallback, not a competing opinion.
+
+   Z-INDEX — chat.js sets 20 inline (~2815) and that wins; the 30 here is the
+   fallback for the same reason. Either way it is a small PANEL-LOCAL value,
+   not a new top-of-app layer. The popover's stacking context is .page-panel's
+   (Overlay hands the panel an inline 300+depth*2, js/config.js ~1214); inside
+   it nothing else establishes a context, so the value only has to beat the
+   other panel-scoped popovers and chrome: .ms-scroll-fab 2, .ms-mention-dd /
+   .ms-emoji-grid 5, .ms-wallpaper-menu 20 (a tie, resolved in this popover's
+   favour by document order — it is emitted after the header), and the
+   header/composer rows which are position:relative at z-index auto. The
+   dev-only stacking lint (window.devCheckStacking, js/app.js ~3798) does NOT
+   flag either value: it walks document.body.children only, and this element
+   lives deep inside the panel, never as a direct child of <body>.
+
+   DO NOT ADD AN OPAQUE-BACKGROUND-KILLING CHANGE HERE. _ensurePickerSkin
+   (js/chat.js ~2910) reads this element's computed backgroundColor and, if it
+   is transparent, paints a minimal emergency skin inline — the guard against
+   this stylesheet going missing. `background: var(--modal-bg)` below is what
+   keeps that fallback dormant (it is opaque in Light/Dark and .92-alpha in
+   Astral, none of which the transparency test matches). ══ */
+.chat-reaction-picker {
+  position: fixed;
+  display: none;
+  /* THE FIX: wrap. With the emoji sized to exactly six per row below, a
+     phone gets a clean two-row pill (reactions / actions) instead of one row
+     running off the edge — and any future extra button lands on a new row
+     rather than off-box. */
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  /* Same popover treatment as every other floating surface in this file —
+     .ms-mention-dd (~4989), .ms-emoji-grid (~5005), .ms-wallpaper-menu
+     (~5340), .dialog-box (~2387) — rather than a bespoke one. --modal-bg is
+     opaque in Light (#FFFFFF) and Dark (#1A1D21) and rgba(13,13,26,.92) in
+     Astral, so it reads as a solid pill over a bubble in all three and keeps
+     Astral's slight translucency over the wallpaper exactly like the other
+     four popovers do. */
+  background: var(--modal-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r, 14px);
+  box-shadow: var(--sh-lg);
+  z-index: 30;
+  /* Fallback max-width ONLY — chat.js sets the real one inline (clamped to
+     the visible strip) and that wins. This exists so the popover still wraps
+     rather than stretching if it is ever shown before/without positioning.
+     Value copied from .ms-emoji-grid so the two agree. */
+  max-width: calc(100vw - 24px);
+  /* The finger is still down when this appears (it opens ON the long press),
+     so a drag off the bubble must not start selecting the picker's own
+     contents. There is no selectable prose in here — only buttons. */
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  /* OPACITY-ONLY ENTRANCE — NEVER a transform/scale one (popIn, msPopIn…).
+     _positionPicker (js/chat.js ~2831) parks this element at its containing
+     block's origin, calls getBoundingClientRect() and derives BOTH the
+     popover's wrapped size and the origin's viewport coordinates from that
+     one synchronous read. getBoundingClientRect() returns the TRANSFORMED
+     box, and a transform-based entrance is at its t=0 keyframe on exactly
+     that tick — popIn starts at scale(.88) translateY(14px), which would
+     hand the positioner a box ~12% too small sitting 14px low and put the
+     pill visibly off the bubble it belongs to. Opacity does not participate
+     in layout or in the measured rect, so this is invisible to that code.
+     msLightboxIn is the existing opacity-only fade in this section. */
+  animation: msLightboxIn .16s var(--ease);
+}
+.chat-reaction-picker.open { display: flex; }
+@media (prefers-reduced-motion: reduce) { .chat-reaction-picker { animation: none; } }
+
+/* Buttons. Both kinds are given the SAME cell height so a wrapped row reads
+   as a deliberate grid instead of a ragged mix of sizes.
+   NOTE ON INLINE STYLES: chat.js writes `font-size:16px; padding:2px 4px`
+   inline on .chat-pick-emoji, which beats the font-size/padding here until
+   that file drops them; min-width/min-height/display/border-radius are NOT
+   set inline, so the tap-target floor below applies either way. */
+.chat-reaction-picker .chat-pick-emoji {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer;
+  padding: 2px 4px; font-size: 20px; line-height: 1;
+  border-radius: var(--r-sm, 10px);
+  transition: background .15s, transform .12s;
+}
+.chat-reaction-picker .chat-pick-emoji:hover { background: var(--surface-2); }
+.chat-reaction-picker .chat-pick-emoji:active { transform: scale(var(--press-scale, .96)); }
+/* Copy / Forward / Pin / edit / remove — .ms-act-btn keeps its own colors and
+   hover from the base rule above; only the box changes in here. */
+.chat-reaction-picker .ms-act-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm, 10px);
+}
+/* chat.js groups the touch-only edit/remove buttons in a bare
+   `display:inline-flex` <span> divider group, which is ONE unbreakable flex
+   item of this popover. Let that group wrap internally too, so a very narrow
+   max-width can never push its last button out of the pill. */
+.chat-reaction-picker > span { flex-wrap: wrap; justify-content: center; }
+/* The leading group divider has to go — ON COARSE POINTERS ONLY. chat.js
+   writes `border-left:1px solid var(--border); padding-left:6px;
+   margin-left:2px` inline on the Copy button (js/chat.js ~2593) to fence the
+   reactions off from the actions — correct while everything sits on ONE line,
+   wrong once the reactions occupy a row of their own: the rule ends up as a
+   stray 1px tick hanging off the FIRST button of row two, separating nothing.
+   The wrap itself is then what reads as the group boundary.
+   WHY THE MEDIA QUERY (it is the whole point of this rule, not decoration):
+   that row-of-their-own only exists where the six-per-row `flex` basis below
+   applies, i.e. `@media (pointer: coarse)`. With a FINE pointer nothing wraps
+   — measured at 375x812, all ten children land on one row — and killing the
+   border there deletes the only group separator the picker has, because
+   isTouchUI (hover:none) is false so chat.js does not emit the touch-actions
+   <span> that carries the second divider either. Unscoped, this rule left the
+   desktop picker with ZERO separation between the emoji and Copy/Forward/Pin,
+   a regression against HEAD. Keep the condition identical to the sizing
+   block's.
+   The second divider (on the touch-actions <span>, between Pin and the
+   edit/remove group) still sits mid-row and is deliberately left alone.
+   `!important` is unavoidable — the declarations it overrides are inline —
+   and the adjacent-sibling selector matches ONLY the action button that
+   directly follows an emoji, i.e. exactly that one leading divider. Delete
+   this rule the moment chat.js stops writing those three properties. */
+@media (pointer: coarse) {
+  .chat-reaction-picker .chat-pick-emoji + .ms-act-btn {
+    border-left: none !important;
+    padding-left: 0 !important;
+    margin-left: 0 !important;
+  }
+}
+
+/* ── Touch sizing. Two separate problems solved together ──
+   (a) TAP TARGETS. The emoji buttons compute to ~24x20 from their inline
+       `font-size:16px; padding:2px 4px` — half the 44px floor this file
+       enforces everywhere else. .ms-act-btn is already in the coarse-pointer
+       list at the top of the file (~line 122), but it gets there via an
+       invisible 44x44 ::after OVERLAY rather than real size, which works for
+       a lone corner button and works badly here: a dozen ~26px buttons on one
+       row means a dozen 44px phantom areas overlapping each other by ~18px,
+       so neighbouring taps steal each other. Real geometry instead — the
+       ::after then sits exactly coincident with the real box and does
+       nothing.
+   (b) THE GROUPING. `flex: 0 0 calc((100% - 5*gap) / 6)` makes the six
+       reactions (REACTIONS, js/chat.js:23) fill exactly one row at ANY
+       max-width chat.js hands us (_positionPicker, ~2831), which forces every action button onto the
+       next row. That is what makes the wrap read as "reactions, then
+       actions" rather than as an arbitrary break wherever the arithmetic
+       happened to land — and it holds without this file needing to know the
+       max-width, which it does not own. min-width keeps the cell usable if
+       the popover is ever squeezed narrower than 6x40px, at the cost of
+       falling back to a plain wrap there (still never clipped). ── */
+@media (pointer: coarse) {
+  .chat-reaction-picker .chat-pick-emoji,
+  .chat-reaction-picker .ms-act-btn { min-height: 44px; }
+  .chat-reaction-picker .ms-act-btn { min-width: 44px; }
+  .chat-reaction-picker .chat-pick-emoji {
+    flex: 0 0 calc((100% - 5 * 4px) / 6);
+    min-width: 40px;
+  }
+}
+
+/* ── Upper bound for coarse pointers WIDER THAN A PHONE (tablet, foldable,
+   touchscreen laptop) ──
+   The `flex: 0 0 calc(100%/6)` basis above has no cap, and the popover itself
+   is shrink-to-fit at max-content whenever the inline clamp is generous, so
+   the six cells simply grow with the device. Measured on the pre-fix build,
+   own message with all 12 buttons, emoji cell width by viewport width:
+   320→44, 375→53, 430→63, 480→71, 540→81, and 600px upward it saturates at
+   the 571px max-content pill with 89x44 cells — beside a 286px bubble, six
+   enormous emoji and a half-empty second row. Nothing is clipped (this is
+   presentation, not function), but it is a regression against HEAD's compact
+   single row at every width above a phone.
+   WHY `width` AND NOT `max-width`: _positionPicker (js/chat.js ~2831) writes
+   max-width INLINE as the real clamp (band minus margins) and inline wins
+   over this file. A plain `width` cooperates with that clamp instead of
+   fighting it — max-width always beats width when both apply — so a narrow
+   band still shrinks the pill exactly as before (measured at bands of 420 /
+   300 / 240 / 160px: pill 340 / 280 / 220 / 140, i.e. the clamp keeps
+   winning) while a generous band no longer lets it balloon. 340px keeps the
+   phone pill's proportions (cells land at 51px, between the 320 tier's 44 and
+   the 375 tier's 53) and still leaves the four action items — Copy, Forward,
+   Pin and the 3-button touch-actions <span>, 284px at their 44px floor — on
+   one row.
+   SCOPED TO `pointer: coarse` because the flex basis it bounds is; the
+   fine-pointer picker has no basis, sizes to its single row of content, and
+   would just become a mostly-empty 340px pill.
+   480px, NOT this file's usual 768px phone boundary: the defect starts
+   immediately above phone widths (a 768px iPad portrait balloons to the full
+   571px pill), and 480 is the first round number clear of the widest phone
+   portrait in use (430px). Both measured phone cases stay byte-identical —
+   375 → 355x106 / 53x44, 320 → 300x154 / 44x44, unchanged. ── */
+@media (pointer: coarse) and (min-width: 480px) {
+  .chat-reaction-picker { width: 340px; }
+}
 
 /* Read receipts: reader avatars (shared with task-chat "Seen by …" text row)
    + own-message sent/read glyphs (Lucide, chat.js only). */

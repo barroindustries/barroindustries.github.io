@@ -109,6 +109,20 @@ window.Chat = (() => {
   const SWIPE_AXIS_THRESH = 24;   // px combined travel before we decide the axis at all
   const SWIPE_SLOPE = 1.8;        // |dx| must exceed this multiple of |dy| to latch "horizontal"
   let _lastThreadScrollAt = 0;    // set by _onThreadScroll — momentum-scroll guard for _onSwipeStart
+  // ── Reaction-picker popover state (owner report 2026-08: "options are
+  //    getting cut off"). The picker is now a fixed-position popover rather
+  //    than an inline row inside the bubble column — see _openPickerFor. ──
+  let _openPickerMid = null;      // data-mid of the ONE open picker, or null
+  let _pickerDismissWired = false;// document/window dismiss listeners currently bound?
+  let _pickerRaf = 0;             // pending coalesced reposition (rAF handle), 0 = none
+  const PICKER_EDGE_MARGIN = 10;  // px kept clear of every edge of the clamp band
+  const PICKER_GAP = 6;           // px between the bubble and the popover
+  // Cancels the in-flight long-press timer of whichever thread scroller is
+  // currently wired (_wireThreadDelegation installs it; teardownThread calls
+  // it). The timer is a closure local of that function and the scroller is
+  // rebuilt per thread, so without this handle a press started 400ms before a
+  // thread close still fired 100ms after the panel was gone.
+  let _cancelThreadPress = null;
   // Composer emoji grid (J6): REACTIONS + ~26 more common emoji, static list, no library.
   const EMOJI_GRID = [...REACTIONS, '😀','😁','😅','😊','🙂','😉','😍','🤔','😴','😎','🥳','😭',
     '😡','👏','🙌','🔥','🎉','✅','❌','💯','🤗','🤝','👀','💪','⭐','🚀'];
@@ -244,6 +258,20 @@ window.Chat = (() => {
     _pending = [];
     _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
     _replyTarget = null; _swipe = null;      // Wave5 M2 — reply-arm + in-flight swipe never survive a thread close
+    // The reaction popover is fixed-positioned and its dismiss listeners live
+    // on document/window, so neither dies with the panel element the way an
+    // in-flow child would. _closePicker() is what unbinds them (and is a
+    // no-op when nothing is open, so this stays idempotent like the rest of
+    // this function).
+    // The in-flight LONG-PRESS timer has to die first, for the same reason and
+    // in this order: it lives in _wireThreadDelegation's closure, so it
+    // survives the scroller element being replaced, and firing it after the
+    // _closePicker() below would re-open a popover on a detached panel and
+    // re-bind the dismiss listeners we are about to unbind (it also buzzes
+    // navigator.vibrate ~350ms after the chat closed). Nulled so a second,
+    // defensive teardown is a no-op like everything else here.
+    if (_cancelThreadPress) { _cancelThreadPress(); _cancelThreadPress = null; }
+    _closePicker();
     // Wave2 practicality batch — in-thread search never carries into the next
     // thread-open (matches _initialMarkReadPending's own reset just below).
     _threadSearchOpen = false; _threadSearchQ = ''; _threadSearchMatches = []; _threadSearchCurrentMid = null;
@@ -2568,7 +2596,14 @@ window.Chat = (() => {
     const pinBtnHtml = canPin
       ? `<button class="chat-pin-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="${isPinnedMsg ? 'Unpin' : 'Pin'}">${emojiIcon(isPinnedMsg ? 'pin-off' : 'pin', 14)}</button>`
       : '';
-    const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px;align-items:center">${
+    // The container carries ONLY `display:none` inline now. Everything that
+    // used to be inline here (gap / margin-top / align-items) moved to the
+    // .chat-reaction-picker stylesheet rule: the picker is no longer a row in
+    // the bubble column, it is a floating popover (see _openPickerFor), and an
+    // inline declaration would outrank — and silently fight — the rule that
+    // owns its look. _openPickerFor/_positionPicker set GEOMETRY inline
+    // (position/left/top/max-width/flex-wrap/z-index) and nothing else.
+    const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
     }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button>${pinBtnHtml}${touchActionsHtml}</div>`;
     // Messenger restyle Fix 3 — the always-visible quick-heart button beside
@@ -2750,10 +2785,273 @@ window.Chat = (() => {
   // on every render. This is what makes the patch path (above) work with zero
   // extra wiring: new/replaced nodes are covered automatically because the
   // listener lives on the stable parent, not on the rows themselves.
+  // ── Reaction picker — a FIXED-POSITION POPOVER ──────────────────────────
+  // Owner report (2026-08): "options are getting cut off". The picker used to
+  // render as an inline `display:flex` row INSIDE .ms-bubble-wrap, i.e. inside
+  // a column whose width is the BUBBLE's (.ms-row is max-width:72%, 85% under
+  // 400px; .ms-bubble-wrap is max-width:100% of that). With 6 reaction emoji +
+  // Copy + Forward + conditional Pin + up to three touch-only action buttons
+  // on ONE non-wrapping line, the tail simply ran off the end of a ~150px
+  // bubble on a 375px phone, and #chat-thread-scroll (overflow-y:auto,
+  // overflow-x:hidden) plus .page-panel (overflow:hidden) clipped whatever
+  // crossed their edges.
+  //
+  // The node STAYS exactly where the renderer put it (still a child of the
+  // message row). That is deliberate and load-bearing: every button inside it
+  // is wired by the ONE delegated click listener on #chat-thread-scroll
+  // (_wireThreadDelegation), so re-parenting the popover to <body> would
+  // silently unwire the emoji, Copy, Forward, Pin, Edit and both Deletes.
+  // Only its GEOMETRY changes — position:fixed + computed top/left — which
+  // escapes every ancestor's overflow without touching the DOM tree or a
+  // single handler.
+  //
+  // CONTAINING BLOCK (the subtle part): .page-panel carries
+  // `transform:translateX(...)` in BOTH states (100% closed, 0 when open —
+  // never `none`), and a transformed ancestor is the containing block for any
+  // position:fixed descendant. So `top/left` here are NOT viewport
+  // coordinates, and the panel's own overflow:hidden still clips us.
+  // _positionPicker handles both empirically — it measures where left:0/top:0
+  // actually lands instead of assuming, and clamps into the INTERSECTION of
+  // the visual viewport and the panel box.
   function _openPickerFor(el, mid) {
-    el.querySelectorAll('.chat-reaction-picker').forEach(p => { if (p.dataset.mid !== mid) p.style.display = 'none'; });
+    // One picker at a time — the same ownership this function always had (it
+    // used to hide every sibling picker), now routed through _closePicker so
+    // the dismiss listeners a previous open wired get unwired with it.
+    if (_openPickerMid && _openPickerMid !== mid) _closePicker();
     const picker = el.querySelector(`.chat-reaction-picker[data-mid="${CSS.escape(mid)}"]`);
-    if (picker) picker.style.display = 'flex';
+    const bubble = el.querySelector(`.chat-bubble-tap[data-mid="${CSS.escape(mid)}"]`);
+    if (!picker || !bubble) return;
+    picker.style.position = 'fixed';
+    // Small LOCAL z-index inside .page-panel's stacking context (the panel is
+    // transformed AND z-indexed, so this can never become a new top-of-app
+    // layer) — same convention as .ms-mention-dd (5) / .ms-wallpaper-menu (20).
+    // It has to exist at all because .messenger-input-row is position:relative
+    // and comes LATER in the DOM: at `auto` the composer paints over us.
+    picker.style.zIndex = '20';
+    picker.style.display = 'flex';
+    // Wrapping is CONTAINMENT, not decoration — it is what makes "never cut
+    // off" true in the one case clamping alone cannot fix: 10+ buttons that
+    // still don't fit the clamped max-width. Set here rather than left to CSS
+    // so the guarantee survives any restyle. Everything else about the look
+    // (background, radius, shadow, gap, padding, button sizing) belongs to the
+    // .chat-reaction-picker stylesheet rule.
+    picker.style.flexWrap = 'wrap';
+    _ensurePickerSkin(picker);           // BEFORE measuring — it can change padding/size
+    _positionPicker(picker, bubble);
+    _openPickerMid = mid;
+    _wirePickerDismiss();
+  }
+  // Places the popover in the viewport: preferred ABOVE the bubble, flipped
+  // BELOW when there isn't room, always clamped inside the usable band.
+  function _positionPicker(picker, bubble) {
+    const M = PICKER_EDGE_MARGIN;
+    const de = document.documentElement;
+    const vv = window.visualViewport;
+    // The VISUAL viewport, not window.innerHeight: with the soft keyboard up
+    // the usable strip is much shorter, and a popover clamped to innerHeight
+    // can land underneath the keyboard. window.ViewportSync (js/config.js) is
+    // the single owner of these values and publishes them on <html> as inline
+    // custom properties, so read them straight off the style attribute (no
+    // getComputedStyle round-trip); fall back to visualViewport, then to the
+    // layout viewport, for the pre-ViewportSync/no-vv case.
+    const cssPx = name => { const n = parseFloat(de.style.getPropertyValue(name)); return Number.isFinite(n) ? n : null; };
+    const varTop = cssPx('--vv-top'), varH = cssPx('--vvh');
+    const vTop = varTop !== null ? varTop : (vv ? vv.offsetTop : 0);
+    const vH   = varH   !== null && varH > 0 ? varH : (vv ? vv.height : window.innerHeight);
+    let bandTop = vTop, bandBottom = vTop + vH;
+    let bandLeft = vv ? vv.offsetLeft : 0, bandRight = (vv ? vv.offsetLeft + vv.width : de.clientWidth);
+    // Intersect with the panel: it is BOTH our fixed containing block (it is
+    // transformed) and a clipper (overflow:hidden), so anything outside its
+    // box is invisible no matter what the visual viewport says. On the phone
+    // the panel already IS the visual viewport (top:var(--vv-top);
+    // height:var(--vvh)), so this only bites on desktop, where the panel
+    // starts below the topbar.
+    const panel = picker.closest('.page-panel');
+    if (panel) {
+      const pr = panel.getBoundingClientRect();
+      bandTop = Math.max(bandTop, pr.top);   bandBottom = Math.min(bandBottom, pr.bottom);
+      bandLeft = Math.max(bandLeft, pr.left); bandRight = Math.min(bandRight, pr.right);
+    }
+    // Cap the width first so the measurement below reflects the wrapped size.
+    // box-sizing is set explicitly, not inherited from the global
+    // `*{box-sizing:border-box}` reset: under content-box a max-width caps the
+    // CONTENT box only, so the picker's own padding and border are ADDED on
+    // top and it overflows the clamp by exactly that much. Measured on a
+    // 375px viewport with a two-row wrapped picker: 365px rendered against a
+    // 355px cap, i.e. 10px straight through the right edge — the very defect
+    // this batch exists to fix, reintroduced by a stylesheet the geometry does
+    // not control. Declared here so the cap is authoritative whatever the
+    // reset does.
+    picker.style.boxSizing = 'border-box';
+    picker.style.maxWidth = Math.max(0, Math.round((bandRight - bandLeft) - M * 2)) + 'px';
+    // Park at the containing block's origin and MEASURE. Two things come out
+    // of this one read: the popover's real rendered size (after wrapping —
+    // never assume a single row) and, because left/top are 0, the containing
+    // block's origin in viewport coordinates. That second value is what makes
+    // this engine- and layout-agnostic: whatever ancestor happens to be the
+    // fixed containing block (today .page-panel's transform, tomorrow
+    // something else, or nothing at all) is measured rather than assumed.
+    picker.style.left = '0px'; picker.style.top = '0px';
+    const pk = picker.getBoundingClientRect();
+    const w = pk.width, h = pk.height, originX = pk.left, originY = pk.top;
+    const b = bubble.getBoundingClientRect();
+    // Horizontal: centre on the bubble, then clamp to the band. minX wins when
+    // the band is narrower than the popover (only reachable if a stylesheet
+    // overrode our max-width with !important) — better flush-left than
+    // negative-width maths.
+    const minX = bandLeft + M, maxX = bandRight - M - w;
+    let x = b.left + b.width / 2 - w / 2;
+    x = maxX < minX ? minX : Math.min(Math.max(x, minX), maxX);
+    // Vertical: above by preference (that is where a thumb ISN'T), flipped
+    // below when the bubble is too close to the top of the band, and finally
+    // pinned to the bottom of the band when neither side fits (a bubble taller
+    // than the visible strip).
+    let y = b.top - PICKER_GAP - h;
+    if (y < bandTop + M) {
+      const below = b.bottom + PICKER_GAP;
+      y = (below + h <= bandBottom - M) ? below : Math.max(bandTop + M, bandBottom - M - h);
+    }
+    picker.style.left = Math.round(x - originX) + 'px';
+    picker.style.top  = Math.round(y - originY) + 'px';
+  }
+  // Re-anchors the OPEN popover to its bubble. Everything _positionPicker
+  // consumes — --vvh/--vv-top, the panel box, the bubble's rect — is live
+  // geometry, so re-running it is all a viewport or layout change needs.
+  //
+  // Closes only on the two things a reposition genuinely cannot fix:
+  //   • the picker or its bubble is gone from the DOM (a _patchThread rewrite,
+  //     an unsend, a thread close) — there is nothing left to anchor to;
+  //   • the bubble has scrolled entirely out of the thread's own visible box,
+  //     so the popover would be pointing at a message the reader can't see.
+  function _repositionOpenPicker() {
+    if (!_openPickerMid) return;
+    const sel = `[data-mid="${CSS.escape(_openPickerMid)}"]`;
+    const scroll = document.getElementById('chat-thread-scroll');
+    const scope = scroll || document;
+    const picker = scope.querySelector(`.chat-reaction-picker${sel}`);
+    const bubble = scope.querySelector(`.chat-bubble-tap${sel}`);
+    if (!picker || !bubble || !picker.isConnected || !bubble.isConnected) { _closePicker(); return; }
+    if (scroll) {
+      const sr = scroll.getBoundingClientRect(), br = bubble.getBoundingClientRect();
+      if (br.bottom <= sr.top || br.top >= sr.bottom) { _closePicker(); return; }
+    }
+    _positionPicker(picker, bubble);
+  }
+  // Coalesces every reposition signal (visual-viewport resize/scroll, window
+  // resize, thread scroll) into ONE measure-and-write per frame. _positionPicker
+  // writes then reads a rect, i.e. it forces a synchronous layout; a raw
+  // per-event call on the thread-scroll path would do that repeatedly during
+  // momentum scrolling. The scheduler is a no-op when no picker is open, so the
+  // scroll path costs a single truthiness test in the normal case.
+  function _schedulePickerReposition() {
+    if (!_openPickerMid || _pickerRaf) return;
+    _pickerRaf = requestAnimationFrame(() => { _pickerRaf = 0; _repositionOpenPicker(); });
+  }
+  // Minimal appearance FALLBACK, applied only when .chat-reaction-picker has
+  // no painted background of its own. Until this batch the picker had no
+  // stylesheet rule at all — every visual came from the inline style attribute
+  // the renderer emitted, which this batch removed in favour of the class. Now
+  // that the picker floats OVER the thread instead of sitting in the bubble
+  // column, a missing rule is not "plain but readable", it is transparent
+  // buttons overlapping other people's messages. When the rule IS present this
+  // returns immediately, so it can never fight the stylesheet's design.
+  function _ensurePickerSkin(picker) {
+    const bg = getComputedStyle(picker).backgroundColor;
+    const transparent = !bg || bg === 'transparent' || /,\s*0\s*\)$/.test(bg);
+    if (!transparent) return;
+    picker.style.gap = '4px';
+    picker.style.alignItems = 'center';
+    picker.style.padding = '6px 8px';
+    picker.style.background = 'var(--modal-bg, var(--surface, #fff))';
+    picker.style.border = '1px solid var(--border)';
+    picker.style.borderRadius = 'var(--r, 14px)';
+    picker.style.boxShadow = 'var(--sh-lg, 0 8px 24px rgba(0,0,0,.18))';
+  }
+  // Closes whichever picker is open and unwires its dismiss listeners.
+  // Idempotent — safe to call from teardownThread, from a scroll, and from a
+  // pointerdown in the same tick.
+  function _closePicker() {
+    const mid = _openPickerMid;
+    _openPickerMid = null;
+    if (_pickerRaf) { cancelAnimationFrame(_pickerRaf); _pickerRaf = 0; }
+    _unwirePickerDismiss();
+    if (!mid) return;
+    // Re-query rather than hold a node reference: _patchThread replaces a
+    // row's outerHTML on any rev change, and picking a reaction FROM this very
+    // picker is exactly such a change — the node captured at open time is
+    // routinely already detached by the time we close. A replaced row renders
+    // its picker `display:none`, so "not found" is a correct no-op.
+    document.querySelectorAll(`.chat-reaction-picker[data-mid="${CSS.escape(mid)}"]`).forEach(p => {
+      // The renderer emits exactly `style="display:none"`, so dropping the
+      // whole attribute and re-hiding restores the authored state byte-for-
+      // byte — no need to enumerate every property _openPickerFor /
+      // _positionPicker / _ensurePickerSkin may have set.
+      p.removeAttribute('style');
+      p.style.display = 'none';
+    });
+  }
+  // Dismiss ownership. Every listener below is bound when a picker opens and
+  // removed when it closes — nothing stays bound between opens, and
+  // teardownThread's _closePicker() call is what guarantees neither an orphan
+  // popover nor an orphan listener survives a thread close.
+  function _wirePickerDismiss() {
+    if (_pickerDismissWired) return;
+    _pickerDismissWired = true;
+    // pointerdown, NOT click. The picker opens WHILE THE FINGER IS STILL DOWN
+    // (the 500ms timer fires mid-touch) and, on desktop, mid-right-click — so
+    // the gesture that opened it has ALREADY delivered its pointerdown and the
+    // next one is necessarily a new interaction. A click-based outside-listener
+    // would instead be hit by the very touchend/click that ENDS the opening
+    // long press and would close the picker the instant it appeared.
+    if (window.PointerEvent) document.addEventListener('pointerdown', _onPickerOutsidePointer, true);
+    else { document.addEventListener('touchstart', _onPickerOutsidePointer, true);
+           document.addEventListener('mousedown',  _onPickerOutsidePointer, true); }
+    // Viewport changes REPOSITION. These used to close, which made the picker
+    // unusable on a phone in the single most common state there is: the
+    // composer holds focus almost all the time (sending a message leaves it
+    // focused, and _armReply focuses it explicitly), so the soft keyboard is
+    // up; the picker opens at 500ms with the finger still down; the lift is a
+    // tap OUTSIDE the composer, which blurs #chat-input and retracts the
+    // keyboard; visualViewport fires resize; the popover was destroyed in the
+    // same breath it appeared — indistinguishable from "long press is not
+    // working". Nothing about that sequence invalidates the popover: the
+    // bubble is still there, the geometry is a pure function of --vvh /
+    // --vv-top and the bubble's rect, so re-running it is the correct answer.
+    // 'scroll' is bound too because an iOS visual-viewport pan fires nothing
+    // else (same reason _onViewportResize listens to both).
+    window.addEventListener('resize', _schedulePickerReposition);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', _schedulePickerReposition, { passive: true });
+      window.visualViewport.addEventListener('scroll', _schedulePickerReposition, { passive: true });
+    }
+    // ROTATION still closes. It is the one viewport change a reposition can't
+    // be trusted through: orientationchange fires BEFORE the visual-viewport
+    // metrics and ViewportSync's --vvh/--vv-top settle, so the maths would run
+    // on pre-rotation numbers; the thread relayouts to a different width and
+    // re-pins to the bottom underneath us, so the bubble is somewhere else
+    // entirely; and the above/below flip decision changes with it. A wrong
+    // answer here is worse than one extra long press.
+    window.addEventListener('orientationchange', _closePicker);
+  }
+  function _unwirePickerDismiss() {
+    if (!_pickerDismissWired) return;
+    _pickerDismissWired = false;
+    document.removeEventListener('pointerdown', _onPickerOutsidePointer, true);
+    document.removeEventListener('touchstart', _onPickerOutsidePointer, true);
+    document.removeEventListener('mousedown',  _onPickerOutsidePointer, true);
+    window.removeEventListener('resize', _schedulePickerReposition);
+    window.removeEventListener('orientationchange', _closePicker);
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', _schedulePickerReposition);
+      window.visualViewport.removeEventListener('scroll', _schedulePickerReposition);
+    }
+  }
+  function _onPickerOutsidePointer(e) {
+    // A pointerdown ON the popover must not close it: hiding the node here
+    // would cancel the click that its own buttons are delegated on.
+    const t = e.target;
+    if (t && t.closest && t.closest('.chat-reaction-picker')) return;
+    _closePicker();
   }
   // Messenger restyle Fix 3 — LONG-PRESS (500ms) on a bubble still opens the
   // full 6-emoji picker (unchanged). The old "or the heart" branch is gone
@@ -2761,6 +3059,31 @@ window.Chat = (() => {
   // touchstart/touchend timing covers mobile; mousedown/mouseup + contextmenu
   // (right-click / long-press-as-contextmenu on some browsers) covers desktop.
   const LONG_PRESS_MS = 500;
+  // Owner report (2026-08): "long press is not working well". Cause: the
+  // touchmove listener below used to call clearPress() on ANY movement, with
+  // ZERO tolerance — and a finger held deliberately still on a phone still
+  // jitters a pixel or three, so the timer was cancelled long before it could
+  // fire and the picker never opened. A press now survives up to this much
+  // travel from its touchstart point.
+  //
+  // 10px, chosen against the three gestures it has to co-exist with:
+  //   • FINGER JITTER while holding still measures ~1-4px — comfortably inside.
+  //   • A SCROLL crosses it almost immediately: even a slow, deliberate
+  //     200px/s drag passes 10px in ~50ms, i.e. one tenth of LONG_PRESS_MS, so
+  //     "scroll cancels the press promptly" still holds by a wide margin.
+  //   • The SWIPE-TO-REPLY axis latch is SWIPE_AXIS_THRESH = 24px of combined
+  //     travel (above). 10 < 24 means a swipe that STARTS as a swipe kills the
+  //     press timer at 10px, long before it can commit at 24 — so the
+  //     deliberate swipe wins cleanly there without knowing about the press.
+  //     It does NOT make the two mutually exclusive, and an earlier revision of
+  //     this comment wrongly claimed it did: at 500ms a still finger has
+  //     travelled 0px, the picker opens, and the 24px accrues afterwards.
+  //     Press-then-swipe is handled explicitly in _onSwipeMove instead.
+  // It also matches the slop iOS itself allows on a system long-press, which
+  // is why LONG_PRESS_MS stays at 500: the defect was cancellation, not
+  // duration, and shortening the timer would start firing the picker during
+  // the still moment at the beginning of a slow scroll.
+  const LONG_PRESS_MOVE_TOL = 10;   // px of travel a press may survive
   // DOUBLE-TAP-TO-HEART decision (documented per the batch brief): a bubble
   // tap is DELAYED by DOUBLE_TAP_MS before it performs the timestamp toggle,
   // so a fast second tap on the SAME message can upgrade it into a double-tap
@@ -2772,6 +3095,16 @@ window.Chat = (() => {
   // standard mobile double-tap window and isn't perceptible as lag for a
   // normal single tap.
   const DOUBLE_TAP_MS = 300;
+  // How long after the finger LIFTS a completed long press still owns the
+  // click. The "a long press happened" flag exists to swallow exactly one
+  // click — the one that ends the press — but plenty of gestures open the
+  // picker and then never produce a click at all: a sideways flick past the
+  // browser's own tap slop (D2), or a file-chip press whose click navigates
+  // the page away (D3). Left latched, the flag ate an unrelated tap later on.
+  // Timed from the RELEASE, not from when the picker opened, so holding for
+  // three seconds and then lifting is still swallowed correctly; 800ms clears
+  // even the slow 300ms-tap-delay path with room to spare.
+  const LONG_PRESS_CLICK_MS = 800;
   function _wireThreadDelegation(el) {
     if (el.dataset.wired) return;
     el.dataset.wired = '1';
@@ -2787,29 +3120,80 @@ window.Chat = (() => {
       if (!(img instanceof HTMLImageElement) || !img.classList.contains('chat-img-tap')) return;
       if (_isNearBottomEl(el)) el.scrollTop = el.scrollHeight;
     }, true);
-    let pressTimer = null, longPressed = false, pressMid = null;
+    let pressTimer = null, longPressed = false, longPressedAt = 0, pressMid = null, pressPt = null;
     let bubbleTapTimer = null, lastBubbleTap = { mid: null, at: 0 };   // double-tap-to-heart state
-    const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    const clearPress = () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+      pressPt = null;
+      // Start the click-swallow window at the RELEASE — see LONG_PRESS_CLICK_MS.
+      // (Harmless on the cancel paths: longPressed is false there.)
+      if (longPressed) longPressedAt = Date.now();
+    };
+    // Consumes the "a long press just completed" flag. Returns true when this
+    // click is the one that ended the press and nothing else may act on it —
+    // and ALWAYS clears the flag, on every path, so a stale one can never
+    // survive into an unrelated tap. longPressedAt === 0 means the finger has
+    // not lifted yet, so the click can only be the terminating one.
+    const takeLongPress = () => {
+      if (!longPressed) return false;
+      const ownsClick = !longPressedAt || (Date.now() - longPressedAt) <= LONG_PRESS_CLICK_MS;
+      longPressed = false; longPressedAt = 0;
+      return ownsClick;
+    };
     const startPress = (target, e) => {
       const holder = target.closest('.chat-bubble-tap');
       if (!holder) return;
-      pressMid = holder.dataset.mid; longPressed = false;
-      clearPress();
+      clearPress();                                    // nulls pressPt — record the origin AFTER it
+      const pt = (e.touches && e.touches[0]) || e;     // touch or mouse, same clientX/Y shape
+      pressPt = { x: pt.clientX, y: pt.clientY };
+      pressMid = holder.dataset.mid; longPressed = false; longPressedAt = 0;
       pressTimer = setTimeout(() => {
-        longPressed = true;
+        pressTimer = null;
+        // Defence in depth for the teardown race (_cancelThreadPress is the
+        // primary fix): if this scroller is already off the DOM, the thread it
+        // belonged to is gone — opening a popover on it would re-bind the
+        // dismiss listeners teardown just unbound and buzz the phone for a
+        // chat that is no longer on screen.
+        if (!el.isConnected) return;
+        longPressed = true; longPressedAt = 0;
         _openPickerFor(el, pressMid);
         if (navigator.vibrate) { try { navigator.vibrate(15); } catch (_) {} }
       }, LONG_PRESS_MS);
     };
+    // D4 — the only handle teardownThread has on the timer above. Clears the
+    // completed-press flag too, so a press that fired just before the close
+    // can't swallow the first click of the NEXT thread.
+    _cancelThreadPress = () => { longPressed = false; longPressedAt = 0; clearPress(); };
+    // Movement tolerance — see LONG_PRESS_MOVE_TOL. Compared as squared
+    // distance so there is no sqrt on a per-touchmove path. Only ever CANCELS;
+    // it can never start or complete a press, so a stray mousemove on desktop
+    // is harmless.
+    const pressMoved = e => {
+      if (!pressTimer || !pressPt) return;
+      const pt = (e.touches && e.touches[0]) || e;
+      if (!pt || typeof pt.clientX !== 'number') return;
+      const dx = pt.clientX - pressPt.x, dy = pt.clientY - pressPt.y;
+      if (dx * dx + dy * dy > LONG_PRESS_MOVE_TOL * LONG_PRESS_MOVE_TOL) clearPress();
+    };
     el.addEventListener('touchstart', e => startPress(e.target, e), { passive: true });
     el.addEventListener('touchend', clearPress);
     el.addEventListener('touchcancel', clearPress);
-    el.addEventListener('touchmove', clearPress);
+    // passive: this listener never calls preventDefault (the swipe-to-reply
+    // handler, bound separately below with passive:false, is the only one that
+    // does) — so it must not hold up scrolling while it decides.
+    el.addEventListener('touchmove', pressMoved, { passive: true });
     el.addEventListener('mousedown', e => { if (e.button === 0) startPress(e.target, e); });
     el.addEventListener('mouseup', clearPress);
     el.addEventListener('mouseleave', clearPress);
+    // Desktop drag = a text selection, not a press. Same tolerance, same
+    // cancel — previously only mouseleave/mouseup could stop a desktop press,
+    // so dragging to select text inside a bubble popped the picker at 500ms.
+    el.addEventListener('mousemove', pressMoved);
     el.addEventListener('contextmenu', e => {
       const holder = e.target.closest('.chat-bubble-tap');
+      // Right-click opens the picker directly. It goes through the exact same
+      // _openPickerFor, so desktop gets the identical clamped popover — the
+      // old inline row could run off the edge of a narrow window here too.
       if (holder) { e.preventDefault(); _openPickerFor(el, holder.dataset.mid); }
     });
     // Wave5 M2 (J3) — swipe-right-to-reply, ADDITIVE alongside the long-press
@@ -2829,6 +3213,17 @@ window.Chat = (() => {
     el.addEventListener('touchcancel', _onSwipeEnd);
     el.addEventListener('click', e => {
       if (e.target.closest('#chat-load-earlier-btn')) { loadEarlier(); return; }
+      // Every picker button is a ONE-SHOT action, so the popover dismisses as
+      // soon as one fires. This used to happen for free: picking a reaction
+      // changes the message's rev, _patchThread rewrites the row, and the
+      // fresh markup renders the picker `display:none` again. Copy / Forward /
+      // Pin / Edit / Delete write nothing that changes the rev, and while the
+      // picker was an inline row tucked under its own bubble a lingering one
+      // was harmless. A popover floating over the middle of the thread is not.
+      // Closing FIRST is safe: _closePicker only rewrites the container's
+      // style attribute — no node is detached, so the branches below still
+      // resolve e.target.closest(...) and read data-mid exactly as before.
+      if (e.target.closest('.chat-reaction-picker')) _closePicker();
       const chip = e.target.closest('.chat-reaction-chip, .chat-pick-emoji');
       if (chip) { e.stopPropagation(); toggleReaction(chip.dataset.mid, chip.dataset.emoji); return; }
       const copyBtn = e.target.closest('.chat-copy-btn');
@@ -2857,7 +3252,7 @@ window.Chat = (() => {
       const imgTap = e.target.closest('.chat-img-tap');
       if (imgTap) {
         e.stopPropagation();
-        if (longPressed) { longPressed = false; return; }
+        if (takeLongPress()) return;
         _openLightboxFor(imgTap.dataset.mid, parseInt(imgTap.dataset.idx || '0', 10));
         return;
       }
@@ -2869,12 +3264,28 @@ window.Chat = (() => {
       // (already opened the picker) suppresses both.
       const bubble = e.target.closest('.chat-bubble-tap');
       if (bubble) {
+        // A COMPLETED long press swallows the click that ends it, whatever it
+        // landed on — checked FIRST, before every other branch in here.
+        // It used to sit below the reply-quote branch (long-press on a bubble
+        // carrying a quote opened the picker AND jumped to the quoted
+        // message), and then below the link/image bail-out — which was worse,
+        // because _renderMessagePart puts an `<a target="_blank">` file chip
+        // INSIDE the bubble for every attachment and every fileSource:'link'.
+        // A long press on one fell straight through to `return`, so the picker
+        // opened AND Safari navigated to the file, and the flag was never
+        // consumed. (New this batch: the old zero-tolerance touchmove meant the
+        // timer essentially never fired, and -webkit-touch-callout:none now
+        // suppresses the iOS long-press-on-link sheet that used to eat the
+        // gesture.) The anchor's default navigation has to be cancelled
+        // explicitly — returning early stops OUR handling, not the browser's.
+        if (takeLongPress()) { if (e.target.closest('a')) e.preventDefault(); return; }
+        // A SHORT tap on a file chip / image still belongs to the element, not
+        // to the bubble: no preventDefault, so the link opens exactly as before.
         if (e.target.closest('a') || e.target.closest('img')) return;
         // Wave5 M2 (J3) — tapping the quoted-reply block scrolls to (+
         // flashes) the original instead of toggling the timestamp line.
         const quote = e.target.closest('.ms-reply-quote');
         if (quote) { _scrollToMessage(quote.dataset.targetMid); return; }
-        if (longPressed) { longPressed = false; return; }
         const mid = bubble.dataset.mid;
         const now = Date.now();
         if (bubbleTapTimer && lastBubbleTap.mid === mid && (now - lastBubbleTap.at) < DOUBLE_TAP_MS) {
@@ -2912,6 +3323,13 @@ window.Chat = (() => {
   // Wave5 M2 (J3) — swipe-right-to-reply gesture. Tracks one active drag at a
   // time (module-scoped `_swipe`); reset defensively in teardownThread too.
   function _onSwipeStart(e) {
+    // The reaction popover is still a DOM child of its .ms-row (only its
+    // GEOMETRY escaped — see _openPickerFor), so a drag starting on it would
+    // otherwise swipe a row it is no longer visually attached to, and the
+    // translateX that swipe applies would drag the fixed popover with it (a
+    // transformed ancestor becomes its containing block). Neither is wanted:
+    // the popover floats free of the thread, so it is not a swipe handle.
+    if (e.target.closest && e.target.closest('.chat-reaction-picker')) return;
     const row = e.target.closest('.ms-row[data-mid]');   // pending/optimistic
     if (!row) return;                                    // rows have no data-mid — excluded by construction
     const t = e.touches && e.touches[0]; if (!t) return;
@@ -2924,9 +3342,71 @@ window.Chat = (() => {
     if (Date.now() - _lastThreadScrollAt < 150) _swipe.aborted = true;
   }
   function _onSwipeMove(e) {
-    if (!_swipe || _swipe.aborted) return;
+    if (!_swipe) return;
+    // Travel is measured BEFORE the aborted bail-out (which now sits below the
+    // picker branch) for two reasons: the picker branch needs it to decide, and
+    // it needs it even on an ALREADY-aborted drag — _onSwipeStart's
+    // momentum-scroll guard aborts at touchstart while the long-press timer
+    // keeps running, so a picker can open on top of an aborted swipe and must
+    // still be dismissable by the same drag.
     const t = e.touches && e.touches[0]; if (!t) return;
     const dx = t.clientX - _swipe.startX, dy = t.clientY - _swipe.startY;
+    // A PICKER OPENED DURING THIS DRAG → the drag dismisses it and arms
+    // nothing. The build assumed the two gestures were mutually exclusive
+    // because LONG_PRESS_MOVE_TOL (10) < SWIPE_AXIS_THRESH (24); they are not.
+    // At 500ms the finger has travelled 0px, so the picker OPENS; the 24px only
+    // accrues afterwards, and clearing an already-fired timer un-opens nothing.
+    // Order is what matters: swipe-then-press is genuinely safe (the press
+    // timer dies at 10px, long before the swipe can commit), press-then-swipe
+    // was not — it armed a reply AND translateX'd .ms-row, which, being a
+    // transformed ancestor, becomes the fixed popover's containing block and
+    // flung it hundreds of px off-screen (measured 539 -> 1189.7px top on an
+    // 812px viewport) into a clipping scroller.
+    //
+    // DISMISS, not reply: with a popover open the user's model is "a menu is
+    // up", and a flick is the universal "get rid of it" — arming a reply they
+    // cannot even see (the composer is behind the popover) is not what that
+    // gesture asks for. Aborting rather than merely closing is also what keeps
+    // the transform from ever being written, which is the half of this defect
+    // that closing alone would not fix.
+    //
+    // Reachable ONLY when the picker opened mid-drag: any pre-existing picker
+    // was already closed by _onPickerOutsidePointer on this touch's own
+    // pointerdown/touchstart (document, capture phase — it runs before the
+    // scroller's own touchstart). So a normal swipe-to-reply never sees this.
+    //
+    // TWO SEPARATE DECISIONS. Collapsing them into one guard is exactly what
+    // the previous revision got wrong (`if (_openPickerMid) { _closePicker();
+    // _swipe.aborted = true; return; }` — zero tolerance, so the FIRST
+    // touchmove of ANY size closed it; measured dismissal at dx = 1px):
+    //   • ABORT the swipe — UNCONDITIONAL, from the first touchmove. This is
+    //     the safety property, and it must not wait for a threshold: it is what
+    //     guarantees translateX is never written on a row that carries an open
+    //     picker (measured consequence when it was: the fixed popover took the
+    //     transformed row as its containing block and was flung from (10,434)
+    //     to (311,979), off-screen and then clipped by #chat-thread-scroll).
+    //   • CLOSE the picker — only once travel genuinely exceeds
+    //     LONG_PRESS_MOVE_TOL (10px). That constant is REUSED rather than given
+    //     a twin because it answers the identical question about the identical
+    //     finger on the identical gesture: how much travel still counts as
+    //     "holding still"? It was measured against the ~1-4px of jitter a
+    //     deliberately-still finger produces (see its comment above), and the
+    //     picker opens with that finger STILL DOWN — so the opened picker faces
+    //     the very same jitter the opening press was given slop for, and got
+    //     none. Symmetry is the rule: movement too small to have CANCELLED the
+    //     press is too small to dismiss what the press produced. Deliberately
+    //     NOT SWIPE_AXIS_THRESH (24): 10 < 24 keeps the close strictly earlier
+    //     than the point at which a swipe could ever latch an axis, so no
+    //     window exists where a committed swipe and an open picker coexist
+    //     (belt-and-braces behind the unconditional abort), and a real sideways
+    //     flick still clears the menu within the first frames of motion instead
+    //     of after 24px of visible finger travel.
+    if (_openPickerMid) {
+      _swipe.aborted = true;
+      if (dx * dx + dy * dy > LONG_PRESS_MOVE_TOL * LONG_PRESS_MOVE_TOL) _closePicker();
+      return;
+    }
+    if (_swipe.aborted) return;
     if (!_swipe.committed) {
       // gesture-conflict fix 2026-08 — true axis-lock (replaces the old 8px
       // noise-floor + 0.6 slope guard). Wait for real combined travel before
@@ -3320,6 +3800,23 @@ window.Chat = (() => {
   }
   function _onThreadScroll() {
     _lastThreadScrollAt = Date.now();   // gesture-conflict fix 2026-08 — feeds _onSwipeStart's momentum-scroll guard
+    // The reaction popover is position:fixed, so it does NOT travel with the
+    // thread — left alone it would hover over an unrelated message. It used to
+    // be closed outright here; it now RE-ANCHORS to its bubble, and
+    // _repositionOpenPicker closes it once that bubble has scrolled out of the
+    // thread's visible box (so a deliberate scroll-away still dismisses it,
+    // just one bubble-height later).
+    //
+    // Closing outright could not stay: the keyboard retraction of D1 re-pins
+    // this scroller to the bottom (_onViewportResize), which fires a scroll
+    // event — so "reposition on visualViewport resize" alone would have been
+    // undone one task later by a close from here, and the D1 defect would have
+    // survived its own fix. A programmatic re-pin and a finger-drag are the
+    // same event; treating both as "follow the bubble" needs no way to tell
+    // them apart. (Opening one cannot re-enter here: _openPickerFor sets
+    // position:fixed and display in the same task, so the picker never
+    // occupies layout space and never shifts the scroller.)
+    if (_openPickerMid) _schedulePickerReposition();
     const el = document.getElementById('chat-thread-scroll');
     if (!el) return;
     _updateScrollFab(el);
