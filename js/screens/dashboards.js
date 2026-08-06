@@ -681,6 +681,17 @@ async function renderProductDatabase() {
     const panel = openPage(`${emojiIcon('🧮',16)} Materials from Inventory`, `<div style="padding:24px">${window.skeletonHtml('rows')}</div>`,
       '<button class="btn-primary" id="bom-apply">Apply to Materials Cost</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>');
     const snap = await db.collection('inventory_items').orderBy('name').get().catch(() => ({ docs: [] }));
+    // CLOSED MID-FLIGHT (v14.0.71 instant-window pass). The whole point of the
+    // skeleton above is that the panel is on screen and interactive while this
+    // read is still out, which means Back can — and on a slow connection does —
+    // land first. Everything below then runs against a panel that has already
+    // been torn down: the innerHTML writes would be harmless (a detached node
+    // still accepts them), but the `#bom-apply` wiring at the bottom was NOT.
+    // It used to be a document-scoped getElementById, so on a closed panel it
+    // resolved to null and threw a TypeError out of this function — an unhandled
+    // rejection every time someone tapped BOM and immediately backed out. Bail
+    // before touching anything; a closed window must stay closed.
+    if (!panel.isConnected) return;
     const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(i => (i.kind || 'material') === 'material');
     const qtyById = {};
     (existingBom || []).forEach(l => { qtyById[l.itemId] = l.qty; });
@@ -716,14 +727,24 @@ async function renderProductDatabase() {
         total += line;
         inp.closest('tr').querySelector('.bom-line-total').textContent = '₱' + window.fmtN2(line);
       });
-      const tEl = document.getElementById('bom-total');
+      // Panel-scoped, not document-scoped: `bom-total` lives in the markup this
+      // function just injected, and a second BOM panel stacked on top would
+      // otherwise have every one of its keystrokes rewrite the BURIED panel's
+      // total (getElementById returns the first match in document order, which
+      // is the older panel). Same reason `.bom-qty` above is read off `body`.
+      const tEl = body.querySelector('#bom-total');
       if (tEl) tEl.textContent = '₱' + window.fmtN2(total);
       return total;
     };
     body.querySelectorAll('.bom-qty').forEach(inp => inp.addEventListener('input', recompute));
     recompute();
 
-    document.getElementById('bom-apply').addEventListener('click', () => {
+    // `#bom-apply` sits in the FOOTER, i.e. inside `panel` but outside `body` —
+    // hence panel.querySelector rather than body's. Optional-chained because a
+    // panel torn down between the isConnected check above and here (a Back press
+    // in that window) would otherwise throw; the listener is simply never wired,
+    // which is correct for a window nobody is looking at any more.
+    panel.querySelector('#bom-apply')?.addEventListener('click', () => {
       const lines = [];
       let total = 0;
       body.querySelectorAll('.bom-qty').forEach(inp => {
@@ -2780,17 +2801,68 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // employee's write here was silently rejected. Now files a real
   // approval_requests doc; on approval, CashAdvance.planFor() reads it as
   // that month's custom deduction amount.
-  document.getElementById('ca-deduct-req-btn')?.addEventListener('click', async () => {
+  document.getElementById('ca-deduct-req-btn')?.addEventListener('click', () => {
     const month = bizDate().slice(0,7);   // Manila pay-period YYYY-MM
     const activeCA = cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0);
+    // ELIGIBILITY GATE — deliberately still AHEAD of openPage (v14.0.71).
+    // The rest of this handler was inverted so the window beats the network,
+    // but this check is not a load: it reads the `cashAdvances` array this
+    // screen already fetched, costs nothing, and answers "is there anything to
+    // deduct against at all?". Opening a request form and then having to yank
+    // it away because the answer is no would be strictly worse than the toast.
     if (!activeCA.length) { Notifs.showToast('No active cash advance balance.', 'error'); return; }
     const totalBal = activeCA.reduce((s,a)=>s+(a.balance||0),0);
-    const existing = await db.collection('approval_requests')
-      .where('userId','==',currentUser.uid).where('type','==','ca_deduct').where('month','==',month).where('status','==','pending')
-      .limit(1).get().catch(()=>({docs:[]}));
-    const currentRequest = existing.docs[0]?.data()?.amount || '';
 
-    openPage('Set CA Deduction for This Payroll', `
+    // ── WINDOW FIRST, READ SECOND (v14.0.71 instant-window pass) ─────────────
+    // This handler used to `await` the pending-request lookup below and only
+    // THEN call openPage. Nothing moved on screen between finger-up and the
+    // query landing — the press state had already released and there was no
+    // panel yet to animate — so the tap read as dropped. Every input this form
+    // renders is already in hand (month, totalBal, both from memory) EXCEPT one
+    // number: the amount of an existing pending ca_deduct request for this
+    // month, used only to prefill the input. One prefill was holding the whole
+    // window hostage.
+    //
+    // NOT taken: render the real form immediately and patch the input's value
+    // when the query lands. The prefill would visibly rewrite itself a beat
+    // after the form appeared, and worse, it would clobber whatever the user
+    // had already typed into that field in the gap. A skeleton that becomes the
+    // form once is honest; a form that silently rewrites itself is not.
+    //
+    // The skeleton is passed to openPage even though withLoadingAndError paints
+    // its own as its first (synchronous, pre-await) statement: that makes the
+    // panel's first paint deterministic here rather than a fact about the
+    // wrapper's internals.
+    const panel = openPage('Set CA Deduction for This Payroll',
+      `<div style="padding:4px 0">${window.skeletonHtml('rows', 3)}</div>`,
+      // The footer ships WITH the panel so the chrome never reflows mid-load,
+      // but the primary button starts disabled: its handler reads
+      // #ca-override-amt, which does not exist until the fill below runs, and a
+      // live-looking button that silently does nothing is its own bug. The
+      // disabled attribute is removed on fill, so the settled DOM is identical
+      // to what this call site rendered before the inversion.
+      `<button class="btn-primary" id="save-ca-override-btn" disabled>Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    const caBody = panel.querySelector('.page-panel-body');
+
+    window.withLoadingAndError(
+      caBody,
+      // Same query, same fields, same limit as before — only its position moved.
+      // The .catch stays: a denied/failed prefill read must NOT block the form
+      // (an employee can still file the request, just without the pre-filled
+      // amount), which is why this fetcher resolves rather than rejects and the
+      // wrapper's error card is only a backstop for a synchronous throw. Either
+      // way there is no path that leaves the skeleton up forever.
+      () => db.collection('approval_requests')
+        .where('userId','==',currentUser.uid).where('type','==','ca_deduct').where('month','==',month).where('status','==','pending')
+        .limit(1).get().catch(()=>({docs:[]})),
+      (existing) => {
+        // CLOSED MID-FLIGHT: Back can land before the query does. `caBody` is
+        // then a detached node — writing to it is harmless but pointless, and
+        // enabling a submit button on a dead panel is not. Never resurrect a
+        // closed window; just stop.
+        if (!panel.isConnected) return;
+        const currentRequest = existing.docs[0]?.data()?.amount || '';
+        caBody.innerHTML = `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
         Your current outstanding CA balance is <strong>₱${formatNum(totalBal)}</strong>.<br>
         Request how much you want deducted from your <strong>${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</strong> payroll.
@@ -2804,28 +2876,45 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <label>Reason / Note (optional)</label>
         <input id="ca-override-note" placeholder="e.g., Please deduct ₱3,000 only this month"/>
       </div>
-    `, `<button class="btn-primary" id="save-ca-override-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    `;
+        // withLoadingAndError hydrates icons for its own empty/error blocks, but
+        // its guard only fires on un-hydrated `[data-lucide]` inside the
+        // container — this markup carries none today, and this call keeps the
+        // fill honest if one is ever added to it.
+        if (window.lucide && caBody.querySelector('[data-lucide]:not(svg)')) lucide.createIcons({ nodes: [caBody] });
 
-    document.getElementById('save-ca-override-btn')?.addEventListener('click', async () => {
-      const amt = parseFloat(document.getElementById('ca-override-amt').value)||0;
-      const note = document.getElementById('ca-override-note').value.trim();
-      if (amt <= 0 || amt > totalBal) { Notifs.showToast(`Enter an amount between ₱1 and ₱${formatNum(totalBal)}.`, 'error'); return; }
-      await db.collection('approval_requests').add({
-        type: 'ca_deduct',
-        userId: currentUser.uid,
-        userName: userProfile.displayName || currentUser.email,
-        month, amount: amt, reason: note,
-        status: 'pending',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      await Notifs.sendToOwner({
-        title: '💳 CA Deduction Request',
-        body: `${userProfile.displayName||currentUser.email} requests ₱${formatNum(amt)} CA deduction for ${month} payroll.`,
-        icon: '💳', type: 'ca_deduct_req', link: 'approvals'
-      });
-      closeModal();
-      Notifs.success(`CA deduction request (₱${formatNum(amt)}) submitted!`);
-    });
+        // ── LISTENERS WIRED AFTER THE FILL, NOT AFTER openPage ──────────────
+        // Pre-inversion this wiring sat immediately under openPage and could
+        // assume the form was already in the DOM. It cannot any more: bound at
+        // that point it would have found a skeleton and silently bound nothing.
+        // Queried off `panel`, not `document`, so a second panel stacked on top
+        // can never steal these ids from the one we just filled.
+        const saveBtn = panel.querySelector('#save-ca-override-btn');
+        if (!saveBtn) return;
+        saveBtn.disabled = false;
+        saveBtn.addEventListener('click', async () => {
+          const amt = parseFloat(caBody.querySelector('#ca-override-amt').value)||0;
+          const note = caBody.querySelector('#ca-override-note').value.trim();
+          if (amt <= 0 || amt > totalBal) { Notifs.showToast(`Enter an amount between ₱1 and ₱${formatNum(totalBal)}.`, 'error'); return; }
+          await db.collection('approval_requests').add({
+            type: 'ca_deduct',
+            userId: currentUser.uid,
+            userName: userProfile.displayName || currentUser.email,
+            month, amount: amt, reason: note,
+            status: 'pending',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await Notifs.sendToOwner({
+            title: '💳 CA Deduction Request',
+            body: `${userProfile.displayName||currentUser.email} requests ₱${formatNum(amt)} CA deduction for ${month} payroll.`,
+            icon: '💳', type: 'ca_deduct_req', link: 'approvals'
+          });
+          closeModal();
+          Notifs.success(`CA deduction request (₱${formatNum(amt)}) submitted!`);
+        });
+      },
+      { skeleton: 'rows', skeletonCount: 3 }
+    );
   });
 };
 

@@ -90,6 +90,37 @@ function projectPaid(p) {
   return (p.payments || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
 }
 
+// ── pageStillOpen(panel) — the close-mid-flight guard ────────────────────────
+// Every drill-down in this file now pushes its openPage window SYNCHRONOUSLY
+// with a skeleton body and fills it when the read lands (see the WINDOW
+// INVERSION notes at each call site). The user can press Back in that gap, so
+// every fill has to be able to no-op.
+//
+// isConnected ALONE IS NOT THAT TEST, measured in-browser 2026-08-05 against a
+// real panel: openPage's teardown (js/app.js) drops `.open`, pops the Overlay
+// entry and splices window._pageStack SYNCHRONOUSLY, but removes the node on a
+// `setTimeout(…, 300)` so the exit transition can play. For those 300ms a
+// dismissed panel is still isConnected === true — and a read landing inside
+// 300ms of the tap is the COMMON case here, not the exotic one (dbCachedGet
+// serves `users` from a 60s in-memory cache, so it resolves on a microtask).
+// A bare isConnected check therefore let the fill run on a window the user had
+// already dismissed: verified filling it and re-enabling its footer button.
+// Nothing user-visible broke — the panel is off the Overlay stack, cannot be
+// revealed again, and is deleted milliseconds later — but it is wasted work on
+// a corpse and it makes the guard read as protection it was not providing.
+//
+// _pageStack membership is the exact liveness test: openPage pushes before it
+// appends, teardown splices before it schedules the removal, so the panel is in
+// that array for precisely as long as the window is alive. isConnected is kept
+// as a belt-and-braces first clause (and as the sole test if a future app.js
+// stops publishing _pageStack, which is why the Array.isArray fallback returns
+// the isConnected verdict rather than false — this must never become the reason
+// a window silently refuses to fill).
+function pageStillOpen(panel) {
+  if (!panel || !panel.isConnected) return false;
+  return Array.isArray(window._pageStack) ? window._pageStack.includes(panel) : true;
+}
+
 async function renderProjects(container, currentUser, currentRole) {
   // v14 prod-fixlist — this was a blanket .catch(()=>({docs:[],empty:true})), so
   // a genuine permission error on `projects` rendered identically to "no
@@ -346,15 +377,27 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
 
   // Record a payment
   document.getElementById('proj-payment-btn')?.addEventListener('click', async () => {
-    const bankOpts = await window.BankAccounts.optionsHTML();
-    openPage('Record Payment', `
-      <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"/></div>
-      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${today()}"/></div>
-      <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
-      <div class="form-group"><label>Reference / Note</label><input id="pay-note" placeholder="OR no., remarks"/></div>
-      <div class="form-group"><label>Deposited to (company account) — optional</label>
-        <select id="pay-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
-    `, `<button class="btn-primary" id="save-pay-btn">Save Payment</button><button class="btn-secondary" id="pay-back-btn">Cancel</button>`);
+    // ── WINDOW INVERSION (v14 smoothness pass) ────────────────────────────────
+    // openPage() takes a FINISHED html string, so this handler used to
+    // `await window.BankAccounts.optionsHTML()` BEFORE calling it: between
+    // finger-up and the response not one pixel changed, and by then the press
+    // state had already released with nothing in the DOM to animate. The window
+    // is now pushed SYNCHRONOUSLY, in the tap frame, carrying a skeleton body;
+    // the real form is injected when the read lands. Nothing about WHAT is
+    // fetched or rendered changed — the filled markup below is byte-identical to
+    // what this call site produced before, down to the ${bankOpts} interpolation.
+    const payPanel = openPage('Record Payment', window.skeletonHtml('rows', 5),
+      // The footer is data-independent, so it ships WHOLE in the tap frame: the
+      // window reads as finished immediately and Cancel is live throughout the
+      // load (the user can always back out of a window they just opened).
+      // "Save Payment" ships `disabled` because its handler reads #pay-amt /
+      // #pay-date / #pay-bank — nodes that do not exist until the fill. A
+      // disabled button dispatches no click from mouse OR keyboard, so the
+      // listener wired directly below is simply unreachable until the fill
+      // re-enables it, and stays unreachable forever on the failure path, where
+      // there is no form to save in the first place.
+      `<button class="btn-primary" id="save-pay-btn" disabled>Save Payment</button><button class="btn-secondary" id="pay-back-btn">Cancel</button>`);
+    const payBody = payPanel.querySelector('.page-panel-body');
     document.getElementById('pay-back-btn').addEventListener('click', reopen);
     document.getElementById('save-pay-btn').addEventListener('click', async () => {
       const amt = parseFloat(document.getElementById('pay-amt').value) || 0;
@@ -417,6 +460,39 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         reopen();
       } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); if (payBtn) payBtn.disabled = false; }
     });
+
+    // ── skeleton → fetch → fill (or error) ────────────────────────────────────
+    // withLoadingAndError (js/ui-states.js) already owns this whole lifecycle:
+    // it repaints the same skeleton, awaits the fetcher, calls the renderer, and
+    // on a rejection swaps in an error block with an internally-wired Retry — so
+    // a failed read can never leave an eternal skeleton. It also runs the single
+    // post-injection lucide sweep, which is what hydrates the icons inside the
+    // markup we inject here (they would render as blank gaps otherwise).
+    // The fetcher is the SAME call, with the same arguments, that used to sit on
+    // the line above openPage.
+    await window.withLoadingAndError(payBody,
+      () => window.BankAccounts.optionsHTML(),
+      (bankOpts) => {
+        // CLOSED MID-FLIGHT — Back can be pressed before the read lands. See
+        // pageStillOpen() at the top of this file for why isConnected alone is
+        // not sufficient here (300ms teardown removal timer).
+        if (!pageStillOpen(payPanel)) return;
+        payBody.innerHTML = `
+      <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"/></div>
+      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${today()}"/></div>
+      <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
+      <div class="form-group"><label>Reference / Note</label><input id="pay-note" placeholder="OR no., remarks"/></div>
+      <div class="form-group"><label>Deposited to (company account) — optional</label>
+        <select id="pay-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+    `;
+        // The form exists now, so the save handler's DOM reads can all resolve.
+        // Scoped to this panel rather than document-wide: a buried page underneath
+        // could in principle carry the same id, and this is the one place where
+        // grabbing the wrong one would silently arm the wrong window's button.
+        const payEnable = payPanel.querySelector('#save-pay-btn');
+        if (payEnable) payEnable.disabled = false;
+      },
+      { skeleton: 'rows', skeletonCount: 5 });
   });
 
   // Create a billing invoice for collection of balance
@@ -539,18 +615,31 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
   // linking a project to any client makes them a design client (brands arrayUnion
   // on save). Falls back to legacy design_clients read-only compat until
   // migrateClientBooks() has run (window.Clients.listAll() handles that itself).
-  const [uSnap, allClients, jSnap] = await Promise.all([
-    dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]})),
-    window.Clients.listAll().catch(()=>[]),
-    db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-  ]);
-  const users   = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  const clients = [...allClients].sort((a,b)=>
-    (b.brands.includes('design')?1:0)-(a.brands.includes('design')?1:0) || (a.name||'').localeCompare(b.name||''));
-  const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
+  //
+  // ── WINDOW INVERSION (v14 smoothness pass) ────────────────────────────────
+  // This function used to await three reads (users + the unified client book +
+  // job_projects) before it called openPage, so tapping "Edit / Link / Delegate"
+  // produced nothing at all until the slowest of them landed. The window is now
+  // pushed synchronously with a skeleton body and filled when the Promise.all
+  // resolves — same three reads, same arguments, same soft-fallback .catch()es,
+  // same rendered form.
   let team = (p.team||[]).map((uid,i)=>({uid, name:(p.teamNames||[])[i]||uid}));
+  // Hoisted out of the fill because the SAVE handler reads it (the `_legacy`
+  // test further down decides whether to stamp `brands: ['design']` onto the
+  // clients doc). That handler is wired in the tap frame, before the fetch has
+  // landed, so it has to close over a binding that the fill can later populate
+  // rather than over a value that does not exist yet. It stays [] only on the
+  // failure path — where the save button is never enabled, so it is never read.
+  let allClients = [];
 
-  openPage('Edit Project', `
+  const pePanel = openPage('Edit Project', window.skeletonHtml('rows', 9), `<button class="btn-primary" id="pe-save-btn" disabled>Save</button><button class="btn-secondary" id="pe-cancel-btn">Cancel</button>`);
+  const peBody  = pePanel.querySelector('.page-panel-body');
+  // Cancel is data-independent and live immediately; Save ships `disabled`
+  // because every field it reads (#pe-name … #pe-job) is injected by the fill —
+  // see the same reasoning spelled out at the Record Payment call site above.
+  document.getElementById('pe-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'); });
+
+  const peFormHtml = (users, clients, jobs) => `
     <div class="form-group"><label>Project Name</label><input id="pe-name" value="${escHtml(p.name||'')}"/></div>
     <div class="form-group"><label>Client (unified CRM)</label>
       <select id="pe-client"><option value="">— None / free text —</option>
@@ -585,28 +674,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
       </select>
     </div>
     <div class="form-group"><label>Notes</label><textarea id="pe-notes" rows="3">${escHtml(p.notes||'')}</textarea></div>
-  `, `<button class="btn-primary" id="pe-save-btn">Save</button><button class="btn-secondary" id="pe-cancel-btn">Cancel</button>`);
-
-  document.getElementById('pe-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'); });
-
-  const renderChips = () => {
-    const wrap = document.getElementById('pe-team-chips');
-    wrap.innerHTML = team.map(a=>`<span class="badge badge-blue team-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ${emojiIcon('✕',16)}</span>`).join('');
-    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
-    wrap.querySelectorAll('.team-chip').forEach(ch=>ch.addEventListener('click',()=>{ team=team.filter(x=>x.uid!==ch.dataset.uid); renderChips(); }));
-  };
-  renderChips();
-  document.getElementById('pe-team-sel').addEventListener('change',e=>{
-    const uid=e.target.value, name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
-    if (uid && !team.some(a=>a.uid===uid)) team.push({uid,name});
-    e.target.value=''; renderChips();
-  });
-  // Picking a client auto-fills the display name (free text remains an override).
-  document.getElementById('pe-client').addEventListener('change', e => {
-    const nm = e.target.options[e.target.selectedIndex]?.dataset.name || '';
-    const disp = document.getElementById('pe-clientname');
-    if (nm && !disp.value.trim()) disp.value = nm;
-  });
+  `;
 
   document.getElementById('pe-save-btn').addEventListener('click', async () => {
     const prevTeam = new Set(p.team||[]);
@@ -670,6 +738,63 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
     } catch(e){ console.warn(e); Notifs.showToast('Could not save project','error'); return; }
     window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview');
   });
+
+  // ── skeleton → fetch → fill (or error) ──────────────────────────────────────
+  // Same three reads, same order, same per-read .catch() fallbacks as before the
+  // inversion — only the call site moved. withLoadingAndError (js/ui-states.js)
+  // owns the skeleton, the error block + Retry, and the one post-injection lucide
+  // sweep, so a rejected read shows a retryable error instead of an eternal
+  // skeleton. NOTE the Promise.all can effectively only reject if one of these
+  // globals is missing outright (window.Clients undefined at tap time) — the
+  // per-read failures are absorbed by the .catch()es exactly as they always were,
+  // which is what keeps "user list failed to load" rendering an empty picker
+  // rather than a hard error, i.e. today's behaviour.
+  await window.withLoadingAndError(peBody,
+    () => Promise.all([
+      dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]})),
+      window.Clients.listAll().catch(()=>[]),
+      db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    ]),
+    ([uSnap, fetchedClients, jSnap]) => {
+      // CLOSED MID-FLIGHT — see pageStillOpen() at the top of this file.
+      if (!pageStillOpen(pePanel)) return;
+      allClients    = fetchedClients;                       // publish to the save handler
+      const users   = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+      const clients = [...allClients].sort((a,b)=>
+        (b.brands.includes('design')?1:0)-(a.brands.includes('design')?1:0) || (a.name||'').localeCompare(b.name||''));
+      const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
+      peBody.innerHTML = peFormHtml(users, clients, jobs);
+
+      // ── LISTENERS WIRED AFTER THE FILL ──────────────────────────────────────
+      // These three used to run on the line after openPage, when the body already
+      // held the real markup. Post-inversion that markup does not exist until
+      // here, so wiring them any earlier would silently bind nothing. Queries are
+      // scoped to peBody (not document) so they can only ever resolve inside the
+      // panel we just filled.
+      const renderChips = () => {
+        const wrap = peBody.querySelector('#pe-team-chips');
+        if (!wrap) return;
+        wrap.innerHTML = team.map(a=>`<span class="badge badge-blue team-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ${emojiIcon('✕',16)}</span>`).join('');
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+        wrap.querySelectorAll('.team-chip').forEach(ch=>ch.addEventListener('click',()=>{ team=team.filter(x=>x.uid!==ch.dataset.uid); renderChips(); }));
+      };
+      renderChips();
+      peBody.querySelector('#pe-team-sel').addEventListener('change',e=>{
+        const uid=e.target.value, name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
+        if (uid && !team.some(a=>a.uid===uid)) team.push({uid,name});
+        e.target.value=''; renderChips();
+      });
+      // Picking a client auto-fills the display name (free text remains an override).
+      peBody.querySelector('#pe-client').addEventListener('change', e => {
+        const nm = e.target.options[e.target.selectedIndex]?.dataset.name || '';
+        const disp = peBody.querySelector('#pe-clientname');
+        if (nm && !disp.value.trim()) disp.value = nm;
+      });
+
+      const peSave = pePanel.querySelector('#pe-save-btn');
+      if (peSave) peSave.disabled = false;
+    },
+    { skeleton: 'rows', skeletonCount: 9 });
 }
 
 // ── Per-project Drawings ──
@@ -761,24 +886,16 @@ async function renderProjectFiles(host, p, currentUser, currentRole){
 }
 
 async function openDrawingCreateModal(project, currentUser, currentRole, canBill){
-  const uSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
-  const users = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  openPage('New Drawing', `
-    <div class="form-group"><label>Title</label><input id="dw-title" placeholder="e.g. Ground Floor Plan"/></div>
-    <div class="form-row">
-      <div class="form-group"><label>Drawing No.</label><input id="dw-no" placeholder="e.g. A-101 (optional)"/></div>
-      <div class="form-group"><label>Type</label><select id="dw-type">${DRAWING_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
-    </div>
-    <div class="form-group"><label>Assign Designer</label>
-      <select id="dw-assignee"><option value="">— Unassigned —</option>
-        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group"><label>Notes (Rev A)</label><textarea id="dw-note" rows="2" placeholder="What this drawing covers / initial notes"></textarea></div>
-    <div class="form-group"><label>File (DWG / PDF / drawing)</label><div id="dw-file"></div></div>
-  `, `<button class="btn-primary" id="dw-save-btn">Create Drawing</button><button class="btn-secondary" id="dw-cancel-btn">Cancel</button>`);
+  // ── WINDOW INVERSION (v14 smoothness pass) ────────────────────────────────
+  // The users read used to sit ABOVE openPage, so "+ New Drawing" showed nothing
+  // until it resolved. Window first (skeleton body), read second, fill third.
+  // Same dbCachedGet call with the same key/TTL/fallback; same rendered form.
+  // `uploaded` is hoisted above openPage because the save handler — wired in the
+  // tap frame — closes over it, while the upload widget that assigns it can only
+  // be mounted after the fill (its host div is part of the injected markup).
   let uploaded = null;
-  Drive.renderUploadArea('dw-file', r=>{ uploaded=r; }, {label:'Upload DWG/PDF/drawing', dept:'Design', subfolder:'Drawings'});
+  const dwPanel = openPage('New Drawing', window.skeletonHtml('rows', 5), `<button class="btn-primary" id="dw-save-btn" disabled>Create Drawing</button><button class="btn-secondary" id="dw-cancel-btn">Cancel</button>`);
+  const dwBody  = dwPanel.querySelector('.page-panel-body');
   document.getElementById('dw-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
   document.getElementById('dw-save-btn').addEventListener('click', async () => {
     const title = document.getElementById('dw-title').value.trim();
@@ -812,6 +929,35 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
     } catch(e){ console.warn(e); Notifs.showToast('Could not create drawing','error'); return; }
     window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings');
   });
+
+  // ── skeleton → fetch → fill (or error) ──────────────────────────────────────
+  await window.withLoadingAndError(dwBody,
+    () => dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]})),
+    (uSnap) => {
+      if (!pageStillOpen(dwPanel)) return;   // dismissed mid-flight — see pageStillOpen()
+      const users = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+      dwBody.innerHTML = `
+    <div class="form-group"><label>Title</label><input id="dw-title" placeholder="e.g. Ground Floor Plan"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Drawing No.</label><input id="dw-no" placeholder="e.g. A-101 (optional)"/></div>
+      <div class="form-group"><label>Type</label><select id="dw-type">${DRAWING_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Assign Designer</label>
+      <select id="dw-assignee"><option value="">— Unassigned —</option>
+        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Notes (Rev A)</label><textarea id="dw-note" rows="2" placeholder="What this drawing covers / initial notes"></textarea></div>
+    <div class="form-group"><label>File (DWG / PDF / drawing)</label><div id="dw-file"></div></div>
+  `;
+      // WIRED AFTER THE FILL — #dw-file is part of the markup injected one line
+      // up, so mounting the uploader any earlier would have found nothing and
+      // silently produced a drawing that could never carry a file.
+      Drive.renderUploadArea('dw-file', r=>{ uploaded=r; }, {label:'Upload DWG/PDF/drawing', dept:'Design', subfolder:'Drawings'});
+      const dwSave = dwPanel.querySelector('#dw-save-btn');
+      if (dwSave) dwSave.disabled = false;
+    },
+    { skeleton: 'rows', skeletonCount: 5 });
 }
 
 function openDrawingDetail(d, project, currentUser, currentRole, canBill){
@@ -988,20 +1134,9 @@ function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill)
 }
 
 async function openDrawingEditModal(d, project, currentUser, currentRole, canBill){
-  const uSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
-  const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  openPage('Edit Drawing', `
-    <div class="form-group"><label>Title</label><input id="de-title" value="${escHtml(d.title||'')}"/></div>
-    <div class="form-row">
-      <div class="form-group"><label>Drawing No.</label><input id="de-no" value="${escHtml(d.drawingNo||'')}"/></div>
-      <div class="form-group"><label>Type</label><select id="de-type">${DRAWING_TYPES.map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
-    </div>
-    <div class="form-group"><label>Assign Designer</label>
-      <select id="de-assignee"><option value="">— Unassigned —</option>
-        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}" ${d.assignedTo===u.id?'selected':''}>${escHtml(u.displayName||u.email)}</option>`).join('')}
-      </select>
-    </div>
-  `, `<button class="btn-primary" id="de-save-btn">Save</button><button class="btn-secondary" id="de-cancel-btn">Cancel</button>`);
+  // ── WINDOW INVERSION (v14 smoothness pass) ── window first, users read second.
+  const dePanel = openPage('Edit Drawing', window.skeletonHtml('rows', 3), `<button class="btn-primary" id="de-save-btn" disabled>Save</button><button class="btn-secondary" id="de-cancel-btn">Cancel</button>`);
+  const deBody  = dePanel.querySelector('.page-panel-body');
   document.getElementById('de-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
   document.getElementById('de-save-btn').addEventListener('click', async () => {
     const asel = document.getElementById('de-assignee');
@@ -1026,37 +1161,44 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
     } catch(e){ console.warn(e); Notifs.showToast('Could not save','error'); return; }
     reopenDrawing(d, project, currentUser, currentRole, canBill);
   });
+
+  // ── skeleton → fetch → fill (or error) ──────────────────────────────────────
+  await window.withLoadingAndError(deBody,
+    () => dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]})),
+    (uSnap) => {
+      if (!pageStillOpen(dePanel)) return;   // dismissed mid-flight — see pageStillOpen()
+      const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+      deBody.innerHTML = `
+    <div class="form-group"><label>Title</label><input id="de-title" value="${escHtml(d.title||'')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Drawing No.</label><input id="de-no" value="${escHtml(d.drawingNo||'')}"/></div>
+      <div class="form-group"><label>Type</label><select id="de-type">${DRAWING_TYPES.map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Assign Designer</label>
+      <select id="de-assignee"><option value="">— Unassigned —</option>
+        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}" ${d.assignedTo===u.id?'selected':''}>${escHtml(u.displayName||u.email)}</option>`).join('')}
+      </select>
+    </div>
+  `;
+      const deSave = dePanel.querySelector('#de-save-btn');
+      if (deSave) deSave.disabled = false;
+    },
+    { skeleton: 'rows', skeletonCount: 3 });
 }
 
 // Delegate a Design task scoped to a project (writes department:'Design' + projectId).
 async function openAddProjectTaskModal(project, currentUser, currentRole, canBill){
-  const uSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
-  const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  openPage('Delegate Task — '+escHtml(project.name||''), `
-    <div class="form-group"><label>Title</label><input id="pt-title" placeholder="Task name"/></div>
-    <div class="form-group"><label>Description</label><textarea id="pt-desc" rows="2"></textarea></div>
-    <div class="form-row">
-      <div class="form-group"><label>Priority</label><select id="pt-priority"><option value="low">${emojiIcon('🟢',16)} Low</option><option value="medium" selected>${emojiIcon('🟡',16)} Medium</option><option value="high">${emojiIcon('🔴',16)} High</option><option value="urgent">${emojiIcon('🚨',16)} Urgent</option></select></div>
-      <div class="form-group"><label>Due Date</label><input id="pt-due" type="date" value="${today()}"/></div>
-    </div>
-    <div class="form-group"><label>Assign To (add multiple)</label>
-      <select id="pt-assignee-sel"><option value="">— Add assignee —</option>${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}</select>
-      <div id="pt-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
-    </div>
-  `, `<button class="btn-primary" id="pt-save-btn">Create Task</button><button class="btn-secondary" id="pt-cancel-btn">Cancel</button>`);
-  document.getElementById('pt-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'); });
+  // ── WINDOW INVERSION (v14 smoothness pass) ── window first, users read second.
+  // `picks` is hoisted above openPage for the same reason `uploaded` is in
+  // openDrawingCreateModal: the save handler is wired in the tap frame and closes
+  // over it, while the chip UI that mutates it only exists after the fill.
+  // The title is data-independent (it comes from the `project` argument, not from
+  // the read), so it is final from the first frame — no neutral placeholder and
+  // no title swap on fill is needed anywhere in this file.
   let picks = [];
-  const renderPicks = () => {
-    const wrap = document.getElementById('pt-chips');
-    wrap.innerHTML = picks.map(a=>`<span class="badge badge-blue pt-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ${emojiIcon('✕',16)}</span>`).join('');
-    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
-    wrap.querySelectorAll('.pt-chip').forEach(ch=>ch.addEventListener('click',()=>{ picks=picks.filter(x=>x.uid!==ch.dataset.uid); renderPicks(); }));
-  };
-  document.getElementById('pt-assignee-sel').addEventListener('change',e=>{
-    const uid=e.target.value, name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
-    if (uid && !picks.some(a=>a.uid===uid)) picks.push({uid,name});
-    e.target.value=''; renderPicks();
-  });
+  const ptPanel = openPage('Delegate Task — '+escHtml(project.name||''), window.skeletonHtml('rows', 4), `<button class="btn-primary" id="pt-save-btn" disabled>Create Task</button><button class="btn-secondary" id="pt-cancel-btn">Cancel</button>`);
+  const ptBody  = ptPanel.querySelector('.page-panel-body');
+  document.getElementById('pt-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'); });
   document.getElementById('pt-save-btn').addEventListener('click', async () => {
     const title = document.getElementById('pt-title').value.trim();
     if (!title){ Notifs.showToast('Enter a task title','error'); return; }
@@ -1082,6 +1224,44 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
     } catch(e){ console.warn(e); Notifs.showToast('Could not create task','error'); return; }
     window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks');
   });
+
+  // ── skeleton → fetch → fill (or error) ──────────────────────────────────────
+  await window.withLoadingAndError(ptBody,
+    () => dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]})),
+    (uSnap) => {
+      if (!pageStillOpen(ptPanel)) return;   // dismissed mid-flight — see pageStillOpen()
+      const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+      ptBody.innerHTML = `
+    <div class="form-group"><label>Title</label><input id="pt-title" placeholder="Task name"/></div>
+    <div class="form-group"><label>Description</label><textarea id="pt-desc" rows="2"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Priority</label><select id="pt-priority"><option value="low">${emojiIcon('🟢',16)} Low</option><option value="medium" selected>${emojiIcon('🟡',16)} Medium</option><option value="high">${emojiIcon('🔴',16)} High</option><option value="urgent">${emojiIcon('🚨',16)} Urgent</option></select></div>
+      <div class="form-group"><label>Due Date</label><input id="pt-due" type="date" value="${today()}"/></div>
+    </div>
+    <div class="form-group"><label>Assign To (add multiple)</label>
+      <select id="pt-assignee-sel"><option value="">— Add assignee —</option>${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}</select>
+      <div id="pt-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+  `;
+      // WIRED AFTER THE FILL — #pt-chips and #pt-assignee-sel are both in the
+      // markup injected one line up. Scoped to ptBody for the same reason as the
+      // Edit Project chips.
+      const renderPicks = () => {
+        const wrap = ptBody.querySelector('#pt-chips');
+        if (!wrap) return;
+        wrap.innerHTML = picks.map(a=>`<span class="badge badge-blue pt-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ${emojiIcon('✕',16)}</span>`).join('');
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+        wrap.querySelectorAll('.pt-chip').forEach(ch=>ch.addEventListener('click',()=>{ picks=picks.filter(x=>x.uid!==ch.dataset.uid); renderPicks(); }));
+      };
+      ptBody.querySelector('#pt-assignee-sel').addEventListener('change',e=>{
+        const uid=e.target.value, name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
+        if (uid && !picks.some(a=>a.uid===uid)) picks.push({uid,name});
+        e.target.value=''; renderPicks();
+      });
+      const ptSave = ptPanel.querySelector('#pt-save-btn');
+      if (ptSave) ptSave.disabled = false;
+    },
+    { skeleton: 'rows', skeletonCount: 4 });
 }
 
 // ── Cross-project Drawings dashboard (Design subtab) ──

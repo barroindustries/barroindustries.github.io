@@ -488,9 +488,157 @@ function closeTaskPanel() {
 window.closeTaskPanel = closeTaskPanel;
 window.openTaskDetail = openTaskDetail;
 
+// ── Instant-window inversion (v14 smoothness pass, 2026-08-06) ───────────────
+// Shared by openTaskDetail and openSubDetail below. openPage() takes a FINISHED
+// html string, so the historical shape of every drill-down in this file was
+// `await <read>` → build html → openPage(): between finger-up and the read
+// landing, ZERO pixels changed. The press state had already released and there
+// was no window in the DOM to animate, which is most of what "the clicks feel
+// slow" was actually measuring. The inverted shape pushes the window
+// synchronously in the tap frame with a skeleton body, then fills it when the
+// read lands. Nothing about WHAT is fetched or rendered changes — only when.
+//
+// THE HAZARD, stated once for both: every listener must now be wired AFTER the
+// fill. Pre-inversion the code could wire straight after openPage() returned,
+// because the real markup was already inside the panel. It is not any more, so
+// any wiring that runs before the fill binds nothing and fails silently. That
+// is why the entire post-read half of each drill-down now lives in its own
+// paint* function that is called only once the data is in hand.
+//
+// Titles are the one thing that cannot be right in the tap frame — both panels
+// title themselves from the fetched doc. They open on a neutral noun ('Task' /
+// 'Submission') and are retitled on fill through app.js's _setPanelTitle, so
+// the icon-extraction + whitespace normalisation it does stays in exactly one
+// place (it is a top-level function declaration in a classic script, therefore
+// a real global; the fallback below only matters if that ever stops holding).
+function setLoadedPanelTitle(panel, title) {
+  const el = panel && panel.querySelector('.page-panel-title');
+  if (!el) return;
+  if (typeof window._setPanelTitle === 'function') { window._setPanelTitle(el, title); return; }
+  el.textContent = String(title == null ? '' : title).replace(/\s+/g, ' ').trim();
+}
+
+// ── "Is this panel still worth filling?" ─────────────────────────────────────
+// CLOSED-MID-FLIGHT is the one hazard the inversion actually creates: the user
+// can now press Back while the read is still in the air, because there is a real
+// window with a real back button from the tap frame onwards.
+//
+// `panel.isConnected` is the obvious test and it is NOT sufficient — measured
+// in-browser against the real openPage teardown (2026-08-06, localhost:3838,
+// MutationObserver on the detach so the numbers do not depend on timer
+// clamping): dismissTop() → teardown/onClose at t+7ms, element actually removed
+// from the DOM at t+367ms. openPage detaches on a deliberate 300ms delay
+// (`setTimeout(() => { if (p.isConnected) p.remove(); }, 300)`, js/app.js) so
+// the exit transition can finish. For that whole ~360ms a fully dismissed panel
+// still reports isConnected === true — longer still on a throttled tab, where
+// the same probe saw it attached ~1s after onClose. A read landing in that
+// window sails straight past an isConnected-only guard.
+//
+// Nothing would be visible — the panel is mid-exit and about to be deleted —
+// but it is not free either: the fill calls renderComments(), which reads the
+// comments AND readers subcollections and then WRITES a read receipt
+// (`readers/{uid}.readAt`, js/departments.js). Marking a task read inside a
+// window the user closed before it ever painted is exactly the "must not
+// resurrect a closed window" case.
+//
+// So every openPage call converted in this file stamps `_fillAbandoned` from
+// its own onClose, which openPage guarantees to invoke on EVERY teardown path
+// (real Back, replaced-away, Overlay.clearAll). isConnected is kept as a second
+// line of defence for anything that removes a panel without a teardown.
+function pageStillLive(panel) {
+  return !!panel && panel.isConnected && !panel._fillAbandoned;
+}
+
 async function openTaskDetail(taskId, currentUser, currentRole) {
-  const snap = await db.collection('tasks').doc(taskId).get();
-  if (!snap.exists) { Notifs.showToast('Task not found','error'); return; }
+  // The window goes up FIRST, holding a skeleton. openPage() hands back the
+  // panel element, and that element is what makes the deferred fill safe: the
+  // painter targets THIS panel rather than "whatever page is on top" by the
+  // time the read resolves (which may be a different window entirely, or none).
+  //
+  // onClose clears our top-of-stack bookkeeping (used by the closeTaskPanel
+  // shim) whenever this panel tears down — real Back, replaced-away, or
+  // Overlay.clearAll(). `panel` is assigned right below; by the time this
+  // fires (always later, on teardown) the const has long since initialized.
+  const panel = window.openPage('Task', window.skeletonHtml('rows'), '', {
+    onClose: () => {
+      panel._fillAbandoned = true;   // see pageStillLive() above
+      if (_activeTaskPanelEl === panel) _activeTaskPanelEl = null;
+    }
+  });
+  _activeTaskPanelEl = panel;   // set BEFORE the read, so closeTaskPanel()/
+                                // navigateTo() can still close a still-loading panel
+  const bodyEl = panel.querySelector('.page-panel-body');
+  // withLoadingAndError (js/ui-states.js) owns the rest of the lifecycle: it
+  // re-asserts the same skeleton (same tick as openPage, before paint — no
+  // flash), awaits the read, calls the painter, and on a REJECTED read paints
+  // its own error block with a Retry button it wires itself, which re-runs this
+  // exact fetcher/painter pair against this same panel. That last part is why
+  // the read is handed over as a fetcher instead of being awaited here: a failed
+  // task read used to mean no window at all and an unhandled rejection, and an
+  // open window must never be left sitting on an eternal skeleton.
+  await window.withLoadingAndError(
+    bodyEl,
+    () => db.collection('tasks').doc(taskId).get(),
+    (snap) => paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole),
+    { skeleton: 'rows' }
+  );
+}
+
+// Everything from the read onwards, moved out of openTaskDetail verbatim — same
+// markup, same handlers, same order. Only the panel/body it writes into and the
+// two guards at the top are new.
+function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) {
+  // CLOSED MID-FLIGHT — see pageStillLive() for why this is not just an
+  // isConnected check. Filling a dismissed panel would resurrect nothing the
+  // user can see, but it would still fire renderComments()'s reads and read
+  // receipt, and the document.getElementById() wiring further down would bind
+  // into a panel on its way out of the DOM. Bail: no throw, no zombie window.
+  if (!pageStillLive(panel)) return;
+  if (!snap.exists) {
+    // Pre-inversion this toasted and simply never opened a window, and that is
+    // still the right outcome: a deleted task has nothing to show and this panel
+    // ships NO footer (openPage was called with footerHTML=''), so an in-place
+    // not-found body is a full-screen window whose only affordance is the header
+    // Back arrow. The window cannot be un-opened — it went up in the tap frame,
+    // which is the whole point of the inversion — so it is taken back OFF
+    // instead, leaving the user on the list they tapped from, exactly as before.
+    //
+    // Overlay.dismissTop() is the only close path that leaves no debris. It is
+    // history.back() → popstate → _popOne → teardown (js/config.js), i.e. the
+    // very Back press the user would otherwise have had to make themselves, so:
+    // it CONSUMES the history entry openPage pushed (a tap on a deleted task
+    // costs no stray Back later), it runs the real teardown — exit transition,
+    // focus returned to the card that was tapped, the panel underneath revealed
+    // with its scroll memo restored — and it fires our own onClose, whose only
+    // two effects (mark this panel abandoned, drop the _activeTaskPanelEl
+    // handle) are precisely what closing should do here. Removing the node by
+    // hand would strand the Overlay entry AND its history state, which is the
+    // stray-entry problem this is avoiding.
+    //
+    // Guarded on topEl() — the same test closeTaskPanel() above uses — because
+    // dismissTop closes whatever is on TOP, not whatever we point at. If some
+    // other surface pushed above us while the read was in the air, backing out
+    // would close THAT one and leave this panel buried. In that (rare) case we
+    // cannot leave the body empty either, since it will be revealed once the
+    // surface above it closes, so it keeps a real message and is given a real
+    // Close button — the same shape the other converted not-found panel uses
+    // (openQuoteApprovalReview, js/screens/approvals.js).
+    Notifs.showToast('Task not found','error');
+    if (window.Overlay && window.Overlay.topEl() === panel) { window.Overlay.dismissTop(); return; }
+    bodyEl.innerHTML = window.renderEmptyState({
+      icon: '🔍', title: 'Task not found',
+      hint: 'It may have been deleted since this list was loaded.'
+    });
+    const foot = panel.querySelector('.page-panel-foot');
+    // openPage hides an empty footer; un-hide it now that it has a control.
+    // closeModal() is Overlay.dismissTop(), and by the time this button is
+    // reachable at all (nothing covering it) this panel is the top entry again.
+    if (foot) { foot.innerHTML = `<button class="btn-secondary" onclick="closeModal()">Close</button>`; foot.classList.remove('hidden'); }
+    // Panel-wide, not body-wide: withLoadingAndError's trailing sweep is scoped
+    // to the container it was handed (bodyEl) and would never see that footer.
+    window.lucide?.createIcons({ nodes: [panel] });
+    return;
+  }
   const t       = normTask(snap.data(),snap.id);
   // Task edit gating: admin/finance roles — this MUST match the Firestore tasks
   // update rule (assignee-or-finance-or-admin → isFinanceOrAdmin()). Dept
@@ -605,23 +753,35 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     </div>
   `;
 
-  // onClose clears our top-of-stack bookkeeping (used by the closeTaskPanel
-  // shim) whenever this panel tears down — real Back, replaced-away, or
-  // Overlay.clearAll(). `panel` is assigned right below; by the time this
-  // fires (always later, on teardown) the const has long since initialized.
-  const panel = window.openPage((t.title||''), bodyHTML, '', {
-    headerRightHTML,
-    onClose: () => { if (_activeTaskPanelEl === panel) _activeTaskPanelEl = null; }
-  });
-  _activeTaskPanelEl = panel;
+  // ── FILL — the window has been on screen since the tap ────────────────────
+  // Title, header actions and body all read from the doc that just landed, so
+  // all three are written here; the neutral 'Task' the panel opened with is
+  // replaced by the real title now that there is one.
+  setLoadedPanelTitle(panel, (t.title||''));
+  const headRight = panel.querySelector('.page-panel-head-right');
+  if (headRight) headRight.innerHTML = headerRightHTML;
+  bodyEl.innerHTML = bodyHTML;
   // page-panel-body is styled overflow-y:auto/padded by default (single scroll
   // region); this panel needs the old split layout instead — a short 42%-max
   // scrollable info region above a flex-fill comments region, each scrolling
   // independently. Override just for this panel instance.
-  const bodyEl = panel.querySelector('.page-panel-body');
+  // Applied on FILL rather than at open (where it used to sit): padding:0 is
+  // right for this body's own internally-padded sections, but it would have
+  // pressed the loading skeleton flat against the panel edges. Nothing here
+  // touches opacity, so the 140ms .page-panel-body entrance is untouched — that
+  // transition is class-driven off .page-panel.open in css/styles.css, not
+  // inline, so cssText cannot clobber it.
   // Single natural scroll region (info + comments + composer flow together),
   // instead of the old forced split that left a gap below short message lists.
-  if (bodyEl) bodyEl.style.cssText = 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0';
+  bodyEl.style.cssText = 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0';
+  // One icon sweep for the whole panel. openPage's own sweep already ran, back
+  // in the tap frame, when this panel held nothing but a skeleton. It has to
+  // cover `panel` and not `bodyEl` because the header action buttons and the
+  // title glyph live OUTSIDE the body, and withLoadingAndError's trailing sweep
+  // is guarded on the container it was handed — it would never see them. After
+  // this call that guard (`[data-lucide]:not(svg)`) finds nothing left to
+  // hydrate and skips, so this is one sweep total, not two.
+  window.lucide?.createIcons({ nodes: [panel] });
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
 
@@ -826,15 +986,38 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
   // rule (assignee-or-admin), so we don't render an assignment dropdown the
   // backend will reject for a non-admin dept member.
   const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  // Window first, content second — see the inversion note above openTaskDetail.
+  // Note the shape this one had: the `await` below is INSIDE `if (isAdmin)`, so
+  // for a non-admin this function never suspended and already opened in the tap
+  // frame. Only the admin path was paying a round trip with a dead screen.
+  //
+  // Hand-rolled instead of withLoadingAndError because this read cannot fail
+  // into an error state: it is already `.catch()`-swallowed to an empty docs
+  // list (unchanged below), so the worst case is the same form with nobody to
+  // add as an assignee — never a stuck skeleton, and never an error surface
+  // this code did not have before.
+  //
+  // The footer is static, so it ships with the panel in the tap frame — but
+  // Save is born disabled. Its listener is wired at the bottom of this function,
+  // i.e. after the fill, so in the gap it would otherwise be a live-looking
+  // button that silently does nothing. Re-enabled the instant the form is real.
+  const panel = openPage('Edit Task', window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="save-edit-btn" disabled>Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
+    { onClose: () => { panel._fillAbandoned = true; } });   // see pageStillLive()
+  const bodyEl = panel.querySelector('.page-panel-body');
   let employees=[];
   if (isAdmin) {
     const empSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
     employees = empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   }
+  // CLOSED MID-FLIGHT — Back during the users read; filling the form would be
+  // pointless and the getElementById() wiring below would bind into a panel
+  // that is already on its way out. (pageStillLive, not isConnected — see there.)
+  if (!pageStillLive(panel)) return;
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${t.department===k?' selected':''}>${k}</option>`).join('');
   const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
-  openPage('Edit Task', `
+  bodyEl.innerHTML = `
     <div class="form-group"><label>Title</label><input id="et-title" value="${(t.title||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Description</label><textarea id="et-desc" rows="3">${escHtml(t.description||'')}</textarea></div>
     <div class="form-row">
@@ -865,7 +1048,12 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
         ${employees.filter(e=>!t.assignedTo.includes(e.id)).map(e=>`<option value="${e.id}" data-name="${escHtml(e.displayName||e.email)}">${escHtml(e.displayName||e.email)}</option>`).join('')}
       </select>
     </div>`:''}
-  `, `<button class="btn-primary" id="save-edit-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `;
+  // Hydrates the ✕ glyphs on the assignee chips — openPage's own sweep ran in
+  // the tap frame, before any of this markup existed.
+  window.lucide?.createIcons({ nodes: [bodyEl] });
+  const saveEditBtn = document.getElementById('save-edit-btn');
+  if (saveEditBtn) saveEditBtn.disabled = false;
 
   let curAssignees=t.assignedTo.map((uid,i)=>({uid,name:t.assignedToNames[i]||uid}));
   document.getElementById('assignee-chips')?.querySelectorAll('.badge').forEach(chip=>{
@@ -933,11 +1121,24 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
 }
 
 async function openAddTaskModal(currentUser, currentRole, defaultDept) {
+  // Window first, content second — see the inversion note above openTaskDetail.
+  // Same reasoning as openEditTaskModal: hand-rolled because the users read is
+  // already `.catch()`-swallowed to an empty docs list and so cannot fail into
+  // an error state, and Create ships disabled because its listener is wired
+  // after the fill. Unlike Edit, this one suspended on EVERY open (no isAdmin
+  // branch), so "+ New Task" was a dead tap on any cold `users` cache.
+  const panel = openPage('New Task', window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="create-task-btn" disabled>Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
+    { onClose: () => { panel._fillAbandoned = true; } });   // see pageStillLive()
+  const bodyEl = panel.querySelector('.page-panel-body');
   const empSnap  = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
+  // CLOSED MID-FLIGHT — bail before touching a dead panel, and before
+  // Drive.renderUploadArea() below mounts an uploader into nothing.
+  if (!pageStillLive(panel)) return;
   const employees= empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${k===defaultDept?' selected':''}>${k}</option>`).join('');
 
-  openPage('New Task', `
+  bodyEl.innerHTML = `
     <div class="form-group"><label>Title</label><input id="t-title" placeholder="Task name"/></div>
     <div class="form-group"><label>Description</label><textarea id="t-desc" rows="3" placeholder="Details…"></textarea></div>
     <div class="form-row">
@@ -971,7 +1172,12 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       <textarea id="t-notes" rows="2" placeholder="Additional notes for assignees…"></textarea>
     </div>
     <div id="task-attach-area"></div>
-  `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `;
+  // Hydrates the priority/📎 glyphs — openPage's own sweep ran in the tap frame,
+  // before any of this markup existed.
+  window.lucide?.createIcons({ nodes: [bodyEl] });
+  const createTaskBtn = document.getElementById('create-task-btn');
+  if (createTaskBtn) createTaskBtn.disabled = false;
 
   let taskAttachments=[];
   Drive.renderUploadArea('task-attach-area',r=>{taskAttachments.push(r);},{label:`${emojiIcon('📎',16)} Attach file or link`,dept:'tasks',subfolder:'attachments'});
@@ -1071,11 +1277,37 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
 }
 
 async function openSubDetail(subId, currentUser, currentRole) {
-  const snap = await db.collection('submissions').doc(subId).get();
+  // Window first, content second — see the inversion note above openTaskDetail.
+  // The footer is static (a Close button on the shared inline closeModal()), so
+  // it ships in the tap frame and works immediately, skeleton or not.
+  const panel = openPage('Submission', window.skeletonHtml('rows'),
+    `<button class="btn-secondary" onclick="closeModal()">Close</button>`,
+    { onClose: () => { panel._fillAbandoned = true; } });   // see pageStillLive()
+  const bodyEl = panel.querySelector('.page-panel-body');
+  // withLoadingAndError here (unlike the two task forms) because this read is
+  // NOT error-swallowed: it had no .catch() at all, so a failure used to mean
+  // no window plus an unhandled rejection. Now it means a visible error state
+  // with a working Retry, inside the window that is already open.
+  await window.withLoadingAndError(
+    bodyEl,
+    () => db.collection('submissions').doc(subId).get(),
+    (snap) => paintSubDetail(panel, bodyEl, subId, snap, currentUser, currentRole),
+    { skeleton: 'rows' }
+  );
+}
+
+// Everything from the read onwards, moved out of openSubDetail verbatim.
+// Deliberately NOT given a `!snap.exists` branch: this flow never had one (a
+// missing doc spreads to `{id}` and renders the "No details." body), and the
+// brief was to change when the window appears, not what it renders.
+function paintSubDetail(panel, bodyEl, subId, snap, currentUser, currentRole) {
+  // CLOSED MID-FLIGHT — see pageStillLive(); same reasoning, same bail.
+  if (!pageStillLive(panel)) return;
   const s = {id:snap.id,...snap.data()};
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
 
-  openPage((s.title||''), `
+  setLoadedPanelTitle(panel, (s.title||''));
+  bodyEl.innerHTML = `
     <div style="margin-bottom:10px">
       <span class="badge ${statusBadge(s.status)}">${s.status||'pending'}</span>
       <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>
@@ -1088,7 +1320,12 @@ async function openSubDetail(subId, currentUser, currentRole) {
     </div>`:''}
     <hr class="divider"/>
     <div id="sub-comments-wrap"></div>
-  `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  `;
+  // Body icons only — this panel has no header actions and its title carries no
+  // glyph, so withLoadingAndError's own trailing sweep would in fact have caught
+  // everything here. Kept explicit so the fill does not depend on that wrapper
+  // detail, matching paintTaskDetail.
+  window.lucide?.createIcons({ nodes: [bodyEl] });
 
   renderComments('submissions', subId, 'sub-comments-wrap', currentUser);
   document.getElementById('approve-btn')?.addEventListener('click', async e => {

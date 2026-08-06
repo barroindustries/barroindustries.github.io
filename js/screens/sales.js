@@ -1959,12 +1959,150 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
+  // ── WINDOW FIRST, READ SECOND (v14 smoothness pass) ─────────────────────
+  // This handler used to be `async e => {}` and read the quote BEFORE it had
+  // drawn anything:
+  //     const snap = await db.collection('bs_quotes').doc(id).get();
+  //     const q = snap.data();
+  //     openPage(title, <form built from q>, footer);
+  // so the tap produced ZERO pixels until the round trip landed. By the time
+  // the panel finally appeared the press state had already released and there
+  // was nothing in the DOM for the entrance to animate — this is the shape
+  // behind "the clicks feel slow". The window is now pushed SYNCHRONOUSLY, in
+  // the same frame as the tap, carrying a skeleton body; the same read then
+  // fills it with the same form. Same collection, same doc id, same rendered
+  // markup — only WHEN it appears changed. Structural twin of
+  // openQuoteTemplatesPicker (js/app.js), which already does this.
   el.querySelectorAll('.bs-edit-return-btn').forEach(btn => {
-    btn.addEventListener('click', async e => {
+    btn.addEventListener('click', e => {
       const b = e.currentTarget;
-      const snap = await db.collection('bs_quotes').doc(b.dataset.id).get();
-      const q = snap.data();
-      openPage(`${emojiIcon('✎',16)} Edit Quote — ${b.dataset.qno}`, `
+
+      // TITLE is built from the row's own dataset, never from the read, so it
+      // is already correct in the tap frame and never has to be patched later.
+      //
+      // FOOTER is passed synchronously and is byte-identical to the old string
+      // EXCEPT that the two WRITING actions start `disabled`; the renderer
+      // below clears that the moment the fields exist, from which point the
+      // markup matches the pre-conversion output exactly. Three reasons the
+      // footer is not deferred alongside the body:
+      //   • it carries emojiIcon() glyphs, i.e. `<i data-lucide>` nodes, and
+      //     handing it to openPage means openPage's own icon sweep hydrates
+      //     them exactly as before — a deferred footer would need its own;
+      //   • openPage hides .page-panel-foot when footerHTML is '' (app.js), so
+      //     deferring it would pop the whole footer bar in mid-load and shove
+      //     the body up — a second, worse motion on top of the one we removed;
+      //   • `disabled` is the honest state: both handlers read #pres-client &
+      //     friends out of the body, and the body is still a skeleton.
+      // Cancel deliberately stays live — backing out must work during the load.
+      const p = openPage(`${emojiIcon('✎',16)} Edit Quote — ${b.dataset.qno}`,
+        // 'rows' × 5 is the closest anatomy the shared skeleton builder
+        // (js/ui-states.js) offers to this form's five stacked label+field
+        // groups. Nothing hand-rolled here on purpose — no bespoke markup
+        // that merely imitates a skeleton.
+        window.skeletonHtml('rows', 5), `
+        <button class="btn-success" id="pres-approve-edit-btn" disabled>${emojiIcon('✅',16)} Save &amp; Approve</button>
+        <button class="btn-primary" id="pres-return-btn" disabled>↩ Save &amp; Return</button>
+        <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      `);
+      const bodyEl = p.querySelector('.page-panel-body');
+      // Scoped to THIS panel rather than document.getElementById: a fast double
+      // tap can stack two edit panels, and a document-wide lookup by id would
+      // hand back the OLDER panel's button (both carry the same id), wiring the
+      // new panel's save to a buried window. Free correctness, same cost.
+      const approveBtn = p.querySelector('#pres-approve-edit-btn');
+      const returnBtn  = p.querySelector('#pres-return-btn');
+
+      // The fetched quote, published by the renderer once the read lands. Every
+      // consumer reads it from here, so a click that somehow arrives before the
+      // fill (or after a failed read) is a silent no-op rather than a TypeError.
+      let q = null;
+
+      const getEdits = () => ({
+        clientName:    document.getElementById('pres-client').value.trim(),
+        clientCompany: document.getElementById('pres-company').value.trim(),
+        scope:         document.getElementById('pres-scope').value.trim(),
+        total:         parseFloat(document.getElementById('pres-total').value)||q.total||0,
+        presidentNotes: document.getElementById('pres-notes').value.trim(),
+        editedByPresident: true,
+        editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        editedBy: currentUser.uid
+      });
+
+      // ── Footer listeners are wired ONCE, HERE — deliberately not in the
+      // renderer. The usual rule after this inversion is "wire listeners after
+      // the fill", and it applies to anything inside .page-panel-body; these
+      // two buttons are the exception because they live in .page-panel-foot,
+      // which openPage built synchronously above, so they already exist. Wiring
+      // them in the renderer would be actively WRONG: withLoadingAndError's
+      // error state ships a Retry button that re-invokes the renderer, and the
+      // footer is outside the container it owns, so the buttons are NOT
+      // re-created between attempts — each retry would stack another handler on
+      // the same node and one tap would fire two writes. `disabled` plus the
+      // `if (!q)` guard cover the click-before-fill window instead.
+      approveBtn.addEventListener('click', async () => {
+        if (!q) return;
+        const edits = getEdits();
+        await db.collection('bs_quotes').doc(b.dataset.id).update({
+          ...edits, status: 'filed', approvalStatus: 'approved',
+          approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid
+        });
+        await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
+        if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved', link:'bs-quotations' });
+        closeModal();
+        Notifs.success('Quote edited, approved and filed!');
+        window.invalidateBsQuotesCache(currentUser.uid);
+        renderBSQuotationsSummary(container, currentUser, currentRole);
+      });
+
+      returnBtn.addEventListener('click', async () => {
+        if (!q) return;
+        const edits = getEdits();
+        await db.collection('bs_quotes').doc(b.dataset.id).update({
+          ...edits, status: 'needs_revision', approvalStatus: 'needs_revision',
+          returnedAt: firebase.firestore.FieldValue.serverTimestamp(), returnedBy: currentUser.uid
+        });
+        if (b.dataset.by) await Notifs.send(b.dataset.by, {
+          title: '↩ Quote Returned for Revision',
+          body: `"${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was reviewed and returned. Please check the notes and re-submit.`,
+          icon: '✎', type: 'quote_returned', link: 'bs-quotations'
+        });
+        closeModal();
+        Notifs.success('Quote updated and returned to submitter.');
+        window.invalidateBsQuotesCache(currentUser.uid);
+        renderBSQuotationsSummary(container, currentUser, currentRole);
+      });
+
+      // ── skeleton → read → form, via the shared wrapper (js/ui-states.js).
+      // Using it rather than hand-rolling buys the failure path for free: a
+      // rejected read (offline, rules denial, deleted doc) paints an error
+      // block with a working Retry instead of an eternal skeleton, and Retry
+      // re-runs this exact fetcher.
+      // The wrapper's own first act is `container.innerHTML = skeletonHtml(
+      // opts.skeleton, opts.skeletonCount)` — the identical string already
+      // handed to openPage above, repainted in the same frame, so the user
+      // cannot see it. Passing the skeleton to openPage as WELL is what makes
+      // the tap-frame paint a property of this call site rather than of the
+      // wrapper's internal ordering.
+      window.withLoadingAndError(bodyEl, async () => {
+        const snap = await db.collection('bs_quotes').doc(b.dataset.id).get();
+        // Pre-conversion this dereferenced snap.data() unguarded, so a quote
+        // deleted between the list render and the tap threw a TypeError out of
+        // an async listener: unhandled rejection, no window, no feedback at
+        // all. Now it routes to the wrapper's error state — and because the
+        // footer stays disabled on that path, the user still cannot act on a
+        // record that turned out not to exist.
+        if (!snap.exists) throw new Error('This quotation no longer exists — it may have been deleted.');
+        return snap.data();
+      }, (data) => {
+        // ── CLOSED MID-FLIGHT ── the user can tap Back before the read lands.
+        // Bail before anything with a side effect OUTSIDE this container runs
+        // (publishing `q`, enabling the footer of a dismissed window). The
+        // wrapper's own writes into a detached bodyEl are inert: setting
+        // innerHTML on a node that is no longer in the document paints nothing
+        // and cannot re-attach it, so a closed window stays closed.
+        if (!bodyEl.isConnected) return;
+        q = data;
+        bodyEl.innerHTML = `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Edit this quotation directly. You can approve after editing, or return it to the submitter.</p>
         <div class="form-group"><label>Client Name</label>
           <input id="pres-client" type="text" value="${(q.clientName||'').replace(/"/g,'&quot;')}" style="width:100%"/>
@@ -1981,53 +2119,20 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         <div class="form-group"><label>President's Notes / Feedback</label>
           <textarea id="pres-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Optional notes for the submitter…">${escHtml(q.presidentNotes||'')}</textarea>
         </div>
-      `, `
-        <button class="btn-success" id="pres-approve-edit-btn">${emojiIcon('✅',16)} Save &amp; Approve</button>
-        <button class="btn-primary" id="pres-return-btn">↩ Save &amp; Return</button>
-        <button class="btn-secondary" onclick="closeModal()">Cancel</button>
-      `);
-
-      const getEdits = () => ({
-        clientName:    document.getElementById('pres-client').value.trim(),
-        clientCompany: document.getElementById('pres-company').value.trim(),
-        scope:         document.getElementById('pres-scope').value.trim(),
-        total:         parseFloat(document.getElementById('pres-total').value)||q.total||0,
-        presidentNotes: document.getElementById('pres-notes').value.trim(),
-        editedByPresident: true,
-        editedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        editedBy: currentUser.uid
-      });
-
-      document.getElementById('pres-approve-edit-btn').addEventListener('click', async () => {
-        const edits = getEdits();
-        await db.collection('bs_quotes').doc(b.dataset.id).update({
-          ...edits, status: 'filed', approvalStatus: 'approved',
-          approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid
-        });
-        await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
-        if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved', link:'bs-quotations' });
-        closeModal();
-        Notifs.success('Quote edited, approved and filed!');
-        window.invalidateBsQuotesCache(currentUser.uid);
-        renderBSQuotationsSummary(container, currentUser, currentRole);
-      });
-
-      document.getElementById('pres-return-btn').addEventListener('click', async () => {
-        const edits = getEdits();
-        await db.collection('bs_quotes').doc(b.dataset.id).update({
-          ...edits, status: 'needs_revision', approvalStatus: 'needs_revision',
-          returnedAt: firebase.firestore.FieldValue.serverTimestamp(), returnedBy: currentUser.uid
-        });
-        if (b.dataset.by) await Notifs.send(b.dataset.by, {
-          title: '↩ Quote Returned for Revision',
-          body: `"${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was reviewed and returned. Please check the notes and re-submit.`,
-          icon: '✎', type: 'quote_returned', link: 'bs-quotations'
-        });
-        closeModal();
-        Notifs.success('Quote updated and returned to submitter.');
-        window.invalidateBsQuotesCache(currentUser.uid);
-        renderBSQuotationsSummary(container, currentUser, currentRole);
-      });
+      `;
+        // The footer is now backed by real fields — from here the window is
+        // indistinguishable from the pre-conversion one.
+        approveBtn.removeAttribute('disabled');
+        returnBtn.removeAttribute('disabled');
+        // NO lucide sweep here, on purpose. This form contains no data-lucide
+        // nodes at all (the only glyphs on this window are the ✎ in the title
+        // and the ✅ in the footer, both hydrated by openPage's own sweep when
+        // it built the panel), and withLoadingAndError already runs the single
+        // guarded `[data-lucide]:not(svg)` sweep over bodyEl the moment this
+        // renderer returns (js/ui-states.js) — which correctly finds nothing
+        // and skips the document-wide rebuild. An unconditional call here
+        // would pay 3-5ms to hydrate zero icons.
+      }, { skeleton: 'rows', skeletonCount: 5 });
     });
   });
 }

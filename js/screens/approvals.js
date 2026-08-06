@@ -214,7 +214,30 @@ window.renderApprovals = async function(currentUser) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 
-  const loadApprovalsSub = async (sub) => {
+  // Which sub-tab the DOM currently inside #approvals-content belongs to. Seeded
+  // to 'all' because the container is rendered above ALREADY holding the 'all'
+  // skeleton, and 'all' is also what loadApprovalsSub is first called with at the
+  // bottom of this function — so the very first load correctly skips re-painting
+  // a skeleton over the byte-identical skeleton that is already on screen.
+  let _paneSub = 'all';
+
+  // Visible acknowledgement for a re-tap of the ALREADY-ACTIVE chip (see the
+  // fromChip note below). Inline styles rather than a new CSS class, and it is
+  // injected INSIDE #approvals-content so every branch's `wrap.innerHTML = …`
+  // fill disposes of it for free. The .spinner class supplies the spin
+  // animation; its stock border colours are white-on-dark button colours, so
+  // both are re-pointed at theme tokens to stay visible on a page background.
+  const REFRESHING_BAR = `<div id="approvals-refreshing" style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted);padding:2px 2px 10px"><span class="spinner" style="width:12px;height:12px;border-color:var(--border);border-top-color:var(--text-muted)"></span>Refreshing…</div>`;
+
+  // Owns the pane's LOADING lifecycle — skeleton-vs-retain, the refresh
+  // affordance, and the disable/re-enable pair — around renderApprovalsPane
+  // below, which owns what is actually drawn. Split in two purely so the
+  // re-enable can live in a `finally`: the pane renderer is ~1000 lines of
+  // per-chip branches, several of which return early, and one of them throwing
+  // must not be able to strand the rows in a disabled state.
+  // opts.fromChip: this call came from a chip tap rather than from a
+  // post-action refresh (see the same-sub case below).
+  const loadApprovalsSub = async (sub, opts) => {
     const wrap = document.getElementById('approvals-content');
     if (!wrap) return;
     // Acting here mutates signup_requests / attendance_extensions / cash_advances /
@@ -222,8 +245,71 @@ window.renderApprovals = async function(currentUser) {
     // and lists don't keep showing already-actioned items for up to the 30s TTL.
     if (typeof dbCacheInvalidate === 'function')
       ['signups-pending','att-ext-pending','ca-pending','approvals-pending'].forEach(k => dbCacheInvalidate(k));
-    wrap.innerHTML = window.skeletonHtml('rows');
+    // ── Skeleton on a real tab CHANGE only — never on a post-action refresh ──
+    // Every approve/reject/deny handler in this function ends by calling
+    // loadApprovalsSub(<the tab it is already on>) to pick the write up. This
+    // line used to blank the entire list to a 4-row skeleton on that refresh
+    // too: the President taps Approve on the 30th row, the whole page collapses
+    // to four grey bars — which is far SHORTER than the list was, so the browser
+    // clamps the scroll offset toward the top — and then re-grows with the new
+    // list, leaving him at the top of a list he was reading the bottom of. The
+    // refetch returns the same data minus one row, so the list already on screen
+    // is a perfectly good thing to keep looking at while it runs, and the action
+    // has already acknowledged itself with a toast.
+    //
+    // A tab SWITCH still gets the skeleton, and must: 'history' fires ten
+    // parallel queries and 'all' fourteen, and leaving the previous tab's rows
+    // up with no loading signal for that long reads as "the chip did nothing".
+    // Tracking which sub currently OWNS the pane is what separates the two cases
+    // — same sub = refresh (keep), different sub = switch (skeleton). The
+    // firstElementChild test is the genuine-empty-pane fallback.
+    //
+    // Retained rows get their buttons disabled for the duration of the refetch.
+    // Blanking the pane used to make a second click on an already-actioned row
+    // physically impossible the instant the write resolved; keeping the rows up
+    // hands that possibility back, and nothing else prevents it — onClickSafe
+    // (js/departments.js) wraps handlers in try/catch but disables nothing, and
+    // most handlers here call loadApprovalsSub WITHOUT awaiting it, so the
+    // handler (and any guard tied to it) is finished while the refetch is still
+    // in flight. A double Approve on a leave request would dispatch the balance
+    // debit twice. Only buttons that were live get collected, so restoring them
+    // can't wrongly enable one that shipped `disabled` in its own markup, and
+    // the `finally` at the bottom — not the fill — is what guarantees the
+    // disabled state never outlives the load, on every path including a throw.
+    //
+    // The same-sub case covers TWO different events, and only one of them has
+    // already acknowledged itself: a post-action refresh (toast already shown,
+    // stay quiet) and a re-tap of the chip that is already active. The re-tap is
+    // a deliberate "give me fresh data" request and must answer immediately —
+    // disabled buttons alone are not an answer, because three of these panes can
+    // contain no buttons at all (the 'all' empty state, the read-only History
+    // list, Grading's not-permitted notice), which left the tap looking dead for
+    // the entire length of a 14-collection refetch.
+    let toRestore = [];
+    if (_paneSub !== sub || !wrap.firstElementChild) {
+      wrap.innerHTML = window.skeletonHtml('rows');
+    } else {
+      toRestore = Array.from(wrap.querySelectorAll('button:not([disabled])'));
+      toRestore.forEach(b => { b.disabled = true; });
+      if (opts && opts.fromChip) wrap.insertAdjacentHTML('afterbegin', REFRESHING_BAR);
+    }
+    _paneSub = sub;
 
+    try {
+      await renderApprovalsPane(sub, wrap);
+    } finally {
+      // Unconditional: an early return or a throw inside any branch must never
+      // leave the rows unclickable with no way back. Buttons the fill already
+      // replaced are detached, so isConnected skips them.
+      const bar = wrap.querySelector('#approvals-refreshing');
+      if (bar) bar.remove();
+      toRestore.forEach(b => { if (b.isConnected) b.disabled = false; });
+    }
+  };
+
+  // Draws one chip's pane into `wrap`. Called ONLY via loadApprovalsSub above,
+  // which has already put the pane into its loading state and will restore it.
+  const renderApprovalsPane = async (sub, wrap) => {
     if (sub === 'all') {
       // ── All Pending Requests aggregated view ──
       // No .orderBy() here — combining it with .where() requires a Firestore composite
@@ -1218,7 +1304,9 @@ window.renderApprovals = async function(currentUser) {
     }
   };
 
-  window.bindChipTabs(c, (key) => loadApprovalsSub(key));
+  // fromChip marks these as user-initiated so a re-tap of the active chip gets
+  // the Refreshing… bar; the in-handler refresh calls deliberately don't set it.
+  window.bindChipTabs(c, (key) => loadApprovalsSub(key, { fromChip: true }));
 
   loadApprovalsSub('all');
 };
@@ -1257,31 +1345,129 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 // Open the full review modal: open in builder, edit key fields, then approve/return.
+//
+// v14.0.71 drill-down smoothness pass — INVERTED. This used to await the quote
+// doc and only THEN call openPage, so tapping "Open & Edit" moved zero pixels
+// until the Firestore round-trip landed: the press state had already released
+// and there was nothing in the DOM to animate. The panel is now pushed
+// synchronously, in the tap's own frame, holding a skeleton, and the quote fills
+// it in when it arrives. WHAT is rendered is unchanged — only WHEN.
+//
+// Three things the inversion has to pay for, each costing a few lines below:
+//
+//  • THE EXISTENCE CHECK CANNOT MOVE. `snap.exists` used to gate the open, and
+//    it cannot run before a window that is opened in the tap's frame — it IS the
+//    fetch. The rule it enforced still holds though (never let the user act on a
+//    record that turns out not to exist), so it is enforced on the ACTIONS
+//    instead of on the window: #qar-approve / #qar-return ship DISABLED and are
+//    only enabled once a real quote doc has actually been read. On the
+//    missing/unreadable path the footer collapses to Cancel and the body says
+//    why, so nothing is ever yanked out from under a tap and nothing is
+//    actionable. The synchronous `!quoteId` guard above still runs BEFORE the
+//    open — it needs no fetch, and a review panel for a request carrying no
+//    quote id at all would have nothing to review.
+//
+//  • CLOSED MID-FLIGHT. The user can hit Back before the read lands. Every fill
+//    is guarded on `p.isConnected`, so a torn-down panel is left alone: no
+//    innerHTML write that would resurrect it, no listener wiring against a dead
+//    node, no onDone.
+//
+//  • LISTENERS WIRE AFTER THE FILL. The body markup does not exist at openPage
+//    time any more, so #qar-open-builder and the #qar-* field reads are bound
+//    (and queried) only once the markup is in, scoped to this panel rather than
+//    via document.getElementById — with a stacked/`.page-under` panel in the DOM
+//    a document-wide id lookup can resolve to the wrong window's field.
 async function openQuoteApprovalReview(ctx, onDone){
   const { quoteId, agentId, quoteNumber, clientName } = ctx;
   const QC = ctx.quoteColl || 'bs_quotes';
   if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
-  const snap = await db.collection(QC).doc(quoteId).get().catch(()=>null);
-  if(!snap || !snap.exists){ Notifs.showToast('Quote not found','error'); return; }
-  const q = snap.data();
   const ta = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical';
+  // 'rows' is the closest of skeletonHtml's three kinds to this body's anatomy
+  // (a stack of full-width blocks: the builder button + four form groups); 5 to
+  // match that count, so the panel does not visibly change height on fill.
+  const p = openPage(`${emojiIcon('📝',16)} Review Quote — ${escHtml(quoteNumber||'')}`,
+    window.skeletonHtml('rows', 5),
+    `<button class="btn-success" id="qar-approve" disabled>${emojiIcon('✅',16)} Save &amp; Approve</button><button class="btn-primary" id="qar-return" disabled>↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const body = p.querySelector('.page-panel-body');
+  const foot = p.querySelector('.page-panel-foot');
+
+  let snap = null, readErr = null;
+  try { snap = await db.collection(QC).doc(quoteId).get(); }
+  catch (ex) { readErr = ex; }
+  // Back was pressed while the read was in flight — the panel is gone. Touch
+  // nothing (see the close-mid-flight note in the header comment).
+  if (!p.isConnected) return;
+
+  if (!snap || !snap.exists || readErr) {
+    // Same toast the pre-inversion code fired on this path, kept so the failure
+    // signal is byte-identical to what users already know — plus an in-panel
+    // state, because a window that is already open must never be left sitting on
+    // an eternal skeleton. Footer drops to Cancel: with no quote read, approve
+    // and return have nothing to write to and stay unreachable.
+    Notifs.showToast('Quote not found','error');
+    // The raw Firestore error goes to the console ONLY — same convention as the
+    // per-collection `console.error('<x> query failed', e)` catches in
+    // loadApprovalsSub. Its text ("Missing or insufficient permissions.",
+    // "The caller does not have permission…") names backend rules and means
+    // nothing to a President or Secretary, so the panel gets a human sentence
+    // instead and the string stays available for diagnosis.
+    if (readErr) console.error('quote review read failed', QC, quoteId, readErr);
+    body.innerHTML = window.renderEmptyState({
+      icon: '⚠️',
+      title: 'Quote not found',
+      hint: readErr ? 'This quote could not be loaded right now. Close and try again — if it keeps failing, report it to IT.'
+                    : 'This quote could not be loaded — it may have been deleted or already actioned.'
+    });
+    foot.innerHTML = `<button class="btn-secondary" onclick="closeModal()">Cancel</button>`;
+    window.lucide?.createIcons({ nodes: [body] });
+    return;
+  }
+
+  const q = snap.data();
   const hasSnapshot = !!q.editableState;
-  openPage(`${emojiIcon('📝',16)} Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
+  body.innerHTML = `
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items (saved back to the partner's quote), or adjust the key fields below, then approve or return it to the partner.</p>
     <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>${emojiIcon('🔧',16)} Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
     <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Scope / Description</label><textarea id="qar-scope" rows="3" style="${ta}">${escHtml(q.scope||q.description||'')}</textarea></div>
     <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}" inputmode="decimal"/></div>
     <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
-  `, `<button class="btn-success" id="qar-approve">${emojiIcon('✅',16)} Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  if (hasSnapshot) document.getElementById('qar-open-builder').addEventListener('click', ()=>{
+  `;
+  // openPage's own sweep already ran (on the frame it pushed the panel) and
+  // covered the footer; this markup arrived after it, so its icons — the 🔧 on
+  // the builder button — need their own pass or they render as blank gaps.
+  window.lucide?.createIcons({ nodes: [body] });
+
+  // The title carried a fetched fallback: `quoteNumber || q.quoteNumber`. Only
+  // the ctx half was available at open time, so patch the rare case where the
+  // approval_requests doc had no quoteNumber and the quote doc does. app.js's
+  // _setPanelTitle is module-private, so its two strip-and-collapse steps are
+  // repeated here; only the TEXT node is rewritten, leaving the icon element
+  // that helper prepended in place.
+  if (!quoteNumber && q.quoteNumber) {
+    const tEl = p.querySelector('.page-panel-title');
+    const tTxt = tEl && Array.prototype.find.call(tEl.childNodes, n => n.nodeType === 3);
+    if (tTxt) tTxt.textContent = `${emojiIcon('📝',16)} Review Quote — ${escHtml(q.quoteNumber)}`
+      .replace(/<i\s+data-lucide="([a-z0-9-]+)"[^>]*>\s*<\/i>/gi, ' ')
+      .replace(/<span class="emoji-icon">([^<]*)<\/span>/gi, '$1')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  if (hasSnapshot) body.querySelector('#qar-open-builder').addEventListener('click', ()=>{
     window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber,
       clientName: q.clientName||clientName, quoteColl: QC };
     closeModal();
     window.reopenQuoteFromDoc(QC, quoteId, q.company === 'BK' ? 'bk-quote-builder' : 'bs-quote-builder');
   });
-  const getEdits = ()=>({ clientName:document.getElementById('qar-client').value.trim(), scope:document.getElementById('qar-scope').value.trim(), total:parseFloat(document.getElementById('qar-total').value)||q.total||0, presidentNotes:document.getElementById('qar-notes').value.trim(), editedByPresident:true, editedAt:firebase.firestore.FieldValue.serverTimestamp(), editedBy:currentUser.uid });
-  document.getElementById('qar-approve').addEventListener('click', async ()=>{
+  const getEdits = ()=>({ clientName:body.querySelector('#qar-client').value.trim(), scope:body.querySelector('#qar-scope').value.trim(), total:parseFloat(body.querySelector('#qar-total').value)||q.total||0, presidentNotes:body.querySelector('#qar-notes').value.trim(), editedByPresident:true, editedAt:firebase.firestore.FieldValue.serverTimestamp(), editedBy:currentUser.uid });
+  // A quote doc is in hand, so the two writing actions become live. Removing the
+  // attribute (rather than re-rendering the footer) keeps the final markup
+  // byte-identical to the pre-inversion footer.
+  const approveBtn = foot.querySelector('#qar-approve');
+  const returnBtn  = foot.querySelector('#qar-return');
+  approveBtn.removeAttribute('disabled');
+  returnBtn.removeAttribute('disabled');
+  approveBtn.addEventListener('click', async ()=>{
     const e=getEdits();
     try{
       await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('approved'), approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
@@ -1293,7 +1479,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       closeModal(); Notifs.success('Quote edited, approved and filed!'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
-  document.getElementById('qar-return').addEventListener('click', async ()=>{
+  returnBtn.addEventListener('click', async ()=>{
     const e=getEdits();
     try{
       await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });

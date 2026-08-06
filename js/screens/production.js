@@ -193,6 +193,30 @@ function prodToJobStage(prodId){
   return prodId==='delivered' ? 'delivered' : prodId==='out_for_delivery' ? 'for_delivery' : 'in_production';
 }
 
+// ── panelLive(panel) — "is this openPage window still actually open?" ────────
+// The guard every deferred body-fill in this file checks before touching the
+// panel it was handed (v14 tap-latency inversion, below: openPage now fires on
+// the tap frame with a skeleton and the real markup is poured in when the read
+// lands, so the user can press Back mid-flight and routinely will).
+//
+// isConnected ALONE IS NOT ENOUGH. openPage's teardown (js/app.js) removes the
+// node on a `setTimeout(…, 300)` so the exit transition has something to
+// animate — for those 300ms a closed panel is still `document`-connected, and a
+// fill that lands inside that window would flash real content onto a surface
+// that is visibly sliding away. window._pageStack, by contrast, is spliced
+// SYNCHRONOUSLY in that same teardown (and cleared outright on logout,
+// js/app.js), so absence from it is the authoritative "closed" signal.
+// Requiring both means a mid-flight fill is a clean no-op: nothing is painted,
+// no listener is bound, and nothing can resurrect a dismissed window.
+//
+// Reading window._pageStack from outside app.js is the same cross-module read
+// js/chat.js already makes (its `alreadyOpen` test) — it is a documented global
+// that app.js publishes deliberately, not a private.
+function panelLive(panel){
+  return !!panel && panel.isConnected &&
+         !!(window._pageStack && window._pageStack.indexOf(panel) !== -1);
+}
+
 // The hardcoded QC checklist (v12 WS28). Universal; edit labels here to change
 // the shop's checklist. Per-product variants = future workstream (YAGNI for now).
 const QC_CHECKLIST = [
@@ -745,8 +769,38 @@ async function openProjectBillingModal(p){
   // drift from the real payment history). Feeds both the displayed balance and
   // the amount input's default below.
   const bal=Math.max(0,(p.contractAmount||0)-(p.amountCollected||0));
-  const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage(`${emojiIcon('💵',16)} Record Payment — `+escHtml(p.clientName||''), `
+  // ── v14 tap-latency inversion ───────────────────────────────────────────
+  // openPage used to run AFTER `await BankAccounts.optionsHTML()`, so the tap on
+  // "Record Payment" changed nothing on screen until that read resolved — the
+  // press state had already released and there was no window yet to animate.
+  // The window is now created SYNCHRONOUSLY in the tap handler with a skeleton
+  // body, and the bank-account <select> markup (the only awaited input this
+  // form has) is poured into `.page-panel-body` when it lands.
+  // Title and footer are built from `p` and static text only — neither depends
+  // on the fetch — so both are final from the very first frame and nothing has
+  // to be re-titled or re-footed on fill.
+  // "Record + Post to Ledger" nonetheless ships `disabled`: its click listener is
+  // wired at the BOTTOM of the renderer below, so for the whole length of the read
+  // it would otherwise be a live-LOOKING button that swallows taps in silence. It
+  // is re-enabled the instant the form (and that listener) exist — and stays
+  // disabled on the error path, where the renderer never runs at all. Cancel is an
+  // inline onclick, so the user's escape hatch works from frame one regardless.
+  const panel = openPage(`${emojiIcon('💵',16)} Record Payment — `+escHtml(p.clientName||''), window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="pb-save" disabled>Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const pbBody = panel.querySelector('.page-panel-body');
+  // withLoadingAndError (js/ui-states.js) owns the whole skeleton → data → error
+  // lifecycle, including a Retry button it wires itself and which re-runs the
+  // read in place inside THIS panel — so a failed load can never leave an
+  // eternal skeleton. EVERYTHING below lives inside the renderer on purpose:
+  // until it runs, the body holds nothing but skeleton divs, so a listener
+  // bound any earlier would silently bind to nothing.
+  // NOTE ON INDENTATION: the renderer body is deliberately NOT re-indented.
+  // Its markup is one big template literal whose leading whitespace is part of
+  // the emitted HTML string; shifting it would change the bytes this window
+  // renders, which this pass is explicitly not allowed to do.
+  await window.withLoadingAndError(pbBody, () => window.BankAccounts.optionsHTML(), (bankOpts) => {
+  if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
+  pbBody.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
       <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
@@ -772,7 +826,11 @@ async function openProjectBillingModal(p){
     <div class="form-group"><label>OR / Reference No.</label><input id="pb-ref" placeholder="Official Receipt no."/>${window.birOrButtonHTML ? window.birOrButtonHTML('pb-ref') : ''}</div>
     <div class="form-group"><label>Receipt (proof)</label><div id="pb-receipt-upload"></div></div>
     <div id="pb-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="pb-save">Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `;
+  // The injected markup is full of emojiIcon() output (`<i data-lucide=…>`);
+  // openPage's own sweep ran long before this fill, so without this pass every
+  // one of those icons stays an empty <i>.
+  if (window.lucide) lucide.createIcons({ nodes: [pbBody] });
   window.wireBirOrButtons && window.wireBirOrButtons();
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('pb-receipt-upload',(r)=>{receipt=r;},{label:'Upload OR / proof',accept:'image/*,.pdf',dept:'Finance',subfolder:'Collections'});
@@ -842,6 +900,12 @@ async function openProjectBillingModal(p){
       closeModal(); Notifs.success('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
+  // Form and listener are real now — release the footer's primary action.
+  // Scoped to THIS panel (not document-wide) because openPage keeps the panel it
+  // stacked over alive underneath as `.page-under`, ids and all.
+  const pbSaveBtn = panel.querySelector('#pb-save');
+  if (pbSaveBtn) pbSaveBtn.disabled = false;
+  }, { skeleton:'rows' });
 }
 
 // Finance issues a printable billing invoice against a job_projects record (the
@@ -851,8 +915,30 @@ async function openJobBillingInvoiceModal(p){
   const contract = Number(p.contractAmount)||0;
   const paid     = Number(p.amountCollected)||0;
   const bal      = Math.max(0, contract - paid);
-  const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage(`${emojiIcon('🧾',16)} Billing Invoice — `+escHtml(p.clientName||''), `
+  // v14 tap-latency inversion — same treatment as openProjectBillingModal above:
+  // the window exists on the tap frame, the bank-account <select> arrives after.
+  // Title/footer depend only on `p`, so neither is deferred — but "Generate
+  // Invoice" ships `disabled` for the same reason Record Payment's Save does: its
+  // listener is wired at the bottom of the renderer, so it is genuinely dead until
+  // the fill lands. Cancel is the opposite case — see the note under it.
+  const panel = openPage(`${emojiIcon('🧾',16)} Billing Invoice — `+escHtml(p.clientName||''), window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="jinv-gen" disabled>Generate Invoice</button><button class="btn-secondary" id="jinv-back">Cancel</button>`);
+  const jinvBody = panel.querySelector('.page-panel-body');
+  // Cancel is wired IMMEDIATELY, outside the renderer — deliberately the one
+  // exception. It lives in the footer, which openPage fills synchronously, and
+  // its handler reads nothing that is fetched, so binding it now means the
+  // user's own escape hatch works during the skeleton frame instead of being a
+  // dead button for the length of the read. (The header Back arrow works from
+  // frame one regardless; this keeps the FOOTER route alive too, because it
+  // does something Back doesn't — see the clearAll note below.)
+  // clearAll() first — Billing Invoice is pushed ON TOP of this hub's page
+  // (never nested deeper), so a bare reopen would leave a stale hidden copy
+  // behind; same rule as Design's openProjectDetail reopen sites above.
+  document.getElementById('jinv-back').addEventListener('click', ()=>{ window.Overlay.clearAll(); openJobProjectDetail(p); });
+  // Renderer body deliberately not re-indented — see openProjectBillingModal.
+  await window.withLoadingAndError(jinvBody, () => window.BankAccounts.optionsHTML(), (bankOpts) => {
+  if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
+  jinvBody.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(contract)} · Collected ₱${fmt(paid)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-group"><label>Bill To</label><input id="jinv-billto" value="${escHtml(p.clientName||'')}"/></div>
     <div class="form-row">
@@ -888,11 +974,8 @@ async function openJobBillingInvoiceModal(p){
     <div class="form-group"><label>Amount to Collect (₱)</label><input id="jinv-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
     <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="jinv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to Barro Industries OPC.</textarea></div>
     <div id="jinv-err" class="error-msg hidden" style="margin-top:8px"></div>
-  `, `<button class="btn-primary" id="jinv-gen">Generate Invoice</button><button class="btn-secondary" id="jinv-back">Cancel</button>`);
-  // clearAll() first — Billing Invoice is pushed ON TOP of this hub's page
-  // (never nested deeper), so a bare reopen would leave a stale hidden copy
-  // behind; same rule as Design's openProjectDetail reopen sites above.
-  document.getElementById('jinv-back').addEventListener('click', ()=>{ window.Overlay.clearAll(); openJobProjectDetail(p); });
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [jinvBody] });
 
   // ── Kind toggle + live balance-schedule preview (v12 WS36) ──
   const kindSel=document.getElementById('jinv-kind'), dpWrap=document.getElementById('jinv-dp-wrap');
@@ -986,6 +1069,11 @@ async function openJobBillingInvoiceModal(p){
       window.openBillingInvoice(p, inv);
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
+  // Form and listener are real now — release Generate Invoice (panel-scoped; see
+  // the same note at openProjectBillingModal).
+  const jinvGenBtn = panel.querySelector('#jinv-gen');
+  if (jinvGenBtn) jinvGenBtn.disabled = false;
+  }, { skeleton:'rows' });
 }
 
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
@@ -1327,33 +1415,66 @@ async function consumeProductionMaterials(order) {
 
 async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillProjectId) {
   const e = order || {};
-  // Load active projects so this work order can be linked to a job (the spine)
-  let projs = [];
-  let projOpts = '<option value="">— None —</option>';
-  try {
-    // Dropdown population only (the actual stock deduction on consume uses atomic
-    // increment()), so a short cache is safe and saves a full read per modal open.
-    const psnap = await dbCachedGet('job_projects', ()=>db.collection('job_projects').get(), 30000);
-    projs = psnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!['paid','cancelled'].includes(p.stage)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    const selP = e.projectId || prefillProjectId || '';
-    projOpts += projs.map(p=>`<option value="${p.id}" data-client="${escHtml(p.clientName||'')}" ${selP===p.id?'selected':''}>${escHtml(p.projectNo||'')} — ${escHtml(p.clientName||p.name||'')}</option>`).join('');
-  } catch(_) {}
-  // Load raw materials for the consumption picker
-  let invItems = [];
-  try {
-    const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
-    invItems = isnap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  } catch(_) {}
-  // v12 WS28 — worker roster (public-safe projection; empty if never synced)
-  let workers = [];
-  try { const wsnap = await dbCachedGet('worker_directory', ()=>db.collection('worker_directory').get().catch(()=>({docs:[]})), 45000);
-    workers = wsnap.docs.map(d=>({id:d.id,...d.data()})).filter(w=>(w.status||'active')==='active').sort((a,b)=>(a.name||'').localeCompare(b.name||'')); } catch(_) {}
+  // ── v14 tap-latency inversion ───────────────────────────────────────────
+  // The worst offender in this file: THREE collection reads (job_projects for
+  // the "Linked Project" dropdown, inventory_items for the materials picker,
+  // worker_directory for the per-stage assignment chips) all had to resolve
+  // before openPage() was even reached, so tapping "＋ New Order", "Edit", or a
+  // pipeline card left the screen completely still until the slowest of them
+  // landed. The window is now created on the tap frame with a skeleton body and
+  // the form is poured in afterwards.
+  // Title reads `order`/`e` and the footer reads `order`/`e.stage` — both are
+  // already in hand from the card that was tapped, so neither is deferred and
+  // the header/footer never change after the fill.
+  // WHICH buttons ship `disabled`: all three of Save / Delivery Receipt / Delete,
+  // because ALL THREE have their listeners wired inside the renderer (po-save,
+  // po-dr, po-del below) and are therefore genuinely dead until the fill — not
+  // just the primary one. Delivery Receipt's handler happens not to read any
+  // fetched value, but a listener that does not exist yet still eats the tap.
+  // Cancel is an inline onclick, so it is never disabled: the way out of this
+  // window works on the very first frame.
+  const panel = openPage(order ? `Edit Order ${e.orderNo||''}` : `${emojiIcon('🏭',16)} New Production Order`, window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="po-save" disabled>Save</button>${order && ['out_for_delivery','delivered'].includes(normProdStageId(e.stage))?`<button class="btn-secondary" id="po-dr" disabled>${emojiIcon('🧾',16)} Delivery Receipt</button>`:''}${order?'<button class="btn-danger" id="po-del" disabled>Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const poBody = panel.querySelector('.page-panel-body');
+  // Renderer body deliberately not re-indented — see openProjectBillingModal.
+  await window.withLoadingAndError(poBody, async () => {
+    // All three reads keep their ORIGINAL per-read `catch(_){}` swallow. That is
+    // load-bearing, not laziness: a job_projects/inventory/roster failure has
+    // always degraded to an empty dropdown (you can still write and save an
+    // order with no linked project and no materials), and it must keep doing so
+    // rather than replacing a usable form with an error screen. Consequently
+    // withLoadingAndError's error state is reachable here only if something
+    // outside these three guards throws.
+    // Load active projects so this work order can be linked to a job (the spine)
+    let projs = [];
+    let projOpts = '<option value="">— None —</option>';
+    try {
+      // Dropdown population only (the actual stock deduction on consume uses atomic
+      // increment()), so a short cache is safe and saves a full read per modal open.
+      const psnap = await dbCachedGet('job_projects', ()=>db.collection('job_projects').get(), 30000);
+      projs = psnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!['paid','cancelled'].includes(p.stage)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+      const selP = e.projectId || prefillProjectId || '';
+      projOpts += projs.map(p=>`<option value="${p.id}" data-client="${escHtml(p.clientName||'')}" ${selP===p.id?'selected':''}>${escHtml(p.projectNo||'')} — ${escHtml(p.clientName||p.name||'')}</option>`).join('');
+    } catch(_) {}
+    // Load raw materials for the consumption picker
+    let invItems = [];
+    try {
+      const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+      invItems = isnap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    } catch(_) {}
+    // v12 WS28 — worker roster (public-safe projection; empty if never synced)
+    let workers = [];
+    try { const wsnap = await dbCachedGet('worker_directory', ()=>db.collection('worker_directory').get().catch(()=>({docs:[]})), 45000);
+      workers = wsnap.docs.map(d=>({id:d.id,...d.data()})).filter(w=>(w.status||'active')==='active').sort((a,b)=>(a.name||'').localeCompare(b.name||'')); } catch(_) {}
+    return { projs, projOpts, invItems, workers };
+  }, ({ projs, projOpts, invItems, workers }) => {
+  if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
   const matItemOpts = (sel='') => '<option value="">— Select material —</option>' + invItems.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-cost="${Number(i.unitCost)||0}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')} @ ₱${fmt(i.unitCost||0)})</option>`).join('');
   // Starting a work order from an incoming job: prefill client + quote from the project.
   const pf = (!order && prefillProjectId) ? projs.find(p=>p.id===prefillProjectId) : null;
   const dfClient = e.client || pf?.clientName || '';
   const dfQuote  = e.quoteRef || pf?.quoteNumber || '';
-  openPage(order ? `Edit Order ${e.orderNo||''}` : `${emojiIcon('🏭',16)} New Production Order`, `
+  poBody.innerHTML = `
     <div class="form-group"><label>Linked Project (job)</label>
       <select id="po-project" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${projOpts}</select>
     </div>
@@ -1401,7 +1522,8 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       : `<button class="btn-secondary btn-sm" id="po-add-mat" type="button" style="margin-top:6px">+ Add material</button>
          ${order?`<button class="btn-primary btn-sm" id="po-consume" type="button" style="margin-top:6px;margin-left:6px">${emojiIcon('📦',16)} Consume → stock & COS</button>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Save the order first, then reopen to consume materials.</div>'}`}
     <div id="po-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="po-save">Save</button>${order && ['out_for_delivery','delivered'].includes(normProdStageId(e.stage))?`<button class="btn-secondary" id="po-dr">${emojiIcon('🧾',16)} Delivery Receipt</button>`:''}${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [poBody] });
 
   // Materials editor (dynamic rows)
   const matsWrap = document.getElementById('po-mats');
@@ -1555,6 +1677,16 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders'); closeModal(); Notifs.success('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
   });
+  // Form and all three listeners are real now — release the whole footer. The two
+  // optional buttons are absent entirely on a new/early-stage order, hence the
+  // null guards. Panel-scoped; see the note at openProjectBillingModal.
+  const poSaveBtn = panel.querySelector('#po-save');
+  if (poSaveBtn) poSaveBtn.disabled = false;
+  const poDrBtn = panel.querySelector('#po-dr');
+  if (poDrBtn) poDrBtn.disabled = false;
+  const poDelBtn = panel.querySelector('#po-del');
+  if (poDelBtn) poDelBtn.disabled = false;
+  }, { skeleton:'rows' });
 }
 
 // ── Inventory Count Form — editable, printable physical stock-take sheet ──
@@ -2067,17 +2199,35 @@ function bindRfqCard(r, currentUser, currentRole, content) {
 
 async function openRfqModal(currentUser, onDone, prefill) {
   prefill = prefill || {};
-  let invItems = [];
-  try {
-    const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
-    invItems = isnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-  } catch(_) {}
+  // v14 tap-latency inversion — the inventory_items read that backs the per-row
+  // item picker used to sit in front of openPage, so "＋ New RFQ" (and the bulk
+  // "From low stock" generator) froze on the tap. Window first, picker after.
+  // Title is static and the footer is static, so both are final immediately —
+  // except that "Create RFQ" ships `disabled`, since its listener (and the item
+  // rows it collects from) only exist once the renderer has run. Cancel is an
+  // inline onclick and stays live throughout.
+  const panel = openPage(`${emojiIcon('🛒',16)} New Request for Quotation`, window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="rfq-save" disabled>Create RFQ</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const rfqBody = panel.querySelector('.page-panel-body');
+  // Renderer body deliberately not re-indented — see openProjectBillingModal.
+  await window.withLoadingAndError(rfqBody, async () => {
+    // Soft-fail preserved verbatim: an unreadable inventory collection has always
+    // meant "free-text items only", not an error screen — an RFQ is still fully
+    // writable without the picker.
+    let invItems = [];
+    try {
+      const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+      invItems = isnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    } catch(_) {}
+    return invItems;
+  }, (invItems) => {
+  if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
   const riItemOpts = (sel='') => `<option value="">— Free text / new —</option>` +
     invItems.map(i => `<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-unit="${escHtml(i.unit||'')}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')}</option>`).join('');
   const deptOpts = Object.keys(window.DEPARTMENTS || {})
     .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
     .map(k => `<option>${escHtml(k)}</option>`).join('');
-  openPage(`${emojiIcon('🛒',16)} New Request for Quotation`, `
+  rfqBody.innerHTML = `
     <div class="form-row">
       <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" value="${escHtml(prefill.title||'')}" placeholder="e.g. Steel sheets for Job #123"/></div>
       <div class="form-group"><label>Supplier</label><input id="rfq-supplier" placeholder="Supplier name (optional)"/></div>
@@ -2091,7 +2241,8 @@ async function openRfqModal(currentUser, onDone, prefill) {
     <label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px">Items</label>
     <div id="rfq-items"></div>
     <button class="btn-secondary btn-sm" id="rfq-add-item" type="button" style="margin-top:6px">+ Add item</button>
-  `, `<button class="btn-primary" id="rfq-save">Create RFQ</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [rfqBody] });
 
   const itemsWrap = document.getElementById('rfq-items');
   const addRow = (desc = '', qty = '', unit = '', itemId = '') => {
@@ -2158,6 +2309,11 @@ async function openRfqModal(currentUser, onDone, prefill) {
       onDone && onDone();
     } catch (err) { Notifs.showToast('Create failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   });
+  // Form, item rows and listener are real now — release Create RFQ (panel-scoped;
+  // see the note at openProjectBillingModal).
+  const rfqSaveBtn = panel.querySelector('#rfq-save');
+  if (rfqSaveBtn) rfqSaveBtn.disabled = false;
+  }, { skeleton:'rows' });
 }
 
 // v12 WS30 — PO approval state with legacy grandfather: PRs converted before the
@@ -2523,20 +2679,48 @@ async function receiveLineIntoItem(p, it, lineIdx, itemRef) {
 // receive transaction. receivedToInventory flips true when the list empties.
 async function openReceiveResolver(p, currentUser, onDone) {
   const rows = (p.receiveUnmatched || []);
+  // This existence check STAYS in front of openPage. With nothing left to
+  // resolve there is no window to show at all, and opening one on the tap only
+  // to yank it away is worse than the (zero-await, already-instant) early
+  // return it has always been.
   if (!rows.length) return;
-  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+  // v14 tap-latency inversion — the inventory_items read that populates every
+  // row's "bind to item" <select> used to precede openPage, so tapping
+  // "⚠ Resolve" on a PR did nothing visible until it resolved.
+  // Title is built from `p` (already in hand) and the footer is static.
+  // Nothing here ships `disabled`, unlike the other converted windows in this
+  // file: this footer holds ONLY Close (an inline onclick, live from frame one),
+  // and the real actions are the per-row "Receive this line →" buttons, which do
+  // not exist at all until the fill renders them — so there is no live-looking
+  // dead control to guard against.
+  const panel = openPage(`${emojiIcon('⚠',16)} Resolve receipt — ${escHtml(p.prNo || p.rfqNo || '')}`, window.skeletonHtml('rows'),
+    `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  const rcvBody = panel.querySelector('.page-panel-body');
+  // Renderer body deliberately not re-indented — see openProjectBillingModal.
+  await window.withLoadingAndError(rcvBody,
+    () => dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000),
+    (snap) => {
+  if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
   const inv = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const opts = sel => `<option value="">— Choose action —</option><option value="__new__">＋ Create new inventory item</option>` +
     inv.map(i => `<option value="${i.id}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')})</option>`).join('');
-  openPage(`${emojiIcon('⚠',16)} Resolve receipt — ${escHtml(p.prNo || p.rfqNo || '')}`, `
+  rcvBody.innerHTML = `
     <p style="font-size:12px;color:var(--text-muted)">These purchased lines matched no inventory item by name. Bind each to an existing item, or create a new one — quantities and weighted-average cost post the moment you resolve a line.</p>
     ${rows.map((r, k) => `<div class="rcv-row" data-k="${k}" style="border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:8px">
       <div style="font-weight:600">${escHtml(r.desc || '—')} <span style="font-weight:400;color:var(--text-muted)">· ${Number(r.qty||0)} ${escHtml(r.unit||'')}${r.unitPrice!=null?` @ ₱${fmt(r.unitPrice)}`:''}</span></div>
       <select class="rcv-target" style="width:100%;margin-top:6px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${opts()}</select>
       <button class="btn-primary btn-sm rcv-apply" style="margin-top:6px">Receive this line →</button>
     </div>`).join('')}
-  `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-  document.querySelectorAll('.rcv-apply').forEach(applyBtn => applyBtn.addEventListener('click', async e => {
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [rcvBody] });
+  // Scoped to THIS panel's body instead of the whole document (the old
+  // `document.querySelectorAll`). openPage keeps the panel it stacks over alive
+  // underneath as `.page-under`, and the tail of this very handler re-opens the
+  // resolver for the remaining lines while the outgoing panel is still mid-
+  // teardown — so a document-wide sweep can bind a second listener onto the
+  // dying panel's buttons. Scoping costs nothing in coverage: every .rcv-apply
+  // this call renders was just written into rcvBody on the line above.
+  rcvBody.querySelectorAll('.rcv-apply').forEach(applyBtn => applyBtn.addEventListener('click', async e => {
     const rowEl = e.currentTarget.closest('.rcv-row');
     const k = +rowEl.dataset.k, r = rows[k];
     const choice = rowEl.querySelector('.rcv-target').value;
@@ -2567,6 +2751,7 @@ async function openReceiveResolver(p, currentUser, onDone) {
       if (remaining.length) openReceiveResolver({ ...p, receiveUnmatched: remaining }, currentUser, onDone);
     } catch (ex) { Notifs.showToast('Failed: ' + (ex.message || ex), 'error'); e.currentTarget.disabled = false; }
   }));
+  }, { skeleton:'rows' });
 }
 
 // Notify the Finance team (Finance-dept members + Accountant role) and the
@@ -2656,19 +2841,41 @@ window.rejectPurchaseOrder = async function(prId, reason) {
 async function recordPurchaseDisbursement(p, currentUser, onDone) {
   const total = p.total != null ? p.total : purchTotal(p.items);
   const ref = p.prNo || p.rfqNo || '';
-  // v12 WS30 — reconcile the PR's paper total against what PHYSICALLY landed in
-  // stock (WS29's RECV_{prId}_{i} movement rows; resolver receipts included).
-  let stockedValue = null, unresolved = (p.receiveUnmatched || []).length;
-  try {
-    const mv = await db.collection('stock_movements')
-      .where('source', '==', 'receive')
-      .where('refNumber', '==', p.prNo || p.rfqNo || p.id).get();
-    if (!mv.empty) stockedValue = mv.docs.reduce((s, d) => {
-      const m = d.data(); return s + (Number(m.qty) || 0) * (Number(m.unitCost) || 0);
-    }, 0);
-  } catch (_) { /* movements unreadable — reconciliation line simply hidden */ }
-  const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage(`${emojiIcon('🧾',16)} Record Purchase — Cash Disbursement`, `
+  // `unresolved` is a pure count off the `p` already in hand — no read, so it
+  // stays out here (it was only bundled into the `stockedValue` declaration
+  // below for brevity; it was never awaited).
+  const unresolved = (p.receiveUnmatched || []).length;
+  // v14 tap-latency inversion — two sequential reads (the stock_movements
+  // reconciliation query, then the bank-account <select>) used to run before
+  // openPage, making this the slowest tap in Purchasing. Window first, both
+  // reads after, in the same order as before. Title/footer are static — but
+  // "Post Entry" ships `disabled`, because its listener is wired at the bottom of
+  // the renderer and every field it posts from is injected by the fill. Cancel is
+  // an inline onclick and stays live throughout.
+  const panel = openPage(`${emojiIcon('🧾',16)} Record Purchase — Cash Disbursement`, window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="rec-save" disabled>Post Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const recBody = panel.querySelector('.page-panel-body');
+  // Renderer body deliberately not re-indented — see openProjectBillingModal.
+  await window.withLoadingAndError(recBody, async () => {
+    // v12 WS30 — reconcile the PR's paper total against what PHYSICALLY landed in
+    // stock (WS29's RECV_{prId}_{i} movement rows; resolver receipts included).
+    let stockedValue = null;
+    try {
+      const mv = await db.collection('stock_movements')
+        .where('source', '==', 'receive')
+        .where('refNumber', '==', p.prNo || p.rfqNo || p.id).get();
+      if (!mv.empty) stockedValue = mv.docs.reduce((s, d) => {
+        const m = d.data(); return s + (Number(m.qty) || 0) * (Number(m.unitCost) || 0);
+      }, 0);
+    } catch (_) { /* movements unreadable — reconciliation line simply hidden */ }
+    // Sequential, not Promise.all — deliberately the same ordering the two
+    // awaits had before, so nothing about the reads' timing or failure
+    // semantics changes with this pass. BankAccounts is the one that CAN
+    // reject, and it should reach withLoadingAndError's error+Retry block.
+    return { stockedValue, bankOpts: await window.BankAccounts.optionsHTML() };
+  }, ({ stockedValue, bankOpts }) => {
+  if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
+  recBody.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Posting <strong>${escHtml(p.title || ref)}</strong> to the Cash Disbursement Journal.</div>
     <div class="form-row">
       <div class="form-group"><label>Reference</label><input id="rec-ref" value="${escHtml(ref)}"/></div>
@@ -2699,7 +2906,8 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
       </select>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px"><span id="rec-vat-preview"></span></div>
     </div>
-  `, `<button class="btn-primary" id="rec-save">Post Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [recBody] });
 
   const acctSel = document.getElementById('rec-acct');
   acctSel.addEventListener('change', () => {
@@ -2828,6 +3036,11 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
       onDone && onDone();
     } catch (err) { Notifs.showToast('Post failed: ' + (err.message || err), 'error'); saveBtn.disabled = false; }
   });
+  // Form and listener are real now — release Post Entry (panel-scoped; see the
+  // note at openProjectBillingModal).
+  const recSaveBtn = panel.querySelector('#rec-save');
+  if (recSaveBtn) recSaveBtn.disabled = false;
+  }, { skeleton:'rows' });
 }
 
 // ── Printable Purchase Order (forward to supplier) ────────────────

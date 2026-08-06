@@ -99,6 +99,42 @@
        which are the only readers.
    ═══════════════════════════════════════════════════ */
 
+// ── Shared failure block for this file's window-first drill-downs ──────────
+// (v14.0.71 responsiveness pass.) Every drill-down below now pushes its
+// openPage panel SYNCHRONOUSLY in the tap handler with a skeleton body and
+// fills it once the read lands. Two shapes are used, deliberately:
+//
+//   • window.withLoadingAndError (js/ui-states.js) wherever the fill is a
+//     single innerHTML assignment — it already owns skeleton → await → render
+//     → error-with-Retry, so there is nothing to hand-roll.
+//   • THIS helper wherever the fill is followed by a block of existing
+//     listener/save code. Wrapping ~70-100 lines of payroll/gov-ID handler
+//     code in withLoadingAndError's renderer callback would re-indent all of
+//     it for zero behavioural gain (and several of those blocks contain
+//     multi-line template literals whose inner indentation is HTML *content*),
+//     so those panels hand-roll the same lifecycle and share this block.
+//
+// The markup is deliberately identical to withLoadingAndError's own error
+// state, so a failed drill-down looks the same no matter which path produced
+// it. `retry` is optional — when omitted the button is left out entirely
+// rather than rendered dead.
+function _hrPanelError(container, err, retry) {
+  if (!container) return;
+  const msg = (err && err.message) ? err.message : String(err);
+  container.innerHTML =
+    '<div class="empty-state">' +
+      '<div class="empty-icon">' + (window.emojiIcon ? window.emojiIcon('\u26a0\ufe0f', 44) : '') + '</div>' +
+      '<h4>Something went wrong</h4>' +
+      '<p>' + escHtml(msg) + '</p>' +
+      (retry ? '<button type="button" class="btn-secondary btn-sm uistate-retry-btn" style="margin-top:14px">Retry</button>' : '') +
+    '</div>';
+  if (retry) container.querySelector('.uistate-retry-btn')?.addEventListener('click', retry);
+  // Same guarded sweep withLoadingAndError uses: emojiIcon() emits
+  // `<i data-lucide>`, and openPage's own sweep already ran while the body was
+  // still a skeleton, so the warning glyph would otherwise stay a blank gap.
+  if (window.lucide && container.querySelector('[data-lucide]:not(svg)')) lucide.createIcons({ nodes: [container] });
+}
+
 // ── Salary Raise (shared by Payroll + HR Profiles) ─
 // Applies a raise immediately and logs it to salary_raises (old→new, %, effective
 // date, reason, who granted it). Finance/admin only; an affected app-user can read
@@ -183,9 +219,42 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
 
 // Read-only log of past raises (finance/admin). Optionally filter to one subject.
 async function openRaiseHistory(opts = {}) {
-  const snap = await db.collection('salary_raises').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
-  let list = snap.docs.map(d=>({id:d.id,...d.data()}));
-  if (opts.subjectId) list = list.filter(r => r.subjectId === opts.subjectId);
+  // ── WINDOW FIRST, DATA SECOND (v14.0.71) ────────────────────────────────
+  // This used to await the 200-doc salary_raises read and call openPage only
+  // once it landed, so between finger-up and the response not one pixel
+  // changed — the press state had already released and there was nothing in
+  // the DOM to animate. The panel is now pushed synchronously in the tap
+  // handler with a skeleton body and filled afterwards.
+  //
+  // Title and footer are derived from `opts` ONLY, never from the fetched
+  // rows, so both are final at open time and never need a second pass. The
+  // footer's only control is inline onclick="closeModal()", which is live from
+  // the moment the panel exists — so there is nothing to re-wire after the
+  // fill, which is why this one uses withLoadingAndError rather than the
+  // hand-rolled shape.
+  const panel = openPage(
+    `${emojiIcon('💸',16)} Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`,
+    window.skeletonHtml('table'),
+    `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  const bodyEl = panel.querySelector('.page-panel-body');
+
+  await window.withLoadingAndError(bodyEl, async () => {
+    const snap = await db.collection('salary_raises').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+    let list = snap.docs.map(d=>({id:d.id,...d.data()}));
+    if (opts.subjectId) list = list.filter(r => r.subjectId === opts.subjectId);
+    return list;
+  }, (list) => {
+    // CLOSED MID-FLIGHT: Back can be pressed before the read lands. openPage's
+    // teardown detaches the panel, so `bodyEl` would by then be an orphan node
+    // — writing to it throws nothing and shows nothing, but bailing makes it
+    // explicit that this path can never touch (or resurrect) a dismissed
+    // window.
+    if (!panel.isConnected) return;
+    // NOTE ON INDENTATION: the `rows` builder below is byte-for-byte what it
+    // was before this pass, including its 2-space statement indent. Its inner
+    // lines are inside a template literal, i.e. they are HTML *content* — so
+    // re-indenting the block to match its new nesting level would change the
+    // markup this screen emits. Left exactly as it was on purpose.
   const rows = !list.length
     ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('💸',44)}</div><p>No salary raises recorded yet.</p></div>`
     : `<div class="table-wrap"><table class="data-table">
@@ -203,17 +272,35 @@ async function openRaiseHistory(opts = {}) {
           </tr>`;
         }).join('')}</tbody>
       </table></div>`;
-  openPage(`${emojiIcon('💸',16)} Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
-    `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    bodyEl.innerHTML = rows;
+  }, { skeleton: 'table' });
 }
 
 // Admin list of scheduled + pending-approval raises (the SCHEDULE half of the
 // lifecycle — openRaiseHistory above stays the immutable APPLIED log).
 window.openScheduledRaises = async function() {
-  const snap = await db.collection('pending_raises').where('status','in',['scheduled','pending_approval']).get().catch(()=>({docs:[]}));
-  const list = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.effectiveDate||'').localeCompare(b.effectiveDate||''));
+  // ── WINDOW FIRST, DATA SECOND (v14.0.71) ────────────────────────────────
+  // The pending_raises read used to run BEFORE openPage, so the tap produced
+  // no visible change at all until it landed. The panel is now pushed
+  // synchronously with a skeleton body and filled in place.
+  //
+  // {replace:true} stays on the one and only openPage call, exactly where it
+  // was, so the page-stack depth is unchanged: approve/reject re-invoke this
+  // WHOLE function, and that second invocation's openPage swaps the first
+  // one's panel in place (openPage falls back to a normal push when there is
+  // no page on top — the first-open case). The old `render()` indirection is
+  // gone because it was only ever called once per invocation.
   const isPres = typeof isRealPresident === 'function' && isRealPresident();
-  const render = () => {
+  const panel = openPage(`${emojiIcon('💸',16)} Scheduled &amp; Pending Raises`, window.skeletonHtml('table'),
+    `<button class="btn-secondary" onclick="closeModal()">Close</button>`, {replace:true});
+  const bodyEl = panel.querySelector('.page-panel-body');
+
+  await window.withLoadingAndError(bodyEl, async () => {
+    const snap = await db.collection('pending_raises').where('status','in',['scheduled','pending_approval']).get().catch(()=>({docs:[]}));
+    return snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.effectiveDate||'').localeCompare(b.effectiveDate||''));
+  }, (list) => {
+    // Closed mid-flight — never write into (or re-animate) a dismissed window.
+    if (!panel.isConnected) return;
     const rows = !list.length
       ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('💸',44)}</div><p>No scheduled or pending raises.</p></div>`
       : `<div class="table-wrap"><table class="data-table">
@@ -229,10 +316,12 @@ window.openScheduledRaises = async function() {
             </td>
           </tr>`).join('')}</tbody>
         </table></div>`;
-    // replace:true — this is a self-refresh (approve/reject re-invoke render()
-    // in place); openPage falls back to a normal push on the very first call
-    // (empty stack), then swaps itself in place on every re-render after.
-    openPage(`${emojiIcon('💸',16)} Scheduled &amp; Pending Raises`, rows, `<button class="btn-secondary" onclick="closeModal()">Close</button>`, {replace:true});
+    bodyEl.innerHTML = rows;
+    // ── LISTENERS AFTER THE FILL ──────────────────────────────────────────
+    // These used to sit on the line right after openPage, when the body
+    // already held the real rows. Post-inversion the buttons do not exist
+    // until the assignment one line up, so wiring any earlier would silently
+    // bind nothing and Approve/Reject would be dead controls.
     document.querySelectorAll('.sr-approve-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
       const r = await window.RaiseFlow.approve(btn.dataset.id);
       Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
@@ -244,8 +333,7 @@ window.openScheduledRaises = async function() {
       Notifs.error('Raise declined.');
       window.openScheduledRaises();
     }));
-  };
-  render();
+  }, { skeleton: 'table' });
 };
 
 // ── Payroll Management ───────────────────────────
@@ -1165,22 +1253,78 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const sug = window.computeStatutory ? window.computeStatutory({ grossPay: (emp.salary||0)+(emp.allowance||0), year: statYear }) : null;
         const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">${emojiIcon('⚠',10)} unverified rates</span>` : '';
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
+        const _payClass = emp.payClass==='production' ? 'production' : 'regular';
 
-        // ── KPI computation (owner feature — read-only section below).
-        // Reuses money-core.js's window.computeKpiForMonth + dashboards.js's
-        // window.getAttendanceScore(uid, month) — the EXACT same
-        // functions/inputs computePayRun (departments.js) feeds into
-        // computePayLine, so the number shown here always matches what an
-        // actual Compute Payroll run would use for this uid/month. Never
-        // writes anything; never changes payroll/{uid} or any pay math.
-        const [kpiTasksSnap, kpiTargetSnap, attScore] = await Promise.all([
-          // Same dual-shape assignedTo filter as computePayRun (departments.js) —
-          // deliberately NOT getKpiScore's array-contains query (dashboards.js),
-          // which misses a scalar (non-array) assignedTo value.
-          db.collection('tasks').get().catch(()=>({docs:[]})),
-          db.collection('kpi_targets').doc(uid).get().catch(()=>null),
-          window.getAttendanceScore ? window.getAttendanceScore(uid, month) : Promise.resolve(1)
-        ]);
+        // ── WINDOW FIRST, DATA SECOND (v14.0.71) ──────────────────────────
+        // Two Firestore round-trips (the KPI batch, then the linked
+        // worker_profiles lookup) used to run BEFORE openPage, so tapping ✎
+        // Edit on a roster row changed nothing on screen until both landed.
+        // The panel is pushed synchronously here with a skeleton body instead.
+        //
+        // The `if (!emp) return` guard above deliberately STAYS ahead of this
+        // call: it is an in-memory lookup against the roster already on
+        // screen, costs nothing, and a window that has to be yanked away is
+        // worse than a slow one.
+        //
+        // Title depends only on `emp` (already in hand), so it is final at
+        // open time. Save ships DISABLED — it cannot act on a form that isn't
+        // there yet — and is enabled the line after the real markup lands, so
+        // the settled DOM is byte-identical to what this screen always
+        // rendered. Cancel is inline onclick="closeModal()" and is live
+        // immediately, so the user is never trapped on a loading panel.
+        const panel = openPage(`Edit Payroll — ${escHtml(emp.displayName||'')}`,
+          window.skeletonHtml('rows', 6),
+          `<button class="btn-primary" id="save-ep-btn" disabled>Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        const bodyEl = panel.querySelector('.page-panel-body');
+
+        // Hand-rolled rather than withLoadingAndError: the ~70 lines of
+        // cash-advance and payroll-save wiring below have to run AFTER the
+        // fill, and moving them into a renderer callback would re-indent every
+        // one of them (see _hrPanelError's header). Same lifecycle, same error
+        // block, no reflow of money-writing code.
+        let _kpiReads, linkedWpSnap;
+        try {
+          // ── KPI computation (owner feature — read-only section below).
+          // Reuses money-core.js's window.computeKpiForMonth + dashboards.js's
+          // window.getAttendanceScore(uid, month) — the EXACT same
+          // functions/inputs computePayRun (departments.js) feeds into
+          // computePayLine, so the number shown here always matches what an
+          // actual Compute Payroll run would use for this uid/month. Never
+          // writes anything; never changes payroll/{uid} or any pay math.
+          _kpiReads = await Promise.all([
+            // Same dual-shape assignedTo filter as computePayRun (departments.js) —
+            // deliberately NOT getKpiScore's array-contains query (dashboards.js),
+            // which misses a scalar (non-array) assignedTo value.
+            db.collection('tasks').get().catch(()=>({docs:[]})),
+            db.collection('kpi_targets').doc(uid).get().catch(()=>null),
+            window.getAttendanceScore ? window.getAttendanceScore(uid, month) : Promise.resolve(1)
+          ]);
+          // ── Existing cash advance (owner feature — read-only section below).
+          // Type-A (this uid's own cash_advances docs) is already `plan`/
+          // `caBalance` above (window.CashAdvance.planFor). Type-B tracks CA on
+          // a linked worker_profiles doc's OWN caBalance field instead — an
+          // entirely separate ledger from the cash_advances collection (hr.js's
+          // Worker Payslip generator, openPayslipGenerator's deductWorker, is
+          // the only writer of worker_profiles.caBalance). A worker_profiles
+          // doc can point linkedUid at this uid even while payClass here is
+          // still 'regular' (computePayRun treats "linked" and "payClass:
+          // production" as two independent skip reasons — see its
+          // `linkedUids` set), so this is checked unconditionally, not only
+          // when _payClass above is 'production'.
+          linkedWpSnap = await db.collection('worker_profiles').where('linkedUid','==',uid).limit(1).get().catch(()=>({docs:[]}));
+        } catch (err) {
+          // FAILURE PATH. Only window.getAttendanceScore can actually reject
+          // here (every other read carries its own .catch), and before this
+          // pass that rejection meant the tap did nothing at all — no window,
+          // no message, an unhandled rejection in the console. Now it lands as
+          // a visible error inside the window the tap already opened, never an
+          // eternal skeleton.
+          if (panel.isConnected) _hrPanelError(bodyEl, err);
+          return;
+        }
+        // CLOSED MID-FLIGHT — Back can be pressed before either read lands.
+        if (!panel.isConnected) return;
+        const [kpiTasksSnap, kpiTargetSnap, attScore] = _kpiReads;
         const kpiUserTasks = kpiTasksSnap.docs.map(d=>d.data())
           .filter(t => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid);
         const kpiDeliverableRaw = (kpiTargetSnap && kpiTargetSnap.exists) ? kpiTargetSnap.data().deliverableScore : undefined;
@@ -1198,24 +1342,11 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         // loadPayrollTable, in closure here) is the best available signal
         // of which policy would apply if Compute ran right now.
         const payPolicyNow = (runData && runData.payPolicy) ? runData.payPolicy : 'flat';
-
-        // ── Existing cash advance (owner feature — read-only section below).
-        // Type-A (this uid's own cash_advances docs) is already `plan`/
-        // `caBalance` above (window.CashAdvance.planFor). Type-B tracks CA on
-        // a linked worker_profiles doc's OWN caBalance field instead — an
-        // entirely separate ledger from the cash_advances collection (hr.js's
-        // Worker Payslip generator, openPayslipGenerator's deductWorker, is
-        // the only writer of worker_profiles.caBalance). A worker_profiles
-        // doc can point linkedUid at this uid even while payClass here is
-        // still 'regular' (computePayRun treats "linked" and "payClass:
-        // production" as two independent skip reasons — see its
-        // `linkedUids` set), so this is checked unconditionally, not only
-        // when _payClass below is 'production'.
-        const linkedWpSnap = await db.collection('worker_profiles').where('linkedUid','==',uid).limit(1).get().catch(()=>({docs:[]}));
         const linkedWp = linkedWpSnap.docs.length ? { id: linkedWpSnap.docs[0].id, ...linkedWpSnap.docs[0].data() } : null;
 
-        const _payClass = emp.payClass==='production' ? 'production' : 'regular';
-        openPage(`Edit Payroll — ${escHtml(emp.displayName||'')}`, `
+        // The markup below is byte-for-byte what openPage used to be handed —
+        // only WHEN it reaches the panel has changed.
+        bodyEl.innerHTML = `
           <div class="form-group"><label>Employee Type</label>
             <select id="ep-class" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
               <option value="regular" ${_payClass==='regular'?'selected':''}>Type A — Regular, monthly (KPI + attendance)</option>
@@ -1293,8 +1424,21 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Remaining after this payroll: ₱<span id="ep-ca-remaining">${fmt(Math.max(0,caBalance-plan.caPlanned))}</span></div>
           </div>` : ''}
-        `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        `;
+        // Save is live only now that the form it saves actually exists;
+        // removeAttribute leaves exactly `<button class="btn-primary"
+        // id="save-ep-btn">Save</button>`, the markup this footer always had.
+        panel.querySelector('#save-ep-btn')?.removeAttribute('disabled');
+        // Icons in the markup just injected — emojiIcon() emits
+        // `<i data-lucide>`, and openPage's own sweep ran back when the body
+        // was still a skeleton, so the KPI / gov-ID / cash-advance glyphs
+        // would otherwise stay blank gaps.
+        if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
 
+        // ── LISTENERS AFTER THE FILL ──────────────────────────────────────
+        // Everything from here down is unchanged; it simply runs one await
+        // later than it used to. Wiring it any earlier would bind nothing,
+        // because none of these ids existed until the assignment above.
         if (caBalance > 0) {
           const updateRemaining = () => {
             const mode   = document.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
@@ -1857,11 +2001,42 @@ async function ensureWorkerVerifyToken(profile) {
 }
 
 window.openWorkerIDModal = async function(profile, onDone) {
-  if (!profile) return;
-  const token = await ensureWorkerVerifyToken(profile).catch(()=>null);
+  if (!profile) return;   // sync, in-memory — stays ahead of openPage
+  // ── WINDOW FIRST, DATA SECOND (v14.0.71) ────────────────────────────────
+  // ensureWorkerVerifyToken() is a round-trip (and, first time round, two
+  // writes) and openPage used to wait for it, so tapping 🪪 ID on a worker row
+  // did nothing visible until it finished. The panel opens synchronously with
+  // a skeleton body now; the title comes from `profile`, already in hand, so
+  // it is final at open time.
+  //
+  // Print ships DISABLED because it is the one control that genuinely needs
+  // the token (window.printIDCards is handed it directly); it is enabled the
+  // line after the card renders, leaving the footer markup identical to what
+  // it always was. Close is inline onclick and live immediately.
+  const panel = openPage(`${emojiIcon('🪪',16)} Worker ID — ` + escHtml(profile.name||''),
+    window.skeletonHtml('rows', 2),
+    `<button class="btn-primary" id="wid-print" disabled>${emojiIcon('🖨',16)} Print / Save PDF</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  const bodyEl = panel.querySelector('.page-panel-body');
+
+  let token = null;
+  try {
+    token = await ensureWorkerVerifyToken(profile).catch(()=>null);
+  } catch (err) {
+    // Defensive only — the .catch above already folds the expected
+    // permission/network failure into `token = null`, which the body below
+    // renders as the "could not create a verify link" note exactly as before.
+    // This catch exists so a synchronous throw can never leave an eternal
+    // skeleton behind the newly-opened window.
+    if (panel.isConnected) _hrPanelError(bodyEl, err);
+    if (onDone) onDone();
+    return;
+  }
+  // CLOSED MID-FLIGHT — Back before the token lands. onDone still fires: it
+  // refreshes the list UNDERNEATH this panel and was never scoped to it.
+  if (!panel.isConnected) { if (onDone) onDone(); return; }
   const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token||'');
   const qr = (window.buildQRSVG && token) ? window.buildQRSVG(url, 120) : '';
-  openPage(`${emojiIcon('🪪',16)} Worker ID — ` + escHtml(profile.name||''), `
+  bodyEl.innerHTML = `
     <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div style="width:90px;height:110px;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:34px">
         ${profile.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:`${emojiIcon('👤',16)}`}</div>
@@ -1874,7 +2049,13 @@ window.openWorkerIDModal = async function(profile, onDone) {
       <div style="width:120px;height:120px">${qr||`<div style="font-size:10px;word-break:break-all">${escHtml(url)}</div>`}</div>
     </div>
     ${token?`<p style="font-size:11px;color:var(--text-muted);margin-top:12px">Verify link: <a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></p>`:'<p style="font-size:11px;color:var(--danger);margin-top:12px">Could not create a verify link (permission). The card will print without a QR.</p>'}
-  `, `<button class="btn-primary" id="wid-print">${emojiIcon('🖨',16)} Print / Save PDF</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  `;
+  panel.querySelector('#wid-print')?.removeAttribute('disabled');
+  // emojiIcon('👤') in the photo fallback — hydrate what was just injected.
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
+  // LISTENER AFTER THE FILL — #wid-print only exists in the footer, which was
+  // rendered at open time, but it is bound here so it can never fire before
+  // `token` is resolved.
   document.getElementById('wid-print')?.addEventListener('click', () => {
     window.printIDCards([window.buildIdVerifyDoc('worker', profile, null)], [token||'']);
   });
@@ -2561,8 +2742,21 @@ function payslipStageBadge(status) {
 
 async function openPayslipHistory(currentUser, currentRole) {
   const canAct = ['president','owner','manager','finance'].includes(currentRole);
-  const snap = await db.collection('payslips').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
-  const list = snap.docs.map(d=>({id:d.id,...d.data()}));
+  // ── WINDOW FIRST, DATA SECOND (v14.0.71) ────────────────────────────────
+  // The 100-doc payslips read used to gate the whole screen: openPage only ran
+  // once renderModal() was reached, i.e. after the await. The shell below is
+  // pushed synchronously in the tap handler instead, and renderModal's FIRST
+  // paint fills that same element in place (see the note at the paint site for
+  // why in-place rather than a second openPage).
+  //
+  // {replace:true} is carried over from renderModal's original call so the
+  // page-stack depth is exactly what it always was: on the button path the
+  // stack has no page on top and openPage falls back to a push, and on the
+  // ps-edit onSave path Overlay.clearAll() has already emptied it.
+  const shell = openPage(`${emojiIcon('📄',16)} Payslip Summary`, window.skeletonHtml('table'), '', {replace:true});
+  const shellBody = shell.querySelector('.page-panel-body');
+  let firstPaint = true;
+  let list = [];
 
   const renderRows = () => list.map(p=>{
     const status = p.status || 'draft';
@@ -2587,12 +2781,7 @@ async function openPayslipHistory(currentUser, currentRole) {
   const renderModal = () => {
     const totalNet = list.reduce((s,p)=>s+(p.netPay||0),0);
     const filedCount = list.filter(p=>['filed','submitted'].includes(p.status)).length;
-    // replace:true — self-refresh (advance/delete/override re-invoke renderModal()
-    // in place, same top-of-stack). The edit sub-page (ps-edit-btn) does NOT come
-    // back through here — see its own onSave callback below, which pops back via
-    // Overlay.clearAll() instead so the stale hidden copy of this page isn't left
-    // behind under the edit page.
-    const panel = openPage(`${emojiIcon('📄',16)} Payslip Summary`, `
+    const bodyHTML = `
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text-muted)">
         <span><strong style="color:var(--text)">${list.length}</strong> payslips</span>
         <span><strong style="color:var(--text)">${filedCount}</strong> filed/submitted</span>
@@ -2604,7 +2793,29 @@ async function openPayslipHistory(currentUser, currentRole) {
           <tbody>${!list.length ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No payslips yet</td></tr>' : renderRows()}</tbody>
         </table>
       </div>
-    `, '', {replace:true});
+    `;
+    // FIRST PAINT fills the shell opened at the top of this function IN PLACE
+    // rather than opening a second window. That keeps the same panel element,
+    // so focus-return on Back still targets the button that opened it (a
+    // skeleton-then-replace would hand openPage a _trigger living inside the
+    // panel it is about to destroy) and there is no second entrance animation.
+    //
+    // EVERY LATER PAINT is a self-refresh (advance/delete/override re-invoke
+    // renderModal() in place, same top-of-stack) and keeps the original
+    // {replace:true} swap. The edit sub-page (ps-edit-btn) does NOT come
+    // back through here — see its own onSave callback below, which pops back via
+    // Overlay.clearAll() instead so the stale hidden copy of this page isn't left
+    // behind under the edit page.
+    let panel;
+    if (firstPaint) {
+      // Closed mid-flight — bail rather than resurrect a dismissed window.
+      if (!shell.isConnected) return;
+      shellBody.innerHTML = bodyHTML;
+      panel = shell;
+      firstPaint = false;   // set only once the fill actually landed
+    } else {
+      panel = openPage(`${emojiIcon('📄',16)} Payslip Summary`, bodyHTML, '', {replace:true});
+    }
     if (window.lucide) lucide.createIcons({ nodes: [panel] });
     bindRows();
   };
@@ -2695,7 +2906,20 @@ async function openPayslipHistory(currentUser, currentRole) {
     }));
   };
 
-  renderModal();
+  // The read that used to gate this whole screen now runs with the window
+  // already up. withLoadingAndError (js/ui-states.js) owns skeleton → await →
+  // render → error-with-Retry against the shell's body. On failure its Retry
+  // re-runs this exact call, and `firstPaint` is still true at that point (the
+  // renderer never ran), so a successful retry still fills the shell in place
+  // instead of opening a second window.
+  await window.withLoadingAndError(shellBody, async () => {
+    const snap = await db.collection('payslips').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
+    return snap.docs.map(d=>({id:d.id,...d.data()}));
+  }, (data) => {
+    if (!shell.isConnected) return;
+    list = data;
+    renderModal();
+  }, { skeleton: 'table' });
 }
 
 // Compact edit of a filed payslip's amounts (recomputes net; keeps ledger in sync).
@@ -3691,11 +3915,14 @@ window.renderPayslipPage = function(model, backFn, hostOpts) {
 //     it has no money math to do.
 //   - Every identity backfill is audit-logged (window.logAudit).
 // ═══════════════════════════════════════════════════════════
-window.openPayslipEditPanel = async function(model, backFn) {
-  if (!_payslipCanEdit()) return; // defensive — the button itself is already gated
-  const isWeekly = model.kind === 'weekly';
-
-  // ── State-aware Section B signal (read-only lookups, no writes) ────────
+// ── State-aware Section B signal (read-only lookups, no writes) ────────
+// Split out of openPayslipEditPanel when that panel went window-first
+// (v14.0.71) purely so its one read can be awaited from inside a try/catch
+// WITHOUT re-indenting this chain: several branches below assign multi-line
+// template literals whose continuation lines are HTML content, so shifting
+// them would change the markup. Identical body, identical indentation, no
+// writes anywhere in here.
+async function _payslipEditSectionB(model, isWeekly) {
   let sectionBHtml, moneyLinkTarget = null; // moneyLinkTarget: 'projection'|'computed'|null(weekly uses weeklyStatus instead)
   let weeklyStatus = null;
   if (isWeekly) {
@@ -3729,6 +3956,42 @@ window.openPayslipEditPanel = async function(model, backFn) {
     sectionBHtml = `<button type="button" class="btn-secondary btn-sm" id="pe-money-link">${isComputed ? 'Adjust this computed line' : 'Edit live pay settings'}</button>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Opens Finance → Payroll — use ${isComputed ? "this employee's row ✎ Adjust button" : "this employee's row ✎ Edit button"} to change pay figures.</div>`;
   }
+  return { sectionBHtml, moneyLinkTarget };
+}
+
+window.openPayslipEditPanel = async function(model, backFn) {
+  if (!_payslipCanEdit()) return; // defensive — the button itself is already gated
+  const isWeekly = model.kind === 'weekly';
+
+  // ── WINDOW FIRST, DATA SECOND (v14.0.71) ────────────────────────────────
+  // Section B needs one Firestore read (payslips/{sourceRef} for weekly,
+  // pay_runs/{monthKey} for monthly) before it can say whether the figures are
+  // locked or where they are edited — and openPage used to wait for it, so
+  // tapping "✎ Edit details" changed nothing on screen until it landed. The
+  // panel now opens synchronously with a skeleton body.
+  //
+  // The title is built from `model`, which the caller already holds, so it is
+  // final at open time and never has to be rewritten. Save ships disabled
+  // until the real form exists; Cancel is inline onclick and live immediately.
+  // NOTHING about what this panel writes changes — the salary_history patch
+  // whitelist and the per-target try/catch below are untouched.
+  const panel = openPage(`${emojiIcon('✎',16)} Edit details — ${escHtml(model.employee.name||'')}`,
+    window.skeletonHtml('rows', 5),
+    `<button class="btn-primary" id="pe-save-btn" disabled>Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const bodyEl = panel.querySelector('.page-panel-body');
+
+  let sectionBHtml, moneyLinkTarget = null;
+  try {
+    ({ sectionBHtml, moneyLinkTarget } = await _payslipEditSectionB(model, isWeekly));
+  } catch (err) {
+    // FAILURE PATH — both reads in there carry their own .catch, so this only
+    // fires on something unexpected; without it that would leave the (now
+    // already-open) window on an eternal skeleton.
+    if (panel.isConnected) _hrPanelError(bodyEl, err);
+    return;
+  }
+  // CLOSED MID-FLIGHT — Back before the read landed.
+  if (!panel.isConnected) return;
 
   const idLabel = isWeekly ? 'Worker ID (BI-W-###)' : 'Employee ID';
   const nameLabel = isWeekly ? 'Worker Name' : 'Name';
@@ -3755,14 +4018,24 @@ window.openPayslipEditPanel = async function(model, backFn) {
     </div>
   `;
 
-  // Stacked push (replace:false) per §1's implementation shape — sits on
-  // top of the payslip panel; the payslip panel itself is only replaced
-  // once Save actually persists something (renderPayslipPage's
-  // hostOpts.replace, wired below).
-  const panel = openPage(`${emojiIcon('✎',16)} Edit details — ${escHtml(model.employee.name||'')}`, bodyHTML,
-    `<button class="btn-primary" id="pe-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // The panel was pushed at the top of this function (a stacked push,
+  // replace:false, per §1's implementation shape — it sits on top of the
+  // payslip panel; the payslip panel itself is only replaced once Save
+  // actually persists something, via renderPayslipPage's hostOpts.replace
+  // wired below). All that happens here is the skeleton giving way to the
+  // real form.
+  bodyEl.innerHTML = bodyHTML;
+  // Byte-identical settled footer: `<button class="btn-primary"
+  // id="pe-save-btn">Save</button>`.
+  panel.querySelector('#pe-save-btn')?.removeAttribute('disabled');
+  // emojiIcon('🪪')/('🔒') in the markup above emit `<i data-lucide>`, and
+  // openPage's sweep ran while the body was still a skeleton.
   if (window.lucide) lucide.createIcons({ nodes: [panel] });
 
+  // ── LISTENERS AFTER THE FILL ────────────────────────────────────────────
+  // #pe-money-link lives in the body that only just landed, so this binding
+  // has to be here; #pe-save-btn is in the footer but is bound here too, so it
+  // can never run against a form that does not exist.
   panel.querySelector('#pe-money-link')?.addEventListener('click', () => {
     Notifs.showToast('Opening Payroll — pay figures are edited there, never on the payslip itself.');
     if (moneyLinkTarget === 'weekly') {
