@@ -3857,11 +3857,32 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
     const r = p.getBoundingClientRect();
     const fr = foot && foot.offsetParent !== null ? foot.getBoundingClientRect() : null;
     const br = body ? body.getBoundingClientRect() : null;
+    // ROUND 2 (2026-08-07): the owner's readout came back `vh793 pnl0-793
+    // bdy-793 ft:none gap0` — the panel AND the body both reach the bottom, yet
+    // his composer sits ~94px above it. So the dead band is INSIDE the body,
+    // below its last child, and every fix so far aimed at the panel. Print what
+    // is actually at the bottom of the body: its own padding, and the rect of
+    // its last visible child (the composer / footer row).
+    let lastTxt = '';
+    if (body) {
+      const kids = Array.from(body.children).filter(k => k.getClientRects().length);
+      const last = kids[kids.length - 1];
+      const bcs = getComputedStyle(body);
+      const pb = Math.round(parseFloat(bcs.paddingBottom) || 0);
+      if (last) {
+        const lr = last.getBoundingClientRect();
+        const lcs = getComputedStyle(last);
+        lastTxt = ` last[${(last.className || last.id || last.tagName).toString().split(' ')[0].slice(0,14)}]` +
+                  `-${Math.round(lr.bottom)} mb${Math.round(parseFloat(lcs.marginBottom) || 0)}` +
+                  ` INNERGAP${Math.round(br.bottom - lr.bottom)}`;
+      }
+      lastTxt += ` bpad${pb} kids${kids.length}`;
+    }
     d.textContent =
       `vh${window.innerHeight} pnl${Math.round(r.top)}-${Math.round(r.bottom)}` +
       (br ? ` bdy-${Math.round(br.bottom)}` : '') +
       (fr ? ` ft-${Math.round(fr.bottom)}` : ' ft:none') +
-      ` gap${Math.round(window.innerHeight - r.bottom)}`;
+      ` gap${Math.round(window.innerHeight - r.bottom)}` + lastTxt;
     p.appendChild(d);
   }, 400);
   _focusTrapAttach(p);
