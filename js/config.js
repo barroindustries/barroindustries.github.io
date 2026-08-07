@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.94';
+window.APP_VERSION = '14.0.95';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2191,12 +2191,70 @@ window.BRAND = {
       sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BK',
       thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
       creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila' },
+    // BI (owner request 2026-08-07) — the PARENT company quoting in its own
+    // name for GENERAL FABRICATION (railings, gates, structural, sheet metal),
+    // i.e. work that isn't kitchens. Identity values are the corporate ones
+    // brandEntity('corporate') already returns from BRAND.legal above, so the
+    // two can never disagree.
+    BI: { name:'BARRO INDUSTRIES OPC',
+      sub:'SEC-registered One Person Corporation',
+      addr:'Metro Manila', contact:'09276836300  |  barroindustries@gmail.com',
+      sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BI',
+      thanks:'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
+      creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila' },
     BS: { name:'BRILLIANT STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
       sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'}, code:'BS',
       thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
       creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300' }
   }
 };
+
+// ── Quote company registry + collection routing (2026-08-07) ─────────────
+// THE single source of truth for "which quoting identity is this, and where
+// does its quote live / which builder page opens it". Introduced when Barro
+// Industries (BI) became a THIRD quoting identity beside Barro Kitchens (BK)
+// and Brilliant Steel (BS), so the routing decision lives in ONE place instead
+// of a `company === 'BK' ? 'bk_quotes' : 'bs_quotes'` ternary repeated across
+// app.js / departments.js / sales.js / production.js / approvals.js.
+//
+// OWNER RULING 2026-08-07: BI quotes are FILED WITH the Barro Kitchens quotes
+// in `bk_quotes`, tagged company:'BI' — deliberately NOT a new bi_quotes
+// collection, which would need its own firestore.rules block, composite index
+// and nav route. The internal Quotations list tells them apart with a badge
+// (see renderBKQuotationsSummary, js/screens/sales.js).
+//
+// ‼️ MIRROR — quote-builder-v2.html is loaded in an <iframe> and CANNOT read
+// window.* from this frame, so it carries its OWN copy of this map (search for
+// "QUOTE_COLL" there). Keep the two in sync BY HAND.
+window.QUOTE_COMPANIES = {
+  BK: { label:'Barro Kitchens',   coll:'bk_quotes', page:'bk-quote-builder', internal:true  },
+  BI: { label:'Barro Industries', coll:'bk_quotes', page:'bk-quote-builder', internal:true  },
+  BS: { label:'Brilliant Steel',  coll:'bs_quotes', page:'bs-quote-builder', internal:false },
+};
+// Every collection a quote may legitimately live in — the allowlist the
+// QUOTE_UPDATE bridge (js/app.js) validates an incoming collection against.
+window.QUOTE_COLLECTIONS = ['bk_quotes', 'bs_quotes'];
+// UNKNOWN CODES (including the runtime-synthesized generic-partner 'PT') fall
+// through to the Brilliant Steel/partner entry — byte-identical to what the
+// `=== 'BK' ? bk : bs` ternaries these helpers replaced already did.
+// hasOwnProperty, not truthiness: 'constructor', 'toString', 'valueOf' and the
+// rest of Object.prototype are inherited and ARE truthy, so a plain
+// `MAP[k] || fallback` would return Object itself for quoteCollectionFor
+// ('constructor') and then read .coll off it as undefined — a silently wrong
+// collection rather than the intended fallback. Cheap here, and it makes every
+// helper below total over arbitrary input.
+function _quoteCo(company){
+  return Object.prototype.hasOwnProperty.call(window.QUOTE_COMPANIES, company)
+    ? window.QUOTE_COMPANIES[company]
+    : window.QUOTE_COMPANIES.BS;
+}
+window.quoteCollectionFor  = function(company){ return _quoteCo(company).coll; };
+window.quoteBuilderPageFor = function(company){ return _quoteCo(company).page; };
+window.quoteCompanyLabel   = function(company){ return _quoteCo(company).label; };
+// Internal = a Barro-owned identity (BK/BI). Partner identities (BS, and the
+// generic 'PT') are not, and must never be quoted under by internal-only flows
+// — or, conversely, be reachable by a partner session.
+window.isInternalQuoteCompany = function(company){ return !!_quoteCo(company).internal; };
 
 // Convenience: pick the correct legal entity for a document type.
 //   brandEntity('bir')       → DTI trade name + real TIN (payslips, invoices, BIR docs)

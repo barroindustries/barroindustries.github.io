@@ -357,7 +357,11 @@ window.renderApprovals = async function(currentUser) {
         ...qApprSnap2.docs.filter(d=>d.data().type==='ca_deduct').map(d=>{const x=d.data();return {id:d.id,...x,type:'ca_deduct',icon:'💳',label:'CA Deduction Request',name:x.userName||'Employee',detail:`₱${fmt(x.amount||0)} this month${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
         // Quote delete requests (partner bs_quotes + internal bk_quotes + client folder) — president approves or denies
         ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bs_quotes',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
-        ...delBKQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bk_quotes',icon:'🗑',label:'BK Quote Delete Request',name:`Delete BK quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
+        // bk_quotes holds both Barro Kitchens and Barro Industries (general
+        // fabrication) quotes, so the label comes from each doc's own company
+        // code rather than being hardcoded "BK" for the whole collection —
+        // the President needs to see WHICH quote they're approving a delete for.
+        ...delBKQSnap2.docs.map(d=>{const x=d.data();const c=x.company||'BK';return {id:d.id,...x,type:'delete-quote',coll:'bk_quotes',icon:'🗑',label:`${c} Quote Delete Request`,name:`Delete ${c} quote ${x.quoteNumber||d.id.slice(-6)}`,detail:`${x.clientName||''}${x.deleteReason?' — '+x.deleteReason:''}`,ts:x.deleteRequestedAt};}),
         ...delCSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-client',icon:'🗑',label:'Client Delete Request',name:`Delete client "${d.data().name||''}"`,detail:d.data().deleteReason||'',ts:d.data().deleteRequestedAt})),
         // Leave requests — surfaced here so every request type funnels through this page.
         ...leaveSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'leave',icon:'🌴',label:'Leave Request',name:x.userName||'Employee',detail:`${x.days||0}d ${x.type||'leave'} · ${x.startDate||''}→${x.endDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
@@ -1457,7 +1461,7 @@ async function openQuoteApprovalReview(ctx, onDone){
     window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber,
       clientName: q.clientName||clientName, quoteColl: QC };
     closeModal();
-    window.reopenQuoteFromDoc(QC, quoteId, q.company === 'BK' ? 'bk-quote-builder' : 'bs-quote-builder');
+    window.reopenQuoteFromDoc(QC, quoteId, window.quoteBuilderPageFor(q.company));
   });
   const getEdits = ()=>({ clientName:body.querySelector('#qar-client').value.trim(), scope:body.querySelector('#qar-scope').value.trim(), total:parseFloat(body.querySelector('#qar-total').value)||q.total||0, presidentNotes:body.querySelector('#qar-notes').value.trim(), editedByPresident:true, editedAt:firebase.firestore.FieldValue.serverTimestamp(), editedBy:currentUser.uid });
   // A quote doc is in hand, so the two writing actions become live. Removing the

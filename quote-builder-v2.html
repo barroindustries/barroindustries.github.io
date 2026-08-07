@@ -427,6 +427,12 @@ tr:hover td{background:#fafbff;}
   .mtb-seg-btn{flex:1;background:none;border:none;border-radius:6px;padding:9px 6px;
     font-size:12.5px;font-weight:700;color:var(--gray-dark);cursor:pointer;min-height:40px;}
   .mtb-seg-btn.active{background:var(--dark-blue);color:white;}
+  /* The Company row carries three LONG brand labels (Barro Kitchens / Barro
+     Industries / Brilliant Steel — or a generic partner's own company name,
+     which mtbSync() copies in at runtime). Three across truncates all of them
+     on a phone, so this one group stacks; Mode keeps its 3-up split because
+     Client/Internal/Admin are short. */
+  #mtbCoGroup .mtb-seg{flex-direction:column;}
 }
 
 /* ── VERIFY / FILE MODAL ── */
@@ -695,6 +701,10 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="topbar-logo" id="navLogo">BARRO <span>KITCHENS</span></div>
     <div class="toggle-pills">
       <button id="coBK" class="active" onclick="setCompany('BK')">🍳 Barro Kitchens</button>
+      <!-- Barro Industries = the parent company, for GENERAL FABRICATION
+           quotes (railings, gates, structural, sheet metal). Internal only —
+           applyPartnerMode() removes this pill entirely for partner sessions. -->
+      <button id="coBI" onclick="setCompany('BI')">🏗 Barro Industries</button>
       <button id="coBS" onclick="setCompany('BS')">⚙ Brilliant Steel</button>
     </div>
     <div class="toggle-pills">
@@ -739,6 +749,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <div class="mtb-seg-label">Company</div>
       <div class="mtb-seg">
         <button class="mtb-seg-btn" id="mtbCoBK" onclick="mtbSetCompany('BK')">🍳 Barro Kitchens</button>
+        <button class="mtb-seg-btn" id="mtbCoBI" onclick="mtbSetCompany('BI')">🏗 Barro Industries</button>
         <button class="mtb-seg-btn" id="mtbCoBS" onclick="mtbSetCompany('BS')">⚙ Brilliant Steel</button>
       </div>
     </div>
@@ -1213,10 +1224,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── PAYMENT DETAILS (owner request) — per-company bank/e-wallet info for the
-     client. Rendered by renderPaymentDetails(): only shows for Barro Kitchens
-     (CO.BK carries the `pay` config; CO.BS/CO.PT do not). Visible on screen
-     AND in print (not wrapped in .print-only), so the preparer can preview
-     exactly what the client will see on the printed/PDF quote. ── -->
+     client. Rendered by renderPaymentDetails(): only shows for the Barro-owned
+     identities (CO.BK and CO.BI carry the `pay` config; CO.BS/CO.PT do not, so
+     a partner quote never prints Barro's account). Visible on screen AND in
+     print (not wrapped in .print-only), so the preparer can preview exactly
+     what the client will see on the printed/PDF quote. ── -->
 <div class="section" id="paymentDetailsSection">
   <div class="sec-title">Payment Details</div>
   <div class="fg-grid no-print">
@@ -1394,7 +1406,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 //  COMPANY CONFIG
 //  Local mirror of window.BRAND.companies (js/config.js, v12 WS09). This file
 //  loads via <iframe> with no access to the parent app's config.js — keep
-//  BK/BS in sync by hand. CO.PT is synthesized at runtime below from
+//  BK/BI/BS in sync by hand. CO.PT is synthesized at runtime below from
 //  ?pcoName/?pcoContact/?pcoSig for generic (non-Brilliant-Steel) partners.
 // ═══════════════════════════════════════════════════════════════════
 const CO = {
@@ -1414,7 +1426,28 @@ const CO = {
     // which carries a `pay` key) never print Barro's account info on a
     // partner's quote.
     pay:{bank:'UnionBank',accountName:'Narciso Neil Barro',accountNo:'0015 3001 4016',
-      other:['BDO','Metrobank','GCash','GoTyme']}},
+      other:['BDO','Metrobank','GCash','GoTyme'],contact:'Barro Kitchens'}},
+  // BI (owner request 2026-08-07) — the PARENT company quoting in its own name
+  // for GENERAL FABRICATION (railings, gates, structural, sheet metal): work
+  // that is not kitchens. Line items are free-typed (description/qty/price),
+  // which the builder already supports — there is deliberately no fabrication
+  // catalogue in products-database.json.
+  //   • contact MUST carry the "|" separator: applyLetterheadHeader() splits on
+  //     it into [phone, email] (CO.BS has no pipe, which is exactly why its
+  //     letterhead email renders blank — don't repeat that here).
+  //   • logo is set EXPLICITLY. Omitting it makes buildLetterhead() fall
+  //     through to the app-wide BRAND.logo.print — the Barro KITCHENS cube —
+  //     and stamp the wrong sub-brand on a Barro Industries document.
+  //   • pay IS carried: BI is the same legal entity that owns this account
+  //     (Barro Industries OPC), unlike BS/PT which must never show it.
+  BI:{name:'BARRO INDUSTRIES OPC',sub:'SEC-registered One Person Corporation',
+    addr:'Metro Manila',contact:'09276836300  |  barroindustries@gmail.com',
+    sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>INDUSTRIES</span>',code:'BI',
+    thanks:'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
+    creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    logo:'icons/barro-industries.png',
+    pay:{bank:'UnionBank',accountName:'Narciso Neil Barro',accountNo:'0015 3001 4016',
+      other:['BDO','Metrobank','GCash','GoTyme'],contact:'Barro Industries'}},
   // logo:'' — Brilliant Steel has no logo asset here; an EMPTY value must
   // suppress the mark entirely (showLogo:false below) rather than falling
   // through to js/letterhead.js's app-wide BRAND.logo.print (the BK cube),
@@ -1428,6 +1461,31 @@ const CO = {
     thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
     creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
 };
+
+// ── QUOTE COLLECTION ROUTING ────────────────────────────────────────
+// Which Firestore collection a company's quotes are filed in.
+//
+// OWNER RULING 2026-08-07: Barro Industries (BI) quotes are filed WITH the
+// Barro Kitchens quotes in bk_quotes, tagged company:'BI' — deliberately NOT a
+// new bi_quotes collection (that would need its own firestore.rules block,
+// composite index and nav route). The internal Quotations list distinguishes
+// them with a badge.
+//
+// ‼️ MIRROR of window.QUOTE_COMPANIES in js/config.js. This page is an
+// <iframe> and CANNOT see window.* from the parent app frame, so it needs its
+// own copy — keep the two in sync BY HAND.
+// Unknown codes (incl. the runtime-synthesized generic-partner 'PT') fall
+// through to bs_quotes, exactly as the ternaries this replaced already did.
+const QUOTE_COLL={ BK:'bk_quotes', BI:'bk_quotes', BS:'bs_quotes' };
+// hasOwnProperty, not truthiness — QUOTE_COLL['constructor'] is inherited from
+// Object.prototype and IS truthy, so `||` would return Object here. Same guard
+// as _quoteCo() in the js/config.js mirror.
+function quoteCollFor(co){ return Object.prototype.hasOwnProperty.call(QUOTE_COLL,co)?QUOTE_COLL[co]:'bs_quotes'; }
+// Identities a PARTNER session may never assume (setCompany's guard below).
+// Barro Industries only — deliberately NOT Barro Kitchens: applyPartnerMode()
+// leaves the BK pill live for generic partners on purpose ("so they can quote
+// under either brand"), and widening this list would silently kill that.
+const PARTNER_BLOCKED_COS=['BI'];
 
 // ═══════════════════════════════════════════════════════════════════
 //  STATE
@@ -1707,6 +1765,13 @@ if (GENERIC_PARTNER) {
 }
 function applyPartnerMode(){
   if(!PARTNER_MODE) return;
+  // Barro Industries is the PARENT company's own general-fabrication identity —
+  // internal only. Remove the pill (and its mobile-sheet proxy) from the DOM
+  // entirely, not display:none, so no partner session has a reachable control
+  // for it at all. setCompany() carries the matching state-level lock for the
+  // draft/template restore paths that never touch these buttons.
+  document.getElementById('coBI')?.remove();
+  document.getElementById('mtbCoBI')?.remove();
   if(GENERIC_PARTNER){
     // Keep BOTH header options: re-label the BS pill as the partner's own company,
     // leave Barro Kitchens available so they can quote under either brand.
@@ -1806,9 +1871,32 @@ function initUI(){
 //  COMPANY & VIEW
 // ═══════════════════════════════════════════════════════════════════
 function setCompany(co){
-  currentCo=co;
-  const c=CO[co];
+  // PARTNER LOCK — a partner session must never quote as Barro Industries, not
+  // even by restoring a draft/template that carries it (loadFromStorage/
+  // resumeDraft/loadEditableState all call setCompany with whatever `currentCo`
+  // the saved state holds, and none of them go anywhere near the pill this
+  // applyPartnerMode() already removed). Firestore's bk_quotes rules deny
+  // partners outright, so nothing leaks either way — but silently rebranding a
+  // partner's builder to "BARRO INDUSTRIES OPC" and only failing at the write
+  // is far worse than never offering it. Redirect to their own identity.
+  if(PARTNER_MODE && PARTNER_BLOCKED_COS.includes(co)) co = GENERIC_PARTNER ? 'PT' : 'BS';
+  // DEFENSIVE — an unknown code used to throw on `c.nav` below and abort the
+  // WHOLE restore mid-way (setCompany runs from loadFromStorage/resumeDraft/
+  // loadEditableState). Fall back the same way applyLetterheadHeader() already
+  // does, so a stale/garbled company code degrades to Barro Kitchens instead of
+  // breaking the reopen.
+  // hasOwnProperty, not truthiness: CO['constructor'] (and 'toString',
+  // 'valueOf', …) are inherited from Object.prototype and ARE truthy, so a
+  // plain `CO[co]||CO.BK` would hand back Object itself and then throw on
+  // c.sig.name — the very mid-restore abort this fallback exists to prevent.
+  const _known=Object.prototype.hasOwnProperty.call(CO,co);
+  const c=_known?CO[co]:CO.BK;
+  currentCo=_known?co:'BK';
+  co=currentCo;
   document.getElementById('coBK').classList.toggle('active',co==='BK');
+  // The Barro Industries pill is internal-only — applyPartnerMode() removes it
+  // for partner sessions, so guard the lookup rather than assuming it's there.
+  document.getElementById('coBI')?.classList.toggle('active',co==='BI');
   // In generic-partner mode the BS pill represents the partner's own company (PT).
   document.getElementById('coBS').classList.toggle('active',co==='BS'||co==='PT');
   document.getElementById('navLogo').innerHTML=c.nav;
@@ -1825,7 +1913,7 @@ function setCompany(co){
   const pfc=document.getElementById('pfCreds'); if(pfc) pfc.textContent=c.creds||'';
   buildQuoteNo();
   applyLetterheadHeader();
-  renderPaymentDetails();   // re-gate on the new company — only CO.BK carries a `pay` config
+  renderPaymentDetails();   // re-gate on the new company — only the Barro-owned CO.BK/CO.BI carry a `pay` config
   mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
 }
 
@@ -1942,15 +2030,23 @@ function mtbSync(){
   const q=document.getElementById('btnQuick'), mq=document.getElementById('mtbQuick');
   if(q && mq) mq.classList.toggle('mtb-row-active', q.classList.contains('active'));
 
-  // Company segmented row — mirrors #coBK/#coBS existence/visibility/active.
+  // Company segmented row — mirrors #coBK/#coBI/#coBS existence/visibility/active.
   // In BS-partner lock mode applyPartnerMode() hides the ENTIRE company
   // toggle-pills wrapper (coBK.parentElement.style.display='none'); mirror
   // that by hiding the whole #mtbCoGroup, not just the BK button.
-  const coBK=document.getElementById('coBK'), coBS=document.getElementById('coBS');
-  const coGroup=document.getElementById('mtbCoGroup'), mCoBK=document.getElementById('mtbCoBK'), mCoBS=document.getElementById('mtbCoBS');
+  const coBK=document.getElementById('coBK'), coBI=document.getElementById('coBI'), coBS=document.getElementById('coBS');
+  const coGroup=document.getElementById('mtbCoGroup'), mCoBK=document.getElementById('mtbCoBK'),
+        mCoBI=document.getElementById('mtbCoBI'), mCoBS=document.getElementById('mtbCoBS');
   const coLocked = !!(coBK && coBK.parentElement && coBK.parentElement.style.display==='none');
   if(coGroup) coGroup.style.display = coLocked ? 'none' : '';
   if(coBK && mCoBK) mCoBK.classList.toggle('active', coBK.classList.contains('active'));
+  // Barro Industries: applyPartnerMode() REMOVES #coBI (and #mtbCoBI) for
+  // partner sessions, so a missing desktop pill means the sheet row must go
+  // too — same "mirror the live DOM, never re-decide gating" rule as Mode below.
+  if(mCoBI){
+    if(!coBI) mCoBI.remove();
+    else mCoBI.classList.toggle('active', coBI.classList.contains('active'));
+  }
   if(coBS && mCoBS){
     mCoBS.textContent = coBS.textContent;   // partner branding (e.g. "🏢 CompanyName") flows through
     mCoBS.classList.toggle('active', coBS.classList.contains('active'));
@@ -2156,10 +2252,21 @@ async function autoClientSeq(){
     const el=document.getElementById('qnoSeq');
     if(!el||String(el.value)!=='1') return;
     if(typeof auth==='undefined'||!auth.currentUser) return;
-    const coll=(currentCo==='BK')?'bk_quotes':'bs_quotes';
+    const coll=quoteCollFor(currentCo);
     let docs=[];
     try{ docs=(await db.collection(coll).get()).docs; }
     catch(_){ docs=(await db.collection(coll).where('createdBy','==',auth.currentUser.uid).get().catch(()=>({docs:[]}))).docs; }
+    // bk_quotes now holds TWO companies (Barro Kitchens + Barro Industries —
+    // owner's filing ruling), so the collection alone no longer identifies the
+    // company. Numbering stays per-company, matching reserveAtomicQnoSeq()'s
+    // `qno_${co}_…` counter key. Gated on the COLLECTION, not the company field:
+    // only bk_quotes is genuinely multi-company (BK + BI). bs_quotes is NOT
+    // single-company — it holds BS, the runtime-synthesized PT, and stranded
+    // company:'BK' rows (see migrateStrandedBKQuotes in js/app.js, which exists
+    // precisely because of them) — so narrowing by field there would silently
+    // DROP real prior quotes from the count. Pure client-side narrowing of docs
+    // already fetched; zero extra reads.
+    if(coll==='bk_quotes') docs=docs.filter(d=>(d.data().company||'BK')===currentCo);
     let max=0;
     docs.forEach(d=>{
       const n=String(d.data().quoteNumber||d.data().quoteNo||'');
@@ -2236,11 +2343,20 @@ async function autoComputeCustRev(){
   if(qnoMode!=='auto') return;
   if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
   const name=(document.getElementById('clientName')?.value||'').trim().toLowerCase();
-  const coll=currentCo==='BK'?'bk_quotes':'bs_quotes';
+  const coll=quoteCollFor(currentCo);
   const today=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
   try{
     const snap=await db.collection(coll).where('createdBy','==',auth.currentUser.uid).get().catch(()=>({docs:[]}));
-    const docs=snap.docs.map(d=>d.data());
+    // Same per-company narrowing as autoClientSeq() above — bk_quotes holds both
+    // Barro Kitchens and Barro Industries quotes now, and their customer#/
+    // revision# sequences are independent. Gated on the COLLECTION for the
+    // reason spelled out there: bs_quotes carries BS + PT + stranded 'BK' rows,
+    // and dropping those from `docs` under-counts _autoRev — which, unlike the
+    // client sequence, is NOT re-derived at file time (reserveAtomicQnoSeq
+    // re-reserves only the seq segment and leaves the R suffix alone), so a
+    // duplicate revision number would be FILED rather than merely previewed.
+    const _all=snap.docs.map(d=>d.data());
+    const docs=(coll==='bk_quotes')?_all.filter(x=>(x.company||'BK')===currentCo):_all;
     const isToday=x=>{ if((x.quoteDate||x.date||'').slice(0,10)===today) return true; const t=x.createdAt&&x.createdAt.toDate?x.createdAt.toDate():null; return t && t.toISOString().slice(0,10)===today; };
     const distinctToday=new Set(docs.filter(isToday).map(x=>(x.clientName||'').trim().toLowerCase()).filter(Boolean));
     const newClientToday = name && !distinctToday.has(name);
@@ -3131,9 +3247,10 @@ function updateRemarksPrint(){
 
 // PAYMENT DETAILS — per-company bank/e-wallet block (owner request). Gated
 // purely on CO[currentCo].pay's presence (mirrors the CO.BS logo:'' leak fix):
-// only Barro Kitchens carries a `pay` config, so Brilliant Steel and generic
-// (CO.PT) partner quotes render nothing here, ever — no code-string branch to
-// keep in sync if a company is added/renamed later. Also honors the
+// only the Barro-owned identities (BK, BI) carry a `pay` config, so Brilliant
+// Steel and generic (CO.PT) partner quotes render nothing here, ever — no
+// code-string branch to keep in sync when a company is added, which is exactly
+// why adding BI needed no change to this function's gate. Also honors the
 // #showPaymentDetails checkbox so a preparer can hide it per-quote. Values are
 // txtEsc()'d before insertion (this standalone doc has no escHtml — see the
 // txtEsc definition/comment near the top of this script block).
@@ -3153,7 +3270,11 @@ function renderPaymentDetails(){
   html+=`<tr><td>Account Number</td><td>${txtEsc(pay.accountNo||'')}</td></tr>`;
   html+=`</tbody></table>`;
   const others=Array.isArray(pay.other)?pay.other.map(txtEsc).join(', '):'';
-  if(others) html+=`<div class="pay-note">Also accepted (no account number on file — please coordinate with your Barro Kitchens contact): ${others}.</div>`;
+  // "your <company> contact" — read from pay.contact, not hardcoded to Barro
+  // Kitchens: BI (Barro Industries, general fabrication) carries the SAME
+  // UnionBank account because it is the same legal entity, but a fabrication
+  // quote must not tell the client to ring their "Barro Kitchens contact".
+  if(others) html+=`<div class="pay-note">Also accepted (no account number on file — please coordinate with your ${txtEsc(pay.contact||'Barro')} contact): ${others}.</div>`;
   box.innerHTML=html;
 }
 

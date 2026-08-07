@@ -4372,6 +4372,28 @@ window.addEventListener('message', async (e) => {
   const { type, payload, docId, collection } = e.data || {};
   if (!payload || !currentUser || !db) return;
 
+  // Barro Industries (company:'BI') is the parent company's own general-
+  // fabrication identity — INTERNAL ONLY. quote-builder-v2.html already removes
+  // the pill and locks setCompany() for partner sessions, and firestore.rules
+  // denies partners bk_quotes outright (where BI quotes are filed), so this is
+  // the third and last line of the same defence: refuse the message here rather
+  // than let a forged/stale partner payload reach a write that would just fail
+  // silently at the rules layer.
+  const _payloadCo = (payload && (payload.company || payload.co)) || '';
+  // Must match the condition that LAUNCHES the locked builder (`isPartner() ||
+  // isBrilliantOnly()`, ~line 1791) — not just isPartner(). A user with role
+  // 'employee' whose only department is Brilliant Steel gets the partner-locked
+  // builder but is NOT isPartner(), so a narrower test here would let them drop
+  // ?portal=partner, unlock the BI pill, and file a BI quote past all three
+  // layers — the rules backstop keys on isPartner() too.
+  const _qbPartner = (typeof isPartner === 'function' && isPartner()) ||
+                     (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+  if (_payloadCo === 'BI' && _qbPartner) {
+    console.warn('[QB bridge] partner session attempted to file as Barro Industries — refused');
+    Notifs?.showToast && Notifs.showToast('Partners cannot quote as Barro Industries.', 'error');
+    return;
+  }
+
   // Wave 3 Q6 — cloud draft. Debounced (5s idle, builder-side) autosave into a
   // single deterministic slot per user per collection, so a closed tab doesn't
   // lose unfiled work. NOTE: requires firestore.rules to allow this user to
@@ -4380,7 +4402,7 @@ window.addEventListener('message', async (e) => {
   // is wrapped to fail silently (nothing else in the app breaks) until then.
   if (type === 'QUOTE_DRAFT') {
     try {
-      const coll = (payload.company === 'BK') ? 'bk_quotes' : 'bs_quotes';
+      const coll = window.quoteCollectionFor(payload.company);
       await db.collection(coll).doc('draft_' + currentUser.uid).set({
         ...payload,
         status: 'draft',
@@ -4403,7 +4425,11 @@ window.addEventListener('message', async (e) => {
     try {
       const name = String(payload.name || '').trim().slice(0, 80);
       const state = payload.state;
-      const co = payload.co === 'BS' ? 'BS' : 'BK';
+      // Narrow to a KNOWN company code (the registry in js/config.js) so a
+      // template can't be tagged with an arbitrary string; anything else —
+      // including a generic partner's 'PT' — still falls back to 'BK' exactly
+      // as before. 'BI' (Barro Industries / general fabrication) now survives.
+      const co = window.QUOTE_COMPANIES[payload.co] ? payload.co : 'BK';
       if (!name || !state || typeof state !== 'object') {
         Notifs?.showToast && Notifs.showToast('Could not save template — missing a name or quote data.', 'error');
         return;
@@ -4442,7 +4468,7 @@ window.addEventListener('message', async (e) => {
   // a new copy. Only known quote collections are ever touched.
   if (type === 'QUOTE_UPDATE') {
     try {
-      if (!docId || (collection !== 'bk_quotes' && collection !== 'bs_quotes')) return;
+      if (!docId || !window.QUOTE_COLLECTIONS.includes(collection)) return;
       const agentName = userProfile?.displayName || currentUser.email;
       const update = {
         quoteNumber:    payload.quoteNumber || '',
@@ -4565,9 +4591,11 @@ window.addEventListener('message', async (e) => {
       createdAt:      firebase.firestore.FieldValue.serverTimestamp(),
     };
 
-    // Route by company so Barro Kitchens quotes land in bk_quotes (visible in the
-    // Sales → Quotations summary) and Brilliant Steel quotes in bs_quotes.
-    const coll = (data.company === 'BK') ? 'bk_quotes' : 'bs_quotes';
+    // Route by company (window.QUOTE_COMPANIES, js/config.js) so Barro Kitchens
+    // AND Barro Industries quotes land in bk_quotes — visible in the Sales →
+    // Quotations summary, which badges the BI ones — and Brilliant Steel quotes
+    // in bs_quotes.
+    const coll = window.quoteCollectionFor(data.company);
 
     // Versioning: if THIS user re-files a quote with the same number, save a new
     // version named "<quoteNo> (2)", "(3)"… instead of silently duplicating.
@@ -4748,7 +4776,10 @@ async function openQuoteTemplatesPicker() {
 // One-click, idempotent: moves bs_quotes docs misfiled with company:'BK' (the old
 // QUOTE_APPROVAL_REQUESTED hardcode) into bk_quotes, PRESERVING each doc id so
 // sales_orders.quoteId / approval_requests.quoteId / clients joins stay valid.
-// company:'PT' rows are deliberately NOT moved (bs_quotes is the non-BK bucket).
+// company:'PT' rows are deliberately NOT moved (bs_quotes is the PARTNER bucket).
+// Nothing analogous exists for company:'BI' (Barro Industries): that identity was
+// added after quote filing was routed through window.quoteCollectionFor, so a BI
+// quote has never had a path into bs_quotes to be stranded in.
 window.migrateStrandedBKQuotes = async function () {
   const FV = firebase.firestore.FieldValue;
   const out = { moved: 0, reqsPatched: 0 };

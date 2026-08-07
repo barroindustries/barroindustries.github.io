@@ -1048,12 +1048,22 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
     const superseded = supersededIds.has(q.id);
     const wonish = !superseded && ['filed','accepted','won','approved'].includes(q.status);
     const canDel = isAdmin || currentRole==='finance' || q.createdBy===currentUser.uid;
-    const label  = `BK quote ${q.quoteNumber||q.id.slice(-6).toUpperCase()} (${q.clientName||'Unnamed'})`;
+    // bk_quotes holds TWO companies now (owner ruling 2026-08-07): Barro
+    // Kitchens AND Barro Industries, the parent company's general-fabrication
+    // identity. Everything brand-bearing on this card derives from q.company so
+    // a fabrication quote is never presented — or acted on — as a kitchen one.
+    // Legacy docs predate the field entirely, hence the 'BK' default.
+    const qco    = q.company || 'BK';
+    const label  = `${qco} quote ${q.quoteNumber||q.id.slice(-6).toUpperCase()} (${q.clientName||'Unnamed'})`;
+    // Barro Kitchens is the default identity of this list, so only the OTHER
+    // company gets a tag — kitchen cards stay exactly as they were.
+    const coTag  = qco === 'BK' ? '' :
+      ` <span class="badge badge-blue" style="font-size:9px" title="General fabrication quote — issued under the parent company, not Barro Kitchens">${escHtml(window.quoteCompanyLabel(qco))}</span>`;
     const staleDays = staleDaysOf(q);
     return `
       <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':''}">
         <div style="flex:1;min-width:160px">
-          <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
+          <div class="item-title" style="font-size:13px">${escHtml(qco)}-${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}${coTag}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
           <div class="item-meta" style="margin-top:4px">
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
@@ -1072,7 +1082,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
           ${!q.editableState?`<span style="font-size:10px;color:var(--text-muted)" title="This quote was filed before edit history was captured (or the snapshot write failed) — there's nothing here to reopen or revise.">No editable snapshot</span>`:''}
           ${window.QUOTE_SHAREABLE_STATUSES.includes(q.status)?`<button class="btn-secondary btn-sm bk-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}
-          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
+          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="${escHtml(qco)}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
       </div>`;
@@ -2170,12 +2180,21 @@ window.QUOTE_SHAREABLE_STATUSES = ['filed', 'approved', 'accepted'];
 // public page prints). Deliberately DUPLICATED from quote-builder-v2.html's
 // CO map (spec §5.2): that map lives inside the builder iframe and isn't
 // reachable from this app frame. This is DATA, not code — keep the two in
-// sync by hand if the BK/BS letterhead ever changes.
+// sync by hand if the BK/BI/BS letterhead ever changes.
 window.QUOTE_BRANDS = {
   BK: {
     name: 'BARRO KITCHENS', sub: 'By Barro Industries OPC',
     creds: 'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
     thanks: 'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
+  },
+  // Barro Industries — the parent company quoting general fabrication in its
+  // own name. WITHOUT this entry a BI quote shown to a CUSTOMER would fall
+  // through resolveQuoteBrand's else-branch and render as a generic PARTNER
+  // ("In partnership with Barro Industries"), which is exactly backwards.
+  BI: {
+    name: 'BARRO INDUSTRIES OPC', sub: 'SEC-registered One Person Corporation',
+    creds: 'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    thanks: 'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
   },
   BS: {
     name: 'BRILLIANT STEEL CORPORATION', sub: '',
@@ -2233,7 +2252,10 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
   const di  = q.deliveryInstall || {};
   const pay = q.payment || {};
   const tl  = q.timeline || {};
-  const co  = (q.company === 'BK' || q.company === 'BS') ? q.company : 'PT';
+  // Narrow to a KNOWN brand code; anything else is a generic partner ('PT').
+  // Driven by QUOTE_BRANDS (which now carries BK/BI/BS) rather than a hardcoded
+  // pair, so this can't drift out of step with resolveQuoteBrand below.
+  const co  = window.QUOTE_BRANDS[q.company] ? q.company : 'PT';
   return {
     v: 1,
     co,
@@ -2290,7 +2312,7 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
   };
 };
 
-// Resolve the four public brand strings for a quote. BK/BS are static
+// Resolve the four public brand strings for a quote. BK/BI/BS are static
 // (QUOTE_BRANDS above); a generic (non-Brilliant-Steel) partner quote
 // (company:'PT') is branded with the partner COMPANY'S name — sourced from
 // the quote's CREATOR's own user profile (same `users/{uid}.company` field
@@ -2300,8 +2322,13 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
 // synthesis (~line 1665) field-for-field, minus `sig` (not part of the
 // public brand allowlist).
 window.resolveQuoteBrand = async function(quote) {
-  const co = quote.company === 'BK' ? 'BK' : (quote.company === 'BS' ? 'BS' : 'PT');
-  if (co === 'BK' || co === 'BS') return { co, brand: window.QUOTE_BRANDS[co] };
+  // Table lookup, not a chain of === comparisons: the old two-arm ternary meant
+  // every company code it didn't literally name — including 'BI' — silently
+  // fell through to the generic-PARTNER branch below, so a Barro Industries
+  // fabrication quote would have introduced itself to the customer as an
+  // unnamed partner "in partnership with Barro Industries".
+  const co = window.QUOTE_BRANDS[quote.company] ? quote.company : 'PT';
+  if (window.QUOTE_BRANDS[co]) return { co, brand: window.QUOTE_BRANDS[co] };
   let coName = 'Partner';
   try {
     if (quote.createdBy) {

@@ -4278,8 +4278,11 @@ window.Chat = (() => {
           dbCachedGet('chat-ref-bs-quotes', () => db.collection('bs_quotes').get(), 30000).catch(() => ({ docs: [] }))
         ]);
         rows = [
+          // bk_quotes holds BOTH Barro Kitchens and Barro Industries quotes
+          // (owner's filing ruling), so the prefix comes from the doc's own
+          // company code, not from the collection name.
           ...bk.docs.map(d => { const q = d.data(); return { kind: 'quote', id: d.id, collection: 'bk_quotes',
-            label: `BK ${q.quoteNumber || d.id.slice(-6).toUpperCase()} — ${q.clientName || 'Unnamed'}` }; }),
+            label: `${q.company || 'BK'} ${q.quoteNumber || d.id.slice(-6).toUpperCase()} — ${q.clientName || 'Unnamed'}` }; }),
           ...bs.docs.map(d => { const q = d.data(); return { kind: 'quote', id: d.id, collection: 'bs_quotes',
             label: `BS ${q.quoteNumber || d.id.slice(-6).toUpperCase()} — ${q.clientName || 'Unnamed'}` }; })
         ];

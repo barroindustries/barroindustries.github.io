@@ -197,13 +197,21 @@
   });
 
   // ── Branding ──────────────────────────────────────────
+  // Per-company accent + logo for the CLIENT-facing page. Mirrors the company
+  // codes in window.QUOTE_COMPANIES (js/config.js) — this page is served
+  // standalone to unauthenticated clients and cannot read the app's window.*,
+  // so it keeps its own copy; keep them in sync by hand.
   var ACCENTS = {
     BK: { a:'#0F6CBD', a2:'#2886DE', logo:'/icons/barro-kitchens.png' },
+    // BI = Barro Industries OPC quoting general fabrication in its own name.
+    // Needs its own entry or a real Barro document renders in the grey,
+    // logo-less GENERIC-PARTNER skin.
+    BI: { a:'#1E3A5F', a2:'#31577F', logo:'/icons/barro-industries.png' },
     BS: { a:'#2c3e50', a2:'#546e7a', logo:'' },
     PT: { a:'#455a64', a2:'#78909c', logo:'' }
   };
   function applyBrand(doc){
-    var co = (doc.co==='BK'||doc.co==='BS') ? doc.co : 'PT';
+    var co = ACCENTS[doc.co] ? doc.co : 'PT';
     var acc = ACCENTS[co] || ACCENTS.PT;
     document.documentElement.style.setProperty('--accent', acc.a);
     document.documentElement.style.setProperty('--accent-2', acc.a2);

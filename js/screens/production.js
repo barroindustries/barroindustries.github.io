@@ -456,7 +456,7 @@ async function createJobProject(d){
   const ref=await db.collection('job_projects').add({
     projectNo, company, name:((d.client||'Client')+' — '+(d.qno||'')).trim(),
     clientName:d.client||'', clientId: d.clientId || null, stage:'won',
-    quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: company==='BK'?'bk_quotes':'bs_quotes',
+    quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: window.quoteCollectionFor(company),
     contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12, capital:0,
     dpPercent: d.dpPercent || null, balanceSchedule: null,
     // v14 sales-pipeline gap fix — the quote's line items carried forward from
@@ -526,7 +526,7 @@ window.renderProjectLifecycle = async function(){
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${p.company==='BK'?'badge-orange':'badge-gray'}" style="font-size:9px">${p.company||''}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${window.isInternalQuoteCompany(p.company)?'badge-orange':'badge-gray'}" style="font-size:9px" title="${escHtml(window.quoteCompanyLabel(p.company))}">${escHtml(p.company||'')}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
         ${showMoney
           ? `<div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</span></div>`
           : (p.targetDate||p.priority) ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">${p.targetDate?`${emojiIcon('📅',16)} Target ${escHtml(p.targetDate)}`:''}${p.targetDate&&p.priority?' · ':''}${p.priority?escHtml(p.priority)+' priority':''}</div>` : ''}

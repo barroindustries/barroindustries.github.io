@@ -192,7 +192,11 @@ window.Clients = (function () {
       } catch (_) { /* fall through to nameKey path */ }
     }
     const name = (q.clientName || '').trim(); if (!name) return null;
-    const key = nameKey(name), brand = (q.company === 'BK') ? 'sales' : 'bs';
+    // 'sales' = the internal client book (Barro Kitchens AND Barro Industries,
+    // whose general-fabrication quotes file alongside BK); 'bs' = the partner
+    // book. Keyed off the shared registry so a new internal identity lands in
+    // the right book automatically.
+    const key = nameKey(name), brand = window.isInternalQuoteCompany(q.company || 'BK') ? 'sales' : 'bs';
     try {
       const FV = firebase.firestore.FieldValue;
       const snap = await db.collection('clients').where('nameKey', '==', key).limit(1).get();
@@ -624,7 +628,8 @@ window.financeDelete = async function(opts) {
 // President approves in Approvals → Finance Requests). A non-admin quote CREATOR
 // can't write finance_delete_requests, so they flag their own quote
 // (deleteRequested) which the President actions in Approvals → All Requests.
-// collection is 'bk_quotes' or 'bs_quotes'.
+// collection is one of window.QUOTE_COLLECTIONS ('bk_quotes' — which holds both
+// Barro Kitchens and Barro Industries quotes — or 'bs_quotes').
 window.requestQuoteDelete = async function(collection, docId, label, createdBy, onDone) {
   onDone = onDone || (()=>{});
   const role = window.currentRole || '';
@@ -2905,7 +2910,7 @@ window.ensureOrderTracking = async function(o){
   const tRef = db.collection('order_tracking').doc(await uniqueTrackCode());
   await tRef.set({
     orderId:o.id, projectId:o.projectId||null, orderNo:orderNo||('SO-'+o.id.slice(-6).toUpperCase()),
-    clientName:o.clientName||'', company:(o.company==='BK'?'Barro Kitchens':'Brilliant Steel'), scope:o.project||'',
+    clientName:o.clientName||'', company:window.quoteCompanyLabel(o.company), scope:o.project||'',
     status:(o.sentToProduction?'production':'confirmed'), stageStamps:{ confirmed:dayStr },
     contractAmount:o.contractAmount||0, paid, balance:Math.max(0,(o.contractAmount||0)-paid),
     orderDate:dayStr, expectedDate:null,
@@ -2929,7 +2934,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
   // dereferencing back to a possibly-stale/re-revised quote doc. Reuses the SAME
   // quote fetch already done for quotePay — no extra read.
   let quoteItems = [];
-  try { const qs = await db.collection(d.co==='BK'?'bk_quotes':'bs_quotes').doc(d.id).get();
+  try { const qs = await db.collection(window.quoteCollectionFor(d.co)).doc(d.id).get();
         if (qs.exists) { quotePay = qs.data().payment || null; quoteItems = Array.isArray(qs.data().items) ? qs.data().items : []; } } catch(_) {}
   const dpPrefill = quotePay
     ? (quotePay.downPaymentMode === 'custom'
@@ -3004,8 +3009,10 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         status:'pending', createdBy:currentUser.uid, createdByName:userProfile?.displayName||currentUser.email,
         createdAt:firebase.firestore.FieldValue.serverTimestamp()
       });
-      // 3) stamp the back-links onto the quote IN THE CORRECT COLLECTION (BK or BS — was hardcoded to bs_quotes)
-      const qc = (d.co==='BK') ? 'bk_quotes' : 'bs_quotes';
+      // 3) stamp the back-links onto the quote IN THE CORRECT COLLECTION (was
+      //    hardcoded to bs_quotes). Routed through the shared registry, so BI
+      //    (Barro Industries, filed alongside BK) resolves without a third arm.
+      const qc = window.quoteCollectionFor(d.co);
       try{ await db.collection(qc).doc(d.id).update({ salesOrderId:ref.id, projectId:proj.id, status:'won' }); if (qc==='bs_quotes') window.invalidateBsQuotesCache(currentUser.uid); }catch(_){}
       // 4) record the Sales Order on the project's document register + link the SO id
       try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id,
@@ -3028,7 +3035,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
         await tRef.set({
           orderId:ref.id, projectId:proj.id, orderNo:proj.projectNo, clientName:d.client||'',
-          company:(d.co==='BK'?'Barro Kitchens':'Brilliant Steel'), scope:project,
+          company:window.quoteCompanyLabel(d.co), scope:project,
           status:'confirmed', stageStamps:{ confirmed:dayStr },
           contractAmount:contract, paid:paid, balance:Math.max(0,contract-paid),
           orderDate:dayStr, expectedDate:null,
@@ -3100,7 +3107,9 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order', link:'projects-lifecycle' }); }catch(_){}
       Notifs.success('Sales order + project '+proj.projectNo+' created'+(autoPosted?' + sale recorded':''));
       if (typeof container!=='undefined' && container) {
-        if (d.co==='BK') renderBKQuotationsSummary(container, currentUser, currentRole);
+        // BK and BI both live in bk_quotes, so both re-render the internal
+        // (Barro Kitchens) quotations summary — which badges the BI rows.
+        if (window.isInternalQuoteCompany(d.co)) renderBKQuotationsSummary(container, currentUser, currentRole);
         else renderBSQuotationsSummary(container, currentUser, currentRole);
       }
       // Surface the shareable client tracking link (falls back to just closing).
@@ -3620,7 +3629,13 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   if (!legacyMode && canAdd && brand !== 'design') (async () => {
     try {
       const qs = await getAllQuotes();
-      const wantCo = brand === 'brilliant-steel' ? (co => co !== 'BK') : (co => co === 'BK');
+      // Which book a quote's client belongs to. The old test was `!== 'BK'` /
+      // `=== 'BK'`, which put Barro Industries (BI — the parent company's
+      // general-fabrication quotes) in the PARTNER book. Split on
+      // internal-vs-partner instead: BK and BI are both internal.
+      const wantCo = brand === 'brilliant-steel'
+        ? (co => !window.isInternalQuoteCompany(co))
+        : (co => window.isInternalQuoteCompany(co));
       const known = new Set(clients.map(c => c.nameKey));
       const un = {};
       qs.docs.forEach(d => { const q = d.data(); const k = window.Clients.nameKey(q.clientName);
@@ -3738,7 +3753,7 @@ async function openClientHub(cl, opts) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [body] });
-  const nav = co => co==='BK' ? 'bk-quote-builder' : 'bs-quote-builder';
+  const nav = co => window.quoteBuilderPageFor(co);
   const chTabs = body.querySelector('.ch-tabs');
   if (chTabs && window.bindChipTabs) {
     window.bindChipTabs(chTabs, (key) => {
