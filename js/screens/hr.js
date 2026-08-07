@@ -448,7 +448,11 @@ async function buildThreeWayRecon(month, runData) {
                  + (_num(h.philhealth) ?? _num(h.philHealth) ?? 0)
                  + (_num(h.pagibig)    ?? _num(h.pagIbig)    ?? 0)
                  + (_num(h.tax) || 0);
-      return Math.round((netB + stat + (_num(h.deductions) || 0)) * 100) / 100;
+      // …minus the unearned half, which money-core also excludes from
+      // effectiveGross (absence/tardiness pay is not a company expense).
+      // Absent on pre-2026-08 rows -> 0 -> the all-withheld original.
+      return Math.round((netB + stat + (_num(h.deductions) || 0)
+                              - (_num(h.deductionsUnearned) || 0)) * 100) / 100;
     };
 
     const ledgerAmt   = Object.prototype.hasOwnProperty.call(ledgerByUid, uid) ? ledgerByUid[uid] : null;
@@ -1047,7 +1051,16 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           // the record's own fields: sss/philhealth/pagibig/tax aren't editable in
           // this form, so rec's already-frozen values are still correct post-edit.
           const statutoryTotal = (rec.sss||0) + (rec.philhealth||0) + (rec.pagibig||0) + (rec.tax||0);
-          const effectiveGross = netPay + statutoryTotal + deductions;
+          // …less the unearned half of Other Deductions, which money-core also
+          // excludes from effectiveGross (absence/tardiness pay is not a company
+          // expense). The edit form does not expose the split, so carry forward
+          // whatever this record was frozen with; absent on pre-2026-08 rows,
+          // where 0 reproduces the original all-withheld figure exactly.
+          // Clamped to the (possibly edited) deductions total for the same
+          // reason money-core clamps: a lowered total must not leave a stale
+          // unearned amount larger than it.
+          const unearned = Math.min(Math.max(rec.deductionsUnearned || 0, 0), deductions);
+          const effectiveGross = netPay + statutoryTotal + deductions - unearned;
           // Keep ledger entry in sync
           const ledgerRef = `PAY-${rec.month}-${rec.userId}`;
           const ledgerSnap = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
@@ -1679,6 +1692,18 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </div>
           <div class="form-row">
             <div class="form-group"><label>Other Deductions</label><input id="ep-deduct" type="number" value="${emp.deductions||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>… of which unearned pay</label><input id="ep-deduct-unearned" type="number" value="${emp.deductionsUnearned||0}" inputmode="decimal"/></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px">
+            Take-home is the same either way — this only decides how the deduction is booked.
+            Leave <strong>unearned</strong> at ₱0 for money you withhold and owe onward (cash bond,
+            canteen, uniform, a staff loan): the full pay stays a company expense and the withheld
+            amount is booked as <em>Employee Deductions Payable</em> until you hand it over.
+            Put the amount here instead for pay that was never earned (absence, tardiness, a
+            penalty): that is not withheld money, so it comes out of payroll expense entirely and
+            nothing is owed. Split it if the month has both.
+          </div>
+          <div class="form-row">
             <div class="form-group"><label>SSS${unverifiedBadge}</label>
               <div style="display:flex;gap:6px">
                 <select id="ep-sss-mode" style="flex:none;width:112px;padding:8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
@@ -1844,6 +1869,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             payClass:   panel.querySelector('#ep-class')?.value === 'production' ? 'production' : 'regular',
             allowance:  parseFloat(panel.querySelector('#ep-allow').value)||0,
             deductions: parseFloat(panel.querySelector('#ep-deduct').value)||0,
+            // How much of `deductions` is pay never earned (absence/tardiness/
+            // penalty) rather than money withheld and owed onward. Clamped into
+            // [0, deductions] here as well as in money-core, so a stale value
+            // left behind after the total is lowered can never exceed it.
+            deductionsUnearned: Math.min(
+              Math.max(parseFloat(panel.querySelector('#ep-deduct-unearned')?.value)||0, 0),
+              parseFloat(panel.querySelector('#ep-deduct').value)||0
+            ),
             sss:        parseFloat(panel.querySelector('#ep-sss').value)||0,
             philhealth: parseFloat(panel.querySelector('#ep-ph').value)||0,
             pagibig:    parseFloat(panel.querySelector('#ep-pi').value)||0,
@@ -1931,6 +1964,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               // old number until navigation.
               emp.allowance  = parseFloat(panel.querySelector('#ep-allow').value)||0;
               emp.deductions = parseFloat(panel.querySelector('#ep-deduct').value)||0;
+              emp.deductionsUnearned = Math.min(
+                Math.max(parseFloat(panel.querySelector('#ep-deduct-unearned')?.value)||0, 0),
+                emp.deductions
+              );
             }
           }
 

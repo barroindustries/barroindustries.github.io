@@ -209,7 +209,7 @@ describe('computePayLine', () => {
     );
     assert.deepEqual(line, {
       uid: 'u1', name: 'Juan', payClass: 'regular',
-      base: 20000, allowance: 2000, otherDeductions: 500,
+      base: 20000, allowance: 2000, otherDeductions: 500, unearnedDeductions: 0, withheldDeductions: 500,
       sss: 1100, philhealth: 550, pagibig: 200, tax: 0,
       er: { sss: 2200, philhealth: 550, pagibig: 200 },
       kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',
@@ -229,7 +229,7 @@ describe('computePayLine', () => {
     );
     assert.deepEqual(line, {
       uid: 'u2', name: 'Maria', payClass: 'regular',
-      base: 30000, allowance: 5000, otherDeductions: 0,
+      base: 30000, allowance: 5000, otherDeductions: 0, unearnedDeductions: 0, withheldDeductions: 0,
       sss: 1750, philhealth: 875, pagibig: 200, tax: 1701.3,
       er: { sss: 3500, philhealth: 875, pagibig: 200 },
       kpiScore: 0.8, attScore: 0.9, perfFactor: 0.83, policy: 'performance',
@@ -772,7 +772,7 @@ describe('computePayLine — §A4 statutory year from ctx.month (the only permit
     );
     assert.deepEqual(line, {
       uid: 'u1', name: 'Juan', payClass: 'regular',
-      base: 20000, allowance: 2000, otherDeductions: 500,
+      base: 20000, allowance: 2000, otherDeductions: 500, unearnedDeductions: 0, withheldDeductions: 500,
       sss: 1100, philhealth: 550, pagibig: 200, tax: 0,
       er: { sss: 2200, philhealth: 550, pagibig: 200 },
       kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',
@@ -798,7 +798,7 @@ describe('computePayLine — §A4 statutory year from ctx.month (the only permit
     );
     assert.deepEqual(line, {
       uid: 'u1td', name: 'TestDec', payClass: 'regular',
-      base: 20000, allowance: 2000, otherDeductions: 500,
+      base: 20000, allowance: 2000, otherDeductions: 500, unearnedDeductions: 0, withheldDeductions: 500,
       sss: 0, philhealth: 0, pagibig: 0, tax: 0,
       er: { sss: 0, philhealth: 0, pagibig: 0 },
       kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',
@@ -883,6 +883,70 @@ describe('computeKpiForMonth — js/money-core.js §A3.3 (month-scoped KPI, pure
   });
 });
 
+describe('Other Deductions withheld/unearned split (owner ruling 2026-08-07)', () => {
+  const EMP = { id: 'u1', displayName: 'Split', salary: 25000, allowance: 3000, deductions: 1500 };
+  const line = (extra) => computePayLine({ ...EMP, ...extra }, { month: '2026-08', caPlan: [{ amount: 2000 }] });
+
+  it('field ABSENT ⇒ all withheld, and every figure is byte-identical to pre-split behaviour', () => {
+    const l = line({});
+    assert.equal(l.unearnedDeductions, 0);
+    assert.equal(l.withheldDeductions, 1500);
+    assert.equal(l.effectiveGross, 28000);          // == nominal gross, exactly as before
+    assert.equal(l.finalPay, 21469.95);
+  });
+
+  it('TAKE-HOME NEVER MOVES: only where the deduction is booked changes', () => {
+    const withheld = line({});
+    const unearned = line({ deductionsUnearned: 1500 });
+    const mixed    = line({ deductionsUnearned: 700 });
+    assert.equal(unearned.finalPay,   withheld.finalPay);
+    assert.equal(mixed.finalPay,      withheld.finalPay);
+    assert.equal(unearned.netBeforeCA, withheld.netBeforeCA);
+    assert.equal(mixed.netBeforeCA,    withheld.netBeforeCA);
+  });
+
+  it('unearned pay leaves the EXPENSE debit — effectiveGross drops by exactly that amount', () => {
+    assert.equal(line({ deductionsUnearned: 1500 }).effectiveGross, 26500);
+    assert.equal(line({ deductionsUnearned: 700  }).effectiveGross, 27300);
+  });
+
+  it('the split always sums back to the total', () => {
+    for (const u of [0, 1, 700, 1499.99, 1500]) {
+      const l = line({ deductionsUnearned: u });
+      assert.equal(+(l.unearnedDeductions + l.withheldDeductions).toFixed(2), l.otherDeductions);
+    }
+  });
+
+  it('CLAMPED both ways: a stale value above the total, or a negative one, can never invent expense', () => {
+    const over = line({ deductionsUnearned: 9999 });
+    assert.equal(over.unearnedDeductions, 1500);
+    assert.equal(over.withheldDeductions, 0);
+    assert.equal(over.effectiveGross, 26500);       // never below gross − otherDeductions
+    const neg = line({ deductionsUnearned: -500 });
+    assert.equal(neg.unearnedDeductions, 0);
+    assert.equal(neg.withheldDeductions, 1500);
+    assert.equal(neg.effectiveGross, 28000);
+  });
+
+  it('DISBURSE LEDGER IDENTITY holds for every split: debits === credits', () => {
+    for (const u of [0, 500, 1500]) {
+      const l = line({ deductionsUnearned: u });
+      const actualCa = l.caPlanned;
+      const erTotal  = (l.er?.sss||0) + (l.er?.philhealth||0) + (l.er?.pagibig||0);
+      // Exactly the legs js/departments.js disbursePayRun posts.
+      const debits  = l.effectiveGross + erTotal;
+      const credits = (l.sss + (l.er?.sss||0)) + (l.philhealth + (l.er?.philhealth||0))
+                    + (l.pagibig + (l.er?.pagibig||0)) + l.tax   // statutory payables
+                    + actualCa                                    // Advances to Employees
+                    + l.withheldDeductions                        // Employee Deductions Payable
+                    + (l.netBeforeCA - actualCa);                 // Cash
+      assert.equal(+debits.toFixed(2), +credits.toFixed(2));
+      // …and Cash is the real take-home, not take-home + otherDeductions.
+      assert.equal(+(l.netBeforeCA - actualCa).toFixed(2), +l.finalPay.toFixed(2));
+    }
+  });
+});
+
 describe('applyPayLineOverride — js/money-core.js §C2 (output override, layered on top of a computePayLine result)', () => {
   // Reuses the pinned 'performance' policy line (nonzero caPlanned:1500,
   // otherDeductions:0) from the computePayLine describe above so the netCash
@@ -893,15 +957,19 @@ describe('applyPayLineOverride — js/money-core.js §C2 (output override, layer
   );
 
   function assertIdentitiesHold(line) {
-    // (b) the netCash identity: effectiveGross - statutoryTotal - caPlanned === finalPay + otherDeductions
+    // Both identities are stated in their GENERAL form (2026-08-07). They used
+    // to be written with plain otherDeductions, which was only correct because
+    // this fixture happens to set deductions:0 — with a withheld/unearned split
+    // present they would have silently passed while the ledger drifted.
+    // (b) the netCash identity: effectiveGross - statutoryTotal - caPlanned === finalPay + WITHHELD deductions
     assert.equal(
       +(line.effectiveGross - line.statutoryTotal - line.caPlanned).toFixed(2),
-      +(line.finalPay + line.otherDeductions).toFixed(2)
+      +(line.finalPay + line.withheldDeductions).toFixed(2)
     );
-    // (c) effectiveGross === netBeforeCA + statutoryTotal + otherDeductions
+    // (c) effectiveGross === netBeforeCA + statutoryTotal + otherDeductions - UNEARNED
     assert.equal(
       +line.effectiveGross.toFixed(2),
-      +(line.netBeforeCA + line.statutoryTotal + line.otherDeductions).toFixed(2)
+      +(line.netBeforeCA + line.statutoryTotal + line.otherDeductions - line.unearnedDeductions).toFixed(2)
     );
   }
 
@@ -961,7 +1029,7 @@ describe('resolveStatutoryEE + statConfig (statutory-config spec)', () => {
   const FIXTURE_A = { id: 'u1', displayName: 'Juan', salary: 20000, allowance: 2000, deductions: 500 };
   const PINNED_A = {
     uid: 'u1', name: 'Juan', payClass: 'regular',
-    base: 20000, allowance: 2000, otherDeductions: 500,
+    base: 20000, allowance: 2000, otherDeductions: 500, unearnedDeductions: 0, withheldDeductions: 500,
     sss: 1100, philhealth: 550, pagibig: 200, tax: 0,
     er: { sss: 2200, philhealth: 550, pagibig: 200 },
     kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',

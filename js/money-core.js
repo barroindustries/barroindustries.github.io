@@ -85,6 +85,22 @@ window.computePayLine = function(emp, ctx) {
   const base   = emp.salary || 0;
   const allowance = emp.allowance || 0;
   const otherDeductions = emp.deductions || 0;
+  // Owner ruling 2026-08-07 — "Other Deductions" is used for BOTH kinds of
+  // thing depending on the employee, and the two book differently:
+  //   WITHHELD  (cash bond, canteen, uniform, non-CA staff loan) — the company
+  //             holds the money and owes it onward. Full gross is a real
+  //             payroll expense; the withheld part is a LIABILITY.
+  //   UNEARNED  (absence, tardiness, penalty) — pay that was never earned. It
+  //             is not withheld money at all, so the payroll EXPENSE itself is
+  //             lower by that amount and there is nothing to owe.
+  // `deductionsUnearned` on payroll/{uid} splits the total. Absent/0 -> the
+  // whole amount is treated as withheld, which is byte-identical to every
+  // figure this function produced before (effectiveGross == gross under flat),
+  // so all existing payroll docs, every frozen pay_run line and all 97 pinned
+  // tests are unaffected. Clamped into [0, otherDeductions] so a stale or
+  // mistyped value can never invent expense or a negative liability.
+  const unearnedDeductions = Math.min(Math.max(emp.deductionsUnearned || 0, 0), otherDeductions);
+  const withheldDeductions = _round2(otherDeductions - unearnedDeductions);
   const gross = base + allowance; // nominal — statutory brackets key off THIS, not the performance-adjusted figure
 
   // Statutory: a hand-typed non-zero value on payroll/{uid} always wins over the
@@ -133,11 +149,15 @@ window.computePayLine = function(emp, ctx) {
   // legs must balance against) — equals nominal `gross` under 'flat', but
   // correctly reflects a performance-scaled allowance under 'performance'
   // (an unearned allowance withholding is not a real company expense).
-  const effectiveGross = netBeforeCA + statutoryTotal + otherDeductions;
+  // Same principle now applied to unearned deductions: absence/tardiness pay
+  // the employee never earned is not a company expense either, so it comes
+  // OUT of the expense debit. Withheld deductions stay in — that money was
+  // earned and owed, it just has not been handed over yet.
+  const effectiveGross = netBeforeCA + statutoryTotal + otherDeductions - unearnedDeductions;
 
   return {
     uid: emp.id, name: emp.displayName||emp.email, payClass: emp.payClass==='production'?'production':'regular',
-    base, allowance, otherDeductions,
+    base, allowance, otherDeductions, unearnedDeductions, withheldDeductions,
     sss, philhealth, pagibig, tax, er,
     kpiScore, attScore, perfFactor, policy,
     caBalance, caPlanned, caPlan,

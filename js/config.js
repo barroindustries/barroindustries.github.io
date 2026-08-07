@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.90';
+window.APP_VERSION = '14.0.91';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1873,7 +1873,8 @@ window.COA = {
               'General Expense', 'Other Expense'],
   asset:     ['Cash', 'Accounts Receivable', 'Inventory', 'Advances to Employees'],
   liability: ['Accounts Payable', 'VAT Payable', 'Statutory Payables',
-              'SSS Payable', 'PhilHealth Payable', 'Pag-IBIG Payable', 'Withholding Tax Payable'], // v12 WS20/21 — per-agency remittance legs (WS39 reads these)
+              'SSS Payable', 'PhilHealth Payable', 'Pag-IBIG Payable', 'Withholding Tax Payable', // v12 WS20/21 — per-agency remittance legs (WS39 reads these)
+              'Employee Deductions Payable'], // 2026-08-07 — the withheld half of payslip "Other Deductions" (cash bond, canteen, uniform, non-CA staff loan): money the company holds and owes onward. Settled by a manual debit when it is actually paid out.
   equity:    ["Owner's Equity", 'Retained Earnings'],
 };
 // Legacy category → accountType (used by ledgerKind's fallback + the backfill).

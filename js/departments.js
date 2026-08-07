@@ -1934,6 +1934,12 @@ window.disbursePayRun = async function(month, opts = {}) {
     shBatch.set(shRef, {
       userId: line.uid, userName: line.name, month,
       salary: line.base, allowance: line.allowance, deductions: line.otherDeductions,
+      // The withheld/unearned split this line was booked with, frozen alongside
+      // everything else so a payslip reprint or a later audit can tell which
+      // half of "Other Deductions" became a payable and which never was an
+      // expense. Absent on pre-2026-08 rows -> all withheld, the old behaviour.
+      deductionsUnearned: line.unearnedDeductions || 0,
+      deductionsWithheld: (line.withheldDeductions != null ? line.withheldDeductions : (line.otherDeductions || 0)),
       sss: line.sss, philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax,
       philHealth: line.philhealth, pagIbig: line.pagibig, // legacy mixed-case mirror (transition — v12 WS21 decision 6)
       er: line.er, kpiScore: line.kpiScore, attScore: line.attScore, perfFactor: line.perfFactor,
@@ -2172,11 +2178,27 @@ window.disbursePayRun = async function(month, opts = {}) {
   // crediting the SAME 'Advances to Employees' asset account
   // CashAdvance.approve debits at release (js/config.js) — so debits still
   // equal credits AND the Cash figure now reflects what actually left the
-  // bank. otherDeductions is NOT touched here: its correct offsetting
-  // account is undefined in the current COA (flagged separately for Neil/
-  // an accountant — see the v14 finance re-audit report) and inventing one
-  // here would be an unproven money-math change.
-  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0, caPlannedAgg=0;
+  // bank.
+  //
+  // 2026-08-07 — the otherDeductions half of this, which the note above left
+  // open ("its correct offsetting account is undefined in the current COA"),
+  // is now RESOLVED: the owner ruled that Other Deductions is used for two
+  // different things depending on the employee, so money-core splits it into
+  // withheldDeductions (money the company holds and owes onward -> a real
+  // liability) and unearnedDeductions (absence/tardiness -> never a company
+  // expense, so it is already out of effectiveGross). The Cash credit is now
+  // stated directly as what actually leaves the bank — netBeforeCA - actualCa,
+  // which IS money-core's finalPay when the CA plan collects in full — instead
+  // of being re-derived from effectiveGross, and the withheld part gets its own
+  // credit leg below. Identity (flat policy, per line):
+  //   debit  effectiveGross            = gross - unearned
+  //   credit statutory + actualCa + (netBeforeCA - actualCa) + withheld
+  //        = statutory + (gross - statutory - otherDed) + (otherDed - unearned)
+  //        = gross - unearned                                        ✓ balances
+  // Legacy frozen lines (computed before the split existed) carry no
+  // withheldDeductions field; they fall back to the full otherDeductions, which
+  // is exactly the all-withheld default and balances identically.
+  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0, caPlannedAgg=0, withheldAgg=0;
   const caReconcileFlags = []; // {uid, name, shortfall} — surfaced to Finance/President below
   for (const line of lines) {
     sssAgg += (line.sss||0) + (line.er?.sss||0);
@@ -2192,7 +2214,15 @@ window.disbursePayRun = async function(month, opts = {}) {
     const actualCa  = (line.caPlan && line.caPlan.length) ? (actualCaByUid[line.uid]||0) : plannedCa;
     const caShortfall = +((plannedCa - actualCa).toFixed(2));
     caPlannedAgg += actualCa;
-    netCashAgg += (line.effectiveGross||0) - (line.statutoryTotal||0) - actualCa;
+    // What actually leaves the bank for this employee. Stated directly rather
+    // than re-derived from effectiveGross: the old form
+    // (effectiveGross - statutoryTotal - actualCa) silently equals
+    // netBeforeCA + otherDeductions - actualCa, so Cash was over-credited by
+    // otherDeductions on EVERY run — money that was withheld and never left
+    // the account. Five staff on a ₱1,500 deduction = ₱7,500/month, ₱90k/year
+    // of cash the books said had gone and had not.
+    netCashAgg += (line.netBeforeCA||0) - actualCa;
+    withheldAgg += (line.withheldDeductions != null ? line.withheldDeductions : (line.otherDeductions||0));
 
     if (caShortfall > 0.01) {
       // The frozen plan (money-core.js's computePayLine — off-limits, not
@@ -2310,6 +2340,24 @@ window.disbursePayRun = async function(month, opts = {}) {
     date: month+'-01', type:'credit', accountType:'asset', account:'Advances to Employees',
     description: `Cash advance repayments — ${monthLabel} payroll`, amount: caPlannedAgg,
     category:'Cash Advance', source:'Finance', refNumber:`CADEDUCT-${month}`,
+    addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  // The offsetting credit for the money the Cash leg no longer claims left the
+  // bank. This is a LIABILITY, not a bank movement — deliberately carries no
+  // BankAccounts.tag, because the whole point is that this cash is still in the
+  // account. It is settled when the withheld money is actually paid out (a
+  // manual debit against the same account), the same way the statutory payable
+  // legs above are settled on remittance.
+  // Guard: `> 0` only, matching CADEDUCT/NETPAY rather than the clear-on-zero
+  // aggLeg helper. withheldAgg is derived from the frozen run.lines and so IS
+  // re-derivable, but on a Resume Disburse a line that has since dropped out of
+  // the run would make a real, correct credit look like a zero — the exact
+  // ambiguity that destroyed a ₱5,000 CA credit once already. A stale row here
+  // is visible and correctable; a destroyed one is not.
+  if (withheldAgg > 0) await upsertLedger(`EMPDED-${month}`, {
+    date: month+'-01', type:'credit', accountType:'liability', account:'Employee Deductions Payable',
+    description: `Employee deductions withheld — ${monthLabel} payroll`, amount: withheldAgg,
+    category:'Employee Deductions Payable', source:'Finance', refNumber:`EMPDED-${month}`,
     addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
   if (netCashAgg > 0) await upsertLedger(`NETPAY-${month}`, {
