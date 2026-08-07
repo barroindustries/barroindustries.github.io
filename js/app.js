@@ -3895,11 +3895,26 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
                    (ta ? ` ta-${Math.round(ta.getBoundingClientRect().bottom)}h${Math.round(ta.getBoundingClientRect().height)}` : '');
       }
     }
+    // ROUND 3b — every "is it flush?" number so far is measured against
+    // window.innerHeight, so they all come back 0 by construction if the
+    // LAYOUT VIEWPORT itself is shorter than the screen. This readout said
+    // vh793 on a phone whose Company Overview probe said ih852. Print the
+    // outer frame too, so the next screenshot distinguishes:
+    //   scr==ih  → the app really does fill the screen; the band is our CSS
+    //   scr >ih  → the band is browser/OS chrome BELOW our viewport, and no
+    //              amount of panel/composer CSS will ever close it
+    let envTxt = '';
+    try {
+      const vv = window.visualViewport;
+      envTxt = ` |ENV scr${window.screen && window.screen.height} out${window.outerHeight}` +
+               (vv ? ` vv${Math.round(vv.height)}/${Math.round(vv.offsetTop)}` : '') +
+               ` sa${(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ? 'YES' : 'no'}`;
+    } catch (_) {}
     d.textContent =
       `vh${window.innerHeight} pnl${Math.round(r.top)}-${Math.round(r.bottom)}` +
       (br ? ` bdy-${Math.round(br.bottom)}` : '') +
       (fr ? ` ft-${Math.round(fr.bottom)}` : ' ft:none') +
-      ` gap${Math.round(window.innerHeight - r.bottom)}` + lastTxt;
+      ` gap${Math.round(window.innerHeight - r.bottom)}` + lastTxt + envTxt;
     p.appendChild(d);
   }, 400);
   _focusTrapAttach(p);
