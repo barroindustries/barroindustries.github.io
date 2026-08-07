@@ -3877,6 +3877,23 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
                   ` INNERGAP${Math.round(br.bottom - lr.bottom)}`;
       }
       lastTxt += ` bpad${pb} kids${kids.length}`;
+      // ROUND 3 — INNERGAP came back 0: the composer row's bottom IS the body's
+      // bottom IS the panel's bottom. So the visible band is INSIDE that row.
+      // Its padding-bottom should be 8 + safe-area(34) = 42, but the screenshot
+      // measures ~93 between the pill and the panel bottom. Print the row's own
+      // box so the difference between its padding and its content is a number
+      // rather than another inference: pb = padding-bottom, ch = client height,
+      // and send/ta = the bottoms of the visible send button and textarea, which
+      // are what the eye reads as "the composer".
+      const row = p.querySelector('.messenger-input-row');
+      if (row) {
+        const rr = row.getBoundingClientRect(), rcs = getComputedStyle(row);
+        const send = row.querySelector('.ms-send-btn'), ta = row.querySelector('textarea');
+        lastTxt += ` |ROW h${Math.round(rr.height)} pb${Math.round(parseFloat(rcs.paddingBottom)||0)}` +
+                   ` pt${Math.round(parseFloat(rcs.paddingTop)||0)} align${(rcs.alignItems||'').slice(0,4)}` +
+                   (send ? ` send-${Math.round(send.getBoundingClientRect().bottom)}` : '') +
+                   (ta ? ` ta-${Math.round(ta.getBoundingClientRect().bottom)}h${Math.round(ta.getBoundingClientRect().height)}` : '');
+      }
     }
     d.textContent =
       `vh${window.innerHeight} pnl${Math.round(r.top)}-${Math.round(r.bottom)}` +
