@@ -3850,15 +3850,7 @@ async function renderCompanyOverview(ct, canAdd) {
         <div class="co-credit-body">
           <div class="co-credit-title">Operations System</div>
           <div class="co-credit-sub">Developed by <strong>Neil Barro</strong> &nbsp;·&nbsp; v${window.APP_VERSION||'9.4'}</div>
-          <!-- TEMPORARY viewport diagnostic (2026-08-07). The owner has reported a
-               ~90px dead band under every full-screen window on his iPhone five
-               times; four fixes missed because each trusted a measurement I could
-               not see. This puts the raw numbers where he already looks to check
-               the version, so one screenshot settles it instead of another round
-               of guessing. REMOVE once the cause is confirmed — it is diagnostic
-               noise, not a feature. Updates live; no Firestore, no writes. -->
-          <div class="co-credit-note" id="co-vp-diag" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;opacity:.65;margin-top:6px"></div>
-          <div class="co-credit-note">Internal platform for operations, attendance, KPIs, finance, and team management.</div>
+                    <div class="co-credit-note">Internal platform for operations, attendance, KPIs, finance, and team management.</div>
         </div>
       </div>
     </div>
@@ -3887,35 +3879,6 @@ async function renderCompanyOverview(ct, canAdd) {
       Notifs.showToast('All members have been logged out.', 'success');
     });
   }
-  // TEMPORARY viewport diagnostic — see the comment on #co-vp-diag above.
-  // Everything here is read-only and local; it exists so one screenshot of this
-  // screen answers what five rounds of guessing could not.
-  (function coVpDiag() {
-    const el = ct.querySelector('#co-vp-diag');
-    if (!el) return;
-    const probe = document.createElement('div');
-    probe.style.cssText = 'position:fixed;left:0;right:0;bottom:0;height:1px;visibility:hidden';
-    const sa = document.createElement('div');
-    sa.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;' +
-      'padding-bottom:env(safe-area-inset-bottom,0px);padding-top:env(safe-area-inset-top,0px)';
-    document.body.appendChild(probe); document.body.appendChild(sa);
-    const paint = () => {
-      if (!el.isConnected) { probe.remove(); sa.remove(); return; }
-      const vv = window.visualViewport, cs = getComputedStyle(document.documentElement);
-      const saCs = getComputedStyle(sa);
-      // How far a fixed bottom:0 element actually lands from the screen bottom —
-      // this is the dead band itself, measured rather than inferred.
-      const gap = Math.round(window.innerHeight - probe.getBoundingClientRect().bottom);
-      el.textContent =
-        `ih ${window.innerHeight} · vv ${vv ? Math.round(vv.height) : '-'}/${vv ? Math.round(vv.offsetTop) : '-'}` +
-        ` · --vvh ${cs.getPropertyValue('--vvh').trim() || '-'} · --kb-h ${cs.getPropertyValue('--kb-h').trim() || '-'}` +
-        ` · kbOpen ${document.documentElement.classList.contains('kb-open') ? 'Y' : 'N'}` +
-        ` · saT ${parseInt(saCs.paddingTop) || 0} saB ${parseInt(saCs.paddingBottom) || 0}` +
-        ` · fixedGap ${gap} · dpr ${window.devicePixelRatio}`;
-      requestAnimationFrame(() => setTimeout(paint, 500));
-    };
-    paint();
-  })();
   if (window.lucide) lucide.createIcons({ nodes: [ct] });
 }
 

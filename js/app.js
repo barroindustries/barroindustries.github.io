@@ -3837,94 +3837,15 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   // getComputedStyle().opacity is the explicit, self-documenting flush.
   void getComputedStyle(p.querySelector('.page-panel-body')).opacity;
   requestAnimationFrame(() => { p.classList.add('open'); _focusEnter(p); });
-  // ── TEMPORARY panel-geometry readout (2026-08-07) ───────────────────────
-  // Six attempts at the owner's "big space below every window" have missed. His
-  // device now reports every viewport primitive as CORRECT (ih 852, vv 852/0,
-  // --kb-h 0, kbOpen N, fixedGap 0, saB 34) and the same layout reproduced at
-  // 393x852 with those exact insets is flush — panel 0..852, footer ending at
-  // 852. So the numbers and the repro both say there is no gap, and his screen
-  // says there is. The only way to settle that is to measure the real panel on
-  // the real device, so this prints the rects into the panel itself: one
-  // screenshot of any window now carries its own geometry.
-  // REMOVE once the cause is found. Diagnostic noise, not a feature.
-  setTimeout(() => {
-    if (!p.isConnected) return;
-    const d = document.createElement('div');
-    d.style.cssText = 'position:absolute;left:0;bottom:0;z-index:9;pointer-events:none;' +
-      'font:9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;color:#0f0;background:rgba(0,0,0,.72);padding:2px 4px';
-    const foot = p.querySelector('.page-panel-foot');
-    const body = p.querySelector('.page-panel-body');
-    const r = p.getBoundingClientRect();
-    const fr = foot && foot.offsetParent !== null ? foot.getBoundingClientRect() : null;
-    const br = body ? body.getBoundingClientRect() : null;
-    // ROUND 2 (2026-08-07): the owner's readout came back `vh793 pnl0-793
-    // bdy-793 ft:none gap0` — the panel AND the body both reach the bottom, yet
-    // his composer sits ~94px above it. So the dead band is INSIDE the body,
-    // below its last child, and every fix so far aimed at the panel. Print what
-    // is actually at the bottom of the body: its own padding, and the rect of
-    // its last visible child (the composer / footer row).
-    let lastTxt = '';
-    if (body) {
-      const kids = Array.from(body.children).filter(k => k.getClientRects().length);
-      const last = kids[kids.length - 1];
-      const bcs = getComputedStyle(body);
-      const pb = Math.round(parseFloat(bcs.paddingBottom) || 0);
-      if (last) {
-        const lr = last.getBoundingClientRect();
-        const lcs = getComputedStyle(last);
-        lastTxt = ` last[${(last.className || last.id || last.tagName).toString().split(' ')[0].slice(0,14)}]` +
-                  `-${Math.round(lr.bottom)} mb${Math.round(parseFloat(lcs.marginBottom) || 0)}` +
-                  ` INNERGAP${Math.round(br.bottom - lr.bottom)}`;
-      }
-      lastTxt += ` bpad${pb} kids${kids.length}`;
-      // ROUND 3 — INNERGAP came back 0: the composer row's bottom IS the body's
-      // bottom IS the panel's bottom. So the visible band is INSIDE that row.
-      // Its padding-bottom should be 8 + safe-area(34) = 42, but the screenshot
-      // measures ~93 between the pill and the panel bottom. Print the row's own
-      // box so the difference between its padding and its content is a number
-      // rather than another inference: pb = padding-bottom, ch = client height,
-      // and send/ta = the bottoms of the visible send button and textarea, which
-      // are what the eye reads as "the composer".
-      const row = p.querySelector('.messenger-input-row');
-      if (row) {
-        const rr = row.getBoundingClientRect(), rcs = getComputedStyle(row);
-        const send = row.querySelector('.ms-send-btn'), ta = row.querySelector('textarea');
-        lastTxt += ` |ROW h${Math.round(rr.height)} pb${Math.round(parseFloat(rcs.paddingBottom)||0)}` +
-                   ` pt${Math.round(parseFloat(rcs.paddingTop)||0)} align${(rcs.alignItems||'').slice(0,4)}` +
-                   (send ? ` send-${Math.round(send.getBoundingClientRect().bottom)}` : '') +
-                   (ta ? ` ta-${Math.round(ta.getBoundingClientRect().bottom)}h${Math.round(ta.getBoundingClientRect().height)}` : '');
-      }
-    }
-    // ROUND 3b — every "is it flush?" number so far is measured against
-    // window.innerHeight, so they all come back 0 by construction if the
-    // LAYOUT VIEWPORT itself is shorter than the screen. This readout said
-    // vh793 on a phone whose Company Overview probe said ih852. Print the
-    // outer frame too, so the next screenshot distinguishes:
-    //   scr==ih  → the app really does fill the screen; the band is our CSS
-    //   scr >ih  → the band is browser/OS chrome BELOW our viewport, and no
-    //              amount of panel/composer CSS will ever close it
-    let envTxt = '';
-    try {
-      const vv = window.visualViewport;
-      // saT/saB are the raw env() insets; unp is the band of screen BELOW our
-      // layout viewport, and sabEff is what the composer now actually uses.
-      // sy is window.screenY — the one value that decides whether the 59px
-      // shortfall is above us or below us, and the fix is a no-op without it.
-      const cs = getComputedStyle(document.documentElement);
-      const rd = (v) => Math.round(parseFloat(cs.getPropertyValue(v)) || 0);
-      envTxt = ` |ENV scr${window.screen && window.screen.height} out${window.outerHeight}` +
-               (vv ? ` vv${Math.round(vv.height)}/${Math.round(vv.offsetTop)}` : '') +
-               ` sy${typeof window.screenY === 'number' ? Math.round(window.screenY) : '?'}` +
-               ` unp${rd('--sa-unpainted')} sabEff${rd('--sab-eff')}` +
-               ` sa${(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ? 'YES' : 'no'}`;
-    } catch (_) {}
-    d.textContent =
-      `vh${window.innerHeight} pnl${Math.round(r.top)}-${Math.round(r.bottom)}` +
-      (br ? ` bdy-${Math.round(br.bottom)}` : '') +
-      (fr ? ` ft-${Math.round(fr.bottom)}` : ' ft:none') +
-      ` gap${Math.round(window.innerHeight - r.bottom)}` + lastTxt + envTxt;
-    p.appendChild(d);
-  }, 400);
+  // The 2026-08-07 panel-geometry readout that lived here is REMOVED: it did
+  // its job. It established, against eight failed fixes, that the panel/body/
+  // composer were always flush and the band was 59 CSS px of screen BELOW the
+  // layout viewport plus a 34px phantom safe-area inset. Both are handled now
+  // (window.ViewportSync's --sab-eff, js/config.js). If a geometry question
+  // ever returns, note the lesson rather than the code: gap/INNERGAP/bpad are
+  // all measured against window.innerHeight while the panel is pinned to
+  // bottom:0 of that same viewport, so they read 0 BY CONSTRUCTION and cannot
+  // see anything outside it. Measure against screen.height, not innerHeight.
   _focusTrapAttach(p);
 
   const teardown = () => {
