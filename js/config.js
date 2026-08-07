@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.91';
+window.APP_VERSION = '14.0.92';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2164,6 +2164,56 @@ window.brandEntity = function(kind){
 // LAST in index.html's script order — a shared service usable by app.js AND
 // modules.js AND departments.js must load before all three.
 function _caRound2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
+// Owner ruling 2026-08-07 — cash-advance interest is recognised AS IT IS
+// COLLECTED, not up front. approve() debits 'Advances to Employees' the bare
+// PRINCIPAL (unchanged), so every repayment must credit that same account by a
+// principal portion only; the rest is interest the business has now earned and
+// posts to Other Income. Before this, repayments credited the receivable the
+// FULL installment including interest, so the account ended each loan negative
+// by exactly the interest and the interest income appeared nowhere at all.
+//
+// These are add-on-interest loans — total = principal*(1+r)^terms, split into
+// `terms` equal installments — so interest is allocated PROPORTIONALLY across
+// the schedule, which is the convention for add-on lending and makes every
+// installment carry the same interest share. Summed over the life of the loan
+// the portions come back to exactly totalPayable - principal (bar sub-centavo
+// rounding on the final installment).
+//
+// Degenerate cases all collapse to "all principal, no interest", which is the
+// pre-existing behaviour: a 0% advance, a doc written before totalPayable
+// existed, or any row where the numbers do not make sense.
+// `collectedBefore` — how much of totalPayable had already been repaid BEFORE
+// this payment. Defaults to totalPayable - ca.balance, which is correct at both
+// live call sites (deduct/recordPayment both split against the doc they read
+// inside the transaction, i.e. the PRE-payment balance). The resume path in
+// disbursePayRun re-derives it by walking payments[] in order, because there
+// the doc's balance is already post-payment.
+function _caSplitPayment(payment, ca, collectedBefore) {
+  const pay = _caRound2(payment || 0);
+  const principal = (ca && ca.amount) || 0;
+  const total     = (ca && ca.totalPayable) || principal;
+  const interestTotal = _caRound2(total - principal);
+  if (!(pay > 0) || !(interestTotal > 0) || !(total > 0)) return { principal: pay > 0 ? pay : 0, interest: 0 };
+  // CUMULATIVE allocation, not per-installment. Rounding each installment's
+  // share independently leaves a few centavos stranded on the receivable after
+  // a fully repaid loan (measured: +0.02 on the 20k/6mo case, +0.04 on
+  // 10k/12mo) — an account that never quite zeroes, which is exactly the kind
+  // of residue that makes a ledger untrustworthy. Allocating on the CUMULATIVE
+  // total and taking the difference makes the portions telescope: the final
+  // payment brings collected to totalPayable, so the shares sum to EXACTLY
+  // interestTotal and the receivable retires to exactly the principal.
+  const bal = (ca && typeof ca.balance === 'number') ? ca.balance : total;
+  const before = (typeof collectedBefore === 'number')
+    ? collectedBefore
+    : _caRound2(total - bal);
+  const c0 = Math.min(Math.max(before, 0), total);
+  const c1 = Math.min(_caRound2(c0 + pay), total);
+  const cum = (c) => _caRound2(interestTotal * (c / total));
+  // Clamped so a final over-payment can never book more interest than was paid.
+  const interest = Math.max(0, Math.min(pay, _caRound2(cum(c1) - cum(c0))));
+  return { principal: _caRound2(pay - interest), interest };
+}
+window._caSplitPayment = _caSplitPayment;
 // Oldest-first split of `total` across a user's approved CA docs, capped per-doc
 // balance. Shared by CashAdvance.planFor()'s custom-amount branch AND the Edit
 // Payroll modal's live "Custom amount" / "Pay in full" previews, so there is
@@ -2412,7 +2462,7 @@ window.CashAdvance = {
       const newBal   = Math.max(0, (cur.balance||0) - paid);
       const payments = [...(cur.payments||[]), { amount: paid, date: payDate, recordedBy: uid, paymentId, source:'manual' }];
       t.update(ref, { balance: newBal, payments, status: newBal <= 0 ? 'paid' : 'approved', ...(newBal<=0?{paidAt:firebase.firestore.FieldValue.serverTimestamp()}:{}) });
-      result = { newBal, userId: cur.userId, userName: cur.userName || '' };
+      result = { newBal, userId: cur.userId, userName: cur.userName || '', split: _caSplitPayment(paid, cur) };
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     if (result) {
@@ -2433,16 +2483,33 @@ window.CashAdvance = {
         const lref = `CA-${id}-REPAY-${paymentId}`;
         const dupe = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
         if (!dupe.docs.length) {
-          await db.collection('ledger').add({
-            date: payDate, type:'credit',
-            accountType:'asset', account:'Advances to Employees',
-            description:`Cash advance repayment — ${result.userName||''}`.trim(),
-            amount: paid, category:'Cash Advance', refNumber: lref, source:'Cash Advance',
-            ...window.BankAccounts.tag(bankAccount, 'in'),
+          const _common = {
+            date: payDate, type:'credit', category:'Cash Advance', source:'Cash Advance',
             addedBy: window.currentUser?.uid || null,
             addedByName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '',
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          // Only the PRINCIPAL portion retires the receivable — approve() only
+          // ever debited that much. Both rows carry the bank-'in' tag so the
+          // account still rises by the full `paid`; they simply land in two
+          // different COA accounts.
+          await db.collection('ledger').add({
+            ..._common, accountType:'asset', account:'Advances to Employees',
+            description:`Cash advance repayment — ${result.userName||''}`.trim(),
+            amount: result.split.principal, refNumber: lref,
+            ...window.BankAccounts.tag(bankAccount, 'in')
           });
+          // …and the interest is income the business has now earned. Its own
+          // ref (-INT) so it is independently idempotent and a resync can tell
+          // the two legs apart.
+          if (result.split.interest > 0) {
+            await db.collection('ledger').add({
+              ..._common, accountType:'income', account:'Other Income',
+              description:`Cash advance interest — ${result.userName||''}`.trim(),
+              amount: result.split.interest, refNumber: `${lref}-INT`,
+              ...window.BankAccounts.tag(bankAccount, 'in')
+            });
+          }
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
         }
       } catch(e){ console.warn('[CA repay ledger]', e?.message || e); }
@@ -2581,7 +2648,11 @@ window.CashAdvance = {
         balance: newBal, payments,
         ...(newBal <= 0 ? { status:'paid', paidAt: firebase.firestore.FieldValue.serverTimestamp() } : {})
       });
-      caDeductions.push({ caId: p.caId, amount: _caRound2(toDeduct) });
+      // Carry the principal/interest split out with the amount so
+      // disbursePayRun can credit the receivable and Other Income separately
+      // (it has no access to the CA doc; `cur` is only in scope here).
+      const _sp = _caSplitPayment(toDeduct, cur);
+      caDeductions.push({ caId: p.caId, amount: _caRound2(toDeduct), principal: _sp.principal, interest: _sp.interest });
     }
     if (caDeductions.length) await batch.commit();
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');

@@ -1990,6 +1990,9 @@ window.disbursePayRun = async function(month, opts = {}) {
   // frozen plan — see the aggregation loop for the reconciliation + the
   // needsReview flag left on salary_history when the two disagree.
   const actualCaByUid = {};
+  // …and how much of that was INTEREST rather than principal, so the CADEDUCT
+  // leg below credits the receivable only what approve() actually debited.
+  const actualCaInterestByUid = {};
 
   // ── R1 ROOT CAUSE (money-critical) — actualCa collapsed to 0 on a RESUME ──
   // CashAdvance.deduct is idempotent PER MONTH: js/config.js:2578 skips any CA
@@ -2025,36 +2028,69 @@ window.disbursePayRun = async function(month, opts = {}) {
   // that fails falls back to the frozen plan amount — the same figure the
   // employee-visible salary_history/payslip already shows — rather than
   // aborting a disburse that has already moved money.
+  // Returns {total, interest}: the interest half is needed because a repayment
+  // credits 'Advances to Employees' only its PRINCIPAL portion (approve() only
+  // debited that much) and books the rest as earned interest income. On the
+  // recovery path the split is recomputed from the CA doc's own principal /
+  // totalPayable via window._caSplitPayment, so a Resume Disburse reproduces
+  // exactly what the original pass would have posted.
   const recoverPostedCa = async (caPlan, postedNowByCa) => {
-    let sum = 0;
+    let sum = 0, interest = 0;
+    const _split = (amt, ca, before) => (typeof window._caSplitPayment === 'function')
+      ? window._caSplitPayment(amt, ca, before) : { principal: amt, interest: 0 };
     for (const p of (caPlan || [])) {
       if (!p || !p.caId) continue;
-      if (postedNowByCa[p.caId] != null) { sum += postedNowByCa[p.caId]; continue; } // deducted by THIS call
+      if (postedNowByCa[p.caId] != null) {                      // deducted by THIS call
+        sum += postedNowByCa[p.caId].amount;
+        interest += postedNowByCa[p.caId].interest;
+        continue;
+      }
       let snap = null;
       try { snap = await db.collection('cash_advances').doc(p.caId).get(); }
       catch (err) {
         console.error('disbursePayRun: could not re-read cash advance', p.caId, '— falling back to the frozen plan amount', err);
-        sum += (p.amount || 0);
+        sum += (p.amount || 0);   // no doc to split against — treat as all principal
         continue;
       }
       if (!snap.exists) continue; // CA gone — nothing was collected against it
-      sum += (snap.data().payments || [])
-        .filter(pm => pm && pm.source === 'payroll' && pm.month === month)
-        .reduce((s, pm) => s + (pm.amount || 0), 0);
+      const ca = snap.data();
+      // Walk payments[] IN ORDER tracking the running collected total: this
+      // doc's `balance` is already post-payment here, so the helper's default
+      // (totalPayable - balance) would mis-place every payment on the schedule.
+      // Only the rows for THIS month are counted, but every earlier row still
+      // advances the cursor.
+      let collected = 0;
+      (ca.payments || []).forEach(pm => {
+        const amt = (pm && pm.amount) || 0;
+        if (pm && pm.source === 'payroll' && pm.month === month) {
+          sum += amt;
+          interest += _split(amt, ca, collected).interest;
+        }
+        collected = +(collected + amt).toFixed(2);
+      });
     }
-    return +sum.toFixed(2);
+    return { total: +sum.toFixed(2), interest: +interest.toFixed(2) };
   };
 
   await Promise.all(lines.map(async (line) => {
     if (line.caPlan && line.caPlan.length) {
       const res = await window.CashAdvance.deduct(line.uid, month, line.caPlan, currentUser?.uid);
-      let actual = res.reduce((s,r)=>s+(r.amount||0), 0);
+      let actual   = res.reduce((s,r)=>s+(r.amount||0), 0);
+      // deduct() reports the principal/interest split per loan (it is the only
+      // place the CA doc is in scope); a doc predating totalPayable, or a 0%
+      // advance, reports no interest and behaves exactly as before.
+      let actualInt = res.reduce((s,r)=>s+(r.interest||0), 0);
       if (isRerunOfThisMonth) {
         const postedNowByCa = {};
-        res.forEach(r => { postedNowByCa[r.caId] = (postedNowByCa[r.caId] || 0) + (r.amount || 0); });
-        actual = await recoverPostedCa(line.caPlan, postedNowByCa);
+        res.forEach(r => {
+          const e = postedNowByCa[r.caId] || (postedNowByCa[r.caId] = { amount: 0, interest: 0 });
+          e.amount += (r.amount || 0); e.interest += (r.interest || 0);
+        });
+        const rec = await recoverPostedCa(line.caPlan, postedNowByCa);
+        actual = rec.total; actualInt = rec.interest;
       }
       actualCaByUid[line.uid] = actual;
+      actualCaInterestByUid[line.uid] = +actualInt.toFixed(2);
       if (res.length) await db.collection('salary_history').doc(`${line.uid}_${month}`)
         .set({ caDeductions: res }, { merge:true }).catch(()=>{});
     }
@@ -2198,7 +2234,7 @@ window.disbursePayRun = async function(month, opts = {}) {
   // Legacy frozen lines (computed before the split existed) carry no
   // withheldDeductions field; they fall back to the full otherDeductions, which
   // is exactly the all-withheld default and balances identically.
-  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0, caPlannedAgg=0, withheldAgg=0;
+  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0, caPlannedAgg=0, withheldAgg=0, caInterestAgg=0;
   const caReconcileFlags = []; // {uid, name, shortfall} — surfaced to Finance/President below
   for (const line of lines) {
     sssAgg += (line.sss||0) + (line.er?.sss||0);
@@ -2214,6 +2250,7 @@ window.disbursePayRun = async function(month, opts = {}) {
     const actualCa  = (line.caPlan && line.caPlan.length) ? (actualCaByUid[line.uid]||0) : plannedCa;
     const caShortfall = +((plannedCa - actualCa).toFixed(2));
     caPlannedAgg += actualCa;
+    caInterestAgg += (line.caPlan && line.caPlan.length) ? (actualCaInterestByUid[line.uid]||0) : 0;
     // What actually leaves the bank for this employee. Stated directly rather
     // than re-derived from effectiveGross: the old form
     // (effectiveGross - statutoryTotal - actualCa) silently equals
@@ -2336,10 +2373,27 @@ window.disbursePayRun = async function(month, opts = {}) {
   // The residual "employee dropped from the run between two passes leaves an
   // orphan leg" case is a genuine pre-existing gap that needs a per-run manifest
   // or a ref-prefix sweep, NOT a per-leg guard change — flagged, not patched.
-  if (caPlannedAgg > 0) await upsertLedger(`CADEDUCT-${month}`, {
+  // Owner ruling 2026-08-07 — the repayment collected here is NOT all principal.
+  // approve() debits 'Advances to Employees' the bare principal, so crediting it
+  // the full installment (which includes interest) drove the receivable NEGATIVE
+  // by exactly the interest on every loan ever repaid, and the interest the
+  // business actually earns appeared nowhere in the P&L. The principal half
+  // retires the receivable; the interest half is income, recognised as collected.
+  // caPrincipalAgg + caInterestAgg === caPlannedAgg, so total credits — and the
+  // debits==credits identity — are unchanged by this split.
+  const caPrincipalAgg = +(caPlannedAgg - caInterestAgg).toFixed(2);
+  if (caPrincipalAgg > 0) await upsertLedger(`CADEDUCT-${month}`, {
     date: month+'-01', type:'credit', accountType:'asset', account:'Advances to Employees',
-    description: `Cash advance repayments — ${monthLabel} payroll`, amount: caPlannedAgg,
+    description: `Cash advance repayments — ${monthLabel} payroll`, amount: caPrincipalAgg,
     category:'Cash Advance', source:'Finance', refNumber:`CADEDUCT-${month}`,
+    addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  // Own ref so it is independently idempotent and distinguishable on a resync.
+  // No bank tag: this is netted out of pay, no cash moved.
+  if (caInterestAgg > 0) await upsertLedger(`CAINT-${month}`, {
+    date: month+'-01', type:'credit', accountType:'income', account:'Other Income',
+    description: `Cash advance interest earned — ${monthLabel} payroll`, amount: caInterestAgg,
+    category:'Other Income', source:'Finance', refNumber:`CAINT-${month}`,
     addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
   // The offsetting credit for the money the Cash leg no longer claims left the
