@@ -426,24 +426,59 @@ async function buildThreeWayRecon(month, runData) {
   return [...uids].map(uid => {
     const line = linesByUid[uid], hist = historyByUid[uid];
     const name = line?.name || hist?.userName || uid;
-    const ledgerAmt  = Object.prototype.hasOwnProperty.call(ledgerByUid, uid) ? ledgerByUid[uid] : null;
-    const payrunNet  = line ? (line.finalPay ?? null) : null;
-    const historyNet = hist ? (hist.finalPay ?? hist.netPay ?? null) : null;
+    // COMPARE LIKE WITH LIKE. The PAY-{month}-{uid} ledger row is posted as
+    // `line.effectiveGross` (js/departments.js, the payslip debit leg) — a GROSS
+    // payroll-expense figure. This report used to diff that straight against
+    // line.finalPay and salary_history.finalPay, which are NET. They differ by
+    // statutoryTotal + otherDeductions + caPlanned BY CONSTRUCTION, so every
+    // employee was flagged MISMATCH every month with a five-figure delta, and a
+    // real drift was indistinguishable from the noise — killing the one control
+    // that would have caught a genuine ledger error.
+    //
+    // salary_history has no gross field, but it stores every component, so the
+    // mirror's gross is reconstructable exactly the way money-core builds it:
+    //   effectiveGross = netBeforeCA + statutoryTotal + otherDeductions
+    // where netBeforeCA is mirrored as `netPay`. philhealth/pagibig are mirrored
+    // in both casings (the WS21 legacy transition), so read either.
+    const _num = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+    const histGrossOf = h => {
+      const netB = _num(h.netPay);
+      if (netB == null) return null;                       // pre-mirror row — cannot derive
+      const stat = (_num(h.sss) || 0)
+                 + (_num(h.philhealth) ?? _num(h.philHealth) ?? 0)
+                 + (_num(h.pagibig)    ?? _num(h.pagIbig)    ?? 0)
+                 + (_num(h.tax) || 0);
+      return Math.round((netB + stat + (_num(h.deductions) || 0)) * 100) / 100;
+    };
+
+    const ledgerAmt   = Object.prototype.hasOwnProperty.call(ledgerByUid, uid) ? ledgerByUid[uid] : null;
+    const payrunGross = line ? (_num(line.effectiveGross)) : null;
+    const histGross   = hist ? histGrossOf(hist) : null;
+    const payrunNet   = line ? (_num(line.finalPay)) : null;
+    const historyNet  = hist ? (_num(hist.finalPay) ?? _num(hist.netPay)) : null;
 
     const missing = [];
-    if (ledgerAmt  == null) missing.push('LEDGER');
-    if (payrunNet  == null) missing.push('PAYRUN');
-    if (historyNet == null) missing.push('HISTORY');
+    if (ledgerAmt   == null) missing.push('LEDGER');
+    if (payrunGross == null) missing.push('PAYRUN');
+    if (histGross   == null) missing.push('HISTORY');
 
-    let status, delta = null;
+    let status, delta = null, netDelta = null;
     if (missing.length) {
       status = 'MISSING-IN-' + missing.join('/');
     } else {
-      const vals = [ledgerAmt, payrunNet, historyNet];
+      const vals = [ledgerAmt, payrunGross, histGross];
       delta = Math.round((Math.max(...vals) - Math.min(...vals)) * 100) / 100;
-      status = delta > 0.01 ? 'MISMATCH' : 'OK';
+      // Second, independent check the old report never made at all: the two NET
+      // mirrors must agree with each other. A gross-only diff would pass a run
+      // where salary_history's take-home was hand-edited after disburse.
+      if (payrunNet != null && historyNet != null) {
+        netDelta = Math.round(Math.abs(payrunNet - historyNet) * 100) / 100;
+      }
+      status = delta > 0.01 ? 'MISMATCH'
+             : (netDelta != null && netDelta > 0.01) ? 'NET-MISMATCH'
+             : 'OK';
     }
-    return { month, uid, name, ledgerAmt, payrunNet, historyNet, status, delta };
+    return { month, uid, name, ledgerAmt, payrunGross, histGross, payrunNet, historyNet, status, delta, netDelta };
   }).sort((a,b) => a.name.localeCompare(b.name));
 }
 
@@ -453,14 +488,23 @@ function threeWayReconTableHTML(rows) {
     ? `<span class="badge badge-green">OK</span>`
     : r.status === 'MISMATCH'
       ? `<span class="badge badge-red">MISMATCH${r.delta!=null?` &nbsp;Δ ₱${fmt(r.delta)}`:''}</span>`
-      : `<span class="badge badge-orange">${escHtml(r.status)}</span>`;
+      : r.status === 'NET-MISMATCH'
+        ? `<span class="badge badge-red">NET Δ ₱${fmt(r.netDelta||0)}</span>`
+        : `<span class="badge badge-orange">${escHtml(r.status)}</span>`;
+  const cell = v => v != null ? `₱${fmt(v)}` : '<span style="color:var(--text-muted)">—</span>';
+  // Headers say GROSS explicitly: all three of these columns are the same
+  // quantity (money-core's effectiveGross), which is the whole point of the
+  // reconciliation. Net is shown alongside because the President reads this to
+  // check take-home too, but it is compared only run-vs-history (the ledger
+  // holds no net figure to compare it against).
   return `<div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Employee</th><th>Ledger Amt</th><th>Payrun Net</th><th>History Net</th><th>Status</th></tr></thead>
+    <thead><tr><th>Employee</th><th>Ledger (gross)</th><th>Pay run (gross)</th><th>History (gross)</th><th>Net (run / history)</th><th>Status</th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td style="font-weight:600">${escHtml(r.name)}</td>
-      <td style="white-space:nowrap;font-size:12px">${r.ledgerAmt!=null?`₱${fmt(r.ledgerAmt)}`:'<span style="color:var(--text-muted)">—</span>'}</td>
-      <td style="white-space:nowrap;font-size:12px">${r.payrunNet!=null?`₱${fmt(r.payrunNet)}`:'<span style="color:var(--text-muted)">—</span>'}</td>
-      <td style="white-space:nowrap;font-size:12px">${r.historyNet!=null?`₱${fmt(r.historyNet)}`:'<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="white-space:nowrap;font-size:12px">${cell(r.ledgerAmt)}</td>
+      <td style="white-space:nowrap;font-size:12px">${cell(r.payrunGross)}</td>
+      <td style="white-space:nowrap;font-size:12px">${cell(r.histGross)}</td>
+      <td style="white-space:nowrap;font-size:12px">${cell(r.payrunNet)} / ${cell(r.historyNet)}</td>
       <td style="white-space:nowrap">${statusBadge(r)}</td>
     </tr>`).join('')}</tbody>
   </table></div>`;
@@ -470,8 +514,11 @@ function threeWayReconTableHTML(rows) {
 // only. For every pay_run month, diffs ledger PAY- rows against the frozen
 // run lines and salary_history mirror, flagging: (a) more than one PAY
 // ledger row for the same month+uid, (b) a ledger amount that doesn't match
-// the frozen run's netPay/finalPay, (c) salary_history rows with no
-// matching frozen line (the pre-lock era's Path-B fingerprint). No writes —
+// the frozen run's gross, (c) salary_history rows with no
+// matching frozen line (the pre-lock era's Path-B fingerprint). All three
+// amount columns are GROSS (money-core's effectiveGross, which is what the
+// PAY- ledger leg is posted as); net is checked separately, run-vs-history.
+// No writes —
 // any fix routes through financeDelete / a manual ledger entry.
 async function openPayrollReconciliation() {
   // Wave 3 E-CALLERS — this modal (openPage's .page-panel host) sits outside
