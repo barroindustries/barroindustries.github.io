@@ -3906,8 +3906,16 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
     let envTxt = '';
     try {
       const vv = window.visualViewport;
+      // saT/saB are the raw env() insets; unp is the band of screen BELOW our
+      // layout viewport, and sabEff is what the composer now actually uses.
+      // sy is window.screenY — the one value that decides whether the 59px
+      // shortfall is above us or below us, and the fix is a no-op without it.
+      const cs = getComputedStyle(document.documentElement);
+      const rd = (v) => Math.round(parseFloat(cs.getPropertyValue(v)) || 0);
       envTxt = ` |ENV scr${window.screen && window.screen.height} out${window.outerHeight}` +
                (vv ? ` vv${Math.round(vv.height)}/${Math.round(vv.offsetTop)}` : '') +
+               ` sy${typeof window.screenY === 'number' ? Math.round(window.screenY) : '?'}` +
+               ` unp${rd('--sa-unpainted')} sabEff${rd('--sab-eff')}` +
                ` sa${(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ? 'YES' : 'no'}`;
     } catch (_) {}
     d.textContent =

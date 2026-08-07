@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.92';
+window.APP_VERSION = '14.0.93';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1414,11 +1414,33 @@ window.isPhoneShell = function () {
 // keyboard show/hide (the keyboard animation outlives the event).
 window.ViewportSync = window.ViewportSync || (function () {
   var raf = 0;
-  var last = { vvh: '', top: '', kb: '' };          // write-only-on-change
+  var last = { vvh: '', top: '', kb: '', sab: '', unp: '' }; // write-only-on-change
   function set(de, name, val, key) {
     if (last[key] === val) return;
     last[key] = val;
     try { de.style.setProperty(name, val); } catch (_) {}
+  }
+  // env() is only readable from CSS, so read it through a hidden probe whose
+  // padding is set from the insets. Kept alive between calls; re-created if it
+  // is ever detached.
+  var _insetProbe = null;
+  function readInset(side) {
+    try {
+      if (!_insetProbe || !_insetProbe.isConnected) {
+        var host = document.body || document.documentElement;
+        if (!host) return 0;
+        _insetProbe = document.createElement('div');
+        _insetProbe.setAttribute('aria-hidden', 'true');
+        _insetProbe.style.cssText =
+          'position:fixed;left:-9999px;top:-9999px;width:0;height:0;' +
+          'pointer-events:none;visibility:hidden;contain:strict;' +
+          'padding-top:env(safe-area-inset-top,0px);' +
+          'padding-bottom:env(safe-area-inset-bottom,0px)';
+        host.appendChild(_insetProbe);
+      }
+      var cs = getComputedStyle(_insetProbe);
+      return Math.round(parseFloat(side === 'top' ? cs.paddingTop : cs.paddingBottom) || 0);
+    } catch (_) { return 0; }
   }
   function apply() {
     raf = 0;
@@ -1468,6 +1490,40 @@ window.ViewportSync = window.ViewportSync || (function () {
     set(de, '--vvh',    Math.round(h) + 'px', 'vvh');
     set(de, '--vv-top', Math.round(t) + 'px', 'top');
     set(de, '--kb-h',   kb + 'px',            'kb');
+
+    // ── PHANTOM SAFE AREA (2026-08-07) ────────────────────────────────────
+    // MEASURED, not inferred. The owner's chat screenshot was decomposed
+    // pixel-by-pixel against the on-panel diagnostic, whose bottom edge IS the
+    // panel's bottom edge (position:absolute;bottom:0). On a 1179x2556 capture
+    // at dpr 3: the diagnostic's bottom sits 59.0 CSS px above the physical
+    // screen bottom, and the composer pill's bottom sits 101.0 CSS px above it.
+    // 101 - 59 = 42 = the composer's padding-bottom, exactly as its rule
+    // computes. So the layout viewport is TOP-anchored and ends 59 CSS px short
+    // of the screen, and iOS still reports env(safe-area-inset-bottom) = 34 for
+    // a home indicator that lies entirely OUTSIDE that viewport, 59px further
+    // down. The composer was therefore reserving 34px to clear a bar that is
+    // not in its box — a phantom. Nine attempts at .page-panel /
+    // .page-panel-body / the composer padding could never find it, because
+    // every "is it flush?" check was measured against innerHeight and so came
+    // back 0 by construction (gap0, INNERGAP0, bpad0 are all true AND the band
+    // is still there — the ruler and the box share an origin).
+    //
+    // Corrected by measuring the overlap instead of trusting env(): only the
+    // part of the inset that actually falls inside the layout viewport is real.
+    //   unpainted = screen.height - (screenY + innerHeight)   // band below us
+    //   sabEff    = max(0, saB - unpainted)
+    // Healthy device (viewport reaches the screen bottom): unpainted 0 ->
+    // sabEff == saB -> byte-identical to before, home-indicator clearance kept.
+    // This device: unpainted 59 -> sabEff = max(0, 34-59) = 0 -> the phantom
+    // goes, the real 8px design padding stays.
+    // FAILS SAFE: if screenY is unavailable or non-finite (it is not specified
+    // for standalone webviews), unpainted is 0 and nothing changes at all.
+    var scrH = (window.screen && window.screen.height) || 0;
+    var sy   = (typeof window.screenY === 'number' && isFinite(window.screenY)) ? window.screenY : null;
+    var unpainted = (sy !== null && scrH) ? Math.max(0, Math.round(scrH - (sy + ih))) : 0;
+    var sabEff = Math.max(0, readInset('bottom') - unpainted);
+    set(de, '--sab-eff',       sabEff    + 'px', 'sab');
+    set(de, '--sa-unpainted',  unpainted + 'px', 'unp');
     // `kb-open` on <html> is what lets the CSS stop deriving a window's BOTTOM
     // edge from the visual viewport when there is no keyboard to track.
     //

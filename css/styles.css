@@ -5203,9 +5203,36 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
    keyboard-CLOSED value is unchanged, so this is a no-op for that consumer and
    for every viewport wider than a phone (--kb-h is 0px there, and the inset is
    0px on non-notched screens). */
+/* PHANTOM SAFE AREA (2026-08-07) — env(safe-area-inset-bottom) is the inset of
+   the SCREEN's system UI, and iOS reports it even when the layout viewport does
+   not reach the screen bottom, i.e. when the home indicator is not inside our
+   box at all. Measured on the owner's iPhone from a pixel decomposition of his
+   own screenshot: the panel's bottom edge sits 59 CSS px above the physical
+   screen bottom while env(safe-area-inset-bottom) still reads 34, so this rule
+   was reserving 34px to clear a bar 59px below the bottom of our own viewport.
+   --sab-eff (js/config.js, window.ViewportSync) is that inset with the
+   unpainted band subtracted — the part of it genuinely inside our viewport.
+   The env() fallback keeps the old value verbatim if ViewportSync has not run
+   yet, and on a device whose viewport DOES reach the screen bottom the two are
+   equal, so nothing changes there. */
 .messenger-input-row {
-  padding-bottom: calc(8px + max(0px, env(safe-area-inset-bottom, 0px) - var(--kb-h, 0px)));
+  padding-bottom: calc(8px + max(0px, var(--sab-eff, env(safe-area-inset-bottom, 0px)) - var(--kb-h, 0px)));
 }
+/* …and the reason the REMAINING, legitimate clearance still reads as a defect:
+   in dark theme --chat-bg and --bg are byte-identical (#0F1114, contrast
+   1.000), so .messenger-input-row, .messenger-body above it and .page-panel
+   behind it are four stacked layers of one colour — and this page's border-top
+   was deliberately removed (see the rule above; the owner asked for that seam
+   to go). The composer therefore has no surface of its own: what the eye sees
+   is a pill and a send button floating on unbroken dark, and the safe-area
+   strip beneath them has no object to belong to, so it reads as void rather
+   than as the bar's body. Every other bottom-anchored surface in the app
+   already has its own fill (.page-panel-foot and .ms-thread-header both use
+   var(--surface)); this was the sole exception, and the sole thing complained
+   about. A background — not a border — fixes the read without bringing back
+   the seam. Scoped to the chat thread: the task/doc comment composer keeps its
+   own look. */
+#chat-thread-panel .messenger-input-row { background: var(--surface); }
 .ms-attach-btn {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
