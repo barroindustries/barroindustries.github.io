@@ -1784,6 +1784,19 @@ window.computePayRun = async function(month, { policy } = {}) {
     if (u.removed === true)           { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'removed' }); continue; }
     if (u.payClass === 'production')  { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'production' }); continue; }
     if (linkedUids.has(u.id))         { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'linked-worker-profile' }); continue; }
+    // Owner-requested (2026-08-07): not everyone on the staff list draws a
+    // payroll. Before this, someone with no salary set was still computed —
+    // base 0, but the statutory table still applied — so the roster showed a
+    // NEGATIVE net pay (owner screenshot: four people at -P500.00, base P0.00
+    // with SSS -250 and PhilHealth -250 deducted from nothing). Marking a
+    // person excluded takes them out of the run entirely; the reason is stored
+    // beside the flag and carried into `skipped` so a run always accounts for
+    // every member of staff and never silently drops one.
+    if (u.payrollExcluded === true) {
+      skipped.push({ uid:u.id, name:u.displayName||u.email,
+                     reason: 'excluded' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : '') });
+      continue;
+    }
     employees.push(u);
   }
   employees.sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));

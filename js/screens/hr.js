@@ -1276,13 +1276,26 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // year it happens to be" (consistent with money-core.js's computePayLine
     // and the D10 disburse gate, which both already key off the run month).
     const statYear = /^\d{4}-\d{2}/.test(month) ? parseInt(month.slice(0,4),10) : (window.bizYear ? window.bizYear() : new Date().getFullYear());
-    const plans = await Promise.all(employees.map(u => window.CashAdvance
+    // LOCKSTEP with computePayRun's `payrollExcluded` skip (js/departments.js).
+    // If the preview showed an excluded person and Compute dropped them, the
+    // roster would contradict the run — the same preview-vs-engine divergence
+    // the statutory work had to close. Excluded staff are listed separately
+    // below the table with their reason, never silently vanished.
+    const _paidEmployees = employees.filter(u => u.payrollExcluded !== true);
+    const _excluded      = employees.filter(u => u.payrollExcluded === true);
+
+    const plans = await Promise.all(_paidEmployees.map(u => window.CashAdvance
       ? window.CashAdvance.planFor(u.id, month)
       : Promise.resolve({ caBalance:0, mode:'full', caPlanned:0, plan:[] })));
     _planByUser = {};
-    employees.forEach((u,i) => { _planByUser[u.id] = plans[i]; });
+    _paidEmployees.forEach((u,i) => { _planByUser[u.id] = plans[i]; });
 
-    tbody.innerHTML = employees.map(u => {
+    // Running totals for the summary row (owner request: "show the current
+    // total as well"). Accumulated from the SAME values each row renders, so
+    // the total can never disagree with the column above it.
+    const _tot = { base:0, allow:0, deduct:0, sss:0, ph:0, pagibig:0, tax:0, ca:0, net:0 };
+
+    tbody.innerHTML = _paidEmployees.map(u => {
       const depts    = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
       const base     = u.salary||0;
       const allow    = u.allowance||0;
@@ -1314,6 +1327,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const caAdv    = plan.caPlanned;
       const deduct   = (u.deductions||0) + sss + ph + pagibig + tax;
       const net      = gross - deduct - caAdv;
+      _tot.base += base; _tot.allow += allow; _tot.deduct += (u.deductions||0);
+      _tot.sss += sss; _tot.ph += ph; _tot.pagibig += pagibig; _tot.tax += tax;
+      _tot.ca += caAdv; _tot.net += net;
       const modeTag  = { installment:'installment', 'custom-request':'custom', 'legacy-override':'custom', full:'full' }[plan.mode];
       const caCell   = caBalance > 0
         ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${modeTag?` <span style="font-size:10px;background:var(--primary-light);color:var(--on-primary);border-radius:4px;padding:1px 5px">${modeTag}</span>`:''}</div>
@@ -1345,10 +1361,49 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td class="tc-actions">
           <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit" aria-label="Edit payroll">${emojiIcon('✎',16)}</button>
           ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise" aria-label="Give raise">${emojiIcon('banknote',14)}</button>` : ''}
+          ${canFinance ? `<button class="btn-secondary btn-sm pr-exclude-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Not on payroll" aria-label="Remove from payroll">${emojiIcon('user-minus',14)}</button>` : ''}
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip" aria-label="Print payslip">${emojiIcon('🖨',16)}</button>
         </td>
       </tr>`;
     }).join('');
+
+    // TOTALS — rendered as the first row so the figure is visible without
+    // scrolling a 10-person table (owner: "maybe a row above shows the total").
+    // Summed from the very values the rows printed, so it cannot drift from
+    // them, and it counts ONLY the people actually in the run.
+    if (_paidEmployees.length) {
+      const totalsRow = `<tr class="pr-row pr-totals-row" style="background:var(--s1);font-weight:700">
+        <td class="tc-avatar" style="text-align:center">${emojiIcon('sigma',16)}</td>
+        <td class="tc-name"><strong>Total — ${_paidEmployees.length} staff</strong><div style="font-size:11px;color:var(--text-muted);font-weight:500">this month's run${_excluded.length?` · ${_excluded.length} not on payroll`:''}</div></td>
+        <td class="tc-detail" data-label="ID">—</td>
+        <td class="tc-detail" data-label="Department">—</td>
+        <td class="tc-detail" data-label="Base">₱${fmt(_tot.base)}</td>
+        <td class="tc-detail" data-label="Allowance" style="color:var(--success)">+₱${fmt(_tot.allow)}</td>
+        <td class="tc-detail" data-label="Deductions" style="color:var(--danger)">-₱${fmt(_tot.deduct)}</td>
+        <td class="tc-detail" data-label="SSS" style="color:var(--danger)">-₱${fmt(_tot.sss)}</td>
+        <td class="tc-detail" data-label="PhilHealth" style="color:var(--danger)">-₱${fmt(_tot.ph)}</td>
+        <td class="tc-detail" data-label="Pag-IBIG" style="color:var(--danger)">-₱${fmt(_tot.pagibig)}</td>
+        <td class="tc-detail" data-label="Tax" style="color:var(--danger)">-₱${fmt(_tot.tax)}</td>
+        <td class="tc-detail" data-label="Cash Adv" style="color:var(--danger)">${_tot.ca?`-₱${fmt(_tot.ca)}`:'—'}</td>
+        <td class="tc-net"><strong style="color:${_tot.net>=0?'var(--success)':'var(--danger)'}">₱${fmt(_tot.net)}</strong></td>
+        <td class="tc-actions"></td>
+      </tr>`;
+      tbody.innerHTML = totalsRow + tbody.innerHTML;
+    }
+
+    // Excluded staff — shown, never silently dropped, with the reason and a
+    // one-tap way back in.
+    if (_excluded.length) {
+      tbody.innerHTML += _excluded.map(u => `<tr class="pr-row pr-excluded-row" style="opacity:.6">
+        <td class="tc-avatar" style="text-align:center">${emojiIcon('user-minus',16)}</td>
+        <td class="tc-name"><strong style="text-decoration:line-through">${escHtml(u.displayName||u.email)}</strong>
+          <div style="font-size:11px;color:var(--text-muted)">Not on payroll${u.payrollExcludedReason?` — ${escHtml(u.payrollExcludedReason)}`:''}</div></td>
+        <td class="tc-detail" data-label="ID"><code>${u.employeeId||'—'}</code></td>
+        <td class="tc-detail" data-label="Department" colspan="9" style="color:var(--text-muted)">Excluded from this and every run until put back on payroll.</td>
+        <td class="tc-net"><span style="color:var(--text-muted)">—</span></td>
+        <td class="tc-actions">${canFinance?`<button class="btn-secondary btn-sm pr-include-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Put back on payroll" aria-label="Put back on payroll">${emojiIcon('user-plus',14)}</button>`:''}</td>
+      </tr>`).join('');
+    }
     if (window.lucide) lucide.createIcons({ nodes: [tbody] });
 
     // Card view (≤700px): tap the row (outside the action buttons) to reveal
@@ -1361,6 +1416,61 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         if (ev.target.closest('button, a')) return;
         tr.classList.toggle('tc-expanded');
       });
+    });
+
+    // ── Not on payroll / put back on payroll ──────────────────────────────
+    // Writes payrollExcluded + the reason onto payroll/{uid} (money-admin
+    // gated by firestore.rules, same doc the pay figures live in — the users
+    // doc is world-readable and must never carry this). computePayRun reads
+    // the same flag, so the roster and the run can never disagree.
+    // The in-memory row is patched alongside the write for the same reason the
+    // statutory work had to: `employees` is captured once and re-rendered from
+    // memory, so without this the roster would show the OLD state until the
+    // next navigation while Compute used the new one.
+    const _setPayrollExcluded = async (uid, excluded, reason) => {
+      const patch = excluded
+        ? { payrollExcluded: true, payrollExcludedReason: reason || '',
+            payrollExcludedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            payrollExcludedBy: (currentUser && currentUser.uid) || '' }
+        : { payrollExcluded: firebase.firestore.FieldValue.delete(),
+            payrollExcludedReason: firebase.firestore.FieldValue.delete(),
+            payrollExcludedAt: firebase.firestore.FieldValue.delete(),
+            payrollExcludedBy: firebase.firestore.FieldValue.delete() };
+      await db.collection('payroll').doc(uid).set(patch, { merge: true });
+      const emp = employees.find(e => e.id === uid);
+      if (emp) {
+        if (excluded) { emp.payrollExcluded = true; emp.payrollExcludedReason = reason || ''; }
+        else { delete emp.payrollExcluded; delete emp.payrollExcludedReason; }
+      }
+      window.dbCacheInvalidate && window.dbCacheInvalidate('users');
+      window.logAudit && window.logAudit('update', 'payroll', uid,
+        { payrollExcluded: excluded, reason: reason || '' });
+    };
+    tbody.querySelectorAll('.pr-exclude-btn').forEach(btn => {
+      btn.addEventListener('click', () => window.busy(btn, async () => {
+        const name = btn.dataset.name || 'this person';
+        const reason = await window.promptDialog({
+          title: 'Not on payroll',
+          message: `Why is ${name} not drawing a payroll? This is recorded on the run so every month accounts for them.`,
+          placeholder: 'e.g. owner / not yet regularised / paid outside payroll',
+          confirmLabel: 'Remove from payroll',
+          required: true          // no blank reasons — the point is the record
+        });
+        if (reason === null) return;                       // cancelled
+        if (!String(reason).trim()) { Notifs.showToast('A reason is required.', 'error'); return; }
+        await _setPayrollExcluded(btn.dataset.uid, true, String(reason).trim());
+        Notifs.showToast(`${name} removed from payroll.`, 'success');
+        loadPayrollTable(month);
+      }));
+    });
+    tbody.querySelectorAll('.pr-include-btn').forEach(btn => {
+      btn.addEventListener('click', () => window.busy(btn, async () => {
+        const name = btn.dataset.name || 'this person';
+        if (!await confirmDialog({ message: `Put ${name} back on payroll? They will be included from the next Compute.` })) return;
+        await _setPayrollExcluded(btn.dataset.uid, false);
+        Notifs.showToast(`${name} is back on payroll.`, 'success');
+        loadPayrollTable(month);
+      }));
     });
 
     tbody.querySelectorAll('.raise-emp-btn').forEach(btn => {
