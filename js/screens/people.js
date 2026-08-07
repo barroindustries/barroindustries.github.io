@@ -503,7 +503,7 @@ window.renderTeamTab = async function() {
         <div class="form-group"><label>Phone</label><input id="inv-phone" type="tel" placeholder="+63 9XX XXX XXXX"/></div>
         <div class="form-group"><label>Role</label>
           <select id="inv-role" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            ${Object.entries(window.ROLES||{}).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+            ${(window.assignableRoles ? window.assignableRoles() : Object.entries(window.ROLES||{})).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" id="inv-company-group" style="display:none"><label>Company <span style="font-weight:400;color:var(--text-muted)">(partner's own company)</span></label>

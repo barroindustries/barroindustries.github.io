@@ -1314,6 +1314,21 @@ function buildNav() {
 
 function isPresident() { return currentRole === 'president'; }
 function isPartner() { return currentRole === 'partner'; }
+// v14 re-audit fix — the role pickers on Invite Team Member (js/screens/
+// people.js), Add Employee Profile and Create Worker Account (js/screens/
+// dashboards.js) all rendered window.ROLES unfiltered, so a MANAGER could mint
+// a brand-new President account and sign into it. firestore.rules' users
+// CREATE rule is the real boundary and now refuses that (only the President
+// may mint role:'president', mirroring the UPDATE rule). This helper keeps the
+// UI honest about it — and matters beyond cosmetics on the two flows that
+// create the Firebase Auth account BEFORE writing the users doc: offering an
+// option the rules will refuse would leave an orphaned Auth account behind.
+// Returns Object.entries(ROLES) minus 'president' for everyone but the
+// President, so call sites can drop it in verbatim.
+window.assignableRoles = function () {
+  return Object.entries(window.ROLES || {})
+    .filter(([k]) => k !== 'president' || isPresident());
+};
 // Type-B (Production, weekly) self-service worker — payClass lives on
 // payroll/{uid} and is merged onto window.userProfile by loadUserProfile()
 // above (own-uid read, firestore.rules payroll/{uid}). Set via js/screens/

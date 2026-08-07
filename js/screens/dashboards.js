@@ -5335,7 +5335,7 @@ function openAddEmployeeModal() {
     <div class="form-group"><label>Email (if they have one)</label><input id="emp-email" type="email"/></div>
     <div class="form-group"><label>Employee ID</label><input id="emp-eid" placeholder="e.g. BI-2026-001"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Role</label><select id="emp-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Role</label><select id="emp-role">${(window.assignableRoles?window.assignableRoles():Object.entries(ROLES)).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select></div>
       <div class="form-group"><label>Primary Dept</label><select id="emp-dept"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}</select></div>
     </div>
     <div class="form-group"><label>Secondary Dept (if dual)</label><select id="emp-dept2"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}</select></div>
@@ -5417,7 +5417,7 @@ function openCreateWorkerModal() {
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Role</label><select id="cw-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${k==='employee'?'selected':''}>${v.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Role</label><select id="cw-role">${(window.assignableRoles?window.assignableRoles():Object.entries(ROLES)).map(([k,v])=>`<option value="${k}" ${k==='employee'?'selected':''}>${v.label}</option>`).join('')}</select></div>
       <div class="form-group"><label>Primary Department</label><select id="cw-dept"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}</select></div>
     </div>
     <div class="form-group"><label>Job Title</label><input id="cw-title" placeholder="e.g. Machine Operator"/></div>

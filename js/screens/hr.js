@@ -2475,8 +2475,18 @@ async function ensureWorkerVerifyToken(profile) {
     return profile.verifyToken;
   }
   const token = window.makeTrackCode(10);
-  await db.collection('id_verify').doc(token).set(proj);
+  // v14 re-audit ROUND 2 — ORDER MATTERS. worker_profiles create/update is
+  // money-tier now (isMoneyAdmin), so for a Corporate Secretary the profile
+  // write below is refused. Writing the public id_verify projection FIRST meant
+  // every refused attempt left an orphan id_verify doc behind — a QR token
+  // pointing at a card nobody can reach, accumulating one per click of 🪪 ID /
+  // Batch Print. Claim the token on the profile first: if that is denied we
+  // throw before minting anything, and both callers already fold the throw into
+  // "The card will print without a QR". The reverse partial failure (profile
+  // stamped, projection not written) is self-healing — the `profile.verifyToken`
+  // branch above re-writes the projection on the next open.
   await db.collection('worker_profiles').doc(profile.id).set({ verifyToken: token }, { merge:true });
+  await db.collection('id_verify').doc(token).set(proj);
   profile.verifyToken = token;
   return token;
 }
@@ -2553,6 +2563,17 @@ window.batchPrintWorkerIDs = async function(profiles) {
 
 async function renderFinanceHRProfiles(container, currentUser, currentRole) {
   const isPriv = isFinancePriv();
+  // v14 re-audit fix — isPriv (isFinancePriv) is true for 'secretary' and for
+  // any Finance-DEPARTMENT member, but firestore.rules now gates every
+  // pay-bearing write on isMoneyAdmin() (president/manager/finance). Controls
+  // that write worker RATES/allowances/CA balance or issue a payslip use
+  // isPayPriv so we don't render a button whose write the boundary will
+  // refuse; the oversight controls a secretary legitimately keeps (payslip &
+  // raise history, batch ID print, the attendance Clock kiosk, and the
+  // read-only roster itself) stay on isPriv. For a Finance-dept member of
+  // role 'employee' this also fixes a PRE-EXISTING mismatch: those buttons
+  // were shown to them but the rules have always denied the write.
+  const isPayPriv = (typeof isMoneyPriv === 'function') ? isMoneyPriv() : isPriv;
   container.innerHTML = window.skeletonHtml('cards');
   // v12 WS23 — same due-raise sweep as the monthly Payroll screen, for the
   // worker_profile subjectType (dailyRate/hourlyRate).
@@ -2577,11 +2598,11 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     </div>
     <div id="hrp-trouble-panel"></div>
     ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      <button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>
+      ${isPayPriv?`<button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>`:''}
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">${emojiIcon('📄',16)} All Payslips</button>
       <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
       <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">${emojiIcon('🪪',16)} Batch Print IDs</button>
-      <button class="btn-secondary btn-sm" id="hrp-sync-dir-btn">↻ Sync Directory</button>
+      ${isPayPriv?`<button class="btn-secondary btn-sm" id="hrp-sync-dir-btn">↻ Sync Directory</button>`:''}
     </div>`:''}
     <div class="card">
       <div class="card-header"><h3>${emojiIcon('👷',20)} Worker Profiles</h3></div>
@@ -2600,11 +2621,11 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td class="tc-detail" data-label="Payroll"><span class="badge ${p.includeInPayroll!==false?'badge-green':'badge-gray'}">${p.includeInPayroll!==false?'Included':'Excluded'}</span></td>
               <td class="tc-detail" data-label="Status"><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
               <td class="tc-actions" style="white-space:nowrap">
-                <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('📄',16)} Payslip</button>
+                ${isPayPriv?`<button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('📄',16)} Payslip</button>`:''}
                 <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('🪪',16)} ID</button>
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">${emojiIcon('⏱',16)} Clock</button>`:''}
-                ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">${emojiIcon('💸',16)} Raise</button>`:''}
-                ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>`:''}
+                ${isPayPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">${emojiIcon('💸',16)} Raise</button>`:''}
+                ${isPayPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px" aria-label="Delete worker profile">${emojiIcon('trash-2',14)}</button>`:''}
               </td>
             </tr>`).join('')}
@@ -2945,6 +2966,16 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   });
 
   document.getElementById('hrp-save-btn').addEventListener('click', async () => {
+    // v14 re-audit fix — this doc carries dailyRate/hourlyRate, foodAllowance,
+    // allowances.meal/transport and caBalance, so firestore.rules gates
+    // worker_profiles create/update on isMoneyAdmin(). Re-check here rather
+    // than trusting that the caller was rendered with isPayPriv: a stale panel
+    // (or a role change mid-session) must not drive a write that would come
+    // back as a bare permission error.
+    if (typeof isMoneyPriv === 'function' && !isMoneyPriv()) {
+      Notifs.showToast('Worker pay changes are President / Manager / Finance only.','error');
+      return;
+    }
     const name = document.getElementById('hrp-name').value.trim();
     if (!name) { Notifs.showToast('Name is required','error'); return; }
     const linkedUid = document.getElementById('hrp-linked-uid').value.trim();
@@ -3595,9 +3626,27 @@ function openPayslipEdit(ps, currentUser, onSave) {
       grossPay, totalDeductions, totalPay, paid, netPay,
       editedBy: currentUser.uid, editedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    // Keep the general-ledger entry in sync if it was already posted
+    // Keep the general-ledger entry in sync if it was already posted.
+    // v14 re-audit ROUND 3 — this is the LAST source-edit -> /ledger-mirror
+    // rewrite in the repo outside resyncLedgerForSource, and the only one whose
+    // failure was invisible. /payslips carries no period gate, /ledger's update
+    // rule has been two-sided since round 1, so editing a payslip whose payDate
+    // is in a CLOSED month commits the payslip and is DENIED on the ledger row
+    // (measured on the emulator: payslip 6000, ledger 4800). The throw was an
+    // unhandled rejection inside window.busy — no toast, no console error the
+    // user would see, closeModal()/Notifs.success() below never reached, so the
+    // modal just sat there while the books stopped matching the payslip.
+    // ledgerMirrorFailed() is round 2's books-integrity reporter, added for
+    // exactly this case ("a future source collection mirrored without its own
+    // gate"); this call site was missed. DIAGNOSTIC ONLY — the real fix is a
+    // period gate on /payslips update, which needs its own lockout pass over
+    // the payslip lifecycle (draft -> submitted -> verified -> filed, worker
+    // self-reads, HR identity patches) and is deliberately NOT done here.
     const lsnap = await db.collection('ledger').where('refNumber','==',`WPAY-${ps.id}`).limit(1).get().catch(()=>({docs:[]}));
-    if (lsnap.docs.length) await lsnap.docs[0].ref.update({ amount: netPay });
+    if (lsnap.docs.length) {
+      try { await lsnap.docs[0].ref.update({ amount: netPay }); }
+      catch (err) { window.ledgerMirrorFailed(err, 'payslips', ps.id); }
+    }
     // Reconcile the worker's running CA balance for any change in the cash-advance
     // deduction. Creation deducted the original CA from caBalance, and delete reverses
     // whatever is current (financeDeleteCascade), so an edit that doesn't adjust by the
@@ -4147,6 +4196,14 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   let psSaving = false;
   document.getElementById('ps-save-btn').addEventListener('click', async () => {
     if (psSaving) return;
+    // v14 re-audit fix — issuing a payslip is a money-tier act (firestore.rules
+    // payslips create/update is isMoneyAdmin() now, matching the president-only
+    // delete that was always there). Same stale-DOM rationale as the worker
+    // profile save above.
+    if (typeof isMoneyPriv === 'function' && !isMoneyPriv()) {
+      Notifs.showToast('Issuing a payslip is President / Manager / Finance only.','error');
+      return;
+    }
     const d = collectPayslipData(profile, currentUser);
     if (!d) return;
     psSaving = true;

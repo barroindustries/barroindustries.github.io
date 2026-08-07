@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.96';
+window.APP_VERSION = '14.0.97';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -619,15 +619,40 @@ window.NAV_REGISTRY = {
 
 // ── Users + payroll merge ─────────────────────────
 // Pay fields (salary/allowance/deductions) live in a PROTECTED payroll/{uid}
-// collection (readable only by the owner or finance/admin) — NOT on the
-// world-readable users doc. This fetcher returns a users-snapshot-like object
+// collection (readable only by the owner or finance/admin) — NOT on the users
+// doc. This fetcher returns a users-snapshot-like object
 // ({docs:[{id,data()}], size, empty}) with pay merged in, so the ~70 existing
 // `u.salary` reads keep working unchanged. Non-admins get an empty payroll map
 // (their unfiltered payroll query is denied → .catch), so they never see others'
 // pay; a user's OWN pay is merged into userProfile separately at auth.
+//
+// v14 re-audit fix — firestore.rules `match /users/{uid}` now splits `get`
+// from `list`: an external partner may still resolve any single uid to a
+// name/photo, but may NOT enumerate the staff directory. Firestore evaluates a
+// list rule against the QUERY, not per document ("rules are not filters"), so
+// the narrowing has to be expressed in the query itself or the whole read is
+// denied. The provable set is exactly what the partner UI needs: other
+// partners (renderTeamTab, js/screens/people.js) plus president/manager (the
+// chat DM picker's candidate set, js/chat.js dmCandidates). Doing it HERE
+// covers every partner-reachable directory read at once, because dbCachedGet()
+// force-substitutes this fetcher for the 'users' key (see below) and the
+// chat presence path passes it explicitly.
+window.PARTNER_VISIBLE_ROLES = ['partner', 'president', 'manager'];
 window.fetchUsersWithPayroll = async function() {
+  const scopedQ = () => db.collection('users')
+    .where('role', 'in', window.PARTNER_VISIBLE_ROLES).get();
+  const viewerIsPartner = (typeof isPartner === 'function' && isPartner());
   const [uSnap, pSnap] = await Promise.all([
-    db.collection('users').get(),
+    viewerIsPartner
+      ? scopedQ()
+      // Belt-and-braces: if currentRole hasn't resolved yet when something
+      // fires this early, the unfiltered list is denied by the rule rather
+      // than over-sharing — fall back to the scoped query instead of letting
+      // a permission error blank the Team tab / DM picker.
+      : db.collection('users').get().catch(err => {
+          if (err && err.code === 'permission-denied') return scopedQ();
+          throw err;
+        }),
     db.collection('payroll').get().catch(() => ({ docs: [] }))
   ]);
   const pay = {};

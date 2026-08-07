@@ -161,6 +161,120 @@ exports.sendPushOnNotification = functions
     return null;
   });
 
+// ──────────────────────────────────────────────────────────────────────────
+//  PLACEHOLDER ADOPTION SAFETY (v14 re-audit ROUND 2 — CRITICAL)
+//
+//  createUserDocOnAuthCreate below runs on the Admin SDK, so it bypasses every
+//  rule in firestore.rules. Its "claim an approved signup placeholder" path used
+//  to trust two things it should never have trusted:
+//    • that a users doc carrying `pendingPasswordSetup: true` IS a placeholder,
+//    • and that whatever role/departments that doc carries may be copied
+//      verbatim onto the brand-new account (`t.set(userRef, { ...p, ... })`).
+//
+//  It does not take a forged placeholder to break that. An attacker CONVERTS a
+//  live one: any isAdmin() (manager OR Corporate Secretary) could update the
+//  PRESIDENT's users doc with { email:'attacker@…', pendingPasswordSetup:true }
+//  — role/department/employeeId untouched, so the rules' privileged-field freeze
+//  passed — then register a Firebase Auth account at that address (Email/Password
+//  is enabled and the web apiKey is public, js/firebase-config.js). This trigger
+//  then copied role:'president' onto the attacker's uid, syncUserClaims stamped
+//  it into the Auth custom claims storage.rules trusts, and `t.delete(pendingRef)`
+//  DESTROYED the real President's users doc — taking the force-logout switch,
+//  finance_delete_requests, finance_periods and ~40 delete rules with it.
+//  firestore.rules now freezes both fields, but that alone is not sufficient:
+//  a privileged doc whose email has no matching Auth account could still be
+//  claimed, and the rules cannot constrain the Admin SDK at all. This is the
+//  load-bearing half.
+//
+//  WHAT ACTUALLY DISTINGUISHES A PLACEHOLDER FROM A LIVE ACCOUNT
+//  A live account's users doc is ALWAYS keyed by its Firebase Auth uid — every
+//  writer does users.doc(<authUid>).set(...): self-signup (js/app.js), Invite
+//  Team Member (js/screens/people.js), Create Worker Account
+//  (js/screens/dashboards.js) and both paths of this function. The ONLY writer
+//  of a placeholder, signupApprove (js/svc-approvals.js), uses
+//  users.doc() — a random Firestore auto-ID with no Auth account behind it —
+//  and hardcodes role:'employee', departments:[], no `uid` field.
+//  So the authoritative, UNFORGEABLE test is: does an Auth account exist whose
+//  uid equals the candidate doc's ID? An attacker cannot arrange one —
+//  createUserWithEmailAndPassword mints a random uid; only the Admin SDK may
+//  choose one. Everything else below is corroborating shape.
+//
+//  Fails CLOSED: an unreadable/erroring Auth lookup is treated as "this IS a
+//  live account". Worst case a genuine placeholder goes unclaimed and the person
+//  gets a fresh default doc alongside it — visible, and fixable by hand. The
+//  other direction is an unrecoverable account takeover.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Roles a signup-approval placeholder may legitimately carry. signupApprove only
+// ever writes 'employee'; 'agent' is allowed for headroom. Deliberately mirrors
+// the non-senior isAdmin() create allowlist in firestore.rules, so a placeholder
+// that a non-president could not have CREATED is never adopted either.
+const PLACEHOLDER_ADOPTABLE_ROLES = ['employee', 'agent'];
+// Finance/Design membership grants canFinance()/canDesign() in firestore.rules
+// and department claims in storage.rules — same freeze the create rule applies.
+const PLACEHOLDER_PRIVILEGED_DEPTS = ['Finance', 'Design'];
+// Explicit copy allowlist. The old code spread the whole doc ({ ...p }), which
+// would carry ANY field an attacker had parked on it — hrManagedAccount,
+// username, removed, salary — onto the new account. Only these are adopted;
+// role and departments are handled separately and validated, never spread.
+const PLACEHOLDER_COPY_FIELDS = [
+  'displayName', 'phone', 'title', 'company', 'employeeId', 'photoUrl', 'startDate'
+];
+
+/**
+ * Returns null when `data` is a genuine unclaimed placeholder that is safe to
+ * adopt and delete, or a human-readable reason string when it is not.
+ * `hasAuthAccount` must be TRUE unless it has been positively established that
+ * no Firebase Auth account exists with this doc's ID.
+ */
+function placeholderRejectReason(data, hasAuthAccount) {
+  if (!data) return 'document no longer exists';
+  if (data.pendingPasswordSetup !== true) return 'not flagged pendingPasswordSetup';
+  // ── the load-bearing check ──
+  if (hasAuthAccount) return 'doc ID is a live Firebase Auth uid — this is a real account, not a placeholder';
+  // corroborating shape: none of these appear on a signupApprove placeholder,
+  // and each of them means a real account flow wrote this doc
+  if (typeof data.uid === 'string' && data.uid) return 'doc carries a uid field (written by a real-account flow)';
+  if (data.claimedAt) return 'already claimed once';
+  if (data.createdVia) return 'createdVia is set (minted by an account flow)';
+  if (data.hrManagedAccount) return 'hrManagedAccount is set (worker login account)';
+  if (data.username) return 'username is set (worker login account)';
+  if (data.removed === true) return 'account is offboarded';
+  const role = typeof data.role === 'string' && data.role ? data.role : 'employee';
+  if (!PLACEHOLDER_ADOPTABLE_ROLES.includes(role)) {
+    return `role '${role}' is not adoptable (a placeholder is only ever created as ${PLACEHOLDER_ADOPTABLE_ROLES.join('/')})`;
+  }
+  const depts = Array.isArray(data.departments) ? data.departments : [];
+  const legacyDept = typeof data.department === 'string' ? data.department : '';
+  if (depts.some(d => PLACEHOLDER_PRIVILEGED_DEPTS.includes(d)) ||
+      PLACEHOLDER_PRIVILEGED_DEPTS.includes(legacyDept)) {
+    return 'carries a privileged department (Finance/Design)';
+  }
+  return null;
+}
+
+/** Build the adopted users doc from an explicit allowlist — never a spread. */
+function buildAdoptedUserDoc(p, uid, email, FieldValue) {
+  const out = {
+    uid,
+    email: email || p.email || '',
+    role: (typeof p.role === 'string' && PLACEHOLDER_ADOPTABLE_ROLES.includes(p.role)) ? p.role : 'employee',
+    departments: Array.isArray(p.departments)
+      ? p.departments.filter(d => typeof d === 'string' && !PLACEHOLDER_PRIVILEGED_DEPTS.includes(d))
+      : [],
+    createdAt: p.createdAt || FieldValue.serverTimestamp(),
+    claimedAt: FieldValue.serverTimestamp(),
+    createdVia: 'signup-approval'
+  };
+  if (typeof p.department === 'string' && p.department && !PLACEHOLDER_PRIVILEGED_DEPTS.includes(p.department)) {
+    out.department = p.department;
+  }
+  for (const f of PLACEHOLDER_COPY_FIELDS) {
+    if (p[f] !== undefined) out[f] = p[f];
+  }
+  return out;
+}
+
 /**
  * Fires whenever a new Firebase Auth account is created — including accounts
  * added by hand in the Firebase Console → Authentication. Mirrors the
@@ -178,8 +292,12 @@ exports.sendPushOnNotification = functions
  * `pendingPasswordSetup: true` (no uid yet), then tells the admin to create the
  * Auth account by hand. Without this, that console step would leave TWO docs
  * for one person. So before falling back to a default doc, we look for a pending
- * placeholder matching this email and "claim" it: copy its fields onto
- * users/{uid} (reusing its already-allocated employeeId) and delete the orphan.
+ * placeholder matching this email and "claim" it: copy its ALLOWLISTED profile
+ * fields onto users/{uid} (reusing its already-allocated employeeId) and delete
+ * the orphan — but ONLY after placeholderRejectReason() proves the candidate is
+ * an unclaimed placeholder and not a live account someone has re-pointed at
+ * this address. See the PLACEHOLDER ADOPTION SAFETY block above; that check is
+ * a security boundary, not a tidiness check.
  */
 exports.createUserDocOnAuthCreate = functions.auth.user().onCreate(async (user) => {
   const db = admin.firestore();
@@ -191,14 +309,43 @@ exports.createUserDocOnAuthCreate = functions.auth.user().onCreate(async (user) 
     // Look for a pending placeholder doc for this email (single-field equality →
     // no composite index needed; we filter the pending flag in code). Done
     // outside the transaction; the ref is re-read inside it to stay consistent.
+    //
+    // v14 re-audit ROUND 2 — every candidate must now PROVE it is an unclaimed
+    // placeholder before it is eligible to be adopted OR deleted (see the block
+    // above). The Auth lookup is done here rather than inside the transaction
+    // because a transaction callback can be re-invoked on contention and an
+    // external call does not belong in it; the answer cannot change for a given
+    // uid anyway. Candidates are examined in turn instead of taking the first
+    // pendingPasswordSetup hit, so one poisoned doc can no longer mask a real
+    // placeholder for the same address.
     let pendingRef = null;
     if (email) {
       const matches = await db.collection('users')
         .where('email', '==', email)
         .limit(10)
         .get();
-      const hit = matches.docs.find(d => d.id !== user.uid && d.data().pendingPasswordSetup === true);
-      if (hit) pendingRef = hit.ref;
+      for (const d of matches.docs) {
+        if (d.id === user.uid) continue;
+        if (d.data().pendingPasswordSetup !== true) continue;
+        let hasAuthAccount = true;               // fail CLOSED
+        try {
+          await admin.auth().getUser(d.id);
+          hasAuthAccount = true;
+        } catch (e) {
+          if (e && e.code === 'auth/user-not-found') hasAuthAccount = false;
+          else console.error('[createUserDocOnAuthCreate] auth lookup failed for users/' + d.id +
+            ' — treating it as a LIVE account and refusing to claim it:', (e && (e.code || e.message)) || e);
+        }
+        const reason = placeholderRejectReason(d.data(), hasAuthAccount);
+        if (reason) {
+          console.error('[createUserDocOnAuthCreate] REFUSING to claim users/' + d.id +
+            ' for new uid ' + user.uid + ' (' + email + ') — ' + reason +
+            '. Leaving that document untouched.');
+          continue;
+        }
+        pendingRef = d.ref;
+        break;
+      }
     }
 
     await db.runTransaction(async (t) => {
@@ -206,28 +353,37 @@ exports.createUserDocOnAuthCreate = functions.auth.user().onCreate(async (user) 
       if (existing.exists) {
         // Real doc already created by an in-app flow. If a stale pending
         // placeholder also exists, drop it so we don't leave a duplicate.
-        if (pendingRef) t.delete(pendingRef);
+        // Only a VALIDATED placeholder ever reaches this line — pendingRef is
+        // null otherwise — and it is re-checked on the transactional read, so
+        // this branch can no longer be used to delete a live account's doc.
+        if (pendingRef) {
+          const s = await t.get(pendingRef);
+          const why = placeholderRejectReason(s.exists ? s.data() : null, false);
+          if (!why) t.delete(pendingRef);
+          else console.error('[createUserDocOnAuthCreate] NOT deleting users/' + pendingRef.id + ' — ' + why);
+        }
         return;
       }
 
-      // Path A — claim an approved signup placeholder (preserves role/depts/
-      // employeeId set at approval time; no counter burn).
+      // Path A — claim an approved signup placeholder (preserves the
+      // employeeId allocated at approval time; no counter burn). role and
+      // departments are re-validated and rebuilt, never spread verbatim.
       if (pendingRef) {
         const pendingSnap = await t.get(pendingRef);
-        if (pendingSnap.exists && pendingSnap.data().pendingPasswordSetup === true) {
-          const p = pendingSnap.data();
-          delete p.pendingPasswordSetup;
-          t.set(userRef, {
-            ...p,
-            uid: user.uid,
-            email: email || p.email || '',
-            createdAt: p.createdAt || admin.firestore.FieldValue.serverTimestamp(),
-            claimedAt: admin.firestore.FieldValue.serverTimestamp(),
-            createdVia: 'signup-approval'
-          });
+        // Re-validate against the transactional read: the doc may have been
+        // rewritten between the query above and this transaction. hasAuthAccount
+        // is false here because that was positively established before the
+        // transaction and cannot change for an existing uid.
+        const why = placeholderRejectReason(pendingSnap.exists ? pendingSnap.data() : null, false);
+        if (!why) {
+          t.set(userRef, buildAdoptedUserDoc(
+            pendingSnap.data(), user.uid, email, admin.firestore.FieldValue));
           t.delete(pendingRef);
           return;
         }
+        console.error('[createUserDocOnAuthCreate] placeholder users/' + pendingRef.id +
+          ' failed re-validation inside the transaction — ' + why +
+          '. Falling back to a default profile and leaving it in place.');
       }
 
       // Path B — brand-new account (e.g. added straight in the Auth console):

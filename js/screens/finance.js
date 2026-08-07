@@ -136,7 +136,29 @@
 // Generic edit modal for simple finance records. `fields` describe the form:
 //   { key, label, type:'text'|'number'|'date'|'select'|'textarea', options?, full? }
 // On save it .update()s the doc with the typed values + an edit audit stamp.
-window.financeEditModal = function({ collection, docId, title, fields, onSaved, transform }) {
+// v14 re-audit fix — optional `periodField` (e.g. 'date'): when the edited
+// record carries a date that buckets it into a finance period, the NEW value
+// is checked against the period-close lock before the write, so a user gets
+// the standard "That month's books are closed…" toast instead of a raw
+// permission error. This catches moving a row INTO a closed month; the
+// caller is responsible for guarding the row's CURRENT month before opening
+// the modal. Mirrors firestore.rules (ledger/CRJ/CDJ/GJ update), President
+// included — assertPeriodOpen has no president bypass but periodOpenFor()
+// does, so the check is skipped for the President to match the boundary
+// exactly rather than inventing a client-only denial.
+// v14 re-audit ROUND 2 — the three `resyncLedgerForSource(...).then(redo)`
+// chains had no `.catch()`, so a throw anywhere in them (the mirror sync
+// itself, or the re-render that follows) became an unhandled rejection: no
+// toast, no console error the user would ever see, and a stale screen. The
+// mirror's OWN failure is reported by window.ledgerMirrorFailed
+// (js/departments.js) from inside resyncLedgerForSource; this handler exists
+// for the remaining link — a failed post-save refresh — and to guarantee the
+// chain can never reject silently.
+function _afterSaveRefreshFailed(err) {
+  console.error('[finance] post-save refresh failed', err);
+}
+
+window.financeEditModal = function({ collection, docId, title, fields, onSaved, transform, periodField }) {
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
   const selStyle = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)';
   const taStyle  = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)';
@@ -176,6 +198,12 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved, 
     upd.editedByName = window.userProfile?.displayName || u.email || '';
     upd.editedAt     = firebase.firestore.FieldValue.serverTimestamp();
     if (typeof transform === 'function') { try { transform(upd); } catch(_e) {} }
+    const _isPres = (typeof isPresident === 'function' && isPresident());
+    if (periodField && upd[periodField] && !_isPres && window.assertPeriodOpen) {
+      // assertPeriodOpen shows its own toast and throws — swallow the throw so
+      // the modal simply stays open on the user's edit.
+      try { await window.assertPeriodOpen(upd[periodField]); } catch (_e) { return; }
+    }
     try {
       await db.collection(collection).doc(docId).update(upd);
       closeModal(); Notifs.success('Updated.'); onSaved && onSaved();
@@ -1399,10 +1427,22 @@ async function renderLedgerTab(container, currentUser, currentRole) {
   // ledger entry or one leg of a General-Journal entry (data-src tells which).
   if (canFin) {
     const redo = () => renderLedgerTab(container, currentUser, currentRole);
-    container.querySelectorAll('.led-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+    container.querySelectorAll('.led-edit-btn').forEach(btn => btn.addEventListener('click', async () => {
       const e = entries.find(x=>x.id===btn.dataset.id && x._src===btn.dataset.src); if (!e) return;
+      // v14 re-audit fix — /ledger UPDATE now carries the same period-close
+      // gate as its own create and as CRJ/CDJ/GJ update, so a closed month's
+      // rows can no longer be restated. Guard the row's CURRENT month here
+      // (periodField:'date' below guards the month it's being moved TO), so
+      // the user gets the standard "books are closed" toast rather than a bare
+      // permission error — which is also what the general_journal branch has
+      // been doing silently-badly all along, since ITS rule already enforced
+      // this and the identical UI just failed with a raw error.
+      // President is exempt, matching firestore.rules' periodOpenFor() bypass.
+      if (!(typeof isPresident === 'function' && isPresident()) && e.date && window.assertPeriodOpen) {
+        try { await window.assertPeriodOpen(e.date); } catch (_e) { return; }
+      }
       if (btn.dataset.src === 'journal') {
-        window.financeEditModal({ collection:'general_journal', docId:e.id, title:'Journal Entry', onSaved:redo, fields:[
+        window.financeEditModal({ collection:'general_journal', docId:e.id, title:'Journal Entry', onSaved:redo, periodField:'date', fields:[
           { key:'date', label:'Date', type:'date', value:e.date },
           { key:'accountTitle', label:'Account Title', type:'text', value:e.accountTitle||e.description, full:true },
           { key:'debit',  label:'Debit (₱)',  type:'number', value:e.debit||0 },
@@ -1410,7 +1450,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
           { key:'reference', label:'Reference', type:'text', value:e.reference||e.refNumber, full:true }
         ]});
       } else {
-        window.financeEditModal({ collection:'ledger', docId:e.id, title:'Ledger Entry', onSaved:redo, fields:[
+        window.financeEditModal({ collection:'ledger', docId:e.id, title:'Ledger Entry', onSaved:redo, periodField:'date', fields:[
           { key:'date', label:'Date', type:'date', value:e.date },
           { key:'type', label:'Type', type:'select', value:e.type, options:['credit','debit'] },
           { key:'description', label:'Description / Account', type:'text', value:e.description, full:true },
@@ -1697,7 +1737,14 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
     ],
     // Edit doesn't just .update() the doc — the mirrored ledger row must stay in
     // sync, so onSaved chains resyncLedgerForSource(...).then(redo) instead of redo.
-    editOnSaved: (e, redo) => () => { resyncLedgerForSource('cash_receipt_journal', e.id).then(redo); },
+    editOnSaved: (e, redo) => () => { resyncLedgerForSource('cash_receipt_journal', e.id).then(redo).catch(_afterSaveRefreshFailed); },
+    // v14 re-audit ROUND 3 — this list is orderBy date desc limit 100, so
+    // CLOSED-month rows are on screen and one ✎ + date correction away from
+    // committing the source while /ledger refuses the mirrored CRJ-<id> and
+    // CRJ-<id>-AR legs. The rules now refuse the source write too; periodField
+    // turns that refusal into the standard "books are closed" toast (see the
+    // cfg.periodField note in js/ui-crud-table.js).
+    periodField: 'date',
     addModal: {
       title: 'New Cash Receipt Entry',
       // beforeOpen fetches bankOpts BEFORE openPage() — same ordering as the
@@ -1799,7 +1846,10 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       { key:'debitSundryAcct', label:'Debit: Sundry Account', type:'text', value:e.debitSundryAcct },
       { key:'debitSundryAmount', label:'Debit: Sundry Amount (₱)', type:'number', value:e.debitSundryAmount }
     ],
-    editOnSaved: (e, redo) => () => { resyncLedgerForSource('cash_disbursement_journal', e.id).then(redo); },
+    editOnSaved: (e, redo) => () => { resyncLedgerForSource('cash_disbursement_journal', e.id).then(redo).catch(_afterSaveRefreshFailed); },
+    // v14 re-audit ROUND 3 — same as the CRJ list above (CDJ-<id> + CDJ-<id>-AP
+    // legs). See the cfg.periodField note in js/ui-crud-table.js.
+    periodField: 'date',
     // Input VAT only applies to VATable purchases (material + sundry); mirrors the
     // create-path calc so an edited CDJ carries correct input VAT (v13 Phase 16).
     editTransform: (e) => (upd) => {
@@ -2178,9 +2228,22 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
 
   if (isPriv) {
     const redo = () => renderFinanceOverview(container, currentUser, currentRole);
-    container.querySelectorAll('.exp-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+    container.querySelectorAll('.exp-edit-btn').forEach(btn => btn.addEventListener('click', async () => {
       const e = expenses.find(x=>x.id===btn.dataset.id); if (!e) return;
-      window.financeEditModal({ collection:'expenses', docId:e.id, title:'Expense', onSaved:()=>{ resyncLedgerForSource('expenses', e.id).then(redo); }, fields:[
+      // v14 re-audit ROUND 2 — an expense is MIRRORED into the ledger as
+      // EXP-<id>, and the ledger is what the P&L and VAT read. /expenses UPDATE
+      // now carries the same period-close gate the ledger and the cash journals
+      // have (firestore.rules), so editing a closed month's expense is refused
+      // at the boundary. This guard is only the courtesy layer: it turns that
+      // refusal into the standard "books are closed" toast instead of a raw
+      // permission error, exactly as .led-edit-btn already does. The modal has
+      // no date field, so periodField:'date' would never fire — the row's
+      // stored date is the one that matters. President is exempt to match
+      // periodOpenFor()'s bypass.
+      if (!(typeof isPresident === 'function' && isPresident()) && e.date && window.assertPeriodOpen) {
+        try { await window.assertPeriodOpen(e.date); } catch (_e) { return; }
+      }
+      window.financeEditModal({ collection:'expenses', docId:e.id, title:'Expense', onSaved:()=>{ resyncLedgerForSource('expenses', e.id).then(redo).catch(_afterSaveRefreshFailed); }, fields:[
         { key:'description', label:'Description', type:'text', value:e.description, full:true },
         { key:'amount', label:'Amount (₱)', type:'number', value:e.amount },
         { key:'category', label:'Category', type:'text', value:e.category },

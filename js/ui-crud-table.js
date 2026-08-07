@@ -28,6 +28,18 @@
 //                                            // (e.g. CDJ recomputing vatAmount from edited legs)
 //     editOnSaved(r, redo) => fn,           // optional: custom onSaved for financeEditModal instead of the
 //                                            // default `redo` (e.g. CRJ/CDJ chaining resyncLedgerForSource(...).then(redo))
+//     periodField,                          // optional: name of the record's finance-period date field (e.g. 'date').
+//                                            // OPT-IN — set it ONLY for a collection whose firestore.rules update rule
+//                                            // actually carries the period-close gate (today: cash_receipt_journal,
+//                                            // cash_disbursement_journal). Setting it on an ungated collection
+//                                            // (tax_records, finance_records) would invent a client-only denial with no
+//                                            // rule behind it. When set, the ✎ button checks BOTH months — the row's
+//                                            // CURRENT one before opening the modal (the OUT direction) and the NEW one
+//                                            // on save (financeEditModal's own periodField, the IN direction) — so the
+//                                            // user gets the standard "books are closed" toast instead of a raw
+//                                            // permission error. This is the DIAGNOSTIC layer only; enforcement lives in
+//                                            // firestore.rules (journalUpdatePeriodOk). Same pair .led-edit-btn and
+//                                            // .exp-edit-btn already use (js/screens/finance.js).
 //     deleteLabel(r) => string,             // label for window.financeDelete
 //     kpiHtml(records) => html,             // optional: KPI row rendered above the Add-button row
 //     addModal: {
@@ -136,13 +148,29 @@ window.renderFinanceCrudTable = async function(container, cfg) {
 
   function bindRowActions(scopeEl) {
     if (!isPriv) return;
-    scopeEl.querySelectorAll('.crud-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+    scopeEl.querySelectorAll('.crud-edit-btn').forEach(btn => btn.addEventListener('click', async () => {
       const r = records.find(x => x.id === btn.dataset.id); if (!r) return;
+      // v14 re-audit ROUND 3 — guard the row's CURRENT month (cfg.periodField
+      // above explains why this is opt-in). The rules now refuse to move a CRJ/
+      // CDJ row OUT of a closed month as well as into one, and this handler is
+      // the ONLY ✎ button that had neither half of the guard — .led-edit-btn
+      // and .exp-edit-btn got theirs in round 2. Without it the user's save
+      // fails with a raw "permission-denied" AFTER the modal has closed.
+      // President is exempt, matching firestore.rules' periodOpenFor() bypass;
+      // a non-string/absent stored date is skipped, matching the rules'
+      // journalMonthOpen() fail-open on a date that buckets to no period.
+      if (cfg.periodField && typeof r[cfg.periodField] === 'string' && r[cfg.periodField]
+          && !(typeof isPresident === 'function' && isPresident()) && window.assertPeriodOpen) {
+        // assertPeriodOpen shows its own toast and throws — swallow it so the
+        // click is simply a no-op instead of an unhandled rejection.
+        try { await window.assertPeriodOpen(r[cfg.periodField]); } catch (_e) { return; }
+      }
       window.financeEditModal({
         collection, docId: r.id, title: cfg.editTitle,
         onSaved: cfg.editOnSaved ? cfg.editOnSaved(r, redo) : redo,
         fields: cfg.editFields(r),
-        transform: cfg.editTransform ? cfg.editTransform(r) : undefined
+        transform: cfg.editTransform ? cfg.editTransform(r) : undefined,
+        periodField: cfg.periodField
       });
     }));
     scopeEl.querySelectorAll('.crud-del-btn').forEach(btn => btn.addEventListener('click', () => {

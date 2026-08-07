@@ -1153,6 +1153,17 @@ async function _loadWorkerFinance(profile) {
   const monthStart = todayStr.slice(0, 7) + '-01';
 
   let weekSnap = { docs: [] }, monthSnap = { docs: [] }, payslipSnap = { docs: [] }, ytd = { gross: 0, net: 0 };
+  // v14 re-audit fix — the payslips read is the ONE member of this Promise.all
+  // that used to have no per-promise catch, so a single rejection took the
+  // whole thing down and the catch below replaced #wb-finance — the ENTIRE
+  // finance half of the only screen a Type-B worker has — with one error card.
+  // That is exactly what happened while firestore.rules compared `workerId` (a
+  // worker_profiles docId) to auth.uid: hours, the calendar and the clock card
+  // all worked, and the money section went dark the moment Finance issued the
+  // worker's first payslip. The rule is fixed (payslips read now resolves
+  // ownership through worker_profiles.linkedUid), but the blast radius stays
+  // fixed too: this one card degrades on its own instead of the section.
+  let payslipErr = null;
   try {
     [weekSnap, monthSnap, payslipSnap, ytd] = await Promise.all([
       db.collection('attendance_worker').doc(profile.id).collection('records')
@@ -1161,7 +1172,8 @@ async function _loadWorkerFinance(profile) {
       db.collection('attendance_worker').doc(profile.id).collection('records')
         .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
         .where(firebase.firestore.FieldPath.documentId(), '<=', todayStr).get(),
-      db.collection('payslips').where('workerId', '==', profile.id).orderBy('createdAt', 'desc').limit(5).get(),
+      db.collection('payslips').where('workerId', '==', profile.id).orderBy('createdAt', 'desc').limit(5).get()
+        .catch(e => { payslipErr = e; return { docs: [] }; }),
       window.payslipYtdWeekly ? window.payslipYtdWeekly(profile.id, window.bizYear ? window.bizYear() : new Date().getFullYear()) : Promise.resolve({ gross: 0, net: 0 })
     ]);
   } catch (err) {
@@ -1206,7 +1218,12 @@ async function _loadWorkerFinance(profile) {
     <div class="card">
       <div class="card-header"><h3>Recent Payslips</h3></div>
       <div class="card-body" style="padding:0">
-        ${!payslips.length ? `<div class="empty-state" style="padding:20px"><p>No payslips issued yet.</p></div>` :
+        ${payslipErr ? `<div class="empty-state" style="padding:20px">
+            <p>Couldn't load your payslips.</p>
+            <p style="font-size:11px;color:var(--text-muted)">${escHtml(payslipErr.message || String(payslipErr))}</p>
+            <button type="button" class="btn-secondary btn-sm" id="wb-ps-retry" style="margin-top:10px">Retry</button>
+          </div>` :
+          !payslips.length ? `<div class="empty-state" style="padding:20px"><p>No payslips issued yet.</p></div>` :
           payslips.map(p => `<div class="wb-payslip-row" data-id="${p.id}" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);cursor:pointer">
             <div>
               <div style="font-weight:600;font-size:13px">${escHtml(p.payPeriodStart || '')} – ${escHtml(p.payPeriodEnd || '')}</div>
@@ -1217,6 +1234,7 @@ async function _loadWorkerFinance(profile) {
       </div>
     </div>`;
   if (window.lucide) lucide.createIcons({ nodes: [el] });
+  document.getElementById('wb-ps-retry')?.addEventListener('click', () => _loadWorkerFinance(profile));
 
   el.querySelectorAll('.wb-payslip-row').forEach(row => {
     row.addEventListener('click', () => {

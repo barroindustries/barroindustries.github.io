@@ -75,6 +75,47 @@ service cloud.firestore {
     }
     function canDept(d) { return isAdmin() || inDept(d); }
 
+    // ── IDENTITY BINDING (v14 re-audit ROUND 2 — critical) ─────────────
+    // `email` + `pendingPasswordSetup` are together the KEY that
+    // createUserDocOnAuthCreate (functions/index.js, Admin SDK — bypasses every
+    // rule in this file) uses to decide that a users doc is an unclaimed
+    // signup-approval PLACEHOLDER and to hand its entire contents — role
+    // included — to whoever next registers a Firebase Auth account at that
+    // address. Neither field was frozen anywhere, and `pendingPasswordSetup`
+    // did not appear in this file at all, so ANY isAdmin() (manager OR
+    // secretary) could run
+    //     users/<PRESIDENT_UID>.update({ email:'attacker@…',
+    //                                    pendingPasswordSetup:true })
+    // — role/department/departments/employeeId all byte-identical, so
+    // userPrivilegedFieldsUnchanged() passed — then create an Auth account at
+    // that address (Email/Password is enabled and the web apiKey is public) and
+    // let the trigger copy role:'president' onto it AND DELETE the real
+    // President's doc. That converts the CREATE-side fixes above (a manager may
+    // not mint a president; a secretary may not mint the money tier) into
+    // decoration: the attacker never creates a privileged doc, they CONVERT one.
+    //
+    // So: the two fields that mark a doc as claimable are immutable for every
+    // branch below except the President's own. No client code path anywhere in
+    // the repo updates either field — the ONE writer of pendingPasswordSetup is
+    // signupApprove's batch.set() at CREATE time (js/svc-approvals.js), and
+    // `email` is only ever written at create (js/app.js self-signup,
+    // js/screens/people.js invite, js/screens/dashboards.js worker-create); the
+    // Edit Employee, HR payslip-identity and offboarding writers all leave it
+    // alone. Freezing them therefore costs no existing flow. It is deliberately
+    // applied to the OWNER too: `email` is the binding between this doc and the
+    // Auth account, and a user re-pointing their own doc at someone else's
+    // address is the same laundering primitive from the other end.
+    // NOTE this is only HALF the fix and not the load-bearing half — see
+    // functions/index.js createUserDocOnAuthCreate, which must not adopt (or
+    // delete) a doc that is a live account rather than a real placeholder,
+    // because a privileged doc whose email happens to have no Auth account can
+    // still be claimed with the flag alone.
+    function userIdentityBindingUnchanged() {
+      return request.resource.data.get('email', null) == resource.data.get('email', null)
+          && request.resource.data.get('pendingPasswordSetup', null)
+             == resource.data.get('pendingPasswordSetup', null);
+    }
+
     // True when a user-profile update leaves all privileged fields untouched.
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
     // themselves (role) or change their own pay/department/employee ID.
@@ -114,7 +155,11 @@ service cloud.firestore {
           && n.get('removedAt', null)    == o.get('removedAt', null)
           && n.get('removedBy', null)    == o.get('removedBy', null)
           && n.get('reinstatedAt', null) == o.get('reinstatedAt', null)
-          && n.get('reinstatedBy', null) == o.get('reinstatedBy', null);
+          && n.get('reinstatedBy', null) == o.get('reinstatedBy', null)
+          // v14 re-audit ROUND 2 — see userIdentityBindingUnchanged() above.
+          // Covers the OWNER and the non-senior isAdmin() (secretary) branches,
+          // which are the two that call this helper.
+          && userIdentityBindingUnchanged();
     }
 
     // ── Shape validators (Phase 92) ─────────────────────
@@ -129,23 +174,110 @@ service cloud.firestore {
 
     // ── Users ──────────────────────────────────────────
     match /users/{uid} {
-      allow read: if isAuth();
+      // v14 re-audit fix — `read` covers BOTH get and list, so the old bare
+      // `allow read: if isAuth()` let ANY signed-in principal (an external
+      // partner most sharply, but equally any compromised low-privilege
+      // account) pull the ENTIRE staff directory — displayName, email, phone,
+      // employeeId, role, departments — with one unfiltered
+      // db.collection('users').get(). The "partners only see partners" filter
+      // was pure client-side JS (renderTeamTab, js/screens/people.js; and
+      // dmCandidates, js/chat.js), i.e. applied AFTER the full snapshot had
+      // already been delivered to the partner's machine. This is the only
+      // collection in the file that had no partner scoping at all.
+      //
+      // Split the two operations rather than locking partners out wholesale:
+      //  • get  stays open to every signed-in user. Single-doc uid→name/photo
+      //    resolution is everywhere the partner legitimately works — the chat
+      //    DM header (js/chat.js), task assignees/creators, approval actors,
+      //    post authors — and the caller must already hold the uid, so there
+      //    is no enumeration. Also, no rule anywhere depends on this: getRole()
+      //    uses a rules-side get(), which bypasses rules entirely.
+      //  • list is where enumeration lives, so that is what a partner loses.
+      //    A partner may run ONLY a query whose role filter Firestore can
+      //    prove is confined to what their two directory screens actually
+      //    need: other partners (the Team tab) plus president/manager (the
+      //    "New Message" picker's candidate set — js/chat.js dmCandidates,
+      //    Decision 3). Internal staff keep the unfiltered list unchanged.
+      //
+      // Firestore evaluates a `list` rule against the QUERY, not per document
+      // ("rules are not filters"), so the client MUST send the matching
+      // filter — js/config.js fetchUsersWithPayroll() now emits
+      // .where('role','in',['partner','president','manager']) when the caller
+      // is a partner, and every partner-reachable directory read funnels
+      // through it (dbCachedGet force-substitutes it for the 'users' key).
+      // Verified against the emulator: that query AND a plain
+      // where('role','==','partner') both prove against this rule, while an
+      // unfiltered list and a where('role','==','employee') are denied.
+      // .get('role','') — a legacy user doc with no role field must deny the
+      // partner branch, not ERROR the rule (an erroring rule denies for
+      // everyone, incl. the internal staff who share this block).
+      allow get:  if isAuth();
+      allow list: if isAuth() && ( !isPartner()
+        || resource.data.get('role', '') in ['partner', 'president', 'manager'] );
+      // Self-signup must not self-assign into a privileged department:
+      // Finance/Design membership grants dept-scoped write access via
+      // isFinanceDept()/isDesignDept() (and Storage claims via syncUserClaims).
+      // v14 re-audit fix — hoisted out of the isOwner branch so the isAdmin
+      // (secretary) branch below can reuse the SAME check and the two can
+      // never drift apart.
+      function noPrivilegedDeptOnCreate() {
+        return request.resource.data.get('department', '') != 'Finance'
+            && request.resource.data.get('department', '') != 'Design'
+            && !request.resource.data.get('departments', []).hasAny(['Finance','Design']);
+      }
       // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
       // v12 WS19: only isSeniorAdmin() (president/manager) may mint a manager/
       // president/secretary account — a secretary/other isAdmin() account may
       // still onboard ordinary staff (employee/agent/finance-department hires).
+      //
+      // v14 re-audit fix #1 — this rule is the CREATE twin of the update rule
+      // below and had drifted badly out of sync with it. The update rule was
+      // hardened with `request.resource.data.get('role','employee') !=
+      // 'president'`; create had NO constraint on the minted role at all under
+      // isSeniorAdmin(), so a manager could not PROMOTE anyone to president but
+      // could freely MINT a brand-new president account (Invite Team Member,
+      // js/screens/people.js; Create Worker Account, js/screens/dashboards.js —
+      // both role pickers render window.ROLES unfiltered) and then sign into
+      // it. President is the top of the hierarchy — settings/{docId} force-
+      // logout, finance_delete_requests approval, finance_periods close/reopen
+      // and the periodOpenFor() bypass, and ~40 `allow delete` rules all key
+      // off it — so the whole "finance deletes route to the President" control
+      // collapses if the tier is forgeable. Split president out unconditionally
+      // (nothing above it to escalate to) and mirror the update rule's guard,
+      // plus a role ENUM so an unknown/typo role string can't be minted either.
+      //
+      // v14 re-audit fix #2 — the non-senior isAdmin() branch (which includes
+      // 'secretary', see isAdmin() at the top of this file) allowlisted
+      // role:'finance' and applied NO department check, so a Corporate
+      // Secretary could create an account they control carrying role:'finance'
+      // and/or departments:['Finance'] and hand themselves the money tier:
+      // isMoneyAdmin()/isFinanceDept()→canFinance() are the sole gate on
+      // payroll, salary_history, salary_raises, pay_runs, cash_advances
+      // approval, ledger and all three journals. That is precisely the tier
+      // WS19 spent this whole file taking AWAY from secretary. The onboarding
+      // capability the comment above describes is preserved — a secretary may
+      // still create ordinary employee/agent staff — it just can no longer
+      // mint the money role or Finance/Design membership. The only creation
+      // path a secretary actually drives in the UI, signupApprove
+      // (js/svc-approvals.js), hardcodes role:'employee' + departments:[] and
+      // is unaffected; "+ Invite Member" and "Create Worker Account" are
+      // already president/manager-gated, i.e. isSeniorAdmin(), and keep full
+      // power. Design is frozen alongside Finance for the same reason the
+      // self-signup branch already froze it.
       allow create: if isAuth() && (
-        isSeniorAdmin() || (
-          isAdmin() && request.resource.data.get('role', 'employee') in ['employee', 'agent', 'finance']
+        isPresident() || (
+          isSeniorAdmin()
+          && request.resource.data.get('role', 'employee') != 'president'
+          && request.resource.data.get('role', 'employee') in
+               ['manager', 'secretary', 'employee', 'agent', 'finance', 'partner']
+        ) || (
+          isAdmin()
+          && request.resource.data.get('role', 'employee') in ['employee', 'agent']
+          && noPrivilegedDeptOnCreate()
         ) || (
           isOwner(uid)
           && request.resource.data.role == 'employee'
-          // Self-signup must not self-assign into a privileged department:
-          // Finance/Design membership grants dept-scoped write access via
-          // isFinanceDept()/isDesignDept() (and Storage claims via syncUserClaims).
-          && request.resource.data.get('department', '') != 'Finance'
-          && request.resource.data.get('department', '') != 'Design'
-          && !request.resource.data.get('departments', []).hasAny(['Finance','Design'])
+          && noPrivilegedDeptOnCreate()
         )
       );
       // Owner-first short-circuit: routine self-updates (name/photo/phone/lastSeen)
@@ -194,12 +326,60 @@ service cloud.firestore {
         return request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['removed','removedAt','removedBy','reinstatedAt','reinstatedBy']);
       }
+      // v14 re-audit ROUND 2 — the isSeniorAdmin() branch does NOT call
+      // userPrivilegedFieldsUnchanged() (a manager legitimately changes role /
+      // department / salary as ordinary HR duty), so freezing the identity
+      // binding inside that helper does not reach this branch. Without the
+      // explicit call below, a MANAGER could still flip
+      // {email, pendingPasswordSetup} onto any non-president doc (a role:
+      // 'finance' one, say) and launder it through createUserDocOnAuthCreate —
+      // exactly the harm F65 was written to stop. Same field pair, same
+      // rationale; no legitimate manager-driven write touches either field.
+      // ⚠ v14 re-audit ROUND 3 — ONE-WRITE OWNER LOCKOUT (pre-existing at HEAD).
+      // The senior branch tested only the POST-write role. It never looked at
+      // resource.data, so a MANAGER could run
+      //     users/<PRESIDENT_UID>.update({ role:'employee' })
+      // and it was ALLOWED (measured on the emulator). Afterwards nobody is
+      // president and nobody can ever become one again: this branch's
+      // !isOwner(uid) blocks self-promotion, its != 'president' blocks
+      // promoting anyone else, and the create rule's senior branch excludes
+      // 'president' by both a != and an enum. Measured immediately after that
+      // single write, ELEVEN president-only operations were unsatisfiable by
+      // every actor in the tenant — finance_delete_requests update/delete,
+      // finance_periods create/update (so a closed month can NEVER be
+      // reopened), the settings force-logout kill switch, periodOpenFor()'s
+      // president bypass, and every `allow delete: if isPresident()`. The
+      // manager can then call setUserDisabled, whose
+      // `if (targetRole === 'president')` guard (functions/index.js) now reads
+      // 'employee', and disable the owner's Auth account. Recovery needs the
+      // Firebase console, not the app.
+      //
+      // The HR branch two lines below already carried the correct half
+      // (resource.data.get('role','employee') != 'president'), so this was an
+      // asymmetry, not a design decision.
+      //
+      // COST, measured: this conjunct fires ONLY when the TARGET doc is
+      // currently a president. A manager's writes to every non-president user
+      // are untouched (14/14 probed operations unchanged — role changes to
+      // manager/finance/secretary/agent, salary, department, employeeId,
+      // offboarding, Edit Employee, HR merge-set, account creation, read).
+      // On a president's doc the manager loses exactly the three demotions
+      // (-> employee / manager / finance) and nothing else: every OTHER
+      // privileged edit to a president was ALREADY denied, because keeping
+      // role=='president' fails this branch's request-side != and then falls
+      // through to (isAdmin() && userPrivilegedFieldsUnchanged()). Renaming a
+      // president, setting their phone/photo and reading their doc still work
+      // via that same isAdmin() branch. Presidents keep full power over each
+      // other, so a real handover (promote successor -> successor demotes the
+      // outgoing president) still works with no console access.
       allow update: if isAuth() && (
         isPresident() ||
         (isSeniorAdmin() && !isOwner(uid)
+          && resource.data.get('role', 'employee') != 'president'
           && request.resource.data.get('role', 'employee') != 'president'
           && fcmTokenUnchangedForOthers()
-          && hrFlagUnchanged()) ||
+          && hrFlagUnchanged()
+          && userIdentityBindingUnchanged()) ||
         (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||
         (isAdmin() && userPrivilegedFieldsUnchanged() && fcmTokenUnchangedForOthers()) ||
         (inDept('HR') && !isOwner(uid)
@@ -383,6 +563,22 @@ service cloud.firestore {
       let p = get(/databases/$(database)/documents/worker_profiles/$(workerId)).data;
       return p.get('linkedUid','') == request.auth.uid && p.get('status', 'active') != 'inactive';
     }
+    // v14 re-audit fix — status-FREE sibling of isLinkedWorkerUid() above, for
+    // ownership checks that must survive offboarding. Setting a worker_profiles
+    // doc's Status to 'inactive' has to stop the worker PUNCHING (that is what
+    // isLinkedWorkerUid enforces) but must never retroactively hide the pay
+    // records they already earned — a worker keeps access to their own issued
+    // payslips.
+    // Unlike isLinkedWorkerUid (whose workerId comes from the doc PATH and so
+    // always exists), callers here pass a value read off the document being
+    // checked, so it may be '' or point at a since-deleted profile. A get() on
+    // a missing path ERRORS, and an erroring rule DENIES — hence the explicit
+    // != '' and exists() guards before the get().
+    function isLinkedWorkerProfile(workerId) {
+      return workerId != ''
+        && exists(/databases/$(database)/documents/worker_profiles/$(workerId))
+        && get(/databases/$(database)/documents/worker_profiles/$(workerId)).data.get('linkedUid','') == request.auth.uid;
+    }
     match /attendance_worker/{workerId} {
       allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
     }
@@ -509,8 +705,15 @@ service cloud.firestore {
       // (status, reassignment, follow-up requests). Uses isFinanceOrAdmin() so the
       // client's task controls — which treat finance as an editor — actually land
       // (finance is the books/ops editor: "finance can edit everything").
+      // v14 re-audit ROUND 2 — .get('assignedTo', []) to match the read rule 10
+      // lines up. Behaviourally identical (measured): a task with no
+      // assignedTo field made the direct read ERROR, and CEL absorbs that error
+      // whenever the isFinanceOrAdmin() disjunct is true, so finance/admin were
+      // never actually blocked and a non-assignee was denied either way. Made
+      // consistent so the two rules cannot be read as disagreeing about whether
+      // the field is optional.
       allow update: if isAuth() && (
-        (request.auth.uid in resource.data.assignedTo) || isFinanceOrAdmin()
+        (request.auth.uid in resource.data.get('assignedTo', [])) || isFinanceOrAdmin()
       );
       // Admins delete any task; a creator may delete the task they made (the UI
       // already offers it to the creator, so this stops a silent permission fail).
@@ -828,9 +1031,25 @@ service cloud.firestore {
 
     // ── Salary raises (audit log of pay increases) ─────
     // Finance/admin grant & manage; the affected app-user may read their own.
+    // v14 re-audit ROUND 2 — the "subject may read their own" branch was HALF
+    // dead, exactly like the payslips one just fixed. There are two writers:
+    // the employee raise sets {subjectType:'payroll', subjectId:<auth uid>}
+    // (js/screens/hr.js) — that half works — but the Type-B worker raise sets
+    // {subjectType:'worker_profile', subjectId:<worker_profiles AUTO-ID>},
+    // which can never equal request.auth.uid. Same worker_profiles.linkedUid
+    // bridge as /payslips and /attendance_worker, via the same status-free
+    // helper. Latent today (no worker screen reads these yet — the only
+    // own-raise reader is the employee dashboard's
+    // where('subjectId','==',uid)); fixed now because it is the identical
+    // defect class and a future Raise History card would inherit it silently.
+    // isFinanceOrAdmin() stays first so the admin list short-circuits without
+    // the profile lookup, and the .get('subjectId','') + != '' + exists()
+    // ordering means a raise row with no subjectId denies rather than errors.
     match /salary_raises/{docId} {
       allow read: if isAuth() && (
-        resource.data.subjectId == request.auth.uid || isFinanceOrAdmin()
+        isFinanceOrAdmin() ||
+        resource.data.get('subjectId', '') == request.auth.uid ||
+        isLinkedWorkerProfile(resource.data.get('subjectId', ''))
       );
       allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
@@ -843,8 +1062,11 @@ service cloud.firestore {
     // President approves → scheduled; the screen-load sweep materializes
     // (scheduled → applied). Subject may read their own.
     match /pending_raises/{docId} {
+      // Same half-dead subject branch as /salary_raises above — see there.
       allow read: if isAuth() && (
-        resource.data.subjectId == request.auth.uid || isFinanceOrAdmin()
+        isFinanceOrAdmin() ||
+        resource.data.get('subjectId', '') == request.auth.uid ||
+        isLinkedWorkerProfile(resource.data.get('subjectId', ''))
       );
       allow create: if isAuth() && (
         isPresident()
@@ -918,6 +1140,57 @@ service cloud.firestore {
 
     // ── Expenses ───────────────────────────────────────
     match /expenses/{docId} {
+      // v14 re-audit ROUND 2 — PERIOD-CLOSE GATE (see the ledger block's own
+      // gate further down, and the identical gate cash_receipt_journal /
+      // cash_disbursement_journal have carried since WS12).
+      //
+      // WHY THIS LAYER. An /expenses row is MIRRORED into /ledger as
+      // `EXP-<id>` (postExpenseToLedger / resyncLedgerForSource, js/departments
+      // .js) and the P&L + VAT return are derived from the LEDGER, never from
+      // /expenses. Closing the ledger's update rule alone (the previous pass)
+      // therefore did not make a closed month immutable — it made the two
+      // halves DIVERGE: the Expense ✎ button (js/screens/finance.js
+      // renderFinanceOverview) still wrote the source doc, then
+      // Ledger.upsertByRef's merge onto the existing EXP- row was denied, and
+      // the denial was swallowed (a console.warn inside resyncLedgerForSource
+      // plus a .then(redo) with no .catch), so the user saw "Updated." while
+      // the books silently stopped matching their own source records. Before
+      // that pass the two at least agreed — wrongly, but consistently.
+      //
+      // The gate belongs HERE, not on the button and not inside
+      // Ledger.upsertByRef, because those are the two doors that exist TODAY:
+      // a client-side guard makes the current path fail loudly but leaves the
+      // invariant unenforced for the next screen, a devtools write, or a
+      // future bulk-edit — and by the time upsertByRef runs, the source doc
+      // has ALREADY been written, so the mirror layer can only report the
+      // divergence, never prevent it. Enforcing it at the source collection's
+      // trust boundary makes source and mirror share one period rule, which is
+      // exactly the property CRJ/CDJ already have (their own update rules
+      // carry periodOpenFor(), which is why their identical resync chain never
+      // desynced). The client guard + the .catch() added alongside this are
+      // diagnostics — a clean toast instead of a raw permission error — not
+      // the enforcement.
+      //
+      // Legacy-safe, per the missing-field-denies hazard: an expense with no
+      // `date`, a malformed one, or a Timestamp (a type periodOpenFor cannot
+      // split, and .matches() ERRORS on) belongs to no period, so it stays
+      // editable rather than being locked out — same fail-open policy the
+      // ledger block documents for its own pre-WS12 rows.
+      // CREATE is deliberately NOT gated: an expense doc on its own restates
+      // nothing (the ledger row is what the P&L reads, and /ledger create has
+      // carried the gate since WS12), and gating it would newly refuse a late
+      // receipt filed against a closed month with no compensating benefit.
+      function expenseMonthOpen(d) {
+        return !(d is string)
+            || !d.matches('^\\d{4}-\\d{2}(-\\d{2})?$')
+            || periodOpenFor(d);
+      }
+      // Both sides, so a row can be moved neither INTO nor OUT of a closed
+      // month (the ledger's ledgerMaterialUpdateOk() does the same).
+      function expensePeriodOk() {
+        return expenseMonthOpen(resource.data.get('date', ''))
+            && expenseMonthOpen(request.resource.data.get('date', ''));
+      }
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
       );
@@ -927,12 +1200,14 @@ service cloud.firestore {
       // was freely editable right up until Finance acted on it, with no
       // diff/audit record of the change; a correction now has to go through
       // Finance like the status transition already does).
+      // The role test stays FIRST so an unauthorized caller short-circuits
+      // before paying periodOpenFor()'s exists()+get().
       allow update: if isAuth() && (
         isFinanceOrAdmin() ||
         (resource.data.createdBy == request.auth.uid
           && request.resource.data.status == resource.data.status
           && request.resource.data.amount == resource.data.amount)
-      );
+      ) && expensePeriodOk();
       // Delete is President-only — finance staff request it via the approval flow.
       allow delete: if isAuth() && isPresident();
     }
@@ -1414,12 +1689,19 @@ service cloud.firestore {
       return periodOpenFor(request.resource.data.get('date', ''));
     }
     // v13 Phase 84 — generalized period-close check, reusable by any money
-    // collection that carries a 'date' field. Same fail-open/fail-safe rules as
-    // the original ledger-only helper it replaces: President bypasses; a date
-    // that doesn't split into a real yyyy-mm (missing/malformed, e.g. '') maps
-    // to a finance_periods docId that will never exist, so the !exists() branch
-    // fires and the write is allowed — mirroring ledgerDateOk's separate check
-    // of date *format* rather than silently blocking on an unrelated field.
+    // collection that carries a 'date' field. President bypasses; a month with
+    // no finance_periods doc is OPEN (fail-open on absence, the safe default
+    // per the missing-field-denies gotcha).
+    //
+    // ⚠ v14 re-audit correction — the note that used to sit here claimed a
+    // missing/malformed date (e.g. '') "maps to a finance_periods docId that
+    // will never exist, so the !exists() branch fires and the write is
+    // allowed". That is NOT what the engine does: ''.split('-') has no index
+    // [1], so the expression ERRORS, and an erroring rule DENIES. Verified in
+    // the emulator. It has never bitten, only because every existing caller
+    // puts `ledgerDateOk() &&` in front and && short-circuits. NEVER call this
+    // with a string you have not already matched against the yyyy-mm(-dd)
+    // regex first.
     function periodOpenFor(dateStr) {
       return isPresident() ||
         !exists(/databases/$(database)/documents/finance_periods/$(
@@ -1428,7 +1710,26 @@ service cloud.firestore {
           dateStr.split('-')[0] + '-' + dateStr.split('-')[1])).data.get('closed', false) == false;
     }
     match /finance_periods/{month} {
-      allow read: if isAuth() && canFinance();
+      // v14 re-audit ROUND 2 — read widened canFinance() -> isFinanceOrAdmin(),
+      // i.e. secretary added. These docs hold ONLY {closed, closedBy, closedAt}
+      // — no figures — and are what the client's isPeriodClosed()/
+      // assertPeriodOpen() (js/config.js) and the 🔒 Closed badge read. The
+      // Corporate Secretary reaches the Finance Overview and its Expense ✎
+      // button (isFinancePriv() returns true for them, js/departments.js), so
+      // with the read denied their period lookup silently failed open and the
+      // new /expenses period gate surfaced as a raw "Update failed:
+      // permission-denied" instead of "That month's books are closed…". Read
+      // only: create/update stay President-only and delete stays false, so this
+      // cannot weaken the lock itself — and secretary already reads payslips,
+      // payroll and salary_history, all strictly more sensitive than "is June
+      // closed?".
+      // The UNION, not a swap: canFinance() is isMoneyAdmin() OR Finance-DEPT
+      // membership, and isFinanceOrAdmin() is role-based only — a Finance-dept
+      // employee (role 'employee', departments ['Finance']) is in the first and
+      // NOT the second. Writing isFinanceOrAdmin() alone took the period lookup
+      // away from exactly the people who post to the ledger all day; the
+      // differential matrix caught it. Both predicates, so nobody loses it.
+      allow read: if isAuth() && (canFinance() || isFinanceOrAdmin());
       allow create, update: if isAuth() && isPresident();
       allow delete: if false;
     }
@@ -1445,6 +1746,24 @@ service cloud.firestore {
     // Finance Tools is the reconciliation authority. Writers = anyone who can
     // post ledger rows (finance + the fenced Production COS path).
     match /finance_rollup/{docId} {
+      // v14 re-audit ROUND 2 — period gate. These docs ARE the month's reported
+      // headline figures (the Finance Overview / dashboard KPI tiles read them
+      // instead of scanning the ledger, js/screens/finance.js
+      // renderFinanceOverview), so leaving them ungated meant a CLOSED month's
+      // published income/expense/VAT could still be moved directly even after
+      // the ledger rows behind them were locked — the same restatement F50
+      // closed, one layer up. Every real writer is _syncRollup/rebuildRollups
+      // (js/finance-ledger.js), which only ever runs AFTER a ledger write that
+      // has itself cleared this same gate, so an open month is unaffected and
+      // a closed month can only be touched by the President (periodOpenFor()'s
+      // bypass) — who is also the only one who can reopen the period or run
+      // Rebuild rollups. Guarded on BOTH the docId (which IS the month key by
+      // construction: .doc(delta.month)) and the `month` field, so writing a
+      // July figure into the June doc doesn't dodge it. Same fail-open policy
+      // for an unbucketable value as everywhere else in this file.
+      function rollupMonthOpen(m) {
+        return !(m is string) || !m.matches('^\\d{4}-\\d{2}$') || periodOpenFor(m);
+      }
       allow read: if isAuth() && canFinance();
       // v14 re-audit fix — was unfenced `write` (create+update+delete) with NO
       // affectedKeys() shape guard, unlike the analogous Production ledger leg
@@ -1456,7 +1775,9 @@ service cloud.firestore {
       // a rollup doc.
       allow create, update: if isAuth() && (canFinance() || canProduction())
         && request.resource.data.keys().hasOnly(
-             ['month','income','expense','vatOutput','vatInput','byCategory','count','updatedAt']);
+             ['month','income','expense','vatOutput','vatInput','byCategory','count','updatedAt'])
+        && rollupMonthOpen(docId)
+        && rollupMonthOpen(request.resource.data.get('month', ''));
       allow delete: if isAuth() && canFinance();
     }
 
@@ -1472,6 +1793,80 @@ service cloud.firestore {
       // the INV leg, the trailing '-INV') recovers the id exactly.
       function pocosOrderId(ref) {
         return ref.split('POCOS-')[1].split('-INV')[0];
+      }
+      // v14 re-audit fix — /ledger UPDATE was the ONE money-collection rule
+      // with no period-close check at all. The sibling create below carries
+      // ledgerDateOk() + ledgerPeriodOpen(), and cash_receipt_journal /
+      // cash_disbursement_journal / general_journal carry both on create AND
+      // update — but a CLOSED month's ledger rows could still be restated
+      // (amount, category, even the date itself). That silently rewrites an
+      // already-filed P&L and VAT return: closeFinancePeriod snapshots no
+      // figures (js/departments.js writes only {closed,closedBy,closedAt}), and
+      // ledgerForPeriod (js/config.js) + computeVatSummary (js/bir.js) re-derive
+      // from the live ledger on every render. The same ✎ button's
+      // general_journal branch DID fail with a permission error, so the /ledger
+      // branch succeeding quietly made the gap invisible to the user.
+      //
+      // Bank-reconciliation maintenance legitimately touches OLD (closed-month)
+      // rows and moves no reported figure, so those writes keep the loose path:
+      // the reconcile checkbox and bank re-tag select (js/screens/finance.js)
+      // and the Bank Rec 'cleared' checkbox (js/bir.js). Everything else —
+      // amount/date/type/category/description/refNumber, i.e. financeEditModal
+      // and Ledger.upsertByRef's merge onto an existing row — must clear the
+      // period gate on BOTH sides, so a row can be moved neither INTO nor OUT
+      // of a closed month.
+      // v14 re-audit ROUND 2 — 'bankFlow' REMOVED from this allowlist. It was
+      // the one entry no maintenance writer actually needs (the reconcile
+      // checkbox writes reconciled/By/At — js/screens/finance.js; the Bank Rec
+      // clear checkbox writes cleared/By/At — js/bir.js; the re-tag select
+      // writes bankAccountId/bankAccountName only), and it is the one that
+      // INVERTS a figure: 'in' ↔ 'out' flips the sign of that row in the
+      // derived bank balance (js/config.js) and in the Bank Rec report
+      // (js/bir.js). bankAccountId/bankAccountName deliberately STAY — moving a
+      // mis-tagged old row to the right account is exactly the reconciliation
+      // work that must survive a close, and it changes no filed figure: the
+      // period lock exists so an already-filed P&L/VAT (type, category, amount,
+      // date) cannot be rewritten, and a bank balance is a live cash position,
+      // not a filed one.
+      function ledgerNonMaterialUpdate() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+          ['reconciled', 'reconciledBy', 'reconciledAt',
+           'cleared', 'clearedBy', 'clearedAt',
+           'bankAccountId', 'bankAccountName',
+           'editedBy', 'editedByName', 'editedAt']);
+      }
+      // periodOpenFor() ERRORS (= denies) on anything it can't split into a
+      // yyyy-mm — see the ⚠ note on that function — so every call is guarded
+      // by the same format check first. Rows predating WS12's create-side
+      // ledgerDateOk() may carry a missing/malformed date; they belong to no
+      // period, so they are neither gated by this nor able to restate a closed
+      // month. Fail-OPEN there is deliberate: locking legacy rows out of every
+      // edit would be worse than the hole being closed.
+      // v14 re-audit ROUND 2 — `d is string` first. .matches() is a STRING
+      // method: on a row whose `date` is a Timestamp rather than a
+      // 'YYYY-MM-DD' string it raises "Function not found error: [matches]",
+      // and an erroring rule DENIES — so a single legacy Timestamp-dated row
+      // would have been permanently un-editable by everyone except the
+      // President (whose periodOpenFor() bypass makes the right operand true,
+      // which CEL then uses to absorb the left error). Reproduced in the
+      // emulator, not theorised. A non-string date can't be bucketed into a
+      // finance_period at all, so it takes the same fail-open path as a
+      // missing/malformed one.
+      function ledgerMonthOpen(d) {
+        return !(d is string)
+            || !d.matches('^\\d{4}-\\d{2}(-\\d{2})?$')
+            || periodOpenFor(d);
+      }
+      // A material edit must carry a well-formed date OR leave the row's
+      // existing (possibly legacy/malformed) date byte-identical — that second
+      // clause is purely so a legacy dateless row stays editable; it can't be
+      // used to dodge the gate, because an unchanged date is checked by the
+      // very same ledgerMonthOpen() call as the old one.
+      function ledgerMaterialUpdateOk() {
+        return ( ledgerDateOk()
+                 || request.resource.data.get('date', '') == resource.data.get('date', '') )
+            && ledgerMonthOpen(resource.data.get('date', ''))
+            && ledgerMonthOpen(request.resource.data.get('date', ''));
       }
       // Finance/admin post anything (subject to the date + period-close gate
       // above). Production may ALSO post its own material COS — v12 WS13 adds a
@@ -1510,7 +1905,8 @@ service cloud.firestore {
             ))
       );
       allow update: if isAuth() && canFinance()
-        && request.resource.data.get('bankFlow', '') in ['', 'in', 'out'];
+        && request.resource.data.get('bankFlow', '') in ['', 'in', 'out']
+        && ( ledgerNonMaterialUpdate() || ledgerMaterialUpdateOk() );
       allow delete: if isAuth() && isPresident();
     }
     match /ledger_entries/{docId} {
@@ -1525,19 +1921,80 @@ service cloud.firestore {
     // never blocks a legit write — only a forged/malformed date. expenses and
     // payslips are deliberately NOT covered this pass (their status-transition
     // updates don't carry a date field) — see Phase 84 follow-up note.
+    //
+    // ⚠ v14 re-audit ROUND 3 — THE GATE ON UPDATE IS NOW TWO-SIDED.
+    //
+    // The three rules below used to read `resource.data` NOWHERE: they checked
+    // only the INCOMING month. Their mirror in /ledger checks BOTH (see
+    // ledgerMaterialUpdateOk() above, made two-sided in round 1), so the mirror
+    // was strictly STRICTER than its own source and an input existed that the
+    // source accepted and the mirror refused:
+    //
+    //   Finance opens a CLOSED-June CRJ row (they are on screen —
+    //   renderCashReceiptJournal lists orderBy date desc limit 100,
+    //   js/screens/finance.js), corrects the date to July, saves.
+    //     SOURCE  periodOpenFor('2026-07-15')                -> open   -> COMMITTED
+    //     MIRROR  ledgerMonthOpen(resource.data.date '2026-06-15') -> closed -> DENIED
+    //   Net: cash_receipt_journal/crj1 says July, ledger/CRJ-crj1 (and its
+    //   -AR leg) still say June. June's already-FILED P&L and VAT return keep
+    //   the row, July never receives it, permanently — and the P&L/VAT read the
+    //   LEDGER, never the journal (ledgerForPeriod, js/config.js;
+    //   computeVatSummary, js/bir.js). Reproduced on the emulator against the
+    //   round-2 rules before this change, not theorised.
+    //
+    // Only the OUT direction leaked. A move INTO a closed month and an
+    // amount-only edit on a row that STAYS in a closed month were already
+    // refused by the incoming-side check, which is why this had one shape only.
+    //
+    // Same fix, same absent-field discipline, as /expenses got in round 2:
+    // fail OPEN on a date that cannot be bucketed into a finance_period (absent,
+    // malformed, or a Timestamp — .matches() is a STRING method and ERRORS on a
+    // Timestamp, and an erroring rule DENIES, which would permanently lock
+    // legacy rows out of every edit). `d is string` FIRST, then the format
+    // check, then and only then periodOpenFor() — which itself errors on
+    // anything it cannot split into a yyyy-mm.
+    //
+    // CREATE is split out and left byte-for-byte as it was: on a create there
+    // is no `resource`, so reading resource.data there would ERROR (= deny)
+    // every new journal entry. This is the same reason /expenses' gate lives on
+    // its update rule alone.
+    //
+    // general_journal has no /ledger mirror (it is a legacy, writer-less
+    // collection — js/config.js gjForPeriod), but it is read DIRECTLY, merged
+    // with the ledger, by the BIR General Journal book (birRenderGJ, js/bir.js)
+    // and by renderFinancialReports. Moving one of its rows out of a closed
+    // month therefore restates that filed month directly, with no divergence
+    // needed. Same gate, same reason.
+    function journalMonthOpen(d) {
+      return !(d is string)
+          || !d.matches('^\\d{4}-\\d{2}(-\\d{2})?$')
+          || periodOpenFor(d);
+    }
+    // Both sides, so a row can be moved neither INTO nor OUT of a closed month.
+    // ledgerDateOk() runs first at every call site and short-circuits, so the
+    // request-side call here can only ever see a well-formed date; it is written
+    // through journalMonthOpen() anyway to stay symmetric with expensePeriodOk()
+    // and ledgerMaterialUpdateOk().
+    function journalUpdatePeriodOk() {
+      return journalMonthOpen(resource.data.get('date', ''))
+          && journalMonthOpen(request.resource.data.get('date', ''));
+    }
     match /cash_receipt_journal/{docId} {
       allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
+      allow create: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
+      allow update: if isAuth() && canFinance() && ledgerDateOk() && journalUpdatePeriodOk();
       allow delete: if isAuth() && isPresident();
     }
     match /cash_disbursement_journal/{docId} {
       allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
+      allow create: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
+      allow update: if isAuth() && canFinance() && ledgerDateOk() && journalUpdatePeriodOk();
       allow delete: if isAuth() && isPresident();
     }
     match /general_journal/{docId} {
       allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
+      allow create: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
+      allow update: if isAuth() && canFinance() && ledgerDateOk() && journalUpdatePeriodOk();
       allow delete: if isAuth() && isPresident();
     }
     match /finance_records/{docId} {
@@ -1618,18 +2075,47 @@ service cloud.firestore {
 
     // ── Payslips & Worker profiles (Brilliant Steel) ───
     match /payslips/{docId} {
-      // v12 WS24 fix — the doc field written by collectPayslipData() is
-      // `workerId`, never `userId`; the old rule checked a field that never
-      // existed, so this owner-read branch was dead code (only finance/admin
-      // could ever read a payslip). `.get(field, default)` per the
-      // missing-field-denies hazard. `linkedUid` future-proofs WS20 D3's
-      // worker_profiles bridge — harmless if never written.
+      // v14 re-audit fix — the two owner branches here were BOTH dead, so a
+      // Type-B (weekly, production) worker could never read their own payslip:
+      //  • `workerId` is a worker_profiles AUTO-ID (js/screens/hr.js
+      //    collectPayslipData writes `workerId: profile.id`), never an auth
+      //    uid, so comparing it to request.auth.uid can never be true.
+      //  • `linkedUid` is written onto worker_profiles, never onto a payslip —
+      //    no payslips writer in the repo sets it — so that branch never fired
+      //    either (the old comment called it "harmless if never written"; it
+      //    was in fact the only thing standing between the worker and their
+      //    pay, which is not harmless).
+      // The worker's own dashboard query (js/screens/worker.js
+      // _loadWorkerFinance) is therefore permission-denied, and because that
+      // .get() is the one member of its Promise.all with no per-promise catch,
+      // the rejection blanks the ENTIRE finance half of the only screen a
+      // Type-B worker has — from the moment Finance issues their first
+      // payslip, i.e. exactly when it starts to matter.
+      // Route ownership the same way /attendance_worker already does: through
+      // the worker_profiles doc named by `workerId`, comparing ITS linkedUid.
+      // isFinanceOrAdmin() stays FIRST so an admin's unfiltered list
+      // short-circuits without the profile lookup. Uses the status-free
+      // isLinkedWorkerProfile() (not isLinkedWorkerUid) so an offboarded
+      // worker can still retrieve their historical payslips.
+      // Verified against the emulator: the dashboard's
+      // where('workerId','==',<profileId>) + orderBy('createdAt') query and
+      // payslipYtdWeekly's workerId + payPeriodStart-range query both prove
+      // against this rule; an unfiltered list, another worker's workerId, and
+      // a legacy payslip carrying no workerId at all are all still denied.
       allow read: if isAuth() && (
-        resource.data.get('workerId', '') == request.auth.uid ||
-        resource.data.get('linkedUid', '') == request.auth.uid ||
-        isFinanceOrAdmin()
+        isFinanceOrAdmin() ||
+        isLinkedWorkerProfile(resource.data.get('workerId', ''))
       );
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      // v14 re-audit fix — WS19's money-tier narrowing (see isMoneyAdmin()
+      // above) reached payroll/salary_history/salary_raises/pay_runs/
+      // bank_accounts but never reached this Type-B leg: isFinanceOrAdmin()
+      // includes 'secretary', so a Corporate Secretary could issue an official,
+      // numbered, worker-visible weekly payslip with no President in the loop.
+      // The delete leg below was ALREADY president-only — that is the intent
+      // these two legs were missing. Read deliberately stays isFinanceOrAdmin():
+      // secretary oversight VISIBILITY is intended; only the write surface is
+      // money-tier now. Same shape as bank_accounts (~line 1610).
+      allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
     match /worker_profiles/{docId} {
@@ -1637,7 +2123,13 @@ service cloud.firestore {
       // profile (the linkedUid lookup the worker dashboard boots from).
       allow read: if isAuth() && (isFinanceOrAdmin()
         || resource.data.get('linkedUid','') == request.auth.uid);
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      // v14 re-audit fix — money-tier, same rationale as payslips above. This
+      // doc holds dailyRate/hourlyRate, foodAllowance, allowances.meal/
+      // transport and caBalance; foodAllowance is multiplied by days-worked
+      // straight into the payslip, and the approval-routed Raise flow fences
+      // only some of those fields — so leaving create/update at
+      // isFinanceOrAdmin() let secretary set a worker's pay rates outright.
+      allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
     // ── Worker directory (public-safe roster projection, v12 WS28) ──
@@ -1648,8 +2140,15 @@ service cloud.firestore {
     // docId. Maintained by the HR profile save + the Sync Directory button.
     match /worker_directory/{docId} {
       allow read:           if isAuth() && !isPartner();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
-      allow delete:         if isAuth() && isFinanceOrAdmin();
+      // v14 re-audit fix — this mirror is maintained by the SAME HR profile
+      // save (and the Sync Directory button) as worker_profiles above, so it
+      // moves to the money tier with it; otherwise secretary could still
+      // rewrite the roster projection Production picks workers from. Delete is
+      // money-tier rather than president-only on purpose: syncWorkerDirectory()
+      // (js/screens/hr.js) prunes directory docs whose profile is gone, and
+      // that housekeeping must keep working for finance/manager.
+      allow create, update: if isAuth() && isMoneyAdmin();
+      allow delete:         if isAuth() && isMoneyAdmin();
     }
 
     // ── Government biddings ────────────────────────────

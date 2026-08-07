@@ -25,6 +25,21 @@ function canEditDept(dept) {
 }
 // Shorthand for Finance-specific privilege (Payroll, HR Profiles, etc.)
 function isFinancePriv() { return canEditDept('Finance'); }
+// v14 re-audit fix — MONEY-tier privilege: the client-side mirror of
+// firestore.rules' isMoneyAdmin() (president/manager/finance). Deliberately
+// NARROWER than isFinancePriv() above, which returns true for 'secretary' and
+// for any Finance-DEPARTMENT member of any role, neither of which the rules
+// let write pay. Use this — not isFinancePriv — for controls that write
+// worker pay: worker_profiles rates/allowances/CA balance, worker_directory,
+// and payslip issuance. isFinancePriv is left alone on purpose: it has ~13
+// call sites across bir.js/finance.js/production.js/ui-crud-table.js and
+// narrowing it globally would strip secretary from unrelated oversight
+// screens they are meant to keep. ('owner' is a legacy alias for president
+// used by the existing role lists in hr.js; it is not in window.ROLES.)
+function isMoneyPriv() {
+  return ['president','owner','manager','finance'].includes(window.currentRole || '');
+}
+window.isMoneyPriv = isMoneyPriv;
 
 // Wrap a click handler so Firestore/JS errors surface as a toast + console.error
 // instead of failing silently (the button just looks like it "did nothing").
@@ -391,6 +406,25 @@ async function postCDJToLedger(cdjId, e) {
   return !existedAll;
 }
 
+// v14 re-audit ROUND 2 — a FAILED ledger mirror is a books-integrity event, not
+// a debug detail. resyncLedgerForSource's catch used to be a bare
+// console.warn(), and its callers chain `.then(redo)` with no `.catch()`, so
+// when the source doc saved but its mirrored ledger row did not, the user was
+// told "Updated." and nothing else — /expenses and /ledger then disagreed
+// permanently, with the P&L and VAT reading the ledger. (That is the shape the
+// round-1 /ledger period gate accidentally created via the ungated /expenses
+// door; the gate now lives on /expenses too, so the case should not arise —
+// this makes it impossible for it to arise SILENTLY if a future source
+// collection is mirrored without its own gate.)
+window.ledgerMirrorFailed = function(err, collection, docId) {
+  const msg = (err && (err.message || err.code)) || String(err);
+  console.error('[ledger mirror] ' + collection + '/' + docId + ' failed to sync: ' + msg, err);
+  if (window.Notifs && Notifs.showToast) {
+    Notifs.showToast('Saved — but the ledger copy of this record did NOT update (' + msg +
+      '). The books and this record now disagree; tell Finance before relying on any report.', 'error');
+  }
+};
+
 // Re-sync the mirrored ledger row after a source doc (expense / CRJ / CDJ) is
 // EDITED, so the ledger never drifts from the journal. Updates the amount/type/
 // category in place, creates the row if it should now exist, or deletes it if the
@@ -463,7 +497,7 @@ async function resyncLedgerForSource(collection, docId) {
         amount: e.debitAP || 0, source: 'Cash Disbursement', extra: { ...apTag }
       }));
     }
-  } catch (err) { console.warn('[ledger resync]', err?.message || err); }
+  } catch (err) { window.ledgerMirrorFailed(err, collection, docId); }
 }
 
 // Cascade cleanup that must accompany the ACTUAL delete of certain finance
