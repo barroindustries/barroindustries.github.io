@@ -659,11 +659,22 @@ function openJobProjectDetail(p){
     ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
-  document.getElementById('proj-advance-btn')?.addEventListener('click', async (e)=>{
+  // SCOPED TO THIS PANEL — these six were document.getElementById. The Billing
+  // Invoice sub-flow returns with `Overlay.clearAll(); openJobProjectDetail(p)`
+  // in ONE tick (production.js, the jinv cancel path) and openPage defers node
+  // removal by 300ms, so the OLD job-project panel is still in the document and
+  // EARLIER in document order — it won every one of these lookups and the
+  // visible footer was bound to nothing. Reproduced by the review: 4 panels in
+  // the DOM, the lookup resolved to the dying panel, and clicking all three
+  // visible footer buttons fired 0 handlers. Only Close (inline onclick) worked,
+  // so the job could not be advanced without closing and reopening the window.
+  // jpdPanel is the panel openPage returned; it is already used for .jinv-card
+  // below, so scoping here simply makes the footer consistent with it.
+  jpdPanel.querySelector('#proj-advance-btn')?.addEventListener('click', async (e)=>{
     const btn = e.currentTarget; btn.disabled = true; // guard against double-click double-posting
     try { await advanceProjectStage(p, next.id); } finally { if (btn) btn.disabled = false; }
   });
-  document.getElementById('proj-ack-btn')?.addEventListener('click', async (e)=>{
+  jpdPanel.querySelector('#proj-ack-btn')?.addEventListener('click', async (e)=>{
     const btn = e.currentTarget; btn.disabled = true; // guard against double-click double-posting
     const who = userProfile?.displayName||currentUser.email;
     try {
@@ -679,10 +690,10 @@ function openJobProjectDetail(p){
       if (fresh.exists) openJobProjectDetail({ id:p.id, ...fresh.data() });
     } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); if (btn) btn.disabled = false; }
   });
-  document.getElementById('proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
-  document.getElementById('proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
-  document.getElementById('proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
-  document.getElementById('proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
+  jpdPanel.querySelector('#proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
+  jpdPanel.querySelector('#proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
+  jpdPanel.querySelector('#proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
+  jpdPanel.querySelector('#proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
   // Re-open a previously issued billing invoice (printable)
   jpdPanel.querySelectorAll('.jinv-card').forEach(card=>card.addEventListener('click',()=>{
     const inv=(p.invoices||[]).find(i=>i.no===card.dataset.inv);

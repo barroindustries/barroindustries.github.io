@@ -1655,31 +1655,42 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         if (caBalance > 0) {
           const updateRemaining = () => {
             const mode   = document.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
-            const custom = parseFloat(document.getElementById('ep-ca-custom')?.value)||0;
+            const custom = parseFloat(panel.querySelector('#ep-ca-custom')?.value)||0;
             const amt    = mode==='full' ? caBalance : mode==='custom' ? Math.min(custom, caBalance) : plan.caPlanned;
-            document.getElementById('ep-ca-remaining').textContent = fmt(Math.max(0, caBalance-amt));
+            panel.querySelector('#ep-ca-remaining').textContent = fmt(Math.max(0, caBalance-amt));
           };
           document.querySelectorAll('input[name="ep-ca-mode"]').forEach(r=>r.addEventListener('change', updateRemaining));
-          document.getElementById('ep-ca-custom')?.addEventListener('input', () => {
+          panel.querySelector('#ep-ca-custom')?.addEventListener('input', () => {
             const radio = document.querySelector('input[name="ep-ca-mode"][value="custom"]');
             if (radio) radio.checked = true;
             updateRemaining();
           });
         }
 
-        document.getElementById('save-ep-btn').addEventListener('click', () => window.busy(document.getElementById('save-ep-btn'), async () => {
+        // SCOPED TO THIS PANEL — the enable above already used
+        // panel.querySelector while the bind and every field read below used
+        // document.getElementById. That is the identical enable-scoped /
+        // bind-global split that produced "Create task not working": open ✎ Edit
+        // Payroll on one employee, Back, open it on the next within openPage's
+        // 300ms removal window, and the handler attaches to the DYING panel while
+        // the visible Save is enabled and dead. On this form that means HR edits
+        // allowance / deductions / SSS / PhilHealth / Pag-IBIG / tax, taps Save,
+        // sees no toast and no error, and the next Compute runs on the OLD
+        // numbers — the correction silently lost. The field reads are scoped too:
+        // a global read would have pulled the dying panel's values.
+        panel.querySelector('#save-ep-btn').addEventListener('click', () => window.busy(panel.querySelector('#save-ep-btn'), async () => {
           // All pay — base, allowance, and government deductions — lives in the
           // protected payroll/{uid} doc (finance/admin write), not the users doc.
           // v12 WS23 — base salary is NOT writable here (approval-routed via 💸
           // Give Raise instead); this modal only edits allowance/deductions/statutory.
           await db.collection('payroll').doc(uid).set({
-            payClass:   document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular',
-            allowance:  parseFloat(document.getElementById('ep-allow').value)||0,
-            deductions: parseFloat(document.getElementById('ep-deduct').value)||0,
-            sss:        parseFloat(document.getElementById('ep-sss').value)||0,
-            philhealth: parseFloat(document.getElementById('ep-ph').value)||0,
-            pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
-            tax:        parseFloat(document.getElementById('ep-tax').value)||0,
+            payClass:   panel.querySelector('#ep-class')?.value === 'production' ? 'production' : 'regular',
+            allowance:  parseFloat(panel.querySelector('#ep-allow').value)||0,
+            deductions: parseFloat(panel.querySelector('#ep-deduct').value)||0,
+            sss:        parseFloat(panel.querySelector('#ep-sss').value)||0,
+            philhealth: parseFloat(panel.querySelector('#ep-ph').value)||0,
+            pagibig:    parseFloat(panel.querySelector('#ep-pi').value)||0,
+            tax:        parseFloat(panel.querySelector('#ep-tax').value)||0,
             // Statutory-config spec §4.2 — MODE only; the amounts stay in the
             // four flat fields above (one source of truth per amount).
             // 'default' MUST mean the key is ABSENT, so the resolver runs its
@@ -1699,13 +1710,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             // v12 WS39 — statutory IDs (alphalist/2316 prerequisite). Free-text,
             // same field names as worker_profiles so toPayslipModel reads one
             // vocabulary across both payroll cycles.
-            tinNum:     document.getElementById('ep-tin')?.value.trim()   || '',
-            ssNum:      document.getElementById('ep-ssnum')?.value.trim() || '',
-            phNum:      document.getElementById('ep-phnum')?.value.trim() || '',
-            pagibigNum: document.getElementById('ep-pagnum')?.value.trim()|| '',
+            tinNum:     panel.querySelector('#ep-tin')?.value.trim()   || '',
+            ssNum:      panel.querySelector('#ep-ssnum')?.value.trim() || '',
+            phNum:      panel.querySelector('#ep-phnum')?.value.trim() || '',
+            pagibigNum: panel.querySelector('#ep-pagnum')?.value.trim()|| '',
           }, {merge:true});
-          if (emp) emp.payClass = document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular';
-          window.logAudit && window.logAudit('update','payroll',uid,{ allowance:parseFloat(document.getElementById('ep-allow').value)||0 });
+          if (emp) emp.payClass = panel.querySelector('#ep-class')?.value === 'production' ? 'production' : 'regular';
+          window.logAudit && window.logAudit('update','payroll',uid,{ allowance:parseFloat(panel.querySelector('#ep-allow').value)||0 });
 
           // Statutory-config spec §4.2 — the modes actually chosen, read back
           // from the same selects the write above used.
@@ -1752,17 +1763,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             // just wrote, alongside the mode.
             if (emp) {
               emp.statConfig = _after;
-              emp.sss        = parseFloat(document.getElementById('ep-sss').value)||0;
-              emp.philhealth = parseFloat(document.getElementById('ep-ph').value)||0;
-              emp.pagibig    = parseFloat(document.getElementById('ep-pi').value)||0;
-              emp.tax        = parseFloat(document.getElementById('ep-tax').value)||0;
+              emp.sss        = parseFloat(panel.querySelector('#ep-sss').value)||0;
+              emp.philhealth = parseFloat(panel.querySelector('#ep-ph').value)||0;
+              emp.pagibig    = parseFloat(panel.querySelector('#ep-pi').value)||0;
+              emp.tax        = parseFloat(panel.querySelector('#ep-tax').value)||0;
               // …and the other two pay fields this same handler writes above
               // (allowance/deductions). Pre-existing staleness, but leaving them
               // out made the patch ASYMMETRIC: statutory refreshed on the roster
               // while an allowance edit saved in the same click still showed the
               // old number until navigation.
-              emp.allowance  = parseFloat(document.getElementById('ep-allow').value)||0;
-              emp.deductions = parseFloat(document.getElementById('ep-deduct').value)||0;
+              emp.allowance  = parseFloat(panel.querySelector('#ep-allow').value)||0;
+              emp.deductions = parseFloat(panel.querySelector('#ep-deduct').value)||0;
             }
           }
 
@@ -1775,7 +1786,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             if (mode === 'installment') {
               await overrideRef.delete().catch(()=>{}); // revert to the plan default
             } else {
-              const amount = mode === 'full' ? caBalance : Math.min(parseFloat(document.getElementById('ep-ca-custom')?.value)||0, caBalance);
+              const amount = mode === 'full' ? caBalance : Math.min(parseFloat(panel.querySelector('#ep-ca-custom')?.value)||0, caBalance);
               await overrideRef.set({ userId:uid, month, amount, setBy:currentUser.uid, setAt:firebase.firestore.FieldValue.serverTimestamp() });
             }
           }

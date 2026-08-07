@@ -280,7 +280,20 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
   // openPage's _setPanelTitle renders the title via textContent (already
   // XSS-safe); escHtml here DOUBLE-encoded it, so an apostrophe showed as
   // '&#39;' literally in the title (owner screenshot). Pass the raw name.
-  openPage((p.name||'Project'), `
+  // SCOPED TO THIS PANEL — openPage's return value was previously discarded and
+  // showTab() resolved #pd-tab-body with document.getElementById. Every reopen
+  // path in this hub (Record Payment, Billing Invoice, Edit Project, New
+  // Drawing, Delegate Task, and the drawing sub-flows) does
+  // `Overlay.clearAll(); openProjectDetail(...)` in ONE tick, and openPage
+  // defers node removal by 300ms (js/app.js) — so the OLD project panel is
+  // still in the document, is EARLIER in document order, and won the global
+  // lookup. The visible panel was never filled: it sat on "Loading…" forever
+  // while the dying one got the content. Reproduced end-to-end by the review:
+  // 2 panels in the DOM, getElementById resolved to the dying page-panel-1, and
+  // #pd-tabs .subtab-btn matched 12 nodes (6 tabs x 2 panels).
+  // Consequence: Record Payment saved the money and the ledger leg, then
+  // returned a blank window with no payment, no balance and no confirmation.
+  const _pdPanel = openPage((p.name||'Project'), `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span>
       ${p.client?`<span>${emojiIcon('👤',16)} ${escHtml(p.client)}</span>`:''}
@@ -294,8 +307,8 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
   `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
   const showTab = (t) => {
-    document.querySelectorAll('#pd-tabs .subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.pd===t));
-    const host = document.getElementById('pd-tab-body');
+    _pdPanel.querySelectorAll('#pd-tabs .subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.pd===t));
+    const host = _pdPanel.querySelector('#pd-tab-body');
     if (!host) return;
     if      (t==='Overview')   renderProjOverview(host, p, currentUser, currentRole, canBill);
     else if (t==='Drawings')   renderProjectDrawings(host, p, currentUser, currentRole, canBill);
@@ -304,7 +317,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
     else if (t==='Financials') renderProjFinancials(host, p, currentUser, currentRole, canBill);
     else if (t==='Activity')   renderProjActivity(host, p, currentUser, currentRole);
   };
-  document.querySelectorAll('#pd-tabs .subtab-btn').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.pd)));
+  _pdPanel.querySelectorAll('#pd-tabs .subtab-btn').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.pd)));
   showTab(initialTab);
 };
 
