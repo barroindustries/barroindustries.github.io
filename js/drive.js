@@ -47,10 +47,187 @@ window.Drive = (() => {
   }
 
   // ── Profile Photo Upload ───────────────────────────
+  // AVATAR NORMALISATION (2026-08-08 lockout fix). This was a bare
+  // `ref.put(file)` with no metadata, which failed on iPhone — the way this app
+  // is actually used — and, because the mandatory-photo gate has no dismiss
+  // control, locked the user out of the whole app. Three failure modes, all
+  // removed by normalising the image client-side before it reaches Storage:
+  //
+  //   1. EMPTY MIME. iOS pickers (Files-app providers, iCloud photos not yet
+  //      downloaded, some HEIC/Live Photo paths) hand back a File whose .type
+  //      is ''. The Storage compat SDK then falls back to
+  //      'application/octet-stream', which fails storage.rules' isValidImage()
+  //      (`contentType.matches('image/.*')`) → storage/unauthorized, on every
+  //      retry, deterministically. js/screens/worker.js:991 already carries
+  //      this exact fix for attendance selfies; this path never got it.
+  //   2. SIZE. isValidImage() also caps uploads at 15MB, and a modern iPhone
+  //      capture (never mind ProRAW) can clear that — denied identically, and
+  //      indistinguishably, from case 1.
+  //   3. HEIC. Passes the rules, but is unviewable in most non-Apple browsers,
+  //      so the avatar would silently render blank for half the company.
+  //
+  // Re-encoding to JPEG kills all three at once, and makes the upload far
+  // faster on mobile data (a ~4MB capture lands at ~100–200KB).
+  const AVATAR_MAX_DIM   = 1024;              // ample for an avatar AND the printed company ID
+  const AVATAR_QUALITY   = 0.85;
+  const AVATAR_MAX_BYTES = 15 * 1024 * 1024;  // mirrors storage.rules isValidImage()
+
+  function _avatarErr(code, message) {
+    return Object.assign(new Error(message), { code });
+  }
+
+  // Decode to something drawable, honouring EXIF orientation. iOS photos are
+  // very commonly rotated (a portrait shot carries Orientation 6), and a canvas
+  // re-encode BAKES the pixels as drawn — so without this every other avatar
+  // comes out sideways. createImageBitmap's imageOrientation:'from-image' is
+  // the explicit control; the <img> fallback covers engines that lack
+  // createImageBitmap or reject the blob, and there modern browsers apply EXIF
+  // to drawImage themselves (CSS image-orientation defaults to from-image).
+  // Resolves null when nothing can decode the bytes.
+  async function _decodeForAvatar(file) {
+    if (typeof createImageBitmap === 'function') {
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+      catch (_) { /* option unsupported, or undecodable — try the plain form */ }
+      try { return await createImageBitmap(file); }
+      catch (_) { /* fall through to the <img> path */ }
+    }
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload  = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Draw → downscale → JPEG. Returns null when the bytes can't be decoded, so
+  // the caller decides what to do rather than this silently shipping something
+  // Storage or the browser will choke on. Same canvas/toBlob approach as
+  // js/chat.js _compressImage and js/screens/worker.js _compressSelfie, with an
+  // avatar's own params.
+  async function _normaliseAvatar(file) {
+    const src = await _decodeForAvatar(file);
+    if (!src) return null;
+    let width  = src.width  || src.naturalWidth;
+    let height = src.height || src.naturalHeight;
+    const close = () => { try { if (typeof src.close === 'function') src.close(); } catch (_) {} };
+    if (!width || !height) { close(); return null; }
+    if (width > AVATAR_MAX_DIM || height > AVATAR_MAX_DIM) {
+      const scale = AVATAR_MAX_DIM / Math.max(width, height);
+      width = Math.round(width * scale); height = Math.round(height * scale);
+    }
+    let canvas;
+    try {
+      canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const _ctx = canvas.getContext('2d');
+      // JPEG has no alpha channel, so a transparent PNG (a cropped logo, a
+      // screenshot cut-out) would export with a BLACK background. Paint white
+      // first so transparency flattens the way a person expects.
+      _ctx.fillStyle = '#fff';
+      _ctx.fillRect(0, 0, canvas.width, canvas.height);
+      _ctx.drawImage(src, 0, 0, width, height);
+    } catch (e) {
+      console.warn('[profile-photo] canvas re-encode failed', e);
+      close(); return null;
+    }
+    close();   // an ImageBitmap holds decoded pixels — free them, phones are tight
+    return new Promise(resolve => {
+      try { canvas.toBlob(blob => resolve(blob || null), 'image/jpeg', AVATAR_QUALITY); }
+      catch (_) { resolve(null); }
+    });
+  }
+
   async function uploadProfilePhoto(file, uid) {
+    if (typeof storage === 'undefined') throw _avatarErr('avatar/no-storage', 'Storage is not available right now. Reload the app and try again.');
+    if (!file) throw _avatarErr('avatar/no-file', 'No photo was selected.');
+    if (!uid)  throw _avatarErr('avatar/unauthenticated', 'Your session ended. Please sign in again and retry.');
+    // Storage's own isSignedIn() would reject this anyway, but as
+    // storage/unauthorized — indistinguishable from a rejected file. Check here
+    // so the user is told the one thing that actually helps.
+    let signedIn = false;
+    try { signedIn = !!(auth && auth.currentUser); } catch (_) { signedIn = false; }
+    if (!signedIn) throw _avatarErr('avatar/unauthenticated', 'Your session ended. Please sign in again and retry.');
+
+    // Wrong-file-type, called out explicitly: an accept="image/*" picker still
+    // lets an iPhone user browse into the Files app, so a PDF or a .zip really
+    // can arrive here. An EMPTY type is deliberately NOT rejected — that is the
+    // iOS case this whole function exists for, and the decode below settles it.
+    if (file.type && !/^image\//i.test(file.type)) {
+      throw _avatarErr('avatar/not-an-image', 'That file is not an image. Please pick a photo (JPEG or PNG).');
+    }
+
+    let blob = await _normaliseAvatar(file);
+    let contentType = 'image/jpeg';
+    if (!blob) {
+      // Undecodable. Keep the original ONLY if it is honestly an image and fits
+      // the rules' ceiling — never re-label unknown bytes as image/jpeg just to
+      // slip past isValidImage(), because that stores an avatar nothing can
+      // render, which is a worse outcome than an honest error.
+      if (!/^image\//i.test(file.type || '')) {
+        throw _avatarErr('avatar/undecodable', "That photo couldn't be read on this device. Please pick a different one (JPEG or PNG).");
+      }
+      if (file.size > AVATAR_MAX_BYTES) {
+        throw _avatarErr('avatar/too-large', 'That photo is too large (15MB maximum). Please pick a smaller one.');
+      }
+      blob = file; contentType = file.type;
+    }
+
     const ref = storage.ref(`profile-photos/${uid}`);
-    await ref.put(file);
+    // The explicit contentType is the entire fix — without it the SDK sends
+    // blob.type || 'application/octet-stream'. customMetadata.uploadedBy
+    // matches what the other upload paths already record.
+    await ref.put(blob, { contentType, customMetadata: { uploadedBy: uid } });
     return ref.getDownloadURL();
+  }
+
+  // ── Human-readable upload failure ──────────────────
+  // Both profile-photo callers (the mandatory gate and the profile drawer) used
+  // to show a bare "Upload failed" and discard the error object, which is
+  // exactly what made this bug undiagnosable. Map the codes that actually occur
+  // to something the user can act on; anything unmapped still surfaces its raw
+  // code, so the next report arrives with evidence attached.
+  function uploadErrorMessage(err) {
+    // String(): a DOMException carries a NUMERIC legacy .code (InvalidStateError
+    // = 11, NotFoundError = 8, AbortError = 20, QuotaExceededError = 22), and
+    // those DO occur on iOS when a File's backing blob has gone away or a
+    // FileReader is busy. Without the coercion `code.indexOf` is not a function,
+    // so this THROWS out of the very catch block that exists to recover — and in
+    // the mandatory-photo gate the throw lands before revealEscape(), leaving the
+    // overlay frozen on "Uploading…" with no message and no way out. That is the
+    // exact lockout this whole change set was written to remove.
+    // Even the property READ is guarded. This function's entire contract is
+    // "never throw" — every caller is inside a catch block that is the user's
+    // last line of defence — so it must not assume `err` is a well-behaved
+    // object. A throwing accessor is exotic, but the cost of tolerating it is
+    // one try/catch and the cost of not doing is a user stranded on a
+    // full-screen overlay with no way out.
+    let code = '', message = '';
+    try { code = String((err && err.code) || ''); } catch (_) {}
+    try { message = String(message || ''); } catch (_) {}
+    if (code.indexOf('avatar/') === 0) return message || 'Upload failed.';
+    switch (code) {
+      case 'storage/unauthenticated':
+        return 'Your session ended. Please sign in again and retry.';
+      case 'storage/unauthorized':
+        return 'That photo was rejected — it must be an image under 15MB. Please try a different one.';
+      case 'storage/quota-exceeded':
+        return 'Company file storage is full. Please tell an administrator.';
+      case 'storage/retry-limit-exceeded':
+        return 'The upload timed out. Check your connection and try again.';
+      case 'storage/canceled':
+        return 'Upload cancelled.';
+      case 'permission-denied':
+        return "You don't have permission to save this. Please tell an administrator.";
+      case 'unavailable':
+        return 'Could not reach the server. Check your connection and try again.';
+    }
+    try { if (navigator && navigator.onLine === false) return 'You appear to be offline. Reconnect and try again.'; } catch (_) {}
+    return `Upload failed (${code || message || 'unknown error'}). Please try again.`;
   }
 
   // ── Worker ID Photo Upload (HR-uploaded; role-gated path, not uid-owned) ──
@@ -292,7 +469,7 @@ window.Drive = (() => {
     if (window.lucide) lucide.createIcons({ nodes: [el] });
   }
 
-  return { uploadFile, uploadProfilePhoto, uploadWorkerPhoto, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
+  return { uploadFile, uploadProfilePhoto, uploadWorkerPhoto, uploadErrorMessage, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
 })();
 
 /* ═══════════════════════════════════════════════════

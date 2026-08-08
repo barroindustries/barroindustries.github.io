@@ -14,6 +14,23 @@ let userProfile  = {};
 // a pending one — see showLogin(). Without this the gate fired over the login
 // screen and trapped the user there (2026-08-08).
 let _reqPhotoTimer = 0;
+// Never let the ERROR REPORTER be the thing that throws. Drive is a separate
+// file; a failed eval or a stale cached asset can leave it missing this export,
+// and every caller below is inside a catch block whose whole purpose is to
+// recover. Falls back to a generic-but-honest message.
+function _uploadErrMsg(err) {
+  try {
+    if (typeof Drive !== 'undefined' && Drive && typeof Drive.uploadErrorMessage === 'function') {
+      return Drive.uploadErrorMessage(err);
+    }
+  } catch (_) {}
+  return 'Upload failed — please try again.';
+}
+// Failed upload attempts this session, and whether the user took the escape
+// hatch the second one unlocks. Both are per-session state, cleared alongside
+// the rest of it in showLogin() — the policy is deferred, never waived.
+let _reqPhotoFails    = 0;
+let _reqPhotoDeferred = false;
 let logoutTimer  = null;
 let selectedLoginType = null; // 'admin' | 'employee' | 'partner' — set on login card click
 
@@ -688,6 +705,9 @@ function showLogin() {
   // so this is the one place that reliably undoes all three.
   if (_reqPhotoTimer) { clearTimeout(_reqPhotoTimer); _reqPhotoTimer = 0; }
   document.getElementById('req-photo-overlay')?.remove();
+  // Session boundary: the "continue without a photo" deferral and its attempt
+  // counter die with the session, so the next sign-in asks again.
+  _reqPhotoFails = 0; _reqPhotoDeferred = false;
   // Reset to the DECLARED empty shapes ({} / null / []), not to null across the
   // board: userProfile is declared as {} and is dereferenced unguarded in
   // several places, so nulling it would trade a lockout for a TypeError.
@@ -949,7 +969,28 @@ async function loadUserProfile(user) {
       const paySnap = await payrollPromise;
       if (paySnap && paySnap.exists) userProfile = { ...userProfile, ...paySnap.data() };
     } catch(e) { /* no own payroll doc yet → pay reads as 0 */ }
-    currentRole  = userProfile.role || 'employee';
+    // Lowercased: window.ROLES is canonically lowercase and EVERY role compare
+    // in the app is `currentRole === 'partner'`-style, but production docs carry
+    // drift ('Partner', 'Manager'). An un-normalised 'Partner' matched nothing —
+    // ROLE_TYPE_MAP[currentRole] fell through to 'employee' so they were bounced
+    // off the Partner login portal, ROLES[currentRole].label lost their badge,
+    // and the mandatory-photo gate's partner exemption missed them, trapping the
+    // one role it is explicitly not for. Normalising here fixes all of it at the
+    // single point where the role enters the app. userProfile.role keeps the raw
+    // stored value; this does not rewrite the doc.
+    // DELIBERATELY NOT lowercased. Production really does contain role drift
+    // ('Partner', 'Manager') and normalising HERE looks like the tidy fix, but it
+    // is only half a fix and the dangerous half: firestore.rules compares
+    // getRole() against exact lowercase literals, so a 'Manager' record is denied
+    // by the SERVER no matter what the client believes. Normalising client-side
+    // would hand that user the manager navigation and admin screens while every
+    // write they attempt is refused — swapping a coherent "you are an employee"
+    // for an incoherent "you are a manager whose every action fails". Today the
+    // two agree; that is worth more than papering over the drift.
+    // The DATA is the defect and is fixed in the data (see BETA-REVIEW notes).
+    // Only the photo gate's partner EXEMPTION compares case-insensitively, and
+    // only because being more exempt from a photo grants no privilege.
+    currentRole  = userProfile.role;
     // Support both old string 'department' and new array 'departments'
     if (Array.isArray(userProfile.departments) && userProfile.departments.length) {
       currentDepts = userProfile.departments;
@@ -1005,7 +1046,7 @@ function applyUserUI() {
   // Profile photo is MANDATORY for non-partners — it's required to issue the
   // Barro Industries company ID. External partners are exempt (no company ID).
   // Show a blocking gate until a photo is set; it's idempotent + self-guards.
-  if (!userProfile.photoUrl && currentRole && currentRole !== 'partner') {
+  if (!userProfile.photoUrl && currentRole && String(currentRole).toLowerCase() !== 'partner') {
     _reqPhotoTimer = setTimeout(requireProfilePhoto, 800);
   }
 }
@@ -1022,7 +1063,13 @@ function requireProfilePhoto() {
   // authenticated user. Checking auth.currentUser is the only honest test.
   try { if (!auth || !auth.currentUser) return; } catch (_) { return; }
   if (!userProfile || userProfile.photoUrl) return;       // already set
-  if (currentRole === 'partner' || !currentRole) return;  // partners exempt
+  // Lowercased compare as well as the normalisation in loadUserProfile: a
+  // users doc carrying role 'Partner' (capital P — real drift in production)
+  // used to miss this exemption and trap the one class of user the gate is
+  // explicitly not for.
+  const role = String(currentRole || '').toLowerCase();
+  if (role === 'partner' || !role) return;                // partners exempt
+  if (_reqPhotoDeferred) return;                          // user chose to continue without one (see below)
   if (document.getElementById('req-photo-overlay')) return;
   const ov = document.createElement('div');
   ov.id = 'req-photo-overlay';
@@ -1040,31 +1087,118 @@ function requireProfilePhoto() {
       <h3 style="margin:0 0 8px;font-size:18px;color:var(--text)">Profile photo required</h3>
       <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0 0 18px">A clear photo of yourself is needed to generate your <strong>Barro Industries company ID</strong>. Please upload one to continue.</p>
       <button id="req-photo-btn" class="btn-primary" style="width:100%">${emojiIcon('📤',16)} Upload Photo</button>
-      <div id="req-photo-status" style="font-size:12px;color:var(--text-muted);margin-top:10px"></div>
+      <div id="req-photo-status" style="font-size:12px;color:var(--text-muted);margin-top:10px;line-height:1.5"></div>
+      <div id="req-photo-escape" class="hidden" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <p style="font-size:12px;color:var(--text-muted);line-height:1.6;margin:0 0 10px">Still not working? Continue for now — we'll ask again next time you sign in. Your company ID can't be issued until a photo is added.</p>
+        <button id="req-photo-skip" class="btn-secondary" style="width:100%">Continue without a photo</button>
+      </div>
+      <button id="req-photo-signout" class="btn-secondary btn-sm" style="width:100%;margin-top:10px;background:none;border:none;color:var(--text-muted);font-size:12px;text-align:center;justify-content:center">Sign out</button>
     </div>`;
   if (window.lucide) lucide.createIcons({ nodes: [ov] });
   document.body.appendChild(ov);
-  document.getElementById('req-photo-btn').onclick = () => {
+
+  // NEVER TRAP THE USER (2026-08-08). This overlay is full-screen at
+  // var(--z-splash) with nothing beneath it reachable, so before this every
+  // upload failure was a total, permanent lockout from the app — worse than the
+  // missing photo it exists to collect. The photo is a POLICY requirement (it
+  // feeds the printed company ID); it protects no data, so denying all access
+  // over it can never be the right trade. Two exits, deliberately asymmetric:
+  //   • Sign out — always available, zero conditions. The minimum any blocking
+  //     screen owes the person behind it (showRemovedUserScreen sets the same
+  //     precedent), and the only way out if the account itself is the problem.
+  //   • Continue without a photo — revealed only after 2 failed attempts, so
+  //     the gate still does its job for everyone whose upload works, and only
+  //     yields to someone it has demonstrably failed. It defers for the SESSION
+  //     only (module flag, cleared by showLogin at the session boundary), so
+  //     the policy is re-asserted on the next sign-in rather than waived.
+  const revealEscape = () => { if (_reqPhotoFails >= 2) ov.querySelector('#req-photo-escape')?.classList.remove('hidden'); };
+  revealEscape();   // an escape already earned this session survives a re-render
+  ov.querySelector('#req-photo-signout').onclick = () => {
+    window.resetSessionOverlays();
+    auth.signOut().catch(err => console.error('[profile-photo] sign-out failed', err));
+  };
+  ov.querySelector('#req-photo-skip').onclick = () => {
+    _reqPhotoDeferred = true;
+    ov.remove();
+    Notifs.showToast('You can add your photo any time from your profile.', 'info');
+  };
+
+  ov.querySelector('#req-photo-btn').onclick = () => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = 'image/*';
     input.onchange = async e => {
       const file = e.target.files[0]; if (!file) return;
-      const st = document.getElementById('req-photo-status');
+      const st = ov.querySelector('#req-photo-status');
       if (st) st.textContent = 'Uploading…';
+      // One line of evidence, unconditionally. The old catch discarded `err`
+      // entirely, which is why an upload that had been failing deterministically
+      // could not be diagnosed from the phone it was failing on. type is the
+      // load-bearing field: '' is the iOS picker case (see drive.js).
+      console.info('[profile-photo] picked', { name: file.name, type: file.type || '(empty)', size: file.size });
+
+      // STEP 1 — Storage. Its own try: these operations used to share ONE
+      // catch, so a successful upload followed by a failed users-doc write
+      // still reported "Upload failed" and left the user behind the gate.
+      let url;
       try {
-        const url = await Drive.uploadProfilePhoto(file, currentUser.uid);
-        await db.collection('users').doc(currentUser.uid).update({ photoUrl: url });
-        userProfile.photoUrl = url;
-        applyUserUI();
-        ov.remove();
-        Notifs.success('Photo saved — your company ID is ready!');
+        url = await Drive.uploadProfilePhoto(file, currentUser.uid);
       } catch (err) {
-        if (st) st.textContent = 'Upload failed — please try again.';
-        else Notifs.showToast('Upload failed','error');
+        console.error('[profile-photo] upload failed', (err && err.code) || '(no code)', err);
+        _reqPhotoFails++;
+        // ORDER MATTERS. revealEscape() runs FIRST, before anything that can
+        // throw. Drive.uploadErrorMessage is a cross-file call: if drive.js
+        // failed to evaluate, or a stale cached asset predates the new export,
+        // calling it throws a TypeError out of this catch — and every later
+        // line, including the escape hatch, is skipped. The overlay then sits
+        // on "Uploading…" forever with no message and no way out, which is
+        // precisely the lockout this gate was rewritten to eliminate. A catch
+        // whose job is "never trap the user" must not depend on anything.
+        revealEscape();
+        let msg = 'Upload failed — please try again.';
+        msg = _uploadErrMsg(err);
+        if (st) st.textContent = msg; else Notifs.showToast(msg, 'error');
+        return;
       }
+
+      // STEP 2 — persist. With Firestore offline persistence enabled this
+      // promise only settles on server ack, so on a dead link it hangs forever
+      // and the gate sits on "Saving…" with no error and no exit. The write is
+      // durably queued in IndexedDB either way, so a timeout must NOT keep the
+      // user here — let them through and say so.
+      if (st) st.textContent = 'Saving…';
+      let synced = true;
+      try {
+        await Promise.race([
+          db.collection('users').doc(currentUser.uid).update({ photoUrl: url }),
+          new Promise((_r, rej) => setTimeout(() => rej(_reqPhotoErr('app/save-timeout')), 20000))
+        ]);
+      } catch (err) {
+        console.error('[profile-photo] saving photoUrl failed', (err && err.code) || '(no code)', err);
+        if (err && err.code === 'app/save-timeout') {
+          synced = false;   // queued locally; it will land when the link returns
+        } else {
+          _reqPhotoFails++;
+          if (st) st.textContent = `Photo uploaded, but saving it failed — ${_uploadErrMsg(err)}`;
+          revealEscape();
+          return;
+        }
+      }
+
+      userProfile.photoUrl = url;
+      applyUserUI();
+      ov.remove();
+      if (synced) Notifs.success('Photo saved — your company ID is ready!');
+      else Notifs.showToast('Photo uploaded — it will finish saving once you’re back online.', 'info');
     };
     input.click();
   };
+}
+
+// Typed error for the save-timeout race above — matches the Object.assign(new
+// Error(...), { code }) idiom used for upload errors in js/drive.js and
+// js/screens/worker.js, so the catch can tell a timeout from a real failure.
+function _reqPhotoErr(code) {
+  return Object.assign(new Error(code), { code });
 }
 
 // showPhotoPrompt (non-blocking "Add a profile photo" corner banner) —
@@ -3178,7 +3312,34 @@ function openProfileDrawer() {
   if (window.lucide) lucide.createIcons({ nodes: [drawer] });
   document.getElementById('profile-photo-wrap').addEventListener('click',()=>{
     const input=document.createElement('input'); input.type='file'; input.accept='image/*';
-    input.onchange=async e=>{const file=e.target.files[0];if(!file)return;Notifs.info('Uploading…');try{const url=await Drive.uploadProfilePhoto(file,currentUser.uid);await db.collection('users').doc(currentUser.uid).update({photoUrl:url});userProfile.photoUrl=url;applyUserUI();document.getElementById('profile-photo-wrap').innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover"/>`;Notifs.success('Photo updated!');}catch(err){Notifs.showToast('Upload failed','error');}};
+    // Expanded from a one-liner (2026-08-08): its catch discarded `err` and
+    // toasted a bare "Upload failed", the twin of the bug in the mandatory gate
+    // above. Same split — Storage and the users-doc write report separately, and
+    // the real error code always reaches the console.
+    input.onchange=async e=>{
+      const file=e.target.files[0]; if(!file)return;
+      console.info('[profile-photo] picked', { name:file.name, type:file.type||'(empty)', size:file.size });
+      Notifs.info('Uploading…');
+      let url;
+      try {
+        url = await Drive.uploadProfilePhoto(file, currentUser.uid);
+      } catch(err) {
+        console.error('[profile-photo] upload failed', (err && err.code) || '(no code)', err);
+        Notifs.showToast(_uploadErrMsg(err), 'error');
+        return;
+      }
+      try {
+        await db.collection('users').doc(currentUser.uid).update({ photoUrl: url });
+      } catch(err) {
+        console.error('[profile-photo] saving photoUrl failed', (err && err.code) || '(no code)', err);
+        Notifs.showToast(`Photo uploaded, but saving it failed — ${_uploadErrMsg(err)}`, 'error');
+        return;
+      }
+      userProfile.photoUrl = url;
+      applyUserUI();
+      document.getElementById('profile-photo-wrap').innerHTML = `<img src="${escHtml(url)}" style="width:100%;height:100%;object-fit:cover"/>`;
+      Notifs.success('Photo updated!');
+    };
     input.click();
   });
   document.getElementById('save-name-btn').addEventListener('click',async()=>{const name=document.getElementById('profile-name').value.trim();if(!name)return;await db.collection('users').doc(currentUser.uid).update({displayName:name});userProfile.displayName=name;applyUserUI();Notifs.success('Name updated!');});
