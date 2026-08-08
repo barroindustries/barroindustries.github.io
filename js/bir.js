@@ -134,17 +134,94 @@ window.nextSerialInRange = async function (seriesKey) {          // 'or' | 'si'
   return `${cfg.prefix}${String(n).padStart(cfg.pad || 6, '0')}`;
 };
 
-// ── Shared print scaffolding — same-document window.print(), no pop-ups
-//    (WS24 payslip pattern). The isolation CSS (.bir-print / @media print)
+// ── Shared print scaffolding — the isolation CSS (.bir-print / @media print)
 //    lives in css/styles.css; letterhead printCSS is injected inline here. ──
+//
+// MOBILE FINANCE PASS (2026-08-08) — the Print button used to be a bare
+// `onclick="window.print()"`, which is a NO-OP inside an iOS Add-to-Home-Screen
+// standalone webview (no browser chrome to host the print sheet). This repo
+// already states that root cause and already ships the cure
+// (js/screens/hr.js §4 → window.openPrintableDoc, js/print-docs.js), but only
+// the payslip had been converted. Routing through window.birPrintDoc below puts
+// all 8 BIR docs on the same iOS-aware Print / Save PDF / Save as JPEG path
+// (Web Share on iOS standalone, window.print() everywhere else) from ONE edit,
+// because every BIR screen renders this toolbar.
 window.birToolbarHTML = function (opts) {
   opts = opts || {};
   return `<div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-    <button class="btn-primary btn-sm" onclick="window.print()">${window.emojiIcon('🖨',14)} Print</button>
+    <button class="btn-primary btn-sm" onclick="window.birPrintDoc(this)">${window.emojiIcon('🖨',14)} Print</button>
     ${opts.csvId ? `<button class="btn-secondary btn-sm" id="${opts.csvId}">${window.emojiIcon('⬇',14)} CSV</button>` : ''}
     ${opts.extraButtons || ''}
   </div>`;
 };
+
+// Open the BIR sheet that this button belongs to as a real printable document.
+// DOM lookup is scoped to the button's own host container (btn → its .no-print
+// toolbar → that toolbar's parent), never document.getElementById — the BIR
+// screens re-render bodyEl in place and can be hosted inside an openPage panel,
+// so an id lookup is exactly the class of bug this codebase keeps hitting.
+// Falls back to plain window.print() if anything is missing, so the button can
+// never become dead again.
+window.birPrintDoc = function (btn) {
+  try {
+    const bar   = btn && btn.closest ? btn.closest('.no-print') : null;
+    const host  = bar && bar.parentElement;
+    const sheet = host && host.querySelector('.bir-print');
+    if (!sheet || typeof window.openPrintableDoc !== 'function') { window.print(); return; }
+
+    // The letterhead's printCSS rides as a <style> sibling of the sheet
+    // (birBuildPrintHTML below). Pass its text through as pageCss so the doc
+    // panel — and, more importantly, the off-viewport html2canvas CLONE, which
+    // has no ancestors — styles the .lh-* letterhead identically.
+    const styleEl = host.querySelector('style');
+    const lhCss   = styleEl ? styleEl.textContent : '';
+
+    // Pin the sheet's width (print-docs.js §4: a .page with no width exports at
+    // content width instead of sheet width). bodyHtml keeps the .bir-print
+    // wrapper itself — css/styles.css's `.bir-print .bir-t td` rules are
+    // descendant-scoped off that class, so keeping it is what makes the panel
+    // copy and the capture clone look like the printed artifact.
+    // The 10-column Cash Disbursements Book has a min-content width wider than
+    // A4's content box (measured: ~793px of unbreakable ₱ figures against a
+    // 703px box at 210mm − 2×12mm), and `width:100%` cannot shrink a table below
+    // its min-content — so without the overflow-wrap below the table spilled
+    // ~90px past the paper edge and gave the doc panel its own horizontal
+    // scrollbar. Letting the cells break lets the AUTO table algorithm fit the
+    // sheet while keeping proportional column widths (table-layout:fixed would
+    // fit too, but would force all 10 columns to equal widths). Scoped to
+    // .pd-print, so the legacy same-document Ctrl+P path off the BIR screen is
+    // byte-identical to before.
+    const pageCss = lhCss + `
+.pd-print.page{width:210mm;padding:0;background:#fff}
+.pd-print .bir-print{max-width:100%;margin:0;padding:12mm;box-shadow:none}
+.pd-print .table-wrap{overflow:visible}
+.pd-print .table-wrap::after{display:none}
+.pd-print table.bir-t{width:100%}
+.pd-print table.bir-t td,.pd-print table.bir-t th{overflow-wrap:anywhere;word-break:break-word}
+/* .no-print exists ONLY inside @media print in css/styles.css, and print-docs'
+   BASE_CSS has no rule for it either — so passing sheet.outerHTML verbatim
+   carried LIVE UI CONTROLS into the exported document: the per-row "2316" button
+   in the Alphalist and the accountant-supplied prior-VAT <input> in the VAT
+   worksheet both sit INSIDE .bir-print with class="no-print". A filed BIR
+   artifact must not show a button. Re-declare it for the doc panel, where no
+   print media query is in effect. */
+.pd-print .no-print{display:none!important}`;
+
+    const title = (sheet.querySelector('.lh-doctitle') || {}).textContent || 'BIR Document';
+    window.openPrintableDoc({
+      title: String(title).trim() || 'BIR Document',
+      barLabel: `${window.emojiIcon('🧾', 16)} ${escHtml(String(title).trim() || 'BIR Document')}`,
+      pageId: 'bir-doc-page',
+      accent: '#1E3A5F',
+      pageCss,
+      bodyHtml: sheet.outerHTML
+    });
+  } catch (e) {
+    console.error('[bir] printable-doc open failed, falling back to window.print()', e);
+    try { window.print(); } catch (_) {}
+  }
+};
+
 // ONE letterhead call shape for every WS39 print — entity ALWAYS 'bir'
 // (never buildLetterhead's own default, which resolves to the OPC entity
 // with a blank TIN — a genuine filing defect).
@@ -155,10 +232,27 @@ window.birBuildPrintHTML = function (opts) {
     accent: '#1E3A5F', signatures: opts.signatures || null,
     footerNote: 'WORKSHEET — figures for accountant transcription into eBIRForms/eFPS, not an official filing by itself · Barro Industries Operating System · ' + new Date().toLocaleString('en-PH')
   });
+  // MOBILE FINANCE PASS (2026-08-08) — opts.bodyHTML is wrapped in a
+  // `.table-wrap` scrollport. This is the SINGLE funnel every BIR doc goes
+  // through (12 call sites), so one wrapper covers all of them.
+  //
+  // Why it was needed: `.bir-print{max-width:210mm;padding:14mm}` is an
+  // ON-SCREEN rule, so a 375px phone got a ~249px content box, and the Cash
+  // Disbursements Book is 10 columns wide (Cash Receipts 7, Alphalist/2316 8).
+  // The books render inside #page-content, which is `overflow-x: clip` —
+  // and clip, unlike scroll/auto, creates NO scrollport, so Input VAT, VAT
+  // Treatment and Tax Withheld were unreachable by ANY gesture. `.table-wrap`
+  // (css/styles.css) is the repo's existing overflow-x:auto + edge-fade
+  // affordance, so the wide columns now scroll INSIDE the sheet while the page
+  // body itself still never scrolls horizontally.
+  //
+  // Markup-only and print-neutral: the @media print block in css/styles.css
+  // releases `.bir-print .table-wrap` back to overflow:visible, so the filed
+  // artifact is unchanged.
   return `<style>${lh.printCSS}</style>
     <div class="bir-print${opts.watermark ? ' bir-watermark' : ''}">
       ${lh.headerHTML}
-      ${opts.bodyHTML}
+      <div class="table-wrap">${opts.bodyHTML}</div>
       ${lh.footerHTML}
     </div>`;
 };
@@ -793,7 +887,7 @@ window.birRender2316 = function (bodyEl, row, year, state) {
   });
   bodyEl.innerHTML = `<div class="no-print" style="display:flex;gap:8px;margin-bottom:10px">
     <button class="btn-secondary btn-sm" id="bir-2316-back">← Back to Alphalist</button>
-    <button class="btn-primary btn-sm" onclick="window.print()">${window.emojiIcon('🖨',14)} Print</button>
+    <button class="btn-primary btn-sm" onclick="window.birPrintDoc(this)">${window.emojiIcon('🖨',14)} Print</button>
   </div>` + printHTML;
   if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-2316-back')?.addEventListener('click', () => window.birRenderAlphaBody(bodyEl, state));

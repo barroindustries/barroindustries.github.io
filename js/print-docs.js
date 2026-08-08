@@ -307,7 +307,14 @@
   // matters more here than for the payslip: a multi-page landscape lead
   // sheet at scale 2 can exceed iOS's ~16.7 MP canvas cap.
   async function _captureDocJpeg(panel, o) {
-    let canvas = await _captureDocCanvas(panel, o, { scale: 2 });
+    // Honour the CALLER's scale. It was hardcoded to 2, so opts.scale — which
+    // openPrintableDoc accepts and documents — could never reach the PDF path.
+    // A caller that knows its document is large (a whole payroll batch) has no
+    // other way to stay under iOS's canvas-area cap, and the retry below cannot
+    // save it: WebKit above the cap returns a non-allocated backing store, so
+    // drawing is a no-op and toBlob resolves with a VALID BUT BLANK jpeg rather
+    // than the null this catch is waiting for.
+    let canvas = await _captureDocCanvas(panel, o, { scale: o.scale || 2 });
     let blob;
     try {
       blob = await _canvasToJpegBlob(canvas);
@@ -625,5 +632,94 @@ ${PRINT_CSS}
     }
 
     return panel;
+  };
+
+  // ═══════════════════════════════════════════════════════════
+  //  §6 — openScreenPrintDoc: the SAME host, for screens that print themselves
+  //  (MOBILE FINANCE PASS, 2026-08-08)
+  // ═══════════════════════════════════════════════════════════
+  // §1 above serves callers that BUILD a document (invoice, delivery receipt,
+  // PO). Finance/HR has a second, older shape: screens that render into
+  // #page-content (or into an openPage panel) and print THEMSELVES via a bare
+  // `onclick="window.print()"`, relying on css/styles.css's `@media print`
+  // block to hide the app chrome. Five of those exist — the Financial Report,
+  // the income/expense category drilldown, Break-even, the payroll
+  // three-way reconciliation, and the batch payslip run — and every one of them
+  // is DEAD on iOS standalone for the reason js/screens/hr.js §4 already
+  // documents: window.print() is a no-op in an Add-to-Home-Screen webview.
+  //
+  // This is deliberately NOT a second print mechanism. It is a call-shape
+  // adapter: snapshot the live DOM, drop the on-screen-only chrome, and hand
+  // the result to openPrintableDoc — so those five screens end up on exactly
+  // the same iOS-aware Print / Save PDF / Save as JPEG path as every other doc,
+  // with no per-caller iOS branching anywhere.
+  //
+  // opts:
+  //   source   - Element to snapshot (REQUIRED; falls back to window.print())
+  //   strip    - extra selector(s) to delete from the clone, on top of the
+  //              default chrome list
+  //   reveal   - selector(s) that are display:none on screen and must be shown
+  //              in the document (the `*-print-lh` letterhead blocks); set as an
+  //              inline style so it beats the cloned <style> tag's own rule
+  //   title / barLabel / pageId / accent / watermark / pageCss - as §1
+  const SCREEN_DOC_CSS = `
+/* Pin the sheet width — print-docs §4: a .page with no width exports at CONTENT
+   width instead of sheet width. */
+.pd-print.page{width:210mm;padding:12mm;background:#fff}
+/* .page already re-points --surface/--border/--text/--text-muted to light
+   values (BASE_CSS), so cloned .card/.data-table markup comes out light-on-white
+   without per-component overrides. These are the few tokens it does NOT own. */
+.pd-print .card{background:#fff;border:1px solid #ccc;box-shadow:none;margin-bottom:10px;overflow:visible}
+.pd-print .card-header{background:#f2f4f8;border-bottom:1px solid #ddd;padding:6px 9px}
+.pd-print .card-header h3{font-size:11pt;font-weight:800;color:#1E3A5F;margin:0}
+.pd-print .card-body{padding:8px 9px}
+.pd-print .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:10px}
+.pd-print .kpi-card{background:#f7f8fa;border:1px solid #ddd;border-radius:4px;padding:8px;box-shadow:none}
+.pd-print .kpi-label{font-size:8pt;color:#555;text-transform:uppercase;letter-spacing:.04em}
+.pd-print .kpi-value{font-size:12pt;font-weight:800;color:#111}
+.pd-print .data-table th{background:#1E3A5F;color:#fff;font-size:8.5pt;text-transform:uppercase;letter-spacing:.04em;text-align:left;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pd-print .data-table td,.pd-print .data-table th{border:1px solid #ccc;padding:4px 6px;font-size:9.5pt}
+/* .table-wrap is overflow-x:auto on screen — an overflow container clips in the
+   210mm sheet and in the html2canvas capture, so release it (and its ≤640px
+   edge-fade ::after, which would paint a themed band over the paper). */
+.pd-print .table-wrap,.pd-print .table-scroll{overflow:visible}
+.pd-print .table-wrap::after,.pd-print .table-scroll::after{display:none}
+.pd-print .badge{border:1px solid #bbb;background:#f2f2f2;color:#333;padding:1px 5px;border-radius:3px;font-size:8pt}
+.pd-print .progress-bar-wrap{background:#eee;border:1px solid #ddd}
+.pd-print .empty-state{color:#555}`;
+
+  const SCREEN_STRIP = [
+    '.no-print', 'script', 'button', '.btn', '.btn-primary', '.btn-secondary',
+    '.btn-danger', '.btn-outline', '.btn-success', '.chip-tabs', '.fab',
+    '.skeleton', '.skeleton-row', 'input', 'select', 'textarea'
+  ].join(', ');
+
+  window.openScreenPrintDoc = function (opts) {
+    const o = opts || {};
+    const src = o.source;
+    // Never leave the caller with a dead button: if the snapshot target is
+    // missing, fall through to the behaviour that at least still works on
+    // desktop rather than doing nothing at all.
+    if (!src || typeof src.cloneNode !== 'function') {
+      try { window.print(); } catch (_) {}
+      return null;
+    }
+    const clone = src.cloneNode(true);
+    try {
+      clone.querySelectorAll(SCREEN_STRIP + (o.strip ? ', ' + o.strip : ''))
+           .forEach(el => el.remove());
+      if (o.reveal) clone.querySelectorAll(o.reveal).forEach(el => { el.style.display = 'block'; });
+    } catch (e) {
+      console.error('openScreenPrintDoc: could not prepare the snapshot', e);
+    }
+    return window.openPrintableDoc({
+      title: o.title || 'Document',
+      barLabel: o.barLabel || null,
+      pageId: o.pageId || 'pd-screen-page',
+      accent: o.accent || '#1E3A5F',
+      watermark: o.watermark || null,
+      pageCss: SCREEN_DOC_CSS + '\n' + (o.pageCss || ''),
+      bodyHtml: clone.innerHTML
+    });
   };
 })();

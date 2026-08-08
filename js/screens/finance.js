@@ -161,7 +161,13 @@ function _afterSaveRefreshFailed(err) {
 window.financeEditModal = function({ collection, docId, title, fields, onSaved, transform, periodField }) {
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
   const selStyle = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)';
-  const taStyle  = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)';
+  // MOBILE FINANCE PASS (2026-08-08) — the inline `font-size:13px` is deleted,
+  // not shrunk: an inline declaration is the ONE thing css/styles.css's
+  // iOS-no-zoom guards cannot beat without !important, and this is the SHARED
+  // textarea for Ledger, Taxes, Cash Receipts, Cash Disbursements and Records.
+  // The field sits in a .form-group, so it now takes .form-group textarea's
+  // var(--fs-base) on desktop and the 1rem/16px coarse-pointer floor on touch.
+  const taStyle  = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)';
   const fieldHtml = f => {
     const v = f.value == null ? '' : f.value;
     if (f.type === 'select') {
@@ -751,7 +757,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
           </button>
         </div>
         <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV${compareOn?' (includes comparison columns)':''}">${emojiIcon('⬇',16)} CSV</button>
-        <button class="btn-secondary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print</button>
+        <button class="btn-secondary btn-sm" id="finrep-print-btn">${emojiIcon('🖨',16)} Print</button>
       </div>
     </div>
     <div class="kpi-row" style="margin-bottom:14px">
@@ -806,6 +812,22 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     // the compareOn guard at the top of the function).
     renderFinancialReports(container, currentUser, currentRole, newKey === 'ytd' ? 'year' : newKey, compareOn);
   }, { activeKey: periodKey });
+  // MOBILE FINANCE PASS (2026-08-08) — Print was `onclick="window.print()"`,
+  // a no-op inside the iOS Add-to-Home-Screen webview (js/screens/hr.js §4
+  // documents this root cause; only the payslip had been converted). Route it
+  // through the shared openScreenPrintDoc → openPrintableDoc host so iOS gets
+  // the Web-Share PDF path and every other platform keeps window.print().
+  // Lookup is scoped to `container`, never document.getElementById.
+  container.querySelector('#finrep-print-btn')?.addEventListener('click', () => {
+    window.openScreenPrintDoc({
+      source: container,
+      reveal: '.finrep-print-lh',   // letterhead is display:none on screen
+      strip: '#finrep-period',      // the period picker is chrome, not content
+      title: 'Financial Report — ' + label,
+      barLabel: `${emojiIcon('📈',16)} Financial Report — ${escHtml(label)}`,
+      pageId: 'finrep-doc-page'
+    });
+  });
   document.getElementById('finrep-close-btn')?.addEventListener('click', async () => {
     const mk = document.getElementById('finrep-close-btn').dataset.month;
     if (!(await confirmDialog({message:`Close the books for ${document.getElementById('finrep-close-btn').dataset.label}?\n\nNo new entries can post to this month until it's reopened.`}))) return;
@@ -865,7 +887,7 @@ window.openFinCategoryDrill = function(category, kind, rows, periodLabel) {
     ${_lh.printCSS}
   </style>` : '';
 
-  window.openPage(`${emojiIcon(kind==='income'?'📈':'📉',16)} ${category} — ${periodLabel}`, `
+  const _drillPanel = window.openPage(`${emojiIcon(kind==='income'?'📈':'📉',16)} ${category} — ${periodLabel}`, `
     ${printCss}
     <div class="findrill-print-wrap">
       <div class="findrill-print-lh">${_lh?_lh.headerHTML:''}</div>
@@ -886,10 +908,26 @@ window.openFinCategoryDrill = function(category, kind, rows, periodLabel) {
       </div></div>
       <div class="findrill-print-lh">${_lh?_lh.footerHTML:''}</div>
     </div>
-  `, `<button class="btn-secondary" id="findrill-csv-btn">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary" onclick="window.print()">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  `, `<button class="btn-secondary" id="findrill-csv-btn">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary" id="findrill-print-btn">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
   if (window.lucide) lucide.createIcons();
-  document.getElementById('findrill-csv-btn')?.addEventListener('click', () => {
+  // MOBILE FINANCE PASS (2026-08-08) — Print was `onclick="window.print()"`,
+  // dead inside the iOS standalone webview. Routed through the shared
+  // openScreenPrintDoc → openPrintableDoc host. Both lookups are now scoped to
+  // the panel this function just opened rather than document.getElementById:
+  // this drill can be opened repeatedly from the Income Statement, and a
+  // document-wide id lookup binds whichever copy the document happens to reach
+  // first (the app's largest defect class per CLAUDE.md).
+  _drillPanel?.querySelector('#findrill-print-btn')?.addEventListener('click', () => {
+    window.openScreenPrintDoc({
+      source: _drillPanel.querySelector('.findrill-print-wrap'),
+      reveal: '.findrill-print-lh',
+      title: `${kind==='income'?'Income':'Expense'} Detail — ${category} — ${periodLabel}`,
+      barLabel: `${emojiIcon(kind==='income'?'📈':'📉',16)} ${escHtml(category)} — ${escHtml(periodLabel)}`,
+      pageId: 'findrill-doc-page'
+    });
+  });
+  _drillPanel?.querySelector('#findrill-csv-btn')?.addEventListener('click', () => {
     const slug = (category + '-' + periodLabel).replace(/[^a-z0-9]+/gi,'-').toLowerCase();
     window.exportCSV('income-statement-' + slug, sorted, [
       { key:'date', label:'Date' },
@@ -1044,7 +1082,7 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canWrite?`<button class="btn-secondary btn-sm" id="bke-classify-btn">${emojiIcon('🏷',16)} Classify</button>`:''}
         <button class="btn-secondary btn-sm" id="bke-csv-btn">${emojiIcon('⬇',16)} CSV</button>
-        <button class="btn-secondary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print</button>
+        <button class="btn-secondary btn-sm" id="bke-print-btn">${emojiIcon('🖨',16)} Print</button>
       </div>
     </div>
 
@@ -1077,7 +1115,13 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
       </div>
     </div>
 
-    <div class="form-row" style="grid-template-columns:1fr 1fr">
+    <!-- .bke-row2: mobile finance pass 2026-08-08. The inline
+         grid-template-columns below outranks .form-row's 768px 1-col collapse,
+         so these two tables sat side by side at ~165px each on a 375px phone.
+         .bke-row2 is named in the same !important rule as .an-row2 (end of
+         css/styles.css) — the shipped precedent for this exact defect, and the
+         only thing that beats a non-important inline style. -->
+    <div class="form-row bke-row2" style="grid-template-columns:1fr 1fr">
       <div class="card" style="margin-bottom:14px">
         <div class="card-header"><h3>${emojiIcon('📌',18)} Fixed Costs (${r.classifiedFixed.length})</h3></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
@@ -1112,6 +1156,19 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
   window.bindPeriodPicker(document.getElementById('bke-period'), (newKey) => {
     renderBreakevenTab(container, currentUser, currentRole, newKey);
   }, { activeKey: periodKey });
+
+  // MOBILE FINANCE PASS (2026-08-08) — see the Financial Report handler above:
+  // the bare window.print() this replaces is a no-op on iOS standalone.
+  container.querySelector('#bke-print-btn')?.addEventListener('click', () => {
+    window.openScreenPrintDoc({
+      source: container,
+      reveal: '.bke-print-lh',
+      strip: '#bke-period',
+      title: 'Break-even Analysis — ' + label,
+      barLabel: `${emojiIcon('📉',16)} Break-even — ${escHtml(label)}`,
+      pageId: 'bke-doc-page'
+    });
+  });
 
   document.getElementById('bke-csv-btn')?.addEventListener('click', () => {
     const slug = label.replace(/[^a-z0-9]+/gi,'-').toLowerCase();
@@ -1510,18 +1567,29 @@ window.renderBankAccounts = async function(container) {
     ${canWrite?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-primary btn-sm" id="ba-add-btn">+ Add Account</button></div>`:''}
     <div class="card"><div class="card-body" style="padding:0">
     ${!accounts.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🏦',44)}</div><h4>No bank accounts registered</h4><p>Add every real company account (bank / e-wallet / petty cash) to start tracking balances.</p></div>`:
-    `<div class="table-wrap"><table class="data-table table-cards">
+    `<div class="table-wrap"><table class="data-table table-cards no-toggle">
       <thead><tr><th></th><th>Account</th><th>Opening</th><th>Book Balance</th><th>Reconciled Balance</th><th>Status</th>${canWrite?'<th></th>':''}</tr></thead>
       <tbody>${accounts.map(a=>{
         const bb = bookBal[a.id]?bookBal[a.id].balance:0, rb = recBal[a.id]?recBal[a.id].balance:0;
-        // Row already navigates to the drilldown (.ba-row-link below) — the
-        // detail page IS the expansion, so tc-detail cells stay hidden on
-        // phone with no separate tap-to-expand toggle (no caret/JS added).
+        // MOBILE FINANCE PASS (2026-08-08) — `no-toggle` added to the table.
+        // The old note here claimed the drilldown "IS the expansion", so the
+        // three .tc-detail cells could stay hidden on phone. They didn't just
+        // stay hidden — they were UNREACHABLE: css/styles.css hides
+        // `.table-cards td.tc-detail` and reveals it only on `tr.tc-expanded`,
+        // and nothing on this screen ever adds that class (no caret, no tap
+        // binding). Net effect on a phone: Opening, Reconciled Balance and
+        // Status were never rendered at all, so an ACTIVE and a CLOSED account
+        // looked identical and the reconciled balance had no path to the eye.
+        // `.table-cards.no-toggle` (styles.css §5c) renders every <td> as an
+        // always-visible `label: value` line with no JS — it ties
+        // `.table-cards td.tc-detail` on specificity and wins on source order.
+        // data-label added to the two cells that lacked one, since no-toggle's
+        // ::before label is what makes a bare peso figure legible on its own row.
         return `<tr>
-        <td class="tc-avatar">${typeIcon(a.type)}</td>
+        <td class="tc-avatar" data-label="Type">${typeIcon(a.type)}</td>
         <td class="tc-name ba-row-link" data-id="${escHtml(a.id)}" style="cursor:pointer"><strong>${escHtml(a.nickname||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.BankAccounts.label(a))}${a.isDefault?' · <span class="badge badge-blue" style="font-size:9px">default</span>':''}</div></td>
         <td class="tc-detail" data-label="Opening" style="font-size:12px">₱${fmt(a.openingBalance||0)}<div style="font-size:10px;color:var(--text-muted)">@ ${escHtml(a.openingDate||'—')}</div></td>
-        <td class="tc-net" style="font-weight:700">₱${fmt(bb)}</td>
+        <td class="tc-net" data-label="Book Balance" style="font-weight:700">₱${fmt(bb)}</td>
         <td class="tc-detail" data-label="Reconciled Balance">₱${fmt(rb)}</td>
         <td class="tc-detail" data-label="Status"><span class="badge ${a.active!==false?'badge-green':'badge-gray'}">${a.active!==false?'active':'closed'}</span></td>
         ${canWrite?`<td class="tc-actions" style="white-space:nowrap">
@@ -1663,7 +1731,7 @@ async function renderBankAccountDrilldown(a) {
           <td data-label="Amount" style="color:${r.bankFlow==='in'?'var(--success)':'var(--danger)'}">${r.bankFlow==='in'?'+':'-'}₱${fmt(r.amount||0)}</td>
           <td data-label="Running Balance" style="font-weight:700">₱${fmt(running)}</td>
           <td data-label="Reconciled"><input type="checkbox" class="ba-recon-chk" data-id="${escHtml(r.id)}" ${r.reconciled?'checked':''}/></td>
-          <td data-label="Re-tag to"><select class="ba-retag-sel" data-id="${escHtml(r.id)}" style="font-size:11px;padding:3px 6px;max-width:60%">${bankOpts}</select></td>
+          <td data-label="Re-tag to"><select class="ba-retag-sel" data-id="${escHtml(r.id)}" style="padding:3px 6px;max-width:60%">${bankOpts}</select></td>
         </tr>`; }).join('')}</tbody>
       </table></div>`}
     </div></div>
@@ -1938,7 +2006,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
     actionsMode: 'privOnly',
     headerExtra: () => `
       <div style="display:flex;gap:8px">
-        <select id="rec-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
+        <select id="rec-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
           <option value="">All Types</option>
           <option>Receipt</option><option>Invoice</option><option>Voucher</option>
           <option>Contract</option><option>Official Receipt</option><option>Other</option>
@@ -1981,7 +2049,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
           <div class="form-group"><label>Amount (₱)</label><input id="rec-amount" type="number" step="0.01" inputmode="decimal"/></div>
           <div class="form-group"><label>From / To</label><input id="rec-party" placeholder="Supplier, client, or payee"/></div>
         </div>
-        <div class="form-group"><label>Notes</label><textarea id="rec-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"></textarea></div>
+        <div class="form-group"><label>Notes</label><textarea id="rec-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"></textarea></div>
         <div id="rec-file-area"></div>
       `,
       footerHtml: `<button class="btn-primary" id="save-rec-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,

@@ -1084,18 +1084,45 @@ window.Notifs = (() => {
     toast.id = 'bi-toast';
     toast.setAttribute('role', 'status');       // v13 Phase 188: screen-reader
     toast.setAttribute('aria-live', 'polite');  // announces toast text
-    // Mobile (no bottom-nav) gets a smaller offset; desktop reserves bottom-nav space.
-    const isMobile = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+    // ── Bottom offset (FIXED 2026-08-08, mobile finance pass; beta finding F12)
+    // This branch used to be INVERTED. The old comment read "Mobile (no
+    // bottom-nav) gets a smaller offset; desktop reserves bottom-nav space" —
+    // which is backwards: `.bottom-nav` is the PHONE's primary nav (it is
+    // display:none only ABOVE 819px — see NAV_MAX_W below), so
+    // the ≤640px branch was the one that needed the clearance and got 16px,
+    // while desktop reserved 84px for a bar that isn't there.
+    // Measured overlap on a 375×812 phone: toast occupied [16+inset,
+    // ~54+inset] and the nav occupies [inset, 56+inset] — a total overlap, with
+    // the toast at --z-toast 9990 over --z-bottom-nav 95. Since the toast lives
+    // for 3500ms and every finance save fires one, the bottom nav was
+    // untappable for 3.5s after each save.
+    // Two independent fixes, both needed: (1) put the toast ABOVE the nav on
+    // phones, using --bottom-nav-h and --sab-eff (the ViewportSync-published
+    // safe-area value, per the house convention) rather than a hardcoded 52px;
+    // (2) pointer-events:none below, so even a mis-measured offset can never
+    // swallow a tap again — the toast is pure output, it has no controls.
+    // 819px, NOT 640. The comment above says the nav is display:none until the
+    // phone tier — that is wrong, and gating on 640 shipped a NEW overlap on
+    // 641-819px. css/styles.css turns .bottom-nav on with
+    // `display:flex!important` inside @media (max-width:768px), AND AGAIN inside
+    // @media (min-width:769px) and (max-width:819px). So the nav is present all
+    // the way to 819px. Measured: at 700px and 790px the 640-gated toast
+    // overlapped the nav by 40px, where HEAD's (wrong-for-phones) 84px offset
+    // happened to clear it. Real devices in that band: iPhone SE and 8 Plus in
+    // landscape, iPad mini and iPad 9.7 in portrait, and the whole 769-819 tier.
+    const NAV_MAX_W = 819;
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: ' + NAV_MAX_W + 'px)').matches;
+    const sab = 'var(--sab-eff, env(safe-area-inset-bottom,0px))';
     const bottom = isMobile
-      ? 'calc(16px + env(safe-area-inset-bottom,0px))'
-      : 'calc(16px + 52px + 16px + env(safe-area-inset-bottom,0px))';
+      ? `calc(12px + var(--bottom-nav-h, 56px) + ${sab})`
+      : `calc(16px + ${sab})`;
     toast.style.cssText = `
       position:fixed; bottom:${bottom}; left:50%; transform:translateX(-50%);
       display:flex; align-items:center; gap:9px;
       background:${bg}; border:1px solid ${border};
       color:${fg}; padding:10px 18px; border-radius:999px;
       font-size:13px; font-weight:600; z-index:var(--z-toast, 9990);
-      box-shadow:${shadow};
+      box-shadow:${shadow}; pointer-events:none;
       animation:toastIn 0.3s ease; white-space:nowrap; max-width:90vw; overflow:hidden; text-overflow:ellipsis;
     `;
     const dot = document.createElement('span');

@@ -550,14 +550,14 @@ async function openPayrollReconciliation() {
     }
     ${_reconLh.printCSS}
   </style>` : '';
-  openPage(`${emojiIcon('🔍',16)} Payroll Reconciliation`,
+  const _reconPanel = openPage(`${emojiIcon('🔍',16)} Payroll Reconciliation`,
     `${_reconPrintCss}
     <div class="recon-print-wrap">
       <div class="recon-print-lh">${_reconLh ? _reconLh.headerHTML : ''}</div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <h4 style="margin:0">Three-Way Reconciliation — ledger vs pay run vs salary history</h4>
         <div class="no-print" style="display:flex;gap:8px;align-items:center">
-          <select id="recon3-month-sel" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"></select>
+          <select id="recon3-month-sel" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"></select>
           <button class="btn-secondary btn-sm" id="recon3-csv-btn" disabled>${emojiIcon('📥',14)} Export CSV</button>
         </div>
       </div>
@@ -567,7 +567,23 @@ async function openPayrollReconciliation() {
       <div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>
       <div class="recon-print-lh">${_reconLh ? _reconLh.footerHTML : ''}</div>
     </div>`,
-    `<button class="btn-secondary" onclick="window.print()">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV (flags)</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    `<button class="btn-secondary" id="recon-print-btn">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV (flags)</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+  // MOBILE FINANCE PASS (2026-08-08) — Print was `onclick="window.print()"`,
+  // which §4 of this very file documents as a no-op inside the iOS
+  // Add-to-Home-Screen webview. Routed through the shared openScreenPrintDoc →
+  // openPrintableDoc host (Web-Share PDF on iOS standalone, window.print()
+  // everywhere else). The snapshot is taken at CLICK time, so the async
+  // three-way table and flag scan below are already filled in by then.
+  _reconPanel?.querySelector('#recon-print-btn')?.addEventListener('click', () => {
+    window.openScreenPrintDoc({
+      source: _reconPanel.querySelector('.recon-print-wrap'),
+      reveal: '.recon-print-lh',
+      title: 'Payroll Reconciliation',
+      barLabel: `${emojiIcon('🔍',16)} Payroll Reconciliation`,
+      pageId: 'recon-doc-page'
+    });
+  });
 
   const runsSnap = await db.collection('pay_runs').get().catch(()=>({docs:[]}));
   const runDataByMonth = {}; runsSnap.docs.forEach(d => { runDataByMonth[d.id] = d.data(); });
@@ -922,7 +938,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-      <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
+      <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
         ${monthOptionsHtml}
       </select>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
@@ -2529,20 +2545,89 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // page-break-after:always stays on the .payslip-print div itself (same
     // element it was always on — .a4-sheet/.payslip-print share one div,
     // per renderPayslipPage's wrapper above), .a4-stage is purely the extra
-    // outer centering box. Desktop-oriented flow (window.print() only, no
-    // Web Share path — batch-PDF-on-iOS is flagged as a follow-up, not in
-    // scope) — fitA4Sheet still runs a one-shot {live:false} fit so a phone
-    // opening this screen before hitting Print doesn't get a fixed 794px
+    // outer centering box — fitA4Sheet still runs a one-shot {live:false} fit so
+    // a phone opening this screen before hitting Print doesn't get a fixed 794px
     // sheet wider than its viewport (horizontal scroll).
+    //
+      // batch-PDF-on-iOS now WORKS, within a hard limit it cannot exceed: the
+      // single-canvas capture is bounded by iOS's canvas AREA, so about 18 A4
+      // sheets at scale 1. Above that the handler refuses with guidance rather
+      // than emitting a blank file — see the ceiling note in the click handler.
+      // It is NOT unconditionally solved; do not read this as closed.
+    // follow-up" is now DONE. Print All was a bare window.print(), i.e. dead in
+    // the iOS Add-to-Home-Screen webview (§4 of this file documents exactly
+    // that), so on the phone this screen was a preview with no way out to paper
+    // or PDF. It now opens the batch as a real printable document via
+    // window.openPrintableDoc, whose iOS path captures the sheets and hands a
+    // multi-page PDF to the native share sheet (_shareDocPDF slices by canvas
+    // height, one PDF page per sheet-height slice). The on-screen preview and
+    // the Back button are unchanged.
     host.innerHTML = `
       <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
         <button class="btn-secondary btn-sm" id="ps-back-btn">← Back</button>
-        <button class="btn-primary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print All</button>
+        <button class="btn-primary btn-sm" id="ps-print-all-btn">${emojiIcon('🖨',16)} Print All</button>
       </div>
       ${models.map(mdl => `<div class="a4-stage"><div class="a4-sheet payslip-print" style="page-break-after:always">${window.buildPayslipHTML(mdl)}</div></div>`).join('')}`;
     if (window.lucide) lucide.createIcons({ nodes: [host] });
     if (typeof window.fitA4Sheet === 'function') window.fitA4Sheet(host, { live:false });
-    document.getElementById('ps-back-btn').addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
+    host.querySelector('#ps-back-btn')?.addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
+    host.querySelector('#ps-print-all-btn')?.addEventListener('click', () => {
+      if (typeof window.openPrintableDoc !== 'function') { try { window.print(); } catch (_) {} return; }
+      // ── CANVAS-AREA CEILING (2026-08-08) ───────────────────────────────────
+      // The iOS PDF path captures the WHOLE panel as ONE canvas and only then
+      // slices it into pages, so a batch is limited by iOS's ~16.7 MP canvas
+      // area — not by page count. One A4 sheet is 794x1123 = 0.892 MP, so about
+      // 4 sheets at scale 2 and about 18 at scale 1.
+      //
+      // This MUST be decided up front, because the existing "retry at scale 1"
+      // fallback cannot catch it: above the cap WebKit hands back a
+      // non-allocated backing store, drawing becomes a no-op, and toBlob
+      // resolves with a VALID BUT BLANK jpeg. Nothing throws. The user would be
+      // handed a blank multi-page payroll PDF that looks like it worked — for a
+      // money document, worse than the dead button this replaced.
+      const SHEET_MP   = (794 * 1123) / 1e6;      // 0.892 MP per A4 sheet
+      const CANVAS_CAP = 16.7;                     // iOS, per print-docs.js's own note
+      const maxAt = (sc) => Math.max(1, Math.floor(CANVAS_CAP / (SHEET_MP * sc * sc)));
+      const n = models.length;
+      const scale = n <= maxAt(2) ? 2 : 1;
+      if (n > maxAt(1)) {
+        const per = maxAt(1);
+        window.confirmDialog?.({
+          title: 'Too many payslips for one file',
+          message: `This run has <strong>${n}</strong> payslips. A single PDF can hold about `
+            + `<strong>${per}</strong> before the phone silently produces a blank file, so this `
+            + `would not be trustworthy. Print them in batches of ${per} or fewer — or use a `
+            + `desktop browser, which has no such limit.`,
+          html: true, confirmLabel: 'Got it', cancelLabel: null
+        }) || Notifs.showToast(`Too many payslips for one PDF (${n}) — print in batches of ${per}.`, 'error');
+        return;
+      }
+      // Built from `models` directly rather than snapshotted from the DOM: the
+      // on-screen copy carries fitA4Sheet's scale-to-fit transform and the
+      // .a4-stage centring box, neither of which belongs on the printed sheet.
+      window.openPrintableDoc({
+        title: 'Payslips — ' + month,
+        scale,   // chosen above from the sheet count, never blindly 2
+        barLabel: `${emojiIcon('🖨',16)} Payslips — ${escHtml(month)} (${models.length})`,
+        pageId: 'payslip-batch-page',
+        accent: '#1E3A5F',
+        // .payslip-print carries its own complete styling in css/styles.css, so
+        // the only deltas needed are (a) pinning the sheet width — print-docs.js
+        // §4: a .page with no width exports at CONTENT width — and (b) undoing
+        // `@media print{ .payslip-print{position:absolute;left:0;top:0} }`,
+        // which is correct for ONE payslip but stacks every sheet of a batch on
+        // top of each other at top:0.
+        pageCss: `
+.pd-print.page{width:794px;padding:0;background:#fff}
+.pd-print .a4-sheet{width:794px;min-height:1123px;transform:none;box-shadow:none;border:none;margin:0 auto}
+@media print{
+  .pd-print .payslip-print{position:static!important;padding:0!important;width:100%!important}
+  .pd-print .a4-sheet{page-break-after:always;break-after:page}
+  .pd-print .a4-sheet:last-child{page-break-after:auto;break-after:auto}
+}`,
+        bodyHtml: models.map(mdl => `<div class="a4-sheet payslip-print">${window.buildPayslipHTML(mdl)}</div>`).join('')
+      });
+    });
   });
 }
 

@@ -340,9 +340,24 @@ html.theme-astral .btn-primary {
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 .form-group textarea { resize: vertical; min-height: 80px; line-height: 1.6; }
-/* 16px stops iOS auto-zoom on focus */
+/* 16px stops iOS auto-zoom on focus.
+   MOBILE FINANCE PASS (2026-08-08) — broadened from the `.form-group`/`.ms-input`
+   allowlist to bare input/select/textarea, so hand-rolled controls built with
+   inline styles (finance's shared edit-modal textarea, the Records type filter,
+   the payroll month pickers, the bank re-tag select) are covered too rather than
+   depending on each site remembering to sit inside a .form-group.
+   NOTE for the next reader: this is the WEAK guard. The strong one lives at
+   ~line 3236 — `@media (hover:none) and (pointer:coarse) { input,textarea,select
+   { font-size: var(--fs-lg)!important } }` — and that one already covers every
+   iPhone (hover:none + coarse) and beats inline styles outright. This rule's
+   real job is the `pointer:coarse` + `hover:hover` gap that the strong guard's
+   `hover:none` term excludes (touch laptops, some Android). Element-level
+   (0,0,1) specificity on purpose: any deliberate class-based sizing still wins.
+   The six finance/HR inline `font-size` declarations were deleted at source in
+   the same pass, so nothing has to be fought with !important here. */
 @media (pointer: coarse) {
-  .form-group input, .form-group textarea, .form-group select, .ms-input { font-size: 1rem; }
+  .form-group input, .form-group textarea, .form-group select, .ms-input,
+  input, select, textarea { font-size: 1rem; }
 }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -2050,13 +2065,31 @@ html.theme-astral .chip-tab.active {
 }
 /* 3. Mobile scroll affordance: a right-edge fade hint suggesting more
    content is scrollable. Pure decoration — pointer-events:none so it never
-   blocks the existing overflow-x scroll gesture. Desktop untouched. */
+   blocks the existing overflow-x scroll gesture. Desktop untouched.
+   MOBILE FINANCE PASS (2026-08-08) — .chip-tabs joins the same rule. At ≤640px
+   it is already a nowrap/overflow-x:auto row with BOTH scrollbars suppressed
+   (scrollbar-width:none + ::-webkit-scrollbar{display:none}, ~line 7330), and
+   Finance's 7 group labels measure ~720px inside a ~355px box, so roughly 3 of
+   7 chips were visible with nothing on screen indicating the rest existed. The
+   pre-existing mask-image fade (~line 1878) is gated on hover:hover+pointer:fine
+   and names only #tn-tabs/.subtab-bar, so touch had no cue at all.
+   `position:absolute` matters: an ::after on a flex container would otherwise
+   become a flex ITEM and take real layout space — out-of-flow keeps it pure
+   decoration. It anchors to the right edge of the scrollport at scrollLeft 0
+   (identical behaviour to .table-wrap's, which is the point of reusing it). */
 @media (max-width: 640px) {
-  .table-wrap, .table-scroll { position: relative; }
-  .table-wrap::after, .table-scroll::after {
+  .table-wrap, .table-scroll, .chip-tabs { position: relative; }
+  .table-wrap::after, .table-scroll::after, .chip-tabs::after {
     content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 24px;
     background: linear-gradient(to right, transparent, var(--bg, var(--bg-2)) 92%);
     pointer-events: none;
+  }
+  /* The BIR books/worksheets are a WHITE filing artifact — the themed --bg
+     fade above would paint a dark band over the paper in Dark/Astral. Repoint
+     it to white for the on-screen BIR sheet only (the printed copy and the
+     openPrintableDoc panel copy are untouched — see the .bir-print block). */
+  #page-content .bir-print .table-wrap::after {
+    background: linear-gradient(to right, rgba(255,255,255,0), #fff 92%);
   }
 }
 /* 4. Row-action button set: consistent trailing action cluster for table
@@ -2141,6 +2174,28 @@ html.theme-astral .chip-tab.active {
     content: attr(data-label); font-weight: 700; font-size: var(--fs-2xs);
     color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
   }
+  /* 5c-i. Composing .no-toggle with the §5 ROLE classes (MOBILE FINANCE PASS
+     2026-08-08). Until now every .no-toggle table in the app used plain
+     data-label <td>s only — Finance's Bank Accounts table is the first to use
+     .no-toggle together with .tc-name/.tc-actions, and the generic
+     `.table-cards.no-toggle td { display:flex; justify-content:space-between }`
+     above is wrong for both of them:
+       · .tc-name is the card's TITLE cell, not a label:value line. It holds a
+         <strong>nickname</strong> plus a sub-label <div>, which display:flex
+         flattened onto ONE line — squeezing the sub-label (bank + account
+         number) against the cell edge instead of stacking it under the name.
+         It also carries no data-label by design, so it gains nothing from the
+         flex row. Back to block.
+       · .tc-actions' own rule sets justify-content:flex-end (a trailing button
+         cluster), which the no-toggle rule ties on specificity and beats on
+         source order — so Edit and Delete were flung to opposite ends of the
+         card. Restore flex-end.
+     Both selectors are (0,3,1) vs the generic (0,2,1), so they win on
+     specificity rather than relying on source order. Verified against every
+     other .no-toggle call site: none uses a .tc-* role class, so this changes
+     exactly one table. */
+  .table-cards.no-toggle td.tc-name { display: block; }
+  .table-cards.no-toggle td.tc-actions { justify-content: flex-end; }
 }
 @media (min-width: 701px) {
   .table-cards .tc-caret { display: none; }
@@ -7007,6 +7062,18 @@ html.light .notif-toggle-slider { background: rgba(0,0,0,0.15); }
   .team-card-btn    { min-height: 38px; min-width: 40px; padding: 8px 12px; }
   /* Attendance pencil lives in a small calendar cell — modest, cell-safe bump */
   .att-edit-btn.att-edit-visible { font-size: var(--fs-sm); padding: 3px 9px; line-height: 1.5; }
+
+  /* MOBILE FINANCE PASS (2026-08-08) — the two sub-20px controls in the Bank
+     Account drilldown that write MONEY data with no confirm step:
+       .ba-recon-chk  a bare UA checkbox (~13px on iOS) whose change handler
+                      writes `reconciled` straight onto a ledger doc
+                      (js/screens/finance.js);
+       .ba-retag-sel  a ~21px-tall select whose change handler re-tags a ledger
+                      row to a DIFFERENT bank account.
+     Both sit in the same card row on a phone, so a fat-finger miss on one hits
+     the other. Size only — no behaviour change; the handlers are untouched. */
+  .ba-recon-chk { width: 24px; height: 24px; flex-shrink: 0; }
+  .ba-retag-sel { min-height: 44px; }
 }
 
 /* ── Light mode overrides ── */
@@ -7272,7 +7339,40 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .bir-print table.bir-t{page-break-inside:auto;break-inside:auto;}
   .bir-print thead{display:table-header-group;}
   .bir-print tr,.bir-print .lh-sig-row{page-break-inside:avoid;break-inside:avoid;}
+  /* birBuildPrintHTML now wraps every doc body in a .table-wrap scrollport
+     (see js/bir.js) so the 10-column Cash Disbursements Book is reachable on a
+     phone. .table-wrap is overflow-x:auto, and an overflow container CLIPS in
+     paged media — release it here so the filed artifact is byte-identical to
+     what it printed before the wrapper existed. (.bir-t is width:100% so it
+     never actually overflows the printed page; this is belt-and-braces.) */
+  .bir-print .table-wrap{overflow:visible!important;}
+  .bir-print .table-wrap::after{display:none!important;}
   @page{size:A4 portrait;margin:11mm 10mm 7mm;}
+}
+/* ── BIR on a phone (MOBILE FINANCE PASS 2026-08-08) ──────────────────────
+   `.bir-print{max-width:210mm;padding:14mm}` above is an ON-SCREEN rule (the
+   @media print block starts after it), so at 375px it left a ~249px content
+   box — 14mm ≈ 53px of dead padding on EACH side — for tables of 7-10 columns.
+   #page-content is `overflow-x: clip` (~line 1240), which creates no scrollport,
+   so Input VAT / VAT Treatment / Tax Withheld were unreachable by any gesture.
+   Scoped to `#page-content` on purpose: the SAME .bir-print markup is reused as
+   the printable-doc sheet inside an openPage panel (window.birPrintDoc), which
+   lives outside #page-content and must keep true A4 geometry for the
+   scale-to-fit + PDF capture. @media print is likewise untouched. */
+@media (max-width: 640px){
+  #page-content .bir-print{max-width:100%;padding:10px;}
+  /* Same failure mode as the table above, in the letterhead. buildLetterhead's
+     .lh-header is a two-column flex row (.lh-id | right-aligned .lh-doc) whose
+     min-content is ~389px — measured 214px + 175px — inside a 335px content box,
+     and .lh-doc's default `min-width:auto` stops it shrinking below the widest
+     word ("DISBURSEMENTS" at 14pt). It overhung #page-content by 44px, and
+     `overflow-x: clip` means clipped-and-unreachable, not scrollable: the doc
+     title was cut in half with no gesture to reveal it. Let the row wrap and the
+     title break. Scoped to the on-screen sheet only — @media print and the
+     openPrintableDoc panel copy keep the real two-column A4 letterhead. */
+  #page-content .bir-print .lh-header{flex-wrap:wrap;}
+  #page-content .bir-print .lh-doc{text-align:left;min-width:0;}
+  #page-content .bir-print .lh-doctitle{overflow-wrap:anywhere;}
 }
 
 /* ── v12 WS18 — keyboard-shortcuts cheat sheet (? modal) ── */
@@ -7313,9 +7413,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   }
 
   /* CHIP ROWS: single-row horizontal scroll, no wrap clutter. Still the one
-     live source for this — height brought down from 40px to match the
-     owner's "paddings take so much space" directive (32px, tighter
-     padding); everything else here (scroll/overflow setup) is unchanged. */
+     live source for this; the scroll/overflow setup is unchanged. */
   .chip-tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -7325,7 +7423,18 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
     padding-bottom: 2px;
   }
   .chip-tabs::-webkit-scrollbar { display: none; }
-  .chip-tab { min-height: 32px; padding: 6px 12px; font-size: var(--fs-sm); flex-shrink: 0; }
+  /* MOBILE FINANCE PASS (2026-08-08) — 32px → 44px. This declaration sits
+     LATER in source than the repo's own coarse-pointer floor
+     (`@media (pointer:coarse){ .chip-tab{min-height:38px} }`, ~line 1930) at
+     equal specificity, so the density pass's 32px silently won on every phone:
+     below that 38px floor AND below the 44px floor `.btn-primary/.btn-secondary/
+     .btn-danger/.btn-outline/.btn-success` get at ≤768px (~line 3125). The V14
+     block header below claims "no tap target drops below 44px effective" — that
+     claim was false four lines above it until now. Finance's chip rows are the
+     most-tapped control on the phone (7 group chips + a sub-chip row on every
+     screen), so they get the real 44px, not the compromise 38px. Padding stays
+     tight — min-height does the work, so the row grows ~12px, not the label. */
+  .chip-tab { min-height: 44px; padding: 6px 12px; font-size: var(--fs-sm); flex-shrink: 0; }
 
   /* FORMS: full-width primary actions */
   .modal-footer .btn-primary,
@@ -7694,7 +7803,17 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
    Receivables, and the other renderAnalytics side-by-side cards) used a fixed
    2-column inline grid that never collapsed, so on a phone each panel was ~180px
    and card values clipped off the right. Stack them below 700px. The inline
-   grid-template-columns keeps the desktop ratios. */
+   grid-template-columns keeps the desktop ratios.
+   MOBILE FINANCE PASS (2026-08-08) — .bke-row2 joins it: Finance → Break-even
+   shipped the identical defect (`<div class="form-row" style="grid-template-
+   columns:1fr 1fr">`, js/screens/finance.js), where the inline attribute
+   unconditionally outranks the ≤768px `.form-row{grid-template-columns:1fr}`
+   collapse, rendering the Fixed Costs and Variable Costs tables side by side at
+   ~165px each on a 375px phone. Same shape, same cure — an !important author
+   declaration is the only thing that beats a non-important inline style, which
+   is exactly why this rule exists rather than editing .form-row's base (that
+   would still lose to the inline attribute, and would move every other
+   .form-row's breakpoint from 768 to 700 as collateral). */
 @media (max-width: 700px) {
-  .an-row2 { grid-template-columns: 1fr !important; }
+  .an-row2, .bke-row2 { grid-template-columns: 1fr !important; }
 }
