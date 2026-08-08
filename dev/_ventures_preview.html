@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ventures screen harness</title>
+  <link rel="stylesheet" href="../css/tokens.css">
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body class="theme-dark">
+  <!-- Local-only dev harness (like dev/_sop_preview.html). NOT part of the
+       deployed app: not referenced from index.html, so it needs no PRECACHE
+       entry. Drives window.renderVentures directly with stubbed globals and a
+       fake `ventures` array — never signs in, never touches production. -->
+  <div class="main-content" style="margin:0;padding:12px">
+    <div id="page-content"></div>
+  </div>
+
+  <script src="../js/config.js"></script>
+  <script src="../js/ui-states.js"></script>
+  <script src="../js/modules.js"></script>
+  <script>
+    // ── Minimal stubs: only what ventures.js touches at runtime ──
+    window.currentRole = 'president';
+    window.currentDepts = ['Ventures'];
+    window.currentUser = { uid: 'harness-uid', email: 'harness@example.com' };
+    window.userProfile = { displayName: 'Harness User' };
+    function deptContainer() { return document.getElementById('page-content'); }
+    function canEditDept() { return true; }
+    window.deptContainer = deptContainer;
+    window.canEditDept = canEditDept;
+    window.lucide = { createIcons() {} };          // no CDN in the harness
+    window.Notifs = {
+      showToast(m) { console.log('TOAST →', m); },
+      success(m) { console.log('OK →', m); }
+    };
+    window.confirmDialog = () => Promise.resolve(false);
+    window.openPrintableDoc = (o) => { console.log('PRINT →', o.title); return {}; };
+    window.Drive = { renderUploadArea() { /* no Storage in the harness */ } };
+    window.setSubroute = (s) => { window.__lastSubroute = s; location.hash = '#/dept/Ventures/' + s; };
+    window.initialSubtab = (d) => (window.currentSubtab != null ? window.currentSubtab : d);
+    window.firebase = { firestore: { FieldValue: { serverTimestamp() { return new Date(); } } } };
+
+    // ── Fake `ventures` collection ──
+    window.__VENTURES = [
+      { id: 'v1', name: 'Tuklas', slug: 'tuklas', tagline: 'Discovery-stage R&D arm',
+        icon: '🧪', color: '#0CA678', status: 'exploring', stage: 'Concept', order: 1,
+        summary: 'Tuklas is the exploratory arm.\n\nIt exists to test **new product bets** before capital is committed.',
+        sections: [
+          { title: 'What it is — overview', body: 'A small internal lab.', bullets: ['Two people', 'No fixed office'], note: 'Reviewed quarterly' },
+          { title: 'Goals & milestones', body: '', bullets: ['Ship one prototype', 'Validate demand'], note: '' },
+          { title: 'Status & next steps', body: 'Idle since June.', bullets: [], note: '' }
+        ],
+        links: [ { label: 'Notion space', url: 'https://example.com/tuklas' },
+                 { label: 'bad', url: 'javascript:alert(1)' } ],
+        fileUrl: null, updatedAt: new Date('2026-07-02T03:00:00Z'), updatedBy: 'neil@example.com' },
+      { id: 'v2', name: 'SteelFab.ph', slug: 'steelfab-ph', tagline: 'Online steel fabrication storefront',
+        icon: '🏗', color: '#F76707', status: 'active', stage: 'Pilot', order: 2,
+        summary: 'A direct-to-customer channel for fabrication work.',
+        sections: [ { title: 'What it is — overview', body: 'Web storefront + quoting.', bullets: [], note: '' } ],
+        links: [], fileUrl: 'https://example.com/deck.pdf',
+        updatedAt: new Date('2026-08-01T03:00:00Z'), updatedBy: 'neil@example.com' },
+      { id: 'v3', name: 'Haligi', slug: 'haligi', tagline: 'Structural systems venture',
+        icon: '🏛', color: '#1971C2', status: 'paused', stage: '', order: 3,
+        summary: '', sections: [], links: [], fileUrl: null },
+      { id: 'v4', name: 'AngatAgri', slug: 'angatagri', tagline: 'Agri equipment & cold chain',
+        icon: '🌾', color: '#2F9E44', status: 'archived', stage: 'Shelved', order: 4,
+        summary: 'Parked pending a partner.', sections: [], links: [], fileUrl: null },
+      // Adversarial row: XSS attempt in every user-authored field + a name that
+      // slugifies with punctuation.
+      { id: 'v5', name: '<img src=x onerror=alert(1)>Evil & Co.', slug: 'evil-co',
+        tagline: '"><script>alert(2)<\/script>', icon: '<b>x</b>', color: 'red; background:url(x)',
+        status: 'nonsense', stage: '<i>stage</i>', order: 5,
+        summary: '<script>alert(3)<\/script>', sections: [ { title: '<u>t</u>', body: '<script>alert(4)<\/script>', bullets: ['<b>b</b>'], note: '<i>n</i>' } ],
+        links: [], fileUrl: null }
+    ];
+
+    let _written = null;
+    window.__lastWrite = () => _written;
+    const docApi = (id) => ({
+      update(data) { _written = { op: 'update', id, data }; return Promise.resolve(); },
+      delete() { _written = { op: 'delete', id }; return Promise.resolve(); }
+    });
+    window.db = {
+      collection(name) {
+        return {
+          get() {
+            if (name !== 'ventures') return Promise.resolve({ docs: [] });
+            if (window.__FAIL_READ) return Promise.reject(new Error('Missing or insufficient permissions.'));
+            return Promise.resolve({ docs: window.__VENTURES.map(v => ({ id: v.id, data: () => v })) });
+          },
+          doc: (id) => docApi(id),
+          add(data) { _written = { op: 'add', data }; return Promise.resolve({ id: 'new-id' }); }
+        };
+      }
+    };
+    window.logAudit = function () {};
+  </script>
+  <script src="../js/screens/ventures.js"></script>
+  <script>
+    window.__render = (sub) => {
+      window.currentSubtab = sub || null;
+      return window.renderVentures(window.currentUser, window.currentRole, sub || undefined);
+    };
+    window.__render();
+  </script>
+</body>
+</html>

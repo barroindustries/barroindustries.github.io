@@ -220,10 +220,23 @@ service cloud.firestore {
       // v14 re-audit fix — hoisted out of the isOwner branch so the isAdmin
       // (secretary) branch below can reuse the SAME check and the two can
       // never drift apart.
+      // 'Ventures' joins Finance/Design (2026-08-08). Without it, the self-create
+      // branch below (isOwner && role=='employee' && noPrivilegedDeptOnCreate)
+      // lets a user set their OWN departments to ['Ventures'] at doc-CREATE
+      // time, which satisfies canDept('Ventures') and unlocks the whole
+      // portfolio. Self-UPDATE cannot do this — departments are frozen by
+      // userPrivilegedFieldsUnchanged — so the window is create-only, and both
+      // account-creation paths are admin-driven; but Email/Password signup is
+      // enabled with a public apiKey, and the Cloud Function that writes the
+      // default doc is an async trigger a racing client write can beat.
+      // Ventures is the first collection where restricted visibility was an
+      // explicit owner decision, so the rationale for freezing Finance/Design
+      // now applies to it too.
       function noPrivilegedDeptOnCreate() {
         return request.resource.data.get('department', '') != 'Finance'
             && request.resource.data.get('department', '') != 'Design'
-            && !request.resource.data.get('departments', []).hasAny(['Finance','Design']);
+            && request.resource.data.get('department', '') != 'Ventures'
+            && !request.resource.data.get('departments', []).hasAny(['Finance','Design','Ventures']);
       }
       // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
       // v12 WS19: only isSeniorAdmin() (president/manager) may mint a manager/
@@ -1667,6 +1680,56 @@ service cloud.firestore {
     match /roc_leads/{id} {
       allow read: if isAuth() && !isPartner();
       allow create, update: if isAuth() && (canDept('CRM') || canDept('Sales') || isAdmin());
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── Ventures portfolio — Ventures department (added 2026-08-08;
+    // js/screens/ventures.js). One doc per venture, holding DOCUMENTATION
+    // ONLY: prose (summary + user-defined sections[]), links[], one fileUrl.
+    // No money fields by design, so this is deliberately NOT on the
+    // finance/delete-request tier.
+    //
+    // READ is canDept-shaped, matching the owner's decision: anyone ASSIGNED
+    // to the Ventures department, plus admins (canDept('Ventures') ==
+    // isAdmin() || inDept('Ventures')). Deliberately NOT president-only and
+    // NOT all-internal-staff. `!isPartner()` is defense-in-depth — the
+    // external partner could never satisfy canDept today, but this keeps that
+    // true even if a future edit widens the helper. THIS RULE IS THE
+    // BOUNDARY; the screen-side canEditDept check is cosmetic.
+    //
+    // LIST: the client reads the collection UNFILTERED and sorts client-side
+    // (js/screens/ventures.js fetchVentures) precisely because a list query is
+    // denied unless it is provable from the query alone — a role/dept-only
+    // condition like this one IS provable, and it needs no composite index.
+    // Do not add a where() clause on the client without revisiting this.
+    //
+    // Every field read below uses .get(field, default): reading an ABSENT
+    // field in a rule throws, and a throwing rule DENIES (this already broke
+    // presence/status in this repo once). Older/partial venture docs
+    // legitimately lack `status`, `slug` and the arrays.
+    //
+    // Rules do NOT cascade to subcollections — this block covers
+    // ventures/{id} only. There are no venture subcollections today; adding
+    // one needs its own match block.
+    //
+    // Attachments live in Firebase Storage under Ventures/Briefs/* and are
+    // already covered by storage.rules' generic
+    // /{department}/{subfolder}/{fileName} block ('Ventures' is not one of its
+    // isReservedTop() segments), so storage.rules needed no change.
+    match /ventures/{id} {
+      allow read: if isAuth() && !isPartner() && canDept('Ventures');
+      allow create: if isAuth() && !isPartner() && canDept('Ventures')
+        && request.resource.data.get('name', '') != ''
+        && request.resource.data.get('slug', '') != ''
+        && request.resource.data.get('status', 'exploring')
+             in ['active', 'exploring', 'paused', 'archived'];
+      allow update: if isAuth() && !isPartner() && canDept('Ventures')
+        && request.resource.data.get('name', '') != ''
+        && request.resource.data.get('status', 'exploring')
+             in ['active', 'exploring', 'paused', 'archived'];
+      // Delete is admin-only (president/manager/secretary) — same low-stakes
+      // rationale as aec_contacts/roc_leads: no delete-request flow, because
+      // nothing here is a financial record.
       allow delete: if isAuth() && isAdmin();
     }
 

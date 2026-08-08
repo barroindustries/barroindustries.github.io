@@ -119,7 +119,12 @@ service firebase.storage {
     // overlapping matches — a broad allow would otherwise loosen the strict
     // ones (e.g. let a non-finance user read Finance/payslips).
     function isReservedTop(seg) {
-      return seg == 'Finance'
+      // 'Ventures' is reserved (2026-08-08) so brief attachments do NOT fall to
+      // the generic department block, which is readable — and, since read covers
+      // list, ENUMERABLE — by any internal non-partner staffer. Without this the
+      // Firestore record would be Ventures-only while the file it points at was
+      // company-wide, which defeats the point of the restriction.
+      return seg == 'Finance' || seg == 'Ventures'
         || seg == 'tasks' || seg == 'posts'
         || seg == 'general' || seg == 'General'
         || seg == 'profile-photos' || seg == 'task-comments'
@@ -261,6 +266,20 @@ service firebase.storage {
     // cross-department access; the external partner is excluded UNLESS the
     // folder is one of their own departments (e.g. their Brilliant Steel space).
     // Reserved top-level segments are excluded so their stricter rules win.
+    // ── Ventures brief attachments (2026-08-08) ─────────────────────────────
+    // 'Ventures' is in isReservedTop(), so the generic {department} block below
+    // deliberately does NOT cover it — that block is readable (and, since read
+    // covers list, ENUMERABLE) by any internal non-partner staffer, which would
+    // have left the Firestore record Ventures-only while the file it points at
+    // was company-wide. This block restores access, scoped: department members
+    // and admins only, partners never. isMemberOf() reads the Auth CUSTOM CLAIM
+    // (syncUserClaims), not the users doc — Storage rules cannot read Firestore.
+    match /Ventures/{subfolder}/{fileName} {
+      allow read: if isSignedIn() && !isPartnerClaim() && isMemberOf('Ventures');
+      allow write: if isSignedIn() && !isPartnerClaim() && isMemberOf('Ventures')
+        && (request.resource == null || isValidDocument());   // size cap on writes
+    }
+
     match /{department}/{subfolder}/{fileName} {
       allow read: if isSignedIn()
         && !isReservedTop(department)

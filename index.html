@@ -191,7 +191,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.104 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.105 · Barro Industries</div>
   </div>
 </div>
 
@@ -483,6 +483,18 @@
      after this file) reaches forward into this file's window.renderCRM the
      same way. -->
 <script defer src="js/screens/crm.js"></script>
+<!-- Ventures department (added 2026-08-08) — the owner's venture portfolio as
+     long-form written briefs (executive summary + user-defined reorderable
+     prose sections + links + one attachment), js/screens/ventures.js.
+     Documentation only, no money fields. Must load after departments.js
+     (canEditDept, deptContainer, escHtml, chipTabs/bindChipTabs, sopPanel,
+     confirmDialog, skeletonHtml) and it sits in the department-screens cluster
+     after crm.js; every reference is by window.*/bare-global name resolved at
+     RUNTIME only, never at parse time — same convention as every other
+     js/screens/*.js file. js/app.js's renderDeptModule ('Ventures' case,
+     loads after this file) reaches forward into window.renderVentures the
+     same way. -->
+<script defer src="js/screens/ventures.js"></script>
 <!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll management +
      reconciliation, HR profiles, worker payslips), split verbatim out of
      departments.js. Must load after departments.js: calls its shared

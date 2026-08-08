@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.104';
+const CACHE_VER = 'bi-ops-v14.0.105';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -59,6 +59,7 @@ const PRECACHE = [
   '/js/screens/tasks.js',
   '/js/screens/sales.js',
   '/js/screens/crm.js',
+  '/js/screens/ventures.js',
   '/js/screens/hr.js',
   // PAYSLIP-OVERHAUL-SPEC.md §4 — lazy-loaded (NOT in index.html's static
   // script list — see hr.js's _ensureHtml2Canvas/_ensurePdfLite), but still

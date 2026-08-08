@@ -3014,6 +3014,12 @@ function renderDeptModule(dept) {
     case 'HR':                         window.renderHR?.(currentUser, currentRole); break;
     case 'Sales': renderSales(currentUser, currentRole); break;
     case 'CRM':                        window.renderCRM?.(currentUser, currentRole); break;
+    // Ventures (2026-08-08, js/screens/ventures.js) — the owner's venture
+    // portfolio as written briefs. WITHOUT this case a DEPARTMENTS key alone
+    // gets nav/pickers/chat/a grid card but NO screen: it would fall through
+    // to renderGenericDept's static "Module coming soon" placeholder, which is
+    // exactly what 'Admin' still is today.
+    case 'Ventures':                   window.renderVentures?.(currentUser, currentRole); break;
     case 'IT':                         window.renderIT?.(currentUser, currentRole); break;
     case 'Design':                     renderDesign(currentUser, currentRole); break;
     case 'Production':                 window.renderProductionDept?.(currentUser, currentRole); break;

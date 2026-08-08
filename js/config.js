@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.104';
+window.APP_VERSION = '14.0.105';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -267,6 +267,26 @@ window.DEPARTMENTS = {
   'Purchasing': {
     key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#099268',
     subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 10
+  },
+  'Ventures': {
+    key: 'Ventures', icon: '🚀', lucideIcon: 'rocket', color: '#5F3DC4',
+    // New department (2026-08-08) — the owner's venture portfolio (Tuklas,
+    // Haligi, SteelFab.ph, AngatAgri …) as long-form written briefs:
+    // js/screens/ventures.js. DOCUMENTATION ONLY (prose/links/files; no money
+    // fields by design).
+    // `subtabs` here is DECORATIVE (nav/search preview copy only) and is
+    // deliberately NOT kept in sync with the data: the screen's real chip row
+    // is Portfolio + one chip per `ventures` doc, built at runtime, so adding
+    // a fifth venture is a Firestore write and never an edit to this list.
+    // POSITION: last of the INTERNAL departments, immediately before the two
+    // external ones (Brilliant Steel isSeparate / Partners isPartnerDept) —
+    // this object's own key order is what every consumer actually reads
+    // (Object.keys() in the dept switcher/pickers/grid). navOrder is a
+    // fractional 10.5 slot to match, and still has NO reader; CRM's 4.5 is
+    // the precedent for inserting without renumbering the rest.
+    // lucideIcon 'rocket' is confirmed present in the pinned lucide@0.468.0
+    // (it is already a LUCIDE_EMOJI_MAP target below, '🚀':'rocket').
+    subtabs: ['Portfolio', 'Brief'], navOrder: 10.5
   },
   'Brilliant Steel': {
     key: 'Brilliant Steel', icon: '⚙️', lucideIcon: 'settings', color: '#495057',

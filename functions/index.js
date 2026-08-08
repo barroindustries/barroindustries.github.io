@@ -212,7 +212,11 @@ exports.sendPushOnNotification = functions
 const PLACEHOLDER_ADOPTABLE_ROLES = ['employee', 'agent'];
 // Finance/Design membership grants canFinance()/canDesign() in firestore.rules
 // and department claims in storage.rules — same freeze the create rule applies.
-const PLACEHOLDER_PRIVILEGED_DEPTS = ['Finance', 'Design'];
+// 'Ventures' added 2026-08-08 — it must stay in step with
+// noPrivilegedDeptOnCreate() in firestore.rules. A placeholder that could not
+// legitimately have been CREATED carrying a privileged department must not be
+// ADOPTED carrying one either, or the claim path becomes the way around the rule.
+const PLACEHOLDER_PRIVILEGED_DEPTS = ['Finance', 'Design', 'Ventures'];
 // Explicit copy allowlist. The old code spread the whole doc ({ ...p }), which
 // would carry ANY field an attacker had parked on it — hrManagedAccount,
 // username, removed, salary — onto the new account. Only these are adopted;
