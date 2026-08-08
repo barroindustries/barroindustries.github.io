@@ -10,6 +10,10 @@ let currentRole  = null;
 let currentDepts = [];   // array — supports dual department
 let currentPage  = 'dashboard';
 let userProfile  = {};
+// Handle for the mandatory-photo gate's deferred show, so signing out can cancel
+// a pending one — see showLogin(). Without this the gate fired over the login
+// screen and trapped the user there (2026-08-08).
+let _reqPhotoTimer = 0;
 let logoutTimer  = null;
 let selectedLoginType = null; // 'admin' | 'employee' | 'partner' — set on login card click
 
@@ -672,6 +676,24 @@ try {
 // ── Screens ───────────────────────────────────────
 function showLogin() {
   hideSplash();
+  // 2026-08-08 — LOCKOUT FIX. The mandatory-photo gate was appearing OVER the
+  // login screen, and since it has no dismiss control the user was trapped on a
+  // screen they could not sign in from; the upload then failed regardless,
+  // because Storage's isSignedIn() is false when nobody is authenticated.
+  // Mechanism: applyUserUI() schedules requireProfilePhoto on an 800ms timer,
+  // the timer was never cancelled, and signing out never cleared userProfile /
+  // currentRole — so a sign-out (or session expiry, or the president's
+  // force-logout) inside that window left the gate to fire against a stale
+  // profile with no auth behind it. Every signed-out path funnels through here,
+  // so this is the one place that reliably undoes all three.
+  if (_reqPhotoTimer) { clearTimeout(_reqPhotoTimer); _reqPhotoTimer = 0; }
+  document.getElementById('req-photo-overlay')?.remove();
+  // Reset to the DECLARED empty shapes ({} / null / []), not to null across the
+  // board: userProfile is declared as {} and is dereferenced unguarded in
+  // several places, so nulling it would trade a lockout for a TypeError.
+  userProfile = {};
+  currentRole = null;
+  currentDepts = [];
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
 }
@@ -984,13 +1006,21 @@ function applyUserUI() {
   // Barro Industries company ID. External partners are exempt (no company ID).
   // Show a blocking gate until a photo is set; it's idempotent + self-guards.
   if (!userProfile.photoUrl && currentRole && currentRole !== 'partner') {
-    setTimeout(requireProfilePhoto, 800);
+    _reqPhotoTimer = setTimeout(requireProfilePhoto, 800);
   }
 }
 
 // Blocking gate: a non-partner with no profile photo must upload one before
 // using the app, because the digital company ID can't be generated without it.
 function requireProfilePhoto() {
+  _reqPhotoTimer = 0;
+  // AUTH FIRST. userProfile/currentRole are module globals that outlive a
+  // sign-out, so they are NOT evidence anybody is signed in. Without this the
+  // gate rendered over the LOGIN screen after a sign-out/expiry/force-logout,
+  // and because it has no dismiss control the user was trapped there — while
+  // the upload failed anyway, since Storage's isSignedIn() is false with no
+  // authenticated user. Checking auth.currentUser is the only honest test.
+  try { if (!auth || !auth.currentUser) return; } catch (_) { return; }
   if (!userProfile || userProfile.photoUrl) return;       // already set
   if (currentRole === 'partner' || !currentRole) return;  // partners exempt
   if (document.getElementById('req-photo-overlay')) return;
