@@ -49,11 +49,48 @@ override, a forgotten punch quietly costs a worker a day's pay and nobody sees i
 
 Implications to settle during build:
 - travel hours need their own input on the time log, separate from regular and OT
-- how does a worker *record* travel? The kiosk records clock-in/out, not purpose.
-  Most likely an admin-entered figure per day, sharing the override mechanism
-  from §2.
 - travel hours must be visible as their own line on the payslip, at their own
   rate, so the worker can check it
+
+**How travel gets recorded — corrected 2026-08-08.** An earlier draft of this spec
+said "the kiosk records clock-in/out, not purpose", and assumed an admin would type
+travel hours in. The owner corrected that: **time in/out is done on each worker's
+own phone**, not a shared kiosk. "Kiosk" is legacy naming in the code for
+`openWorkerKioskModal` — the older path where HR enters a worker's time on HR's
+device. The live path is `js/screens/worker.js`: the worker signs in on their own
+phone and punches with a geofence check and a selfie.
+
+**OWNER RULING: BOTH.** The worker taps a Travel option on their own phone, AND an
+admin can add or correct travel hours on the weekly run, with a reason — the same
+override mechanism as a missing punch (§2).
+- The worker-side half falls out of what already exists: the self-service punch
+  performs a **geofence check**, and a worker who is travelling is BY DEFINITION
+  not at the site, so that check already fails them today. It reads as "you can't
+  clock in" when it could read as "this is travel". A travel punch type gives that
+  failure a meaning instead of a dead end. Selfie and location are still recorded.
+- The admin-side half is the one that will actually get used first — see below.
+
+Note also: self-service punching ALREADY requires the unified structure this spec
+proposes — a `users` doc, `payroll/{uid}.payClass === 'production'`, and a
+`worker_profiles` doc whose `linkedUid` is that uid (see the header comment in
+js/screens/worker.js).
+
+**OWNER RULING: most workers are still HR-ENTERED today; phone punching has not
+rolled out widely.** That reorders the work:
+- The CREATE PATH is the bigger half, not a formality. Most production workers have
+  no login at all, so nothing links them to a `users` doc and the "same method as
+  Type A" model does not yet apply to them. Making one create form that produces
+  all three records (users + payroll + worker_profiles.doc(uid) with linkedUid) is
+  what actually moves them onto the unified rails.
+- The weekly run MUST read attendance identically whichever way it was recorded.
+  Both paths already write the same
+  `attendance_worker/{worker_profiles.id}/records/{date}` shape — the self-service
+  path merely adds geofence/selfie fields on top — so the run should key off the
+  worker_profiles docId and treat the extra fields as optional. Do NOT make the
+  run depend on a linkedUid existing.
+- Consequently the ADMIN-ENTERED travel figure is what will be used in practice on
+  day one, and the worker-side Travel button is the part that matters as phone
+  punching rolls out. Build the admin side first.
 
 Still absent by choice: holiday, rest-day and night-differential premiums. The
 owner has not asked for them. **Flag to the accountant before this is
