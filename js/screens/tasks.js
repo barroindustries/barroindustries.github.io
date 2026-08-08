@@ -671,8 +671,27 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // Priority/status/department chips used to sit under the title inside the
   // panel's own header; openPage's title slot is plain text only, so they move
   // to the top of the scrollable info section instead — same info, same markup.
+  // OWNER REPORT (2026-08-08) — "description cut off mid-word" + "big empty
+  // space below the composer" were ONE defect: the three properties removed
+  // from this div (flex:0 0 auto / overflow-y:auto / max-height:42%) were
+  // leftovers of the OLD forced split layout, which the switch to a single
+  // natural scroll region (see the bodyEl.style.cssText note below, and the
+  // sibling comment on the messaging section) never cleaned up.
+  //   .page-panel-body is a BLOCK with overflow-y:auto, so `flex:0 0 auto` here
+  //   was inert — but `max-height:42%` was NOT. Measured at 375x812: this
+  //   region was pinned to 311px while its own content wanted 870px, i.e. 559px
+  //   of the task hidden behind a nested scroller nobody could see was there,
+  //   with the description's last line sliced 4.5px below the cut. Meanwhile the
+  //   two children totalled 574.7px inside a 743px body, so 168.4px of unfilled
+  //   height sat under the composer — the panel had slack and the section that
+  //   wanted room was the one being capped.
+  // Dropping all three makes the info region take its natural height, so
+  // .page-panel-body is the single scroller (its own `overflow-y:auto`), the
+  // description renders in full, and the content now exceeds the body height —
+  // which is what removes the dead space rather than merely hiding it.
+  // border-bottom is kept: it is the seam between the task info and Messages.
   const bodyHTML = `
-    <div style="flex:0 0 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
+    <div style="padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
 
       <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
         <span class="badge ${priorityBadge(t.priority)}" style="font-size:10px">${t.priority||'medium'}</span>
@@ -761,10 +780,11 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   const headRight = panel.querySelector('.page-panel-head-right');
   if (headRight) headRight.innerHTML = headerRightHTML;
   bodyEl.innerHTML = bodyHTML;
-  // page-panel-body is styled overflow-y:auto/padded by default (single scroll
-  // region); this panel needs the old split layout instead — a short 42%-max
-  // scrollable info region above a flex-fill comments region, each scrolling
-  // independently. Override just for this panel instance.
+  // page-panel-body is styled overflow-y:auto/padded by default; the only thing
+  // overridden for this panel instance is the padding, because this body's own
+  // sections (#task-info-scroll, the messenger) carry their own. The scroller
+  // itself is the default one — see the 2026-08-08 note on #task-info-scroll
+  // above for why the old 42%-cap split layout is gone and must not come back.
   // Applied on FILL rather than at open (where it used to sit): padding:0 is
   // right for this body's own internally-padded sections, but it would have
   // pressed the loading skeleton flat against the panel edges. Nothing here
@@ -773,7 +793,15 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // inline, so cssText cannot clobber it.
   // Single natural scroll region (info + comments + composer flow together),
   // instead of the old forced split that left a gap below short message lists.
-  bodyEl.style.cssText = 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0';
+  // display:FLEX, not the default block. With block, .page-panel-body has a
+  // DEFINITE height (flex:1 in the panel column) but nothing owns the leftover,
+  // so on a task with a long description and few messages ~139px of the panel
+  // sat empty BELOW the composer — measured at 375x812. As a flex column the
+  // comments region absorbs that slack instead (see .task-detail-body in
+  // css/styles.css), while a long description still overflows and scrolls the
+  // body exactly as before.
+  bodyEl.classList.add('task-detail-body');
+  bodyEl.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0';
   // One icon sweep for the whole panel. openPage's own sweep already ran, back
   // in the tap frame, when this panel held nothing but a skeleton. It has to
   // cover `panel` and not `bodyEl` because the header action buttons and the
@@ -868,7 +896,13 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const update={assignedTo:[...t.assignedTo,newUid],assignedToNames:[...t.assignedToNames,newName],lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
-    if (note) update.description=(t.description||'')+`\n\n${emojiIcon('📝',16)} ${actorName}: ${note}`;
+    // PLAIN emoji, never emojiIcon() — `description` is a STORED Firestore field
+    // rendered through escHtml() (~line 705). emojiIcon() returns HTML
+    // (`<i data-lucide="file-pen-line" style="width:16px;height:16px"></i>`), so
+    // building the string with it persisted that markup into the document and
+    // the escaped render then showed the tag to the user as literal text. See
+    // the fuller note on the create path below (openAddTaskModal).
+    if (note) update.description=(t.description||'')+`\n\n📝 ${actorName}: ${note}`;
     await db.collection('tasks').doc(taskId).update(update);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
@@ -1223,7 +1257,23 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     const desc=$p('t-desc').value.trim();
     const notes=$p('t-notes').value.trim();
     const taskRef = await db.collection('tasks').add({
-      title, description:notes?`${desc}\n\n${emojiIcon('📝',16)} Instructions: ${notes}`:desc,
+      // ── VISIBLE-CODE DEFECT, owner screenshot 2026-08-08 ────────────────────
+      // This line is the generator. It used to read
+      //   `${desc}\n\n${emojiIcon('📝',16)} Instructions: ${notes}`
+      // and `description` is not a render string — it is a STORED Firestore
+      // field on the task document. emojiIcon() (js/config.js) returns HTML, so
+      // every task created through this modal with an Instructions note had
+      //   <i data-lucide="file-pen-line" style="width:16px;height:16px"></i>
+      // written into its description, verbatim, in the database. The detail
+      // panel renders the field with escHtml() — which is CORRECT for user
+      // content and must stay — so the stored tag was escaped and displayed to
+      // the user as literal text ("<i data-lucide=... Instructions: ...").
+      // The owner's "Organize CRM List" screenshot is that exact string.
+      // PLAIN emoji here, per the house rule: emojiIcon() output may only ever
+      // reach an innerHTML sink, never a stored field or an escaped/textContent
+      // one. This stops NEW pollution only — rows already written keep the
+      // markup until a one-off backfill rewrites them.
+      title, description:notes?`${desc}\n\n📝 Instructions: ${notes}`:desc,
       priority:$p('t-priority').value,
       status:$p('t-status').value,
       dueDate:$p('t-due').value,

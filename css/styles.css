@@ -3873,9 +3873,34 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .team-status-pill--on {
   background: rgba(48,209,88,0.12); color: #30D158;
 }
+/* BETA F13 (owner screenshot, 2026-08-08) — the 4th button, which is the
+   DESTRUCTIVE "Remove from system" / "Reinstate", was clipped off the card on
+   the 2-column phone grid.
+   Measured at 375px with the coarse-pointer sizes that a real iPhone gets
+   (.team-card-btn min-width:40px/padding:8px 12px, ~line 7062): card 169.5px,
+   content box 139.5px, four 42px buttons + three 6px gaps = 186px of row in a
+   139.5px box → 46.5px of overflow, and because .team-member-card centers its
+   children (align-items:center) it hung 23.3px off BOTH sides. The Remove
+   button's right edge landed at 373.3px — 8.3px past the card's own border box
+   and past #page-content's overflow-x:clip edge, so it rendered sliced.
+   Two declarations, both needed:
+     align-self: stretch — the row is a flex ITEM of the column card, so
+       align-items:center made its cross size fit-content, i.e. max-content
+       (186px) regardless of how narrow the card is. Stretching binds its width
+       to the card's content box, which is what gives wrapping an actual limit.
+     flex-wrap: wrap — with it, the row's min-content width drops to the widest
+       single button instead of the sum of all four, so the line breaks instead
+       of overflowing: three buttons fit the 139.5px line and Remove reflows to
+       a second, centered line.
+   Also the safer read: the destructive action no longer sits shoulder-to-
+   shoulder with Message and Nudge on one line. (It is already behind a
+   danger-styled confirmDialog in js/screens/people.js, so a mis-tap was
+   recoverable — but an unreachable button was not.)
+   No JS change: js/screens/people.js's markup is untouched. */
 .team-card-actions {
   margin-top: 6px;
   display: flex; gap: 6px; justify-content: center;
+  align-self: stretch; flex-wrap: wrap;
 }
 .team-card-btn {
   background: var(--surface2); border: 1px solid var(--border);
@@ -4592,8 +4617,46 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 
 /* ── Messenger-style chat UI — WS42 Batch D (Phases 16–20) ──────────────────
    Shared by chat.js (#chat-thread-panel) AND the task-chat comment thread
-   (departments.js renderComments, ~2098) — both consumers get this look for
-   free by using the same .messenger-*/.ms-* class names; keep it that way. */
+   (departments.js renderComments) — both consumers get this look for free by
+   using the same messenger-/ms- class names; keep it that way.
+
+   NEVER put a star character in this comment. CSS has no nested comments and
+   no escaping inside them: a star followed by a slash ENDS the comment, wherever
+   it appears. The previous wording wrote the two class prefixes as globs — a
+   dot, "messenger-", a star, a slash — and that star-slash pair closed the
+   comment four words early. The tail that was left ("class names; keep it that
+   way." plus the real terminator) then had to be parsed as CSS; it contains no
+   opening brace, so the parser kept consuming forward, absorbed the
+   .messenger-wrap selector on the next line into one invalid selector list, and
+   threw the whole rule away. Every browser, silently, for as long as the typo
+   existed. Two of these were introduced and caught while writing THIS comment,
+   which is why the warning is the first line of it.
+   Verified in-browser against this stylesheet before the fix (localhost,
+   375x812): document.styleSheets held .messenger-header, .messenger-body,
+   .messenger-empty and .messenger-input-row but NO .messenger-wrap rule at all,
+   and the live element computed display:block, border 0px, border-radius 0px,
+   transparent background, margin-top 0px.
+   The lost "display:flex; flex-direction:column" is why the messages area could
+   never absorb the task panel's leftover height: laid out as a BLOCK, this
+   wrap gave .messenger-body's own flex:1 (just below) no flex container to grow
+   in. See the 2026-08-08 note on #task-info-scroll in js/screens/tasks.js.
+   Sole consumer of this class is js/departments.js's doc-comments widget
+   (tasks / quotes / biddings / design) — grepped: chat.js builds its thread out
+   of the ms- classes and #chat-thread-scroll and never uses .messenger-wrap, so
+   restoring this rule cannot move the chat thread or its composer. */
+/* TASK DETAIL BODY (2026-08-08) — the panel body is a flex COLUMN (set in
+   js/screens/tasks.js), so the comments region can absorb the panel's spare
+   height. Without this the body was display:block with a definite height and
+   nobody owned the slack: on a long-description / few-messages task ~139px sat
+   empty BELOW the composer. flex-shrink:0 matters as much as grow — the wrap
+   must never be squashed when the description is long; in that case the body
+   simply scrolls, which is the pre-existing behaviour. min-height:0 lets the
+   inner .messenger-body scroll rather than forcing the wrap taller than the
+   column. Scoped to this class so every other .messenger-wrap consumer (the
+   doc-comment lists in js/departments.js) is untouched. */
+.page-panel-body.task-detail-body > #task-comments-wrap { flex: 1 0 auto; min-height: 0; }
+.page-panel-body.task-detail-body > #task-comments-wrap > .messenger-wrap { flex: 1 0 auto; min-height: 0; }
+
 .messenger-wrap {
   display: flex; flex-direction: column;
   border: 1.5px solid var(--border); border-radius: var(--r-lg, 16px);
@@ -5783,8 +5846,24 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-wallpaper-swatch.wp-gradient-sunset { background: linear-gradient(135deg, #FF6B9D, #FFD60A); }
 .ms-wallpaper-swatch.wp-astral { background: radial-gradient(circle at 30% 30%, #2a1a4a, #070710); }
 
-/* Legacy per-theme overrides retired — .ms-bubble-*/.messenger-body/.ms-input
-   are fully token-driven now (--bubble-in-bg/--chat-bg/--surface-2). */
+/* Legacy per-theme overrides retired — the ms-bubble- variants, .messenger-body
+   and .ms-input are fully token-driven now
+   (--bubble-in-bg / --chat-bg / --surface-2).
+
+   NO STAR CHARACTERS IN THIS COMMENT — same trap as the .messenger-wrap comment
+   (~line 4617). This one read ".ms-bubble-" followed by a star and a slash, and
+   that pair ENDED the comment on its first line. The prose tail
+   (".messenger-body/.ms-input are fully token-driven now (...)." plus the real
+   terminator) was then parsed as CSS; it has no opening brace, so the parser ran
+   forward and swallowed the FIRST REAL RULE after it into one invalid selector
+   list. Verified in Chrome against this stylesheet: .ms-thread-search-bar was
+   absent from document.styleSheets while its own siblings
+   (.ms-thread-search-bar.hidden, .ms-thread-search-input, .ms-thread-search-nav,
+   .ms-thread-search-count) were all present — i.e. exactly one rule lost.
+   That rule is the chat thread's in-thread search bar (js/chat.js:1063,
+   `<div id="chat-search-bar" class="ms-thread-search-bar hidden">`), so the bar
+   was rendering as an unstyled block with no flex row, no padding, no
+   border-bottom and no background. */
 
 /* ══════════════════════════════
    Wave2 practicality batch — in-thread search, record-link chips,
