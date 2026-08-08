@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.101';
+window.APP_VERSION = '14.0.102';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1178,17 +1178,51 @@ window.chipTabs = function(items, activeKey, opts) {
   return '<div class="chip-tabs' + (opts.cls ? ' ' + opts.cls : '') + '">' + html + '</div>';
 };
 
+// Keep the selected chip visible in a horizontally-scrolling chip row.
+// (MOBILE FINANCE PASS 2026-08-08.) At ≤640px .chip-tabs is flex-wrap:nowrap +
+// overflow-x:auto with both scrollbars suppressed (css/styles.css), so a row
+// like Finance's 7 group labels (~720px of chips in a ~355px box) shows about 3
+// at a time. Screens that rebuild the row wholesale on every click —
+// renderFinanceNav does exactly that, deliberately, to keep both rows' active
+// state correct without DOM diffing — get a brand-new element whose scrollLeft
+// is 0, so the chip the user just tapped scrolled off screen and the row looked
+// like it had jumped back to the start.
+//
+// Called both on click and right after a (re)render, so the row follows the
+// selection either way. Deliberately a no-op when the row does not actually
+// overflow (every desktop width, and short rows on phones), which is what keeps
+// it from ever nudging the page: scrollIntoView walks ancestor scrollports too,
+// and `block:'nearest'` means "don't move vertically if it is already visible"
+// — but not calling it at all is a stronger guarantee.
+function _chipFollow(row, btn) {
+  if (!row || !btn || typeof btn.scrollIntoView !== 'function') return;
+  try {
+    if (row.scrollWidth <= row.clientWidth + 1) return;   // nothing to scroll
+    btn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  } catch (_) { /* older engines without the options form — skip */ }
+}
+
 // Wire chip clicks within `scope` (an element). Calls onSelect(key, btn) and
 // manages the .active class. Safe to call repeatedly after re-rendering chips.
 window.bindChipTabs = function(scope, onSelect) {
   if (!scope) return;
+  // `scope` may be the .chip-tabs row itself (renderFinanceNav passes
+  // wrap.querySelector('.fin-group-tabs')) or a container holding it, so resolve
+  // the actual scrollport from a chip rather than assuming which one it is.
+  var rowOf = function(btn) { return (btn.closest && btn.closest('.chip-tabs')) || scope; };
   scope.querySelectorAll('.chip-tab').forEach(function(btn) {
     btn.addEventListener('click', function() {
       scope.querySelectorAll('.chip-tab').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
+      _chipFollow(rowOf(btn), btn);
       try { onSelect(btn.dataset.chip, btn); } catch (e) { /* swallow */ }
     });
   });
+  // Initial (re)render: bring the already-active chip into view. This is the
+  // half that actually fixes the rebuild-on-click case above, since the button
+  // clicked a moment ago no longer exists by the time the new row is bound.
+  var active = scope.querySelector('.chip-tab.active');
+  if (active) _chipFollow(rowOf(active), active);
 };
 
 // ── Overlay stack (v12 WS10) — one history entry per dismissable surface ──
