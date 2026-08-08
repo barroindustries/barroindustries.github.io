@@ -21,7 +21,8 @@
    ensureWorkerVerifyToken/openWorkerIDModal/batchPrintWorkerIDs/
    renderFinanceHRProfiles/openHRProfileForm/openWorkerKioskModal/
    PAYSLIP_STAGES/payslipStageBadge/openPayslipHistory/openPayslipEdit/
-   openPayslipGenerator/computeDayHours/collectPayslipData/
+   openPayslipGenerator/computeDayHours/psFormInputs/psTotals/
+   collectPayslipData/
    window.toPayslipModel/window.thirteenthMonthFor/window.payslipYtdMonthly/
    window.payslipYtdWeekly/window.buildPayslipHTML/window.renderPayslipPage/
    window.downloadPayslipJPEG).
@@ -1312,6 +1313,67 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </td>
         </tr>`;
       }).join('');
+
+      // TOTALS — the same summary row the live preview has carried since the
+      // owner asked for it ("maybe a row above shows the total"), now on the
+      // FROZEN branch too. It only ever existed below, PAST the `return` that
+      // ends this block, so the figure was visible while previewing and
+      // VANISHED the moment Compute froze the run — i.e. exactly when he wants
+      // to check it before Disburse. Summed from runData.lines and never
+      // re-derived from today's roster: the frozen lines are what will actually
+      // be disbursed (payroll recall spec §B3), so the total is of the money
+      // that is really going out.
+      if (runData.lines.length) {
+        const _ft = runData.lines.reduce((a, l) => ({
+          base:    a.base    + (l.base||0),
+          allow:   a.allow   + (l.allowance||0),
+          deduct:  a.deduct  + (l.otherDeductions||0),
+          sss:     a.sss     + (l.sss||0),
+          ph:      a.ph      + (l.philhealth||0),
+          pagibig: a.pagibig + (l.pagibig||0),
+          tax:     a.tax     + (l.tax||0),
+          ca:      a.ca      + (l.caPlanned||0),
+          net:     a.net     + (l.finalPay||0)
+        }), { base:0, allow:0, deduct:0, sss:0, ph:0, pagibig:0, tax:0, ca:0, net:0 });
+        // Excluded-staff wording, kept coherent with the live branch below. A
+        // frozen run carries NO line for anyone computePayRun skipped, so the
+        // only honest count on this branch is "roster members with no line in
+        // THIS run" — which covers payrollExcluded staff and anyone hired since
+        // the run was computed, without claiming to know which. The frozen
+        // branch never listed those people as rows and still doesn't; this only
+        // discloses that the total does not cover them.
+        // Use the run's OWN record, not a roster proxy. computePayRun writes a
+        // `skipped[]` of {uid,name,reason} onto pay_runs (js/departments.js) with
+        // reasons 'removed' / 'production' / 'linked-worker-profile' /
+        // 'excluded: <why>', and runData already holds it — no extra read, no
+        // schema change. A roster proxy ("anyone with no line") over-counts,
+        // because `employees` filters neither removed staff nor linked workers
+        // while the engine skips both: the subtitle would jump from
+        // "1 not on payroll" before Compute to "5 not in this run" after it,
+        // silently changing meaning on the one screen whose job is to make the
+        // figure checkable. Counting only the DELIBERATE exclusions keeps the
+        // same semantics either side of the button.
+        const _fSkipped  = Array.isArray(runData.skipped) ? runData.skipped : [];
+        const _fNotInRun = _fSkipped.filter(s => String((s && s.reason) || '').startsWith('excluded')).length;
+        const _fSkipNames = _fSkipped.filter(s => String((s && s.reason) || '').startsWith('excluded'))
+                                     .map(s => (s && s.name) || (s && s.uid) || '').filter(Boolean).join(', ');
+        tbody.innerHTML = `<tr class="pr-row pr-totals-row" style="background:var(--s1);font-weight:700">
+          <td class="tc-avatar" style="text-align:center">${emojiIcon('sigma',16)}</td>
+          <td class="tc-name"><strong>Total — ${runData.lines.length} staff</strong><div style="font-size:11px;color:var(--text-muted);font-weight:500">computed run — this is what disburses${_fNotInRun?` · <span title="${escHtml(_fSkipNames)}">${_fNotInRun} not on payroll</span>`:''}</div></td>
+          <td class="tc-detail" data-label="ID">—</td>
+          <td class="tc-detail" data-label="Department">—</td>
+          <td class="tc-detail" data-label="Base">₱${fmt(_ft.base)}</td>
+          <td class="tc-detail" data-label="Allowance" style="color:var(--success)">+₱${fmt(_ft.allow)}</td>
+          <td class="tc-detail" data-label="Deductions" style="color:var(--danger)">-₱${fmt(_ft.deduct)}</td>
+          <td class="tc-detail" data-label="SSS" style="color:var(--danger)">-₱${fmt(_ft.sss)}</td>
+          <td class="tc-detail" data-label="PhilHealth" style="color:var(--danger)">-₱${fmt(_ft.ph)}</td>
+          <td class="tc-detail" data-label="Pag-IBIG" style="color:var(--danger)">-₱${fmt(_ft.pagibig)}</td>
+          <td class="tc-detail" data-label="Tax" style="color:var(--danger)">-₱${fmt(_ft.tax)}</td>
+          <td class="tc-detail" data-label="Cash Adv" style="color:var(--danger)">${_ft.ca?`-₱${fmt(_ft.ca)}`:'—'}</td>
+          <td class="tc-net"><strong style="color:${_ft.net>=0?'var(--success)':'var(--danger)'}">₱${fmt(_ft.net)}</strong></td>
+          <td class="tc-actions"></td>
+        </tr>` + tbody.innerHTML;
+      }
       if (window.lucide) lucide.createIcons({ nodes: [tbody] });
       tbody.querySelectorAll('tr.pr-row').forEach(tr => {
         tr.addEventListener('click', (ev) => { if (ev.target.closest('button, a')) return; tr.classList.toggle('tc-expanded'); });
@@ -1336,13 +1398,46 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // year it happens to be" (consistent with money-core.js's computePayLine
     // and the D10 disburse gate, which both already key off the run month).
     const statYear = /^\d{4}-\d{2}/.test(month) ? parseInt(month.slice(0,4),10) : (window.bizYear ? window.bizYear() : new Date().getFullYear());
-    // LOCKSTEP with computePayRun's `payrollExcluded` skip (js/departments.js).
-    // If the preview showed an excluded person and Compute dropped them, the
-    // roster would contradict the run — the same preview-vs-engine divergence
-    // the statutory work had to close. Excluded staff are listed separately
-    // below the table with their reason, never silently vanished.
-    const _paidEmployees = employees.filter(u => u.payrollExcluded !== true);
-    const _excluded      = employees.filter(u => u.payrollExcluded === true);
+    // LOCKSTEP with computePayRun's FULL skip chain (js/departments.js), not
+    // just its payrollExcluded arm. If the preview shows someone Compute drops,
+    // the roster contradicts the run — the same preview-vs-engine divergence the
+    // statutory work had to close.
+    //
+    // 2026-08-08: this filter previously honoured payrollExcluded ONLY, while
+    // the engine also skips `removed === true` (offboarded staff) and anyone
+    // bridged to a weekly worker_profiles doc via linkedUid. Those two were
+    // invisible until the frozen run grew a totals row of its own — now the two
+    // totals sit either side of one button press, so three ex-employees still
+    // carrying a salary would make the figure drop by their combined pay on
+    // Compute with nothing on screen explaining it. The preview must skip
+    // exactly what the engine skips.
+    //
+    // linkedUids mirrors js/departments.js's own construction (active profiles
+    // with a linkedUid). Read through dbCachedGet so a roster re-render does not
+    // re-fetch the collection; a failed read yields an EMPTY set, which is the
+    // safe direction here — it shows a person the run might skip (visible, and
+    // the frozen total then explains itself) rather than hiding someone who is
+    // genuinely being paid.
+    let _linkedUids = new Set();
+    try {
+      const _wpSnap = await (typeof window.dbCachedGet === 'function'
+        ? window.dbCachedGet('worker_profiles', () => db.collection('worker_profiles').get(), 60000)
+        : db.collection('worker_profiles').get());
+      _linkedUids = new Set(
+        _wpSnap.docs.map(d => d.data())
+          .filter(p => p && p.status !== 'inactive' && p.linkedUid)
+          .map(p => p.linkedUid)
+      );
+    } catch (_) { /* empty set — see note above */ }
+
+    const _skipReason = (u) =>
+      u.removed === true          ? 'offboarded'
+      : _linkedUids.has(u.id)     ? 'paid weekly (Type B)'
+      : u.payrollExcluded === true ? ('not on payroll' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : ''))
+      : null;
+
+    const _paidEmployees = employees.filter(u => !_skipReason(u));
+    const _excluded      = employees.filter(u =>  _skipReason(u));
 
     const plans = await Promise.all(_paidEmployees.map(u => window.CashAdvance
       ? window.CashAdvance.planFor(u.id, month)
@@ -1451,18 +1546,32 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       tbody.innerHTML = totalsRow + tbody.innerHTML;
     }
 
-    // Excluded staff — shown, never silently dropped, with the reason and a
-    // one-tap way back in.
+    // Skipped staff — shown, never silently dropped, each with the reason the
+    // ENGINE would give. Three distinct reasons now land here, and they are not
+    // interchangeable: only a deliberate payrollExcluded can be undone with
+    // "put back on payroll". Offering that button to an offboarded person would
+    // clear a flag that is not what is keeping them out (js/departments.js skips
+    // on `removed` first), and offering it to a Type B worker would invite
+    // double pay — the very thing the linked-worker skip exists to prevent.
     if (_excluded.length) {
-      tbody.innerHTML += _excluded.map(u => `<tr class="pr-row pr-excluded-row" style="opacity:.6">
+      tbody.innerHTML += _excluded.map(u => {
+        const _r      = _skipReason(u) || '';
+        const _isExcl = _r.startsWith('not on payroll');
+        const _note   = _isExcl
+          ? 'Excluded from this and every run until put back on payroll.'
+          : (u.removed === true
+              ? 'Offboarded — reinstate from Team before they can be paid.'
+              : 'Paid weekly under Type B — kept out of the monthly run so nobody is paid twice.');
+        return `<tr class="pr-row pr-excluded-row" style="opacity:.6">
         <td class="tc-avatar" style="text-align:center">${emojiIcon('user-minus',16)}</td>
         <td class="tc-name"><strong style="text-decoration:line-through">${escHtml(u.displayName||u.email)}</strong>
-          <div style="font-size:11px;color:var(--text-muted)">Not on payroll${u.payrollExcludedReason?` — ${escHtml(u.payrollExcludedReason)}`:''}</div></td>
-        <td class="tc-detail" data-label="ID"><code>${u.employeeId||'—'}</code></td>
-        <td class="tc-detail" data-label="Department" colspan="9" style="color:var(--text-muted)">Excluded from this and every run until put back on payroll.</td>
+          <div style="font-size:11px;color:var(--text-muted)">${escHtml(_r.charAt(0).toUpperCase() + _r.slice(1))}</div></td>
+        <td class="tc-detail" data-label="ID"><code>${escHtml(u.employeeId||'—')}</code></td>
+        <td class="tc-detail" data-label="Department" colspan="9" style="color:var(--text-muted)">${_note}</td>
         <td class="tc-net"><span style="color:var(--text-muted)">—</span></td>
-        <td class="tc-actions">${canFinance?`<button class="btn-secondary btn-sm pr-include-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Put back on payroll" aria-label="Put back on payroll">${emojiIcon('user-plus',14)}</button>`:''}</td>
-      </tr>`).join('');
+        <td class="tc-actions">${(canFinance && _isExcl)?`<button class="btn-secondary btn-sm pr-include-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Put back on payroll" aria-label="Put back on payroll">${emojiIcon('user-plus',14)}</button>`:''}</td>
+      </tr>`;
+      }).join('');
     }
     if (window.lucide) lucide.createIcons({ nodes: [tbody] });
 
@@ -3439,7 +3548,17 @@ async function openPayslipHistory(currentUser, currentRole) {
         const ps = list.find(p=>p.id===btn.dataset.id);
         const next = btn.dataset.next;
         if (!ps || !next) return;
-        if (!(await confirmDialog({message:`Mark ${escHtml(ps.workerName)}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd}) as "${next}"?`, html:true}))) return;
+        // Name the AMOUNT, not just the worker and the period (owner: "I just
+        // want to see the total before submitting it"). Submit is the
+        // ledger-posting transition — it books exactly this netPay to Payroll
+        // Expense a few lines below — so the figure quoted here is the figure
+        // that hits the books. Read straight off `ps`, the same object the
+        // Ledger.upsertByRef call uses, so the two cannot disagree.
+        const _psAmt = ps.netPay || 0;
+        const _psAmtLine = next === 'submitted'
+          ? `<br/><br/>This posts <strong>₱${fmt(_psAmt)}</strong> to the General Ledger as Payroll Expense.`
+          : `<br/><br/>Net pay: <strong>₱${fmt(_psAmt)}</strong>.`;
+        if (!(await confirmDialog({message:`Mark ${escHtml(ps.workerName||'')}'s payslip (${escHtml(ps.payPeriodStart||'')} – ${escHtml(ps.payPeriodEnd||'')}) as "${escHtml(next)}"?${_psAmtLine}`, html:true}))) return;
         const fieldPrefix = { verified:'verified', filed:'filed', submitted:'submitted' }[next];
         const payDate = ps.payDate || ps.payPeriodEnd || today();
         // Check the period BEFORE flipping status — Submit is the ledger-posting
@@ -3683,7 +3802,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   const periodEnd   = addDays(todayISO, (6 - dow + 7) % 7);  // upcoming/this Saturday
   const periodStart = addDays(periodEnd, -5);                // Monday of that pay week
 
-  openPage(`${emojiIcon('📄',16)} Generate Payslip — ${escHtml(profile.name||'')}`, `
+  const panel = openPage(`${emojiIcon('📄',16)} Generate Payslip — ${escHtml(profile.name||'')}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="form-group"><label>Pay Period Start</label><input id="ps-start" type="date" value="${periodStart}"/></div>
       <div class="form-group"><label>Pay Period End (Sat)</label><input id="ps-end" type="date" value="${periodEnd}"/></div>
@@ -3770,11 +3889,41 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       <label>Attach Transfer Proof (optional)</label>
       <div id="ps-proof-area"></div>
     </div>
+
+    <!-- Owner: "I just want to see the total before submitting it." Sticky to
+         the bottom of the scrolling panel body so it stays next to the Save &
+         Generate button in the (always-visible) panel foot, instead of hiding
+         at the end of a long form. Every figure here is written by psSummary()
+         from psFormInputs + psTotals — the SAME pair collectPayslipData saves
+         with.
+         OPAQUE, deliberately: --surface is a translucent overlay in every theme
+         (measured rgba(255,255,255,.05)), and on a bar that FLOATS over the form
+         while it scrolls that lets the fields underneath bleed through the
+         figures. Painting the theme's opaque page background first and layering
+         the usual --surface tint over it as a background-image gives the
+         identical card look with nothing showing through, and stays
+         theme-driven — both are the same tokens the cards above use. -->
+    <div style="position:sticky;bottom:0;background-color:var(--bg);background-image:linear-gradient(var(--surface),var(--surface));border:1.5px solid var(--border);border-radius:10px;padding:12px;margin-top:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">This payslip</div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:4px"><span>Gross pay</span><strong id="ps-sum-gross">₱0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:4px"><span>Total deductions</span><strong id="ps-sum-ded" style="color:var(--danger)">₱0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:8px"><span>Already paid</span><strong id="ps-sum-paid">₱0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;border-top:1px solid var(--border);padding-top:8px">
+        <span style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em">Net pay</span>
+        <strong id="ps-sum-net" style="font-size:20px;color:var(--success)">₱0.00</strong>
+      </div>
+      <div id="ps-sum-basis" style="font-size:10px;color:var(--text-muted);margin-top:6px;line-height:1.5"></div>
+    </div>
   `, `
     <button class="btn-secondary" onclick="closeModal()">Cancel</button>
     <button class="btn-secondary" id="ps-preview-btn">${emojiIcon('👁',16)} Preview</button>
     <button class="btn-primary" id="ps-save-btn">${emojiIcon('💾',16)} Save &amp; Generate</button>
   `);
+  // EVERY lookup below is scoped to THIS panel. #ps-* ids are not unique across
+  // the page stack, and a buried or dying generator would win a document-wide
+  // getElementById — the live total would then be read off a different form than
+  // the one being saved, which is the one thing a pre-submit total must not do.
+  const $ps = id => panel.querySelector('#' + id);
 
   // Bind proof upload area
   let proofFile = null;
@@ -3782,15 +3931,50 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     Drive.renderUploadArea('ps-proof-area', r => { proofFile = r; }, { label:'Upload transfer screenshot/photo', dept:'Finance', subfolder:'payslips' });
   }
 
+  // ── Live money summary — the owner's "see the total before submitting it" ──
+  // Reads the same inputs and runs the same arithmetic collectPayslipData uses
+  // to build the doc that gets written (psFormInputs + psTotals), against THIS
+  // panel — so #ps-sum-net is the netPay that will be saved to `payslips`, shown
+  // on the printed payslip, and posted to the General Ledger on Submit. It is
+  // not a second opinion about that number; there is only one expression.
+  //
+  // Three things move these figures and only one of them fires 'input':
+  //   • typing in an amount field            → the listeners registered below
+  //   • recomputeHours()                     → calls psSummary() itself (it also
+  //     covers "Load from kiosk", whose last act is to call recomputeHours)
+  //   • psStatRefresh / apply()              → calls psSummary() itself (it
+  //     assigns SSS/PhilHealth/Pag-IBIG/tax programmatically — no event)
+  const psSummary = () => {
+    const v = psFormInputs(panel);
+    const t = psTotals(v);
+    const set = (id, txt) => { const el = $ps(id); if (el) el.textContent = txt; };
+    // "-₱500.00", never "₱-500.00" — the sign belongs outside the symbol, and a
+    // zero-hours week with a cash advance still on the books is a genuinely
+    // negative net the owner must be able to read at a glance.
+    const peso = n => (n < 0 ? '-₱' : '₱') + fmt(Math.abs(n));
+    set('ps-sum-gross', peso(t.grossPay));
+    set('ps-sum-ded',   (t.totalDeductions > 0 ? '-' : '') + peso(t.totalDeductions));
+    set('ps-sum-paid',  (v.paid > 0 ? '-' : '') + peso(v.paid));
+    set('ps-sum-net',   peso(t.netPay));
+    const netEl = $ps('ps-sum-net');
+    if (netEl) netEl.style.color = t.netPay >= 0 ? 'var(--success)' : 'var(--danger)';
+    // textContent sinks throughout — plain text, figures only, no user-authored
+    // string reaches any of them, so there is no innerHTML/escHtml sink here.
+    set('ps-sum-basis',
+      `${v.hrs.toFixed(2)} hrs × ₱${fmt(v.rph)} = ₱${fmt(t.regTotal)}`
+      + ` · OT ₱${fmt(t.otTotal)} · allowances ₱${fmt(t.allowTotal)}`
+      + ` · statutory ₱${fmt(t.govTotal)} · other ₱${fmt(t.otherTotal)}`);
+  };
+
   // ── Auto-compute hours from daily time log (−1hr lunch if shift spans 12–1PM) ──
   let foodEdited = false, otHrsEdited = false;
-  document.getElementById('ps-meal')?.addEventListener('input', () => { foodEdited = true; });
+  $ps('ps-meal')?.addEventListener('input', () => { foodEdited = true; });
   // v14: flag overtime automatically from days exceeding 8 hrs — this table
   // is fed by "Load Kiosk Hours" (self-service geofenced timeIn/timeOut),
   // which is uniquely well-positioned to surface OT without HR hand-typing
   // it. Only OT HOURS are auto-filled here — the OT RATE input (a pay policy
   // value) is left exactly as before, still manual/editable.
-  document.getElementById('ps-ot-hrs')?.addEventListener('input', () => { otHrsEdited = true; });
+  $ps('ps-ot-hrs')?.addEventListener('input', () => { otHrsEdited = true; });
   // v14 HR remediation P2 — payslip provenance. Each ps-tin-{i} input carries a
   // data-source attribute: 'manual' (hand-keyed, the default), 'kiosk-manual'
   // (HR clocked it via openWorkerKioskModal — no GPS/selfie), or 'kiosk-verified'
@@ -3806,8 +3990,8 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       : `<span title="Hand-keyed by HR">✏️</span>`;
   const updateSourceBadges = () => {
     for (let i = 0; i < 7; i++) {
-      const cell = document.getElementById(`ps-src-${i}`);
-      const inp = document.getElementById(`ps-tin-${i}`);
+      const cell = $ps(`ps-src-${i}`);
+      const inp = $ps(`ps-tin-${i}`);
       if (cell && inp) cell.innerHTML = _srcLabel(inp.dataset.source || 'manual');
     }
     if (window.lucide) lucide.createIcons();
@@ -3829,24 +4013,24 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     let total = 0, daysOver4 = 0, otHrsTotal = 0;
     for (let i = 0; i < 7; i++) {
       const hrs = computeDayHours(
-        document.getElementById(`ps-tin-${i}`)?.value,
-        document.getElementById(`ps-tout-${i}`)?.value
+        $ps(`ps-tin-${i}`)?.value,
+        $ps(`ps-tout-${i}`)?.value
       );
-      const cell = document.getElementById(`ps-dayhrs-${i}`);
+      const cell = $ps(`ps-dayhrs-${i}`);
       if (cell) cell.textContent = hrs.toFixed(2);
       total += hrs;
       if (hrs > 4) daysOver4++;
       if (hrs > 8) otHrsTotal += (hrs - 8);
     }
-    const totalEl = document.getElementById('ps-computed-total');
+    const totalEl = $ps('ps-computed-total');
     if (totalEl) totalEl.textContent = total.toFixed(2);
-    const hrsInput = document.getElementById('ps-hrs');
+    const hrsInput = $ps('ps-hrs');
     if (hrsInput) hrsInput.value = total.toFixed(2);
     // Food allowance: profile rate × number of days exceeding 4 hrs (unless manually overridden)
-    const foodInput = document.getElementById('ps-meal');
+    const foodInput = $ps('ps-meal');
     if (foodInput && !foodEdited) foodInput.value = ((profile.foodAllowance||0) * daysOver4).toFixed(2);
     // OT hours: sum of (hrs − 8) across days exceeding 8 hrs (unless manually overridden)
-    const otHrsInput = document.getElementById('ps-ot-hrs');
+    const otHrsInput = $ps('ps-ot-hrs');
     if (otHrsInput && !otHrsEdited) otHrsInput.value = otHrsTotal.toFixed(2);
     updateSourceBadges();
     // D1 — ps-hrs / ps-meal / ps-ot-hrs were just written programmatically, so
@@ -3854,12 +4038,26 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     // internally sequenced) so the auto amounts always track the gross that is
     // actually on the form. Null for every worker without a statConfig.
     if (psStatRefresh) psStatRefresh();
+    // Hours (and with them food allowance / OT hours) just moved, so the pesos
+    // did too. psStatRefresh above is async and re-runs psSummary() itself once
+    // the statutory amounts settle.
+    psSummary();
   };
-  document.querySelectorAll('.ps-time-input').forEach(inp => {
+  panel.querySelectorAll('.ps-time-input').forEach(inp => {
     inp.addEventListener('input', recomputeHours);
     inp.addEventListener('input', () => { inp.dataset.source = 'manual'; });
   });
   recomputeHours();
+
+  // Every amount input that moves the summary. (ps-hrs / ps-ot-hrs / ps-meal are
+  // listed because HR may override them BY HAND, which fires 'input' and does
+  // not go through recomputeHours — the same reason the statutory prefill binds
+  // them below.) ps-daily is deliberately absent: it is a reference figure and
+  // does not enter the math, exactly as in collectPayslipData.
+  ['ps-rph','ps-hrs','ps-ot-rate','ps-ot-hrs','ps-meal','ps-transport','ps-rent',
+   'ps-sss','ps-ph','ps-pib','ps-ca','ps-loans','ps-tax','ps-paid']
+    .forEach(id => $ps(id)?.addEventListener('input', psSummary));
+  psSummary();
 
   // ── Statutory-config spec (2026-08-06) §5.3 — OPT-IN Type B prefill ────
   // THE DEFAULT IS UNCHANGED AND ZERO. Per the owner, production workers are
@@ -3892,7 +4090,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     // 'exempt' is a one-time, unchanging state: zero, locked, labelled.
     FIELDS.forEach(([k, id]) => {
       if (cfg[k] !== 'exempt') return;
-      const inp = document.getElementById(id);
+      const inp = $ps(id);
       if (!inp) return;
       inp.value = '0';
       inp.disabled = true;
@@ -3907,13 +4105,13 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     // Manual-edit pins — once HR types in a field, this block stops writing to
     // it for the rest of the session.
     const edited = {};
-    AUTOFIX.forEach(([k, id]) => document.getElementById(id)?.addEventListener('input', () => { edited[k] = true; }));
+    AUTOFIX.forEach(([k, id]) => $ps(id)?.addEventListener('input', () => { edited[k] = true; }));
 
     // Hint line + hidden ER carrier, appended to the Deductions card. Both are
     // created here (never in the base markup) so an unconfigured worker's DOM
     // is untouched. If the card cannot be located the block degrades to
     // prefill-only and employerShare stays null exactly as before.
-    const dedCard = document.getElementById('ps-tax')?.closest('.form-group')?.parentElement?.parentElement;
+    const dedCard = $ps('ps-tax')?.closest('.form-group')?.parentElement?.parentElement;
     let hintEl = null, erInput = null;
     if (dedCard) {
       hintEl = document.createElement('div');
@@ -3967,15 +4165,15 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
 
     // Same gross expression collectPayslipData uses (rate×hrs + OT + allowances).
     const formGross = () => {
-      const n = (id) => parseFloat(document.getElementById(id)?.value)||0;
+      const n = (id) => parseFloat($ps(id)?.value)||0;
       return n('ps-rph')*n('ps-hrs') + n('ps-ot-rate')*n('ps-ot-hrs') + n('ps-meal') + n('ps-transport') + n('ps-rent');
     };
 
     let seq = 0;
     const apply = async () => {
       const my    = ++seq;
-      const end   = document.getElementById('ps-end')?.value || '';
-      const start = document.getElementById('ps-start')?.value || '';
+      const end   = $ps('ps-end')?.value || '';
+      const start = $ps('ps-start')?.value || '';
       // D3 — ps-start is now load-bearing (it bounds the month-to-date query),
       // so it is validated exactly as strictly as ps-end. A half-typed date
       // leaves the previous, still-correct amounts standing rather than
@@ -4034,7 +4232,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
           anyAuto = true;                             // "any configured key" — drives ps-er-json below
           if (isLastPayWeek && sug && k !== 'tax') er[k] = sug.er[k] || 0;
         }
-        const inp = document.getElementById(id);
+        const inp = $ps(id);
         if (!inp || edited[k]) return;              // EE amount only: HR typed here — hands off
         const amt = !isLastPayWeek ? 0
           : cfg[k] === 'auto' ? (sug ? (sug.ee[k]||0) : 0)
@@ -4055,18 +4253,22 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
         hintEl.innerHTML = bits.join('<br/>');
         if (window.lucide) lucide.createIcons({ nodes: [hintEl] });
       }
+      // D1's sibling for the summary: the four statutory EE amounts were just
+      // assigned programmatically, so no 'input' reaches the listeners above and
+      // the strip would keep showing a net computed on the PREVIOUS deductions.
+      psSummary();
     };
 
     // MANUAL edits — every amount input that moves gross. (ps-hrs, ps-ot-hrs
     // and ps-meal are listed because HR may override them by hand, which fires
     // 'input' and does NOT go through recomputeHours.)
     ['ps-rph','ps-hrs','ps-ot-rate','ps-ot-hrs','ps-meal','ps-transport','ps-rent']
-      .forEach(id => document.getElementById(id)?.addEventListener('input', apply));
+      .forEach(id => $ps(id)?.addEventListener('input', apply));
     // D7 — ps-start alone drives the month bracket now; ps-end is still bound
     // because apply() bails while EITHER date is half-typed, so completing ps-end
     // has to re-run the pass that bail skipped.
-    document.getElementById('ps-end')?.addEventListener('change', apply);
-    document.getElementById('ps-start')?.addEventListener('change', apply);
+    $ps('ps-end')?.addEventListener('change', apply);
+    $ps('ps-start')?.addEventListener('change', apply);
     // D1 — PROGRAMMATIC gross changes. recomputeHours() is the single funnel
     // for them: it is what the ".ps-time-input" listeners call, and it is the
     // last thing "Load from kiosk" does after assigning the times directly. The
@@ -4101,8 +4303,8 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   // paying" list instead, with the raw in/out times/selfies, so HR confirms
   // real hours instead of paying a phantom shift. Normal-record hours MATH
   // (computeDayHours) is completely untouched.
-  document.getElementById('ps-load-kiosk-btn')?.addEventListener('click', async () => {
-    const start = document.getElementById('ps-start').value, end = document.getElementById('ps-end').value;
+  $ps('ps-load-kiosk-btn')?.addEventListener('click', async () => {
+    const start = $ps('ps-start').value, end = $ps('ps-end').value;
     if (!start || !end) { Notifs.showToast('Set pay period dates first','error'); return; }
 
     const oneDay = 24*60*60*1000;
@@ -4130,7 +4332,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     const loaded  = [];   // successfully auto-filled — shown in the audit panel too
     for (let i = 0; i < 7; i++) {
       const r = byOffset[i];
-      const tin = document.getElementById(`ps-tin-${i}`), tout = document.getElementById(`ps-tout-${i}`);
+      const tin = $ps(`ps-tin-${i}`), tout = $ps(`ps-tout-${i}`);
       if (!r) {
         // OVERPAY FIX (v14 HR remediation) — the table's static defaults
         // (07:00–16:00 Mon–Fri, 07:00–18:00 Sat, ~8h/day) are a hand-entry
@@ -4157,8 +4359,8 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       loaded.push({ ...r, _rowLabel: rowLabel });
     }
     recomputeHours();
-    renderKioskReviewList(flagged);
-    renderKioskAuditPanel(loaded, flagged);
+    renderKioskReviewList(flagged, panel);
+    renderKioskAuditPanel(loaded, flagged, panel);
     Notifs.showToast(flagged.length
       ? `Loaded kiosk hours — ${flagged.length} day(s) need review before paying (see list below).`
       : 'Loaded kiosk hours — review & adjust before saving.');
@@ -4167,15 +4369,15 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   // ── Live CA remaining-balance preview ──
   const updateCaRemaining = () => {
     const balance = profile.caBalance || 0;
-    const deduct  = parseFloat(document.getElementById('ps-ca')?.value) || 0;
+    const deduct  = parseFloat($ps('ps-ca')?.value) || 0;
     const remain  = Math.max(0, balance - deduct);
-    const el = document.getElementById('ps-ca-remaining-display');
+    const el = $ps('ps-ca-remaining-display');
     if (el) el.textContent = fmt(remain);
   };
-  document.getElementById('ps-ca')?.addEventListener('input', updateCaRemaining);
+  $ps('ps-ca')?.addEventListener('input', updateCaRemaining);
 
-  document.getElementById('ps-preview-btn').addEventListener('click', async () => {
-    const d = collectPayslipData(profile, currentUser);
+  $ps('ps-preview-btn').addEventListener('click', async () => {
+    const d = collectPayslipData(profile, currentUser, panel);
     if (!d) return;
     const model = window.toPayslipModel(d, 'weekly');
     model.official = false; // never yet saved — a draft/projection by construction
@@ -4194,7 +4396,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   // on the first click so a second click before the first save settles is a
   // no-op, not a second write.
   let psSaving = false;
-  document.getElementById('ps-save-btn').addEventListener('click', async () => {
+  $ps('ps-save-btn').addEventListener('click', async () => {
     if (psSaving) return;
     // v14 re-audit fix — issuing a payslip is a money-tier act (firestore.rules
     // payslips create/update is isMoneyAdmin() now, matching the president-only
@@ -4204,10 +4406,10 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       Notifs.showToast('Issuing a payslip is President / Manager / Finance only.','error');
       return;
     }
-    const d = collectPayslipData(profile, currentUser);
+    const d = collectPayslipData(profile, currentUser, panel);
     if (!d) return;
     psSaving = true;
-    const saveBtn = document.getElementById('ps-save-btn');
+    const saveBtn = $ps('ps-save-btn');
     const saveBtnHTML = saveBtn ? saveBtn.innerHTML : '';
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
     try {
@@ -4262,8 +4464,8 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
 // implausible >16h shift). HR must confirm the real hours and hand-key them
 // into the table above before this pay period is saved — nothing here feeds
 // pay automatically.
-function renderKioskReviewList(flagged) {
-  const area = document.getElementById('ps-kiosk-review-area');
+function renderKioskReviewList(flagged, root) {
+  const area = (root || document).querySelector('#ps-kiosk-review-area');
   if (!area) return;
   if (!flagged || !flagged.length) { area.innerHTML = ''; return; }
   area.innerHTML = `
@@ -4297,8 +4499,8 @@ function renderKioskReviewList(flagged) {
 // accuracy/verified marker), so HR can spot-check ANY day, not just flagged
 // ones, without leaving the payslip screen. Collapsed by default (details/
 // summary — no new CSS/JS dependency) since most weeks need no scrutiny.
-function renderKioskAuditPanel(loaded, flagged) {
-  const area = document.getElementById('ps-kiosk-audit-area');
+function renderKioskAuditPanel(loaded, flagged, root) {
+  const area = (root || document).querySelector('#ps-kiosk-audit-area');
   if (!area) return;
   const all = [...(loaded||[]), ...(flagged||[])].sort((a,b) => (a.date||'').localeCompare(b.date||''));
   if (!all.length) { area.innerHTML = ''; return; }
@@ -4337,35 +4539,85 @@ function computeDayHours(timeIn, timeOut) {
   return Math.max(0, mins/60);
 }
 
-function collectPayslipData(profile, currentUser) {
-  const daily    = parseFloat(document.getElementById('ps-daily').value)||0;
-  const rph      = parseFloat(document.getElementById('ps-rph').value)||0;
-  const hrs      = parseFloat(document.getElementById('ps-hrs').value)||0;
-  const regTotal = parseFloat((rph * hrs).toFixed(2));  // hourly rate × hours worked
-  const otRate   = parseFloat(document.getElementById('ps-ot-rate').value)||0;
-  const otHrs    = parseFloat(document.getElementById('ps-ot-hrs').value)||0;
-  const otTotal  = parseFloat((otRate * otHrs).toFixed(2));
-  const meal     = parseFloat(document.getElementById('ps-meal').value)||0;
-  const transport= parseFloat(document.getElementById('ps-transport').value)||0;
-  const rent     = parseFloat(document.getElementById('ps-rent').value)||0;
-  const allowTotal = meal + transport + rent;
+// ── Weekly payslip money — ONE SOURCE OF TRUTH ─────────────────────────────
+// Owner: "I just want to see the total before submitting it." The generator
+// showed a running total in HOURS and no pesos at all; the money existed
+// nowhere until collectPayslipData ran, on Preview or on Save.
+//
+// psFormInputs(root) reads every amount the weekly math depends on; psTotals(v)
+// IS that math, moved here VERBATIM from collectPayslipData (same statements,
+// same order, same rounding — not re-derived). collectPayslipData (what
+// actually gets SAVED) and the live summary strip in openPayslipGenerator both
+// go through this one pair, so the net the owner reads before pressing Save &
+// Generate is the net that lands in `payslips` BY CONSTRUCTION, not because two
+// copies of one expression are being kept in step by hand. This screen has
+// already been bitten by exactly that class of drift — see the statutory §4.3
+// lockstep note in loadPayrollTable, and D1 above.
+//
+// `root` is the generator's own openPage panel, never `document`: #ps-* ids are
+// not unique across the page stack, and a buried or dying generator would win a
+// document-wide lookup — the displayed figure and the saved figure would then be
+// read off two different forms. The `|| document` fallback exists only so the
+// helpers stay usable standalone; every caller in this file passes the panel.
+function psFormInputs(root) {
+  const num = id => parseFloat((root || document).querySelector('#' + id)?.value) || 0;
+  return {
+    daily:     num('ps-daily'),        // carried onto the doc for reference; never enters the math
+    rph:       num('ps-rph'),
+    hrs:       num('ps-hrs'),
+    otRate:    num('ps-ot-rate'),
+    otHrs:     num('ps-ot-hrs'),
+    meal:      num('ps-meal'),
+    transport: num('ps-transport'),
+    rent:      num('ps-rent'),
+    sss:       num('ps-sss'),
+    ph:        num('ps-ph'),
+    pib:       num('ps-pib'),
+    ca:        num('ps-ca'),
+    loans:     num('ps-loans'),
+    tax:       num('ps-tax'),
+    paid:      num('ps-paid')
+  };
+}
+// Pure — no DOM, no Firestore, no rounding policy of its own beyond the two
+// toFixed(2) calls the saved payslip has always used.
+function psTotals(v) {
+  const regTotal = parseFloat((v.rph * v.hrs).toFixed(2));  // hourly rate × hours worked
+  const otTotal  = parseFloat((v.otRate * v.otHrs).toFixed(2));
+  const allowTotal = v.meal + v.transport + v.rent;
   const grossPay = regTotal + otTotal + allowTotal;
-
-  const sss   = parseFloat(document.getElementById('ps-sss').value)||0;
-  const ph    = parseFloat(document.getElementById('ps-ph').value)||0;
-  const pib   = parseFloat(document.getElementById('ps-pib').value)||0;
-  const ca    = parseFloat(document.getElementById('ps-ca').value)||0;
-  const loans = parseFloat(document.getElementById('ps-loans').value)||0;
-  const tax   = parseFloat(document.getElementById('ps-tax').value)||0;
-  const govTotal   = sss + ph + pib;
-  const otherTotal = ca + loans + tax;
+  const govTotal   = v.sss + v.ph + v.pib;
+  const otherTotal = v.ca + v.loans + v.tax;
   const totalDeductions = govTotal + otherTotal;
   const totalPay = grossPay - totalDeductions;
-  const paid     = parseFloat(document.getElementById('ps-paid').value)||0;
-  const netPay   = totalPay - paid;
+  const netPay   = totalPay - v.paid;
+  return { regTotal, otTotal, allowTotal, grossPay, govTotal, otherTotal, totalDeductions, totalPay, netPay };
+}
 
-  const periodStart = document.getElementById('ps-start').value;
-  const periodEnd   = document.getElementById('ps-end').value;
+function collectPayslipData(profile, currentUser, panel) {
+  // `panel` is openPayslipGenerator's own openPage element — see psFormInputs
+  // for why every lookup in here is scoped to it.
+  const $ps = id => (panel || document).querySelector('#' + id);
+  const v = psFormInputs(panel);
+  const t = psTotals(v);
+  const daily = v.daily, rph = v.rph, hrs = v.hrs;
+  const regTotal = t.regTotal;                                   // hourly rate × hours worked
+  const otRate = v.otRate, otHrs = v.otHrs, otTotal = t.otTotal;
+  const meal = v.meal, transport = v.transport, rent = v.rent;
+  const allowTotal = t.allowTotal;
+  const grossPay = t.grossPay;
+
+  const sss = v.sss, ph = v.ph, pib = v.pib;
+  const ca = v.ca, loans = v.loans, tax = v.tax;
+  const govTotal = t.govTotal;
+  const otherTotal = t.otherTotal;
+  const totalDeductions = t.totalDeductions;
+  const totalPay = t.totalPay;
+  const paid = v.paid;
+  const netPay = t.netPay;
+
+  const periodStart = $ps('ps-start').value;
+  const periodEnd   = $ps('ps-end').value;
   if (!periodStart || !periodEnd) { Notifs.showToast('Set pay period dates','error'); return null; }
 
   const caBalanceBefore = profile.caBalance || 0;
@@ -4379,10 +4631,10 @@ function collectPayslipData(profile, currentUser) {
   // MATH below — same computeDayHours call as before.
   const timeLog = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>({
     day: d,
-    timeIn:  document.getElementById(`ps-tin-${i}`)?.value || '',
-    timeOut: document.getElementById(`ps-tout-${i}`)?.value || '',
-    hours: computeDayHours(document.getElementById(`ps-tin-${i}`)?.value, document.getElementById(`ps-tout-${i}`)?.value),
-    source: document.getElementById(`ps-tin-${i}`)?.dataset.source || 'manual'
+    timeIn:  $ps(`ps-tin-${i}`)?.value || '',
+    timeOut: $ps(`ps-tout-${i}`)?.value || '',
+    hours: computeDayHours($ps(`ps-tin-${i}`)?.value, $ps(`ps-tout-${i}`)?.value),
+    source: $ps(`ps-tin-${i}`)?.dataset.source || 'manual'
   }));
 
   return {
@@ -4398,9 +4650,9 @@ function collectPayslipData(profile, currentUser) {
     payPeriodStart: periodStart,
     payPeriodEnd: periodEnd,
     payPeriodMonth: periodStart.slice(0,7),
-    payDate: document.getElementById('ps-date').value,
-    company: document.getElementById('ps-company').value||'Barro Kitchens',
-    preparedBy: document.getElementById('ps-preparer').value||currentUser?.displayName||'',
+    payDate: $ps('ps-date').value,
+    company: $ps('ps-company').value||'Barro Kitchens',
+    preparedBy: $ps('ps-preparer').value||currentUser?.displayName||'',
     regular: { dailyRate: daily, ratePerHr: rph, hrsWorked: hrs, total: regTotal },
     overtime: { ratePerHr: otRate, hours: otHrs, total: otTotal },
     allowances: { meal, transport, rent, total: allowTotal },
@@ -4416,7 +4668,7 @@ function collectPayslipData(profile, currentUser) {
     // #ps-er-json only exists for a CONFIGURED worker on a last pay week;
     // absent element or empty value -> null, byte-identical to before.
     employerShare: (() => { try {
-      const el = document.getElementById('ps-er-json');
+      const el = $ps('ps-er-json');
       return el && el.value ? JSON.parse(el.value) : null;
     } catch(_) { return null; } })(),
     caBalanceBefore,
