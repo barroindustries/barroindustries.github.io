@@ -109,6 +109,213 @@ window.renderPosts = async function() {
   document.getElementById('new-post-btn').addEventListener('click', () => openNewPostModal(canPost));
 };
 
+// ── Post card markup — ONE source of truth ────────────────────────────────
+// Extracted verbatim from loadPosts's own posts.map(...) template (2026-08,
+// "share posts to chat" batch) so the feed and the single-post detail view
+// (openPostById, below) can never drift apart. Both branches — the memo mirror
+// card and the normal post card — are byte-identical to what the feed rendered
+// before, with ONE addition: an optional Share button (opts.share).
+//
+// opts:
+//   canApprove — viewer may approve/reject/pin (president/manager)
+//   isOwn      — viewer authored this post (Edit/Delete)
+//   share      — render the "Share" button (feed only; never in the detail view,
+//                and never for an external partner — see loadPosts)
+window.postCardHtml = function(p, opts) {
+  opts = opts || {};
+  const canApprove = !!opts.canApprove;
+  const isOwn      = !!opts.isOwn;
+  const ts = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+  const hearts = p.hearts || [];
+  const hearted = hearts.includes(currentUser.uid);
+  // escHtml on the id (the surrounding template interpolates it raw) — a no-op
+  // for a real Firestore id, so `.post-share-btn[data-id]` lookups are unchanged.
+  const shareBtn = opts.share
+    ? `<button class="btn-secondary btn-sm post-share-btn" data-id="${escHtml(p.id)}">${emojiIcon('share-2',16)} Share</button>`
+    : '';
+  // Memo mirror cards: internal announcements surfaced into the General feed.
+  // They open the memo (with conforme) instead of behaving like a normal post.
+  // Partners never load the General tab, so these stay internal-only.
+  if (p.kind === 'memo' && p.memoId) {
+    return `
+    <div class="post-card post-memo-card" data-id="${p.id}" data-memo-id="${escHtml(p.memoId)}" style="cursor:pointer;border-left:3px solid var(--primary,#0A84FF)">
+      <div class="post-header">
+        <div class="post-avatar" style="background:var(--info-soft)">${emojiIcon('📋',16)}</div>
+        <div class="post-meta">
+          <div class="post-author">${escHtml(p.authorName||'Management')}</div>
+          <div class="post-time">${escHtml(ts)} · Memo</div>
+        </div>
+        ${p.pinned ? `<span class="badge badge-blue">${emojiIcon('📌',16)} Pinned</span>` : ''}
+        <span class="badge badge-blue">${emojiIcon('📋',16)} Memo</span>
+      </div>
+      ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
+      <div class="post-body">${escHtml((p.content||'').slice(0,200))}${(p.content||'').length>200?'…':''}</div>
+      <div class="post-actions">
+        <button class="btn-primary btn-sm post-memo-open" data-memo-id="${escHtml(p.memoId)}">${emojiIcon('📋',16)} Read &amp; Conforme</button>
+        ${shareBtn}
+        <div style="display:flex;gap:6px;margin-left:auto">
+          ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
+          ${canApprove ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="post-card" data-id="${p.id}">
+    <div class="post-header">
+      <div class="post-avatar">${safeHttpUrl(p.authorPhoto) ? `<img src="${escHtml(p.authorPhoto)}"/>` : escHtml((p.authorName||'?')[0])}</div>
+      <div class="post-meta">
+        <div class="post-author">${escHtml(p.authorName||'Unknown')}</div>
+        <div class="post-time">${escHtml(ts)}${p.dept&&p.dept!=='General'?` · ${escHtml(p.dept)}`:''}</div>
+      </div>
+      ${p.pinned ? `<span class="badge badge-blue">${emojiIcon('📌',16)} Pinned</span>` : ''}
+      ${p.status==='pending' ? '<span class="badge badge-orange">Pending</span>' : ''}
+    </div>
+    ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
+    <div class="post-body">${escHtml(p.content||'')}</div>
+    ${safeHttpUrl(p.imageUrl) ? `<img src="${escHtml(p.imageUrl)}" class="post-image" data-img="${escHtml(p.imageUrl)}" style="cursor:zoom-in"/>` : ''}
+    ${safeHttpUrl(p.fileUrl) ? `<a href="${escHtml(p.fileUrl)}" target="_blank" rel="noopener noreferrer" class="post-attachment">${emojiIcon('📎',16)} ${escHtml(p.fileName||'Attachment')}</a>` : ''}
+    <div class="post-actions">
+      ${p.status==='published' ? `
+        <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
+          <svg class="heart-svg" viewBox="0 0 24 24" fill="${hearted?'#FF6B2B':'none'}" stroke="${hearted?'#FF6B2B':'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          ${hearts.length ? `<span class="heart-count">${hearts.length}</span>` : '<span class="heart-count" style="display:none">0</span>'}
+        </button>
+        ${hearts.length ? `<button class="post-likers-btn btn-link" data-id="${p.id}" data-hearts='${JSON.stringify(hearts)}' style="font-size:12px;color:var(--text-muted);padding:0 4px;background:none;border:none;cursor:pointer"></button>` : ''}
+      ` : ''}
+      ${canApprove && p.status==='pending' ? `
+        <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">${emojiIcon('✓',16)} Approve</button>
+        <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">${emojiIcon('✗',16)} Reject</button>
+      ` : ''}
+      ${shareBtn}
+      <div style="display:flex;gap:6px;margin-left:auto">
+        ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>` : ''}
+        ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
+        ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+};
+
+// The post-card interactions that need NO feed reload — image tap, heart
+// toggle, likers list. Moved verbatim out of loadPosts so the single-post
+// detail view gets exactly the same behaviour from the same code. (Approve /
+// reject / delete / pin / edit all end in `loadPosts(dept)` and therefore stay
+// feed-only — see openPostById's own note.)
+// `container` is always the caller's own scoped element, never a document lookup.
+window.wirePostCardCommon = function(container) {
+  if (!container) return;
+  // Open post image in a new tab — URL validated to http(s) only, wired via
+  // addEventListener so the raw URL never lands in an inline onclick string.
+  container.querySelectorAll('.post-image[data-img]').forEach(img => img.addEventListener('click', () => {
+    const safe = safeHttpUrl(img.dataset.img);
+    if (safe) window.open(safe, '_blank', 'noopener,noreferrer');
+  }));
+
+  container.querySelectorAll('.post-heart-btn').forEach(btn => btn.addEventListener('click', async e => {
+    const id = btn.dataset.id;
+    const isHearted = btn.classList.contains('hearted');
+    const countEl = btn.querySelector('.heart-count');
+    const svg = btn.querySelector('.heart-svg');
+
+    // Optimistic UI update — instant feedback
+    btn.classList.toggle('hearted', !isHearted);
+    const currentCount = parseInt(countEl?.textContent || '0') || 0;
+    const newCount = isHearted ? Math.max(0, currentCount - 1) : currentCount + 1;
+    if (countEl) { countEl.textContent = newCount; countEl.style.display = newCount > 0 ? '' : 'none'; }
+    if (svg) {
+      svg.setAttribute('fill', !isHearted ? '#FF6B2B' : 'none');
+      svg.setAttribute('stroke', !isHearted ? '#FF6B2B' : 'currentColor');
+    }
+    // Bounce animation
+    btn.classList.add('heart-pop');
+    btn.addEventListener('animationend', () => btn.classList.remove('heart-pop'), { once: true });
+
+    // Persist to Firestore (revert the optimistic UI if the write fails)
+    const uid = currentUser.uid;
+    const op = isHearted
+      ? firebase.firestore.FieldValue.arrayRemove(uid)
+      : firebase.firestore.FieldValue.arrayUnion(uid);
+    try {
+      await db.collection('posts').doc(id).update({ hearts: op });
+    } catch (err) {
+      btn.classList.toggle('hearted', isHearted);
+      if (countEl) { countEl.textContent = currentCount; countEl.style.display = currentCount > 0 ? '' : 'none'; }
+      if (svg) { svg.setAttribute('fill', isHearted ? '#FF6B2B' : 'none'); svg.setAttribute('stroke', isHearted ? '#FF6B2B' : 'currentColor'); }
+      Notifs.showToast('Could not save your like.', 'error');
+    }
+  }));
+
+  // Show likers list
+  container.querySelectorAll('.post-likers-btn').forEach(btn => btn.addEventListener('click', async () => {
+    let uids = [];
+    try { uids = JSON.parse(btn.dataset.hearts); } catch{}
+    if (!uids.length) return;
+    openModal('❤️ Liked by', window.skeletonHtml('rows'));
+    const names = await Promise.all(uids.map(uid =>
+      db.collection('users').doc(uid).get().then(s => s.exists ? (s.data().displayName || s.data().email) : uid).catch(()=>uid)
+    ));
+    document.getElementById('modal-body').innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${names.map(n=>`<div style="display:flex;align-items:center;gap:8px;font-size:14px"><span style="font-size:20px">❤️</span>${escHtml(n)}</div>`).join('')}
+      </div>`;
+  }));
+};
+
+// ── Open ONE post by id ───────────────────────────────────────────────────
+// Entry point for the chat record-link chip (js/chat.js `_openRefChip`, kind
+// 'post'). The Posts feed itself CANNOT serve as that opener: loadPosts always
+// starts on the General tab with .limit(30), so a shared department post — or
+// any post older than the most recent 30 — is simply not on screen. Modelled on
+// window.openMemoById (js/screens/dashboards.js): fetch the single doc, render
+// one card into an openPage panel.
+//
+// Every failure mode dead-ends in a toast, never a thrown/unhandled rejection:
+//   • a partner tapping a chip for an internal post  → rules-DENIED (throws)
+//   • a post deleted after the chip was sent         → !snap.exists
+//   • offline / transient                            → throws
+window.openPostById = async function(postId) {
+  if (!postId) { Notifs.showToast('That post is no longer available', 'error'); return; }
+  let snap = null;
+  try {
+    snap = await db.collection('posts').doc(postId).get();
+  } catch (_) {
+    Notifs.showToast('That post is no longer available', 'error');
+    return;
+  }
+  if (!snap || !snap.exists) { Notifs.showToast('That post is no longer available', 'error'); return; }
+  const p = { id: snap.id, ...snap.data() };
+  // Read-only detail view. canApprove/isOwn are deliberately false: every
+  // button they would add (Approve/Reject/Edit/Delete/Pin) ends in a
+  // `loadPosts(dept)` feed re-render that has no meaning here. share is false
+  // too — you reached this card FROM a share.
+  const panel = window.openPage('Post', `<div id="post-detail-body">${window.postCardHtml(p, { canApprove: false, isOwn: false, share: false })}</div>`);
+  if (!panel) return;
+  const host = panel.querySelector('#post-detail-body');
+  if (!host) return;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+  window.wirePostCardCommon(host);
+  // Memo mirror card → open the memo (conforme is given there). No onChange
+  // callback: there is no feed behind this panel to refresh.
+  host.querySelectorAll('.post-memo-open').forEach(btn => btn.addEventListener('click', e => {
+    e.stopPropagation();
+    window.openMemoById?.(btn.dataset.memoId);
+  }));
+  host.querySelectorAll('.post-memo-card').forEach(card => card.addEventListener('click', e => {
+    if (e.target.closest('button') || e.target.closest('a')) return;
+    window.openMemoById?.(card.dataset.memoId);
+  }));
+};
+
+// The one-line label a shared post carries into chat. sendMessage()'s persist
+// block already caps ref.label at 140 chars; the cap is repeated here only so
+// the value this function returns is the value that gets stored. The real work
+// is collapsing whitespace, so a multi-line post body becomes one clean chip
+// line instead of a ragged block.
+function postShareLabel(p) {
+  return String(p.title || p.content || 'Post').replace(/\s+/g, ' ').trim().slice(0, 140) || 'Post';
+}
+
 // Re-audit 2026-08-03: this always queried .limit(30) with no cursor/"load more" —
 // anything older than the most recent 30 posts in a tab was permanently
 // unreachable from this screen. `pageSize` grows via the "Load older posts"
@@ -138,82 +345,41 @@ async function loadPosts(dept, pageSize) {
       return;
     }
     const canApprove = isRealPresident() || currentRole === 'manager';
+    // Sharing a post into chat copies up to 140 chars of its title/body VERBATIM
+    // into the chat message doc (ref.label), and from there into the target
+    // conversation's inbox preview and every recipient's push body. An external
+    // partner must never be handed that, so the button is not offered to a
+    // partner viewer at all (js/chat.js's shareToChat re-asserts this, and
+    // additionally blocks every conversation a partner is IN).
+    const viewerIsPartner = typeof isPartner === 'function' && isPartner();
     // Store post data by id so edit button can retrieve it without fragile data-* encoding
     const postMap = new Map(posts.map(p => [p.id, p]));
-    container.innerHTML = posts.map(p => {
-      const ts = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-      const isOwn = p.authorId === currentUser.uid;
-      const hearts = p.hearts || [];
-      const hearted = hearts.includes(currentUser.uid);
-      // Memo mirror cards: internal announcements surfaced into the General feed.
-      // They open the memo (with conforme) instead of behaving like a normal post.
-      // Partners never load the General tab, so these stay internal-only.
-      if (p.kind === 'memo' && p.memoId) {
-        return `
-        <div class="post-card post-memo-card" data-id="${p.id}" data-memo-id="${escHtml(p.memoId)}" style="cursor:pointer;border-left:3px solid var(--primary,#0A84FF)">
-          <div class="post-header">
-            <div class="post-avatar" style="background:var(--info-soft)">${emojiIcon('📋',16)}</div>
-            <div class="post-meta">
-              <div class="post-author">${escHtml(p.authorName||'Management')}</div>
-              <div class="post-time">${escHtml(ts)} · Memo</div>
-            </div>
-            ${p.pinned ? `<span class="badge badge-blue">${emojiIcon('📌',16)} Pinned</span>` : ''}
-            <span class="badge badge-blue">${emojiIcon('📋',16)} Memo</span>
-          </div>
-          ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
-          <div class="post-body">${escHtml((p.content||'').slice(0,200))}${(p.content||'').length>200?'…':''}</div>
-          <div class="post-actions">
-            <button class="btn-primary btn-sm post-memo-open" data-memo-id="${escHtml(p.memoId)}">${emojiIcon('📋',16)} Read &amp; Conforme</button>
-            <div style="display:flex;gap:6px;margin-left:auto">
-              ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
-              ${canApprove ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
-            </div>
-          </div>
-        </div>`;
-      }
-      return `
-      <div class="post-card" data-id="${p.id}">
-        <div class="post-header">
-          <div class="post-avatar">${safeHttpUrl(p.authorPhoto) ? `<img src="${escHtml(p.authorPhoto)}"/>` : escHtml((p.authorName||'?')[0])}</div>
-          <div class="post-meta">
-            <div class="post-author">${escHtml(p.authorName||'Unknown')}</div>
-            <div class="post-time">${escHtml(ts)}${p.dept&&p.dept!=='General'?` · ${escHtml(p.dept)}`:''}</div>
-          </div>
-          ${p.pinned ? `<span class="badge badge-blue">${emojiIcon('📌',16)} Pinned</span>` : ''}
-          ${p.status==='pending' ? '<span class="badge badge-orange">Pending</span>' : ''}
-        </div>
-        ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
-        <div class="post-body">${escHtml(p.content||'')}</div>
-        ${safeHttpUrl(p.imageUrl) ? `<img src="${escHtml(p.imageUrl)}" class="post-image" data-img="${escHtml(p.imageUrl)}" style="cursor:zoom-in"/>` : ''}
-        ${safeHttpUrl(p.fileUrl) ? `<a href="${escHtml(p.fileUrl)}" target="_blank" rel="noopener noreferrer" class="post-attachment">${emojiIcon('📎',16)} ${escHtml(p.fileName||'Attachment')}</a>` : ''}
-        <div class="post-actions">
-          ${p.status==='published' ? `
-            <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
-              <svg class="heart-svg" viewBox="0 0 24 24" fill="${hearted?'#FF6B2B':'none'}" stroke="${hearted?'#FF6B2B':'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-              ${hearts.length ? `<span class="heart-count">${hearts.length}</span>` : '<span class="heart-count" style="display:none">0</span>'}
-            </button>
-            ${hearts.length ? `<button class="post-likers-btn btn-link" data-id="${p.id}" data-hearts='${JSON.stringify(hearts)}' style="font-size:12px;color:var(--text-muted);padding:0 4px;background:none;border:none;cursor:pointer"></button>` : ''}
-          ` : ''}
-          ${canApprove && p.status==='pending' ? `
-            <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">${emojiIcon('✓',16)} Approve</button>
-            <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">${emojiIcon('✗',16)} Reject</button>
-          ` : ''}
-          <div style="display:flex;gap:6px;margin-left:auto">
-            ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>` : ''}
-            ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
-            ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
-          </div>
-        </div>
-      </div>`;
-    }).join('') + (hasMore ? `<div style="text-align:center;padding:14px"><button class="btn-secondary btn-sm" id="posts-load-more-btn">${emojiIcon('⬇',16)} Load older posts</button></div>` : '');
+    container.innerHTML = posts.map(p => window.postCardHtml(p, {
+      canApprove,
+      isOwn: p.authorId === currentUser.uid,
+      // Only a PUBLISHED post is shareable — a pending/rejected draft must not
+      // be broadcast into chat before it clears approval.
+      share: !viewerIsPartner && p.status === 'published'
+    })).join('') + (hasMore ? `<div style="text-align:center;padding:14px"><button class="btn-secondary btn-sm" id="posts-load-more-btn">${emojiIcon('⬇',16)} Load older posts</button></div>` : '');
     if (window.lucide) lucide.createIcons({nodes:[container]});
     document.getElementById('posts-load-more-btn')?.addEventListener('click', () => loadPosts(dept, pageSize + 30));
 
-    // Open post image in a new tab — URL validated to http(s) only, wired via
-    // addEventListener so the raw URL never lands in an inline onclick string.
-    container.querySelectorAll('.post-image[data-img]').forEach(img => img.addEventListener('click', () => {
-      const safe = safeHttpUrl(img.dataset.img);
-      if (safe) window.open(safe, '_blank', 'noopener,noreferrer');
+    // Image tap / heart / likers — shared with the single-post detail view
+    // (window.wirePostCardCommon, above); none of them reload the feed.
+    window.wirePostCardCommon(container);
+
+    // Share this post into a chat conversation. The picker + the partner block
+    // both live in js/chat.js (Chat.shareToChat) — this only supplies the
+    // {kind,id,label} payload.
+    container.querySelectorAll('.post-share-btn').forEach(btn => btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const p = postMap.get(btn.dataset.id);
+      if (!p) return;
+      if (!window.Chat || typeof window.Chat.shareToChat !== 'function') {
+        Notifs.showToast('Chat is unavailable right now.', 'error');
+        return;
+      }
+      window.Chat.shareToChat({ kind: 'post', id: p.id, label: postShareLabel(p) });
     }));
 
     container.querySelectorAll('.post-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
@@ -245,55 +411,6 @@ async function loadPosts(dept, pageSize) {
       await db.collection('posts').doc(id).update({pinned: !snap.data().pinned});
       loadPosts(dept);
     }));
-    container.querySelectorAll('.post-heart-btn').forEach(btn => btn.addEventListener('click', async e => {
-      const id = btn.dataset.id;
-      const isHearted = btn.classList.contains('hearted');
-      const countEl = btn.querySelector('.heart-count');
-      const svg = btn.querySelector('.heart-svg');
-
-      // Optimistic UI update — instant feedback
-      btn.classList.toggle('hearted', !isHearted);
-      const currentCount = parseInt(countEl?.textContent || '0') || 0;
-      const newCount = isHearted ? Math.max(0, currentCount - 1) : currentCount + 1;
-      if (countEl) { countEl.textContent = newCount; countEl.style.display = newCount > 0 ? '' : 'none'; }
-      if (svg) {
-        svg.setAttribute('fill', !isHearted ? '#FF6B2B' : 'none');
-        svg.setAttribute('stroke', !isHearted ? '#FF6B2B' : 'currentColor');
-      }
-      // Bounce animation
-      btn.classList.add('heart-pop');
-      btn.addEventListener('animationend', () => btn.classList.remove('heart-pop'), { once: true });
-
-      // Persist to Firestore (revert the optimistic UI if the write fails)
-      const uid = currentUser.uid;
-      const op = isHearted
-        ? firebase.firestore.FieldValue.arrayRemove(uid)
-        : firebase.firestore.FieldValue.arrayUnion(uid);
-      try {
-        await db.collection('posts').doc(id).update({ hearts: op });
-      } catch (err) {
-        btn.classList.toggle('hearted', isHearted);
-        if (countEl) { countEl.textContent = currentCount; countEl.style.display = currentCount > 0 ? '' : 'none'; }
-        if (svg) { svg.setAttribute('fill', isHearted ? '#FF6B2B' : 'none'); svg.setAttribute('stroke', isHearted ? '#FF6B2B' : 'currentColor'); }
-        Notifs.showToast('Could not save your like.', 'error');
-      }
-    }));
-
-    // Show likers list
-    container.querySelectorAll('.post-likers-btn').forEach(btn => btn.addEventListener('click', async () => {
-      let uids = [];
-      try { uids = JSON.parse(btn.dataset.hearts); } catch{}
-      if (!uids.length) return;
-      openModal('❤️ Liked by', window.skeletonHtml('rows'));
-      const names = await Promise.all(uids.map(uid =>
-        db.collection('users').doc(uid).get().then(s => s.exists ? (s.data().displayName || s.data().email) : uid).catch(()=>uid)
-      ));
-      document.getElementById('modal-body').innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:8px">
-          ${names.map(n=>`<div style="display:flex;align-items:center;gap:8px;font-size:14px"><span style="font-size:20px">❤️</span>${escHtml(n)}</div>`).join('')}
-        </div>`;
-    }));
-
     // Edit post
     container.querySelectorAll('.post-edit-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id      = btn.dataset.id;

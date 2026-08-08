@@ -1207,7 +1207,7 @@ window.Chat = (() => {
       if (pendingFile) parts.push(`${emojiIcon('paperclip',12)} ${escHtml(pendingFile.name || 'file')}`);
       else if (pendingImages.length) parts.push(`${emojiIcon('camera',12)} ${pendingImages.length} photo${pendingImages.length > 1 ? 's' : ''} selected`);
       else if (pendingLink) parts.push(`${emojiIcon('link',12)} ${escHtml(pendingLink)}`);
-      if (pendingRef) parts.push(`${emojiIcon(pendingRef.kind === 'task' ? 'clipboard-list' : pendingRef.kind === 'quote' ? 'file-text' : 'landmark', 12)} ${escHtml(pendingRef.label)}`);
+      if (pendingRef) parts.push(`${emojiIcon(pendingRef.kind === 'task' ? 'clipboard-list' : pendingRef.kind === 'quote' ? 'file-text' : pendingRef.kind === 'post' ? 'megaphone' : 'landmark', 12)} ${escHtml(pendingRef.label)}`);
       filePreview.innerHTML = parts.join(' &nbsp;·&nbsp; ');
       if (window.lucide) lucide.createIcons({ nodes: [filePreview] });
     };
@@ -2040,7 +2040,13 @@ window.Chat = (() => {
                          // file/media/link, just a task/quote/bidding chip) needs its
                          // own preview branch — the old fallback (`📎 ${fileName||'File'}`)
                          // would otherwise misreport it as a generic attachment.
-                         : (msgDoc.ref ? `🔗 ${msgDoc.ref.label}` : '');
+                         // The glyph here MUST stay a PLAIN emoji — this
+                         // string is written to conv.lastMessageText AND used
+                         // as the FCM push body, neither of which interprets
+                         // HTML, so emojiIcon() (which returns `<i data-lucide>`)
+                         // would display as literal markup. See the block
+                         // comment above.
+                         : (msgDoc.ref ? `${msgDoc.ref.kind === 'post' ? '📣' : '🔗'} ${msgDoc.ref.label}` : '');
     // Second write — passes the affectedKeys([lastMessage*,reads]) member
     // branch. Wave5 M4 (J9): the sender's own reads.{uid} rides in the SAME
     // write as the preview bump — the deployed rule requires exactly that
@@ -2370,7 +2376,14 @@ window.Chat = (() => {
   // of an <a> since this triggers an in-app opener (_openRefChip), not a URL.
   function _refChipHtml(ref) {
     if (!ref || !ref.kind || !ref.id) return '';
-    const icon = ref.kind === 'task' ? 'clipboard-list' : ref.kind === 'quote' ? 'file-text' : 'landmark';
+    // 'post' uses the SAME icon NAV_REGISTRY gives the Posts page ('megaphone',
+    // js/config.js) so the chip reads as "a Post" at a glance. Without an arm
+    // here a post chip would fall through to 'landmark' — this ternary has no
+    // default branch of its own.
+    const icon = ref.kind === 'task' ? 'clipboard-list'
+      : ref.kind === 'quote' ? 'file-text'
+      : ref.kind === 'post' ? 'megaphone'
+      : 'landmark';
     return `<div class="ms-file-chip chat-ref-tap" role="button" tabindex="0" style="margin-top:5px;cursor:pointer"
         data-kind="${escHtml(ref.kind)}" data-id="${escHtml(ref.id)}" data-collection="${escHtml(ref.collection || '')}" data-label="${escHtml(ref.label || '')}">
       ${emojiIcon(icon, 14)}<span>${escHtml(ref.label || 'Linked record')}</span>
@@ -2407,6 +2420,19 @@ window.Chat = (() => {
           window.reopenQuoteFromDoc(ref.collection || 'bk_quotes', ref.id);
         } else {
           Notifs.showToast('Quote viewer unavailable', 'error');
+        }
+      } else if (ref.kind === 'post') {
+        // window.openPostById (js/screens/people.js) fetches the ONE post doc
+        // and renders it into its own page — deliberately NOT the feed, which
+        // opens on General with .limit(30) and therefore cannot reach a shared
+        // department post or anything older than the 30 most recent. Guarded by
+        // typeof: people.js and chat.js load in a fixed order and neither
+        // exists at the other's parse time. openPostById handles denied /
+        // deleted itself (toast, never a thrown rejection).
+        if (typeof window.openPostById === 'function') {
+          window.openPostById(ref.id);
+        } else {
+          Notifs.showToast('That post is no longer available', 'error');
         }
       } else if (ref.kind === 'bidding') {
         if (typeof window.navigateTo === 'function') window.navigateTo('dept:Government Biddings');
@@ -4167,6 +4193,200 @@ window.Chat = (() => {
     dd.classList.remove('hidden');
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  //  Partner containment — the ONE hard rule for shared record chips
+  // ══════════════════════════════════════════════════════════════════════
+  // A record chip copies up to 140 characters of the source record VERBATIM
+  // into the message doc's `ref.label` (see sendMessage's persist block). For a
+  // shared POST that is the post's own title/body — internal content an
+  // external partner has no read access to. The post DOC stays protected (a
+  // partner tapping the chip gets PERMISSION_DENIED from firestore.rules'
+  // posts rule, and openPostById toasts), but the LABEL is already denormalised
+  // into three places a partner reads, none of which the rules can fence:
+  //
+  //   1. conversations/{id}/messages/{id}.ref.label
+  //      `allow read: if isAuth() && convMember()` (firestore.rules ~859) —
+  //      no per-field restriction of any kind.
+  //   2. conv.lastMessageText — sendMessage's ref-only preview branch writes
+  //      `📣 <label>` / `🔗 <label>` there: the partner's INBOX ROW.
+  //   3. the FCM push body — _notifyRecipients interpolates that same preview,
+  //      and functions/index.js forwards it verbatim: their phone LOCK SCREEN.
+  //
+  // Partners are legitimate DM targets (dmCandidates returns literally
+  // "everyone" for an internal user, so every partner sits in every employee's
+  // picker), which is exactly why this cannot be left to the rules or to
+  // convention. It is enforced in JS at BOTH points: conversations containing a
+  // partner are excluded FROM THE PICKER, and the target is RE-CHECKED against
+  // fresh data immediately before the send, because the picker list is a
+  // snapshot and group membership/roles can change under it.
+  //
+  // Partner-ness is decided the way the rest of the app decides it —
+  // `u.role === 'partner'` (dmCandidates above, js/screens/people.js's Team
+  // card, firestore.rules' own isPartner()) — but compared CASE-INSENSITIVELY:
+  // production carries role-case drift ("Partner"), and over-counting someone
+  // as a partner is the safe direction for this particular check.
+  // The VIEWER test, deliberately separate from the global isPartner().
+  // js/app.js's isPartner() is `currentRole === 'partner'` — CASE-SENSITIVE — and
+  // production contains role drift ('Partner' with a capital P). A drifted viewer
+  // therefore passes that check and could share. For DM/group that self-heals
+  // (their own uid is in participants and the target test below is
+  // case-insensitive), but a dept channel has no participants to catch them on.
+  // Being MORE cautious about who counts as a partner is the safe direction, so
+  // every share/forward refusal routes through here.
+  function _viewerIsPartner() {
+    try { return _roleIsPartner(window.currentRole); } catch (_) { return true; }
+  }
+  function _roleIsPartner(role) {
+    return String(role == null ? '' : role).trim().toLowerCase() === 'partner';
+  }
+  // `fresh` bypasses every cache — the send-time re-check must, because it IS
+  // the security boundary. The picker's own pass may use a short-TTL cache.
+  //
+  // Deliberately NOT the shared 'users' key: dbCachedGet force-substitutes
+  // window.fetchUsersWithPayroll for that key (js/config.js), which returns
+  // `{...userDoc, ...payrollDoc}` — a payroll doc carrying a `role` field would
+  // silently OVERWRITE the user's real role in the merged object, and role is
+  // the exact field this guard decides on. A distinct key gets the raw users
+  // docs with no merge; a short TTL keeps repeat opens cheap.
+  async function _usersByIdMap(fresh) {
+    const snap = fresh
+      ? await db.collection('users').get()
+      : await dbCachedGet('chat-share-users', () => db.collection('users').get(), 15000);
+    const map = {};
+    snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
+    return map;
+  }
+  // null   → safe to share into.
+  // string → why it is excluded. Phrased about the CHAT, never about a person.
+  function _partnerBlockReason(cv, usersById) {
+    // ── DEPT CHANNELS: participants is EMPTY BY RULE, so inspecting it alone
+    // waves every dept channel straight through. firestore.rules enforces
+    // `participants == []` on dept create and derives membership from each
+    // user's own department instead.
+    //
+    // An earlier version of this guard reasoned that dept channels are safe
+    // because the rules fence their membership branch behind !isPartner(), so
+    // no partner can read the conversation or the message. That is TRUE, and it
+    // closes the message-doc and inbox-row sinks — but it does NOT close the
+    // third one, and the third one is the loudest: push notifications never
+    // pass through conversation rules at all. The SENDER's client computes the
+    // recipient set with _targetsFor() and writes into each recipient's own
+    // notifications inbox, and that filter has no role test whatsoever. So a
+    // partner whose profile lists an internal department (the invite form
+    // offers every department to every role, unfiltered) receives the post
+    // title in-app AND on their lock screen, from a channel they cannot open.
+    //
+    // Resolve membership the SAME way _targetsFor does, so the guard and the
+    // notification fan-out can never disagree about who is in the room.
+    if (cv && cv.type === 'dept') {
+      const dept = cv.department;
+      const members = Object.keys(usersById).map(k => usersById[k]).filter(u =>
+        u && (u.department === dept ||
+              (Array.isArray(u.departments) && u.departments.indexOf(dept) !== -1)));
+      for (let i = 0; i < members.length; i++) {
+        if (_roleIsPartner(members[i].role)) return 'A partner is in this department';
+      }
+      // Distinguish "the read failed" from "this department is genuinely empty".
+      // If usersById is empty the read failed (or was denied) and we cannot show
+      // that nobody external is listening — fail closed. If it resolved but this
+      // department matched nobody, the channel truly has no members: _targetsFor
+      // would notify nobody, so there is nothing to leak and refusing would be a
+      // false alarm.
+      if (!Object.keys(usersById || {}).length) return 'Cannot confirm who is in this channel';
+      return null;
+    }
+    const parts = (cv && Array.isArray(cv.participants)) ? cv.participants : [];
+    // A non-dept conversation with no participants is unverifiable, not empty.
+    if (!parts.length) return 'Cannot confirm everyone here is internal';
+    for (let i = 0; i < parts.length; i++) {
+      const u = usersById[parts[i]];
+      // An unresolvable participant is not proof of safety — fail closed.
+      if (!u) return 'Cannot confirm everyone here is internal';
+      if (_roleIsPartner(u.role)) return 'Includes an external partner';
+    }
+    return null;
+  }
+
+  // ── Conversation picker (extracted from _openForwardPicker) ─────────────
+  // _openForwardPicker ALREADY was this picker; its list-build, page and row
+  // wiring are lifted out here verbatim so Share (from the Posts feed) reuses
+  // exactly the same code path. Forward passes no `filter`, so every row is
+  // enabled and behaves precisely as before — zero behaviour change for
+  // Forward is the regression-safety property of this extraction.
+  //
+  // opts:
+  //   title   — openPage title
+  //   exclude — a conversation id to leave out (Forward: the source thread)
+  //   filter  — (cv) => null | 'reason'. A reason renders the row DISABLED with
+  //             the reason shown beside it; rows are never silently dropped.
+  //   onPick  — async (cv) => …, called with the picked conversation row
+  async function _openConvPicker(opts) {
+    opts = opts || {};
+    // COLD START (real bug this extraction has to fix). `_convs` is assigned in
+    // exactly ONE place — _runInboxRefresh — fed by _attachInbox, which is
+    // called from exactly one place: the end of renderChatPage. navigateTo()
+    // calls teardownInbox() on every non-chat page (js/app.js), and that
+    // unsubscribes the listener but does NOT clear _convs. So opened from the
+    // Posts feed this list is either EMPTY (Chat never opened this session —
+    // the picker would show dept channels only) or FROZEN-STALE (Chat opened
+    // earlier, listener since detached). Do a one-shot load whenever the live
+    // listener is not currently attached.
+    let convs = _convs;
+    if (!convs.length || !_inboxUnsub) {
+      const snap = await dbCachedGet('chat-picker-convs',
+        () => db.collection('conversations').where('participants', 'array-contains', currentUser.uid).get(),
+        15000).catch(() => null);
+      if (snap) convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    const deptRows = myDeptChannels().map(d => {
+      const existing = _deptConvs.find(cv => cv.department === d);
+      return existing || { id: 'dept_' + d, type: 'dept', department: d, name: d, participants: [], lastMessageAt: null, _unprovisioned: true };
+    });
+    const all = [...convs, ...deptRows].filter(cv => !opts.exclude || cv.id !== opts.exclude);
+    const sorted = all.slice().sort((a, b) => (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
+    const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
+    const reasons = {};
+    if (typeof opts.filter === 'function') sorted.forEach(cv => { reasons[cv.id] = opts.filter(cv) || null; });
+    const blocked = sorted.filter(cv => reasons[cv.id]).length;
+    const rowHtml = cv => {
+      const title = _convTitle(cv);
+      const why = reasons[cv.id];
+      if (why) {
+        return `<div class="item-card chat-conv-target-blocked" data-cid="${escHtml(cv.id)}" aria-disabled="true" style="display:flex;align-items:center;gap:10px;padding:8px;opacity:.55;cursor:not-allowed">
+          <div class="ms-avatar ms-avatar-md">${initials(title)}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600">${escHtml(title)}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${escHtml(why)}</div>
+          </div>
+        </div>`;
+      }
+      return `<div class="item-card chat-conv-target pressable" data-cid="${escHtml(cv.id)}" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
+        <div class="ms-avatar ms-avatar-md">${initials(title)}</div>
+        <div style="flex:1;min-width:0;font-weight:600">${escHtml(title)}</div>
+      </div>`;
+    };
+    // Excluded conversations are SHOWN with their reason, not hidden — a chat
+    // that silently vanishes from a picker reads as a bug.
+    const note = blocked
+      ? `<div style="font-size:12px;color:var(--text-muted);padding:2px 2px 12px;line-height:1.45">${blocked} chat${blocked > 1 ? 's are' : ' is'} unavailable here — internal posts are not shared into chats that include someone outside the company.</div>`
+      : '';
+    const body = note + `<div id="chat-conv-picker-list" class="item-list">${
+      sorted.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>No conversations yet.</p></div>'
+    }</div>`;
+    // Scoped to the RETURNED panel element, never document.getElementById —
+    // several panels can be stacked and ids are not unique across them.
+    const panel = window.openPage(opts.title || 'Send to…', body);
+    if (!panel) return;
+    panel.querySelectorAll('.chat-conv-target').forEach(row => {
+      row.addEventListener('click', async () => {
+        const target = sorted.find(x => x.id === row.dataset.cid);
+        if (!target) return;
+        window.Overlay.dismissTop();
+        if (typeof opts.onPick === 'function') await opts.onPick(target);
+      });
+    });
+  }
+
   // ── Wave5 M2 (J3) — Forward ──
   // Conversation picker = "my conversations, sorted recent" (dm/group/dept —
   // the SAME merged+sorted list _renderInbox builds, reusing _convTitle for
@@ -4175,34 +4395,48 @@ window.Chat = (() => {
   // to that conversation via the SAME sendMessage({conv}) machinery every
   // other send uses — the target's lastMessage* preview bump and
   // _notifyRecipients both come along for free, nothing duplicated here.
+  // The list/page/row-wiring half now lives in _openConvPicker above (shared
+  // with Share); the send callback below is unchanged.
   async function _openForwardPicker(mid) {
     const m = [..._earlier, ..._msgs].find(x => x.id === mid);
     if (!m || m.deleted) return;
     const sourceConvId = _openConvId;
     if (!sourceConvId) return;
-    const deptRows = myDeptChannels().map(d => {
-      const existing = _deptConvs.find(cv => cv.department === d);
-      return existing || { id: 'dept_' + d, type: 'dept', department: d, name: d, participants: [], lastMessageAt: null, _unprovisioned: true };
-    });
-    const all = [..._convs, ...deptRows].filter(cv => cv.id !== sourceConvId);
-    const sorted = all.slice().sort((a, b) => (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
-    const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
-    const rowHtml = cv => {
-      const title = _convTitle(cv);
-      return `<div class="item-card chat-forward-target pressable" data-cid="${escHtml(cv.id)}" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
-        <div class="ms-avatar ms-avatar-md">${initials(title)}</div>
-        <div style="flex:1;min-width:0;font-weight:600">${escHtml(title)}</div>
-      </div>`;
-    };
-    const body = `<div id="chat-forward-list" class="item-list">${
-      sorted.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>No conversations yet.</p></div>'
-    }</div>`;
-    window.openPage('Forward to…', body);
-    document.getElementById('chat-forward-list')?.querySelectorAll('.chat-forward-target').forEach(row => {
-      row.addEventListener('click', async () => {
-        let target = sorted.find(x => x.id === row.dataset.cid);
-        if (!target) return;
-        window.Overlay.dismissTop();
+    // Forward carries `ref` along verbatim (see the sendMessage call below). For
+    // a POST ref that is the post's own title/body — the exact string the share
+    // flow refuses to place in front of an external partner — so Forward has to
+    // honour the SAME block, otherwise it is simply a second, unguarded route to
+    // the same leak: share a post into an internal thread, then forward it out.
+    //
+    // Deliberately scoped to kind 'post' ONLY. Forwarding text/photos/files/
+    // links and task/quote/bidding refs behaves exactly as it did before this
+    // batch (those carry the pre-existing, separately-tracked F64 exposure and
+    // narrowing them is not this batch's mandate).
+    const guardPostRef = !!(m.ref && m.ref.kind === 'post');
+    let usersById = null;
+    if (guardPostRef) {
+      if (_viewerIsPartner()) {
+        Notifs.showToast('Forwarding a post is available to internal staff only.', 'error');
+        return;
+      }
+      try { usersById = await _usersByIdMap(false); } catch (_) { usersById = null; }
+      if (!usersById || !Object.keys(usersById).length) {   // fail closed
+        Notifs.showToast('Could not check who is in your chats — try again in a moment.', 'error');
+        return;
+      }
+    }
+    await _openConvPicker({
+      title: 'Forward to…',
+      exclude: sourceConvId,
+      filter: guardPostRef ? (cv => _partnerBlockReason(cv, usersById)) : null,
+      onPick: async target => {
+        if (guardPostRef) {
+          // Same fresh-data re-check the share flow runs, for the same reason:
+          // the picker list is a snapshot.
+          const guard = await _assertShareTargetSafe(target);
+          if (!guard.ok) { Notifs.showToast(guard.reason, 'error'); return; }
+          target = guard.conv;   // already provisioned + freshly re-read
+        }
         try {
           if (target._unprovisioned) {   // lazy-create, mirrors openDeptChannel
             await db.collection('conversations').doc(target.id).set({
@@ -4223,8 +4457,79 @@ window.Chat = (() => {
         } catch (_) {
           Notifs.showToast('Forward failed', 'error');
         }
-      });
+      }
     });
+  }
+
+  // ── Share a record into a conversation (window.Chat.shareToChat) ────────
+  // `payload` is the SAME {kind, id, label} shape sendMessage's `ref` argument
+  // already takes, so a shared post rides the existing record-link machinery
+  // end to end — persist block, chip render, tap-to-open — with no new message
+  // shape and (verified) no firestore.rules change: message create has no
+  // keys().hasOnly() allowlist, only convMember() + authorId + the announcement
+  // restriction (firestore.rules ~860-866).
+  //
+  // Today's only caller is the Posts feed's Share button (js/screens/people.js).
+  async function shareToChat(payload) {
+    if (!payload || !payload.kind || !payload.id) return;
+    // Every conversation an external partner is in contains an external partner
+    // — including their own — so a partner has nothing they could share into.
+    // Say so plainly rather than opening a picker where every row is blocked.
+    if (_viewerIsPartner()) {
+      Notifs.showToast('Sharing to chat is available to internal staff only.', 'error');
+      return;
+    }
+    let usersById = null;
+    try { usersById = await _usersByIdMap(false); } catch (_) { usersById = null; }
+    // FAIL CLOSED: with no users list there is no way to tell a partner
+    // conversation from an internal one, so the picker must not open at all.
+    if (!usersById || !Object.keys(usersById).length) {
+      Notifs.showToast('Could not check who is in your chats — try again in a moment.', 'error');
+      return;
+    }
+    await _openConvPicker({
+      title: 'Share to…',
+      filter: cv => _partnerBlockReason(cv, usersById),
+      onPick: async target => {
+        // SECOND enforcement point. The picker list is a snapshot: someone can
+        // be added to a group, or have their role changed to partner, between
+        // it painting and this tap. Re-verified against FRESH reads here.
+        const guard = await _assertShareTargetSafe(target);
+        if (!guard.ok) { Notifs.showToast(guard.reason, 'error'); return; }
+        try {
+          await sendMessage({ text: '', clientKey: _newClientKey(), conv: guard.conv, ref: payload });
+          Notifs.success('Shared to chat');
+        } catch (_) {
+          Notifs.showToast('Could not share that — nothing was sent.', 'error');
+        }
+      }
+    });
+  }
+  // The send-time half of the partner block. EVERY branch fails closed: any
+  // thrown read, any missing conversation doc, any unresolvable participant,
+  // and any partner participant all refuse the send.
+  async function _assertShareTargetSafe(target) {
+    if (!target || !target.id) return { ok: false, reason: 'Nothing was shared — that chat is unavailable.' };
+    // A dept channel nobody has opened yet has no Firestore doc for the re-read
+    // below to check. Provision it first (the same lazy-create Forward does),
+    // and only for a channel this user is actually a member of.
+    if (target._unprovisioned && target.type === 'dept'
+        && myDeptChannels().indexOf(target.department) !== -1) {
+      await _ensureDeptDocExists(target.department);
+    }
+    let snap = null;
+    try { snap = await db.collection('conversations').doc(target.id).get(); }
+    catch (_) { return { ok: false, reason: 'Could not verify who is in that chat — nothing was shared.' }; }
+    if (!snap || !snap.exists) return { ok: false, reason: 'That chat no longer exists — nothing was shared.' };
+    const conv = { id: snap.id, ...snap.data() };
+    let fresh = null;
+    try { fresh = await _usersByIdMap(true); } catch (_) { fresh = null; }
+    if (!fresh || !Object.keys(fresh).length) {
+      return { ok: false, reason: 'Could not verify who is in that chat — nothing was shared.' };
+    }
+    const why = _partnerBlockReason(conv, fresh);
+    if (why) return { ok: false, reason: 'Not shared — ' + why.charAt(0).toLowerCase() + why.slice(1) + '.' };
+    return { ok: true, conv };
   }
 
   // ── Wave2 practicality batch (P0) — "Attach a record" picker ──
@@ -4984,6 +5289,16 @@ window.Chat = (() => {
            loadEarlier, onComposerInput, teardownInbox, teardownThread,
            dmIdFor, myDeptChannels, dmCandidates, setFilter, setSearch, _attachInbox,
            _attachGlobalBadgeListener, _detachGlobalBadgeListener,
+           // 2026-08 "share posts to chat" — called by the Posts feed's Share
+           // button (js/screens/people.js). The partner block lives INSIDE it,
+           // at both the picker and the pre-send re-check, so no caller can
+           // route around it.
+           shareToChat,
+           // Test seams for the partner block (headless harness only — nothing
+           // in the app calls these). Exposed so the guard can be exercised
+           // against a constructed partner conversation without a production
+           // sign-in.
+           _partnerBlockReason, _roleIsPartner, _viewerIsPartner, _assertShareTargetSafe,
            _recentDmIds };   // Wave2 practicality batch — read by renderChatPage's New Message picker
 })();
 
