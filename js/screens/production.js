@@ -1508,7 +1508,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
         </div>
         ${e.team?`<div style="font-size:11px;color:var(--text-muted);margin-top:3px">Legacy team note: ${escHtml(e.team)}</div>`:''}`
         :`<input id="po-team" value="${escHtml(e.team||'')}" placeholder="e.g. Fab Team A"/>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">No worker directory yet — Finance/HR: press "↻ Sync Directory" on Payroll → Type B. Free-text team is used meanwhile.</div>`}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">No worker directory yet — Finance/HR: press "↻ Sync Directory" on Payroll → Operations Team. Free-text team is used meanwhile.</div>`}
       </div>
     </div>
     <div class="form-row">

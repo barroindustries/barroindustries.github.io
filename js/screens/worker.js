@@ -4,10 +4,10 @@
 
    WHO THIS IS FOR
    ----------------
-   "Type B" = a Production-class employee, paid WEEKLY, who has a real
+   "Operations Team" = a Production-class employee, paid WEEKLY, who has a real
    Firebase Auth login (unlike the older HR-kiosk-only worker_profiles flow —
    see js/screens/hr.js openWorkerKioskModal — where the worker has no login
-   at all and HR clocks them in from the office). Type B workers time
+   at all and HR clocks them in from the office). Operations Team workers time
    themselves in/out from their own phone, with their location checked
    against admin-defined geofenced Work Sites (js/geo-core.js siteMatch) and
    a selfie captured on a valid Time In/Out.
@@ -1271,7 +1271,7 @@ window.renderWorkerHome = async function () {
     c.innerHTML = `<div class="empty-state" style="padding:40px 20px">
       <div class="empty-icon">${emojiIcon('🔗', 44)}</div><h4>Account not linked yet</h4>
       <p style="color:var(--text-muted);font-size:13px;max-width:360px;margin:0 auto">
-        Your login is set to Production (Type B) but isn't linked to a Worker Profile yet.
+        Your login is set to Operations Team but isn't linked to a Worker Profile yet.
         Ask HR to open your Worker Profile and set "Linked Login Account" to your account.
       </p>
     </div>`;

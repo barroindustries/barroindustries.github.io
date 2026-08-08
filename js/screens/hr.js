@@ -12,7 +12,8 @@
    stays in departments.js, see below), the HR hub card launcher
    (window.renderHR), the payroll reconciliation screen (buildThreeWayRecon/
    threeWayReconTableHTML/openPayrollReconciliation), the Payroll hub
-   (window.renderPayrollHub — the Type A / Type B chip-tab wrapper that is now
+   (window.renderPayrollHub — the Office Team / Operations Team chip-tab wrapper (the
+   payClass values stay 'regular'/'production'; only the LABELS were renamed) that is now
    the single entry point for BOTH payroll screens; see its own header block),
    Payroll Management
    (renderPayrollManagement, incl. its nested loadPayrollTable/
@@ -359,7 +360,7 @@ window.renderHR = async function(currentUser, currentRole){
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
     // One card, two tabs (owner: "Better if its just / Payroll / Then / Type a
     // / Type b"). Opens the hub, which lands on Type A by default.
-    { icon:'💰', title:'Payroll',        desc:'Type A monthly run (Compute → Verify → Disburse) + Type B weekly Production payslips', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
+    { icon:'💰', title:'Payroll',        desc:'Office Team monthly run (Compute → Verify → Disburse) + Operations Team weekly payslips', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
     ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
     { icon:'📍', title:'Work Sites',     desc:'Geofenced Time In/Out locations for Type-B (Production) self-service', go:()=>openWorkSitesPage(currentUser, currentRole) },
     { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
@@ -369,8 +370,8 @@ window.renderHR = async function(currentUser, currentRole){
     <div class="page-header"><h2>${emojiIcon('👥',20)} Human Resources</h2></div>
     ${window.sopPanel('How HR works', [
       'People & Roles — set each person’s role, department(s) and employee class (Regular monthly vs Production weekly).',
-      'Payroll → Type A — the monthly cycle for regular staff: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
-      'Payroll → Type B — generate weekly payslips for Production workers (hourly attendance, fixed weekly rate), plus their worker profiles and ID cards.',
+      'Payroll → Office Team — the monthly cycle for regular staff: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
+      'Payroll → Operations Team — generate weekly payslips for Production workers (hourly attendance, fixed weekly rate), plus their worker profiles and ID cards.',
       'Leave — employees request leave; finance/admin approve and balances update automatically.',
       'Attendance — review daily attendance and approve time-in extension requests.'
     ])}
@@ -781,8 +782,8 @@ window.renderPayrollHub = async function(container, currentUser, currentRole, ta
 
   host.innerHTML = `
     ${window.chipTabs([
-      { key:'A', label:'Type A — Monthly' },
-      { key:'B', label:'Type B — Weekly (Production)' }
+      { key:'A', label:'Office Team' },
+      { key:'B', label:'Operations Team' }
     ], active, { cls:'payroll-hub-tabs' })}
     <div id="payroll-hub-pane">${window.skeletonHtml('rows')}</div>
   `;
@@ -870,7 +871,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     return depts.length === 1 && depts[0] === 'Brilliant Steel';
   };
   const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
-  // Production-class staff are paid WEEKLY via Payroll → Type B,
+  // Production-class staff are paid WEEKLY via Payroll → Operations Team,
   // NOT in the monthly run. Excluding them here is the single-source fix that
   // stops a production worker being paid both weekly AND monthly (double pay).
   const productionStaff = allStaff.filter(u=>u.payClass==='production');
@@ -951,7 +952,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     ${raiseBanner}
     <div id="pr-unpaid-card" style="margin-bottom:14px"></div>
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
-    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via <strong>Payroll → Type B</strong> and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
+    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via <strong>Payroll → Operations Team</strong> and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
     <div class="card">
       <div class="card-body" style="padding:0">
         <div id="payroll-table-caption" style="padding:8px 16px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--border)"></div>
@@ -1448,7 +1449,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
     const _skipReason = (u) =>
       u.removed === true          ? 'offboarded'
-      : _linkedUids.has(u.id)     ? 'paid weekly (Type B)'
+      : _linkedUids.has(u.id)     ? 'paid weekly (Operations Team)'
       : u.payrollExcluded === true ? ('not on payroll' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : ''))
       : null;
 
@@ -1577,7 +1578,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           ? 'Excluded from this and every run until put back on payroll.'
           : (u.removed === true
               ? 'Offboarded — reinstate from Team before they can be paid.'
-              : 'Paid weekly under Type B — kept out of the monthly run so nobody is paid twice.');
+              : 'Paid weekly under Operations Team — kept out of the monthly run so nobody is paid twice.');
         return `<tr class="pr-row pr-excluded-row" style="opacity:.6">
         <td class="tc-avatar" style="text-align:center">${emojiIcon('user-minus',16)}</td>
         <td class="tc-name"><strong style="text-decoration:line-through">${escHtml(u.displayName||u.email)}</strong>
@@ -1788,10 +1789,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         bodyEl.innerHTML = `
           <div class="form-group"><label>Employee Type</label>
             <select id="ep-class" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-              <option value="regular" ${_payClass==='regular'?'selected':''}>Type A — Regular, monthly (KPI + attendance)</option>
-              <option value="production" ${_payClass==='production'?'selected':''}>Type B — Production, weekly (hourly attendance, 8-hr day)</option>
+              <option value="regular" ${_payClass==='regular'?'selected':''}>Office Team — monthly (KPI + attendance)</option>
+              <option value="production" ${_payClass==='production'?'selected':''}>Operations Team — weekly (hourly attendance, 8-hr day)</option>
             </select>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Type A staff are paid monthly here. Type B (Production) workers are paid weekly on the Type B tab, excluded from this monthly run, and — if their Worker Profile's "Linked Login Account" is set to this uid (Payroll → Type B → the profile's edit form) — can self-service Time In/Out with geofencing from their own phone (HR → Work Sites).</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Office Team staff are paid monthly here. Operations Team workers are paid weekly on the Operations Team tab, excluded from this monthly run, and — if their Worker Profile's "Linked Login Account" is set to this uid (Payroll → Operations Team → the profile's edit form) — can self-service Time In/Out with geofencing from their own phone (HR → Work Sites).</div>
           </div>
           <div style="margin-top:4px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface))">
             <label style="font-weight:600">${emojiIcon('bar-chart-2',16)} KPI Computation — ${window.fmtMonthLabel ? window.fmtMonthLabel(month) : month}</label>
@@ -1898,8 +1899,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <label style="font-weight:600">${emojiIcon('💳',16)} Existing Cash Advance</label>
             <div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">Read-only — current outstanding balance(s) on record. Choosing how much to deduct FROM this payroll run (if any) is the actionable section below.</div>
             <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
-              <div>Type A — Payroll Cash Advance <span style="color:var(--text-muted)">(installment plan)</span>: <strong>${caBalance>0?'₱'+fmt(caBalance):'—'}</strong></div>
-              ${linkedWp ? `<div>Type B — Worker Profile CA balance <span style="color:var(--text-muted)">(linked profile: ${escHtml(linkedWp.name||linkedWp.id)})</span>: <strong>₱${fmt(linkedWp.caBalance||0)}</strong></div>` : ''}
+              <div>Office Team — Payroll Cash Advance <span style="color:var(--text-muted)">(installment plan)</span>: <strong>${caBalance>0?'₱'+fmt(caBalance):'—'}</strong></div>
+              ${linkedWp ? `<div>Operations Team — Worker Profile CA balance <span style="color:var(--text-muted)">(linked profile: ${escHtml(linkedWp.name||linkedWp.id)})</span>: <strong>₱${fmt(linkedWp.caBalance||0)}</strong></div>` : ''}
             </div>
           </div>
           ${caBalance > 0 ? `

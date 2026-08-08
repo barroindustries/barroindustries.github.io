@@ -270,7 +270,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
       'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
       'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow, Bank Reconciliation and Break-even.',
-      'Payroll is one screen with two tabs: Type A (regular staff, monthly — Compute → Verify → Disburse) and Type B (Production workers, weekly payslips, profiles & ID cards). It opens on Type A.',
+      'Payroll is one screen with two tabs: Office Team (monthly — Compute → Verify → Disburse) and Operations Team (weekly payslips, profiles & ID cards). It opens on Office Team.',
       `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`,
       isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
     ].filter(Boolean))}
