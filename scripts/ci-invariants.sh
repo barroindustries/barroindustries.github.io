@@ -174,7 +174,7 @@ fi
 # call sites still invoked them, silently severing cash-in/out/expenses/
 # purchases from the ledger — the single source of truth).
 # ═══════════════════════════════════════════════════════════════════════
-echo "=== [4/4] LEDGER POSTERS: postCRJ/CDJ/Expense/resync are defined ==="
+echo "=== [4/5] LEDGER POSTERS: postCRJ/CDJ/Expense/resync are defined ==="
 posters_fail=0
 for fn in postExpenseToLedger postCRJToLedger postCDJToLedger resyncLedgerForSource; do
   if ! grep -rqE "^(async )?function $fn|window\\.$fn[[:space:]]*=" js/*.js js/screens/*.js 2>/dev/null; then
@@ -186,6 +186,73 @@ if [ "$posters_fail" -eq 0 ]; then
   echo "PASS: all four ledger posters are defined"
 else
   overall_fail=1
+fi
+
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK 5 — emojiIcon() must never reach a PLAIN-TEXT sink.
+# emojiIcon() returns `<i data-lucide=…>` MARKUP. A notification's title/body/
+# icon is PERSISTED and then rendered as TEXT — the in-app inbox escHtml's it and
+# the OS lock-screen banner shows the raw string — so markup appears literally as
+# code on the owner's phone. This exact bug has shipped FOUR times: twice writing
+# it into stored task descriptions, once into the task-comment notification
+# preview, and once into the self-assessment reminder's title and icon. The
+# generators were each fixed after a screenshot; this check is so there is no
+# fifth. Scoped deliberately narrow — only Notifs.send's three text fields — so
+# it cannot fire on the many legitimate emojiIcon() calls that build innerHTML.
+# ═══════════════════════════════════════════════════════════════════════
+echo
+echo "=== [5/5] TEXT SINKS: emojiIcon() must not reach a notification title/body/icon ==="
+sink_hits=$(python3 - <<'PYEOF'
+import re, glob, os
+bad = []
+NL = chr(10)
+for f in sorted(set(glob.glob('js/**/*.js', recursive=True) + ['functions/index.js'])):
+    if not os.path.exists(f):
+        continue
+    src = open(f, encoding='utf-8', errors='ignore').read()
+    for m in re.finditer(r'Notifs\.send\s*\(', src):
+        i = m.end() - 1
+        depth = 0
+        call = ''
+        for k in range(i, min(len(src), i + 3000)):
+            if src[k] == '(':
+                depth += 1
+            elif src[k] == ')':
+                depth -= 1
+                if depth == 0:
+                    call = src[i:k+1]
+                    break
+        if not call:
+            continue
+        line = src[:m.start()].count(NL) + 1
+        for field in ('title', 'body', 'icon'):
+            fm = re.search(field + r'\s*:\s*([^,\n]{0,240})', call)
+            if not fm:
+                continue
+            expr = fm.group(1)
+            # (a) emojiIcon written INLINE in the field
+            if 'emojiIcon' in expr:
+                bad.append('%s:%d  %s  (inline emojiIcon)' % (f, line, field))
+                continue
+            # (b) the field INTERPOLATES a variable that was built from emojiIcon
+            #     earlier in the same scope. This is the shape that actually
+            #     shipped: `const preview = ...emojiIcon...` then `body: `${x}: ${preview}``
+            for ident in set(re.findall(r'\$\{\s*([A-Za-z_$][\w$]*)', expr)):
+                assign = re.search(
+                    r'(?:const|let|var)\s+' + re.escape(ident) + r'\s*=([^;]{0,600});',
+                    src[max(0, m.start() - 4000): m.start()])
+                if assign and 'emojiIcon' in assign.group(1):
+                    bad.append('%s:%d  %s  (via `%s`, built with emojiIcon)' % (f, line, field, ident))
+for b in bad:
+    print(b)
+PYEOF
+)
+if [ -n "$sink_hits" ]; then
+  echo "FAIL: emojiIcon() reaches a persisted notification text field — use a PLAIN emoji there:"
+  echo "$sink_hits" | sed 's/^/  /'
+  overall_fail=1
+else
+  echo "PASS: no emojiIcon() in a notification title/body/icon"
 fi
 
 echo

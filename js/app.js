@@ -564,11 +564,16 @@ async function checkPayrollDuties(user) {
     const monthLabel = new Date(year, month, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
     const isUrgent = isFirstDay;
     await Notifs.send(user.uid, {
-      title: isUrgent ? `${emojiIcon('🚨',16)} Self-Assessment Due Today` : `${emojiIcon('📋',16)} Self-Assessment Reminder`,
+      // PLAIN EMOJI ONLY — title and icon are persisted on the notification doc
+      // and rendered as TEXT (the inbox escHtml's them; the OS banner shows the
+      // raw string), so emojiIcon()'s `<i data-lucide=…>` markup would appear
+      // literally on the lock screen. Same class as the task-description and
+      // task-comment generators fixed on 2026-08-08.
+      title: isUrgent ? '🚨 Self-Assessment Due Today' : '📋 Self-Assessment Reminder',
       body: isUrgent
         ? `Please complete your self-assessment for ${monthLabel} today before payroll is finalized.`
         : `Reminder: Your self-assessment for ${monthLabel} is due tomorrow. Go to Personal Finance → Self Evaluate.`,
-      icon: isUrgent ? `${emojiIcon('🚨',16)}` : `${emojiIcon('📋',16)}`, type: 'payroll_reminder', link: 'personal-finance',
+      icon: isUrgent ? '🚨' : '📋', type: 'payroll_reminder', link: 'personal-finance',
       dedupKey: `selfassess-${user.uid}-${currentMonth}`
     });
     localStorage.setItem(dedupKey, '1');

@@ -943,7 +943,15 @@ window.renderComments = async function(collection, docId, containerId, currentUs
           const task = taskSnap.data();
           const involved = new Set([...(task.assignedTo||[]), task.createdBy].filter(Boolean));
           involved.delete(currentUser.uid);
-          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `${fileSource==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📎',16)}`} ${fileName||'File'}`;
+          // PLAIN EMOJI ONLY. This string becomes the notification BODY, which is
+          // persisted and rendered as TEXT in the inbox and on the OS lock screen —
+          // neither interprets HTML. emojiIcon() returns `<i data-lucide=…>` markup,
+          // so this shipped literal code to the owner's phone:
+          //   Neil Barro: <i data-lucide="link" style="width:16px;height:16px"></i> docs.google.com
+          // Same class as the task-description generators fixed on 2026-08-08; this
+          // is the notification-side instance. js/chat.js's own preview ladder
+          // already carries this rule in a comment — see the plain 📣/🔗 there.
+          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `${fileSource==='link'?'🔗':'📎'} ${fileName||'File'}`;
           for (const uid of involved) {
             await Notifs.send(uid, {
               title: `💬 New message on "${task.title}"`,
