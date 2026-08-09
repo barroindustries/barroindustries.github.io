@@ -57,6 +57,18 @@ function isOpsPriv() {
   return ['president','owner','manager','secretary','finance'].includes(window.currentRole || '');
 }
 window.isOpsPriv = isOpsPriv;
+// Client mirror of firestore.rules' isAdmin() — president/manager/secretary.
+// DELIBERATELY EXCLUDES 'finance': isOpsPriv() (above) mirrors isOpsAdmin() and
+// DOES include finance, and conflating the two shipped a dead control — the
+// Attendance page offered a finance user Approve/Deny on time-extension
+// requests whose rule (attendance_extensions update = isAdmin()) refuses them,
+// and the handler had no error branch, so the tap looked like it worked.
+// Use this for approve/deny verbs whose boundary rule is isAdmin(); use
+// isOpsPriv() for viewing/editing attendance records themselves.
+function isAdminPriv() {
+  return ['president','owner','manager','secretary'].includes(window.currentRole || '');
+}
+window.isAdminPriv = isAdminPriv;
 window.canEditDept = canEditDept;
 window.isFinancePriv = isFinancePriv;
 // v14 re-audit fix — MONEY-tier privilege: the client-side mirror of
@@ -690,20 +702,52 @@ window.financeDelete = async function(opts) {
   });
 };
 
-// Delete a quote record WITH APPROVAL (never a silent hard delete). Roles that
-// can file a finance delete request (president/manager/secretary/finance) route
-// through financeDelete (President deletes now; others file a request the
-// President approves in Approvals → Finance Requests). A non-admin quote CREATOR
-// can't write finance_delete_requests, so they flag their own quote
-// (deleteRequested) which the President actions in Approvals → All Requests.
+// Delete a quote record WITH APPROVAL (never a silent hard delete). Three paths,
+// each matched to what firestore.rules actually permits that actor:
+//   president/manager/finance — financeDelete (President deletes now; the other
+//     two file a finance_delete_requests row, whose create is canFinance()).
+//   Corporate Secretary — canFinance() excludes them since the 2026-08-08
+//     carve-out, so they flag the quote itself (deleteRequested), which
+//     bk_quotes/bs_quotes update allows for isAdmin().
+//   the quote's own CREATOR — same deleteRequested flag; they were never able
+//     to write finance_delete_requests.
+// The last two both land in Approvals → All Requests for the President.
 // collection is one of window.QUOTE_COLLECTIONS ('bk_quotes' — which holds both
 // Barro Kitchens and Barro Industries quotes — or 'bs_quotes').
 window.requestQuoteDelete = async function(collection, docId, label, createdBy, onDone) {
   onDone = onDone || (()=>{});
   const role = window.currentRole || '';
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
-  if (['president','manager','secretary','finance'].includes(role)) {
+  // DEAD CONTROL (fixed 2026-08-09). financeDelete's non-President branch writes
+  // finance_delete_requests, whose create rule is canFinance() —
+  // president/manager/finance only since the Corporate Secretary carve-out. So
+  // routing 'secretary' here landed them on a modal whose Submit was refused,
+  // with no way forward. Dropping them from this list lets them fall through to
+  // the `deleteRequested` flag path below, which firestore.rules DOES allow for
+  // isAdmin() (bk_quotes/bs_quotes update) and which the President actions in
+  // Approvals → All Requests. Same outcome, a path that actually works.
+  if (['president','manager','finance'].includes(role)) {
     return window.financeDelete({ collection, docId, label, onDone });
+  }
+  if (role === 'secretary') {
+    const reason = ((await promptDialog({message:'Reason for deleting this quote? (sent to the President for approval)', required:true, multiline:true})) || '').trim();
+    if (!reason) return;
+    try {
+      await db.collection(collection).doc(docId).update({
+        deleteRequested: true, deleteReason: reason,
+        deleteRequestedBy: u.uid, deleteRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await safeNotify(() => Notifs.sendToOwner({
+        title: '🗑 Quote Deletion Requested',
+        body:  `${window.userProfile?.displayName || 'The Corporate Secretary'} requested deletion of ${label}. Reason: ${reason}`,
+        icon: '🗑', type: 'delete_request', link: 'approvals'
+      }));
+      Notifs.success('Deletion request sent to the President for approval.');
+      onDone('requested');
+    } catch (e) {
+      Notifs.showToast('Could not send request: '+(e.message||e),'error');
+    }
+    return 'requested';
   }
   if (createdBy && u.uid === createdBy) {
     const reason = ((await promptDialog({message:'Reason for deleting this quote? (sent to the President for approval)', required:true, multiline:true})) || '').trim();
@@ -1819,6 +1863,53 @@ window.RaiseFlow = (function () {
 // window.computePayLine is already defined by the time computePayRun below
 // calls it — no behavior change.
 
+/* ── THE DOUBLE-PAY GUARD — one expression, three callers ──────────────
+   Why this is a named function rather than an inline chain: the monthly run
+   (computePayRun, below), the Payroll roster and the roster's table preview
+   (js/screens/hr.js) each decided independently who the monthly run pays, and
+   they DID drift — the roster tested `payClass` alone while the engine also
+   skipped removed staff and anyone bridged to a weekly worker profile, so the
+   screen listed people Compute then silently dropped.
+
+   It is the ONLY thing standing between the two populations and someone being
+   paid MONTHLY and WEEKLY for the same period, and it gets more load-bearing —
+   not less — as Office Team and Operations Team converge on one create path
+   and one profile. It must therefore have exactly one definition.
+
+   Two INDEPENDENT facts each mean "paid weekly", and both must be honoured:
+     • payroll/{uid}.payClass === 'production'  — the declared pay class
+     • an ACTIVE worker_profiles doc whose linkedUid == uid — the structural
+       bridge, which can exist while payClass is still 'regular'
+   Anyone matching EITHER is out of the monthly run. `status !== 'inactive'` is
+   part of the linked test: an offboarded worker profile must not keep a person
+   out of the monthly run forever.
+
+   Returns null when the person IS paid monthly, otherwise a reason string that
+   is recorded in pay_runs.skipped[] — a run always accounts for every member of
+   staff and never silently drops one.
+
+   NOTE ON ROLE: no clause here reads `role`. Every office role — president,
+   manager, Corporate Secretary, finance, employee, agent — is paid by the
+   monthly run on exactly the same terms. */
+window.monthlyRunSkipReason = function(u, linkedUids) {
+  if (!u) return 'missing';
+  // Money-critical — a fired/offboarded user (users/{uid}.removed === true, set
+  // by People → Remove; js/app.js's auth gate already blocks THEIR login on this
+  // flag) was once iterated and computed/disbursed like an active employee.
+  if (u.removed === true)          return 'removed';
+  if (u.payClass === 'production') return 'production';
+  if (linkedUids && (linkedUids.has ? linkedUids.has(u.id) : linkedUids[u.id]))
+                                   return 'linked-worker-profile';
+  // Owner-requested (2026-08-07): not everyone on the staff list draws a
+  // payroll. Before this, someone with no salary set was still computed — base
+  // 0, but the statutory table still applied — so the roster showed a NEGATIVE
+  // net pay (owner screenshot: four people at -P500.00, base P0.00 with SSS
+  // -250 and PhilHealth -250 deducted from nothing).
+  if (u.payrollExcluded === true)
+    return 'excluded' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : '');
+  return null;
+};
+
 window.computePayRun = async function(month, { policy } = {}) {
   // Payroll recall spec §C3 — read any existing run doc FIRST, before any
   // other work. Two jobs: (1) fail fast if this month is past the editable
@@ -1856,28 +1947,8 @@ window.computePayRun = async function(month, { policy } = {}) {
   const skipped = [];
   const employees = [];
   for (const u of allStaff) {
-    // Money-critical fix — a fired/offboarded user (users/{uid}.removed===true,
-    // set by People → Remove; js/app.js's own auth gate already blocks THEIR
-    // login on this flag) was still iterated here and computed/disbursed like
-    // an active employee. Skip before any other check, mirroring the existing
-    // payClass/linked-worker-profile skips below (same shape: reason recorded
-    // in `skipped`, never silently dropped).
-    if (u.removed === true)           { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'removed' }); continue; }
-    if (u.payClass === 'production')  { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'production' }); continue; }
-    if (linkedUids.has(u.id))         { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'linked-worker-profile' }); continue; }
-    // Owner-requested (2026-08-07): not everyone on the staff list draws a
-    // payroll. Before this, someone with no salary set was still computed —
-    // base 0, but the statutory table still applied — so the roster showed a
-    // NEGATIVE net pay (owner screenshot: four people at -P500.00, base P0.00
-    // with SSS -250 and PhilHealth -250 deducted from nothing). Marking a
-    // person excluded takes them out of the run entirely; the reason is stored
-    // beside the flag and carried into `skipped` so a run always accounts for
-    // every member of staff and never silently drops one.
-    if (u.payrollExcluded === true) {
-      skipped.push({ uid:u.id, name:u.displayName||u.email,
-                     reason: 'excluded' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : '') });
-      continue;
-    }
+    const reason = window.monthlyRunSkipReason(u, linkedUids);
+    if (reason) { skipped.push({ uid:u.id, name:u.displayName||u.email, reason }); continue; }
     employees.push(u);
   }
   employees.sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
@@ -2993,8 +3064,27 @@ window.ensureOrderTracking = async function(o){
     publicNote:'Thank you for your order! This page updates as your order moves through production and delivery.',
     createdAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp()
   });
-  try{ await db.collection('sales_orders').doc(o.id).update({ trackingToken:tRef.id }); }catch(_){}
-  if(o.projectId){ try{ await db.collection('job_projects').doc(o.projectId).update({ trackingToken:tRef.id }); }catch(_){} }
+  // ⚠ SILENT HALF-WRITE (fixed 2026-08-09). The public order_tracking doc above
+  // is created by anyone who is not a partner, but STAMPING the token back onto
+  // the order is `sales_orders` update = canFinance(). The 🔗 Link button is
+  // rendered to EVERY viewer of the list, so for anyone outside the money tier
+  // — the Corporate Secretary most sharply — this update was denied and the
+  // bare catch swallowed it. The token was then never persisted, so every fresh
+  // page load minted a NEW public tracking doc with a NEW token for the same
+  // order: links shared earlier were orphaned and the collection accumulated
+  // duplicates, with nothing on screen and nothing in the console.
+  // Now the failure is surfaced, once, in plain terms.
+  let stamped = true;
+  try{ await db.collection('sales_orders').doc(o.id).update({ trackingToken:tRef.id }); }
+  catch(e){
+    stamped = false;
+    console.warn('[order tracking] token not saved onto the order', e);
+    // Toasts render via textContent — plain emoji only, never emojiIcon() HTML.
+    if (window.Notifs) Notifs.showToast(
+      'Link created, but it could not be saved onto the order — you do not have permission to edit sales orders. Share it now; re-opening will generate a different link. Ask Finance to save it.',
+      'error');
+  }
+  if(o.projectId && stamped){ try{ await db.collection('job_projects').doc(o.projectId).update({ trackingToken:tRef.id }); }catch(_){} }
   o.trackingToken = tRef.id;
   return tRef.id;
 };

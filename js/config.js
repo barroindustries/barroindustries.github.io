@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.111';
+window.APP_VERSION = '14.0.112';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -405,6 +405,38 @@ window.ROLES = {
   partner:   { label: 'Partner',             badge: 'badge-teal',   canSeeAll: false }
 };
 
+// ── Employment status (owner request, 2026-08-09) ────────────────────────
+// "their status like training, employed, or what". Data-driven — the set lives
+// here beside DEPARTMENTS/ROLES so HR can be given a new stage without editing
+// a screen, exactly as the owner asked. Add/rename entries HERE only.
+//
+// ⚠ This is NOT `worker_profiles.status`. That field is 'active' | 'inactive'
+// and is LOAD-BEARING in the double-pay guard (window.monthlyRunSkipReason,
+// js/departments.js) and in firestore.rules' isLinkedWorkerUid() punch gate —
+// overloading it with a hiring stage would silently change who gets paid and
+// who can clock in. Employment status is its own field, `employmentStatus`,
+// stored on users/{uid} for Office Team and on worker_profiles/{id} for
+// Operations Team staff with no login.
+//
+// `ends` marks a status that means the person is no longer working. It is
+// ADVISORY ONLY: the payroll guard keys off users.removed / payrollExcluded /
+// payClass, never off this field, so setting someone to Resigned does NOT take
+// them out of the pay run. Offboarding is still People → Remove.
+window.EMPLOYMENT_STATUSES = {
+  training:     { label: 'Training',     badge: 'badge-orange', ends: false },
+  probationary: { label: 'Probationary', badge: 'badge-blue',   ends: false },
+  regular:      { label: 'Regular',      badge: 'badge-green',  ends: false },
+  resigned:     { label: 'Resigned',     badge: 'badge-gray',   ends: true  },
+  terminated:   { label: 'Terminated',   badge: 'badge-red',    ends: true  }
+};
+// Label/badge for a stored employmentStatus value. An absent or unknown value
+// reads as "not set" rather than defaulting to a stage nobody chose — a wrong
+// default here would show every legacy record as Regular.
+window.employmentStatusMeta = function(v) {
+  const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
+  return window.EMPLOYMENT_STATUSES[k] || { label: 'Not set', badge: 'badge-gray', ends: false, unset: true };
+};
+
 // ── Leave policy (WS25) ──────────────────────────
 // ‼️ PLACEHOLDER — Neil to confirm (legal floor is ONE 5-day SIL pool, not
 // 5 vacation + 5 sick). Do NOT present this as the legal minimum in any UI.
@@ -673,7 +705,16 @@ window.fetchUsersWithPayroll = async function() {
           if (err && err.code === 'permission-denied') return scopedQ();
           throw err;
         }),
-    db.collection('payroll').get().catch(() => ({ docs: [] }))
+    // ⚠ THE SILENT-ZERO CHOKE POINT. payroll read is isMoneyAdmin(), so a
+    // collection LIST is denied outright for the Corporate Secretary (and for
+    // any employee viewing a roster). This catch turns that denial into an
+    // EMPTY map, and every consumer's `u.salary || 0` then renders a confident
+    // ₱0 — indistinguishable from "no pay on file". That single line is why
+    // Analytics showed the Secretary "Payroll ₱0/mo" and a Net Pay column of
+    // zeroes for the whole company.
+    // The catch stays (blanking the Team tab would be worse), but the denial is
+    // now RECORDED, so a caller can say "not shown to you" instead of "₱0".
+    db.collection('payroll').get().catch((e) => ({ docs: [], _denied: !!(e && e.code === 'permission-denied'), _error: e }))
   ]);
   const pay = {};
   pSnap.docs.forEach(d => { pay[d.id] = d.data(); });
@@ -681,7 +722,9 @@ window.fetchUsersWithPayroll = async function() {
     const merged = { ...d.data(), ...(pay[d.id] || {}) };
     return { id: d.id, data: () => merged };
   });
-  return { docs, size: uSnap.size, empty: uSnap.empty };
+  // payrollDenied: the pay half of every row is MISSING BY PERMISSION, not
+  // absent. Read it before rendering any peso figure derived from these docs.
+  return { docs, size: uSnap.size, empty: uSnap.empty, payrollDenied: !!pSnap._denied };
 };
 
 // ── Firestore In-Memory Cache ─────────────────────

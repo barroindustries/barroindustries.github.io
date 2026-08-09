@@ -197,7 +197,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.111 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.112 · Barro Industries</div>
   </div>
 </div>
 
@@ -535,6 +535,13 @@
      tabs) reaches forward into this file's renderPayrollManagement/
      renderFinanceHRProfiles the same way. -->
 <script defer src="js/screens/hr.js"></script>
+<!-- Employee Profile (owner request 2026-08-09) — ONE per-person profile screen
+     shared by the Office Team and the Operations Team, composing users +
+     payroll + worker_profiles + cash_advances + raises + pay history. Must
+     load AFTER hr.js: it calls that file's openSalaryRaiseModal /
+     openRaiseHistory as bare globals at CLICK time (never at parse time), the
+     same forward-reference convention every other js/screens/*.js file uses. -->
+<script defer src="js/screens/employee-profile.js"></script>
 <!-- v14 Wave 7 Pass 4 — Production + Purchasing + Projects (job_projects
      lifecycle) screens, split verbatim out of departments.js (a single
      contiguous tail cut — PROD_STAGES/QC/Delivery Receipt through

@@ -1091,7 +1091,14 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
   // Never fabricate an "Absent" mark for a day before the worker's own
   // hire/link date — a mid-month link/hire would otherwise paint every
   // prior day red with no real data behind it.
-  const hireDateStr = profile.issuedOn || null;
+  // `startDate` is the OFFICIAL employment date, added 2026-08-09 with the HR
+  // employee profile. It is preferred because `issuedOn` is the ID-CARD issue
+  // date (that is its label on the HR worker form) and merely stood in as a
+  // hire date because nothing better existed — it defaults to the day the
+  // profile was created, so a long-serving worker given a card last week had
+  // every earlier day treated as pre-hire. issuedOn stays as the fallback so
+  // existing records behave exactly as they do today.
+  const hireDateStr = profile.startDate || profile.issuedOn || null;
 
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   let html = `<div class="att-cal-grid">${dayLabels.map(d => `<div class="att-cal-hdr">${d}</div>`).join('')}${Array(firstDay).fill('<div></div>').join('')}`;

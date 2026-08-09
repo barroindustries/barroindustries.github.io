@@ -1277,19 +1277,31 @@ window.loadHolidayOverrides = async function(years) {
 
 window.renderAttendancePage = async function() {
   const c = document.getElementById('page-content');
-  const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
+  // TWO tiers, not one. The old single `pres` predicate
+  // (president|manager|finance) was wrong in both directions:
+  //   • it EXCLUDED the Corporate Secretary, whom firestore.rules explicitly
+  //     allows to read/write any attendance record (isOpsAdmin) and to approve
+  //     extensions (isAdmin) — so the one oversight role saw only their own
+  //     calendar, silently, with no error to report.
+  //   • it INCLUDED finance on the extension Approve/Deny buttons, which
+  //     `attendance_extensions` update = isAdmin() denies — a dead control the
+  //     handler below never surfaced, because it has no error branch.
+  // canSeeAll  → mirrors isOpsAdmin(): employee picker + day-edit pencil.
+  // canApprove → mirrors isAdmin():    the extension approve/deny queue.
+  const canSeeAll  = (typeof window.isOpsPriv   === 'function') ? window.isOpsPriv()   : (currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance');
+  const canApprove = (typeof window.isAdminPriv === 'function') ? window.isAdminPriv() : (currentRole === 'president' || currentRole === 'manager');
 
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('📅',20)} Attendance</h2>
-      ${pres ? `<select id="att-emp-select" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"><option value="">Loading…</option></select>` : ''}
+      ${canSeeAll ? `<select id="att-emp-select" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"><option value="">Loading…</option></select>` : ''}
     </div>
     ${window.sopPanel('How Attendance works', [
       'Time In happens on your Dashboard, 7:00–9:00 AM only — this calendar just shows the recorded history.',
       'Green = Present (100%), half-circle = Half Day (50%), red = Absent. Tap the pencil on a day to correct it (admins only).',
       'Missed the window? Request a Time In extension from your Dashboard; admins approve pending extensions from the banner above.'
     ], {open:false})}
-    ${pres ? `<div id="att-ext-requests" style="margin-bottom:14px"></div>` : ''}
+    ${canApprove ? `<div id="att-ext-requests" style="margin-bottom:14px"></div>` : ''}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <button class="btn-secondary btn-sm" id="att-prev-month" aria-label="Previous month">‹</button>
       <span id="att-month-label" style="font-weight:700;font-size:15px;min-width:140px;text-align:center"></span>
@@ -1317,7 +1329,7 @@ window.renderAttendancePage = async function() {
   let viewMonth = parseInt(bizToday.slice(5,7), 10) - 1;
 
   let empList = [];
-  if (pres) {
+  if (canSeeAll) {
     const sel = document.getElementById('att-emp-select');
     try {
       const usersSnap = typeof dbCachedGet === 'function'
@@ -1339,7 +1351,7 @@ window.renderAttendancePage = async function() {
     }
   }
 
-  // ── Extension requests (president/manager only) ──
+  // ── Extension requests (isAdmin tier: president/manager/secretary) ──
   async function loadExtensionRequests() {
     const extEl = document.getElementById('att-ext-requests');
     if (!extEl) return;
@@ -1391,7 +1403,7 @@ window.renderAttendancePage = async function() {
     });
   }
 
-  if (pres) loadExtensionRequests();
+  if (canApprove) loadExtensionRequests();
 
   async function renderAttMonth() {
     const calEl  = document.getElementById('att-calendar');
@@ -1425,7 +1437,7 @@ window.renderAttendancePage = async function() {
 
     const firstDay    = window.bizDow(monthStart);
     const todayStr    = window.bizDate();
-    const canEdit     = pres;
+    const canEdit     = canSeeAll;
     const phHolidays  = getPHHolidays(viewYear);
 
     const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -2153,7 +2165,15 @@ async function openPresidentCashAdvanceModal(users) {
   window.renderLeavePage = async function(container){
     const c = container || document.getElementById('page-content');
     if(!c) return;
-    const isAdmin = currentRole==='president'||currentRole==='manager'||currentRole==='finance';
+    // isOpsPriv() mirrors firestore.rules' isOpsAdmin() — president, manager,
+    // Corporate Secretary and finance. The old inline list omitted the
+    // secretary, so the HR hub's "Leave — requests, approvals & balances" card
+    // silently dropped them onto their OWN leave page, even though the rules
+    // (leave_requests update = isOpsAdmin) and APPROVAL_CAPS both authorise
+    // them to approve. Same lost-capability shape as the Attendance page.
+    const isAdmin = (typeof window.isOpsPriv === 'function')
+      ? window.isOpsPriv()
+      : (currentRole==='president'||currentRole==='manager'||currentRole==='finance');
     // 8-point #3 (Wave 7 Pass 7) — this page had no error boundary at all:
     // renderLeaveEmployee/renderLeaveAdmin's primary fetch swallowed errors
     // into {docs:[]}, so a permission/network failure rendered identically

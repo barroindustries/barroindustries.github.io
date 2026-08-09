@@ -1053,7 +1053,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.innerHTML = `
         ${!pending.length && !resolved.length ? `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('🌴',44)}</div><h4>No leave requests</h4></div>` : ''}
         ${pending.length?`<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
-          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">${pending.map(r=>card(r,canAct)).join('')}</div>`:''}
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">${pending.map(r=>card(r,canActOn('leave'))).join('')}</div>`:''}
         ${resolved.length?`<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">History</h4>
           <div style="display:flex;flex-direction:column;gap:10px">${resolved.slice(0,20).map(r=>card(r,false)).join('')}</div>`:''}`;
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });

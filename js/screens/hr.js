@@ -244,9 +244,29 @@ async function openRaiseHistory(opts = {}) {
   const bodyEl = panel.querySelector('.page-panel-body');
 
   await window.withLoadingAndError(bodyEl, async () => {
-    const snap = await db.collection('salary_raises').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+    // PER-PERSON: query BY SUBJECT rather than reading the newest 200 rows
+    // company-wide and filtering in JS. The old shape silently showed
+    // "No salary raises recorded yet" for anyone whose raises fell outside
+    // those 200 — a cap that only becomes visible once per-person history is
+    // reachable from a profile screen, which it now is.
+    //
+    // `subjectId` is TWO id spaces: an auth uid for subjectType 'payroll' and a
+    // worker_profiles docId for 'worker_profile'. Callers may therefore pass
+    // subjectIds:[uid, workerProfileId] to cover a person who exists in both.
+    //
+    // Equality-only + a client-side sort, deliberately: adding .orderBy() here
+    // would need a (subjectId, createdAt) composite index that does not exist,
+    // and a missing index throws FAILED_PRECONDITION — which the ambient catch
+    // would render as an empty history rather than an error. 'in' over <= 10
+    // values stays a single-field query, so it needs no index either.
+    const subjectIds = (Array.isArray(opts.subjectIds) && opts.subjectIds.length
+      ? opts.subjectIds
+      : (opts.subjectId ? [opts.subjectId] : [])).filter(Boolean).slice(0, 10);
+    const snap = subjectIds.length
+      ? await db.collection('salary_raises').where('subjectId','in',subjectIds).limit(200).get().catch(()=>({docs:[]}))
+      : await db.collection('salary_raises').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
     let list = snap.docs.map(d=>({id:d.id,...d.data()}));
-    if (opts.subjectId) list = list.filter(r => r.subjectId === opts.subjectId);
+    if (subjectIds.length) list.sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0));
     return list;
   }, (list) => {
     // CLOSED MID-FLIGHT: Back can be pressed before the read lands. openPage's
@@ -364,6 +384,11 @@ window.renderHR = async function(currentUser, currentRole){
   // silently renders as an empty payroll rather than as an error.
   const canPayroll = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : true;
   const cards = [
+    // Owner request 2026-08-09 — "employee profiles on hr … official employment
+    // date, sss number etc, their status like training, employed, or what, what
+    // their job is". ONE roster covering BOTH teams; each row opens the same
+    // profile screen (js/screens/employee-profile.js).
+    { icon:'🪪', title:'Employee Profiles', desc:'Employment date, status, job, IDs · rates, cash advance, raises & payroll history', go:()=>window.renderEmployeeProfiles && window.renderEmployeeProfiles() },
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
     // One card, two tabs (owner: "Better if its just / Payroll / Then / Type a
     // / Type b"). Opens the hub, which lands on Type A by default.
@@ -857,7 +882,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   // v12 WS23 — apply any due-dated raise BEFORE the base salary is read, so
   // Compute/the table preview always see the current base. Safe to re-run.
   await window.RaiseFlow.applyDueRaises('payroll').catch(()=>{});
-  const [usersSnap, histSnap, delReqSnap, payRunsSnap, earliestHistSnap] = await Promise.all([
+  const [usersSnap, histSnap, delReqSnap, payRunsSnap, earliestHistSnap, wpSnap] = await Promise.all([
     fetchUsersWithPayroll(),
     db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
     db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]})),
@@ -865,7 +890,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // one doc per month) drives both the month-dropdown union and the
     // unpaid-months card below; fetched once here, not per-render.
     db.collection('pay_runs').get().catch(()=>({docs:[]})),
-    db.collection('salary_history').orderBy('month').limit(1).get().catch(()=>({docs:[]}))
+    db.collection('salary_history').orderBy('month').limit(1).get().catch(()=>({docs:[]})),
+    // ONE ROSTER (2026-08-09). The weekly bridge is read ONCE, here, and shared
+    // by the "paid weekly" banner AND the table preview below — which used to
+    // fetch it separately, so the banner's count and the preview's exclusion
+    // list were computed from two different reads of the same collection.
+    (typeof window.dbCachedGet === 'function'
+      ? window.dbCachedGet('worker_profiles', () => db.collection('worker_profiles').get(), 60000)
+      : db.collection('worker_profiles').get()).catch(()=>({docs:[]}))
   ]);
   // Exclude ALL external partners from the monthly run — they are not Barro
   // payroll. A partner can present as role 'partner', a Brilliant-Steel-only
@@ -878,11 +910,36 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     return depts.length === 1 && depts[0] === 'Brilliant Steel';
   };
   const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
+  // ── THE DOUBLE-PAY GUARD, roster side ───────────────────────────
+  // A person can be paid weekly by TWO independent facts, and the engine
+  // (computePayRun, js/departments.js) honours both:
+  //   1. payroll/{uid}.payClass === 'production'   — declared Operations Team
+  //   2. an ACTIVE worker_profiles doc whose linkedUid is this uid — the
+  //      structural bridge, which can exist even while payClass is 'regular'
+  // This roster used to test (1) ONLY, so a 'regular'-class person bridged to a
+  // weekly worker profile was listed as a monthly employee here and then
+  // silently dropped by Compute. Testing the SAME union the engine tests is
+  // what keeps the guard and the screen from disagreeing — and the guard gets
+  // MORE load-bearing, not less, as the two populations converge on one create
+  // path. `status !== 'inactive'` mirrors js/departments.js exactly: an
+  // offboarded worker profile must NOT keep someone out of the monthly run.
+  const linkedUids = new Set(
+    (wpSnap.docs || []).map(d => d.data())
+      .filter(p => p && p.status !== 'inactive' && p.linkedUid)
+      .map(p => p.linkedUid)
+  );
+  // ONE EXPRESSION with the engine — window.monthlyRunSkipReason (js/departments.js)
+  // is what computePayRun itself calls. Anything it flags 'production' or
+  // 'linked-worker-profile' is paid weekly; 'removed' / 'excluded: …' are
+  // separate reasons the preview reports on its own line below, so they stay in
+  // `employees` here and are surfaced there rather than vanishing silently.
+  const _skipOf = (u) => window.monthlyRunSkipReason(u, linkedUids);
+  const isPaidWeekly = (u) => ['production','linked-worker-profile'].includes(_skipOf(u));
   // Production-class staff are paid WEEKLY via Payroll → Operations Team,
   // NOT in the monthly run. Excluding them here is the single-source fix that
   // stops a production worker being paid both weekly AND monthly (double pay).
-  const productionStaff = allStaff.filter(u=>u.payClass==='production');
-  const employees = allStaff.filter(u=>u.payClass!=='production')
+  const productionStaff = allStaff.filter(isPaidWeekly);
+  const employees = allStaff.filter(u=>!isPaidWeekly(u))
     .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   const history   = histSnap.docs.map(d=>({id:d.id,...d.data()}));
   const delReqs   = delReqSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -959,7 +1016,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     ${raiseBanner}
     <div id="pr-unpaid-card" style="margin-bottom:14px"></div>
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
-    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via <strong>Payroll → Operations Team</strong> and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
+    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> ${productionStaff.length!==1?'people are':'person is'} paid <strong>weekly</strong> via <strong>Payroll → Operations Team</strong> and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment — Operations Team pay class, or linked to an active worker profile. ${productionStaff.length!==1?'They':'This person'} cannot appear in both runs.</div>`:''}
     <div class="card">
       <div class="card-body" style="padding:0">
         <div id="payroll-table-caption" style="padding:8px 16px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--border)"></div>
@@ -1442,23 +1499,25 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // safe direction here — it shows a person the run might skip (visible, and
     // the frozen total then explains itself) rather than hiding someone who is
     // genuinely being paid.
-    let _linkedUids = new Set();
-    try {
-      const _wpSnap = await (typeof window.dbCachedGet === 'function'
-        ? window.dbCachedGet('worker_profiles', () => db.collection('worker_profiles').get(), 60000)
-        : db.collection('worker_profiles').get());
-      _linkedUids = new Set(
-        _wpSnap.docs.map(d => d.data())
-          .filter(p => p && p.status !== 'inactive' && p.linkedUid)
-          .map(p => p.linkedUid)
-      );
-    } catch (_) { /* empty set — see note above */ }
+    // ONE ROSTER — the same Set the outer scope built from a single
+    // worker_profiles read (see `linkedUids` above). This closure used to
+    // re-fetch the collection itself, so the banner's count and this exclusion
+    // list could be computed from two different reads. `employees` is now
+    // already filtered by that union, so the branch below is defensive only.
+    const _linkedUids = linkedUids;
 
-    const _skipReason = (u) =>
-      u.removed === true          ? 'offboarded'
-      : _linkedUids.has(u.id)     ? 'paid weekly (Operations Team)'
-      : u.payrollExcluded === true ? ('not on payroll' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : ''))
-      : null;
+    // LOCKSTEP by construction: the reason comes from the engine's own
+    // predicate (window.monthlyRunSkipReason), and only the wording is
+    // localised for the screen. A new skip reason added to the engine can no
+    // longer be missed here.
+    const _skipReason = (u) => {
+      const r = window.monthlyRunSkipReason(u, _linkedUids);
+      if (!r) return null;
+      if (r === 'removed') return 'offboarded';
+      if (r === 'production' || r === 'linked-worker-profile') return 'paid weekly (Operations Team)';
+      if (r.startsWith('excluded')) return 'not on payroll' + r.slice('excluded'.length);
+      return r;
+    };
 
     const _paidEmployees = employees.filter(u => !_skipReason(u));
     const _excluded      = employees.filter(u =>  _skipReason(u));
@@ -1538,6 +1597,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td class="tc-detail" data-label="Cash Adv">${caCell}</td>
         <td class="tc-net"><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
         <td class="tc-actions">
+          <button class="btn-secondary btn-sm ep-profile-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Employee profile" aria-label="Employee profile">${emojiIcon('🪪',16)}</button>
           <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit" aria-label="Edit payroll">${emojiIcon('✎',16)}</button>
           ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise" aria-label="Give raise">${emojiIcon('banknote',14)}</button>` : ''}
           ${canFinance ? `<button class="btn-secondary btn-sm pr-exclude-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Not on payroll" aria-label="Remove from payroll">${emojiIcon('user-minus',14)}</button>` : ''}
@@ -1678,6 +1738,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           targetField: 'salary',
           current:     emp.salary || 0
         }, currentUser, () => loadPayrollTable(month));
+      });
+    });
+
+    // HR employee profile — the composed per-person view (employment date,
+    // status, job, gov IDs, rate, CA, raises, pay history).
+    tbody.querySelectorAll('.ep-profile-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (window.openEmployeeProfile) window.openEmployeeProfile({ uid: btn.dataset.uid, name: btn.dataset.name });
       });
     });
 
@@ -2827,6 +2895,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
                 <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('🪪',16)} ID</button>
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">${emojiIcon('⏱',16)} Clock</button>`:''}
                 ${isPayPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">${emojiIcon('💸',16)} Raise</button>`:''}
+                <button class="btn-secondary btn-sm ep-wprofile-btn" data-id="${p.id}" data-name="${escHtml(p.name||'')}">${emojiIcon('🪪',16)} Profile</button>
                 ${isPayPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px" aria-label="Delete worker profile">${emojiIcon('trash-2',14)}</button>`:''}
               </td>
@@ -2842,6 +2911,16 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     tr.addEventListener('click', (ev) => {
       if (ev.target.closest('button, a')) return;
       tr.classList.toggle('tc-expanded');
+    });
+  });
+
+  // Employee profile — the composed per-person view, reached by worker_profiles
+  // docId because most Operations staff have no login and so no uid to key on.
+  // Bound OUTSIDE the isPriv gate below: the button is rendered to every viewer
+  // of this roster, so gating only the LISTENER would make it a dead control.
+  container.querySelectorAll('.ep-wprofile-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (window.openEmployeeProfile) window.openEmployeeProfile({ workerId: btn.dataset.id, name: btn.dataset.name });
     });
   });
 
@@ -2929,6 +3008,14 @@ async function _loadHrTroublePanel(container, currentUser) {
   } catch (_) { panelEl.innerHTML = ''; return; }
   const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   if (!rows.length) { panelEl.innerHTML = ''; return; }
+  // DEAD-CONTROL FIX (2026-08-09): Approve/Deny write attendance_extensions,
+  // whose rule is `allow update, delete: if isAuth() && isAdmin()` —
+  // president/manager/secretary ONLY. This panel lives inside the Operations
+  // Team roster, which the `finance` role and any Finance-department member
+  // also reach, so both were being offered buttons the boundary refuses. The
+  // queue itself is still worth showing them (read is `isAuth() && !isPartner()`),
+  // so render it read-only with the reason stated instead of hiding it.
+  const canAct = (typeof window.isAdminPriv === 'function') ? window.isAdminPriv() : true;
   panelEl.innerHTML = `
     <div class="card" style="margin-bottom:16px;border:1.5px solid var(--warning,#d97706)">
       <div class="card-header"><h3>${emojiIcon('🚧',20)} Trouble Timing In — Pending (${rows.length})</h3></div>
@@ -2942,8 +3029,9 @@ async function _loadHrTroublePanel(container, currentUser) {
             <td style="font-size:12px">${escHtml(r.reason || r.note || '—')}</td>
             <td style="font-size:11px;color:var(--text-muted)">${r.requestedAt?.toDate ? escHtml(r.requestedAt.toDate().toLocaleString('en-PH')) : '—'}</td>
             <td style="white-space:nowrap">
-              <button class="btn-primary btn-sm hrp-trbl-approve" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}">Approve</button>
-              <button class="btn-secondary btn-sm hrp-trbl-deny" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}" style="margin-left:4px">Deny</button>
+              ${canAct ? `<button class="btn-primary btn-sm hrp-trbl-approve" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}">Approve</button>
+              <button class="btn-secondary btn-sm hrp-trbl-deny" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}" style="margin-left:4px">Deny</button>`
+              : `<span style="font-size:11px;color:var(--text-muted)">President / Manager / Secretary approves</span>`}
             </td>
           </tr>`).join('')}</tbody>
         </table></div>
@@ -5100,7 +5188,10 @@ window.buildPayslipHTML = function(model) {
 // file already relies on.
 // PAYSLIP-OVERHAUL-SPEC.md §1 — client-side gate for the "✎ Edit details"
 // button. Deliberately narrower than hr.js's own canFinance/isFinancePriv()
-// (= canEditDept('Finance'), which also admits 'secretary'): firestore.rules'
+// (= canEditDept('Finance'); note it no longer admits 'secretary' — the
+// 2026-08-09 carve-out made canEditDept return false for them on Finance and
+// IT — so the two predicates now differ only by Finance-DEPARTMENT members of
+// any role, who are likewise not isMoneyAdmin): firestore.rules'
 // isMoneyAdmin() — the actual write authority on payroll/{uid} and
 // salary_history/{uid}_{month} — is president/manager/finance ONLY (WS19
 // money-tier narrowing deliberately excludes secretary). Mirroring the

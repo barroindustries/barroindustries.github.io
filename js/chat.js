@@ -363,8 +363,26 @@ window.Chat = (() => {
   }
   function myDeptChannels() {
     if (typeof isPartner === 'function' && isPartner()) return [];  // partners NEVER
-    return _isAdminRole() ? deptChannelKeys()
-      : deptChannelKeys().filter(d => (currentDepts || []).includes(d));
+    // ⚠ CARVE-OUT GAP (2026-08-09). _isAdminRole() includes 'secretary', so the
+    // Corporate Secretary's inbox listed EVERY department channel — including
+    // # Finance and # IT, the two the owner explicitly closed to them
+    // ("corporate secretary can access all departments except finance, and
+    // IT"). Neither SECRETARY_BLOCKED_DEPTS nor canIt() reached chat.
+    //
+    // ⚠ THIS IS THE UI HALF ONLY. firestore.rules' convMember()/memberOfDoc()
+    // still grant dept-channel membership through isAdmin(), which still
+    // contains 'secretary' — so the boundary itself does NOT yet refuse a
+    // direct read or post to conversations/dept_Finance. Closing that needs a
+    // !isSecretary() guard on the dept-membership disjunct in firestore.rules
+    // (mirroring canIt()), an emulator differential and a separate deploy.
+    // Reported, deliberately not changed in this pass: rules ahead of a stale
+    // cached client denies reads the old build still sends.
+    const blocked = (window.currentRole === 'secretary')
+      ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
+      : [];
+    return (_isAdminRole() ? deptChannelKeys()
+      : deptChannelKeys().filter(d => (currentDepts || []).includes(d)))
+      .filter(d => !blocked.includes(d));
   }
   // Decision 3: partner picker = same-company partners + president/manager.
   function dmCandidates(users) {

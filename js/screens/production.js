@@ -656,7 +656,7 @@ function openJobProjectDetail(p){
   `, `
     ${_isFinAdmin()&&!isPartnerU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
     ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
-    ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
+    ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
   // SCOPED TO THIS PANEL — these six were document.getElementById. The Billing
@@ -1130,7 +1130,23 @@ async function loadProdContent(currentUser, currentRole, sub) {
 }
 
 async function renderProdOrders(el, currentUser, currentRole) {
-  const canEdit = canEditDept('Production');
+  // DEAD CONTROLS (fixed 2026-08-09). firestore.rules production_orders:
+  //   create = canProduction()
+  //   update = canProduction() && !isSecretary()
+  // canEditDept('Production') is true for the Corporate Secretary (Production
+  // is a department they keep), so every mutation control on this screen —
+  // Advance, QC, Edit, Delivery Receipt, Consume materials — was rendered to
+  // them and then refused by the boundary, surfacing only as "Update failed".
+  // The rules exclusion is deliberate: consumeProductionMaterials commits
+  // inventory decrements + stock_movements + materialsConsumed in ONE
+  // transaction and posts the ledger legs separately, and the guard exists to
+  // stop that half-write being started by someone who cannot finish it. So the
+  // fix is to hide the controls, NOT to widen the rule.
+  // CREATE is still permitted by the rules, but a work order that can never be
+  // advanced, QC'd or delivered is worse than no button — it strands a job on
+  // the shop floor — so it is hidden with the rest, and flagged for the owner
+  // to confirm whether the Corporate Secretary should keep Production at all.
+  const canEdit = canEditDept('Production') && (window.currentRole !== 'secretary');
   const showMoney = !isProductionOnlyViewer();   // Sales→Production handoff — no contract ₱ for Production-only viewers
   el.innerHTML = window.skeletonHtml('table');
   // production_orders is this screen's PRIMARY data — a failure here now

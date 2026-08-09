@@ -2793,6 +2793,11 @@ window.tryUpgradeAttendanceOnNotifRead = async function() {
       fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     Notifs.success('✅ Full attendance (100%) — all notifications checked!');
+    // The card that renders "50% — Timed In" sits on the dashboard, and nothing
+    // here used to refresh it — so the upgrade only became visible on the next
+    // navigation. Now that all five office roles carry the attendance card
+    // (window.attendanceCardHtml), this stale state is no longer employee-only.
+    if (window.currentPage === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
   } catch(e) { /* WS19 rule denied (admin-edited day) — silently ignore */ }
 };
 

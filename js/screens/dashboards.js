@@ -928,13 +928,296 @@ function liveDateTime(elId) {
   Session.addCleanup(() => { if (_liveDateInterval) { clearInterval(_liveDateInterval); _liveDateInterval = null; } });
 }
 
+/* ════════════════════════════════════════════════════════════════
+   TODAY'S ATTENDANCE CARD — one renderer, five callers
+   ────────────────────────────────────────────────────────────────
+   Owner report (2026-08-09): "secretary time in cant be found".
+   It could not be found because it did not exist: the Time In / Time Out /
+   Request-Extension card lived ONLY inside renderEmployeeDashboard, so the
+   president, manager, Corporate Secretary and finance dashboards had no way
+   to record a day at all — while js/app.js still fired the 7–9 AM
+   "Don't forget to time in today" reminder at every one of those roles.
+
+   The WRITE PATH needs no change and neither do the rules:
+   firestore.rules attendance/{uid}/records/{date} already grants
+   `allow write: isOpsAdmin()` (president/manager/secretary/finance) and an
+   owner clause for everyone else. This was purely a missing client surface.
+
+   Split three ways so the four admin dashboards fold it into their EXISTING
+   Promise.all (no extra round-trip) and so the handlers can be scoped to the
+   card's own root element instead of document.getElementById.
+
+   NOT for partners (excluded from attendance reads, firestore.rules) and NOT
+   for Operations Team workers — they have their own geofenced selfie punch in
+   js/screens/worker.js writing attendance_worker/{profileId}. Two punch paths
+   on one screen is the double-population defect this pass exists to reduce.
+   ════════════════════════════════════════════════════════════════ */
+
+// Reads today's attendance + extension docs and derives every flag the card
+// renders. Async so callers can drop it straight into their Promise.all.
+window.attendanceCardState = async function(uid) {
+  const now      = new Date();
+  const todayStr = bizDate();
+  const [attSnap, extSnap] = await Promise.all([
+    db.collection('attendance').doc(uid).collection('records').doc(todayStr).get()
+      .catch(e => { _dashWarnOnce('attendance', e); return { exists:false, data:()=>({}) }; }),
+    db.collection('attendance_extensions').doc(`${uid}_${todayStr}`).get()
+      .catch(e => { _dashWarnOnce('attendance_extensions', e); return { exists:false, data:()=>({}) }; })
+  ]);
+
+  // Holiday / Sunday check — anchored to Manila time
+  const phHolidays  = typeof getPHHolidays === 'function' ? getPHHolidays(bizYear()) : {};
+  const todayHoliday = phHolidays[todayStr];
+  const isSundayToday = bizDow() === 0;
+  const isNoWorkDay  = isSundayToday || !!todayHoliday;
+
+  // Attendance — 0 / 0.5 / 1.0 model
+  const attData   = attSnap.exists ? attSnap.data() : {};
+  const hasLogin  = !!attData.loginTime;
+  const attScore  = window.attRecScore(attData);
+  const hasFull   = attScore >= 1.0;
+  const hasLogout = !!attData.logoutTime;
+
+  // An admin correction (People → Attendance → pencil) stamps editedBy. For a
+  // plain employee firestore.rules already refuses their next self-write on
+  // such a doc — so Time In/Out were DEAD CONTROLS there, failing with a
+  // permission error. For president/manager/secretary/finance the opposite is
+  // true and worse: they match the unrestricted isOpsAdmin() write clause, so
+  // their own tap would silently REVERT HR's correction, and payroll reads
+  // attendanceScore directly. Making it terminal for everyone fixes the dead
+  // control and the silent revert at once, in the client, with no rules change
+  // (narrowing the isOpsAdmin() clause would break the admin edit path itself).
+  const adminRecorded = !!attData.editedBy;
+
+  // Attendance window: 7:00–9:00 AM Manila time (or an approved extension)
+  const nowHour      = bizHour();
+  const inWindow     = nowHour >= 7 && nowHour < 9;
+  const beforeWindow = nowHour < 7;
+  const extData      = extSnap.exists ? extSnap.data() : null;
+  const _ext         = window.attExtActive(extData, now);
+  const extApproved  = _ext.active;
+  const extPending   = extData?.status === 'pending';
+  const extDenied    = extData?.status === 'denied';
+  const extExpired   = extData?.status === 'approved'
+                         && (!extData?.expiresAt || now >= extData.expiresAt.toDate());
+  const canTimeIn    = !adminRecorded && !hasLogin && (inWindow || extApproved);
+  const extExpiresStr = extApproved
+    ? _ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
+    : '';
+
+  const isLeaveToday       = attData.status === 'leave';
+  const isUnpaidLeaveToday = attData.status === 'unpaid_leave';
+  const attBadgeClass = isLeaveToday ? 'badge-green' : isUnpaidLeaveToday ? 'badge-gray' : isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
+  const attLabel      = isLeaveToday ? `${emojiIcon('🌴',16)} On Leave` : isUnpaidLeaveToday ? `${emojiIcon('📅',16)} Unpaid Leave` : isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? `100% Full ${emojiIcon('✅',16)}` : hasLogin ? `50% Timed In ${emojiIcon('🟡',16)}` : 'Not Timed In';
+
+  return { uid, now, todayStr, attData, extData, todayHoliday, isSundayToday, isNoWorkDay,
+           hasLogin, attScore, hasFull, hasLogout, adminRecorded, inWindow, beforeWindow,
+           extApproved, extPending, extDenied, extExpired, canTimeIn, extExpiresStr,
+           isLeaveToday, isUnpaidLeaveToday, attBadgeClass, attLabel };
+};
+
+// The card markup. Uses only .card/.card-header/.card-body/.badge/.btn-* — all
+// already present on every dashboard, so no new CSS and no 375px risk (buttons
+// are full-bleed, comfortably over the 44px tap target).
+window.attendanceCardHtml = function(st) {
+  const { attData, todayHoliday, isSundayToday, isNoWorkDay, hasLogin, hasFull, hasLogout,
+          adminRecorded, canTimeIn, beforeWindow, extApproved, extPending, extDenied,
+          extExpired, extExpiresStr, attBadgeClass, attLabel, now } = st;
+  return `
+      <div class="card" id="attendance-card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>Today's Attendance <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${now.toLocaleDateString('en-PH',{weekday:'short',month:'short',day:'numeric'})}</span></h3>
+          <span class="badge ${attBadgeClass}">${attLabel}</span>
+        </div>
+        <div class="card-body">
+          ${isNoWorkDay ? `
+            <div style="display:flex;align-items:center;gap:14px;padding:4px 0">
+              <div style="font-size:32px">${isSundayToday?`${emojiIcon('😴',16)}`:`${emojiIcon('🎌',16)}`}</div>
+              <div>
+                <div style="font-size:14px;font-weight:700;color:var(--text)">${isSundayToday?'It\'s Sunday — rest day!':escHtml(todayHoliday.name||'Holiday')}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">No attendance required today. Enjoy your ${isSundayToday?'day off':'holiday'}!</div>
+              </div>
+            </div>`
+          : adminRecorded ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="width:40px;height:40px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('🔒',20)}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text)">Recorded by HR — ${escHtml(attData.status || (hasFull?'present':hasLogin?'half day':'absent'))}</div>
+                <div style="font-size:11px;color:var(--text-muted)">Today was set by an administrator${attData.note?` · ${escHtml(attData.note)}`:''}. Ask HR if this needs correcting.</div>
+              </div>
+            </div>`
+          : hasFull ? `
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('✅',20)}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
+                <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ${emojiIcon('✓',16)}</div>
+              </div>
+            </div>
+            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
+              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
+            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}`
+          : hasLogin ? `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+              <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('🟡',20)}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
+                <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check all notifications before 9:00 AM → 100%'}</div>
+              </div>
+            </div>
+            ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
+              Tap the ${emojiIcon('🔔',16)} bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
+            </div>`:''}
+            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
+              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
+            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
+          ` : canTimeIn ? `
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+              ${extApproved?`<span style="color:var(--warning)">${emojiIcon('⏰',16)} Extension approved — expires ${extExpiresStr}</span><br>`:''}
+              <strong>Step 1:</strong> Time in (7–9 AM) = 50%.<br>
+              <strong>Step 2:</strong> Check every notification before 9:00 AM = 100%.
+            </p>
+            <button class="btn-primary" id="check-in-btn" style="width:100%">
+              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
+            </button>`
+          : beforeWindow ? `
+            <div style="text-align:center;padding:10px 0;color:var(--text-muted);font-size:13px">
+              <div style="font-size:24px;margin-bottom:6px">${emojiIcon('⏳',24)}</div>
+              Time In window opens at <strong>7:00 AM</strong>
+            </div>`
+          : extPending ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="font-size:24px">${emojiIcon('⏳',24)}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600">Extension requested</div>
+                <div style="font-size:11px;color:var(--text-muted)">Waiting for president to approve. Refresh to check status.</div>
+              </div>
+            </div>`
+          : extDenied ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="font-size:24px">${emojiIcon('❌',24)}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--danger)">Extension denied</div>
+                <div style="font-size:11px;color:var(--text-muted)">Attendance marked absent for today.</div>
+              </div>
+            </div>`
+          : extExpired ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="font-size:24px">${emojiIcon('⌛',24)}</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text-muted)">Extension expired</div>
+                <div style="font-size:11px;color:var(--text-muted)">The 6-hour window has closed.</div>
+              </div>
+            </div>`
+          : `
+            <div style="padding:4px 0">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <div style="font-size:24px">${emojiIcon('⚠️',24)}</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--warning)">Time window missed</div>
+                  <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–9:00 AM. You can request an extension.</div>
+                </div>
+              </div>
+              <button class="btn-secondary" id="req-ext-btn" style="width:100%">${emojiIcon('⏰',16)} Request Time Extension</button>
+            </div>`}
+        </div>
+      </div>`;
+};
+
+// Wires the three buttons. `rootEl` is the container the card was rendered
+// into — every lookup is scoped to it (house rule: never
+// document.getElementById inside a panel). `onChange` is the caller's own
+// re-render, so the card stays role-agnostic.
+window.bindAttendanceCard = function(rootEl, st, onChange) {
+  if (!rootEl) return;
+  const todayStr = st.todayStr;
+  const refresh  = () => { try { onChange && onChange(); } catch(_) {} };
+
+  rootEl.querySelector('#check-in-btn')?.addEventListener('click', async () => {
+    // Check if no new notifs today (or all already read) → auto 100%
+    // Manila midnight (not UTC) so early-morning notifications are counted.
+    const todayStart = new Date(todayStr + 'T00:00:00+08:00').getTime();
+    let autoFull = false;
+    try {
+      const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
+        .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0)).get();
+      const todayNotifs = notifSnap.docs.map(d => d.data());
+      autoFull = todayNotifs.length === 0 || todayNotifs.every(n => n.read);
+    } catch {}
+    try {
+      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+        loginTime: firebase.firestore.FieldValue.serverTimestamp(),
+        uid: currentUser.uid, date: todayStr,
+        attendanceScore: autoFull ? 1.0 : 0.5,
+        fullTime: autoFull,
+        autoFull
+      }, { merge: true });
+    } catch (err) {
+      Notifs.showToast(err?.code === 'permission-denied'
+        ? 'Time In was rejected — today\'s record is admin-managed or your account lacks permission. Ask an admin to record your attendance.'
+        : 'Time In failed to save: ' + (err?.message || err), 'error');
+      return;
+    }
+    // Toasts render via textContent — plain emoji only, never emojiIcon() HTML.
+    Notifs.info(autoFull
+      ? '✅ Full attendance (100%) — no unchecked notifications!'
+      : '🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.');
+    refresh();
+  });
+
+  // Office self-service Time Out button
+  rootEl.querySelector('#time-out-btn')?.addEventListener('click', async () => {
+    const inTs = st.attData.loginTime?.toDate ? st.attData.loginTime.toDate() : null;
+    const hrs  = inTs ? window.computeHoursBetween(inTs, new Date()) : 0;
+    try {
+      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+        logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
+        hoursWorked: hrs
+      }, { merge: true });
+    } catch (err) {
+      Notifs.showToast('Time Out failed to save: ' + (err?.message || err), 'error');
+      return;
+    }
+    Notifs.info(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
+    refresh();
+  });
+
+  // Request extension button
+  rootEl.querySelector('#req-ext-btn')?.addEventListener('click', async () => {
+    const btn = rootEl.querySelector('#req-ext-btn');
+    btn.disabled = true; btn.textContent = 'Requesting…';
+    try {
+      await db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).set({
+        uid:         currentUser.uid,
+        userName:    userProfile.displayName || currentUser.email,
+        date:        todayStr,
+        status:      'pending',
+        requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      // Notify president
+      await Notifs.sendToOwner({
+        title: '⏰ Attendance Extension Requested',
+        body:  `${userProfile.displayName||currentUser.email} missed the 7–9am window on ${todayStr} and is requesting an extension.`,
+        icon:  '⏰', type: 'att_extension',
+        link:  'attendance'
+      });
+      dbCacheInvalidate && dbCacheInvalidate('att-ext-pending');
+      Notifs.success('Extension requested — waiting for president approval.');
+      refresh();
+    } catch(err) {
+      btn.disabled = false; btn.textContent = '⏰ Request Time Extension';
+      Notifs.showToast('Failed to submit request','error');
+    }
+  });
+};
+
 async function renderPresidentDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('cards');
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList, attState] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
@@ -960,6 +1243,8 @@ async function renderPresidentDashboard() {
       ledgerForPeriod('prev'),
       dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                       45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
+      // Own attendance — the President clocks in like everyone else.
+      window.attendanceCardState(currentUser.uid),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1064,6 +1349,8 @@ async function renderPresidentDashboard() {
         <span class="alert-chevron">›</span>
       </div>`:''}
 
+      ${window.attendanceCardHtml(attState)}
+
       <div class="kpi-row">
         <div class="kpi-card">
           <div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div>
@@ -1166,6 +1453,7 @@ async function renderPresidentDashboard() {
     `;
     liveDateTime('live-clock');
     renderMiniCal();
+    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderPresidentDashboard);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
@@ -1181,7 +1469,7 @@ async function renderManagerDashboard() {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
     const depts = currentDepts || [];
-    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, attExtSnap, leaveSnap, poSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, attExtSnap, leaveSnap, poSnap, attState] = await Promise.all([
       dbCachedGet('users',     () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
@@ -1200,6 +1488,8 @@ async function renderManagerDashboard() {
       // extensions already are, below.
       dbCachedGet('leave-pending', () => safeGet(db.collection('leave_requests').where('status','==','pending'), 'leave_requests'), 30000),
       dbCachedGet('po-pending',    () => safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'), 30000),
+      // Own attendance — a manager records their own day like everyone else.
+      window.attendanceCardState(currentUser.uid),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
@@ -1259,6 +1549,7 @@ async function renderManagerDashboard() {
       <div id="live-clock" class="live-clock-line"></div>
       ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>${emojiIcon('⚠️',16)} <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
       ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
+      ${window.attendanceCardHtml(attState)}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="user-check" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Present today</div><div class="kpi-value">${present}</div><div class="kpi-sub">${half} half · ${unmarked} not in yet</div></div>
@@ -1302,6 +1593,13 @@ async function renderManagerDashboard() {
         </div>
       </div>`;
     liveDateTime('live-clock');
+    // A manager sitting in their own department also appears in "Team Today",
+    // which is cached for 60s — drop that key on their own punch so the row
+    // they just changed is not still showing "not in yet".
+    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, () => {
+      dbCacheInvalidate && dbCacheInvalidate('mgr-att-today:'+depts.join(',')+':'+todayStr);
+      renderManagerDashboard();
+    });
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
@@ -1340,7 +1638,7 @@ async function renderSecretaryDashboard() {
       catch(e) { _dashWarnOnce(label || 'query', e); _denied.push(_QUEUE_NAMES[label] || label || 'a queue'); return { docs:[], size:0, failed:true }; }
     };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, attState] = await Promise.all([
       dbCachedGet('users',       () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all',   () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
@@ -1359,6 +1657,10 @@ async function renderSecretaryDashboard() {
       safeGet(db.collection('clients').where('deleteRequested','==',true), 'clients'),
       safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'),
       safeGet(db.collection('pending_raises').where('status','==','pending_approval'), 'pending_raises'),
+      // Own attendance — owner report 2026-08-09, "secretary time in cant be
+      // found". The Corporate Secretary records his own day here, same card and
+      // same write path as every other role.
+      window.attendanceCardState(currentUser.uid),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1390,10 +1692,11 @@ async function renderSecretaryDashboard() {
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('🗂',20)} Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
       <div id="live-clock" class="live-clock-line"></div>
-      <div class="alert-banner" style="cursor:default"><span>${emojiIcon('👁',16)} <strong>Oversight role.</strong> You can review everything across the company. The President approves all requests, and deletions of key records require President approval.</span></div>
+      <div class="alert-banner" style="cursor:default"><span>${emojiIcon('👁',16)} <strong>Oversight role.</strong> You can review everything across the company except Finance and IT. You approve the everyday queue — sign-ups, attendance, leave, submissions and task reviews; money-moving requests and deletions of key records go to the President.</span></div>
       ${_denied.length?`<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Not counted here:</strong> ${escHtml(_denied.join(', '))} — outside your access, so these are omitted rather than shown as 0.</span></div>`:''}
       ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
       ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>${emojiIcon('🗑',16)} <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
+      ${window.attendanceCardHtml(attState)}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">People</div><div class="kpi-value">${activeStaff}</div></div>
         <div class="kpi-card ${totalPending?'accent':''}" style="cursor:pointer" onclick="navigateTo('approvals')"><div class="kpi-icon-wrap" style="background:var(--warning-soft)"><i data-lucide="shield-check" style="stroke:var(--warning);width:18px"></i></div><div class="kpi-label">Pending Approvals</div><div class="kpi-value">${totalPending}</div></div>
@@ -1427,6 +1730,7 @@ async function renderSecretaryDashboard() {
         </div>
       </div>`;
     liveDateTime('live-clock');
+    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderSecretaryDashboard);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
@@ -1449,7 +1753,7 @@ async function renderFinanceDashboard() {
     const todayStr = bizDate();
     const period = window._FIN_DASH_PERIOD || 'month';
     const plabel = finPeriodLabel(period);
-    const [usersSnap, ledgerSnap, prevLedSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
+    const [usersSnap, ledgerSnap, prevLedSnap, expSnap, caSnap, invSnap, jobSnap, projList, attState] = await Promise.all([
       dbCachedGet('users', fetchUsersWithPayroll, 30000),
       ledgerForPeriod(period),
       ledgerForPeriod('prev'),
@@ -1458,6 +1762,8 @@ async function renderFinanceDashboard() {
       dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                   45000),
       dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs'), 'job_costs'),                                         45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
+      // Own attendance — the accountant records their own day like everyone else.
+      window.attendanceCardState(currentUser.uid),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const payrollGross = users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
@@ -1510,6 +1816,7 @@ async function renderFinanceDashboard() {
       <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
       <div id="fin-dash-period">${window.periodPicker(period, {closedBadge:true})}</div>
+      ${window.attendanceCardHtml(attState)}
       ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>${emojiIcon('💸',16)} <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="trending-up" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
@@ -1564,6 +1871,7 @@ async function renderFinanceDashboard() {
         </div>
       </div>`;
     liveDateTime('live-clock');
+    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderFinanceDashboard);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     window.bindPeriodPicker(document.getElementById('fin-dash-period'), (newKey) => {
       window._FIN_DASH_PERIOD = newKey; renderFinanceDashboard();
@@ -1599,12 +1907,13 @@ async function renderEmployeeDashboard() {
     const now      = new Date();
     const todayStr = bizDate();
     const uid = currentUser.uid;
-    const [myTasksSnap, attSnap, caSnap, extSnap, kpiProfile, monthAttScore] = await Promise.all([
+    const [myTasksSnap, attState, caSnap, kpiProfile, monthAttScore] = await Promise.all([
       db.collection('tasks').where('assignedTo','array-contains', uid).get()
         .catch(()=>db.collection('tasks').where('assignedTo','==', uid).get()),
-      db.collection('attendance').doc(uid).collection('records').doc(todayStr).get(),
+      // Today's attendance + extension, and every flag the card renders — one
+      // shared reader, same call the four admin dashboards now make.
+      window.attendanceCardState(uid),
       db.collection('cash_advances').where('userId','==', uid).get().catch(e => { _dashWarnOnce('cash_advances', e); return {docs:[]}; }),
-      db.collection('attendance_extensions').doc(`${uid}_${todayStr}`).get().catch(e => { _dashWarnOnce('attendance_extensions', e); return {exists:false,data:()=>({})}; }),
       db.collection('kpi_targets').doc(uid).get().catch(e => { _dashWarnOnce('kpi_targets', e); return null; }),
       getAttendanceScore(uid)
     ]);
@@ -1617,34 +1926,12 @@ async function renderEmployeeDashboard() {
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
 
-    // Holiday / Sunday check — anchored to Manila time
-    const phHolidays = typeof getPHHolidays === 'function' ? getPHHolidays(bizYear()) : {};
-    const todayHoliday = phHolidays[todayStr];
-    const isSundayToday = bizDow() === 0;
-    const isNoWorkDay = isSundayToday || !!todayHoliday;
-
-    // Attendance — new model: 0 / 0.5 / 1.0
-    const attData     = attSnap.exists ? attSnap.data() : {};
-    const hasLogin    = !!attData.loginTime;
-    const attScore    = window.attRecScore(attData);
-    const hasFull     = attScore >= 1.0;
-    const hasLogout   = !!attData.logoutTime;
-
-    // Attendance window: 7:00–9:00 AM Manila time (or approved extension)
-    const nowHour      = bizHour();
-    const inWindow     = nowHour >= 7 && nowHour < 9;   // normal 2-hr window
-    const beforeWindow = nowHour < 7;
-    const extData      = extSnap.exists ? extSnap.data() : null;
-    const _ext = window.attExtActive(extData, now);
-    const extApproved = _ext.active;
-    const extPending   = extData?.status === 'pending';
-    const extDenied    = extData?.status === 'denied';
-    const extExpired   = extData?.status === 'approved'
-                           && (!extData?.expiresAt || now >= extData.expiresAt.toDate());
-    const canTimeIn    = !hasLogin && (inWindow || extApproved);
-    const extExpiresStr = extApproved
-      ? _ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
-      : '';
+    // Today's attendance state — holiday/Sunday, the 0/0.5/1.0 score, the
+    // extension window and the badge — now lives entirely in the shared reader
+    // (window.attendanceCardState) and is consumed by the shared card markup,
+    // so none of it is unpacked here any more. The month-to-date attendance
+    // figure on the Current Standing card is a different value and still comes
+    // from getAttendanceScore(uid) in the Promise.all above.
 
     // KPI computation
     const taskScore = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 0;
@@ -1664,11 +1951,6 @@ async function renderEmployeeDashboard() {
     const workDaysDash = countWorkDays(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, +todayStr.slice(8,10));
     const attDaysFull = Math.round(monthAttScore * workDaysDash);
     const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
-
-    const isLeaveToday       = attData.status === 'leave';
-    const isUnpaidLeaveToday = attData.status === 'unpaid_leave';
-    const attBadgeClass = isLeaveToday ? 'badge-green' : isUnpaidLeaveToday ? 'badge-gray' : isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
-    const attLabel      = isLeaveToday ? `${emojiIcon('🌴',16)} On Leave` : isUnpaidLeaveToday ? `${emojiIcon('📅',16)} Unpaid Leave` : isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? `100% Full ${emojiIcon('✅',16)}` : hasLogin ? `50% Timed In ${emojiIcon('🟡',16)}` : 'Not Timed In';
 
     // Dept quick tab buttons
     const deptTabsHTML = currentDepts.length ? `
@@ -1745,97 +2027,8 @@ async function renderEmployeeDashboard() {
         </div>
       </div>
 
-      <!-- Attendance Card -->
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">
-          <h3>Today's Attendance <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${now.toLocaleDateString('en-PH',{weekday:'short',month:'short',day:'numeric'})}</span></h3>
-          <span class="badge ${attBadgeClass}">${attLabel}</span>
-        </div>
-        <div class="card-body">
-          ${isNoWorkDay ? `
-            <div style="display:flex;align-items:center;gap:14px;padding:4px 0">
-              <div style="font-size:32px">${isSundayToday?`${emojiIcon('😴',16)}`:`${emojiIcon('🎌',16)}`}</div>
-              <div>
-                <div style="font-size:14px;font-weight:700;color:var(--text)">${isSundayToday?'It\'s Sunday — rest day!':todayHoliday.name}</div>
-                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">No attendance required today. Enjoy your ${isSundayToday?'day off':'holiday'}!</div>
-              </div>
-            </div>`
-          : hasFull ? `
-            <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('✅',20)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
-                <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ${emojiIcon('✓',16)}</div>
-              </div>
-            </div>
-            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
-              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
-            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}`
-          : hasLogin ? `
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-              <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('🟡',20)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
-                <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check all notifications before 9:00 AM → 100%'}</div>
-              </div>
-            </div>
-            ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
-              Tap the ${emojiIcon('🔔',16)} bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
-            </div>`:''}
-            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
-              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
-            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
-          ` : canTimeIn ? `
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-              ${extApproved?`<span style="color:var(--warning)">${emojiIcon('⏰',16)} Extension approved — expires ${extExpiresStr}</span><br>`:''}
-              <strong>Step 1:</strong> Time in (7–9 AM) = 50%.<br>
-              <strong>Step 2:</strong> Check every notification before 9:00 AM = 100%.
-            </p>
-            <button class="btn-primary" id="check-in-btn" style="width:100%">
-              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
-            </button>`
-          : beforeWindow ? `
-            <div style="text-align:center;padding:10px 0;color:var(--text-muted);font-size:13px">
-              <div style="font-size:24px;margin-bottom:6px">${emojiIcon('⏳',24)}</div>
-              Time In window opens at <strong>7:00 AM</strong>
-            </div>`
-          : extPending ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">${emojiIcon('⏳',24)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600">Extension requested</div>
-                <div style="font-size:11px;color:var(--text-muted)">Waiting for president to approve. Refresh to check status.</div>
-              </div>
-            </div>`
-          : extDenied ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">${emojiIcon('❌',24)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--danger)">Extension denied</div>
-                <div style="font-size:11px;color:var(--text-muted)">Attendance marked absent for today.</div>
-              </div>
-            </div>`
-          : extExpired ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">${emojiIcon('⌛',24)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--text-muted)">Extension expired</div>
-                <div style="font-size:11px;color:var(--text-muted)">The 6-hour window has closed.</div>
-              </div>
-            </div>`
-          : `
-            <div style="padding:4px 0">
-              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-                <div style="font-size:24px">${emojiIcon('⚠️',24)}</div>
-                <div>
-                  <div style="font-size:13px;font-weight:600;color:var(--warning)">Time window missed</div>
-                  <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–9:00 AM. You can request an extension.</div>
-                </div>
-              </div>
-              <button class="btn-secondary" id="req-ext-btn" style="width:100%">${emojiIcon('⏰',16)} Request Time Extension</button>
-            </div>`}
-        </div>
-      </div>
+      <!-- Attendance Card — shared renderer, see window.attendanceCardHtml -->
+      ${window.attendanceCardHtml(attState)}
 
       <!-- Management row: Tasks + KPI -->
       <div class="dashboard-grid">
@@ -1893,83 +2086,8 @@ async function renderEmployeeDashboard() {
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
 
-    // Attendance buttons — new model
-    document.getElementById('check-in-btn')?.addEventListener('click', async () => {
-      // Check if no new notifs today (or all already read) → auto 100%
-      // Manila midnight (not UTC) so early-morning notifications are counted.
-      const todayStart = new Date(todayStr + 'T00:00:00+08:00').getTime();
-      let autoFull = false;
-      try {
-        const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
-          .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0)).get();
-        const todayNotifs = notifSnap.docs.map(d => d.data());
-        autoFull = todayNotifs.length === 0 || todayNotifs.every(n => n.read);
-      } catch {}
-      try {
-        await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-          loginTime: firebase.firestore.FieldValue.serverTimestamp(),
-          uid: currentUser.uid, date: todayStr,
-          attendanceScore: autoFull ? 1.0 : 0.5,
-          fullTime: autoFull,
-          autoFull
-        }, { merge: true });
-      } catch (err) {
-        Notifs.showToast(err?.code === 'permission-denied'
-          ? 'Time In was rejected — today\'s record is admin-managed or your account lacks permission. Ask an admin to record your attendance.'
-          : 'Time In failed to save: ' + (err?.message || err), 'error');
-        return;
-      }
-      // Toasts render via textContent — plain emoji only, never emojiIcon() HTML.
-      Notifs.info(autoFull
-        ? '✅ Full attendance (100%) — no unchecked notifications!'
-        : '🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.');
-      renderEmployeeDashboard();
-    });
-
-    // Office self-service Time Out button
-    document.getElementById('time-out-btn')?.addEventListener('click', async () => {
-      const inTs = attData.loginTime?.toDate ? attData.loginTime.toDate() : null;
-      const hrs  = inTs ? window.computeHoursBetween(inTs, new Date()) : 0;
-      try {
-        await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-          logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
-          hoursWorked: hrs
-        }, { merge: true });
-      } catch (err) {
-        Notifs.showToast('Time Out failed to save: ' + (err?.message || err), 'error');
-        return;
-      }
-      Notifs.info(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
-      renderEmployeeDashboard();
-    });
-
-    // Request extension button
-    document.getElementById('req-ext-btn')?.addEventListener('click', async () => {
-      const btn = document.getElementById('req-ext-btn');
-      btn.disabled = true; btn.textContent = 'Requesting…';
-      try {
-        await db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).set({
-          uid:         currentUser.uid,
-          userName:    userProfile.displayName || currentUser.email,
-          date:        todayStr,
-          status:      'pending',
-          requestedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        // Notify president
-        await Notifs.sendToOwner({
-          title: '⏰ Attendance Extension Requested',
-          body:  `${userProfile.displayName||currentUser.email} missed the 7–9am window on ${todayStr} and is requesting an extension.`,
-          icon:  '⏰', type: 'att_extension',
-          link:  'attendance'
-        });
-        dbCacheInvalidate && dbCacheInvalidate('att-ext-pending');
-        Notifs.success('Extension requested — waiting for president approval.');
-        renderEmployeeDashboard();
-      } catch(err) {
-        btn.disabled = false; btn.textContent = '⏰ Request Time Extension';
-        Notifs.showToast('Failed to submit request','error');
-      }
-    });
+    // Attendance buttons — shared binder, scoped to the card element.
+    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderEmployeeDashboard);
 
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
@@ -4522,13 +4640,33 @@ async function renderAnalytics() {
   if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
   const c=document.getElementById('page-content');
   c.innerHTML=window.skeletonHtml('cards');
-  const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
+  // ⚠ SILENT ZEROS (2026-08-09). This screen admits the Corporate Secretary by
+  // name, then reads four collections the money-tier carve-out denies them —
+  // ledger, payroll (via fetchUsersWithPayroll), job_costs and payslips. Every
+  // one of those reads ends in a catch that yields {docs:[]}, so the page
+  // rendered confidently and completely IN ZEROES: "Revenue ₱0", "Net Cash ₱0",
+  // "Payroll ₱0/mo", a Net Pay column of ₱0 for every person, and empty charts.
+  // A reader has no way to tell a denial from a business with no money in it —
+  // which on the company Analytics page could actually mislead a decision.
+  // `_denied` records which ones were refused; the banner below names them.
+  // Same treatment already shipped on the Approvals queue and the Secretary
+  // dashboard — this is that pattern, not a third one.
+  const _denied = [];
+  const _DENY_NAMES = { ledger:'Income & expenses (ledger)', job_costs:'Job costs & margins',
+                        payslips:'Payslips', payroll:'Payroll', expenses:'Expenses' };
+  const _noteDenied = (key, e) => {
+    if (!(e && (e.code === 'permission-denied' || e.code === 'permission_denied'))) return;
+    const base = String(key).split(':')[0];
+    const nm = _DENY_NAMES[base] || base;
+    if (_denied.indexOf(nm) === -1) _denied.push(nm);
+  };
+  const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); _noteDenied(label, e); return { docs:[], size:0 }; } };
   // Analytics re-reads the same heavy collections on every visit — cache 60s, keyed by the
   // active period so switching "This Month" ↔ "YTD" ↔ "All Time" doesn't serve stale rows
   // from a differently-bounded query (Phase 86 item 3). Uses the SAME canonical unqualified
   // keys as dashboards/writers for the 'all' case (no more 'an_' prefix) so a post-then-view
   // still sees fresh data on the one path other screens' dbCacheInvalidate() calls target.
-  const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(e => { _dashWarnOnce(key, e); return {docs:[],size:0}; });
+  const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(e => { _dashWarnOnce(key, e); _noteDenied(key, e); return {docs:[],size:0}; });
 
   // ── Phase 86: period scope ──────────────────────────────────────────
   // Chip/select on the Overview tab (This Month / Last Month / YTD / All Time), stored in
@@ -4563,6 +4701,18 @@ async function renderAnalytics() {
     cg('projects:'+anKey, _boundTS ? db.collection('projects').where('createdAt','>=',_boundTS) : db.collection('projects')),
     window.Clients.listAll().catch(()=>[]),
   ]);
+  // fetchUsersWithPayroll stamps payrollDenied when the payroll LIST was
+  // refused — without it every `u.salary||0` below silently becomes ₱0.
+  if (usersSnap && usersSnap.payrollDenied && _denied.indexOf(_DENY_NAMES.payroll) === -1) _denied.push(_DENY_NAMES.payroll);
+  // The ledger read has its own catch upstream (ledgerSince / dbCachedGet), so
+  // its denial cannot be observed from here — infer it from the tier instead.
+  // canFinance() = money role OR Finance-department member; the Corporate
+  // Secretary is excluded from both by firestore.rules.
+  if (!ledgerSnap || !ledgerSnap.docs || !ledgerSnap.docs.length) {
+    const _moneyTier = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : true;
+    const _finDept = (window.currentDepts || []).includes('Finance') && window.currentRole !== 'secretary';
+    if (!_moneyTier && !_finDept && _denied.indexOf(_DENY_NAMES.ledger) === -1) _denied.push(_DENY_NAMES.ledger);
+  }
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
   const quotes=quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -4708,6 +4858,7 @@ async function renderAnalytics() {
 
   c.innerHTML=`
     <div class="page-header"><h2>${emojiIcon('📊',20)} Analytics & Performance</h2></div>
+    ${_denied.length?`<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Some figures are not shown to you:</strong> ${escHtml(_denied.join(', '))}. Anything derived from them reads ₱0 on this page because the data was withheld — not because it is zero.</span></div>`:''}
     ${window.chipTabs(SUBTABS.map(t=>({key:t.id,label:t.label,icon:t.icon})), 'overview', {cls:'an-subtabs'})}
     <div id="analytics-content"></div>
   `;
@@ -5361,9 +5512,17 @@ async function renderTeam() {
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('team-table')] });
 }
 
+// PROFILE-ONLY create. Deliberately NOT the unified create path: it uses
+// db.collection('users').add(), i.e. a RANDOM doc id rather than a Firebase
+// Auth uid, so the person it makes can never sign in, never self-punch and can
+// never be a worker_profiles.doc(uid) target. openCreateWorkerModal below is
+// the one that mints a real uid and is where the three-record Operations path
+// lives. Kept for the record-keeping case it was built for, with payClass now
+// written explicitly (an absent payClass reads as 'regular' in the pay run) and
+// a clearer steer to the account path.
 function openAddEmployeeModal() {
-  openPage('Add Employee Profile',`
-    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">Adds a profile record only. Use <strong>${emojiIcon('👷',16)} Create Worker Account</strong> to also create a username login.</p>
+  const panel = openPage('Add Employee Profile',`
+    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">Adds a <strong>record only</strong> — no login, no self Time In, and it cannot be linked to a weekly worker profile. For anyone who will actually use the app or be paid weekly, use <strong>${emojiIcon('👷',16)} Create Worker Account</strong> instead.</p>
     <div class="form-group"><label>Display Name</label><input id="emp-name"/></div>
     <div class="form-group"><label>Email (if they have one)</label><input id="emp-email" type="email"/></div>
     <div class="form-group"><label>Employee ID</label><input id="emp-eid" placeholder="e.g. BI-2026-001"/></div>
@@ -5378,29 +5537,42 @@ function openAddEmployeeModal() {
       <div class="form-group"><label>Allowance (₱)</label><input id="emp-allow" type="number" inputmode="decimal" value="0"/></div>
     </div>
     <div class="form-group"><label>Deductions (₱)</label><input id="emp-deduct" type="number" inputmode="decimal" value="0"/></div>
-    <div class="form-group"><label>Start Date</label><input id="emp-start" type="date" value="${bizDate()}"/></div>
+    <div class="form-group"><label>Official Employment Date</label><input id="emp-start" type="date" value="${bizDate()}"/></div>
+    <div class="form-group"><label>Employment Status</label>
+      <select id="emp-status">
+        <option value="">— not set —</option>
+        ${Object.entries(window.EMPLOYMENT_STATUSES||{}).map(([k,v])=>`<option value="${k}">${escHtml(v.label)}</option>`).join('')}
+      </select>
+    </div>
   `,`<button class="btn-primary" id="save-emp-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('save-emp-btn').addEventListener('click',async()=>{
-    const dept1=document.getElementById('emp-dept').value;
-    const dept2=document.getElementById('emp-dept2').value;
+  // Scoped to this panel — see the note in openCreateWorkerModal.
+  const $ = (sel) => panel.querySelector(sel);
+  $('#save-emp-btn').addEventListener('click',async()=>{
+    const dept1=$('#emp-dept').value;
+    const dept2=$('#emp-dept2').value;
     const depts=[dept1,dept2].filter(Boolean);
     const ref = await db.collection('users').add({
-      displayName:document.getElementById('emp-name').value.trim(),
-      email:document.getElementById('emp-email').value.trim(),
-      employeeId:document.getElementById('emp-eid').value.trim(),
-      role:document.getElementById('emp-role').value,
+      displayName:$('#emp-name').value.trim(),
+      email:$('#emp-email').value.trim(),
+      employeeId:$('#emp-eid').value.trim(),
+      role:$('#emp-role').value,
       departments:depts, department:depts[0]||'',
-      title:document.getElementById('emp-title').value.trim(),
-      startDate:document.getElementById('emp-start').value,
+      title:$('#emp-title').value.trim(),
+      startDate:$('#emp-start').value,
+      employmentStatus:$('#emp-status').value,
       createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
     // Pay lives in the protected payroll/{uid} collection, keyed by the user doc id.
+    // payClass is written explicitly: this form has no Operations option (it
+    // cannot produce a linkable uid), so it is always the monthly run — stating
+    // that beats leaving it absent and relying on a default.
     await db.collection('payroll').doc(ref.id).set({
-      salary:parseFloat(document.getElementById('emp-salary').value)||0,
-      allowance:parseFloat(document.getElementById('emp-allow').value)||0,
-      deductions:parseFloat(document.getElementById('emp-deduct').value)||0,
+      salary:parseFloat($('#emp-salary').value)||0,
+      allowance:parseFloat($('#emp-allow').value)||0,
+      deductions:parseFloat($('#emp-deduct').value)||0,
+      payClass:'regular',
     });
-    window.logAudit && window.logAudit('create','payroll',ref.id,{ salary:parseFloat(document.getElementById('emp-salary').value)||0 });
+    window.logAudit && window.logAudit('create','payroll',ref.id,{ salary:parseFloat($('#emp-salary').value)||0, payClass:'regular' });
     dbCacheInvalidate('users'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 }
@@ -5426,7 +5598,22 @@ function openCreateWorkerModal() {
 
   const initialPw = generatePassword('worker');
 
-  openPage(`${emojiIcon('👷',16)} Create Worker Account`, `
+  // ONE CREATE PATH (TYPE-B-WEEKLY-PAYROLL-SPEC.md build step 3).
+  // This is the only form in the app that mints a real Firebase Auth uid, so
+  // it is the one the unified create path has to be built on. Before this it
+  // wrote users + payroll but NEVER set payClass — and an absent payClass reads
+  // as 'regular' everywhere, so a NEW OPERATIONS HIRE SILENTLY LANDED IN THE
+  // MONTHLY RUN until someone happened to open Edit Payroll and flip a select.
+  //
+  // Choosing Operations Team now writes all three records in one go:
+  //   users/{uid}                        identity
+  //   payroll/{uid}  payClass:'production'   pay class, declared not inferred
+  //   worker_profiles.doc(uid)  linkedUid:uid    the weekly/attendance record
+  // worker_profiles doc ids are CLIENT-GENERATED, which is what makes
+  // .doc(uid) possible with no migration: EXISTING workers keep their auto-ids
+  // and are never touched, because every join in the app resolves through
+  // linkedUid, not the id shape.
+  const panel = openPage(`${emojiIcon('👷',16)} Create Worker Account`, `
     <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">
       Creates a username + password login. The worker does <strong>not</strong> need an email address.
       HR manages all credentials.
@@ -5455,40 +5642,74 @@ function openCreateWorkerModal() {
     </div>
     <div class="form-group"><label>Job Title</label><input id="cw-title" placeholder="e.g. Machine Operator"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Base Salary (₱)</label><input id="cw-salary" type="number" inputmode="decimal" value="0"/></div>
+      <div class="form-group"><label>Employee Type <span style="color:var(--danger)">*</span></label>
+        <select id="cw-payclass">
+          <option value="regular" selected>Office Team — paid monthly</option>
+          <option value="production">Operations Team — paid weekly</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Decides which pay run this person appears in. Nobody can be in both.</div>
+      </div>
+      <div class="form-group"><label>Employment Status</label>
+        <select id="cw-empstatus">
+          <option value="">— not set —</option>
+          ${Object.entries(window.EMPLOYMENT_STATUSES||{}).map(([k,v])=>`<option value="${k}"${k==='training'?' selected':''}>${escHtml(v.label)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row" id="cw-monthly-row">
+      <div class="form-group"><label>Base Salary (₱ / month)</label><input id="cw-salary" type="number" inputmode="decimal" value="0"/></div>
       <div class="form-group"><label>Allowance (₱)</label><input id="cw-allow" type="number" inputmode="decimal" value="0"/></div>
     </div>
-    <div class="form-group"><label>Start Date</label><input id="cw-start" type="date" value="${bizDate()}"/></div>
+    <div class="form-row hidden" id="cw-weekly-row">
+      <div class="form-group"><label>Daily Rate (₱)</label><input id="cw-daily" type="number" inputmode="decimal" value="0"/></div>
+      <div class="form-group"><label>Hourly Rate (₱)</label><input id="cw-hourly" type="number" inputmode="decimal" value="0"/></div>
+    </div>
+    <div class="form-group"><label>Official Employment Date</label><input id="cw-start" type="date" value="${bizDate()}"/></div>
     <div id="cw-error" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="cw-save-btn">Create Account</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
+  // Every lookup below is scoped to `panel` — never document.getElementById
+  // inside an openPage panel. openPage removes a dismissed panel on a delay, so
+  // a document-wide lookup can bind to the dying one and read (or write) the
+  // wrong form's values. This app's largest defect class.
+  const $ = (sel) => panel.querySelector(sel);
+
   // Auto-suggest username from name
-  document.getElementById('cw-name').addEventListener('input', suggestUsername);
-  document.getElementById('cw-username').addEventListener('input', () => {
-    document.getElementById('cw-username')._edited = true;
-  });
-  document.getElementById('cw-username').addEventListener('input', e => {
+  $('#cw-name').addEventListener('input', suggestUsername);
+  $('#cw-username').addEventListener('input', () => { $('#cw-username')._edited = true; });
+  $('#cw-username').addEventListener('input', e => {
     e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,'');
   });
-  document.getElementById('cw-regen-pw').addEventListener('click', () => {
-    document.getElementById('cw-password').value = generatePassword('worker' + Date.now());
+  $('#cw-regen-pw').addEventListener('click', () => {
+    $('#cw-password').value = generatePassword('worker' + Date.now());
+  });
+  // Show the rate fields that belong to the chosen pay run, so nobody types a
+  // monthly salary into a weekly worker (or a daily rate into a monthly one).
+  $('#cw-payclass').addEventListener('change', () => {
+    const isProd = $('#cw-payclass').value === 'production';
+    $('#cw-monthly-row').classList.toggle('hidden', isProd);
+    $('#cw-weekly-row').classList.toggle('hidden', !isProd);
   });
 
-  document.getElementById('cw-save-btn').addEventListener('click', async () => {
-    const btn  = document.getElementById('cw-save-btn');
-    const errEl= document.getElementById('cw-error');
+  $('#cw-save-btn').addEventListener('click', async () => {
+    const btn  = $('#cw-save-btn');
+    const errEl= $('#cw-error');
     errEl.classList.add('hidden');
 
-    const name     = document.getElementById('cw-name').value.trim();
-    const username = document.getElementById('cw-username').value.trim().toLowerCase();
-    const password = document.getElementById('cw-password').value.trim();
-    const role     = document.getElementById('cw-role').value;
-    const dept     = document.getElementById('cw-dept').value;
-    const title    = document.getElementById('cw-title').value.trim();
-    const salary   = parseFloat(document.getElementById('cw-salary').value)||0;
-    const allow    = parseFloat(document.getElementById('cw-allow').value)||0;
-    const eid      = document.getElementById('cw-eid').value.trim();
-    const start    = document.getElementById('cw-start').value;
+    const name     = $('#cw-name').value.trim();
+    const username = $('#cw-username').value.trim().toLowerCase();
+    const password = $('#cw-password').value.trim();
+    const role     = $('#cw-role').value;
+    const dept     = $('#cw-dept').value;
+    const title    = $('#cw-title').value.trim();
+    const payClass = $('#cw-payclass').value === 'production' ? 'production' : 'regular';
+    const empStatus= $('#cw-empstatus').value;
+    const salary   = payClass === 'production' ? 0 : (parseFloat($('#cw-salary').value)||0);
+    const allow    = payClass === 'production' ? 0 : (parseFloat($('#cw-allow').value)||0);
+    const dailyRate  = payClass === 'production' ? (parseFloat($('#cw-daily').value)||0)  : 0;
+    const hourlyRate = payClass === 'production' ? (parseFloat($('#cw-hourly').value)||0) : 0;
+    const eid      = $('#cw-eid').value.trim();
+    const start    = $('#cw-start').value;
 
     if (!name)     { errEl.textContent='Full name is required.'; errEl.classList.remove('hidden'); return; }
     if (!username) { errEl.textContent='Username is required.'; errEl.classList.remove('hidden'); return; }
@@ -5520,6 +5741,7 @@ function openCreateWorkerModal() {
         role, department: dept, departments: dept ? [dept] : [],
         title,
         startDate:   start,
+        employmentStatus: empStatus,
         hrManagedAccount: true,
         createdBy:   currentUser.uid,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
@@ -5527,8 +5749,48 @@ function openCreateWorkerModal() {
       // Keep the username -> email login map in sync (v12 WS19).
       await db.collection('usernames').doc(username).set({ email: authEmail, uid });
       // Pay → protected payroll/{uid} (keyed by Auth UID == users doc id).
-      await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0 });
-      window.logAudit && window.logAudit('create','payroll',uid,{ salary, allowance: allow });
+      // payClass is now DECLARED here rather than inferred later: an absent
+      // payClass reads as 'regular' in the run, the roster and the profile, so
+      // an Operations hire created without it was silently queued for the
+      // MONTHLY run until someone noticed.
+      await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0, payClass });
+      window.logAudit && window.logAudit('create','payroll',uid,{ salary, allowance: allow, payClass });
+
+      // Operations Team → the third record. .doc(uid) with linkedUid:uid makes
+      // this person single-population from birth: the attendance, payslip,
+      // ID-card and directory joins all resolve, and the double-pay guard
+      // (window.monthlyRunSkipReason) sees BOTH facts agree instead of one.
+      if (payClass === 'production') {
+        let idNumber = '';
+        try { idNumber = await window.nextWorkerIdNumber(); } catch (_) { idNumber = ''; }
+        await db.collection('worker_profiles').doc(uid).set({
+          name,
+          idNumber,
+          jobTitle: title,
+          department: dept || 'General',
+          dailyRate, hourlyRate,
+          status: 'active',
+          includeInPayroll: true,
+          linkedUid: uid,
+          startDate: start,
+          // issuedOn stays the ID-CARD date and keeps defaulting to today —
+          // js/screens/worker.js's pre-hire punch guard reads startDate first
+          // now and only falls back to this for older records.
+          issuedOn: start,
+          employmentStatus: empStatus,
+          caBalance: 0,
+          createdBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        // Keep the assignment-safe roster projection in step (Production picks
+        // workers from worker_directory, not worker_profiles).
+        await db.collection('worker_directory').doc(uid).set({
+          name, idNumber, jobTitle: title, department: dept || 'General',
+          status: 'active', photoUrl: ''
+        }, { merge: true }).catch(()=>{});
+        window.logAudit && window.logAudit('create','worker_profiles',uid,{ linkedUid: uid, dailyRate });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('worker_profiles');
+      }
 
       dbCacheInvalidate('users'); dbCacheInvalidate('users-presence');
 
