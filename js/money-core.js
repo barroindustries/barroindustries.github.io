@@ -411,6 +411,124 @@ window.applyPayLineOverride = function(line, ovr) {
   return out;
 };
 
+// ═══════════════════════════════════════════════════════════
+//  WEEKLY (Operations Team) PAY — computeWeeklyLine
+//  TYPE-B-WEEKLY-PAYROLL-SPEC.md step 4. ADDITIVE: nothing above this line
+//  changed, so every existing pinned test still pins the same behaviour.
+//
+//  Exists so the weekly run and the payslip form share ONE expression. This
+//  repo has already been bitten by a preview/engine divergence in payroll —
+//  the number a person sees before submitting must be produced by the same
+//  code that writes the payslip, not by a second copy of the arithmetic.
+//
+//  THE FOUR OWNER RULINGS (2026-08-08) THIS ENCODES
+//   1. The pay week is MONDAY–SUNDAY, seven days. Before this the payslip
+//      generator laid out Mon–Sat while the worker's own phone showed Mon–Sun,
+//      so a Sunday shift could appear in the worker's estimate and fall outside
+//      the period actually paid. Seven days resolves that in the worker's
+//      favour. It is a PERIOD decision, not a premium decision — Sunday hours
+//      are paid like any other hours.
+//   2. No clock-in = ABSENT (zero hours, zero pay), with an admin override that
+//      is RECORDED, never silent: who, when, and a reason. Without the override
+//      a forgotten punch quietly costs a worker a day's pay and nobody sees it;
+//      without the record, the override itself is unauditable.
+//   3. Overtime at the PLAIN hourly rate (confirming what the app already did).
+//      TRAVEL is a NEW component paid at HALF the hourly rate.
+//   4. One disburse for the whole week — that is the run's shape (step 5), not
+//      this function's; this only has to be callable per worker inside it.
+//
+//  STILL ABSENT BY CHOICE: holiday, rest-day and night-differential premiums.
+//  The owner has not asked for them. FLAG TO THE ACCOUNTANT before this is
+//  systematised — PH labour rules do prescribe premiums, and a weekly run
+//  applies whatever it is given to everyone, every week, automatically.
+// ═══════════════════════════════════════════════════════════
+
+// The seven pay-week days in order, Monday first (PH convention). Exported so
+// the form, the run and the tests cannot disagree about the week's shape.
+window.WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+window.TRAVEL_RATE_FACTOR = 0.5;   // ruling 3 — travel is half the normal rate
+
+/**
+ * One production worker's pay for one Mon–Sun week.
+ *
+ * @param {object} w  the worker's rates:
+ *        {hourlyRate, allowances:{meal,transport,rent}, deductions, caDeduction}
+ * @param {Array}  days  up to 7 entries, one per day of the week, in order:
+ *        {date, hours, otHours, travelHours, override:{by,at,reason}}
+ *        A day with no punch is `{hours:0}` or simply absent — both are ABSENT.
+ * @returns {object} the line, with every component kept separate so the payslip
+ *        can show the worker how each figure was reached.
+ */
+window.computeWeeklyLine = function (w, days) {
+  w = w || {};
+  const rate       = Math.max(0, Number(w.hourlyRate) || 0);
+  const travelRate = _round2(rate * window.TRAVEL_RATE_FACTOR);
+  const rows = [];
+
+  let regHours = 0, otHours = 0, travelHours = 0;
+  let daysWorked = 0, daysAbsent = 0, daysOverridden = 0;
+
+  for (let i = 0; i < 7; i++) {
+    const d = (days && days[i]) || {};
+    // Negative hours are not a correction, they are bad data — a negative day
+    // would silently reduce the week's pay with nothing on the payslip to show
+    // where it went. Clamp at zero and let the override be the visible route.
+    const hrs = Math.max(0, Number(d.hours)       || 0);
+    const ot  = Math.max(0, Number(d.otHours)     || 0);
+    const tr  = Math.max(0, Number(d.travelHours) || 0);
+    // Ruling 2: an override only counts when it is RECORDED. A reason-less
+    // override is treated as absent rather than quietly paid, so the audit
+    // trail can never be empty while money moved.
+    const ovr = d.override && d.override.reason ? d.override : null;
+    const worked = (hrs + ot + tr) > 0;
+
+    if (worked) daysWorked++; else daysAbsent++;
+    if (ovr) daysOverridden++;
+
+    regHours += hrs; otHours += ot; travelHours += tr;
+    rows.push({
+      day: window.WEEK_DAYS[i],
+      date: d.date || '',
+      hours: hrs, otHours: ot, travelHours: tr,
+      pay: _round2(hrs * rate + ot * rate + tr * travelRate),
+      absent: !worked,
+      override: ovr ? { by: ovr.by || '', at: ovr.at || '', reason: String(ovr.reason) } : null
+    });
+  }
+
+  const regularPay = _round2(regHours    * rate);
+  const otPay      = _round2(otHours     * rate);        // ruling 3 — plain rate
+  const travelPay  = _round2(travelHours * travelRate);  // ruling 3 — half rate
+
+  const a = w.allowances || {};
+  const meal      = Math.max(0, Number(a.meal)      || 0);
+  const transport = Math.max(0, Number(a.transport) || 0);
+  const rent      = Math.max(0, Number(a.rent)      || 0);
+  const allowanceTotal = _round2(meal + transport + rent);
+
+  const gross = _round2(regularPay + otPay + travelPay + allowanceTotal);
+
+  const otherDeductions = Math.max(0, Number(w.deductions)  || 0);
+  // Never collect more cash advance than the pay can cover — the same clamp the
+  // monthly engine applies. A weekly run applies this to everyone at once, so an
+  // unclamped CA would turn into a negative net for a whole crew in one click.
+  const caRequested = Math.max(0, Number(w.caDeduction) || 0);
+  const caDeduction = _round2(Math.min(caRequested, Math.max(0, gross - otherDeductions)));
+  const deductionTotal = _round2(otherDeductions + caDeduction);
+  const net = _round2(gross - deductionTotal);
+
+  return {
+    rate, travelRate, rows,
+    regHours: _round2(regHours), otHours: _round2(otHours), travelHours: _round2(travelHours),
+    regularPay, otPay, travelPay,
+    allowances: { meal, transport, rent }, allowanceTotal,
+    gross,
+    otherDeductions, caDeduction, caShortfall: _round2(caRequested - caDeduction),
+    deductionTotal, net,
+    daysWorked, daysAbsent, daysOverridden
+  };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     vatSplit: window.vatSplit,
@@ -419,6 +537,9 @@ if (typeof module !== 'undefined' && module.exports) {
     computeBreakeven: window.computeBreakeven,
     monthBounds: window.monthBounds,
     computeKpiForMonth: window.computeKpiForMonth,
-    applyPayLineOverride: window.applyPayLineOverride
+    applyPayLineOverride: window.applyPayLineOverride,
+    computeWeeklyLine: window.computeWeeklyLine,
+    WEEK_DAYS: window.WEEK_DAYS,
+    TRAVEL_RATE_FACTOR: window.TRAVEL_RATE_FACTOR
   };
 }
