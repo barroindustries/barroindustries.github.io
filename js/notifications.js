@@ -139,12 +139,20 @@ window.Notifs = (() => {
   // no opts), so this calls it a second time, directly, with the month. A
   // notification from before this shipped has no `month` — the plain
   // personal-finance route (unchanged) still works for those.
-  function _navigateFromNotif(type, taskId, chatId, link, month) {
+  function _navigateFromNotif(type, taskId, chatId, link, month, meetingId) {
     document.getElementById('notif-panel')?.classList.add('hidden');
     document.getElementById('notif-backdrop')?.classList.add('hidden');
     if (type === 'chat_message') {
       if (typeof navigateTo === 'function') navigateTo('chat');
       if (chatId && window.Chat?.openConversation) window.Chat.openConversation(chatId);
+      return;
+    }
+    // Meetings — open the ONE meeting, not the month. A meeting notification
+    // is always about a specific appointment, and landing on the calendar
+    // would make the reader hunt for it.
+    if (type?.startsWith('meeting')) {
+      if (meetingId && typeof window.openMeetingView === 'function') window.openMeetingView(meetingId);
+      else if (typeof navigateTo === 'function') navigateTo('calendar');
       return;
     }
     if (taskId || type?.startsWith('task')) {
@@ -188,6 +196,9 @@ window.Notifs = (() => {
     deadline:{icon:'⏰',accent:'#E8590C'},
     // Chat
     chat_message:{icon:'💬',accent:'#0866FF'},
+    // Meetings — without an entry here these render as a bare bell.
+    meeting_invite:{icon:'📅',accent:'#7048E8'}, meeting_today:{icon:'📅',accent:'#7048E8'},
+    meeting_followup:{icon:'↩️',accent:'#7048E8'},
     // Cash advance / payroll
     cash_advance:{icon:'💸',accent:'#F76707'}, ca_deduct:{icon:'💸',accent:'#F76707'},
     ca_deduct_remind:{icon:'💸',accent:'#F76707'}, ca_deduct_req:{icon:'💸',accent:'#F76707'},
@@ -303,7 +314,7 @@ window.Notifs = (() => {
     _updatePanelHint(unreadCount, items.length);
 
     const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment','chat_message']);
-    const isNavigable = n => n.taskId || n.link || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
+    const isNavigable = n => n.taskId || n.link || n.meetingId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att') || n.type?.startsWith('meeting');
 
     // Many notifications set BOTH an icon AND a title that starts with the same
     // emoji (e.g. icon '💸' + title '💸 New Expense') — which rendered the icon
@@ -329,7 +340,7 @@ window.Notifs = (() => {
       // inlined (not a styles.css class) per this file's existing toast precedent.
       const unreadDot = !n.read ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${tileColor};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>` : '';
       return `
-      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}" data-link="${escHtml(n.link||'')}" data-month="${escHtml(n.month||'')}">
+      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}" data-link="${escHtml(n.link||'')}" data-month="${escHtml(n.month||'')}" data-meeting-id="${escHtml(n.meetingId||'')}">
         <div class="notif-item-main" style="cursor:pointer">
           <div class="notif-item-emoji">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 32)}</div>
           <div class="notif-item-text">
@@ -443,6 +454,7 @@ window.Notifs = (() => {
         const chatId = item?.dataset.chatId || '';
         const link = item?.dataset.link || '';
         const month = item?.dataset.month || '';
+        const meetingId = item?.dataset.meetingId || '';
         // Auto mark as read on view
         if (item?.classList.contains('unread')) {
           item.classList.remove('unread');
@@ -450,7 +462,7 @@ window.Notifs = (() => {
           item.querySelector('.notif-read-btn')?.remove();
           await markRead(uid, item.dataset.id);
         }
-        _navigateFromNotif(type, taskId, chatId, link, month);
+        _navigateFromNotif(type, taskId, chatId, link, month, meetingId);
       });
     });
 
@@ -466,6 +478,7 @@ window.Notifs = (() => {
         const chatId = item.dataset.chatId || '';
         const link = item.dataset.link || '';
         const month = item.dataset.month || '';
+        const meetingId = item.dataset.meetingId || '';
         // Auto mark as read on open
         if (item.classList.contains('unread')) {
           item.classList.remove('unread');
@@ -473,7 +486,7 @@ window.Notifs = (() => {
           item.querySelector('.notif-read-btn')?.remove();
           await markRead(uid, item.dataset.id);
         }
-        _navigateFromNotif(type, taskId, chatId, link, month);
+        _navigateFromNotif(type, taskId, chatId, link, month, meetingId);
       });
     });
   }
@@ -503,7 +516,7 @@ window.Notifs = (() => {
   // payroll disburse notification deep-link to the exact month's payslip
   // (see _navigateFromNotif below). Optional — every existing call site
   // that omits it behaves byte-identically (data.month is simply absent).
-  async function send(targetUid, { title, body, icon = `${emojiIcon('🔔',16)}`, type = 'general', link = null, dedupKey = null, taskId = null, chatId = null, month = null } = {}) {
+  async function send(targetUid, { title, body, icon = `${emojiIcon('🔔',16)}`, type = 'general', link = null, dedupKey = null, taskId = null, chatId = null, month = null, meetingId = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
       // Single-field query — no composite index required
@@ -519,7 +532,8 @@ window.Notifs = (() => {
       ...(dedupKey ? { dedupKey } : {}),
       ...(taskId ? { taskId } : {}),
       ...(chatId ? { chatId } : {}),
-      ...(month ? { month } : {})
+      ...(month ? { month } : {}),
+      ...(meetingId ? { meetingId } : {})
     };
     await db.collection('notifications').doc(targetUid).collection('items').add(data);
 
@@ -1020,7 +1034,7 @@ window.Notifs = (() => {
         navigator.serviceWorker.addEventListener('message', ev => {
           const m = ev.data || {};
           if (m.type !== 'PUSH_NAV') return;
-          try { _navigateFromNotif(m.notifType, m.taskId, m.chatId); }
+          try { _navigateFromNotif(m.notifType, m.taskId, m.chatId, m.link, m.month, m.meetingId); }
           catch (e) { if (m.link && typeof navigateTo === 'function') navigateTo(m.link); }
         });
       }

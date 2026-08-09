@@ -572,7 +572,11 @@ service cloud.firestore {
         // existing Notifs.send*() call site never sets it, so this is purely
         // additive — an old client (or one that never passes month) still
         // satisfies hasOnly() unchanged.
-        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId','senderUid','month'])
+        // 'meetingId' added with the calendar: a meeting invite/reminder must
+        // be able to open the ONE meeting it is about. hasOnly() is a hard
+        // allowlist, so without this the write is rejected outright — and
+        // silently, since Notifs.send does not surface a denial.
+        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId','senderUid','month','meetingId'])
         && request.resource.data.read == false
         && request.resource.data.createdAt == request.time
         && isBoundedString(request.resource.data.get('title', ''), 200)
@@ -585,6 +589,7 @@ service cloud.firestore {
         // default), so it's checked null-OR-bounded-string rather than always a
         // string like the others below.
         && isBoundedString(request.resource.data.get('icon', ''), 32)
+        && isBoundedString(request.resource.data.get('meetingId', ''), 128)
         && isBoundedString(request.resource.data.get('type', ''), 64)
         && (request.resource.data.get('link', null) == null
             || isBoundedString(request.resource.data.get('link', ''), 300))

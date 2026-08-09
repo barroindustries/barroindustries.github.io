@@ -125,7 +125,7 @@ self.addEventListener('notificationclick', event => {
           // App-side follow-up (js/notifications.js, OWNED by another agent):
           // listen for this and route via navigateTo()/Chat.openConversation()
           // the same way _navigateFromNotif() already does for in-app clicks.
-          client.postMessage({ type: 'PUSH_NAV', link, notifType: data.type || '', chatId: data.chatId || '', taskId: data.taskId || '', notifId: data.notifId || '' });
+          client.postMessage({ type: 'PUSH_NAV', link, notifType: data.type || '', chatId: data.chatId || '', taskId: data.taskId || '', meetingId: data.meetingId || '', notifId: data.notifId || '' });
           return client;
         }
       }

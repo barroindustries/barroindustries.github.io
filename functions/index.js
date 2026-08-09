@@ -33,6 +33,7 @@ exports.sendPushOnNotification = functions
     const link   = asStr(raw.link).slice(0, 300);
     const chatId = asStr(raw.chatId).slice(0, 200);
     const taskId = asStr(raw.taskId).slice(0, 200);
+    const meetingId = asStr(raw.meetingId).slice(0, 200);
 
     // Malformed doc (no real content) — nothing worth pushing.
     if (!title.trim() && !body.trim()) {
@@ -134,6 +135,7 @@ exports.sendPushOnNotification = functions
         link:    link,                 // in-app nav target, e.g. 'projects-lifecycle', 'dept:Sales' — same string js/notifications.js already writes on the doc
         chatId:  chatId,               // present for chat message notifs — lets the SW/app open the right conversation
         taskId:  taskId,               // present for task/deadline notifs
+        meetingId: meetingId,          // present for meeting invites/reminders — opens the ONE meeting, not the month
         tag:     tag,                  // OS-level collapse key: per-type by default, per-conversation for chat
       },
       webpush: {
@@ -908,6 +910,68 @@ exports.scheduledDailyDigestChecks = functions
     } catch (e) {
       stats.errors++;
       console.error('[scheduledDailyDigestChecks] deadlines failed:', e.message);
+    }
+
+    // ── 1b. Meetings today (+ follow-ups falling due today) ──────────────
+    // Rides this EXISTING job rather than adding a Scheduler job: it already
+    // runs 08:30 Manila and its notification docs already relay to FCM web
+    // push through sendPushOnNotification, so a reminder reaches a phone with
+    // the app closed at no extra cost.
+    //
+    // Cloud Functions v1 always run in UTC — .timeZone() only decides WHEN
+    // Scheduler fires, not what `new Date()` says inside — so the day window
+    // is built from manilaDate(), never from a raw toISOString().
+    try {
+      const dayStart = new Date(todayStr + 'T00:00:00+08:00');
+      const dayEnd   = new Date(todayStr + 'T23:59:59+08:00');
+      const [startSnap, followSnap] = await Promise.all([
+        db.collection('meetings')
+          .where('status', '==', 'scheduled')
+          .where('startAt', '>=', dayStart).where('startAt', '<=', dayEnd).get(),
+        db.collection('meetings')
+          .where('status', '==', 'scheduled')
+          .where('followUpAt', '>=', dayStart).where('followUpAt', '<=', dayEnd).get()
+          .catch(() => ({ docs: [] }))   // followUpAt is optional; a missing index must not kill the whole digest
+      ]);
+
+      const hhmmManila = (ts) => {
+        try {
+          const d = ts && ts.toDate ? ts.toDate() : new Date(ts);
+          const shifted = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+          return shifted.toISOString().slice(11, 16);
+        } catch (_) { return ''; }
+      };
+
+      // One notification PER PERSON PER MEETING, deduped on a deterministic id
+      // so a re-run is a same-id set() — no onCreate, therefore no second push.
+      const pushMeeting = (doc, isFollowUp) => {
+        const m = doc.data() || {};
+        const invitees = Array.isArray(m.invitees) ? m.invitees : [];
+        const title = String(m.title || 'Meeting').slice(0, 120);
+        invitees.forEach(uid => {
+          if (!uid) return;
+          toNotify.push({
+            ref: db.collection('notifications').doc(uid).collection('items').doc(),
+            notifData: {
+              // PLAIN emoji: this is a notification title/body, a text sink.
+              title: isFollowUp ? '↩ Follow-up today' : '📅 Meeting today',
+              body: isFollowUp
+                ? `Follow up on "${title}".`
+                : `${hhmmManila(m.startAt)} — "${title}"${m.location ? ' · ' + String(m.location).slice(0, 80) : ''}`,
+              icon: '📅',
+              type: isFollowUp ? 'meeting_followup' : 'meeting_today',
+              meetingId: doc.id,
+              link: null,
+              dedupKey: `meet-${isFollowUp ? 'fu' : 'day'}-${doc.id}-${todayStr}`
+            }
+          });
+        });
+      };
+      (startSnap.docs || []).forEach(d => pushMeeting(d, false));
+      (followSnap.docs || []).forEach(d => pushMeeting(d, true));
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] meetings failed:', e.message);
     }
 
     // ── 2. Low stock — port of checkLowStock(uid, role): daily digest to

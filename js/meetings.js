@@ -37,7 +37,7 @@ window.Meetings = (function () {
 
   const esc = (s) => (window.escHtml ? window.escHtml(s == null ? '' : s) : String(s == null ? '' : s));
   const ico = (g, sz) => (window.emojiIcon ? window.emojiIcon(g, sz || 16) : '');
-  const uid = () => (window.currentUser && currentUser.uid) || '';
+  const uid = () => (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || '';
   // The oversight tier — mirrors firestore.rules' isAdmin(). These roles see the
   // whole company's calendar; everyone else sees only what they are invited to.
   const isAdminTier = () => ['president', 'manager', 'secretary'].includes(window.currentRole || '');
@@ -133,7 +133,8 @@ window.Meetings = (function () {
       return m.id;
     }
     body.organizerUid  = me;
-    body.organizerName = (window.userProfile && userProfile.displayName) || (window.currentUser && currentUser.email) || '';
+    body.organizerName = (window.userProfile && userProfile.displayName)
+      || (typeof currentUser !== 'undefined' && currentUser && currentUser.email) || '';
     body.rsvp          = { [me]: 'yes' };   // organising IS accepting
     body.createdAt     = firebase.firestore.FieldValue.serverTimestamp();
     const ref = await db.collection(COLL).add(body);

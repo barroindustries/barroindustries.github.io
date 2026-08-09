@@ -425,6 +425,7 @@ window.Chat = (() => {
     // any upload bookkeeping — this is the backstop that makes the local-preview
     // map incapable of leaking past a thread close.
     _clearLocalPreviews();
+    _clearMeetingSubs();   // a listener must never outlive the thread that opened it
     _uploadTasks.clear(); _uploadProgress.clear();
     _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
     _replyTarget = null; _swipe = null;      // Wave5 M2 — reply-arm + in-flight swipe never survive a thread close
@@ -1264,6 +1265,7 @@ window.Chat = (() => {
           <input type="file" id="chat-camera" accept="image/*" capture="environment" style="display:none"/>
           <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
           <button type="button" class="ms-attach-btn" id="chat-attach-ref" title="Attach a task, quote or bidding">${emojiIcon('link-2',18)}</button>
+          <button type="button" class="ms-attach-btn" id="chat-attach-meeting" title="Schedule a meeting">${emojiIcon('calendar-plus',18)}</button>
         </div>
         <button type="button" class="ms-attach-btn" id="chat-emoji-btn" title="Emoji">${emojiIcon('smile',18)}</button>
         <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…" ${canPost ? '' : 'disabled'}></textarea>
@@ -1359,7 +1361,10 @@ window.Chat = (() => {
     // (Wave2 practicality batch, P0 record-link) is INDEPENDENT of that group
     // — a task/quote/bidding reference is plain metadata, not a competing
     // upload, so it can ride alongside a photo/file/link/text in the same send.
-    let pendingFile = null, pendingLink = null, pendingImages = [], pendingRef = null;
+    // pendingMeeting is independent for the same reason as pendingRef: a
+    // meeting pointer is metadata, not a competing upload, so it rides
+    // alongside text/photo/file in one send.
+    let pendingFile = null, pendingLink = null, pendingImages = [], pendingRef = null, pendingMeeting = null;
     const fileInp = document.getElementById('chat-file');
     const cameraInp = document.getElementById('chat-camera');
     const filePreview = document.getElementById('chat-file-preview');
@@ -1378,10 +1383,12 @@ window.Chat = (() => {
       else if (pendingImages.length) parts.push(`${emojiIcon('camera',12)} ${pendingImages.length} photo${pendingImages.length > 1 ? 's' : ''} selected`);
       else if (pendingLink) parts.push(`${emojiIcon('link',12)} ${escHtml(pendingLink)}`);
       if (pendingRef) parts.push(`${emojiIcon(pendingRef.kind === 'task' ? 'clipboard-list' : pendingRef.kind === 'quote' ? 'file-text' : pendingRef.kind === 'post' ? 'megaphone' : 'landmark', 12)} ${escHtml(pendingRef.label)}`);
+      // innerHTML sink — the title is user-authored, so escHtml is mandatory.
+      if (pendingMeeting) parts.push(`${emojiIcon('calendar-days',12)} ${escHtml(pendingMeeting.title)}`);
       filePreview.innerHTML = parts.join(' &nbsp;·&nbsp; ');
       if (window.lucide) lucide.createIcons({ nodes: [filePreview] });
     };
-    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingImages.length || pendingLink || pendingRef); };
+    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingImages.length || pendingLink || pendingRef || pendingMeeting); };
     // Messenger restyle Fix 5 — the 3 attach controls (file/camera/link)
     // collapse into ONE ➕ button that expands them inline (Messenger-style)
     // when tapped, and auto-collapses once the composer has text (below, in
@@ -1521,6 +1528,30 @@ window.Chat = (() => {
       });
     });
 
+    // Owner request — "Can we make meeting appointments as well on chat".
+    // Scheduling FROM a thread pre-fills the invitee list with that thread's
+    // real members, which for a department channel is NOT conv.participants:
+    // dept channels are created with participants:[] and membership is derived
+    // from each user's department, so reading participants here would invite
+    // NOBODY. _targetsFor is the one function that resolves this correctly.
+    document.getElementById('chat-attach-meeting')?.addEventListener('click', async () => {
+      setAttachExpanded(false);
+      if (typeof window.openMeetingEditor !== 'function') { Notifs.error('Calendar unavailable'); return; }
+      let invitees = [];
+      try { invitees = await _targetsFor(conv); } catch (_) {}
+      invitees = Array.from(new Set(invitees.concat([currentUser.uid])));
+      window.openMeetingEditor(null, { convId: conv.id, invitees }, async (id) => {
+        // Attach a POINTER, never the meeting's mutable state — the deployed
+        // message rules allow exactly three shapes of message update and none
+        // of them would let an RSVP be written onto the message doc.
+        let title = 'Meeting';
+        try { const m = await window.Meetings.get(id); if (m && m.title) title = m.title; } catch (_) {}
+        pendingMeeting = { id, title };
+        updateFilePreview();
+        updateSendState();
+      });
+    });
+
     // Wave5 M3 (J4) — paste an image from the clipboard directly into the
     // composer (desktop). Only preventDefault when an image was actually
     // found, so normal text paste is never intercepted.
@@ -1624,21 +1655,22 @@ window.Chat = (() => {
       const text = (input.value || '').trim();
       const file = pendingFile, link = pendingLink, images = pendingImages.slice();   // Wave5 M3 — snapshot before clearing
       const ref = pendingRef;                               // Wave2 — snapshot before clearing, same pattern
+      const meeting = pendingMeeting;                       // same pattern again
       const replyTo = _replyTarget;                        // Wave5 M2 — captured BEFORE clearing below
       const mentions = _computeMentions(text, conv);        // Wave5 M2
-      if (!text && !file && !link && !images.length && !ref) return;
+      if (!text && !file && !link && !images.length && !ref && !meeting) return;
       _isSending = true;
       sendBtn.disabled = true;
       const clientKey = _newClientKey();
       const savedText = input.value;
       input.value = ''; _autoGrow(input);
-      fileInp.value = ''; pendingFile = null; pendingLink = null; pendingImages = []; pendingRef = null;
+      fileInp.value = ''; pendingFile = null; pendingLink = null; pendingImages = []; pendingRef = null; pendingMeeting = null;
       updateFilePreview();
       _replyTarget = null; _renderReplyChip();               // Wave5 M2 — clears on optimistic send, like the composer text
       document.getElementById('chat-mention-dd')?.classList.add('hidden');
       clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
       updateSendState();
-      _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref });
+      _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref, meeting });
       // Wave1 P1 fix #6 — the optimistic bubble above IS the UI-complete
       // signal; the guard used to stay held until the underlying network
       // write resolved, which offline (or on a stalled upload — put() has no
@@ -1651,7 +1683,7 @@ window.Chat = (() => {
       _isSending = false;
       updateSendState();
       try {
-        await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions, ref });
+        await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions, ref, meeting });
       } catch (e) {
         // v14 chat re-audit fix — canceled via the pending bubble's ✕ while
         // the send was in flight (_cancelPendingMessage): it's already gone
@@ -1681,7 +1713,8 @@ window.Chat = (() => {
         else if (images.length) pendingImages = images;
         else if (link) pendingLink = link;
         if (ref) pendingRef = ref;
-        if (file || images.length || link || ref) updateFilePreview();
+        if (meeting) pendingMeeting = meeting;
+        if (file || images.length || link || ref || meeting) updateFilePreview();
         if (replyTo) { _replyTarget = replyTo; _renderReplyChip(); }   // Wave5 M2 — restore reply-arm on failure too
         _saveDraft(conv.id, savedText);
         _markPendingFailed(clientKey);
@@ -1917,6 +1950,7 @@ window.Chat = (() => {
     _pending.forEach(_revokePendingPreviews);
     _pending = [];
     _clearLocalPreviews();
+    _clearMeetingSubs();   // a listener must never outlive the thread that opened it
     _uploadTasks.clear(); _uploadProgress.clear();
     _replyTarget = null;   // Wave5 M2 — a reply armed in a PREVIOUS thread never leaks into this one
     _initialMarkReadPending = true;   // Wave1 P1 fix #7 — see the messages listener below
@@ -2181,7 +2215,7 @@ window.Chat = (() => {
   // writing into the wrong conversation's subcollections. For every M1 caller
   // conv.id === _openConvId is always true (conv came from _openConv itself),
   // so nothing changes for them.
-  async function sendMessage({ text, file, images, link, clientKey, replyTo, forwardedFrom, mentions, ref,
+  async function sendMessage({ text, file, images, link, clientKey, replyTo, forwardedFrom, mentions, ref, meeting,
                                 conv: convParam, fileUrl: preFileUrl, fileName: preFileName, fileSource: preFileSource,
                                 media: preMedia }) {
     const conv = convParam || _openConv; if (!conv) return;
@@ -2294,6 +2328,16 @@ window.Chat = (() => {
       msgDoc.ref = { kind: ref.kind, id: ref.id, label: (ref.label || 'Linked record').slice(0, 140) };
       if (ref.collection) msgDoc.ref.collection = ref.collection;
     }
+    // Meeting pointer — an ID and a title snapshot, nothing mutable. RSVP and
+    // times are read live from meetings/{id}; they can NOT live here, because
+    // the deployed message rules allow exactly three shapes of update (author
+    // edit with authorId/createdAt frozen, admin tombstone, reactions-only) and
+    // an rsvp write onto a message doc would be denied outright.
+    // OMITTED entirely when absent — that is this file's stated backward-compat
+    // contract, so there is no migration and no message-rules change.
+    if (meeting && meeting.id) {
+      msgDoc.meeting = { id: meeting.id, title: String(meeting.title || 'Meeting').slice(0, 140) };
+    }
     await db.collection('conversations').doc(conv.id).collection('messages').add(msgDoc);
     // v14 chat re-audit fix — the Shared Media page (_openMediaTab) now
     // caches its up-to-500-message fetch; invalidate that cache key eagerly
@@ -2327,6 +2371,9 @@ window.Chat = (() => {
                          // HTML, so emojiIcon() (which returns `<i data-lucide>`)
                          // would display as literal markup. See the block
                          // comment above.
+                         // PLAIN emoji — see the block comment above. This
+                         // string is conv.lastMessageText AND the FCM push body.
+                         : msgDoc.meeting ? `📅 ${msgDoc.meeting.title}`
                          : (msgDoc.ref ? `${msgDoc.ref.kind === 'post' ? '📣' : '🔗'} ${msgDoc.ref.label}` : '');
     // Second write — passes the affectedKeys([lastMessage*,reads]) member
     // branch. Wave5 M4 (J9): the sender's own reads.{uid} rides in the SAME
@@ -2604,9 +2651,13 @@ window.Chat = (() => {
       const orig = _earlier.find(x => x.id === m.replyTo.mid) || _msgs.find(x => x.id === m.replyTo.mid);
       if (orig) q = '|q:' + (orig.deleted ? 'x' : (orig.text || '').slice(0, 80));
     }
+    // Same reasoning as the quote above, for the meeting card: the pointer on
+    // the message never changes, so without this the card's time and RSVP
+    // counts would be frozen at send time forever.
+    const mt = m.meeting && m.meeting.id ? '|m:' + _meetingRev(m.meeting.id) : '';
     return JSON.stringify(m.reactions || {}) + '|' + (m.text || '') + '|' +
       (m.deleted ? 1 : 0) + '|' + (m.editedAt ? 1 : 0) + '|' + (m.fileUrl || '') + '|' +
-      JSON.stringify(m.media || []) + q;
+      JSON.stringify(m.media || []) + q + mt;
     // replyTo/forwardedFrom/mentions THEMSELVES deliberately excluded — like
     // createdAt/authorId, they're set once at message CREATE and never
     // mutated by any update() in this file, so they can never change for an
@@ -2655,6 +2706,76 @@ window.Chat = (() => {
   // Reuses .ms-file-chip's existing visual language (rounded pill, icon +
   // label) rather than adding new CSS — a plain <div role="button"> instead
   // of an <a> since this triggers an in-app opener (_openRefChip), not a URL.
+  // ── Meeting cards: keeping them LIVE ──────────────────────────────────
+  // The message carries only {id, title} and never changes, so _patchThread —
+  // which repaints a row only when _msgRev(m) changes — would freeze the card
+  // at whatever the counts were when it was sent. Same shape of problem as a
+  // reply quote whose original gets edited, so the same solution: hold the
+  // live doc in a cache, subscribe to it, and fold its state into the row's
+  // rev hash. One listener per visible meeting (not an `in` query) because a
+  // multi-doc query fails WHOLESALE if the reader may not see one of the docs,
+  // and a thread can easily contain a meeting you were never invited to.
+  const _meetingCache = new Map();     // id -> doc data, or null when unreadable
+  const _meetingSubs  = new Map();     // id -> unsubscribe
+  const MEETING_SUB_CAP = 12;
+  function _meetingRev(id) {
+    const m = _meetingCache.get(id);
+    if (m === undefined) return '?';
+    if (m === null) return 'x';
+    return (m.status || '') + ':' + (m.title || '') + ':' +
+      (m.startAt && m.startAt.toMillis ? m.startAt.toMillis() : 0) + ':' +
+      JSON.stringify(m.rsvp || {});
+  }
+  function _syncMeetingSubs(list) {
+    const want = [];
+    (list || []).forEach(m => { if (m && m.meeting && m.meeting.id && want.indexOf(m.meeting.id) === -1) want.push(m.meeting.id); });
+    const keep = new Set(want.slice(-MEETING_SUB_CAP));   // newest messages win the cap
+    _meetingSubs.forEach((un, id) => { if (!keep.has(id)) { try { un(); } catch (_) {} _meetingSubs.delete(id); } });
+    keep.forEach(id => {
+      if (_meetingSubs.has(id)) return;
+      try {
+        const un = db.collection('meetings').doc(id).onSnapshot(
+          d => { _meetingCache.set(id, d.exists ? d.data() : null); _renderThread(); },
+          _ => { _meetingCache.set(id, null); _renderThread(); }   // denied/offline — say so, never guess
+        );
+        _meetingSubs.set(id, un);
+      } catch (_) { _meetingCache.set(id, null); }
+    });
+  }
+  function _clearMeetingSubs() {
+    _meetingSubs.forEach(un => { try { un(); } catch (_) {} });
+    _meetingSubs.clear(); _meetingCache.clear();
+  }
+  // ONE markup, TWO callers (_renderMessagePart and _renderPendingBubble) —
+  // the same contract _refChipHtml/_replyQuoteHtml follow.
+  function _meetingCardHtml(mt) {
+    if (!mt || !mt.id) return '';
+    const live = _meetingCache.get(mt.id);
+    const M = window.Meetings;
+    let when = '', where = '', counts = '', cancelled = false;
+    if (live && M) {
+      const h = M._h;
+      when = `${h.dayOf(live.startAt)} · ${h.hhmm(live.startAt)}` + (live.endAt ? '–' + h.hhmm(live.endAt) : '');
+      where = live.location || '';
+      const c = { yes: 0, no: 0, maybe: 0 };
+      Object.values(live.rsvp || {}).forEach(v => { if (c[v] != null) c[v]++; });
+      counts = `${c.yes} going · ${c.maybe} maybe · ${c.no} declined`;
+      cancelled = live.status === 'cancelled';
+    } else if (live === null) {
+      when = 'Not shown — you are not on this meeting';
+    }
+    const title = (live && live.title) || mt.title || 'Meeting';
+    return `<div class="ms-file-chip chat-meeting-tap" role="button" tabindex="0"
+        style="margin-top:5px;cursor:pointer;flex-direction:column;align-items:flex-start;gap:2px"
+        data-meeting-id="${escHtml(mt.id)}">
+      <div style="display:flex;align-items:center;gap:6px">${emojiIcon('calendar-days',14)}<span style="font-weight:700">${escHtml(title)}</span></div>
+      ${cancelled ? `<span style="font-size:11px;color:var(--danger,#c00);font-weight:700">Cancelled</span>` : ''}
+      ${when   ? `<span style="font-size:11px;opacity:.85">${escHtml(when)}</span>` : ''}
+      ${where  ? `<span style="font-size:11px;opacity:.85">${escHtml(where)}</span>` : ''}
+      ${counts ? `<span style="font-size:11px;opacity:.7">${escHtml(counts)}</span>` : ''}
+    </div>`;
+  }
+
   function _refChipHtml(ref) {
     if (!ref || !ref.kind || !ref.id) return '';
     // 'post' uses the SAME icon NAV_REGISTRY gives the Posts page ('megaphone',
@@ -2980,7 +3101,7 @@ window.Chat = (() => {
     let textHtml = m.text ? _highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions) : '';
     if (textHtml && _threadSearchQ.trim()) textHtml = _highlightSearchMatch(textHtml, _threadSearchQ, m.id === _threadSearchCurrentMid);
     // Wave2 practicality batch (P0) — record-link chip (task/quote/bidding).
-    const refHtml = _refChipHtml(m.ref);
+    const refHtml = _refChipHtml(m.ref) + _meetingCardHtml(m.meeting);
 
     const isLast = idx === list.length - 1;
 
@@ -3054,6 +3175,7 @@ window.Chat = (() => {
       // consistent chrome rather than a bespoke placeholder.
       return `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>No messages yet</h4><p>Say hello!</p></div>`;
     }
+    _syncMeetingSubs(list);   // keeps every visible meeting card live
     const showEarlierBtn = !_earlierCapped && (_earlier.length + _msgs.length) >= PAGE_SIZE;
     const isFirstRender = _lastMsgIds === null;
     const prevIds = _lastMsgIds || new Set();
@@ -3592,6 +3714,8 @@ window.Chat = (() => {
       // Wave2 practicality batch (P0) — record-link chip tap.
       const refChip = e.target.closest('.chat-ref-tap');
       if (refChip) { e.stopPropagation(); _openRefChip({ kind: refChip.dataset.kind, id: refChip.dataset.id, collection: refChip.dataset.collection || null, label: refChip.dataset.label || '' }); return; }
+      const mtCard = e.target.closest?.('.chat-meeting-tap');
+      if (mtCard) { e.stopPropagation(); if (typeof window.openMeetingView === 'function') window.openMeetingView(mtCard.dataset.meetingId); return; }
       // Wave5 M3 (J1) — any message image (legacy single fileUrl OR a new
       // media-grid tile) opens the in-app lightbox instead of the old
       // window.open(). Checked BEFORE the generic bubble-tap-toggle below so
@@ -3925,7 +4049,7 @@ window.Chat = (() => {
   function _newClientKey() {
     return (currentUser?.uid || 'u') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   }
-  function _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref }) {
+  function _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref, meeting }) {
     let previewUrl = null;
     if (file && /^image\//.test(file.type || '')) {
       try { previewUrl = URL.createObjectURL(file); } catch (_) {}
@@ -3941,7 +4065,8 @@ window.Chat = (() => {
     // (it's plain data, already-existing-record metadata — no upload needed,
     // so the chip is tappable even before the message doc lands).
     _pending.push({ clientKey, text: text || '', file: file || null, images: images || [], previewUrl, previewUrls,
-      link: link || null, status: 'sending', replyTo: replyTo || null, ref: ref || null });
+      link: link || null, status: 'sending', replyTo: replyTo || null, ref: ref || null,
+      meeting: meeting || null });
     _renderThread();
   }
   function _markPendingFailed(clientKey) {
@@ -4071,6 +4196,8 @@ window.Chat = (() => {
       // something that needs the send to land first.
       const refChip = e.target.closest('.chat-ref-tap');
       if (refChip) { e.stopPropagation(); _openRefChip({ kind: refChip.dataset.kind, id: refChip.dataset.id, collection: refChip.dataset.collection || null, label: refChip.dataset.label || '' }); return; }
+      const mtCard = e.target.closest?.('.chat-meeting-tap');
+      if (mtCard) { e.stopPropagation(); if (typeof window.openMeetingView === 'function') window.openMeetingView(mtCard.dataset.meetingId); return; }
       // Wave2 practicality batch (P1) — tap-to-retry also covers the offline-
       // queued state (manual retry alongside the automatic 'online' one).
       const failed = e.target.closest('.ms-bubble-failed, .ms-bubble-offline');
@@ -4132,7 +4259,7 @@ window.Chat = (() => {
     // Wave2 practicality batch (P0) — same ref-chip markup/contract the
     // confirmed-message renderer uses (see _renderMessagePart) so both wire
     // through the SAME .chat-ref-tap delegated click.
-    const refHtml = _refChipHtml(p.ref);
+    const refHtml = _refChipHtml(p.ref) + _meetingCardHtml(p.meeting);
     return `
       <div class="ms-row ms-row-mine ms-grp-single">
         <div class="ms-bubble-wrap" style="align-items:flex-end">
