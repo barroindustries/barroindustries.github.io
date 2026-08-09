@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.112';
+window.APP_VERSION = '14.0.113';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -597,6 +597,15 @@ window.NAV_REGISTRY = {
       { key:'company',  icon:'building-2',   label:'Company',       page:'company' },
       { deptLoop:true },
       { key:'team',        icon:'users',       label:'Team',         page:'team-directory', section:true, sectionLabel:'Management' },
+      // Owner request 2026-08-09 — "Allow accountant access to hr".
+      // renderHR (js/screens/hr.js) ALREADY admitted the finance role; what was
+      // missing was any way in. The Accountant uses this 'staff' sidebar, whose
+      // only HR route was the {deptLoop} block — i.e. HR appeared solely if they
+      // happened to be assigned to the HR department. So the screen existed and
+      // was unreachable. Payroll inside it is separately gated on isMoneyPriv(),
+      // which the Accountant has; account CREATION stays president/manager
+      // (canAccounts), matching renderTeam.
+      { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR', when:'isFinanceRole' },
       { key:'attendance',  icon:'calendar',    label:'Attendance',   page:'attendance' },
       { key:'files',       icon:'folder',      label:'Files',        page:'files' },
       { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory', when:'hasProductionDept' },

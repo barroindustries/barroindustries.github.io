@@ -180,6 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // branch stays self-contained regardless of future edits earlier in
           // the success path above it.
           window._navDepth = 0;
+          window._navFwd = 0;
           await auth.signOut();
           showLogin();
           // Keep form wrap visible (not role picker) so the error element is shown
@@ -1642,7 +1643,7 @@ function _navPredicateOk(name) {
 }
 // Departments — appear ABOVE the Management section, in the 'staff' sidebar
 // variant only. The Accountant (finance role) always sees the Finance
-// department even when they isn't explicitly assigned to it; Finance is them one
+// department even when not explicitly assigned to it; Finance is their one
 // department (Sales Orders, Payroll, Ledger, etc. all live inside the Finance
 // hub as tabs). Per-user data, not static nav config — NAV_REGISTRY's 'staff'
 // list marks WHERE this goes with a `{deptLoop:true}` placeholder; this is
@@ -2561,8 +2562,18 @@ function updateNavBackBtn() {
   const showBack = ((window._navDepth||0) > 0 && window.currentPage !== 'dashboard');
   if (b) b.style.display = showBack ? '' : 'none';
   if (m) m.style.display = '';
+  // Desktop Back/Forward (owner request 2026-08-09). Always PRESENT so the
+  // control doesn't jump around the topbar as you navigate — only enabled or
+  // greyed out, the way browser chrome behaves.
+  const db = document.getElementById('nav-hist-back');
+  const df = document.getElementById('nav-hist-fwd');
+  if (db) db.disabled = !((window._navDepth||0) > 0);
+  if (df) df.disabled = !((window._navFwd||0) > 0);
 }
 window.navBack = function() { history.back(); };   // the top-bar chevron === device Back
+// Desktop Forward. Deliberately the real History API and not a private stack:
+// the browser's own Forward, Alt+→ and this button must all mean one thing.
+window.navForward = function() { history.forward(); };
 
 // ── Route-aware skeleton shape (v14.0.68) ─────────
 // navigateTo() has always flashed skeletonHtml('rows') — list-item anatomy,
@@ -2618,6 +2629,10 @@ function navigateTo(page, opts) {
     const useReplace = opts.replace || absorbStale;
     const st = { t:'page', page, subtab, d: (useReplace ? (window._navDepth||0) : (window._navDepth = (window._navDepth||0) + (page===window.currentPage?0:1))) };
     const url = hashFor(page, subtab);
+    // A genuine push DISCARDS everything ahead of the cursor — that is what the
+    // History API does, so the Forward button must go dead with it. (replace
+    // rewrites the current entry and leaves the forward entries intact.)
+    if (!useReplace) window._navFwd = 0;
     try { useReplace ? history.replaceState(st,'',url) : history.pushState(st,'',url); } catch(_){}
   }
 
@@ -4351,9 +4366,22 @@ window.devCheckStacking = function () {
 window.addEventListener('popstate', (e) => {
   // Overlay open? A Back press dismisses the top overlay and consumes the event.
   if (window.Overlay && window.Overlay.isOpen()) { window.Overlay._popOne(); return; }
-  window._navDepth = Math.max(0, (window._navDepth||0) - 1);
+  // DIRECTION MATTERS. This used to decrement unconditionally, which reads a
+  // FORWARD press as a step backwards: depth drifts down until the back chevron
+  // disappears on a page you can still go back from. Every page entry carries
+  // its own depth (`d`, pushed above), so read the direction off the entry the
+  // browser just restored rather than guessing. Entries without `d` (older
+  // sessions, a hand-edited hash) keep the previous assume-back behaviour.
+  const prevDepth = window._navDepth || 0;
   const s = e.state || parseHash();
   const st = (s.t === 'overlay') ? s.base : s;        // stale overlay entry → render its underlying page
+  const newDepth = (st && typeof st.d === 'number') ? st.d : Math.max(0, prevDepth - 1);
+  window._navDepth = newDepth;
+  // Forward availability is not observable from the History API, so track it:
+  // stepping back banks that many forward steps, stepping forward spends them.
+  window._navFwd = (newDepth < prevDepth)
+    ? (window._navFwd || 0) + (prevDepth - newDepth)
+    : Math.max(0, (window._navFwd || 0) - (newDepth - prevDepth));
   navigateTo(st.page || 'dashboard', { subtab: st.subtab || null, fromHistory: true });
 });
 window.addEventListener('hashchange', () => {         // user typed/edited the URL hash

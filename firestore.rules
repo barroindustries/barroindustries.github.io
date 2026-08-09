@@ -25,6 +25,14 @@ service cloud.firestore {
     // read-only money-request carve-outs below (ruling 1) and for the two
     // department gates that must survive a profile edit (ruling 3).
     function isSecretary(){ return getRole() == 'secretary'; }
+    // The two departments closed to the Corporate Secretary, as ONE expression.
+    // A dept-scoped surface that admits isAdmin() admits the secretary, because
+    // isAdmin() lists them — so every such surface needs this said explicitly.
+    // Used by the dept CHAT CHANNELS below: the client stopped listing
+    // # Finance and # IT for them on 2026-08-09, but the rules still let those
+    // two threads be read and posted to by id, which is the layer that counts.
+    function deptOpenToSecretary(d) { return !(d == 'Finance' || d == 'IT'); }
+    function deptChannelOpen(d) { return !isSecretary() || deptOpenToSecretary(d); }
     function isPartner()     { return getRole() == 'partner'; }
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
@@ -844,6 +852,7 @@ service cloud.firestore {
       function memberOfDoc() {
         return (request.auth.uid in resource.data.get('participants', []))
           || (resource.data.get('type','') == 'dept' && !isPartner()
+              && deptChannelOpen(resource.data.get('department',''))
               && (isAdmin() || inDept(resource.data.get('department',''))));
       }
       // Membership via re-read, for subcollections (mirrors taskAssignee()).
@@ -851,6 +860,7 @@ service cloud.firestore {
         let c = get(/databases/$(database)/documents/conversations/$(convId)).data;
         return (request.auth.uid in c.get('participants', []))
           || (c.get('type','') == 'dept' && !isPartner()
+              && deptChannelOpen(c.get('department',''))
               && (isAdmin() || inDept(c.get('department',''))));
       }
 
@@ -866,6 +876,7 @@ service cloud.firestore {
           && request.auth.uid in request.resource.data.get('participants', []) )
         ||
         ( request.resource.data.get('type','') == 'dept' && !isPartner()
+          && deptChannelOpen(request.resource.data.get('department',''))
           && (isAdmin() || inDept(request.resource.data.get('department','')))
           && convId == 'dept_' + request.resource.data.get('department','')
           && request.resource.data.get('participants', []).size() == 0 )

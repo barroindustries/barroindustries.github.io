@@ -803,6 +803,23 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
    Wrapping in @media (hover:hover) is a no-op for mouse users. */
 @media (hover:hover) { .menu-toggle:hover { background: var(--s2); color: var(--text); } }
 
+/* ── Desktop Back / Forward (owner request 2026-08-09) ──
+   Browser-chrome semantics in the app's own chrome, for the installed PWA and
+   for anyone who navigates from the sidebar rather than the address bar. Both
+   buttons drive the real History API (navBack/navForward in js/app.js), so
+   they stay in lockstep with the browser's own controls and with the mobile
+   chevron. Hidden under 768px, where #topbar itself is display:none. */
+.nav-hist { display: flex; align-items: center; gap: 2px; margin-right: 4px; }
+.nav-hist-btn {
+  background: transparent; border: none; border-radius: var(--r-xs);
+  color: var(--text); font-size: 1.6rem; line-height: 1; cursor: pointer;
+  padding: 4px 10px; transition: background var(--t1), color var(--t1), opacity var(--t1);
+}
+.nav-hist-btn[disabled] { opacity: .32; cursor: default; pointer-events: none; }
+@media (hover:hover) { .nav-hist-btn:not([disabled]):hover { background: var(--s2); } }
+.nav-hist-btn:not([disabled]):active { background: var(--s3, var(--s2)); }
+@media (max-width: 768px) { .nav-hist { display: none; } }
+
 .topbar-logo { display: flex; align-items: center; gap: 10px; flex: 1; }
 
 /* ID-card-style logo pill */

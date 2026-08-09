@@ -197,7 +197,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.112 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.113 · Barro Industries</div>
   </div>
 </div>
 
@@ -210,6 +210,17 @@
   <header class="topbar" id="topbar">
     <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"><span aria-hidden="true">☰</span></button>
     <button class="menu-toggle" id="nav-back-btn" aria-label="Back" style="display:none" onclick="navBack()"><span aria-hidden="true">‹</span></button>
+    <!-- Owner request 2026-08-09 — "there should also be a back and forward
+         button on desktop". #nav-back-btn above cannot serve: it borrows
+         .menu-toggle, which is display:none outside the mobile breakpoint, and
+         there has never been a Forward anywhere. Desktop-only (the mobile
+         topbar is display:none and its controls are relocated into the top
+         strip by placeTopbarActions). Disabled state is driven by
+         updateNavBackBtn() in js/app.js. -->
+    <div class="nav-hist" id="nav-hist" role="group" aria-label="Page history">
+      <button type="button" class="nav-hist-btn" id="nav-hist-back" aria-label="Back" title="Back" disabled onclick="navBack()"><span aria-hidden="true">‹</span></button>
+      <button type="button" class="nav-hist-btn" id="nav-hist-fwd"  aria-label="Forward" title="Forward" disabled onclick="navForward()"><span aria-hidden="true">›</span></button>
+    </div>
     <div class="topbar-logo-area">
       <div class="topbar-logo-card">
         <img src="icons/barro-kitchens.png" alt="Barro Industries" class="topbar-logo-img"
