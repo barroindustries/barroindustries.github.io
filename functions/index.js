@@ -216,7 +216,11 @@ const PLACEHOLDER_ADOPTABLE_ROLES = ['employee', 'agent'];
 // noPrivilegedDeptOnCreate() in firestore.rules. A placeholder that could not
 // legitimately have been CREATED carrying a privileged department must not be
 // ADOPTED carrying one either, or the claim path becomes the way around the rule.
-const PLACEHOLDER_PRIVILEGED_DEPTS = ['Finance', 'Design', 'Ventures'];
+// 'IT' added 2026-08-09 alongside noPrivilegedDeptOnCreate() in firestore.rules.
+// These two lists MUST stay identical: a placeholder that could not legitimately
+// have been CREATED carrying a privileged department must not be ADOPTED carrying
+// one either, or the claim path becomes the way around the rule.
+const PLACEHOLDER_PRIVILEGED_DEPTS = ['Finance', 'Design', 'Ventures', 'IT'];
 // Explicit copy allowlist. The old code spread the whole doc ({ ...p }), which
 // would carry ANY field an attacker had parked on it — hrManagedAccount,
 // username, removed, salary — onto the new account. Only these are adopted;

@@ -413,6 +413,14 @@ label.check-row { display: inline-flex; align-items: center; gap: 8px; min-heigh
   background: rgba(48,209,88,0.08); border: 1px solid rgba(48,209,88,0.18);
   border-radius: var(--r-sm);
 }
+/* Session-persistence disclosure on the login screen (#login-persist-note).
+   Amber, not red: "you won't stay signed in" is a consequence the user has to
+   be told about before they hit Sign In, but it isn't a failed action. */
+.persist-note {
+  color: #F0B429; font-size: var(--fs-sm); padding: 8px 12px;
+  background: rgba(240,180,41,0.08); border: 1px solid rgba(240,180,41,0.20);
+  border-radius: var(--r-sm); margin-bottom: 10px; line-height: 1.4;
+}
 .spinner {
   display: inline-block; width: 16px; height: 16px;
   border: 2px solid rgba(255,255,255,0.25);

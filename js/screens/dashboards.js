@@ -1318,7 +1318,27 @@ async function renderSecretaryDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = window.skeletonHtml('cards');
   try {
-    const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
+    // ⚠ 2026-08-09 — same silent-zero fix as the Approvals screen. safeGet()
+    // swallowed a denied query into {size:0}, so a queue this role cannot read
+    // rendered as "0 pending" — and the rows list below filters zeros out
+    // entirely, so it vanished without trace on the one screen whose job is to
+    // surface what needs attention. The denial is now recorded and NAMED below.
+    const _denied = [];
+    // Human names for the banner — `label` is the collection id, which is what
+    // _dashWarnOnce keys its dedupe on, so the two must not be conflated.
+    const _QUEUE_NAMES = {
+      approval_requests:'Quote / ROA approvals', cash_advances:'Cash advances',
+      attendance_extensions:'Attendance extensions', signup_requests:'Sign-ups',
+      leave_requests:'Leave requests', finance_delete_requests:'Finance delete requests',
+      payroll_delete_requests:'Payroll delete requests', tasks:'Tasks for review',
+      bs_quotes:'BS quote deletions', bk_quotes:'BK quote deletions',
+      clients:'Client deletions', purchase_requisitions:'Purchase requisitions',
+      pending_raises:'Raise requests'
+    };
+    const safeGet = async (q, label) => {
+      try { return await q.get(); }
+      catch(e) { _dashWarnOnce(label || 'query', e); _denied.push(_QUEUE_NAMES[label] || label || 'a queue'); return { docs:[], size:0, failed:true }; }
+    };
     const todayStr = bizDate();
     const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap] = await Promise.all([
       dbCachedGet('users',       () => db.collection('users').get(), 30000),
@@ -1371,6 +1391,7 @@ async function renderSecretaryDashboard() {
       <div class="page-header"><h2>${emojiIcon('🗂',20)} Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
       <div id="live-clock" class="live-clock-line"></div>
       <div class="alert-banner" style="cursor:default"><span>${emojiIcon('👁',16)} <strong>Oversight role.</strong> You can review everything across the company. The President approves all requests, and deletions of key records require President approval.</span></div>
+      ${_denied.length?`<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Not counted here:</strong> ${escHtml(_denied.join(', '))} — outside your access, so these are omitted rather than shown as 0.</span></div>`:''}
       ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
       ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>${emojiIcon('🗑',16)} <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
@@ -1384,7 +1405,10 @@ async function renderSecretaryDashboard() {
           <div class="card-header"><h3>Pending Approval Queue</h3><button class="btn-primary btn-sm" onclick="navigateTo('approvals')">Open Approvals</button></div>
           <div class="card-body" style="padding:0">
             ${!rows.length
-              ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No pending requests — all clear.</p></div>`
+              ? (_denied.length
+                  // Never claim "all clear" for queues we were not allowed to check.
+                  ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🔒',44)}</div><p>Nothing pending in the queues you can see.<br><span style="font-size:12px;color:var(--text-muted)">${escHtml(_denied.join(', '))} not included.</span></p></div>`
+                  : `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No pending requests — all clear.</p></div>`)
               : rows.map(([label,n,ic])=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)"><span style="font-size:16px">${ic}</span><span style="flex:1;font-size:13px">${label}</span><span class="badge badge-orange">${n}</span></div>`).join('')}
           </div>
         </div>
@@ -4424,7 +4448,16 @@ async function renderDepartments() {
   const c = document.getElementById('page-content');
 
   // All known departments from config + Brilliant Steel
-  const allDepts = Object.keys(DEPARTMENTS).filter(k => k !== 'Brilliant Steel');
+  // 2026-08-09 — the Corporate Secretary does not see Finance or IT here (owner
+  // ruling). renderDeptModule (js/app.js) carries the same check, so this grid
+  // filter is presentation only: a hand-typed dept: link is still refused there,
+  // and firestore.rules is what actually denies the data.
+  const _blocked = (window.currentRole === 'secretary')
+    ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
+    : [];
+  const allDepts = Object.keys(DEPARTMENTS)
+    .filter(k => k !== 'Brilliant Steel')
+    .filter(k => !_blocked.includes(k));
 
   c.innerHTML = `
     <div class="page-header">

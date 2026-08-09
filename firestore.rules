@@ -18,28 +18,70 @@ service cloud.firestore {
     // manager-level access. It is intentionally NOT in isPresident(), so deletions of
     // key records (finance, payroll, ledger — all gated on isPresident below) still
     // require the President's approval, exactly as for managers.
-    function isAdmin()          { return getRole() in ['president', 'manager', 'secretary']; }
-    function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'secretary', 'finance']; }
-    function isPresident()      { return getRole() == 'president'; }
-    // v12 WS19 — secretary two-tier: secretary keeps isAdmin()/isFinanceOrAdmin()
-    // for the minor/oversight surface (memos, SOPs, sign-ups, minor approvals),
-    // but money-moving and identity-changing blocks use these narrower helpers
-    // instead so secretary can act on neither, while president/manager (and
-    // finance, for the money helper) still can.
+    function isAdmin()   { return getRole() in ['president', 'manager', 'secretary']; }
+    function isPresident(){ return getRole() == 'president'; }
+    // Owner ruling 2026-08-08: the Corporate Secretary may reach every department
+    // EXCEPT Finance and IT. isSecretary() is the explicit hook for the three
+    // read-only money-request carve-outs below (ruling 1) and for the two
+    // department gates that must survive a profile edit (ruling 3).
+    function isSecretary(){ return getRole() == 'secretary'; }
     function isPartner()     { return getRole() == 'partner'; }
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
 
+    // ── isOpsAdmin() — THE SPLIT OF THE OLD 4-ROLE HELPER (2026-08-09) ───────
+    // The deleted helper (president|manager|secretary|finance — see
+    // SECRETARY-SCOPE-SPEC.md for its name and full history) was ONE NAME FOR
+    // TWO UNRELATED TIERS. Of its 42 call
+    // sites only 17 were about money; the other 25 were attendance, tasks,
+    // leave, holidays, KPI, strategy notes, system health and ID-minting — i.e.
+    // the Corporate Secretary's actual job. Two of those 25 are load-bearing:
+    // `tasks` update is the ONLY non-assignee update clause (there is no
+    // isAdmin() fallback on that verb) and `leave_requests` update IS the
+    // approve/reject verb. So simply dropping 'secretary' from the old helper
+    // would not have SCOPED the role, it would have DELETED it.
+    //
+    // Therefore: SPLIT, don't narrow.
+    //   • isOpsAdmin()  — the OLD BODY VERBATIM. Company-oversight surface.
+    //                     25 sites. No principal gains or loses anything here.
+    //   • isMoneyAdmin()— the pre-existing money tier. The 17 finance sites now
+    //                     point here. (Verified: the old set minus
+    //                     'secretary' IS isMoneyAdmin() exactly, so narrowing the
+    //                     old body in place would have produced a duplicate set
+    //                     and a permanent drift hazard.)
+    //
+    // The old helper is DELETED rather than left as an alias, on
+    // purpose: a missed call site is then an UNKNOWN FUNCTION and
+    // `firebase deploy --only firestore:rules` REFUSES TO COMPILE. The compiler
+    // is the test suite for a change that has no test suite. The old NAME is
+    // deliberately absent from this file, comments included, so that grepping
+    // this file for it is an exact, zero-judgement check (expected count: 0)
+    // rather than one a reader has to eyeball prose for. The name and the full
+    // 42-site classification live in SECRETARY-SCOPE-SPEC.md.
+    function isOpsAdmin()    { return getRole() in ['president', 'manager', 'secretary', 'finance']; }
+
     // Member of the Finance DEPARTMENT (by string `department` or array `departments`),
     // regardless of their role. Lets a Finance-dept staffer record sales income even if
     // their role isn't the special 'finance' role.
+    //
+    // ⚠ OWNER RULING 3 (2026-08-08) — THE ROLE DECISION ALWAYS WINS.
+    // canFinance() = isMoneyAdmin() || isFinanceDept(). Without the role test
+    // below, giving the Corporate Secretary's profile the Finance department —
+    // one dropdown in People & Roles, no rules change, no review — would hand
+    // back the ENTIRE money tier (ledger, journals, rollups, finance_config,
+    // sales_orders update, finance_delete_requests …) and silently evaporate
+    // the carve-out. The exclusion therefore lives HERE, inside the boundary,
+    // not in the UI. It reads `role` off the SAME user doc this function
+    // already fetched, so it costs no extra get().
     function isFinanceDept() {
       let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return u.get('department', '') == 'Finance' || u.get('departments', []).hasAny(['Finance']);
+      return u.get('role', null) != 'secretary'
+        && (u.get('department', '') == 'Finance' || u.get('departments', []).hasAny(['Finance']));
     }
     // Anyone allowed to operate the books: money-tier role OR Finance-dept member.
-    // v12 WS19: was isFinanceOrAdmin()||isFinanceDept() — narrowed to isMoneyAdmin()
-    // so 'secretary' no longer has ledger/journal write access via this helper.
+    // v12 WS19: was the old ops/finance tier ||isFinanceDept() — narrowed to
+    // isMoneyAdmin() so 'secretary' no longer has ledger/journal write access
+    // via this helper. 2026-08-09: ruling 3 closes the isFinanceDept() back door.
     function canFinance() { return isMoneyAdmin() || isFinanceDept(); }
 
     // Member of the Design DEPARTMENT (by string `department` or array `departments`).
@@ -74,6 +116,16 @@ service cloud.firestore {
       return u.get('department', '') == d || u.get('departments', []).hasAny([d]);
     }
     function canDept(d) { return isAdmin() || inDept(d); }
+
+    // ── canIt() — IT boundary for the Corporate Secretary (owner ruling) ──────
+    // canDept('IT') resolves through isAdmin(), which INCLUDES 'secretary', so it
+    // can never express "everyone but the secretary". A dedicated predicate can.
+    // Ruling 3 again: the exclusion is on the ROLE, so it also holds for a
+    // secretary whose profile is later given the IT department.
+    // canDept() itself is deliberately NOT touched — it is the sole write gate
+    // for Sales work plans, all five Marketing collections and the three Gov
+    // Bidding buckets, i.e. departments the secretary KEEPS.
+    function canIt() { return !isSecretary() && canDept('IT'); }
 
     // ── IDENTITY BINDING (v14 re-audit ROUND 2 — critical) ─────────────
     // `email` + `pendingPasswordSetup` are together the KEY that
@@ -236,7 +288,16 @@ service cloud.firestore {
         return request.resource.data.get('department', '') != 'Finance'
             && request.resource.data.get('department', '') != 'Design'
             && request.resource.data.get('department', '') != 'Ventures'
-            && !request.resource.data.get('departments', []).hasAny(['Finance','Design','Ventures']);
+            && request.resource.data.get('department', '') != 'IT'
+            // 'IT' added 2026-08-09 with the secretary carve-out. Finance was
+            // frozen but IT was not, so the isAdmin() create branch let a
+            // secretary mint a users doc carrying departments:['IT'] plus
+            // email + pendingPasswordSetup (both settable at CREATE, since the
+            // identity-binding guard is update-only), then claim it by
+            // registering at that address — arriving as an IT-department
+            // employee and satisfying canIt(). Freezing the department closes
+            // the only asymmetry between the Finance half and the IT half.
+            && !request.resource.data.get('departments', []).hasAny(['Finance','Design','Ventures','IT']);
       }
       // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
       // v12 WS19: only isSeniorAdmin() (president/manager) may mint a manager/
@@ -416,7 +477,7 @@ service cloud.firestore {
     }
 
     // ── Sequence counters (employees, workers, etc.) ────
-    // Widened from admin-only to isFinanceOrAdmin() (WS27) so HR/finance can
+    // Widened from admin-only to the ops/finance tier (WS27) so HR/finance can
     // mint BI-W-### worker IDs. Safe: docs here are opaque monotonic integers
     // — the worst a finance user can do is advance a sequence number.
     // Widened again (WS28) so Production can mint DR-serials via nextSerial().
@@ -538,12 +599,12 @@ service cloud.firestore {
     // devtools, and payroll/EOM read that score directly. `records` is the only
     // subcollection under attendance/{uid} today (verified).
     match /attendance/{uid} {
-      allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow read: if isAuth() && (isOwner(uid) || isOpsAdmin());
     }
     match /attendance/{uid}/records/{date} {
-      allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow read: if isAuth() && (isOwner(uid) || isOpsAdmin());
       // Admins: unrestricted (the Present/Half/Absent edit path, stamps editedBy).
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && isOpsAdmin();
       // Owner self check-in / notification-driven auto-upgrade: score capped to
       // the set an honest client ever produces, and can never overwrite a doc an
       // admin has already hand-edited (protects a Present/Half/Absent correction
@@ -593,11 +654,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/worker_profiles/$(workerId)).data.get('linkedUid','') == request.auth.uid;
     }
     match /attendance_worker/{workerId} {
-      allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
+      allow read: if isAuth() && (isOpsAdmin() || isLinkedWorkerUid(workerId));
     }
     match /attendance_worker/{workerId}/records/{date} {
-      allow read: if isAuth() && (isFinanceOrAdmin() || isLinkedWorkerUid(workerId));
-      // v14 re-audit hardening (self-service write only — isFinanceOrAdmin()
+      allow read: if isAuth() && (isOpsAdmin() || isLinkedWorkerUid(workerId));
+      // v14 re-audit hardening (self-service write only — isOpsAdmin()
       // stays unrestricted for the HR/kiosk admin path):
       //  • date field (when present) must match the docId — stops a
       //    field/docId mismatch from confusing anything that trusts the field.
@@ -611,7 +672,7 @@ service cloud.firestore {
       // A full today-only date bound would need a Cloud Function (request.time
       // has no clean date-string formatter in rules) — deferred, same
       // limitation already accepted for attendance/{uid}/records above.
-      allow write: if isAuth() && (isFinanceOrAdmin() || (
+      allow write: if isAuth() && (isOpsAdmin() || (
         isLinkedWorkerUid(workerId)
         && request.resource.data.workerId == workerId
         && request.resource.data.get('date', date) == date
@@ -639,7 +700,7 @@ service cloud.firestore {
     // ── Geofence work sites (v14 Type-B) ───────────────
     match /geo_sites/{docId} {
       allow read: if isAuth() && !isPartner();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isOpsAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -658,7 +719,7 @@ service cloud.firestore {
       // status:'pending', requestedAt}; finance/admin filing on someone's
       // behalf is additionally allowed to match the pattern used elsewhere.
       allow create: if isAuth() && !isPartner() && (
-        isFinanceOrAdmin() ||
+        isOpsAdmin() ||
         (request.resource.data.get('uid', '') == request.auth.uid
           && request.resource.data.get('status', '') == 'pending')
       ) && request.resource.data.keys().hasOnly(['uid','userName','date','status','requestedAt'])
@@ -668,13 +729,21 @@ service cloud.firestore {
     }
 
     // ── Cash advances ──────────────────────────────────
+    // ⚠ OWNER RULING 1 (2026-08-08) — MONEY REQUESTS STAY VISIBLE, READ-ONLY.
+    // The Corporate Secretary keeps SEEING cash advances in Approvals so they can
+    // flag them to the President; that escalation workflow already exists
+    // (APPROVAL_CAPS + "Request President approval", js/screens/approvals.js).
+    // They may not create, approve or fund one — those stay isMoneyAdmin() below.
+    // This also avoids the silent-zero failure: every Approvals count query ends
+    // in `.catch(() => ({size:0}))`, so a DENIED query renders as "0 pending",
+    // indistinguishable from "nothing needs attention".
     match /cash_advances/{docId} {
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+        resource.data.userId == request.auth.uid || isMoneyAdmin() || isSecretary()
       );
       // Employees may only file their OWN request, pending and unfunded.
       // Money-tier (president/manager/finance) may record/approve any (e.g.
-      // president-entered advances) — v12 WS19: narrowed from isFinanceOrAdmin()
+      // president-entered advances) — v12 WS19: narrowed from the ops/finance tier
       // to isMoneyAdmin() so 'secretary' can no longer approve a cash advance via
       // a direct write (the UI already hides this button from secretary; the
       // rule now matches).
@@ -715,18 +784,23 @@ service cloud.firestore {
         isAdmin() || (isDesignDept() && request.resource.data.get('department', '') == 'Design')
       );
       // Assignees update their own tasks; admins AND finance manage any task
-      // (status, reassignment, follow-up requests). Uses isFinanceOrAdmin() so the
+      // (status, reassignment, follow-up requests). Uses isOpsAdmin() so the
       // client's task controls — which treat finance as an editor — actually land
       // (finance is the books/ops editor: "finance can edit everything").
+      // ⚠ 2026-08-09 — this is the ONLY non-assignee update clause on /tasks:
+      // there is no isAdmin() fallback beside it. It is therefore one of the two
+      // sites (with leave_requests update) that made "just drop secretary from
+      // the old 4-role helper" a role-deleting change rather than a scoping one.
+      // It stays on the FULL old set. Do not narrow it without adding a fallback.
       // v14 re-audit ROUND 2 — .get('assignedTo', []) to match the read rule 10
       // lines up. Behaviourally identical (measured): a task with no
       // assignedTo field made the direct read ERROR, and CEL absorbs that error
-      // whenever the isFinanceOrAdmin() disjunct is true, so finance/admin were
+      // whenever the isOpsAdmin() disjunct is true, so finance/admin were
       // never actually blocked and a non-assignee was denied either way. Made
       // consistent so the two rules cannot be read as disagreeing about whether
       // the field is optional.
       allow update: if isAuth() && (
-        (request.auth.uid in resource.data.get('assignedTo', [])) || isFinanceOrAdmin()
+        (request.auth.uid in resource.data.get('assignedTo', [])) || isOpsAdmin()
       );
       // Admins delete any task; a creator may delete the task they made (the UI
       // already offers it to the creator, so this stops a silent permission fail).
@@ -952,10 +1026,10 @@ service cloud.firestore {
       // isOwner branch is frozen by presFieldsAbsentOnCreate/UntouchedOnUpdate,
       // but the admin branch had NO such freeze, so 'secretary' could otherwise
       // write/forge presidentGrade directly. Only president/manager grade KPIs.
-      allow read:   if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow read:   if isAuth() && (isOwner(uid) || isOpsAdmin());
       allow create: if isAuth() && (isSeniorAdmin() || (isOwner(uid) && presFieldsAbsentOnCreate()));
       allow update: if isAuth() && (isSeniorAdmin() || (isOwner(uid) && presFieldsUntouchedOnUpdate()));
-      allow delete: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isOpsAdmin();
     }
 
     // ── KPI targets ────────────────────────────────────
@@ -983,7 +1057,7 @@ service cloud.firestore {
     // employeeOfMonth/sales_sop — loosening it would loosen those too).
     match /settings_holidays/{year} {
       allow read:  if isAuth();
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && isOpsAdmin();
     }
 
     // ── Strategy / market-research notes (v12 WS40) ──────────────────
@@ -992,8 +1066,8 @@ service cloud.firestore {
     // arrayUnion. Secretary is view-only CLIENT-side (WS25 decision-9 pattern) —
     // rules keep the tier uniform. .get() defaults per missing-field-throws memory.
     match /strategy_notes/{deptKey} {
-      allow read:  if isAuth() && isFinanceOrAdmin();
-      allow write: if isAuth() && isFinanceOrAdmin()
+      allow read:  if isAuth() && isOpsAdmin();
+      allow write: if isAuth() && isOpsAdmin()
         && request.resource.data.get('entries', []) is list;
       allow delete: if isAuth() && isPresident();
     }
@@ -1002,7 +1076,7 @@ service cloud.firestore {
     // Written ONLY by the GitHub Actions backup/sync jobs via the Admin SDK
     // (which bypasses these rules). No client ever writes it.
     match /system_health/{jobId} {
-      allow read:  if isAuth() && isFinanceOrAdmin();
+      allow read:  if isAuth() && isOpsAdmin();
       allow write: if false;
     }
 
@@ -1023,12 +1097,17 @@ service cloud.firestore {
     // ── Payroll (live pay: salary/allowance/deductions) ─
     // Moved off the world-readable users doc so pay isn't visible to all staff.
     // Each user may read their OWN pay; only finance/admin may read others or write.
-    // v12 WS19: create/update narrowed isFinanceOrAdmin() -> isMoneyAdmin() on
+    // v12 WS19: create/update narrowed to isMoneyAdmin() on
     // payroll/salary_history/salary_raises/payroll_ca_overrides (secretary no
-    // longer writes live pay); read stays isFinanceOrAdmin() (secretary keeps
-    // oversight visibility) — only the write surface is money-tier now.
+    // longer writes live pay).
+    // 2026-08-09 (owner ruling 2 — "they lose payroll, payslips, worker pay
+    // rates, expenses, the ledger and taxes"): the READS move to isMoneyAdmin()
+    // too, so the Corporate Secretary no longer sees live pay at all. The three
+    // money-REQUEST queues they keep for oversight (cash_advances,
+    // pending_raises, payroll_delete_requests) are carved out individually with
+    // an explicit `|| isSecretary()` on their read rule — read only, never write.
     match /payroll/{uid} {
-      allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow read:  if isAuth() && (isOwner(uid) || isMoneyAdmin());
       allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
@@ -1036,7 +1115,7 @@ service cloud.firestore {
     // ── Salary history ─────────────────────────────────
     match /salary_history/{docId} {
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+        resource.data.userId == request.auth.uid || isMoneyAdmin()
       );
       allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
@@ -1055,12 +1134,12 @@ service cloud.firestore {
     // own-raise reader is the employee dashboard's
     // where('subjectId','==',uid)); fixed now because it is the identical
     // defect class and a future Raise History card would inherit it silently.
-    // isFinanceOrAdmin() stays first so the admin list short-circuits without
+    // isMoneyAdmin() stays first so the admin list short-circuits without
     // the profile lookup, and the .get('subjectId','') + != '' + exists()
     // ordering means a raise row with no subjectId denies rather than errors.
     match /salary_raises/{docId} {
       allow read: if isAuth() && (
-        isFinanceOrAdmin() ||
+        isMoneyAdmin() ||
         resource.data.get('subjectId', '') == request.auth.uid ||
         isLinkedWorkerProfile(resource.data.get('subjectId', ''))
       );
@@ -1076,19 +1155,26 @@ service cloud.firestore {
     // (scheduled → applied). Subject may read their own.
     match /pending_raises/{docId} {
       // Same half-dead subject branch as /salary_raises above — see there.
+      // ⚠ OWNER RULING 1 — READ-ONLY oversight for the Corporate Secretary: this
+      // is the collection the Approvals "Raises" queue lists
+      // (where('status','==','pending_approval'), js/screens/approvals.js), so
+      // they can see a pending raise and escalate it. They cannot file, approve,
+      // schedule or materialize one — create/update below stay money-tier and
+      // President-only, and the APPLIED-raise audit log (/salary_raises) is now
+      // money-tier read, so they see the REQUEST, never the resulting pay.
       allow read: if isAuth() && (
-        isFinanceOrAdmin() ||
+        isMoneyAdmin() || isSecretary() ||
         resource.data.get('subjectId', '') == request.auth.uid ||
         isLinkedWorkerProfile(resource.data.get('subjectId', ''))
       );
       allow create: if isAuth() && (
         isPresident()
-        || ( isFinanceOrAdmin()
+        || ( isMoneyAdmin()
              && request.resource.data.get('status','') == 'pending_approval' )
       );
       allow update: if isAuth() && (
         // Automated materialize: any finance, ONLY scheduled → applied.
-        ( isFinanceOrAdmin()
+        ( isMoneyAdmin()
           && resource.data.get('status','') == 'scheduled'
           && request.resource.data.get('status','') == 'applied' )
         // Approve / reject / cancel / reschedule: President only.
@@ -1100,28 +1186,34 @@ service cloud.firestore {
     // ── Payroll CA overrides ───────────────────────────
     match /payroll_ca_overrides/{docId} {
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+        resource.data.userId == request.auth.uid || isMoneyAdmin()
       );
       allow write: if isAuth() && isMoneyAdmin();
     }
 
     // ── Payroll delete requests ────────────────────────
+    // ⚠ OWNER RULING 1 — the Corporate Secretary keeps the READ (this is the
+    // Approvals "Finance Requests" queue) but loses CREATE: filing a payroll
+    // deletion is a money-surface action. Approve/reject was already President-
+    // only. Same silent-zero rationale as cash_advances above.
     match /payroll_delete_requests/{docId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
-      allow create: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && (isMoneyAdmin() || isSecretary());
+      allow create: if isAuth() && isMoneyAdmin();
       allow update, delete: if isAuth() && isPresident();
     }
 
     // ── Pay runs (Compute → Verify → Disburse workflow state per month) ──
     // Doc id = YYYY-MM. Governance metadata only (no raw pay). Finance/admin
     // read & write; the President prunes.
-    // v12 WS20 — transition-aware state machine. isMoneyAdmin() (not
-    // isFinanceOrAdmin()) drives Compute/Verify so 'secretary' can't write
-    // pay_runs directly (matches WS19's money-tier narrowing everywhere else).
+    // v12 WS20 — transition-aware state machine. isMoneyAdmin() drives
+    // Compute/Verify so 'secretary' can't write pay_runs directly (matches
+    // WS19's money-tier narrowing everywhere else). 2026-08-09: the READ moved
+    // to isMoneyAdmin() as well — payroll governance state is part of the
+    // payroll surface the owner's ruling 2 takes away from the secretary.
     // 'disbursed' is reachable ONLY by the president, ONLY from 'verified', and
     // is immutable afterward — no clause below permits updating a disbursed doc.
     match /pay_runs/{month} {
-      allow read: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && isMoneyAdmin();
       allow create: if isAuth() && isMoneyAdmin() &&
         request.resource.data.get('state','draft') in ['draft','computed'];
       allow update: if isAuth() && (
@@ -1205,7 +1297,7 @@ service cloud.firestore {
             && expenseMonthOpen(request.resource.data.get('date', ''));
       }
       allow read: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
+        resource.data.createdBy == request.auth.uid || isMoneyAdmin()
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       // Owners may edit their own expense details but not approve it (status
@@ -1216,7 +1308,7 @@ service cloud.firestore {
       // The role test stays FIRST so an unauthorized caller short-circuits
       // before paying periodOpenFor()'s exists()+get().
       allow update: if isAuth() && (
-        isFinanceOrAdmin() ||
+        isMoneyAdmin() ||
         (resource.data.createdBy == request.auth.uid
           && request.resource.data.status == resource.data.status
           && request.resource.data.amount == resource.data.amount)
@@ -1339,7 +1431,7 @@ service cloud.firestore {
       allow create: if isAuth() &&
         (request.resource.data.get('userId', '') == request.auth.uid ||
          request.resource.data.get('agentId', '') == request.auth.uid ||
-         isFinanceOrAdmin()) &&
+         isOpsAdmin()) &&
         request.resource.data.get('status', '') == 'pending' &&
         request.resource.data.get('type', '') in ['ca_deduct', 'bs_quote'] &&
         request.resource.data.keys().hasOnly([
@@ -1434,7 +1526,14 @@ service cloud.firestore {
     // naturally include that role; the `!isPartner()` is defense-in-depth so
     // this stays true even if a future edit widens either helper.
     match /product_costs/{docId} {
-      allow read, write: if isAuth() && !isPartner() && (isAdmin() || canFinance());
+      // ⚠ 2026-08-09 SECRETARY LEAK — isAdmin() -> isSeniorAdmin(). This doc is
+      // capital material/labour and BOM unit costs; it was split out of
+      // /products precisely BECAUSE it is cost basis. It reached the Corporate
+      // Secretary through isAdmin(), not through the old 4-role helper, so
+      // the helper split alone would not have closed it. Delta is exactly
+      // {secretary}: president/manager keep it via isSeniorAdmin(), the finance
+      // role and Finance-dept staff via canFinance().
+      allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
     }
 
     // ── Reference materials ────────────────────────────
@@ -1578,21 +1677,30 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
     // IT assets/software: IT-dept members manage them (UI gates on canEditDept('IT')).
+    // 2026-08-09 — canDept('IT') -> canIt() on every WRITE, and on the two
+    // restricted READS (it_access holds credentials/account grants, it_network
+    // holds infrastructure config; both were admin-or-IT-dept). Delta is exactly
+    // {secretary}. it_assets/it_software READ deliberately stays !isPartner():
+    // it is a company-wide inventory every employee can already see, so removing
+    // one role from it would be theatre, and the IT screen is hidden from them in
+    // the nav. Note the client ALREADY restricted the Access Control / Network
+    // subtabs to president|manager (js/screens/govit.js renderIT `itAdmin`), so
+    // these two reads only bring the rules into line with shipped UI behaviour.
     match /it_assets/{docId} {
       allow read: if isAuth() && !isPartner();
-      allow write: if isAuth() && canDept('IT');
+      allow write: if isAuth() && canIt();
     }
     match /it_software/{docId} {
       allow read: if isAuth() && !isPartner();
-      allow write: if isAuth() && canDept('IT');
+      allow write: if isAuth() && canIt();
     }
     match /it_access/{docId} {
-      allow read: if isAuth() && (isAdmin() || inDept('IT'));
-      allow write: if isAuth() && (isAdmin() || inDept('IT'));
+      allow read: if isAuth() && canIt();
+      allow write: if isAuth() && canIt();
     }
     match /it_network/{docId} {
-      allow read: if isAuth() && (isAdmin() || inDept('IT'));
-      allow write: if isAuth() && (isAdmin() || inDept('IT'));
+      allow read: if isAuth() && canIt();
+      allow write: if isAuth() && canIt();
     }
 
     // ── Per-department document collections (renderDocCollection) ───────
@@ -1773,26 +1881,23 @@ service cloud.firestore {
           dateStr.split('-')[0] + '-' + dateStr.split('-')[1])).data.get('closed', false) == false;
     }
     match /finance_periods/{month} {
-      // v14 re-audit ROUND 2 — read widened canFinance() -> isFinanceOrAdmin(),
-      // i.e. secretary added. These docs hold ONLY {closed, closedBy, closedAt}
-      // — no figures — and are what the client's isPeriodClosed()/
-      // assertPeriodOpen() (js/config.js) and the 🔒 Closed badge read. The
-      // Corporate Secretary reaches the Finance Overview and its Expense ✎
-      // button (isFinancePriv() returns true for them, js/departments.js), so
-      // with the read denied their period lookup silently failed open and the
-      // new /expenses period gate surfaced as a raw "Update failed:
-      // permission-denied" instead of "That month's books are closed…". Read
-      // only: create/update stay President-only and delete stays false, so this
-      // cannot weaken the lock itself — and secretary already reads payslips,
-      // payroll and salary_history, all strictly more sensitive than "is June
-      // closed?".
-      // The UNION, not a swap: canFinance() is isMoneyAdmin() OR Finance-DEPT
-      // membership, and isFinanceOrAdmin() is role-based only — a Finance-dept
-      // employee (role 'employee', departments ['Finance']) is in the first and
-      // NOT the second. Writing isFinanceOrAdmin() alone took the period lookup
-      // away from exactly the people who post to the ledger all day; the
-      // differential matrix caught it. Both predicates, so nobody loses it.
-      allow read: if isAuth() && (canFinance() || isFinanceOrAdmin());
+      // v14 re-audit ROUND 2 widened this read from canFinance() to the old
+      // ops/finance tier purely so the Corporate Secretary's Finance Overview /
+      // Expense ✎ period lookup stopped failing open. 2026-08-09 that premise is
+      // gone: ruling 2 removes them from the Finance Overview, the Expense ✎
+      // button and /expenses update altogether, so the widening has no remaining
+      // beneficiary and is reverted to plain canFinance().
+      // NOT a narrowing of anyone else: the union that shipped in round 2 was
+      // `canFinance() || <ops tier>`, and dropping 'secretary' from the right
+      // operand leaves president/manager/finance — all already inside
+      // canFinance() — so `canFinance()` alone is the exact same set minus the
+      // secretary. A Finance-DEPT employee (role 'employee',
+      // departments:['Finance']) keeps it via canFinance(), which is the case the
+      // round-2 differential matrix caught and must not regress.
+      // Client-side this fails SAFE: isPeriodClosed() (js/config.js) .catch()es a
+      // denied read to null and treats the month as OPEN, so nothing throws — and
+      // they have no write path into any period-gated collection anyway.
+      allow read: if isAuth() && canFinance();
       allow create, update: if isAuth() && isPresident();
       allow delete: if false;
     }
@@ -1836,7 +1941,19 @@ service cloud.firestore {
       // finance-tier only: rebuildRollups() (the only delete path) is already
       // president-only client-side, and Production never legitimately deletes
       // a rollup doc.
-      allow create, update: if isAuth() && (canFinance() || canProduction())
+      // ⚠ 2026-08-09 SECRETARY LEAK — canProduction() -> isProductionDept().
+      // canProduction() = isAdmin() || isProductionDept(), and isAdmin() includes
+      // 'secretary', so the Corporate Secretary passed this WRITE while READ is
+      // canFinance() — they could rewrite any open month's reported income,
+      // expense, vatOutput, vatInput and byCategory, figures they cannot even
+      // read, and which ARE the Finance Overview and the dashboard KPI tiles.
+      // This reached them through canProduction(), NOT through the old 4-role
+      // helper, so the helper split alone would not have closed it.
+      // Nobody else moves: president/manager/finance already satisfy
+      // canFinance(); genuine Production-dept staff keep the leg they need.
+      // canProduction() ITSELF is left alone — production_orders legitimately
+      // needs it and Production is a department they keep.
+      allow create, update: if isAuth() && (canFinance() || isProductionDept())
         && request.resource.data.keys().hasOnly(
              ['month','income','expense','vatOutput','vatInput','byCategory','count','updatedAt'])
         && rollupMonthOpen(docId)
@@ -1946,7 +2063,12 @@ service cloud.firestore {
       allow create: if isAuth() && ledgerDateOk() && ledgerPeriodOpen()
         && request.resource.data.get('bankFlow', '') in ['', 'in', 'out'] && (
         canFinance()
-        || (canProduction()
+        // ⚠ 2026-08-09 SECRETARY LEAK — canProduction() -> isProductionDept(),
+        // same disjunct-shape and same reasoning as finance_rollup above: the
+        // isAdmin() inside canProduction() let the Corporate Secretary post
+        // fenced Production COS rows into the general ledger. Safe for everyone
+        // else — president/manager/finance already clear canFinance().
+        || (isProductionDept()
             && request.resource.data.get('source', '') == 'Production'
             && request.resource.data.get('amount', 0) is number
             && request.resource.data.get('amount', 0) > 0
@@ -2156,7 +2278,7 @@ service cloud.firestore {
       // payslip, i.e. exactly when it starts to matter.
       // Route ownership the same way /attendance_worker already does: through
       // the worker_profiles doc named by `workerId`, comparing ITS linkedUid.
-      // isFinanceOrAdmin() stays FIRST so an admin's unfiltered list
+      // the role test stays FIRST so an admin's unfiltered list
       // short-circuits without the profile lookup. Uses the status-free
       // isLinkedWorkerProfile() (not isLinkedWorkerUid) so an offboarded
       // worker can still retrieve their historical payslips.
@@ -2166,32 +2288,35 @@ service cloud.firestore {
       // against this rule; an unfiltered list, another worker's workerId, and
       // a legacy payslip carrying no workerId at all are all still denied.
       allow read: if isAuth() && (
-        isFinanceOrAdmin() ||
+        isMoneyAdmin() ||
         isLinkedWorkerProfile(resource.data.get('workerId', ''))
       );
       // v14 re-audit fix — WS19's money-tier narrowing (see isMoneyAdmin()
       // above) reached payroll/salary_history/salary_raises/pay_runs/
-      // bank_accounts but never reached this Type-B leg: isFinanceOrAdmin()
-      // includes 'secretary', so a Corporate Secretary could issue an official,
-      // numbered, worker-visible weekly payslip with no President in the loop.
-      // The delete leg below was ALREADY president-only — that is the intent
-      // these two legs were missing. Read deliberately stays isFinanceOrAdmin():
-      // secretary oversight VISIBILITY is intended; only the write surface is
-      // money-tier now. Same shape as bank_accounts (~line 1610).
+      // bank_accounts but never reached this Type-B leg: the old ops/finance
+      // tier included 'secretary', so a Corporate Secretary could issue an
+      // official, numbered, worker-visible weekly payslip with no President in
+      // the loop. The delete leg below was ALREADY president-only — that is the
+      // intent these two legs were missing. Same shape as bank_accounts.
+      // 2026-08-09 (owner ruling 2, "they lose … payslips"): the READ is now
+      // money-tier too. The worker-ownership branch beside it is untouched, so a
+      // Type-B worker still reads their own payslips.
       allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
     match /worker_profiles/{docId} {
       // v14 Type-B self-service: a linked login account may read ITS OWN
       // profile (the linkedUid lookup the worker dashboard boots from).
-      allow read: if isAuth() && (isFinanceOrAdmin()
+      allow read: if isAuth() && (isMoneyAdmin()
         || resource.data.get('linkedUid','') == request.auth.uid);
       // v14 re-audit fix — money-tier, same rationale as payslips above. This
       // doc holds dailyRate/hourlyRate, foodAllowance, allowances.meal/
       // transport and caBalance; foodAllowance is multiplied by days-worked
       // straight into the payslip, and the approval-routed Raise flow fences
-      // only some of those fields — so leaving create/update at
-      // isFinanceOrAdmin() let secretary set a worker's pay rates outright.
+      // only some of those fields — so leaving create/update on the old
+      // ops/finance tier let secretary set a worker's pay rates outright.
+      // 2026-08-09 (owner ruling 2, "they lose … worker pay rates"): the READ is
+      // money-tier now as well. The linkedUid self-read branch is untouched.
       allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
@@ -2244,7 +2369,7 @@ service cloud.firestore {
     }
     // Job costing carries revenue/margin per project — finance/admin only.
     match /job_costs/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read, write: if isAuth() && isMoneyAdmin();
     }
 
     // ── Production orders (shop-floor pipeline) ─────────
@@ -2262,7 +2387,20 @@ service cloud.firestore {
       allow create: if isAuth() && !isPartner() && (canProduction() || inDept('Sales'))
         && request.resource.data.get('stage','') != 'out_for_delivery'
         && request.resource.data.get('stage','') != 'delivered';
-      allow update: if isAuth() && !isPartner() && canProduction()
+      // canProduction() = isAdmin() || isProductionDept(), and isAdmin() still
+      // contains 'secretary' — so narrowing the /ledger Production leg to
+      // isProductionDept() (leak-fix 2) left the SOURCE open to a secretary
+      // while closing the MIRROR. That is the /expenses defect in reverse, and
+      // worse: consumeProductionMaterials commits inventory decrements,
+      // stock_movements and materialsConsumed:true in ONE transaction FIRST,
+      // then posts the ledger legs SEPARATELY and swallows the denial — and
+      // materialsConsumed is a one-shot idempotency flag, so the COS debit and
+      // the Inventory contra credit could NEVER be posted for that order again.
+      // Excluding the secretary here means they cannot start the half-write at
+      // all. Nobody else moves: president/manager reach the mirror via
+      // canFinance(), Production staff via isProductionDept(), and 'finance'
+      // was never in canProduction() to begin with.
+      allow update: if isAuth() && !isPartner() && canProduction() && !isSecretary()
         // QC gate — may not ENTER Out for Delivery without a passed inspection
         && ( request.resource.data.get('stage','') != 'out_for_delivery'
              || resource.data.get('stage','') in ['out_for_delivery','ready']
@@ -2341,7 +2479,7 @@ service cloud.firestore {
     // finance/admin read all + approve/reject; only the president deletes.
     match /leave_requests/{docId} {
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+        resource.data.userId == request.auth.uid || isOpsAdmin()
       );
       // Shape-validate days/userName on every create; an employee may only file
       // their OWN request as pending. Finance/admin may file on anyone's behalf.
@@ -2351,14 +2489,14 @@ service cloud.firestore {
         && request.resource.data.days <= 366
         && request.resource.data.userName is string
         && (
-          isFinanceOrAdmin() ||
+          isOpsAdmin() ||
           (request.resource.data.userId == request.auth.uid
             && request.resource.data.status == 'pending')
         );
       // Only finance/admin may mutate a request after it's filed (approve/reject).
       // Employees never update — the client only ever creates — so the owner has
       // no update path (which would otherwise let them tamper post-approval).
-      allow update: if isAuth() && isFinanceOrAdmin();
+      allow update: if isAuth() && isOpsAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -2505,7 +2643,7 @@ service cloud.firestore {
             && realDepts.hasAll(deptTokens);
       }
       allow create, update: if isAuth() && !isPartner() && (
-        isFinanceOrAdmin() ||                                     // HR mints worker + employee cards
+        isOpsAdmin() ||                                     // HR mints worker + employee cards
         ( request.resource.data.get('kind','') == 'employee'      // employee self-mints OWN card only
           && request.resource.data.get('uid','') == request.auth.uid
           && selfMintMatchesCaller() )
@@ -2518,10 +2656,10 @@ service cloud.firestore {
     // balances without being granted broad write access to user profiles.
     // The owner reads their own balance; finance/admin read all + write.
     match /leave_balances/{uid} {
-      allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow read:  if isAuth() && (isOwner(uid) || isOpsAdmin());
       // Shape-guard so a buggy accrual run can't write NaN/negative/wrong-typed counters.
       // .get(field,default) — a missing field must not deny the rule (missing-field-throws memory).
-      allow write: if isAuth() && isFinanceOrAdmin()
+      allow write: if isAuth() && isOpsAdmin()
         && isNonNegNumber(request.resource.data.get('vacation', 0))
         && isNonNegNumber(request.resource.data.get('sick', 0));
     }
@@ -2530,11 +2668,11 @@ service cloud.firestore {
     // docId = {uid}_{YYYY}. Owner reads own history; finance/admin read all +
     // write (grant runs in admin context — employees never write). President-only delete.
     match /leave_accruals/{docId} {
-      allow read:   if isAuth() && (resource.data.get('uid','') == request.auth.uid || isFinanceOrAdmin());
-      allow create: if isAuth() && isFinanceOrAdmin()
+      allow read:   if isAuth() && (resource.data.get('uid','') == request.auth.uid || isOpsAdmin());
+      allow create: if isAuth() && isOpsAdmin()
         && isNonNegNumber(request.resource.data.get('grantedVacation', 0))
         && isNonNegNumber(request.resource.data.get('grantedSick', 0));
-      allow update: if isAuth() && isFinanceOrAdmin();
+      allow update: if isAuth() && isOpsAdmin();
       allow delete: if isAuth() && isPresident();
     }
 

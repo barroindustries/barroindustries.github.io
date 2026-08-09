@@ -37,17 +37,124 @@ if (typeof storage.setMaxUploadRetryTime === 'function') {
   storage.setMaxUploadRetryTime(45000);
 }
 
-// LOCAL persistence — session survives tab close/app restart for up to 10 days.
-// Background push notifications stay active without re-login.
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {
-  // Safari Private Browsing and some in-app webviews reject LOCAL persistence —
-  // fall back to SESSION rather than silently leaving persistence undefined.
-  // Non-blocking either way: init must continue regardless of the outcome.
-  console.warn('[Auth] setPersistence(LOCAL) failed, falling back to SESSION:', err);
-  auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(err2 => {
-    console.warn('[Auth] setPersistence(SESSION) fallback also failed:', err2);
-  });
-});
+// ── Auth session persistence ──────────────────────────────────────────────
+// LOCAL persistence is IndexedDB-backed (`firebaseLocalStorageDb`) and survives
+// tab close / PWA restart for up to AUTO_LOGOUT_MS (10 days), which is what
+// keeps background push alive without a re-login. SESSION persistence is
+// sessionStorage-backed and is DESTROYED the moment an iOS home-screen PWA is
+// closed. Measured on the live compat SDK (10.12.2):
+//   LOCAL   persistence object -> { …, db }              (IndexedDB, durable)
+//   SESSION persistence object -> { storageRetriever }   (sessionStorage, dies)
+// So a downgrade to SESSION reads to the user as "it logged me out again", every
+// single time. It is never cosmetic and must never be silent.
+//
+// 2026-08-09 rewrite. This block used to fall back to SESSION on the FIRST
+// rejection with nothing but a console.warn — invisible on a phone, and a
+// one-way ratchet, because setPersistence MIGRATES any session that already
+// exists. Three properties are now guaranteed:
+//   1. RECOVER, DON'T RATCHET. A transient IndexedDB open failure at boot (iOS
+//      reclaiming storage, a slow service-worker-controlled load) is the common
+//      case and is retryable, so a single rejection no longer condemns the
+//      session. Only a persistent failure falls back.
+//   2. NEVER SILENTLY DOWNGRADE. The real outcome is published on
+//      window.__authPersistence and announced via an 'auth-persistence-change'
+//      event, so the login screen can TELL the user their session will not
+//      survive closing the app instead of letting them discover it by being
+//      logged out.
+//   3. BE DIAGNOSABLE. requested/effective/error/attempts are readable on the
+//      device itself (and rendered onto the login version line), and a genuine
+//      downgrade is reported through logClientError, so the next bug report
+//      carries the actual persistence in effect and the actual error code.
+//
+// Non-blocking throughout: this file runs before everything else, so every path
+// stays inside a .catch()/try and nothing here may throw.
+window.__authPersistence = {
+  requested: 'LOCAL',   // what we asked for
+  effective: 'pending', // 'LOCAL' | 'SESSION' | 'NONE' | 'pending' | 'unknown'
+  error: null,          // error code/message when degraded, else null
+  attempts: 0,
+  userChoiceApplied: false, // set by the login handler; stops the boot retry loop
+  at: Date.now()
+};
+
+(function initAuthPersistence() {
+  var P = firebase.auth.Auth.Persistence;
+  var BACKOFF_MS = [0, 400, 1500];   // attempt 0 immediate, then two retries
+  var MAX_ATTEMPTS = BACKOFF_MS.length;
+
+  function publish(effective, err, attempts) {
+    try {
+      var st = window.__authPersistence;
+      st.effective = effective;
+      st.error     = err ? (err.code || err.message || String(err)) : null;
+      st.attempts  = attempts;
+      st.at        = Date.now();
+      // Anything already on screen (the login screen) repaints off this.
+      window.dispatchEvent(new CustomEvent('auth-persistence-change', {
+        detail: { effective: st.effective, error: st.error, requested: st.requested }
+      }));
+    } catch (e) { /* a diagnostic must never break boot */ }
+  }
+
+  // Honour a DELIBERATE kiosk opt-out across reloads. 'bi-remember-choice' is
+  // written only by the login handler when the user unticks "Keep me signed in";
+  // absent (every existing device) means LOCAL, so the default self-heals.
+  var wantLocal = true;
+  try { wantLocal = localStorage.getItem('bi-remember-choice') !== '0'; } catch (e) { /* storage blocked */ }
+  window.__authPersistence.requested = wantLocal ? 'LOCAL' : 'SESSION';
+
+  if (!wantLocal) {
+    try {
+      auth.setPersistence(P.SESSION).then(function () {
+        publish('SESSION', null, 1);
+      }, function (err) {
+        publish('unknown', err, 1);
+      });
+    } catch (e) { publish('unknown', e, 1); }
+    return;
+  }
+
+  function attempt(n) {
+    // The user's explicit login-screen choice outranks this boot default — bail
+    // out so a late retry can never migrate a deliberately session-only login
+    // back up to LOCAL.
+    if (window.__authPersistence.userChoiceApplied) return;
+
+    // setPersistence is expected to REJECT rather than throw, but this file runs
+    // before everything else and a synchronous throw here would brick boot, so
+    // the sync call site is wrapped too. (attempt() is otherwise only re-entered
+    // from a setTimeout, where a throw could not reach boot anyway.)
+    try {
+      auth.setPersistence(P.LOCAL).then(function () {
+        publish('LOCAL', null, n + 1);
+      }, function (err) {
+        if (n + 1 < MAX_ATTEMPTS) {
+          setTimeout(function () { attempt(n + 1); }, BACKOFF_MS[n + 1]);
+          return;
+        }
+        // Persistently unavailable — Safari Private Browsing, some in-app
+        // webviews. Fall back so auth still works for this session, but SAY SO.
+        console.warn('[Auth] setPersistence(LOCAL) failed after ' + MAX_ATTEMPTS + ' attempts, falling back to SESSION:', err);
+        try {
+          if (window.logClientError) {
+            window.logClientError(err, 'auth persistence downgraded to SESSION');
+          }
+        } catch (e) { /* never throw */ }
+        auth.setPersistence(P.SESSION).then(function () {
+          publish('SESSION', err, n + 1);
+        }, function (err2) {
+          console.warn('[Auth] setPersistence(SESSION) fallback also failed:', err2);
+          publish('NONE', err2, n + 1);
+        });
+      });
+    } catch (e) {
+      console.warn('[Auth] setPersistence threw synchronously:', e);
+      publish('unknown', e, n + 1);
+    }
+  }
+
+  attempt(0);
+})();
 
 // Firestore offline persistence — caches all reads to IndexedDB so the app
 // loads instantly from disk on the next visit while fresh data syncs in background.

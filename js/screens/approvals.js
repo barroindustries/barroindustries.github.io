@@ -137,22 +137,62 @@ window.renderApprovals = async function(currentUser) {
   // is single-use: it's consumed (and cleared) the first time loadApprovalsSub('all')
   // runs, which happens immediately below; any later re-visit to the 'all' tab
   // refetches fresh data the normal way.
+  // ⚠ 2026-08-09 — THE QUEUE USED TO LIE WHEN DENIED.
+  // Every one of these 14 queries ended in `.catch(() => ({size:0, docs:[]}))`,
+  // so a query the RULES refused rendered as "0 pending" — indistinguishable
+  // from "nothing needs attention" on the one screen whose entire job is to tell
+  // you something needs attention. A reviewer sees a clean queue and moves on.
+  // _apq() keeps the same fail-soft shape (a denial must never blank the page)
+  // but STAMPS the failure, so the categories below can be LABELLED as
+  // unavailable instead of silently reported as empty. Role-independent by
+  // construction: it reacts to what the boundary actually did, not to a guess
+  // about who is signed in, so it keeps working for any future role scoping.
+  const _deniedQueues = [];
+  const _apq = (label, chip, q) => q.get().catch(e => {
+    console.error('approval count query failed', label, e);
+    const denied = !!e && (e.code === 'permission-denied' || /permission/i.test(e.message || ''));
+    _deniedQueues.push({ label, chip, denied });
+    return { size: 0, docs: [], failed: true, denied };
+  });
   const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2] = await Promise.all([
-    db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('submissions').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('tasks').where('status','==','review').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('finance_delete_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('clients').where('deleteRequested','==',true).get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
-    db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};})
+    _apq('Sign-ups', 'signups',                 db.collection('signup_requests').where('status','==','pending')),
+    _apq('Attendance', 'attendance',            db.collection('attendance_extensions').where('status','==','pending')),
+    _apq('Cash Advances', 'ca',                 db.collection('cash_advances').where('status','==','pending')),
+    _apq('Work submissions', 'all',             db.collection('submissions').where('status','==','pending')),
+    _apq('Tasks for Review', 'review-tasks',    db.collection('tasks').where('status','==','review')),
+    _apq('Payroll delete requests', 'finance-requests', db.collection('payroll_delete_requests').where('status','==','pending')),
+    _apq('Finance delete requests', 'finance-requests', db.collection('finance_delete_requests').where('status','==','pending')),
+    _apq('Quote / ROA', 'roa',                  db.collection('approval_requests').where('status','==','pending')),
+    _apq('BS quote deletions', 'all',           db.collection('bs_quotes').where('deleteRequested','==',true)),
+    _apq('BK quote deletions', 'all',           db.collection('bk_quotes').where('deleteRequested','==',true)),
+    _apq('Client deletions', 'all',             db.collection('clients').where('deleteRequested','==',true)),
+    _apq('Leave', 'leave',                      db.collection('leave_requests').where('status','==','pending')),
+    _apq('Purchase approvals', 'all',           db.collection('purchase_requisitions').where('approvalStatus','==','pending')),
+    _apq('Raises', 'all',                       db.collection('pending_raises').where('status','==','pending_approval'))
   ]);
+  // Chips whose count is now known to be incomplete, and the human labels behind
+  // them. 'All Requests' sums every queue, so ANY failure makes it incomplete.
+  const _incompleteChips = new Set(_deniedQueues.map(d => d.chip));
+  if (_deniedQueues.length) _incompleteChips.add('all');
+  const _deniedLabels    = _deniedQueues.map(d => d.label);
+  // A count is trustworthy only if nothing feeding it failed. The rule that
+  // matters is the one the silent-zero bug broke: NEVER render a bare 0 for a
+  // category we did not actually get to check.
+  //   • nothing failed              -> the real number
+  //   • something failed, n  > 0    -> the real number. Some chips are fed by
+  //                                    TWO collections (Finance Requests =
+  //                                    payroll deletes + finance deletes), and
+  //                                    the Corporate Secretary is MEANT to see
+  //                                    the payroll-delete half (owner ruling 1).
+  //                                    Blanking it to '—' would hide items they
+  //                                    is supposed to act on; the 🔒 on the label
+  //                                    and the banner carry the "incomplete".
+  //   • something failed, n == 0    -> '—', never 0. Number('—') is NaN, so the
+  //                                    "has items" pill stays off too.
+  const _cnt = (chip, n) => (_incompleteChips.has(chip) && !n) ? '—' : n;
+  // Persistent marker on any chip whose count cannot be complete, independent of
+  // what the number happens to be this render.
+  const _lbl = (chip, label) => _incompleteChips.has(chip) ? (label + ' 🔒') : label;
   let _cachedAllSnaps = { sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 };
   const pendingSignups = sgSnap.size || 0;
   const pendingExt     = atSnap.size || 0;
@@ -185,28 +225,40 @@ window.renderApprovals = async function(currentUser) {
   }
 
   const approvalChips = [
-    { key:'all',              label:'All Requests',     icon:emojiIcon('📋',14), count: totalPending },
+    { key:'all',              label:_lbl('all','All Requests'), icon:emojiIcon('📋',14), count: _cnt('all', totalPending) },
     _showGrading ? { key:'grading', label:'Grading',    icon:emojiIcon('⭐',14), count: pendingGrading } : null,
-    { key:'review-tasks',     label:'Tasks for Review',            count: pendingReview },
-    { key:'signups',          label:'Sign-ups',                    count: pendingSignups },
-    { key:'attendance',       label:'Attendance',                  count: pendingExt },
-    { key:'leave',            label:'Leave',            icon:emojiIcon('🌴',14), count: pendingLeave },
-    { key:'ca',               label:'Cash Advances',               count: pendingCA },
-    { key:'roa',              label:'Quote / ROA',                 count: pendingQApprovals },
+    { key:'review-tasks',     label:_lbl('review-tasks','Tasks for Review'), count: _cnt('review-tasks', pendingReview) },
+    { key:'signups',          label:_lbl('signups','Sign-ups'),              count: _cnt('signups', pendingSignups) },
+    { key:'attendance',       label:_lbl('attendance','Attendance'),         count: _cnt('attendance', pendingExt) },
+    { key:'leave',            label:_lbl('leave','Leave'),          icon:emojiIcon('🌴',14), count: _cnt('leave', pendingLeave) },
+    { key:'ca',               label:_lbl('ca','Cash Advances'),              count: _cnt('ca', pendingCA) },
+    { key:'roa',              label:_lbl('roa','Quote / ROA'),               count: _cnt('roa', pendingQApprovals) },
     { key:'quote-files',      label:'Quote Files',      icon:emojiIcon('📁',14) },
-    { key:'finance-requests', label:'Finance Requests', icon:emojiIcon('💼',14), count: pendingFinReqs },
+    { key:'finance-requests', label:_lbl('finance-requests','Finance Requests'), icon:emojiIcon('💼',14), count: _cnt('finance-requests', pendingFinReqs) },
     { key:'history',          label:'History',          icon:emojiIcon('🗄️',14) },
   ].filter(Boolean);
 
+  // Explicit, non-alarming statement of what could NOT be loaded. Shown to
+  // whoever hit the denial, with the category NAMED — the whole point is that
+  // "we didn't check this" must never look like "we checked, nothing there".
+  const _deniedBanner = _deniedQueues.length ? `
+    <div class="alert-banner" style="cursor:default;margin-bottom:10px">
+      <span>${emojiIcon('🔒',16)} <strong>Not shown to you:</strong> ${escHtml(_deniedLabels.join(', '))}.
+      ${_deniedQueues.every(d => d.denied)
+        ? 'These queues are outside your access, so their counts read “—” rather than 0. The President and Finance still see them.'
+        : 'These queues could not be loaded just now, so their counts read “—” rather than 0. Try refreshing.'}</span>
+    </div>` : '';
+
   c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon('✅',20)} Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
+    <div class="page-header"><h2>${emojiIcon('✅',20)} Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending}${_deniedQueues.length?'+':''} pending</span>`:''}</div>
     ${window.sopPanel('How approvals work', [
       'Every request (sign-ups, cash advances, leave, deletes, quotes, etc.) lands here as one unified queue — default view is All Requests, pending only.',
       'Use the chips to filter by type; each chip shows a live pending count.',
       _showGrading ? 'President/Manager: the Grading chip queues completed tasks and self-assessments waiting for a score — separate from routine approvals.' : 'Money-moving and deletion requests are President-only; the Secretary can act on everyday items and escalate the rest.',
       'Already-decided items don\'t clutter the queue — find them under the History chip (last 30 days, read-only).'
     ])}
-    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews); money-moving and deletion requests go to the President.</span></div>`
+    ${_deniedBanner}
+    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews). Cash advances, raises and payroll deletions stay visible here so you can flag them — approving them is the President's.</span></div>`
       :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('ℹ️',16)} Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     ${window.chipTabs(approvalChips, 'all')}

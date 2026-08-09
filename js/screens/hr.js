@@ -356,11 +356,18 @@ window.renderHR = async function(currentUser, currentRole){
     return;
   }
   const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
+  // 2026-08-09 — HR stays OPEN to the Corporate Secretary (People & Roles,
+  // attendance, leave, ID cards, holidays, work sites: owner ruling 2), but
+  // Payroll does NOT: firestore.rules now denies them payroll/payslips/pay_runs/
+  // worker_profiles reads outright, so this card would open a screen whose every
+  // query is denied and — because they all end in `.catch(()=>({docs:[]}))` —
+  // silently renders as an empty payroll rather than as an error.
+  const canPayroll = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : true;
   const cards = [
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
     // One card, two tabs (owner: "Better if its just / Payroll / Then / Type a
     // / Type b"). Opens the hub, which lands on Type A by default.
-    { icon:'💰', title:'Payroll',        desc:'Office Team monthly run (Compute → Verify → Disburse) + Operations Team weekly payslips', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
+    ...(canPayroll ? [{ icon:'💰', title:'Payroll',        desc:'Office Team monthly run (Compute → Verify → Disburse) + Operations Team weekly payslips', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') }] : []),
     ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
     { icon:'📍', title:'Work Sites',     desc:'Geofenced Time In/Out locations for Type-B (Production) self-service', go:()=>openWorkSitesPage(currentUser, currentRole) },
     { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
@@ -3403,7 +3410,16 @@ function openWorkerKioskModal(profile, currentUser) {
 // on every Time In/Out attempt. No new CSS — reuses .card/.data-table/
 // .form-group/.badge exactly like every other hr.js screen.
 async function openWorkSitesPage(currentUser, currentRole) {
-  const canEdit = isFinancePriv();
+  // ⚠ 2026-08-09 — REGATED isFinancePriv() -> isOpsPriv(). Work Sites is the
+  // geo_sites attendance-geofence admin: pure HR, and its boundary rule
+  // (firestore.rules /geo_sites create,update) is isOpsAdmin(), NOT the money
+  // tier. It rode isFinancePriv() only because it lives in hr.js. When the
+  // Corporate Secretary lost isFinancePriv() in the Finance/IT carve-out, this
+  // screen was the ONE true client-side lockout it would have caused: the rules
+  // still allow them the write while the UI hides the button. Nothing errors, so
+  // nobody notices — until a Type-B worker at a new gate cannot self-clock,
+  // because a worker can only punch inside an ACTIVE site.
+  const canEdit = (typeof window.isOpsPriv === 'function') ? window.isOpsPriv() : isFinancePriv();
   openPage(`${emojiIcon('📍',16)} Work Sites`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
       Type-B (Production) workers can only self-service Time In/Out within the radius of an <strong>active</strong> site below.

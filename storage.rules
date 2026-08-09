@@ -100,10 +100,17 @@ service firebase.storage {
     }
     // Finance tier mirrors firestore.rules isFinanceOrAdmin() + Finance-dept.
     function isFinanceClaim() {
+      // 2026-08-09 — ruling 3 ("the role decision always wins") has to hold on
+      // BOTH rule files. The ROLE list already excludes 'secretary', but the DEPT
+      // leg did not: syncUserClaims stamps {role, departments} into the Auth
+      // custom claims this file trusts, so a secretary whose profile is ever
+      // given the Finance department would get Finance STORAGE back even though
+      // firestore.rules denies them Finance everywhere else. Same exclusion,
+      // same reasoning, same place in the predicate.
       return claimRole() == 'president'
         || claimRole() == 'manager'
         || claimRole() == 'finance'
-        || hasClaimDept('Finance');
+        || (claimRole() != 'secretary' && hasClaimDept('Finance'));
     }
     function isPartnerClaim() {
       return claimRole() == 'partner';

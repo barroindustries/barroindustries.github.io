@@ -178,9 +178,15 @@
             <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password"><i data-lucide="eye" aria-hidden="true"></i></button>
           </div>
         </div>
+        <!-- Ticked BY DEFAULT. Since 2026-08-04 this checkbox decides Firebase Auth
+             persistence, not just email pre-fill: unticked = SESSION = the session
+             dies when the app is closed. It shipped unticked, which signed the owner
+             out on every exit. LOCAL is the default; unticking is a deliberate
+             kiosk/shared-device opt-out, and #login-persist-note says so out loud. -->
         <label class="remember-row">
-          <input type="checkbox" id="remember-me"/> Save login on this device
+          <input type="checkbox" id="remember-me" checked/> Keep me signed in on this device
         </label>
+        <div id="login-persist-note" class="persist-note hidden"></div>
         <div id="login-error" class="error-msg hidden"></div>
         <button type="submit" class="btn-primary btn-full" id="login-btn">
           <span id="login-btn-text">Sign In</span>
@@ -191,7 +197,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.109 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.110 · Barro Industries</div>
   </div>
 </div>
 
@@ -427,11 +433,34 @@
     const v = window.APP_VERSION || '9.4';
     const B = window.BRAND || { name: 'Barro Industries', systemName: 'Operating System' };
     const lv = document.getElementById('login-version-str');
-    if (lv) lv.textContent = 'v' + v + ' · ' + B.name;
+    /* The session-persistence state is stamped onto the login version line so the
+       owner's next bug report carries the persistence ACTUALLY in effect (and the
+       error code when degraded) instead of another round of guessing. It belongs
+       HERE rather than only in app.js's paintPersistenceState because this
+       function re-runs on window 'load' and would otherwise clobber it. */
+    if (lv) {
+      let s = 'v' + v + ' · ' + B.name;
+      const ap = window.__authPersistence;
+      if (ap && ap.effective && ap.effective !== 'pending') {
+        s += (ap.effective === 'LOCAL')
+          ? ' · session: saved on this device'
+          : ' · session: this session only' + (ap.error ? ' (' + ap.error + ')' : '');
+      }
+      lv.textContent = s;
+    }
     const tb = document.getElementById('topbar-version-str');
     if (tb) tb.textContent = B.systemName;   // just 'Operating System' — version lives in the sidebar footer
     const sv = document.getElementById('sidebar-version-str');
-    if (sv) sv.textContent = 'v' + v;
+    /* Once the session bug is fixed the owner stops seeing the login screen, so the
+       degraded state also has to be reachable while SIGNED IN — otherwise the next
+       report is guesswork again. Terse and only when degraded, to keep the footer
+       clean: a healthy session leaves this as the bare version number. */
+    if (sv) {
+      const apx = window.__authPersistence;
+      sv.textContent = 'v' + v + ((apx && (apx.effective === 'SESSION' || apx.effective === 'NONE' || apx.effective === 'unknown'))
+        ? ' · session: this session only' + (apx.error ? ' (' + apx.error + ')' : '')
+        : '');
+    }
   };
   window._applyBrandVersion();
 </script>

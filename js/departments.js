@@ -11,20 +11,54 @@ function fmt(n) { return window.fmtN2(n); }
 function today() { return (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)); }
 function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'badge-green',urgent:'badge-red'}[p]||'badge-gray'; }
 
+// Departments the Corporate Secretary may NOT reach. Owner ruling, 2026-08-08:
+// "corporate secretary can access all departments except finance, and IT"
+// (re-confirmed: "Dont give corporate secretary access to finance and it").
+// Mirrors firestore.rules — isFinanceDept()'s role exclusion and canIt(). The
+// RULES are the real boundary (this client talks to Firestore directly, so every
+// gate in this file is advisory); this list only stops the UI offering a control
+// whose write the boundary will refuse.
+window.SECRETARY_BLOCKED_DEPTS = ['Finance', 'IT'];
+
 // Returns true if user is an admin role OR is a member of the given department.
 // Use this for write-access checks inside department modules so that dept members
 // can manage their own content regardless of their system role.
 function canEditDept(dept) {
   const role = window.currentRole || '';
-  // 'secretary' (Corporate Secretary) gets manager-level edit access across the company.
-  if (['president','owner','manager','secretary'].includes(role)) return true;
+  if (['president','owner','manager'].includes(role)) return true;
+  // 'secretary' (Corporate Secretary) keeps manager-level edit access across the
+  // company EXCEPT Finance and IT.
+  // ⚠ This line used to sit in the blanket admin list above and so returned true
+  // BEFORE the `dept` argument was ever inspected — which is precisely what made
+  // isFinancePriv() (= canEditDept('Finance')) true for the secretary and handed
+  // them all 13 of its readers, the Finance screens included.
+  if (role === 'secretary') return !window.SECRETARY_BLOCKED_DEPTS.includes(dept);
   // Accountant (finance role): full edit rights to the FINANCE department only — not
   // other departments. Deletes still route through President approval (financeDelete).
   if (role === 'finance') return dept === 'Finance';
   return (window.currentDepts || []).includes(dept);
 }
 // Shorthand for Finance-specific privilege (Payroll, HR Profiles, etc.)
+// NOTE: as of 2026-08-09 this is FALSE for 'secretary'. Twelve of its thirteen
+// readers are genuinely finance and that is the intent. The thirteenth was Work
+// Sites (openWorkSitesPage, js/screens/hr.js) — the geo_sites attendance-geofence
+// admin, pure HR, riding this predicate only because it lives in hr.js. It was
+// moved to isOpsPriv() below in the same change; without that the rules would
+// have allowed the write while the UI hid the button, and nobody would have
+// noticed until a Type-B worker at a new gate could not punch in.
 function isFinancePriv() { return canEditDept('Finance'); }
+// Client mirror of firestore.rules' isOpsAdmin() — the company-OVERSIGHT tier
+// (president/manager/secretary/finance), as distinct from the MONEY tier
+// (isMoneyPriv, president/manager/finance). Use this for HR / attendance /
+// leave / holiday / work-site admin controls, i.e. anything whose boundary rule
+// is isOpsAdmin(). ('owner' is a legacy alias for president, matching the role
+// lists in hr.js; it is not in window.ROLES.)
+function isOpsPriv() {
+  return ['president','owner','manager','secretary','finance'].includes(window.currentRole || '');
+}
+window.isOpsPriv = isOpsPriv;
+window.canEditDept = canEditDept;
+window.isFinancePriv = isFinancePriv;
 // v14 re-audit fix — MONEY-tier privilege: the client-side mirror of
 // firestore.rules' isMoneyAdmin() (president/manager/finance). Deliberately
 // NARROWER than isFinancePriv() above, which returns true for 'secretary' and

@@ -1214,12 +1214,71 @@ function _reqPhotoErr(code) {
 
 // ── Login ─────────────────────────────────────────
 function initLogin() {
-  // Pre-fill saved email
+  // Pre-fill saved email. 'bi-saved-email' means ONLY "pre-fill the email field" —
+  // it deliberately no longer drives the Keep-me-signed-in checkbox (see below).
   const savedEmail = localStorage.getItem('bi-saved-email');
   if (savedEmail) {
     document.getElementById('email').value = savedEmail;
-    document.getElementById('remember-me').checked = true;
   }
+
+  // ── "Keep me signed in on this device" — its own key, DEFAULT ON ──────────
+  // Until 2026-08-09 this checkbox was derived from 'bi-saved-email', which made
+  // it SELF-SEALING once a0f355f (2026-08-04) wired it to auth persistence:
+  //   box starts unticked (no `checked` attr, no saved email)
+  //     -> the submit handler takes the SESSION branch
+  //     -> SESSION lives in sessionStorage, so the session dies when the iOS
+  //        home-screen PWA is closed
+  //     -> the same handler then DELETES 'bi-saved-email'
+  //     -> next launch the box is unticked again. Closed loop, no exit.
+  // The owner was signed out on every single exit with no way back short of
+  // noticing a checkbox labelled like an email-prefill convenience. Persist the
+  // CHOICE under its own key and default it ON; absent (every existing device)
+  // reads as ON, so the fix self-heals without the user doing anything.
+  const rememberEl = document.getElementById('remember-me');
+  if (rememberEl) rememberEl.checked = localStorage.getItem('bi-remember-choice') !== '0';
+
+  // ── Session-persistence disclosure ────────────────────────────────────────
+  // A session that cannot survive closing the app is something the user must be
+  // TOLD, not something they discover by being logged out. firebase-config.js
+  // publishes the real outcome on window.__authPersistence and fires
+  // 'auth-persistence-change' when it resolves; surface it here, and stamp it on
+  // the version line so the owner's next report carries the persistence actually
+  // in effect and the actual error code instead of another round of guessing.
+  function paintPersistenceState() {
+    const st = window.__authPersistence || {};
+    const note = document.getElementById('login-persist-note');
+    const degraded = st.effective === 'SESSION' || st.effective === 'NONE' || st.effective === 'unknown';
+    if (note && !note.dataset.userToggled) {
+      if (degraded && rememberEl && rememberEl.checked) {
+        // Asked for LOCAL, didn't get it — the device itself can't save sessions.
+        note.textContent = "This device can't save your session — you'll need to sign in again after closing the app.";
+        note.classList.remove('hidden');
+      } else {
+        note.classList.add('hidden');
+      }
+    }
+    // The version line itself is owned by _applyBrandVersion (index.html), which
+    // re-runs on window 'load' and would clobber anything written here. It reads
+    // window.__authPersistence directly, so just re-run it.
+    try { window._applyBrandVersion && window._applyBrandVersion(); } catch (e) {}
+  }
+  paintPersistenceState();
+  window.addEventListener('auth-persistence-change', paintPersistenceState);
+
+  // Unticking is now a real decision with a real consequence, so say so at the
+  // moment it is made rather than after the app has already signed them out.
+  rememberEl?.addEventListener('change', () => {
+    const note = document.getElementById('login-persist-note');
+    if (!note) return;
+    if (!rememberEl.checked) {
+      note.dataset.userToggled = '1';
+      note.textContent = "You'll be signed out when you close the app.";
+      note.classList.remove('hidden');
+    } else {
+      delete note.dataset.userToggled;
+      paintPersistenceState();   // fall back to a genuine device-capability warning, if any
+    }
+  });
   // Legacy guest login was removed from index.html — clear its stale key. (A device
   // still holding 'bi-guest-name' used to throw here on the missing #guest-name
   // element, which blocked the auth listener from attaching → app stuck on splash.)
@@ -1325,21 +1384,60 @@ function initLogin() {
 
       const remember = document.getElementById('remember-me').checked;
       // Must set persistence BEFORE signInWithEmailAndPassword — it only applies to the
-      // sign-in call that follows it, not retroactively. LOCAL (checked/default) matches
-      // the global boot default in firebase-config.js and survives browser/tab close for
-      // ~10 days, which is what keeps background push alive. SESSION (unchecked) ends the
-      // session the moment the tab/browser fully closes — that's intentionally weaker,
-      // but it's the entire point of "Save login on this device": on a shared/kiosk
-      // machine the user is explicitly opting OUT of being remembered, so losing push
-      // continuity here is expected, not a bug to "fix" back to LOCAL.
+      // sign-in call that follows it, not retroactively. LOCAL (ticked, and now the
+      // DEFAULT — see initLogin) is IndexedDB-backed and survives app/tab close for
+      // ~10 days, which is what keeps the session and background push alive on the
+      // home-screen PWA. SESSION (unticked) is sessionStorage-backed and ends the
+      // moment the app fully closes — intentionally weaker, and the entire point of
+      // the opt-out on a shared/kiosk machine, so losing push continuity there is
+      // expected rather than a bug to "fix" back to LOCAL.
+      //
+      // RATCHET GUARD: setPersistence MIGRATES a session that already exists, so the
+      // SESSION branch is one-way — it would silently convert a working LOCAL login
+      // into a session-only one. Only ever take it on a genuinely fresh sign-in
+      // (no currentUser). Upgrading to LOCAL is always safe, so it is unconditional.
       try {
-        await auth.setPersistence(
-          remember ? firebase.auth.Auth.Persistence.LOCAL
-                   : firebase.auth.Auth.Persistence.SESSION
-        );
-      } catch (_) { /* private-mode/webview may reject setPersistence; falls back to boot default */ }
+        // Stand the boot retry loop down: an explicit user choice outranks the
+        // default, and a late retry must not migrate a deliberate kiosk login.
+        if (window.__authPersistence) window.__authPersistence.userChoiceApplied = true;
+        if (remember || !auth.currentUser) {
+          await auth.setPersistence(
+            remember ? firebase.auth.Auth.Persistence.LOCAL
+                     : firebase.auth.Auth.Persistence.SESSION
+          );
+          if (window.__authPersistence) {
+            Object.assign(window.__authPersistence, {
+              requested: remember ? 'LOCAL' : 'SESSION',
+              effective: remember ? 'LOCAL' : 'SESSION',
+              error: null, at: Date.now()
+            });
+          }
+        }
+      } catch (e) {
+        // Private-mode / in-app webviews can reject setPersistence. Don't fail the
+        // sign-in over it — but don't pretend it worked either. Record the real
+        // state so the login screen and the next bug report carry it.
+        if (window.__authPersistence) {
+          Object.assign(window.__authPersistence, {
+            requested: remember ? 'LOCAL' : 'SESSION',
+            effective: 'unknown',
+            error: (e && (e.code || e.message)) || String(e), at: Date.now()
+          });
+        }
+        try { window.logClientError && window.logClientError(e, 'login setPersistence'); } catch (_) {}
+      }
+      // Repaint the version lines off the new state (the sidebar footer is what the
+      // owner can still read once he's signed in and no longer sees the login screen).
+      try {
+        window.dispatchEvent(new CustomEvent('auth-persistence-change', {
+          detail: { effective: window.__authPersistence && window.__authPersistence.effective }
+        }));
+      } catch (_) {}
 
       await auth.signInWithEmailAndPassword(emailToUse, document.getElementById('password').value);
+      // Remember the CHOICE independently of the email pre-fill — storing it only
+      // inside 'bi-saved-email' is what made the unticked state self-sealing.
+      localStorage.setItem('bi-remember-choice', remember ? '1' : '0');
       if (remember) {
         localStorage.setItem('bi-saved-email', input);
       } else {
@@ -1544,7 +1642,7 @@ function _navPredicateOk(name) {
 }
 // Departments — appear ABOVE the Management section, in the 'staff' sidebar
 // variant only. The Accountant (finance role) always sees the Finance
-// department even when she isn't explicitly assigned to it; Finance is her one
+// department even when they isn't explicitly assigned to it; Finance is them one
 // department (Sales Orders, Payroll, Ledger, etc. all live inside the Finance
 // hub as tabs). Per-user data, not static nav config — NAV_REGISTRY's 'staff'
 // list marks WHERE this goes with a `{deptLoop:true}` placeholder; this is
@@ -3012,7 +3110,32 @@ function renderDualDeptPicker() {
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 }
 
+// Departments the Corporate Secretary may not open. Owner ruling 2026-08-08.
+// This is THE interception point for the whole app: navigateTo()'s `dept:` prefix
+// routes here, and so do the sidebar "My Departments" loop, the Departments grid,
+// the dual-dept picker, deep links, search results and notification payloads.
+// Gating here rather than only in the grid means a hand-typed #dept:Finance
+// cannot get round it. It is still only UI — firestore.rules is the boundary.
+function _deptBlockedForRole(dept) {
+  return (window.currentRole || '') === 'secretary'
+    && (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT']).includes(dept);
+}
+
 function renderDeptModule(dept) {
+  if (_deptBlockedForRole(dept)) {
+    const c = document.getElementById('page-content');
+    if (c) {
+      // renderAccessDenied lives in dashboards.js and is resolved as a bare
+      // global at runtime (the pattern this switch already uses for
+      // renderGovBiddings/renderSOPs); the fallback keeps a load-order surprise
+      // from leaving a blank page behind.
+      c.innerHTML = (typeof renderAccessDenied === 'function')
+        ? renderAccessDenied(dept)
+        : `<div class="access-denied"><h3>${dept}</h3><p>You don't have access to this department.</p></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [c] });
+    }
+    return;
+  }
   switch(dept) {
     case 'Marketing':                  renderMarketing(currentUser, currentRole); break;
     case 'Finance':                    renderFinance(currentUser, currentRole); break;
