@@ -2252,6 +2252,18 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
   const di  = q.deliveryInstall || {};
   const pay = q.payment || {};
   const tl  = q.timeline || {};
+  // Custom payment milestones (quote-builder-v2 "Use custom payment
+  // milestones"). Re-projected field-by-field like everything else here — the
+  // condition text is free-form operator input and lands on a public page, so
+  // it is length-capped here and HTML-escaped at render time in q/index.html.
+  // null/absent on every legacy quote; the five legacy payment fields above are
+  // still copied verbatim so nothing downstream changes.
+  const milestones = Array.isArray(pay.milestones) ? pay.milestones.slice(0, 24).map(m => ({
+    pct:    Number(m && m.pct) || 0,
+    label:  String((m && m.label) || '').slice(0, 80),
+    date:   /^\d{4}-\d{2}-\d{2}$/.test(String((m && m.date) || '')) ? String(m.date) : '',
+    amount: Number(m && m.amount) || 0,
+  })) : null;
   // Narrow to a KNOWN brand code; anything else is a generic partner ('PT').
   // Driven by QUOTE_BRANDS (which now carries BK/BI/BS) rather than a hardcoded
   // pair, so this can't drift out of step with resolveQuoteBrand below.
@@ -2294,6 +2306,7 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
       balance:         Number(pay.balance) || 0,
       balanceMode:     pay.balanceMode || '',
       interestRate:    Number(pay.interestRate) || 0,
+      milestones,   // additive; null on legacy quotes — q/index.html falls back to the rows above
     },
     bankDetails: window.QUOTE_MIRROR_SHOW_BANK_DETAILS_IMMEDIATELY ? (q.bankDetails || '') : '',
     timeline: {

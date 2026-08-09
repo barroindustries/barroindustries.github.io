@@ -248,6 +248,45 @@ tr:hover td{background:#fafbff;}
 .pay-tbl tr.pay-head td{background:var(--light-blue);font-weight:700;color:var(--dark-blue);}
 .pay-note{font-size:11px;color:var(--gray-dark);margin-top:6px;line-height:1.5;font-style:italic;}
 
+/* ── CUSTOM PAYMENT MILESTONES (screen-only editor; #milestoneEditor is
+   .no-print and lives OUTSIDE #paymentSummary so renderTotals' wholesale
+   innerHTML rewrite of the summary can never blow away a focused input) ── */
+.ms-wrap{margin-top:8px;border:1.5px dashed var(--mid-blue);border-radius:8px;padding:10px;background:#fbfcfe;}
+.ms-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+.ms-chip{font-size:11px;font-weight:700;border-radius:20px;padding:4px 11px;white-space:nowrap;}
+.ms-chip.ok{background:#e6f7ee;color:#1f8f4e;border:1px solid #a8e0c2;}
+.ms-chip.warn{background:#fdf2e2;color:#a1610a;border:1px solid #f0cf95;}
+.ms-chip.bad{background:#fdecea;color:#b03024;border:1px solid #f3b8b1;}
+.ms-row{display:grid;grid-template-columns:22px 78px minmax(140px,1fr) 138px 108px auto;gap:6px;align-items:center;margin-bottom:6px;}
+.ms-idx{font-size:11px;font-weight:700;color:var(--gray-dark);text-align:center;}
+.ms-row input{font-size:12.5px;padding:5px 7px;}
+.ms-row input.ms-pct{text-align:right;}
+.ms-amt{font-size:12.5px;font-weight:700;color:var(--dark-blue);text-align:right;white-space:nowrap;}
+.ms-acts{display:flex;gap:3px;}
+.ms-acts button{border:1px solid var(--gray-mid);background:white;border-radius:5px;cursor:pointer;
+  font-size:12px;line-height:1;padding:5px 7px;color:var(--gray-dark);}
+.ms-acts button:hover{border-color:var(--mid-blue);color:var(--dark-blue);}
+.ms-acts button.ms-del:hover{border-color:var(--red);color:var(--red);}
+.ms-cols{display:grid;grid-template-columns:22px 78px minmax(140px,1fr) 138px 108px auto;gap:6px;
+  font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin-bottom:3px;}
+.ms-cols span:nth-child(2),.ms-cols span:nth-child(5){text-align:right;}
+.ms-foot{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;align-items:center;}
+.ms-hint{font-size:10.5px;color:var(--gray-dark);font-style:italic;margin-top:6px;line-height:1.45;}
+@media (max-width:760px){
+  .ms-cols{display:none;}
+  /* "date" spans the first two tracks — on a single track it collapsed to the
+     34px index column and the field rendered as a bare calendar icon. */
+  .ms-row{grid-template-columns:34px 1fr auto;grid-template-areas:"idx pct acts" "lbl lbl lbl" "date date amt";
+    border:1px solid var(--gray-mid);border-radius:7px;padding:8px;background:white;gap:6px;}
+  .ms-row .ms-idx{grid-area:idx;}
+  .ms-row .ms-pct{grid-area:pct;}
+  .ms-row .ms-label{grid-area:lbl;}
+  .ms-row .ms-date{grid-area:date;}
+  .ms-row .ms-amt{grid-area:amt;align-self:center;}
+  .ms-row .ms-acts{grid-area:acts;}
+  .ms-acts button{min-width:36px;min-height:36px;justify-content:center;}
+}
+
 /* ── INTERNAL PANEL ── */
 .int-panel{background:#fffbf0;border:1.5px dashed var(--orange);border-radius:9px;padding:14px;margin-top:10px;}
 .int-panel .sec-title{color:var(--orange);border-bottom-color:#f0d080;}
@@ -1219,7 +1258,19 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <label>Installment Interest Rate (% per annum)</label>
       <input type="number" id="interestRate" min="0" step="0.5" value="0" oninput="renderTotals()">
     </div>
+    <div class="fg full">
+      <label class="pc-check" style="padding-top:0;">
+        <input type="checkbox" id="msToggle" onchange="toggleMilestoneMode(this)">
+        Use custom payment milestones instead (write your own “X% upon …” stages)
+      </label>
+      <div class="pc-hint">Off = the Down Payment / Balance presets above. On = your own list; the first milestone is the down payment.</div>
+    </div>
   </div>
+  <!-- Screen-only milestone editor. Deliberately a SEPARATE node from
+       #paymentSummary (which renderTotals rewrites wholesale on every
+       keystroke anywhere in the quote): this one is rebuilt ONLY on a
+       structural change, so a focused <input> keeps its caret. -->
+  <div id="milestoneEditor" class="no-print"></div>
   <div id="paymentSummary" class="payment-summary"></div>
 </div>
 
@@ -1491,6 +1542,21 @@ const PARTNER_BLOCKED_COS=['BI'];
 //  STATE
 // ═══════════════════════════════════════════════════════════════════
 let items=[], currentView='client', currentCo='BK', qnoMode='auto';
+// ── CUSTOM PAYMENT MILESTONES (owner request: "allow for custom number of
+// staggered payment ... and a date when with condition ... fully customizeable")
+//   null  => LEGACY mode: dpMode/balMode drive the schedule, byte-identical to
+//            every quote filed before this feature existed.
+//   array => MILESTONE mode; the array spans the WHOLE contract and [0] IS the
+//            down payment.
+// Array.isArray(payMilestones) IS the mode — there is no separate boolean, so a
+// flag and the data can never disagree. #msToggle renders its checked state
+// from the array, never the other way round.
+// Row shape: { pct:Number, label:String (free text, <=80 chars), date:'YYYY-MM-DD'|'' }
+// NO derived money is ever stored — amounts are recomputed from the live grand
+// total by milestoneMath() so they can never go stale.
+let payMilestones=null;
+const MS_LABEL_MAX=80;   // free-text condition cap
+const MS_MAX_ROWS=24;    // sanity cap — a contract with 25 stages is a data-entry accident
 // QB #9 — drag-to-reorder. Native HTML5 drag events only originate from a
 // mouse gesture (no browser fires dragstart from touchstart), so gating the
 // drag handle on this keeps touch users on the up/down buttons only and
@@ -3080,6 +3146,12 @@ function renderTotals(){
   document.getElementById('totalsTbl').innerHTML=html;
   renderTimeline();
   renderPaymentSchedule(t.grand);
+  // Deliberately its OWN line, AFTER renderPaymentSchedule — that function
+  // early-returns when grand is 0, which would otherwise leave the milestone
+  // editor's peso figures dead until the first item is added. This is a
+  // surgical textContent write (amounts + allocation chip); it never touches
+  // an <input>, so a caret mid-edit survives it.
+  syncMilestoneEditorAmounts(t.grand);
   updateDiPrint();
   if(currentView==='internal') computeMarginSummary();
   updateRunningTotalPill(t);
@@ -3122,6 +3194,9 @@ function renderPaymentSchedule(grand){
   const box=document.getElementById('paymentSummary');
   if(!box) return;
   if(!grand){box.innerHTML='<div class="pay-note">Add items to compute the payment schedule.</div>';return;}
+  // MILESTONE mode replaces the whole DP/balance schedule — this table is the
+  // read-only, PRINT-FACING contract wording (#paymentSummary is not .no-print).
+  if(Array.isArray(payMilestones)){ box.innerHTML=milestoneSummaryHtml(grand); return; }
   const dpMode=document.getElementById('dpMode')?.value||'50';
   const dp=getDpAmount(grand);
   const balance=Math.max(0,grand-dp);
@@ -3175,6 +3250,296 @@ function renderPaymentSchedule(grand){
   let html=`<table class="pay-tbl"><tbody>${rows}</tbody></table>`;
   if(note) html+=`<div class="pay-note">${note}</div>`;
   box.innerHTML=html;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CUSTOM PAYMENT MILESTONES
+//  Owner request: "allow for custom number of staggered payment in quotation
+//  builder and a date when with condition ... allow to write custom upon...
+//  and when, allow to leave date blank ... it should be fully customizeable".
+//
+//  DESIGN NOTES (the two things that will bite anyone editing this):
+//  1. TWO NODES, TWO LIFECYCLES. #paymentSummary is rewritten wholesale by
+//     renderPaymentSchedule() on EVERY renderTotals() — an <input> living in
+//     there loses focus and caret on every keystroke anywhere in the quote.
+//     So the editable rows live in #milestoneEditor (a separate .no-print
+//     node) which is rebuilt ONLY on a structural change (toggle / add /
+//     delete / move / load / reset). The per-row setters below therefore call
+//     renderTotals() but MUST NEVER call renderMilestoneEditor().
+//  2. WHOLE PESOS. formatPeso() prints Math.round(n) and the printed table IS
+//     the contract, so the amounts are modelled in whole pesos and the LAST
+//     row absorbs the rounding residual — but only when the stated
+//     percentages already sum to 100, otherwise a 90%-allocated draft would
+//     silently fatten the last row by 10% instead of honestly showing the
+//     shortfall. Same contract js/config.js already states for the invoice
+//     side ("last row absorbs rounding").
+// ═══════════════════════════════════════════════════════════════════
+
+// Rows stashed when the toggle is switched OFF, so an accidental toggle
+// doesn't destroy typed conditions. Never persisted, never filed.
+let _msStash=null;
+
+function clampPct(v){
+  const n=Number(v);
+  if(!isFinite(n)||n<0) return 0;
+  return Math.min(100, Math.round(n*100)/100);   // 2dp
+}
+// 33.00 → "33", 33.33 → "33.33" — percentages read as written, no fake precision.
+function fmtPct(n){
+  const x=Math.round((Number(n)||0)*100)/100;
+  return (Math.abs(x-Math.round(x))<0.005) ? String(Math.round(x)) : String(+x.toFixed(2));
+}
+// A milestone date is stored verbatim as the 'YYYY-MM-DD' the date input gave
+// us; blank stays blank. Parsed at NOON (same convention as addDays) so it can
+// never day-shift across the UTC/Manila boundary, and never round-tripped
+// through toISOString().
+function msDateObj(iso){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(iso||''))) return null;
+  const d=new Date(iso+'T12:00:00');
+  return isNaN(d)?null:d;
+}
+function msWhen(iso){ const d=msDateObj(iso); return d?fmtDate(d):''; }
+
+// Defensive normalizer — everything that comes back from localStorage, a
+// #quote= hash, a reopened Firestore doc or a template passes through here.
+function sanitizeMilestones(raw){
+  if(!Array.isArray(raw)||!raw.length) return null;
+  const out=raw.slice(0,MS_MAX_ROWS).map(r=>({
+    pct:   clampPct(r&&r.pct),
+    label: String((r&&r.label)!=null?r.label:'').slice(0,MS_LABEL_MAX),
+    date:  /^\d{4}-\d{2}-\d{2}$/.test(String((r&&r.date)||'')) ? String(r.date) : '',
+  }));
+  return out.length?out:null;
+}
+
+// THE single source of every peso figure shown, printed or filed.
+function milestoneMath(grand){
+  const ms=Array.isArray(payMilestones)?payMilestones:[];
+  const n=ms.length;
+  const total=Math.round(Number(grand)||0);          // what formatPeso prints for GRAND TOTAL
+  const pctSum=+(ms.reduce((s,m)=>s+(Number(m.pct)||0),0)).toFixed(4);
+  const exact=Math.abs(pctSum-100)<0.005;
+  const amounts=ms.map(m=>Math.round(total*(Number(m.pct)||0)/100));
+  if(exact&&n){
+    let head=0; for(let i=0;i<n-1;i++) head+=amounts[i];
+    amounts[n-1]=total-head;                          // last row absorbs the residual
+  }
+  const allocated=amounts.reduce((s,a)=>s+a,0);
+  return {ms,n,total,pctSum,exact,amounts,allocated,unassigned:total-allocated};
+}
+
+// '' when the quote may be filed; otherwise the reason it may not.
+function milestoneBlockReason(){
+  if(!Array.isArray(payMilestones)) return '';
+  const m=milestoneMath(computeTotals().grand);
+  if(!m.n) return 'Add at least one payment milestone, or switch custom milestones off.';
+  if(m.ms.some(r=>!String(r.label||'').trim())) return 'Every payment milestone needs a description (e.g. "Upon Fabrication").';
+  if(!m.exact){
+    const d=+(m.pctSum-100).toFixed(2);
+    return d<0
+      ? `Payment milestones total ${fmtPct(m.pctSum)}% — ${fmtPct(-d)}% (${formatPeso(Math.abs(m.unassigned))}) is still unassigned. They must total exactly 100%.`
+      : `Payment milestones are over-allocated by ${fmtPct(d)}% — they must total exactly 100%.`;
+  }
+  return '';
+}
+
+function milestoneChipState(grand){
+  const m=milestoneMath(grand);
+  if(!m.n) return {cls:'bad',  text:'No milestones yet — add one'};
+  if(m.ms.some(r=>!String(r.label||'').trim())) return {cls:'warn', text:'Every milestone needs a description'};
+  if(m.exact)      return {cls:'ok',   text:`100% allocated · ${m.n} milestone${m.n===1?'':'s'}`};
+  if(m.pctSum<100) return {cls:'warn', text:`${fmtPct(m.pctSum)}% allocated · ${formatPeso(Math.abs(m.unassigned))} unassigned`};
+  return {cls:'bad', text:`Over-allocated by ${fmtPct(m.pctSum-100)}%`};
+}
+
+// Hand-off from the presets: milestone 1 inherits whatever down payment the
+// user already picked, so switching modes never silently changes the money.
+function seedMilestonesFromPresets(){
+  const grand=computeTotals().grand;
+  const mode=document.getElementById('dpMode')?.value||'50';
+  let dpPct;
+  if(mode==='custom'){
+    const amt=parseFloat(document.getElementById('dpCustom')?.value||0)||0;
+    dpPct = grand>0 ? clampPct(100*amt/grand) : 50;
+  } else {
+    dpPct = clampPct(parseFloat(mode)||50);
+  }
+  const rest=+(100-dpPct).toFixed(2);
+  const rows=[{pct:dpPct,label:'Down Payment upon confirmation of order',date:''}];
+  if(rest>0.004) rows.push({pct:clampPct(rest),label:'Upon Delivery / Completion',date:''});
+  return rows;
+}
+
+// ── The screen-only editor. Rebuilt ONLY on structural change. ──
+function renderMilestoneEditor(){
+  const box=document.getElementById('milestoneEditor');
+  if(!box) return;
+  const cb=document.getElementById('msToggle');
+  if(cb) cb.checked=Array.isArray(payMilestones);   // the array IS the mode
+  if(!Array.isArray(payMilestones)){ box.innerHTML=''; return; }
+  const m=milestoneMath(computeTotals().grand);
+  const chip=milestoneChipState(m.total);
+  let rows='';
+  m.ms.forEach((r,i)=>{
+    rows+=`<div class="ms-row">
+      <span class="ms-idx">${i+1}</span>
+      <input class="ms-pct" type="number" min="0" max="100" step="0.01" inputmode="decimal"
+             value="${attrEsc(r.pct)}" onchange="setMilestonePct(${i},this)" aria-label="Milestone ${i+1} percentage">
+      <input class="ms-label" type="text" maxlength="${MS_LABEL_MAX}" placeholder="e.g. Upon Fabrication"
+             value="${attrEsc(r.label||'')}" onchange="setMilestoneLabel(${i},this)" aria-label="Milestone ${i+1} condition">
+      <input class="ms-date" type="date" value="${attrEsc(r.date||'')}"
+             onchange="setMilestoneDate(${i},this)" aria-label="Milestone ${i+1} date (optional)">
+      <span class="ms-amt" id="msAmt${i}">${formatPeso(m.amounts[i]||0)}</span>
+      <span class="ms-acts">
+        <button type="button" title="Move up"   onclick="moveMilestone(${i},-1)"${i===0?' disabled style="opacity:.35"':''}>&#9650;</button>
+        <button type="button" title="Move down" onclick="moveMilestone(${i},1)"${i===m.n-1?' disabled style="opacity:.35"':''}>&#9660;</button>
+        <button type="button" class="ms-del" title="Delete this milestone" onclick="deleteMilestone(${i})">&#10005;</button>
+      </span>
+    </div>`;
+  });
+  box.innerHTML=`<div class="ms-wrap">
+    <div class="ms-head">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue)">Custom Payment Milestones</div>
+      <span class="ms-chip ${chip.cls}" id="msChip">${txtEsc(chip.text)}</span>
+    </div>
+    <div class="ms-cols"><span></span><span>%</span><span>Condition / description</span><span>Date (optional)</span><span>Amount</span><span></span></div>
+    ${rows||'<div class="ms-hint">No milestones yet — add the first one below.</div>'}
+    <div class="ms-foot">
+      <button type="button" class="btn btn-sm" style="background:var(--mid-blue);color:#fff" onclick="addMilestone()">＋ Add milestone</button>
+      <button type="button" class="btn btn-sm" style="background:var(--gray-mid);color:var(--text)" onclick="distributeMilestoneRemainder()">Balance to 100%</button>
+      <button type="button" class="btn btn-sm" style="background:var(--gray-mid);color:var(--text)" onclick="resetMilestones()">Reset</button>
+    </div>
+    <div class="ms-hint">Milestone 1 is the down payment. Percentages must total exactly 100% and every row needs a description before the quote can be filed. Leave the date blank if it isn't fixed yet — blank dates simply don't print.</div>
+  </div>`;
+}
+
+// Surgical live update — touches ONLY textContent/className, never an <input>,
+// so it is safe to run from renderTotals() while a row is being typed into.
+function syncMilestoneEditorAmounts(grand){
+  if(!Array.isArray(payMilestones)) return;
+  const box=document.getElementById('milestoneEditor');
+  if(!box||!box.firstChild) return;
+  const m=milestoneMath(grand!=null?grand:computeTotals().grand);
+  for(let i=0;i<m.n;i++){
+    const el=document.getElementById('msAmt'+i);
+    if(el) el.textContent=formatPeso(m.amounts[i]||0);
+  }
+  const chipEl=document.getElementById('msChip');
+  if(chipEl){
+    const c=milestoneChipState(m.total);
+    chipEl.textContent=c.text;
+    chipEl.className='ms-chip '+c.cls;
+  }
+}
+
+function toggleMilestoneMode(cb){
+  if(cb&&cb.checked){
+    payMilestones=(Array.isArray(_msStash)&&_msStash.length)
+      ? _msStash.map(r=>({...r}))
+      : seedMilestonesFromPresets();
+  } else {
+    if(Array.isArray(payMilestones)&&payMilestones.length) _msStash=payMilestones.map(r=>({...r}));
+    payMilestones=null;
+  }
+  renderMilestoneEditor();
+  renderTotals();
+}
+
+// ── Row setters. onchange (never oninput) — same reason updateQty/updatePrice
+//    use it. They MUST NOT rebuild the editor. ──
+function setMilestonePct(i,el){
+  if(!Array.isArray(payMilestones)||!payMilestones[i]) return;
+  const v=clampPct(el.value);
+  payMilestones[i].pct=v;
+  if(String(el.value)!==String(v)) el.value=v;   // reflect a clamp only when it actually clamped
+  renderTotals();
+}
+function setMilestoneLabel(i,el){
+  if(!Array.isArray(payMilestones)||!payMilestones[i]) return;
+  const v=String(el.value||'').slice(0,MS_LABEL_MAX);
+  payMilestones[i].label=v;
+  if(el.value!==v) el.value=v;
+  renderTotals();
+}
+function setMilestoneDate(i,el){
+  if(!Array.isArray(payMilestones)||!payMilestones[i]) return;
+  const raw=String(el.value||'');
+  const v=/^\d{4}-\d{2}-\d{2}$/.test(raw)?raw:'';   // a blank date stays blank
+  payMilestones[i].date=v;
+  if(el.value!==v) el.value=v;
+  renderTotals();
+}
+
+// ── Structural ops — these DO rebuild the editor. ──
+function addMilestone(){
+  if(!Array.isArray(payMilestones)) payMilestones=[];
+  if(payMilestones.length>=MS_MAX_ROWS){ showToast(`Maximum ${MS_MAX_ROWS} milestones.`,'error'); return; }
+  const m=milestoneMath(computeTotals().grand);
+  payMilestones.push({pct:clampPct(Math.max(0,+(100-m.pctSum).toFixed(2))),label:'',date:''});
+  renderMilestoneEditor();
+  renderTotals();
+  const labels=document.getElementById('milestoneEditor')?.querySelectorAll('.ms-label');
+  if(labels&&labels.length) labels[labels.length-1].focus();
+}
+function deleteMilestone(i){
+  if(!Array.isArray(payMilestones)||!payMilestones[i]) return;
+  payMilestones.splice(i,1);
+  renderMilestoneEditor();
+  renderTotals();
+}
+function moveMilestone(i,dir){
+  if(!Array.isArray(payMilestones)) return;
+  const j=i+dir;
+  if(j<0||j>=payMilestones.length) return;
+  const tmp=payMilestones[i]; payMilestones[i]=payMilestones[j]; payMilestones[j]=tmp;
+  renderMilestoneEditor();
+  renderTotals();
+}
+function distributeMilestoneRemainder(){
+  if(!Array.isArray(payMilestones)||!payMilestones.length) return;
+  const m=milestoneMath(computeTotals().grand);
+  const diff=+(100-m.pctSum).toFixed(2);
+  if(Math.abs(diff)<0.005){ showToast('Milestones already total exactly 100%.'); return; }
+  const last=payMilestones.length-1;
+  payMilestones[last].pct=clampPct((Number(payMilestones[last].pct)||0)+diff);
+  renderMilestoneEditor();
+  renderTotals();
+}
+function resetMilestones(){
+  payMilestones=seedMilestonesFromPresets();
+  renderMilestoneEditor();
+  renderTotals();
+}
+
+// ── The read-only, PRINT-FACING milestone table (#paymentSummary). ──
+function milestoneSummaryHtml(grand){
+  const m=milestoneMath(grand);
+  let rows=`<tr class="pay-head"><td>Total Contract Price</td><td>${formatPeso(m.total)}</td></tr>`;
+  if(!m.n){
+    rows+=`<tr><td>No payment milestones defined yet.</td><td>—</td></tr>`;
+  } else {
+    m.ms.forEach((r,i)=>{
+      const cond=String(r.label||'').trim();
+      const when=msWhen(r.date);   // '' for a blank date — renders NOTHING, never "Invalid Date"
+      rows+=`<tr><td>${i+1}. ${txtEsc(fmtPct(r.pct))}% — `
+          + (cond?txtEsc(cond):'<em style="color:var(--gray-dark)">condition not yet stated</em>')
+          + (when?` <span style="color:var(--gray-dark);font-weight:400">(on or before ${txtEsc(when)})</span>`:'')
+          + `</td><td>${formatPeso(m.amounts[i])}</td></tr>`;
+    });
+  }
+  let note;
+  if(!m.n){
+    note='⚠️ DRAFT — no payment milestones defined. Add at least one, or switch custom milestones off.';
+  } else if(m.exact){
+    note=`Payment is staged across ${m.n} milestone${m.n===1?'':'s'} totalling 100% of the contract price. `
+       + `Milestone 1 is the down payment, due upon confirmation of order; each succeeding amount falls due upon the stated condition being met. `
+       + `Dates shown are target dates and move with the actual project schedule; a milestone shown without a date is billed on its condition alone.`;
+  } else if(m.pctSum<100){
+    note=`⚠️ DRAFT — only ${fmtPct(m.pctSum)}% of the contract price is allocated (${formatPeso(Math.abs(m.unassigned))} unassigned). Milestones must total exactly 100% before this quote can be filed.`;
+  } else {
+    note=`⚠️ DRAFT — milestones are over-allocated by ${fmtPct(m.pctSum-100)}% (${formatPeso(Math.abs(m.unassigned))} more than the contract price). Milestones must total exactly 100% before this quote can be filed.`;
+  }
+  return `<table class="pay-tbl"><tbody>${rows}</tbody></table><div class="pay-note">${note}</div>`;
 }
 
 // #4 — Discount: percent (existing) vs a custom flat peso amount. Whichever
@@ -4064,15 +4429,44 @@ function getPricingFields(){
     if(!el) return;
     o[id]=el.type==='checkbox'?el.checked:el.value;
   });
+  // Custom payment milestones. NOT a PRICING_IDS entry — that loop is strictly
+  // one getElementById per id and cannot carry a list. Riding here (outside the
+  // loop) is what makes milestones round-trip through EVERY state path at once:
+  // localStorage (bkqb_pricing), the filed payload's editableState.pricing
+  // (reopen / new revision), quote templates, and #quote= share links.
+  // Deep-copied so a later mutation of payMilestones can't retro-edit a
+  // snapshot someone already took.
+  o.milestones = Array.isArray(payMilestones) ? payMilestones.map(r=>({pct:r.pct,label:r.label,date:r.date})) : null;
   return o;
 }
 function applyPricingFields(o){
-  if(!o) return;
+  // _msStash holds the rows a user set aside by UNTICKING the milestone toggle,
+  // so an accidental toggle-off does not destroy their work. It must NOT survive
+  // a load of a DIFFERENT quote: LOAD_TEMPLATE is posted into the STILL-OPEN
+  // iframe, so no reload intervenes, and a user who then ticked the toggle got
+  // the PREVIOUS customer's percentages, free-text contract wording and dates.
+  // If those rows happened to sum to 100 with every label filled — which a
+  // completed quote does by definition — milestoneBlockReason() returns clean
+  // and the quote is FILABLE carrying another customer's payment terms.
+  // Cleared here, beside payMilestones, for the same reason stated below: every
+  // caller of this function is loading a WHOLE state.
+  _msStash = null;
+  // Cleared BEFORE the early return, not after: `!o` still means "a whole state
+  // is being loaded", so bailing out early must not leave the previous quote's
+  // milestones in place either.
+  if(!o){ payMilestones = null; renderMilestoneEditor(); return; }
   PRICING_IDS.forEach(id=>{
     const el=document.getElementById(id);
     if(!el||o[id]===undefined) return;
     if(el.type==='checkbox') el.checked=!!o[id]; else el.value=o[id];
   });
+  // ALWAYS assigned, never conditional on the key being present: every caller
+  // (hash load, draft resume, reopen, template, clearForm) is loading a WHOLE
+  // state, so a quote filed before this feature existed (no `milestones` key)
+  // must land in LEGACY mode rather than inherit whatever the previously-open
+  // quote had.
+  payMilestones = sanitizeMilestones(o.milestones);
+  renderMilestoneEditor();
   if(document.getElementById('discountMode')) onDiscountModeChange();
   if(document.getElementById('commissionMode')) onCommissionModeChange();
   if(document.getElementById('diFree')) onFreeDeliveryChange();
@@ -4231,7 +4625,9 @@ function clearForm(){
   applyPricingFields({showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
     commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
     diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
-    interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30'});
+    interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30',
+    milestones:null});   // back to LEGACY dpMode/balMode mode on a brand-new quote
+  _msStash=null;         // and drop the toggle-off stash so it can't resurrect on the next quote
   document.getElementById('quoteDate').value=today;
   document.getElementById('filedBadge').classList.remove('show');
   document.getElementById('filedBadge').textContent='✓ FILED';
@@ -4259,6 +4655,10 @@ const VERIFY_CHECKS=[
 ];
 
 function canFile(){
+  // Milestone arithmetic is a HARD gate, deliberately outside VERIFY_CHECKS:
+  // every check in that list is waivable ("Mark as N/A"), and a quote whose
+  // stages don't add up to the contract price must never be waivable.
+  if(milestoneBlockReason()) return false;
   return VERIFY_CHECKS.every(c=>!!c.get()||waiveFlags[c.id]);
 }
 
@@ -4317,6 +4717,30 @@ function buildVerifyModal(){
             <span>Update the original quote in place — no new copy</span>
           </label>
         </div>
+      </div>
+    </div>`;
+  }
+  // Custom payment milestones — show the schedule that's about to be filed, and
+  // when it doesn't add up, say exactly why File is blocked (canFile() already
+  // returns false; this is the message, not the gate).
+  if(Array.isArray(payMilestones)){
+    const mm=milestoneMath(computeTotals().grand);
+    const reason=milestoneBlockReason();
+    const lines=mm.ms.map((r,i)=>{
+      const when=msWhen(r.date);
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0">
+        <span>${i+1}. ${txtEsc(fmtPct(r.pct))}% — ${txtEsc(String(r.label||'').trim()||'(no description)')}${when?' · '+txtEsc(when):''}</span>
+        <span style="font-weight:700;white-space:nowrap">${formatPeso(mm.amounts[i]||0)}</span>
+      </div>`;
+    }).join('')||'<div style="color:#aaa"><em>No milestones added</em></div>';
+    html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+      <div class="verify-icon">${reason?'⚠️':'🗓️'}</div>
+      <div class="verify-info">
+        <div class="verify-label" style="font-size:13px;font-weight:700">Custom Payment Milestones</div>
+        <div class="verify-val" style="margin-top:4px">${lines}</div>
+        ${reason
+          ? `<div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600">${txtEsc(reason)}</div>`
+          : `<div style="margin-top:6px;font-size:12px;color:#1f8f4e;font-weight:600">✓ ${mm.n} milestone${mm.n===1?'':'s'} · 100% of ${formatPeso(mm.total)} allocated</div>`}
       </div>
     </div>`;
   }
@@ -4409,6 +4833,11 @@ async function reserveAtomicQnoSeq(){
 
 async function fileQuotation(){
   if(_isFiling) return; // double-tap guard — see note above canFile()
+  // Belt-and-braces: canFile() already covers this and the button is disabled,
+  // but fileQuotation() is also reachable programmatically — never let a quote
+  // whose milestones don't total the contract price reach Firestore.
+  const msBlock=milestoneBlockReason();
+  if(msBlock){ showToast(msBlock,'error'); return; }
   if(!canFile()) return;
   _isFiling=true;
   flushSaveToStorageNow(); // ensure the local draft is consistent before this quote is filed
@@ -4477,10 +4906,34 @@ function buildQuotePayload(){
     else { delete i.volumeBreakPct; delete i.volumeBreakAmt; }
   });
   const grand = t.grand;
-  const dp = getDpAmount(grand);
-  const balance = Math.max(0,grand-dp);
-  const dpMode = document.getElementById('dpMode')?.value||'50';
+  // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
+  // downPaymentMode / balance / interestRate stay populated on EVERY filed
+  // quote, milestone mode or not — `milestones` is purely additive. The only
+  // downstream reader that makes a money decision off these is the Sales Order
+  // DP% prefill (js/departments.js ~2973):
+  //   downPaymentMode==='custom' ? 100*downPayment/total : parseFloat(downPaymentMode)
+  // so in milestone mode we file a WHOLE-NUMBER downPaymentMode when milestone
+  // 1 is a whole percent (→ it prefills 40 for "40%"), and 'custom' with the
+  // exact peso downPayment otherwise (→ it back-computes the same percentage).
+  let dp, balance, dpMode, milestonesOut=null;
   const balMode = document.getElementById('balMode')?.value||'lump';
+  if(Array.isArray(payMilestones)){
+    const m=milestoneMath(grand);
+    milestonesOut=m.ms.map((r,i)=>({
+      pct:    Number(r.pct)||0,
+      label:  String(r.label||'').trim().slice(0,MS_LABEL_MAX),
+      date:   /^\d{4}-\d{2}-\d{2}$/.test(String(r.date||''))?String(r.date):'',
+      amount: m.amounts[i]||0,   // snapshot of the filed figure; the model stays pct-driven
+    }));
+    dp = m.amounts.length ? m.amounts[0] : 0;          // milestone 1 IS the down payment
+    balance = Math.max(0, grand-dp);
+    const p0 = m.ms.length ? (Number(m.ms[0].pct)||0) : 0;
+    dpMode = (Math.abs(p0-Math.round(p0))<0.005) ? String(Math.round(p0)) : 'custom';
+  } else {
+    dp = getDpAmount(grand);
+    balance = Math.max(0,grand-dp);
+    dpMode = document.getElementById('dpMode')?.value||'50';
+  }
   const pricing = getPricingFields();
   const photos = quotePhotos.map(({dataUrl,...p})=>p); // never persist dataUrl (offline-only, in-memory)
 
@@ -4549,6 +5002,12 @@ function buildQuotePayload(){
       balance:         balance,
       balanceMode:     balMode,
       interestRate:    parseFloat(document.getElementById('interestRate')?.value||0),
+      // ADDITIVE — null on every legacy quote and on every quote filed before
+      // this existed. Nested inside `payment` on purpose: the app.js QUOTE_FILED
+      // / QUOTE_UPDATE bridge copies `payment` wholesale (js/app.js ~4789/~4716),
+      // so this rides to Firestore with no bridge change and can never be
+      // dropped by that allowlist.
+      milestones:      milestonesOut,
     },
     editableState,
     waiveFlags,

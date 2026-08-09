@@ -325,12 +325,45 @@
       + '</div>';
   }
 
+  // 33.00 → "33", 33.33 → "33.33" — percentages read exactly as the sales rep
+  // wrote them, no fake precision.
+  function fmtPct(n){
+    var x = Math.round((Number(n)||0)*100)/100;
+    return (Math.abs(x-Math.round(x)) < 0.005) ? String(Math.round(x)) : String(+x.toFixed(2));
+  }
+  // Milestone peso figures, recomputed here from THIS page's own printed total
+  // with the identical rule the builder uses (whole pesos; the LAST row absorbs
+  // the rounding residual, but only when the percentages already sum to 100).
+  // Recomputed rather than trusting the filed `amount` snapshot so the rows can
+  // never fail to add up to the Total this very page prints.
+  function msAmounts(total, list){
+    var t = Math.round(Number(total)||0), n = list.length, i, head = 0;
+    var sum = 0; for (i=0;i<n;i++) sum += (Number(list[i].pct)||0);
+    var exact = Math.abs(sum-100) < 0.005;
+    var amts = list.map(function(m){ return Math.round(t*(Number(m.pct)||0)/100); });
+    if (exact && n){ for (i=0;i<n-1;i++) head += amts[i]; amts[n-1] = t - head; }
+    return amts;
+  }
   function paymentHtml(doc){
     var pay = doc.payment || {};
     var rows = [];
-    if (pay.downPayment) rows.push(['Down Payment'+(pay.downPaymentMode?' ('+esc(pay.downPaymentMode)+(String(pay.downPaymentMode).match(/^\d+$/)?'%':'')+')':''), peso(pay.downPayment)]);
-    if (pay.balance) rows.push(['Balance'+(pay.balanceMode?' ('+esc(pay.balanceMode)+')':''), peso(pay.balance)]);
-    if (pay.interestRate) rows.push(['Interest Rate', pay.interestRate+'%']);
+    // PREFER the custom milestone schedule when the quote carries one; the
+    // legacy DP/Balance rows below stay verbatim as the fallback for every
+    // quote already filed before milestones existed.
+    var ms = Array.isArray(pay.milestones) ? pay.milestones : null;
+    if (ms && ms.length) {
+      var amts = msAmounts(doc.total, ms);
+      ms.forEach(function(m, i){
+        var when = fmtDate(m.date);   // '' for a blank date — prints nothing, never "Invalid Date"
+        var lbl = '<strong style="color:var(--ink)">'+(i+1)+'. '+esc(fmtPct(m.pct))+'%</strong> — '+esc(String(m.label||'').trim())
+                + (when ? '<span style="display:block;font-size:11.5px;margin-top:2px">on or before '+esc(when)+'</span>' : '');
+        rows.push([lbl, peso(amts[i]||0)]);
+      });
+    } else {
+      if (pay.downPayment) rows.push(['Down Payment'+(pay.downPaymentMode?' ('+esc(pay.downPaymentMode)+(String(pay.downPaymentMode).match(/^\d+$/)?'%':'')+')':''), peso(pay.downPayment)]);
+      if (pay.balance) rows.push(['Balance'+(pay.balanceMode?' ('+esc(pay.balanceMode)+')':''), peso(pay.balance)]);
+      if (pay.interestRate) rows.push(['Interest Rate', pay.interestRate+'%']);
+    }
     if (!rows.length && !doc.bankDetails) return '';
     var rowsHtml = rows.map(function(r){
       return '<div class="pay-row"><span class="lbl">'+r[0]+'</span><span class="v">'+esc(r[1])+'</span></div>';
