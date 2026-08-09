@@ -146,7 +146,9 @@ window.Chat = (() => {
   // the existing _pending/_retryPending machinery byte-for-byte; only adds a
   // distinct 'offline' status (vs. 'failed') and an automatic retry on the
   // browser's 'online' event. See _markPendingOffline/doSend's catch below.
-  const HEIC_RE = /\.(heic|heif)$/i;
+  // (The old HEIC_RE name sniff lived here. It only drove a "may not display
+  // for recipients" toast, which _compressImage's always-transcode-to-JPEG rule
+  // has made untrue — a decodable HEIC now leaves this device as a JPEG.)
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
@@ -178,6 +180,151 @@ window.Chat = (() => {
   function _revokePendingPreviews(p) {
     if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} }
     (p.previewUrls || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
+  }
+
+  // ── Photo delivery: hand the sender's OWN pixels to the confirmed bubble ──
+  // The sender already has the bytes. The optimistic bubble was showing an
+  // object URL of the chosen file, and _reconcilePending revoked it the instant
+  // the message doc echoed back — at which point the confirmed bubble
+  // re-rendered pointing at the Storage DOWNLOAD url, a url this device has
+  // never fetched (the upload was a PUT to a different endpoint). So the photo
+  // the sender was already looking at went blank and had to come back DOWN the
+  // same congested link it had just gone up. On mobile data that is the whole
+  // "photos keep lagging" complaint.
+  //
+  // This map hands the local pixels over instead: Storage download url -> an
+  // object URL for the EXACT blob that was uploaded to it. _mediaGridHtml
+  // prefers it, so the confirmed bubble paints from memory with zero network.
+  //
+  // Deliberately NO eager warm-fetch of the remote url: warming would re-download
+  // every photo the sender just uploaded, doubling their mobile data for no
+  // visible gain. The blob simply stays until one of the bounded releases below.
+  //
+  // Lifetime (a leak here is a real memory cost on a long thread):
+  //   - thread teardown / conversation switch  -> release all
+  //   - more than LOCAL_PREVIEW_CAP entries    -> release oldest first
+  // Release always repoints any live <img> at the remote url BEFORE revoking,
+  // so an eviction can never blank a tile that is currently on screen.
+  const LOCAL_PREVIEW_CAP = 12;
+  const _localPreviews = new Map();          // remoteUrl -> { objUrl }
+  function _localPreviewSrc(remoteUrl) {
+    const e = _localPreviews.get(remoteUrl);
+    // Only ever emit a blob: url this module itself minted — never anything
+    // that arrived on a Firestore doc.
+    return (e && typeof e.objUrl === 'string' && e.objUrl.slice(0, 5) === 'blob:') ? e.objUrl : '';
+  }
+  // `repoint` — swap live <img>s onto the remote url before revoking, so
+  // releasing can never blank a photo that is on screen. TRUE for cap-eviction
+  // (the bubble stays mounted and must keep showing something); FALSE at
+  // teardown, where the DOM is being destroyed anyway.
+  //
+  // That distinction is not cosmetic, it is mobile data. openPage fires _onClose
+  // BEFORE removing the panel (removal is deferred 300ms), and openConversation
+  // tears down the outgoing thread while it is still mounted — so a blanket
+  // repoint at teardown starts a remote fetch for every photo still on screen.
+  // Measured at 3G, closing a thread holding six just-sent photos: 6 requests
+  // started, 0 completed, 888 KB of a possible 1388 KB actually pulled, because
+  // the browser does not abort promptly. That is the exact warm-fetch this
+  // feature set out to avoid, just deferred to close, and it fired on every
+  // close and every conversation switch.
+  function _releaseLocalPreview(remoteUrl, repoint) {
+    const e = _localPreviews.get(remoteUrl);
+    if (!e) return;
+    _localPreviews.delete(remoteUrl);
+    const remote = repoint === false ? '' : safeHttpUrl(remoteUrl);
+    // Repoint every live <img> at the remote url BEFORE revoking, so releasing
+    // can never blank a photo that is currently on screen.
+    // This one query is deliberately document-wide rather than panel-scoped:
+    // the same blob can legitimately be showing in three different panels at
+    // once (thread bubble, Shared Media thumb, lightbox), and the selector
+    // matches on the exact object-URL string this module minted — it cannot
+    // touch anything else on the page.
+    if (remote) {
+      try {
+        document.querySelectorAll(`img[src="${e.objUrl}"]`).forEach(img => img.setAttribute('src', remote));
+      } catch (_) { /* malformed selector — fall through to the revoke */ }
+    }
+    try { URL.revokeObjectURL(e.objUrl); } catch (_) {}
+  }
+  function _clearLocalPreviews() {
+    // repoint:false — teardown. Also note Array#forEach passes the INDEX as the
+    // second argument, so passing the function bare here would have handed
+    // `repoint` a number (0 = falsy for the first entry, truthy after) — a bug
+    // that would have looked intermittent. Wrapped deliberately.
+    Array.from(_localPreviews.keys()).forEach(k => _releaseLocalPreview(k, false));
+  }
+  // `blob` is the COMPRESSED blob that was actually uploaded (not the original
+  // file): identical bytes to what every reader will get, and ~10x less memory
+  // to hold than the camera original.
+  function _rememberLocalPreview(remoteUrl, blob) {
+    if (!remoteUrl || !blob || _localPreviews.has(remoteUrl)) return;
+    let objUrl;
+    try { objUrl = URL.createObjectURL(blob); } catch (_) { return; }
+    while (_localPreviews.size >= LOCAL_PREVIEW_CAP) {
+      _releaseLocalPreview(_localPreviews.keys().next().value, true);   // still on screen — repoint
+    }
+    _localPreviews.set(remoteUrl, { objUrl });
+  }
+
+  // ── Upload progress + real cancel ──
+  // storage.ref().put() returns an UploadTask that emits state_changed with
+  // bytesTransferred/totalBytes. This file used to await the task and use NONE
+  // of them, so a multi-hundred-KB upload over mobile data showed a static ⏳
+  // with no indication anything was happening, and the ✕ "cancel" could only
+  // hide the bubble (the byte pump kept running to completion).
+  // Keyed by clientKey so one message's photos aggregate into ONE bar.
+  const _uploadTasks = new Map();      // clientKey -> [UploadTask]
+  const _uploadProgress = new Map();   // clientKey -> Map(partIdx -> {loaded,total})
+  function _uploadPct(clientKey) {
+    const parts = _uploadProgress.get(clientKey);
+    if (!parts || !parts.size) return null;
+    let loaded = 0, total = 0;
+    parts.forEach(p => { loaded += p.loaded; total += p.total; });
+    if (!total) return null;
+    return Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
+  }
+  // Paints the bar in place — a full _renderPendingTail() on every progress
+  // event would rebuild the bubble's innerHTML dozens of times per upload.
+  function _paintUploadProgress(clientKey) {
+    const pct = _uploadPct(clientKey);
+    if (pct === null) return;
+    const tail = document.getElementById('chat-pending-tail');
+    if (!tail) return;
+    tail.querySelectorAll('.ms-pending-bar').forEach(bar => {
+      if (bar.dataset.clientKey !== clientKey) return;
+      const fill = bar.firstElementChild;
+      if (fill) fill.style.width = pct + '%';
+    });
+  }
+  function _forgetUpload(clientKey) {
+    _uploadTasks.delete(clientKey);
+    _uploadProgress.delete(clientKey);
+  }
+  function _cancelUploads(clientKey) {
+    (_uploadTasks.get(clientKey) || []).forEach(t => { try { t.cancel(); } catch (_) {} });
+    _forgetUpload(clientKey);
+  }
+  // put() wrapper that keeps the task reference and reports bytes. Awaiting the
+  // returned task behaves exactly like awaiting put() did.
+  function _putTracked(sref, blob, metadata, clientKey, partIdx) {
+    const task = sref.put(blob, metadata);
+    if (clientKey) {
+      const list = _uploadTasks.get(clientKey) || [];
+      list.push(task);
+      _uploadTasks.set(clientKey, list);
+      const parts = _uploadProgress.get(clientKey) || new Map();
+      parts.set(partIdx, { loaded: 0, total: (blob && blob.size) || 0 });
+      _uploadProgress.set(clientKey, parts);
+      try {
+        task.on('state_changed', snap => {
+          const p = _uploadProgress.get(clientKey);
+          if (!p) return;                                  // canceled / already reconciled
+          p.set(partIdx, { loaded: snap.bytesTransferred || 0, total: snap.totalBytes || (blob && blob.size) || 0 });
+          _paintUploadProgress(clientKey);
+        }, () => { /* errors surface via the awaited promise below */ });
+      } catch (_) { /* progress is a nicety — never let it break the upload */ }
+    }
+    return task;
   }
   function dmIdFor(a, b) { return 'dm_' + [a, b].sort().join('_'); }
   // Wave2 practicality batch (P1) — "Recents" for the dept-grouped New Message
@@ -256,6 +403,11 @@ window.Chat = (() => {
     // fire-and-forget posture as the rest of this file's teardown).
     _pending.forEach(_revokePendingPreviews);
     _pending = [];
+    // Same "discard optimistic state" rule for the handed-off photo blobs and
+    // any upload bookkeeping — this is the backstop that makes the local-preview
+    // map incapable of leaking past a thread close.
+    _clearLocalPreviews();
+    _uploadTasks.clear(); _uploadProgress.clear();
     _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
     _replyTarget = null; _swipe = null;      // Wave5 M2 — reply-arm + in-flight swipe never survive a thread close
     // The reaction popover is fixed-positioned and its dismiss listeners live
@@ -1262,21 +1414,32 @@ window.Chat = (() => {
       // async, fire-and-forget (never blocks attaching): warn instead of
       // quietly uploading a photo some recipients' browsers won't render.
       add.forEach(f => {
-        const looksHeic = HEIC_RE.test(f.name || '') || /^image\/hei[cf]/i.test(f.type || '');
         _probeImageDecodable(f).then(ok => {
-          if (!ok) {
-            // This device's own browser couldn't decode it at all — it will
-            // upload as-is (same _compressImage fallback as before), but is
-            // very likely to render as a broken image for EVERYONE, sender
-            // included.
-            Notifs.showToast(`"${f.name || 'photo'}" couldn't be previewed on this device and may not display for anyone — consider sending it as JPEG/PNG instead`, 'error');
-          } else if (looksHeic) {
-            // Decoded fine here (e.g. Safari/iOS has native HEIC support) but
-            // the format itself is a common no-render case for recipients on
-            // other browsers/devices once it's rendered from Storage.
-            Notifs.showToast(`"${f.name || 'photo'}" is a HEIC photo — it may not display for recipients on non-Apple devices`, 'error');
-          }
+          if (ok) return;
+          // Chat photo-lag fix — this used to only TOAST and then upload
+          // anyway. Measured in Chromium: an undecodable HEIC takes
+          // _compressImage's fallback and the full original is uploaded
+          // unchanged (1.5MB in the test, real ones run 2-4MB), stored under a
+          // ".jpg" name with no contentType, and renders as a permanently
+          // broken image for every reader — minutes of mobile data spent on a
+          // photo nobody can see. A photo this device cannot decode cannot be
+          // transcoded either (canvas.drawImage needs a decoded source), so
+          // there is no version of this send worth making: drop it here, while
+          // the user is still standing in the composer and can pick another.
+          const i = pendingImages.indexOf(f);
+          // Still in the composer? Drop it. Already gone (the user sent or
+          // removed it while this probe was in flight) — say nothing: a "can't
+          // be sent" toast for a message already on its way would just be wrong.
+          if (i === -1) return;
+          pendingImages.splice(i, 1);
+          updateFilePreview();
+          updateSendState();
+          Notifs.showToast(`"${f.name || 'photo'}" can't be opened on this device, so it can't be sent — save it as JPEG or PNG and try again`, 'error');
         });
+        // NOTE: the old "HEIC may not display for recipients" warning is gone
+        // on purpose. It is no longer true: a HEIC this device CAN decode is
+        // now always transcoded to JPEG before upload (see _compressImage's
+        // srcIsWebSafe rule), so recipients on any device get a JPEG.
       });
     }
     fileInp.addEventListener('change', e => {
@@ -1735,6 +1898,8 @@ window.Chat = (() => {
     _scrollFabUnseen = 0;
     _pending.forEach(_revokePendingPreviews);
     _pending = [];
+    _clearLocalPreviews();
+    _uploadTasks.clear(); _uploadProgress.clear();
     _replyTarget = null;   // Wave5 M2 — a reply armed in a PREVIOUS thread never leaks into this one
     _initialMarkReadPending = true;   // Wave1 P1 fix #7 — see the messages listener below
     _refreshUsersCache().then(() => {
@@ -1872,32 +2037,97 @@ window.Chat = (() => {
       img.src = url;
     });
   }
+  // Chat photo-lag fix. Four changes from the original, each load-bearing:
+  //
+  // 1. ALWAYS resolves real pixel dimensions for a decodable image. The old
+  //    code returned w/h = null on BOTH the <300KB skip and the decode-fail
+  //    fallback, and null w/h is what collapses the receiving tile to 0px tall
+  //    (see _mediaGridHtml) — an empty bubble until the bytes land.
+  // 2. Compressed for a MESSAGE, not an archive: 1280px long edge / q=0.72
+  //    instead of 1600/0.85. Measured on real 12MP camera photos in WebKit
+  //    (= the encoder iPhones actually use): 649/611/611 KB -> 351/318/311 KB,
+  //    about -47%. 1280px still far over-serves a bubble that is at most 260
+  //    CSS px wide even at 3x DPR, and holds up in the lightbox.
+  // 3. The blanket "<300KB: upload verbatim" skip is gone — it uploaded full
+  //    bytes AND produced the 0px tile. It is replaced by a NEVER-INFLATE rule,
+  //    which is what the skip was really groping for: re-encoding an
+  //    already-small image can make it BIGGER (measured: a 208KB 1200px photo
+  //    came back 300KB at 1280/0.72 on WebKit), so keep whichever blob is
+  //    smaller — but keep the true dimensions either way.
+  // 4. Decodes from an object URL instead of a FileReader data URL. Same
+  //    decoder, but it no longer materialises the whole file as a base64
+  //    string first (~4MB for a 12MP photo, ~21MB for a 48MP one) — that
+  //    string was pure peak-memory risk on iOS. _probeImageDecodable already
+  //    decodes these same files this way in production, so the path is proven.
+  //
+  // Resolves { blob, width, height, transcoded }:
+  //   width/height — true pixel size OF `blob` (null only if undecodable)
+  //   transcoded   — true when `blob` is a freshly encoded JPEG, false when it
+  //                  is the original file's own bytes (the caller needs this to
+  //                  pick the stored extension and contentType).
+  const CHAT_IMG_MAX_DIM = 1280;
+  const CHAT_IMG_QUALITY = 0.72;
+  // Formats every recipient's browser can render. Anything else (HEIC/HEIF and
+  // friends) is ALWAYS transcoded when we can decode it, even if that makes the
+  // file bigger — interoperability beats bytes for a photo half the office
+  // otherwise cannot see at all.
+  const WEB_SAFE_IMG_TYPE = /^image\/(jpeg|jpg|png|gif|webp)$/i;
+  const WEB_SAFE_IMG_EXT = /\.(jpe?g|png|gif|webp)$/i;
   function _compressImage(file) {
     return new Promise(resolve => {
-      if (!file || !/^image\//.test(file.type || '') || file.size < 300 * 1024) {
-        resolve({ blob: file, width: null, height: null }); return;
-      }
-      const reader = new FileReader();
-      reader.onload = e => {
-        const img = new Image();
-        img.onload = () => {
-          let { width, height } = img;
-          const maxDim = 1600;
-          if (width > maxDim || height > maxDim) {
-            const scale = maxDim / Math.max(width, height);
-            width = Math.round(width * scale); height = Math.round(height * scale);
-          }
-          const canvas = document.createElement('canvas');
+      const asIs = (w, h) => resolve({ blob: file, width: w || null, height: h || null, transcoded: false });
+      if (!file || !/^image\//.test(file.type || '')) { asIs(); return; }
+      let objUrl = null;
+      try { objUrl = URL.createObjectURL(file); } catch (_) {}
+      if (!objUrl) { asIs(); return; }
+      const img = new Image();
+      const done = () => { try { URL.revokeObjectURL(objUrl); } catch (_) {} };
+      img.onload = () => {
+        const natW = img.naturalWidth || img.width, natH = img.naturalHeight || img.height;
+        if (!natW || !natH) { done(); asIs(); return; }
+        // An animated GIF would come out of the canvas as a single still frame.
+        // Keep the original bytes — but now WITH dimensions, so it still gets a
+        // properly reserved tile.
+        if (/^image\/gif$/i.test(file.type || '')) { done(); asIs(natW, natH); return; }
+        let width = natW, height = natH;
+        if (width > CHAT_IMG_MAX_DIM || height > CHAT_IMG_MAX_DIM) {
+          const scale = CHAT_IMG_MAX_DIM / Math.max(width, height);
+          width = Math.max(1, Math.round(width * scale));
+          height = Math.max(1, Math.round(height * scale));
+        }
+        let canvas;
+        try {
+          canvas = document.createElement('canvas');
           canvas.width = width; canvas.height = height;
           canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-          canvas.toBlob(blob => resolve({ blob: blob || file, width, height }), 'image/jpeg', 0.85);
-        };
-        img.onerror = () => resolve({ blob: file, width: null, height: null });
-        img.src = e.target.result;
+        } catch (_) { done(); asIs(natW, natH); return; }   // e.g. out of memory on a huge source
+        canvas.toBlob(blob => {
+          done();
+          const srcIsWebSafe = WEB_SAFE_IMG_TYPE.test(file.type || '') || WEB_SAFE_IMG_EXT.test(file.name || '');
+          if (blob && (blob.size < file.size || !srcIsWebSafe)) {
+            resolve({ blob, width, height, transcoded: true });
+          } else {
+            asIs(natW, natH);
+          }
+        }, 'image/jpeg', CHAT_IMG_QUALITY);
       };
-      reader.onerror = () => resolve({ blob: file, width: null, height: null });
-      reader.readAsDataURL(file);
+      img.onerror = () => { done(); asIs(); };
+      img.src = objUrl;
     });
+  }
+  // Stored-object extension for an image we did NOT transcode. The old code
+  // appended ".jpg" to EVERYTHING, so an undecodable HEIC was stored as
+  // "...jpg" while actually containing HEIC bytes — _isImageUrl then matched
+  // the name, the renderer confidently emitted an <img>, and every reader got a
+  // permanently broken image.
+  function _imgExtFor(file) {
+    const m = /\.([a-z0-9]{1,5})$/i.exec((file && file.name) || '');
+    if (m && WEB_SAFE_IMG_EXT.test('.' + m[1])) return m[1].toLowerCase();
+    const t = ((file && file.type) || '').toLowerCase();
+    if (t === 'image/png') return 'png';
+    if (t === 'image/gif') return 'gif';
+    if (t === 'image/webp') return 'webp';
+    return 'jpg';
   }
 
   // v14 chat re-audit fix — bounded-retry helper for the conv-doc preview
@@ -1940,7 +2170,7 @@ window.Chat = (() => {
     const FV = firebase.firestore.FieldValue;
     let fileUrl = null, fileName = null, fileSource = null, media = null;
     if (images && images.length) {
-      // Wave5 M3 (J4) — multi-photo: compress EACH image (1600px/0.85, see
+      // Wave5 M3 (J4) — multi-photo: compress EACH image (1280px/0.72, see
       // _compressImage), upload in parallel, and write ONE message carrying
       // media:[{url,name,w,h}] — never fileUrl. Cap (6/message) is already
       // enforced by the composer (_addPendingImages); re-sliced here too as a
@@ -1950,26 +2180,59 @@ window.Chat = (() => {
       // Phase 63 #1 established for the single-file path below.
       try {
         media = await Promise.all(images.slice(0, 6).map(async (f, i) => {
-          const { blob, width, height } = await _compressImage(f);
-          const safeName = (f.name || 'photo').replace(/\.[^./\\]+$/, '');
-          const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${i}_${safeName}.jpg`);
-          await sref.put(blob, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } });
+          const { blob, width, height, transcoded } = await _compressImage(f);
+          // Storage PATH is unchanged: chat-files/{convId}/{fileName}. Only the
+          // fileName part changes — a real extension instead of an unconditional
+          // ".jpg" (see _imgExtFor), and the base name is now restricted to
+          // filename-safe characters. A name containing "/" used to nest a
+          // subfolder, which storage.rules' {fileName} segment does not match,
+          // so that upload was silently denied.
+          const rawName = (f.name || 'photo').replace(/\.[^./\\]+$/, '');
+          const baseName = rawName.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) || 'photo';
+          const ext = transcoded ? 'jpg' : _imgExtFor(f);
+          const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${i}_${baseName}.${ext}`);
+          // contentType was never set before, so Storage inferred it from the
+          // blob — which is how HEIC bytes ended up served under a .jpg name.
+          // cacheControl was never set either: object names are timestamped and
+          // never mutate, so without it every reader re-downloaded every photo
+          // on every single thread open.
+          await _putTracked(sref, blob, {
+            contentType: transcoded ? 'image/jpeg' : (f.type || 'image/jpeg'),
+            cacheControl: 'public, max-age=31536000, immutable',
+            customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' }
+          }, clientKey, i);
           const url = await sref.getDownloadURL();
+          // Hand THESE bytes to the confirmed bubble so the sender's own photo
+          // never has to be downloaded back off the network.
+          _rememberLocalPreview(url, blob);
           return { url, name: f.name || 'photo', w: width || null, h: height || null };
         }));
       } catch (_) {
         throw new Error('Photo upload failed — message not sent.');
+      } finally {
+        _forgetUpload(clientKey);
       }
     } else if (file) {
       try {
         const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${file.name}`);
-        await sref.put(file, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } }); fileUrl = await sref.getDownloadURL(); fileName = file.name;
+        // Same two additions as the photo path: a progress-reporting put (the
+        // ⏳ was static before) and a cacheControl so the attachment isn't
+        // re-fetched on every thread open. contentType is deliberately left to
+        // Storage's own inference from the File here — this branch carries
+        // arbitrary documents, and storage.rules' isValidDocument() denylist
+        // keys off that inferred type.
+        await _putTracked(sref, file, {
+          cacheControl: 'public, max-age=31536000, immutable',
+          customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' }
+        }, clientKey, 0); fileUrl = await sref.getDownloadURL(); fileName = file.name;
       } catch (_) {
         // Phase 63 #1: THROW instead of silently returning — a silent return
         // here used to let the caller (doSend) clear the input/attachment as
         // if the send had succeeded (silent data loss). All user-facing
         // messaging for a failed send happens once, in doSend's catch.
         throw new Error('File upload failed — message not sent.');
+      } finally {
+        _forgetUpload(clientKey);
       }
     } else if (link) {
       fileUrl = link; fileSource = 'link';
@@ -2470,12 +2733,20 @@ window.Chat = (() => {
   // SAME class/attribute contract a legacy single fileUrl image uses (see the
   // caller below), so one delegated click handler (_wireThreadDelegation)
   // opens the lightbox for either shape.
-  function _mediaGridHtml(m) {
+  // Longest edge a photo bubble is ever displayed at. MUST stay in sync with
+  // css/styles.css's .ms-media-grid max-width / .ms-media-1 max-height (260px)
+  // — this is what makes the reserved box identical to the loaded box.
+  const MEDIA_BOX_PX = 260;
+  function _mediaGridHtml(m, opts) {
     const media = m.media || [];
     if (!media.length) return '';
     const shown = media.slice(0, 6);
     const extra = media.length - shown.length;
     const cls = shown.length === 1 ? 'ms-media-1' : shown.length === 2 ? 'ms-media-2' : 'ms-media-grid3';
+    // The newest few messages are the ones the reader is actually looking at:
+    // don't put them behind the lazy-loading heuristic, and ask for the very
+    // first tile at high priority.
+    const eager = !!(opts && opts.eager);
     const tiles = shown.map((item, i) => {
       const overlay = (i === shown.length - 1 && extra > 0) ? `<div class="ms-media-more">+${extra}</div>` : '';
       // Wave1 P2 fix #17 — reserve the tile's box from the STORED w/h
@@ -2489,9 +2760,39 @@ window.Chat = (() => {
       // non-numeric w/h must never be interpolated straight into an inline
       // style attribute unescaped.
       const hasWH = Number.isFinite(item.w) && Number.isFinite(item.h) && item.w > 0 && item.h > 0;
-      const ratioStyle = (shown.length === 1 && hasWH) ? ` style="aspect-ratio:${item.w}/${item.h}"` : '';
-      return `<div class="ms-media-tile"${ratioStyle}>
-        <img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="${i}" src="${safeHttpUrl(item.url)}" alt="${escHtml(item.name || 'photo')}" loading="lazy"/>
+      // An inline aspect-ratio ALONE reserved nothing. Measured in WebKit at
+      // iPhone width: every photo bubble — with w/h, without w/h, single or
+      // grid — reserved 0x0 while the image was downloading, leaving a 16px
+      // bubble containing just the timestamp and tick. That is the empty
+      // bubble in the owner's screenshot.
+      // The reason is that the whole chain (.ms-row -> .ms-bubble-wrap ->
+      // .ms-bubble -> .ms-media-grid) is shrink-to-fit, so an un-loaded 0x0
+      // <img> makes the grid column 0 wide, and an aspect-ratio resolved
+      // against a 0 width is 0 tall. A definite WIDTH is what was missing:
+      //   single photo  -> the exact box the loaded image will occupy,
+      //                    computed here from w/h (.ms-tile-sized)
+      //   2+ photos     -> a fixed 260px grid width in CSS
+      //   no w/h        -> a min-size floor in CSS (.ms-tile-unsized)
+      // Verified: the reserved box now equals the loaded box exactly, so the
+      // photo fades in without moving anything under the reader's thumb.
+      let tileCls = 'ms-media-tile', tileStyle = '', dimAttrs = '';
+      if (hasWH) {
+        dimAttrs = ` width="${item.w}" height="${item.h}"`;
+        if (shown.length === 1) {
+          const scale = Math.min(MEDIA_BOX_PX / item.w, MEDIA_BOX_PX / item.h, 1);
+          tileCls += ' ms-tile-sized';
+          tileStyle = ` style="width:${Math.round(item.w * scale)}px;aspect-ratio:${item.w}/${item.h}"`;
+        }
+      } else if (shown.length === 1) {
+        tileCls += ' ms-tile-unsized';
+      }
+      // Prefer the sender's own already-in-memory bytes over a round trip.
+      const src = _localPreviewSrc(item.url) || safeHttpUrl(item.url);
+      const loadAttrs = eager
+        ? (i === 0 ? ' fetchpriority="high"' : '')
+        : ' loading="lazy"';
+      return `<div class="${tileCls}"${tileStyle}>
+        <img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="${i}" src="${src}" alt="${escHtml(item.name || 'photo')}"${dimAttrs}${loadAttrs} decoding="async"/>
         ${overlay}
       </div>`;
     }).join('');
@@ -2689,7 +2990,7 @@ window.Chat = (() => {
           <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass}${isClusterLast?' ms-time-rest':''} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${replyQuoteHtml}
             ${textHtml ? `<div class="ms-text">${textHtml}</div>` : ''}
-            ${m.media && m.media.length ? _mediaGridHtml(m)
+            ${m.media && m.media.length ? _mediaGridHtml(m, { eager: idx >= list.length - 3 })
               : m.fileUrl ? (m.fileSource!=='link' && _isImageUrl(m.fileUrl)
                 // Wave5 M3 (J1) — legacy single-image docs (fileUrl, no media[])
                 // render IDENTICALLY to before (same size/radius), except the
@@ -2698,7 +2999,10 @@ window.Chat = (() => {
                 // the new media grid uses (data-mid + data-idx="0"), so one
                 // image tap — old doc shape or new — opens the SAME in-app
                 // lightbox instead of a new browser tab.
-                ? `<div style="margin-top:${m.text?'6':'0'}px"><img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="0" src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer"/></div>`
+                // .ms-legacy-img gives this a min-size floor: these docs have no
+                // stored w/h at all, so before the fix it measured 0px tall
+                // while downloading — the same empty bubble as the media grid.
+                ? `<div style="margin-top:${m.text?'6':'0'}px"><img class="chat-img-tap ms-legacy-img" data-mid="${escHtml(m.id)}" data-idx="0" src="${_localPreviewSrc(m.fileUrl) || safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" decoding="async" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer"/></div>`
                 : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(m.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(m.fileName||'Attachment')}</span></a>`
               ) : ''}
             ${refHtml}
@@ -3709,6 +4013,12 @@ window.Chat = (() => {
     const idx = _pending.findIndex(x => x.clientKey === clientKey);
     if (idx === -1) return;
     _canceledClientKeys.add(clientKey);
+    // This is now a REAL network abort, not just a UI dismiss: the UploadTask
+    // reference is kept (see _putTracked), so cancelling stops the byte pump
+    // instead of letting it run to completion in the background. The rejected
+    // put() propagates as the usual "Photo upload failed" throw, which
+    // _canceledClientKeys then swallows in doSend/_retryPending's catch.
+    _cancelUploads(clientKey);
     _revokePendingPreviews(_pending[idx]);
     _pending.splice(idx, 1);
     _renderPendingTail();
@@ -3758,6 +4068,8 @@ window.Chat = (() => {
   function _renderPendingBubble(p) {
     const failed = p.status === 'failed';
     const offline = p.status === 'offline';   // Wave2 practicality batch (P1)
+    const hasUpload = !!(p.file || (p.images && p.images.length));
+    const pct = _uploadPct(p.clientKey);
     // v14 chat re-audit fix — a 'sending' bubble now carries its own small
     // ✕ cancel affordance (wired in _wirePendingTailDelegation) instead of
     // being tappable ONLY once it flips to 'failed'. Inline-styled (no CSS
@@ -3769,7 +4081,12 @@ window.Chat = (() => {
       // connectivity) — auto-retries on 'online', tap-to-retry also works.
       : offline
         ? `<span class="ms-pending-status">${emojiIcon('wifi-off',11)}</span><span class="ms-pending-offline-label">Will send when back online</span>`
+        // Determinate upload progress. put() has always returned an UploadTask
+        // emitting state_changed; this file used none of it, so a 350KB upload
+        // over mobile data showed a motionless ⏳ and the sender had no way to
+        // tell a slow send from a stuck one.
         : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>` +
+        (hasUpload ? `<span class="ms-pending-bar" data-client-key="${escHtml(p.clientKey)}"><i style="width:${pct === null ? 0 : pct}%"></i></span>` : '') +
         `<button type="button" class="ms-pending-cancel" data-client-key="${escHtml(p.clientKey)}" ` +
         `title="Cancel sending" aria-label="Cancel sending" ` +
         `style="background:none;border:none;padding:2px;margin-left:4px;cursor:pointer;` +
@@ -3785,7 +4102,10 @@ window.Chat = (() => {
     const gridCls = previewCount === 1 ? 'ms-media-1' : previewCount === 2 ? 'ms-media-2' : 'ms-media-grid3';
     const mediaHtml = previewCount
       ? `<div class="ms-media-grid ${gridCls}" style="margin-top:${p.text?'6':'0'}px;opacity:.75">${
-          p.previewUrls.slice(0, 6).map(u => `<div class="ms-media-tile"><img src="${u}" alt=""/></div>`).join('')
+          // ms-tile-unsized on the single-photo case so the preview has a
+          // reserved box for the frame or two before the blob decodes — same
+          // floor the confirmed bubble now gets.
+          p.previewUrls.slice(0, 6).map(u => `<div class="ms-media-tile${previewCount === 1 ? ' ms-tile-unsized' : ''}"><img src="${u}" alt="" decoding="async"/></div>`).join('')
         }</div>`
       : p.previewUrl
         ? `<div style="margin-top:${p.text?'6':'0'}px"><img src="${p.previewUrl}" alt="" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);opacity:.75"/></div>`
@@ -4739,7 +5059,16 @@ window.Chat = (() => {
     function render() {
       const it = images[idx];
       const u = safeHttpUrl(it.url);
-      img.src = u; img.alt = it.name || '';
+      // Opening your OWN just-sent photo shouldn't pull it back down the wire:
+      // if the uploaded bytes are still in memory, show those. The download
+      // link stays on the real Storage url — a blob: href would hand the user a
+      // dead link the moment the preview is released.
+      const local = _localPreviewSrc(it.url);
+      // If the local blob is released while this lightbox is open (cap
+      // eviction), fall back to the real url once rather than showing a broken
+      // image. Guarded so a genuinely dead remote url can't loop.
+      img.onerror = local ? () => { img.onerror = null; if (u) img.src = u; } : null;
+      img.src = local || u; img.alt = it.name || '';
       dlEl.href = u; dlEl.setAttribute('download', it.name || '');
       countEl.textContent = multi ? `${idx + 1} / ${images.length}` : '';
       resetZoom();
@@ -5019,7 +5348,7 @@ window.Chat = (() => {
       </a>`;
     const mediaHtml = mediaItems.length
       ? `<div class="chat-mediatab-grid">${mediaItems.map((it, i) =>
-          `<div class="chat-mediatab-thumb" data-idx="${i}"><img src="${safeHttpUrl(it.url)}" loading="lazy" alt="${escHtml(it.name||'photo')}"/></div>`).join('')}</div>`
+          `<div class="chat-mediatab-thumb" data-idx="${i}"><img src="${_localPreviewSrc(it.url) || safeHttpUrl(it.url)}" loading="lazy" decoding="async" alt="${escHtml(it.name||'photo')}"/></div>`).join('')}</div>`
       : `<div class="empty-state" style="padding:16px"><p>No photos yet.</p></div>`;
     const filesHtml = fileItems.length
       ? fileItems.map(it => fileRowHtml(it, 'paperclip')).join('')
