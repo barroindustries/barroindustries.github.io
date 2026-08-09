@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.114';
+window.APP_VERSION = '14.0.115';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -552,6 +552,7 @@ window.NAV_REGISTRY = {
       { key:'team',         icon:'users',        label:'Team Directory',   page:'team-directory', section:true },
       { key:'hr',           icon:'user-cog',     label:'HR',               page:'dept:HR' },
       { key:'attendance',   icon:'calendar',     label:'Attendance',       page:'attendance' },
+      { key:'calendar',     icon:'calendar-days', label:'Calendar',         page:'calendar' },
       { key:'files-hub',    icon:'folder-open',  label:'Files',            page:'files-hub' },
       { key:'inventory',    icon:'boxes',        label:'Inventory',        page:'inventory', section:true, sectionLabel:'Operations' },
       { key:'projects',     icon:'trending-up',  label:'Projects',         page:'projects-lifecycle' },
@@ -607,6 +608,7 @@ window.NAV_REGISTRY = {
       // (canAccounts), matching renderTeam.
       { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR', when:'isFinanceRole' },
       { key:'attendance',  icon:'calendar',    label:'Attendance',   page:'attendance' },
+      { key:'calendar',    icon:'calendar-days', label:'Calendar',   page:'calendar' },
       { key:'files',       icon:'folder',      label:'Files',        page:'files' },
       { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory', when:'hasProductionDept' },
       { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', when:'hasProjectsDept' },

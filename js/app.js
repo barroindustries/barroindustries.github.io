@@ -2713,6 +2713,7 @@ function navigateTo(page, opts) {
     case 'chat':             window.renderChatPage?.(); break;
     case 'my-profile':       window.renderMyProfile?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
+    case 'calendar':         window.renderCalendarPage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
     case 'leave':            window.renderLeavePage?.(); break;
     case 'holidays':         window.renderHolidaysAdmin?.(); break;

@@ -7993,3 +7993,50 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 @media (max-width: 700px) {
   .an-row2, .bke-row2 { grid-template-columns: 1fr !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   CALENDAR — month grid + day chips (js/meetings.js)
+   Phone-first: the seven columns must fit 375px with NO horizontal scroll,
+   so the grid is fractional (never fixed px) and the chips clip rather than
+   widen the track. minmax(0,1fr) — not 1fr — because a bare 1fr track has
+   min-width:auto and a long chip would push the row wider than the screen.
+══════════════════════════════════════════════════════════════════════ */
+.cal-bar { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+.cal-bar .cal-title { flex:1; min-width:120px; font-weight:800; font-size:15px; text-align:center; }
+.cal-dow { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px; margin-bottom:3px; }
+.cal-dow span { text-align:center; font-size:10px; font-weight:700; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--text-muted); }
+.cal-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:3px; }
+.cal-cell {
+  min-height:64px; padding:3px; border:1px solid var(--border); border-radius:7px;
+  background:var(--surface); color:var(--text); text-align:left; cursor:pointer;
+  display:flex; flex-direction:column; gap:2px; overflow:hidden;
+  font:inherit; transition:background var(--t1), border-color var(--t1);
+}
+.cal-cell.cal-pad { background:transparent; border-color:transparent; cursor:default; }
+.cal-cell .cal-num { font-size:11px; font-weight:700; color:var(--text-muted); line-height:1.1; }
+.cal-cell.cal-today { border-color:var(--accent, #E64980); }
+.cal-cell.cal-today .cal-num { color:var(--accent, #E64980); }
+.cal-cell.cal-has .cal-num { color:var(--text); }
+.cal-chip {
+  font-size:9px; line-height:1.25; padding:1px 3px; border-radius:3px;
+  background:var(--s2); color:var(--text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block;
+}
+/* A 375px phone gives each column about 50px. A chip reading "09:00 Weekly
+   produ…" ellipsises immediately after the time, so the title never survives —
+   the user learns only that SOMETHING is at 9am, which the time alone already
+   said. So show the time alone on a phone (honest and legible) and let the day
+   agenda carry the detail; the title returns as soon as there is room for it. */
+.cal-chip-n { display:none; }
+@media (min-width:769px) { .cal-chip-n { display:inline; } }
+.cal-chip-fu { background:var(--warning-bg, var(--s2)); font-style:italic; }
+.cal-more { font-size:9px; color:var(--text-muted); }
+@media (hover:hover) { .cal-cell:not(.cal-pad):hover { background:var(--s2); } }
+/* Desktop has the room for a taller, more readable month. */
+@media (min-width:769px) {
+  .cal-cell { min-height:96px; padding:5px; gap:3px; }
+  .cal-cell .cal-num { font-size:12px; }
+  .cal-chip { font-size:11px; padding:2px 5px; }
+  .cal-more { font-size:11px; }
+}

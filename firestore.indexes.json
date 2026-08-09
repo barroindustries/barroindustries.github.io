@@ -4,164 +4,324 @@
       "collectionGroup": "posts",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status",    "order": "ASCENDING"  },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "posts",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "dept",      "order": "ASCENDING"  },
-        { "fieldPath": "status",    "order": "ASCENDING"  },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "dept",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "tasks",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "assignedTo", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "dueDate",    "order": "ASCENDING"      }
+        {
+          "fieldPath": "assignedTo",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "dueDate",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "tasks",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status",         "order": "ASCENDING"  },
-        { "fieldPath": "lastModifiedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastModifiedAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "cash_advances",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "salary_history",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userId", "order": "ASCENDING"  },
-        { "fieldPath": "month",  "order": "DESCENDING" }
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "month",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "bs_quotes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "createdBy", "order": "ASCENDING"  },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "bk_quotes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "createdBy", "order": "ASCENDING"  },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "createdBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "payslips",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "payPeriodMonth", "order": "ASCENDING"  },
-        { "fieldPath": "createdAt",      "order": "DESCENDING" }
+        {
+          "fieldPath": "payPeriodMonth",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "payslips",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "workerId",       "order": "ASCENDING" },
-        { "fieldPath": "payPeriodStart", "order": "ASCENDING" }
+        {
+          "fieldPath": "workerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "payPeriodStart",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "payslips",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "workerId",  "order": "ASCENDING"  },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "workerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "partner_deals",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "partnerUid", "order": "ASCENDING"  },
-        { "fieldPath": "createdAt",  "order": "DESCENDING" }
+        {
+          "fieldPath": "partnerUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "scope",   "order": "ASCENDING" },
-        { "fieldPath": "deleted", "order": "ASCENDING" },
-        { "fieldPath": "visibility", "order": "ASCENDING" }
+        {
+          "fieldPath": "scope",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "scope",      "order": "ASCENDING" },
-        { "fieldPath": "deleted",    "order": "ASCENDING" },
-        { "fieldPath": "uploadedBy", "order": "ASCENDING" }
+        {
+          "fieldPath": "scope",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedBy",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "sharedUserIds", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "scope",         "order": "ASCENDING" },
-        { "fieldPath": "deleted",       "order": "ASCENDING" }
+        {
+          "fieldPath": "sharedUserIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "scope",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "deleted",    "order": "ASCENDING" },
-        { "fieldPath": "visibility", "order": "ASCENDING" }
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "visibility",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "deleted",    "order": "ASCENDING" },
-        { "fieldPath": "uploadedBy", "order": "ASCENDING" }
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "uploadedBy",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "sharedUserIds", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "deleted",       "order": "ASCENDING" }
+        {
+          "fieldPath": "sharedUserIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "hub_folders",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "scope",      "order": "ASCENDING" },
-        { "fieldPath": "department", "order": "ASCENDING" }
+        {
+          "fieldPath": "scope",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "department",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "audit_log",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "actorUid", "order": "ASCENDING"  },
-        { "fieldPath": "ts",       "order": "DESCENDING" }
+        {
+          "fieldPath": "actorUid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ts",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "meetings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "invitees",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "startAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "meetings",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startAt",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

@@ -197,7 +197,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.114 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.115 · Barro Industries</div>
   </div>
 </div>
 
@@ -477,6 +477,11 @@
 </script>
 <script defer src="js/drive.js"></script>
 <script defer src="js/notifications.js"></script>
+<!-- Meetings + in-system calendar (owner request). MUST load after
+     notifications.js: window.Meetings sends invites through Notifs.send at
+     RUN time. Everything it touches is a runtime reference, never parse-time,
+     so this position is about intent, not a hard parse dependency. -->
+<script defer src="js/meetings.js"></script>
 <!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
      before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
 <script defer src="js/svc-approvals.js"></script>

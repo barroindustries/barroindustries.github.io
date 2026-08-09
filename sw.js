@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.114';
+const CACHE_VER = 'bi-ops-v14.0.115';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -50,6 +50,7 @@ const PRECACHE = [
   '/js/finance-ledger.js',
   '/js/drive.js',
   '/js/notifications.js',
+  '/js/meetings.js',
   '/js/svc-approvals.js',
   '/js/ui-crud-table.js',
   '/js/money-core.js',
