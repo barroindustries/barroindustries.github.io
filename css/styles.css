@@ -7469,13 +7469,26 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
    under .a4-sheet, regardless of what html.theme-dark/astral set at the root. */
 .a4-stage{
   --a4-scale:1;
+  /* --a4-h is the sheet's REAL layout height, written by window.fitA4Sheet()
+     (js/screens/hr.js). It defaults to exactly one A4 page so the reservation
+     is right before any measurement runs and for any stage the fitter misses. */
+  --a4-h:1123px;
   display:flex;justify-content:center;
+  /* MUST NOT be `stretch` (the flex default). Stretch sets a DEFINITE cross-axis
+     height on .a4-sheet, and a definite height makes overflowing content spill
+     instead of growing the box — so every payslip was capped at exactly one
+     page no matter how much was on it. Measured 2026-08-09: a sheet needing
+     2443px of content still had a 1123px box, i.e. the bottom half of a long
+     payslip (many allowances/deductions) was silently cut off the paper. */
+  align-items:flex-start;
   width:calc(794px * var(--a4-scale));
-  height:calc(1123px * var(--a4-scale));
+  height:calc(var(--a4-h) * var(--a4-scale));
   margin:0 auto;padding:16px 8px;
 }
 .a4-sheet{
-  width:794px;min-height:1123px;flex-shrink:0;
+  /* height:auto + min-height = "at least one page, more if the content needs
+     it". Paired with the stage's align-items above; neither works alone. */
+  width:794px;height:auto;min-height:1123px;flex-shrink:0;
   background:#fff;color-scheme:light;
   padding:42px 38px 26px;
   box-shadow:0 2px 16px rgba(0,0,0,.22);border:1px solid #ddd;

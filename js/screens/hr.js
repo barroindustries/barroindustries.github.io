@@ -5750,6 +5750,15 @@ window.fitA4Sheet = function(root, opts) {
       const w = (bodyEl && bodyEl.clientWidth) || root.clientWidth || window.innerWidth;
       const scale = Math.max(0.1, Math.min(1, (w - 16) / 794));
       stage.style.setProperty('--a4-scale', String(scale));
+      // Reserve the sheet's ACTUAL scaled height, not one hardcoded A4 page.
+      // transform:scale() does not shrink the layout box, so the stage has to
+      // stand in for the visual size — and it was standing in for 1123px even
+      // when the payslip ran to two pages, which made a long sheet paint over
+      // whatever followed it (in the Print-All batch: the next person's
+      // payslip). offsetHeight is the untransformed layout height, so this is
+      // the true unscaled paper length.
+      const sheet = stage.querySelector('.a4-sheet');
+      if (sheet && sheet.offsetHeight) stage.style.setProperty('--a4-h', sheet.offsetHeight + 'px');
     });
   };
   recalc();
