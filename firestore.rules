@@ -33,6 +33,15 @@ service cloud.firestore {
     // two threads be read and posted to by id, which is the layer that counts.
     function deptOpenToSecretary(d) { return !(d == 'Finance' || d == 'IT'); }
     function deptChannelOpen(d) { return !isSecretary() || deptOpenToSecretary(d); }
+    // Lowercase-docId sibling of the two above. /strategy_notes keys its docs by a
+    // free-form lowercase deptKey ('finance', 'sales', …), not by the DEPARTMENTS
+    // label, and rules has no case-fold operator — so the two lists cannot share
+    // one predicate and are deliberately kept adjacent instead, so a future
+    // department closure has to walk past both. 'it' is listed even though the
+    // Strategy screen has no IT chip today: the docId is client-chosen, so the
+    // guard has to be about the key space, not about today's UI.
+    function deptKeyOpenToSecretary(k) { return !(k == 'finance' || k == 'it'); }
+    function strategyDeptOpen(k) { return !isSecretary() || deptKeyOpenToSecretary(k); }
     function isPartner()     { return getRole() == 'partner'; }
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
@@ -119,9 +128,26 @@ service cloud.firestore {
     // Generic department membership (null-safe), and "admin OR member of dept D".
     // Used by the per-department document collections (work plans, marketing plans,
     // gov bidding buckets, IT assets/software, etc.).
+    //
+    // ⚠ OWNER RULING 3, GENERALIZED (2026-08-10) — ASSIGNMENT NEVER BEATS THE ROLE.
+    // isFinanceDept() has carried this exclusion since 2026-08-08, but the GENERIC
+    // membership predicate did not, so every surface keyed on a raw inDept(...)
+    // rather than on isFinanceDept() still let one People & Roles dropdown hand a
+    // Corporate Secretary back a department they were closed out of. The live
+    // example is budgets_<dept>: its create/update legs are
+    // `isMoneyAdmin() || inDept(resource.data.dept)`, so a secretary carrying the
+    // Finance department could write Finance's budget lines — the exact failure
+    // mode ruling 3 was written after, one collection over from the one it fixed.
+    // Putting the exclusion HERE means it holds for every present and future
+    // inDept() call site instead of having to be remembered at each one.
+    // Scoped to the two closed departments only: a secretary may hold Production,
+    // Sales, Marketing, CRM, Ventures etc. and this leaves those memberships whole.
+    // Reads `role` off the SAME user doc this function already fetched, so it
+    // costs no extra get().
     function inDept(d) {
       let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return u.get('department', '') == d || u.get('departments', []).hasAny([d]);
+      return !(u.get('role', null) == 'secretary' && (d == 'Finance' || d == 'IT'))
+        && (u.get('department', '') == d || u.get('departments', []).hasAny([d]));
     }
     function canDept(d) { return isAdmin() || inDept(d); }
 
@@ -853,7 +879,38 @@ service cloud.firestore {
     //    partners NEVER pass this branch. participants stays [] on dept docs.
     // Rules do NOT cascade — messages/readers/typing each get an explicit match.
     match /conversations/{convId} {
-      // Membership vs THIS doc (parent reads/updates — no extra get()).
+      // ⚠ 2026-08-10 — WHY THE PARTICIPANTS DISJUNCT IS TYPE-FENCED.
+      // Both functions are two disjuncts, and the dept-channel one correctly calls
+      // deptChannelOpen(). The participants one did not, and it was FIRST — no type
+      // test, no department test. On a dept doc that is not a second way to be a
+      // member, it is a way to MINT membership: participants is derived-never-stored
+      // for a dept channel (the create rule below pins it to size()==0), so any
+      // entry appearing there is by definition planted. Combined with the
+      // creator/admin update branch further down it made
+      //   conversations/dept_Finance.update({participants:[myUid]})
+      // a complete bypass of deptChannelOpen() — the write needs no read first
+      // (request.resource.data is the server-side merge), and once it lands the
+      // channel doc, its whole message history and the post verb all open up.
+      // The fence below is the belt to that branch's braces: even if a genuine
+      // # Finance member plants someone else's uid there, it confers nothing.
+      // No legitimate principal moves — a dept doc's participants array is empty.
+      // ⚠ THE FIRST DISJUNCT MUST STAY EXACTLY `uid in participants`, UNFENCED.
+      // `allow read` serves LIST as well as GET, and Firestore evaluates a list
+      // against the QUERY, not per document — so the rule has to be provable
+      // from the query alone. The inbox lists with
+      //   where('participants','array-contains', uid)
+      // which proves this disjunct and nothing else. A `type != 'dept'` fence
+      // here reads a FIELD, which no query constraint can establish, so the
+      // whole inbox list is denied — for every role, not just the secretary.
+      // (Caught in review 2026-08-10 before it shipped.)
+      //
+      // Nothing is lost by dropping the fence: a dept conversation can never
+      // HAVE a non-empty participants array. `allow create` pins it to
+      // size() == 0, the group-management update branch below now refuses to
+      // touch participants/participantNames on a type=='dept' doc, and the
+      // "leave group" branch can only ever remove the caller. Closing the WRITE
+      // is what closes the bypass; fencing the read was belt on already-fastened
+      // braces, at the cost of the entire feature.
       function memberOfDoc() {
         return (request.auth.uid in resource.data.get('participants', []))
           || (resource.data.get('type','') == 'dept' && !isPartner()
@@ -948,9 +1005,36 @@ service cloud.firestore {
         // archivedBy for EVERY caller — INCLUDING the creator/admin
         // themself — now go exclusively through the own-uid-only branches
         // above.
+        // ⚠ 2026-08-10 THE CHAT BYPASS — two conjuncts added, both load-bearing.
+        //
+        // (1) memberOfDoc(). This branch had NO membership precondition at all: a
+        //     creator-or-admin could rewrite `participants` on a conversation they
+        //     had never been part of and could not even read, and a Firestore write
+        //     is evaluated independently of read access, so no prior get() was
+        //     needed. That was a one-line self-join into ANY private DM or group in
+        //     the company. It costs nothing real: the management UI (_isGroupAdmin /
+        //     _canManageConv, js/chat.js) is only reachable from an OPEN thread, and
+        //     opening one already requires this same memberOfDoc() via `allow read`.
+        //
+        // (2) the dept fence. A dept channel derives its membership from the
+        //     `department` field — participants is pinned to [] at create and
+        //     nothing legitimate ever writes it afterwards — so permitting those two
+        //     keys here was the write half of the deptChannelOpen() bypass described
+        //     on memberOfDoc() above. Blocking the KEYS rather than the whole branch
+        //     keeps the parts of group management a dept channel does use (rename,
+        //     photo, wallpaper, pin/unpin — chat.js _canManageConv writes
+        //     pinnedMsgIds on any conv type) working unchanged for admins and members.
+        //
+        // The "leave group" disjunct below is untouched: it is self-limiting (the
+        // new array must equal the old minus the CALLER's own uid), so it can only
+        // ever remove the caller and can never add anyone.
         || ( (resource.data.get('createdBy','') == request.auth.uid || isAdmin())
+          && memberOfDoc()
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['name','photoUrl','participants','participantNames','wallpaper','pinnedMsgIds']) )
+              .hasOnly(['name','photoUrl','participants','participantNames','wallpaper','pinnedMsgIds'])
+          && ( resource.data.get('type','') != 'dept'
+               || !request.resource.data.diff(resource.data).affectedKeys()
+                     .hasAny(['participants','participantNames']) ) )
         || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
              && request.resource.data.get('participants', [])
                 == resource.data.get('participants', []).removeAll([request.auth.uid]) )
@@ -1079,11 +1163,34 @@ service cloud.firestore {
     // ── Strategy / market-research notes (v12 WS40) ──────────────────
     // docId ∈ {general,sales,marketing,production,finance,gov}. Read scoped to the
     // Analytics tier (president/manager/secretary/finance); entries appended via
-    // arrayUnion. Secretary is view-only CLIENT-side (WS25 decision-9 pattern) —
-    // rules keep the tier uniform. .get() defaults per missing-field-throws memory.
+    // arrayUnion. .get() defaults per missing-field-throws memory.
+    //
+    // ⚠ 2026-08-10 SECRETARY LEAK — the tier was uniform across every deptKey, and
+    // one of those keys is 'finance'. isOpsAdmin() lists 'secretary', so the role
+    // the owner twice closed out of Finance could read (and, per the rule, write)
+    // Finance's market-research and conclusions notes — free-text commentary of
+    // exactly the kind the carve-out exists for. Unlike the ledger/payroll reads on
+    // the same Analytics screen this one is not denied, so there is no zero and no
+    // banner: it renders real content. The old comment here described the client's
+    // view-only gate as covering it; a client gate is not a boundary, and the docId
+    // is the whole address, so a hand-set window._AN_STRAT_DEPT reaches it anyway.
+    // The guard goes on BOTH verbs — read for the leak, write because a rule that
+    // permits a write the UI refuses cannot be read as a statement of intent.
+    // Nobody else moves: president/manager/finance are untouched by strategyDeptOpen().
+    //
+    // ⚠ CLIENT CHANGE REQUIRED (js/screens/dashboards.js renderStrategy) — the
+    // Strategy tab loads this collection with an UNFILTERED list
+    // (cg('strategy_notes', db.collection('strategy_notes'))). A list is evaluated
+    // per returned document, so once the 'finance' doc is denied the WHOLE query is
+    // denied and the secretary loses every chip, not just Finance. The client must
+    // stop asking for the doc it may not have: for currentRole==='secretary', fetch
+    // the allowed keys by id (or query documentId() 'in' the allowed list) instead
+    // of the bare collection. Until that lands they get the screen's existing
+    // "not shown to you" denial banner rather than Finance's notes — the correct
+    // failure direction, but not the intended end state.
     match /strategy_notes/{deptKey} {
-      allow read:  if isAuth() && isOpsAdmin();
-      allow write: if isAuth() && isOpsAdmin()
+      allow read:  if isAuth() && isOpsAdmin() && strategyDeptOpen(deptKey);
+      allow write: if isAuth() && isOpsAdmin() && strategyDeptOpen(deptKey)
         && request.resource.data.get('entries', []) is list;
       allow delete: if isAuth() && isPresident();
     }
@@ -1460,10 +1567,23 @@ service cloud.firestore {
       // to approve them via a direct write — tightened to match: secretary
       // (isAdmin() but not isSeniorAdmin()) may only act on the MINOR request
       // types; money/quote/finance approvals need president or manager.
+      // ⚠ 2026-08-10 — 'ca_deduct' REMOVED from the non-senior allowlist. The
+      // comment above says "money/quote/finance approvals need president or
+      // manager", and the client agrees: APPROVAL_CAPS['ca_deduct'] is
+      // ['president','manager'] (js/screens/approvals.js), because that request
+      // decides how much of an employee's cash advance is deducted from a given
+      // pay run — a money decision, and owner ruling 1 keeps money requests
+      // VISIBLE and read-only for the secretary, never actionable. It was the one
+      // entry left in this list after every sibling money verb was narrowed
+      // (cash_advances update -> isMoneyAdmin, pending_raises and
+      // payroll_delete_requests approval -> isPresident). The rule now mirrors
+      // APPROVAL_CAPS exactly, so a future UI change that trusts the boundary
+      // cannot hand them the button by accident. Escalation is unaffected — that
+      // path writes nothing here, it notifies the President.
       allow update: if isAuth() && (
         isSeniorAdmin() ||
         (isAdmin() && resource.data.get('type', '') in
-          ['signup', 'attendance', 'submission', 'review-task', 'leave', 'ca_deduct'])
+          ['signup', 'attendance', 'submission', 'review-task', 'leave'])
       );
       allow delete: if isAuth() && isAdmin();
     }
@@ -1684,13 +1804,39 @@ service cloud.firestore {
 
     // ── IT collections ─────────────────────────────────
     // v12 WS19: read locked to !isPartner() on all three — were bare isAuth().
+    // ⚠ 2026-08-10 — it_tickets was MISSED by the 2026-08-09 canIt() sweep below.
+    // That pass converted it_assets/it_software writes and both it_access and
+    // it_network verbs, and its block comment reasons collection by collection —
+    // but never names this one, sitting immediately above it. So the Corporate
+    // Secretary still held moderator rights over the IT department's own work
+    // queue: silently reassign or close any ticket, and permanently delete one.
+    // READ is deliberately LEFT at !isPartner(): it is company-wide by design and
+    // by the same argument the sweep makes for the it_assets/it_software
+    // inventory just below — every internal employee can already see the queue
+    // they file into, and removing exactly one role from a company-wide read
+    // would be theatre while the reporter-visible half stayed open. It is the
+    // WRITE and the DELETE over another department's queue that were never
+    // argued for, and those are what move here. A ticket's own author keeps
+    // both verbs — canIt() replaces only the isAdmin() disjunct beside it.
+    // .get('createdBy','') so a legacy ticket with no createdBy denies that
+    // disjunct instead of ERRORING the whole rule (missing-field-throws).
     match /it_tickets/{docId} {
       allow read: if isAuth() && !isPartner();
       allow create: if isAuth();
       allow update: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isAdmin()
+        resource.data.get('createdBy', '') == request.auth.uid || canIt()
       );
-      allow delete: if isAuth() && isAdmin();
+      // Delete stays a pure moderator verb (no author disjunct).
+      //
+      // isSeniorAdmin(), NOT canIt(). The stated goal here was to take ONE ROLE
+      // OUT, and canIt() = !isSecretary() && (isAdmin() || inDept('IT')) does
+      // more than that: it would hand PERMANENT deletion of any ticket to every
+      // ordinary employee carrying the IT department, a set that has never had
+      // this verb. Update is a different matter — closing and reassigning is
+      // exactly what an IT staffer is for, and it matches the it_assets /
+      // it_software model directly below — but destroying the record of a
+      // reported problem is not day-to-day queue work.
+      allow delete: if isAuth() && isSeniorAdmin();
     }
     // IT assets/software: IT-dept members manage them (UI gates on canEditDept('IT')).
     // 2026-08-09 — canDept('IT') -> canIt() on every WRITE, and on the two
@@ -1836,10 +1982,21 @@ service cloud.firestore {
     // ventures/{id} only. There are no venture subcollections today; adding
     // one needs its own match block.
     //
-    // Attachments live in Firebase Storage under Ventures/Briefs/* and are
-    // already covered by storage.rules' generic
-    // /{department}/{subfolder}/{fileName} block ('Ventures' is not one of its
-    // isReservedTop() segments), so storage.rules needed no change.
+    // Attachments live in Firebase Storage under Ventures/Briefs/*.
+    // ⚠ 2026-08-10 — the note that stood here was STALE and actively misleading.
+    // It claimed 'Ventures' is not one of storage.rules' isReservedTop() segments
+    // and that the generic /{department}/{subfolder}/{fileName} block therefore
+    // covered brief attachments with no storage.rules change. It IS reserved
+    // (storage.rules, 2026-08-08) and has its own dedicated block gated on
+    // isMemberOf('Ventures') = isAdminClaim() || hasClaimDept('Ventures') — and
+    // storage.rules' isAdminClaim() is president|manager ONLY, where THIS file's
+    // isAdmin() also includes 'secretary'. So the two rule files disagree about
+    // who may do the same job: Firestore lets the Corporate Secretary read,
+    // create, edit and delete a venture brief with no department assignment,
+    // while Storage refuses their upload unless their profile carries the
+    // Ventures department. Fixing that belongs in storage.rules, not here — do
+    // not "fix" it by widening this block. A matching note is on the audit
+    // handoff; the zero-code workaround is to assign them the Ventures dept.
     // ── MEETINGS (owner request — in-system calendar + chat invites) ──────
     // Read is invitee-or-oversight. There is no LIST-safe blanket read: the
     // calendar's non-admin query carries `invitees array-contains uid`, which
@@ -1893,8 +2050,29 @@ service cloud.firestore {
         && request.resource.data.get('startAt', request.time) is timestamp
         && noServerFieldsOnCreate();
 
+      // ⚠ 2026-08-10 — the oversight tier's WRITE on this collection is narrowed
+      // from isAdmin() to isSeniorAdmin(); the READ above is deliberately left
+      // company-wide. Two separate reasons.
+      //
+      // WRITE: isAdmin() includes 'secretary', so the whole-company read they hold
+      // for oversight came bundled with the power to silently rewrite or CANCEL a
+      // meeting they were never invited to — agenda, invitee list, location,
+      // status, and the post-meeting notes that are the only record of what was
+      // decided. No screen ever offered it: js/meetings.js gates Edit / Notes /
+      // Cancel on `mine` (organizerUid === me) and nothing in the repo calls a
+      // meetings delete at all. So this removes an unexercised grant rather than a
+      // working control, and president/manager keep it for genuine cover work.
+      //
+      // READ: left alone ON PURPOSE, and it is NOT clean — a Finance or IT meeting's
+      // title, agenda and minutes are still readable by a role closed out of both
+      // departments. It cannot be fixed here: a meeting doc carries no department
+      // field, so there is nothing for a deptOpenToSecretary()-shaped guard to test.
+      // Filtering those out is a SCHEMA change (add `dept`, populate it at create
+      // from the organiser or a picker, backfill), not a rule tweak, and inventing
+      // the field in this file would silently deny every existing meeting. Raised
+      // for the owner rather than guessed at.
       allow update: if isAuth() && !isPartner() && (
-        ( (isOrganizer() || isAdmin())
+        ( (isOrganizer() || isSeniorAdmin())
           && request.resource.data.get('organizerUid', '') == resource.data.get('organizerUid', '')
           && request.resource.data.get('title', '') != ''
           && request.resource.data.get('title', '').size() <= 140
@@ -1908,7 +2086,9 @@ service cloud.firestore {
         ( isInvitee() && rsvpOnlyByOwner() )
       );
 
-      allow delete: if isAuth() && (isOrganizer() || isAdmin());
+      // Same narrowing as update, same reason — cancelling someone else's meeting
+      // outright is the sharper end of the verb, not the milder one.
+      allow delete: if isAuth() && (isOrganizer() || isSeniorAdmin());
     }
 
     match /ventures/{id} {
@@ -2040,7 +2220,24 @@ service cloud.firestore {
       // canFinance(); genuine Production-dept staff keep the leg they need.
       // canProduction() ITSELF is left alone — production_orders legitimately
       // needs it and Production is a department they keep.
-      allow create, update: if isAuth() && (canFinance() || isProductionDept())
+      // ⚠ 2026-08-10 RULING 3, THE HALF THAT WAS MISSED — `&& !isSecretary()`.
+      // The 2026-08-09 fix above swapped canProduction() for isProductionDept()
+      // to strip the isAdmin() leg, and stopped there. But isProductionDept()
+      // carries NO role test (unlike isFinanceDept(), which was given one on
+      // 2026-08-08 for precisely this reason), and Production is a department the
+      // secretary is ALLOWED to hold — so the closure was one People & Roles
+      // dropdown deep. Assigned Production, they could restate any open month's
+      // published income, expense, vatOutput and vatInput: figures that ARE the
+      // Finance Overview and the dashboard KPI tiles, and which they still cannot
+      // READ (the read above is canFinance()). Write-without-read is the worse
+      // half — a restatement they cannot see the before-value of.
+      // The exclusion is written HERE rather than inside isProductionDept()
+      // deliberately: the secretary genuinely may BE a Production member, so a
+      // helper that denies it would be false, and a future Production surface
+      // gated on it would wrongly lock them out. What they may not do is post to
+      // the FINANCE surfaces that Production membership happens to unlock — this
+      // rule and the /ledger COS leg below — so the guard lives on those two.
+      allow create, update: if isAuth() && (canFinance() || (isProductionDept() && !isSecretary()))
         && request.resource.data.keys().hasOnly(
              ['month','income','expense','vatOutput','vatInput','byCategory','count','updatedAt'])
         && rollupMonthOpen(docId)
@@ -2155,7 +2352,14 @@ service cloud.firestore {
         // isAdmin() inside canProduction() let the Corporate Secretary post
         // fenced Production COS rows into the general ledger. Safe for everyone
         // else — president/manager/finance already clear canFinance().
-        || (isProductionDept()
+        // ⚠ 2026-08-10 — `&& !isSecretary()`, the same ruling-3 completion as the
+        // finance_rollup leg above and for the same reason: isProductionDept()
+        // has no role test, Production is a department the secretary may hold,
+        // and this leg posts rows into the GENERAL LEDGER — a collection they
+        // cannot read (canFinance() on the read above). See the fuller note there
+        // for why the guard sits on the two Finance-surface legs rather than
+        // inside isProductionDept() itself.
+        || (isProductionDept() && !isSecretary()
             && request.resource.data.get('source', '') == 'Production'
             && request.resource.data.get('amount', 0) is number
             && request.resource.data.get('amount', 0) > 0
@@ -2322,8 +2526,20 @@ service cloud.firestore {
     // ── Finance delete requests ────────────────────────
     // Finance staff file a request to delete any finance record; the President
     // approves/denies it (and performs the real delete) in the Approvals tab.
+    // ⚠ OWNER RULING 1 (applied here 2026-08-10) — this was the FOURTH money-request
+    // queue and the only one without the read-only secretary carve-out. Its three
+    // siblings each got an explicit `|| isSecretary()` on 2026-08-08 —
+    // cash_advances, pending_raises, payroll_delete_requests — and the Approvals
+    // screen folds THIS collection and payroll_delete_requests into the SAME
+    // "Finance Requests" chip (js/screens/approvals.js), so the omission left the
+    // secretary looking at half a queue: their own dashboard permanently told them
+    // a bucket they are asked to escalate from was outside their access. Read only,
+    // exactly like the other three — create stays canFinance() and the
+    // approve/deny verbs stay isPresident() below, so nothing here becomes
+    // actionable for them; they can see a pending delete and flag it to the
+    // President, which is the whole point of ruling 1.
     match /finance_delete_requests/{docId} {
-      allow read: if isAuth() && canFinance();
+      allow read: if isAuth() && (canFinance() || isSecretary());
       allow create: if isAuth() && canFinance();
       allow update, delete: if isAuth() && isPresident();
     }
@@ -2509,8 +2725,25 @@ service cloud.firestore {
       // v12 WS41: a user may list THEIR OWN trail (provable for
       // where('actorUid','==',uid) queries); admins read everything.
       // Create rule already forces actorUid == auth.uid, so "own" is sound.
+      //
+      // ⚠ 2026-08-10 SECRETARY LEAK — isAdmin() -> isSeniorAdmin(). This read
+      // reconstructed, in full, the payroll surface owner ruling 2 took away. The
+      // `details` map is not a summary, it is the numbers: raise-apply logs
+      // {from:<old salary>, to:<new salary>} for a named person; disburse-payrun
+      // logs {totalNet, employeeCount} — the company's entire net payroll for the
+      // month; ledger creates log {source, amount, client}; cash-advance approvals
+      // log their totals (js/departments.js, js/config.js). And because the admin
+      // disjunct is role-only it is provable from the query alone, so an
+      // UNFILTERED list of the whole collection succeeded. That defeated the
+      // payroll / salary_history / salary_raises / pay_runs narrowing wholesale —
+      // this file even states the intent two hundred lines up ("they see the
+      // REQUEST, never the resulting pay"), which this rule contradicted directly.
+      // Costs nothing: the only screen is renderAuditLog, already president-only
+      // on three independent gates, and the own-trail branch beside it is
+      // untouched, so renderRecentActivity's where('actorUid','==',uid) query —
+      // the one thing the secretary actually reads here — keeps working.
       allow read:   if isAuth()
-        && (isAdmin() || resource.data.get('actorUid','') == request.auth.uid);
+        && (isSeniorAdmin() || resource.data.get('actorUid','') == request.auth.uid);
       // v14 re-audit fix — action/entity/entityId/details had no size bound at
       // all; an unrate-limited, append-only collection with unbounded fields
       // can be flooded with near-1MB documents by any signed-in account.
@@ -2556,9 +2789,24 @@ service cloud.firestore {
         && (!request.resource.data.keys().hasAny(['uid'])
             || request.resource.data.uid == null
             || request.resource.data.uid == request.auth.uid);
-      allow read:   if isAuth() && isAdmin();
+      // ⚠ 2026-08-10 — read isAdmin() -> isSeniorAdmin(), delete isAdmin() ->
+      // isPresident(). This is an IT/observability stream (js/errlog.js ships
+      // window.onerror payloads: message, stack, page, version, uid, ua), i.e. a
+      // department the Corporate Secretary is closed out of, and its per-user
+      // error trails are diagnostic data about everyone. The DELETE is the sharper
+      // half: this collection is append-only by design (`allow update: if false`)
+      // and its sibling audit_log has always reserved pruning to the President —
+      // error_log simply never got the same treatment, so a non-President could
+      // permanently erase a diagnostic trail with no approval and no audit row of
+      // its own. Nothing regresses: the only reader is renderSystemHealth, gated
+      // `isPresident() || currentRole==='finance'` (js/screens/dashboards.js), and
+      // the finance role was never inside isAdmin() to begin with — its error
+      // panel has always come back empty via that function's own try/catch. If
+      // finance is meant to see it, add `|| canFinance()` here deliberately; do
+      // not restore isAdmin(), which is the one set that puts the secretary back.
+      allow read:   if isAuth() && isSeniorAdmin();
       allow update: if false;
-      allow delete: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Leave requests ──────────────────────────────────
@@ -2858,9 +3106,33 @@ service cloud.firestore {
     // Firestore can prove for list queries. Dept/role shares are expanded
     // to uids client-side at share time. All .get(field, default) per the
     // missing-field-throws memory (migrated docs predate some fields).
+    // ⚠ 2026-08-10 SECRETARY LEAK — the leading isAdmin() disjunct on read and on
+    // update becomes isSeniorAdmin(). Since WS38 every Files tab in the app writes
+    // HERE (files_<scope> was retired into hub_files, namespaced by `scope`), and
+    // two of those scopes are Finance's: 'sss' (SSS & Government Documents) and
+    // 'accounting'. A hub_files doc's `url` is a getDownloadURL() token string that
+    // resolves with no auth at all, so reading the metadata IS reading the file —
+    // this was full content, not a listing. Because the disjunct was role-only it
+    // was also provable for an unfiltered list, and it sat FIRST, ahead of the
+    // visibility test, so it reached visibility:'private' documents any employee
+    // had uploaded and never shared. The update leg mattered just as much: it is
+    // the one branch not fenced by an affectedKeys() allowlist (the editor branch
+    // below is), so it carried the sharing ACL and ownership fields — the power to
+    // silently re-share a Finance document to anyone.
+    // Delta is exactly {secretary}: president/manager keep both verbs via
+    // isSeniorAdmin(), uploaders keep their own files, share targets keep theirs,
+    // and the shipped client never asked for the broad query anyway
+    // (FilesHub.loadFiles' own admin list is president/manager/owner, js/drive.js).
+    // Same narrowing already applied to product_costs for the same reason.
+    // NOTE the company-visibility disjunct below is deliberately LEFT: it is not a
+    // secretary carve-out, it is how every internal employee sees shared files, and
+    // bindFileCollection stamps visibility:'company' on every upload. Finance files
+    // therefore remain company-visible to EVERYONE, secretary included — closing
+    // that is a `scope`/`dept`-aware read rule plus a UI change, and is flagged
+    // rather than guessed at here.
     match /hub_files/{fileId} {
       allow read: if isAuth() && (
-           isAdmin()
+           isSeniorAdmin()
         || resource.data.get('uploadedBy','') == request.auth.uid
         || request.auth.uid in resource.data.get('sharedUserIds', [])
         || (!isPartner() && resource.data.get('visibility','company') == 'company')
@@ -2872,7 +3144,7 @@ service cloud.firestore {
       // Owner/admin: any update (incl. sharing/visibility). Editors: content &
       // organization fields only — NEVER the ACL/ownership fields.
       allow update: if isAuth() && (
-           isAdmin()
+           isSeniorAdmin()
         || resource.data.get('uploadedBy','') == request.auth.uid
         || (request.auth.uid in resource.data.get('editorUserIds', [])
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(

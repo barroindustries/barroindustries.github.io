@@ -1720,7 +1720,15 @@ async function renderSecretaryDashboard() {
             <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
               <button class="quick-action-btn" onclick="navigateTo('approvals')"><i data-lucide="shield-check"></i> Approvals (oversight)${totalPending?`<span class="badge badge-red" style="margin-left:auto">${totalPending}</span>`:''}</button>
               <button class="quick-action-btn" onclick="navigateTo('memos')"><i data-lucide="clipboard-check"></i> Memos & Resolutions</button>
-              <button class="quick-action-btn" onclick="navigateTo('dept:Admin')"><i data-lucide="building-2"></i> Admin — Policies & HR Docs</button>
+              <!-- Was navigateTo('dept:Admin'), which is a DEAD DESTINATION: the
+                   'Admin' department has no case in renderDeptModule's switch, so
+                   it falls to renderGenericDept's "Module coming soon" card. The
+                   role whose stated job is corporate records was being offered a
+                   labelled shortcut to Policies & HR Docs that opened a blank
+                   page. The content is real and this role can read AND write it —
+                   it just lives in two other places, so point at those instead. -->
+              <button class="quick-action-btn" onclick="navigateTo('company')"><i data-lucide="scroll-text"></i> Policies, Handbook &amp; Downloads</button>
+              <button class="quick-action-btn" onclick="navigateTo('dept:HR')"><i data-lucide="building-2"></i> HR — People &amp; Records</button>
               <button class="quick-action-btn" onclick="navigateTo('team-directory')"><i data-lucide="users"></i> Team Directory</button>
               <button class="quick-action-btn" onclick="navigateTo('departments')"><i data-lucide="layout-grid"></i> Departments</button>
               <button class="quick-action-btn" onclick="navigateTo('attendance')"><i data-lucide="calendar"></i> Attendance</button>
@@ -3208,6 +3216,15 @@ async function openEmpStandingsModal(uid, name, preloaded) {
     const caBalance = caList.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
     const caActive  = caList.filter(a=>a.status==='approved'&&(a.balance||0)>0).length;
 
+    // `payHidden` is set by the caller when the /payroll LIST that feeds
+    // salary/allowance/deductions was REFUSED (isMoneyAdmin read tier — the
+    // Corporate Secretary is outside it). Those three fields are then absent,
+    // not zero, and every figure derived from them is meaningless. Rule for
+    // this panel: never render a peso figure that was not successfully read —
+    // a withheld notice is correct, a ₱0 Net Pay is a lie an oversight role
+    // has no way to detect. CA balance below comes from cash_advances, a read
+    // this role IS granted, so it stays real.
+    const payHidden = !!preloaded.payHidden;
     const net    = preloaded.salary + preloaded.allowance - preloaded.deductions;
     const kpiPct = preloaded.mTotal ? Math.round(preloaded.mDone / preloaded.mTotal * 100) : 0;
     const attPct = Math.round(attScore * 100);
@@ -3258,6 +3275,14 @@ async function openEmpStandingsModal(uid, name, preloaded) {
         </div>
 
         <!-- Salary Breakdown -->
+        ${payHidden ? `
+        <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;margin-bottom:18px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Salary Computation</div>
+            <span class="badge badge-gray" style="white-space:nowrap">${emojiIcon('🔒',14)} Not shown</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.6">Base salary, allowances, deductions and net pay come from the payroll records, which are outside your access. They are withheld here rather than displayed as ₱0 — this person's pay is not zero, it simply was not read.</div>
+        </div>` : `
         <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;margin-bottom:18px">
           <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Salary Computation</div>
           <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)"><span style="font-size:13px">Base Salary</span><span style="font-size:13px;font-weight:600">₱${formatNum(preloaded.salary)}</span></div>
@@ -3266,7 +3291,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
           ${caBalance > 0 ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)"><span style="font-size:13px;color:var(--danger,#ff4444)">− CA Outstanding</span><span style="font-size:13px;font-weight:600;color:var(--danger,#ff4444)">₱${formatNum(caBalance)}</span></div>` : ''}
           <div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:2px"><span style="font-size:14px;font-weight:700">Net Pay</span><span style="font-size:16px;font-weight:800;color:var(--primary-light,#6c8ef5)">₱${formatNum(Math.max(0, net - caBalance))}</span></div>
           ${caBalance > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">* Net deducted by CA outstanding balance</div>` : ''}
-        </div>
+        </div>`}
 
         <!-- Attendance Grid -->
         <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px">
@@ -3543,11 +3568,22 @@ async function renderProgressReports() {
   c.innerHTML = window.skeletonHtml('rows');
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
+    // ⚠ SILENT ZEROS — the same class the owner already reported once as
+    // Analytics' "Payroll ₱0/mo", still live here. This screen admits the
+    // Corporate Secretary by name three lines up, then reads pay through
+    // fetchUsersWithPayroll(), whose /payroll LIST is isMoneyAdmin() and is
+    // therefore REFUSED for them. js/config.js returns `payrollDenied` for
+    // exactly this purpose; discarding it made every `u.salary||0` below render
+    // a confident ₱0 — a company-wide compensation table stating that nobody is
+    // paid anything, indistinguishable from data. Keep the flag: it drives the
+    // named banner below and travels on each View button so the Standings panel
+    // withholds the Salary Computation instead of computing a ₱0 Net Pay.
     const [usersSnap, tasksSnap, attSnap] = await Promise.all([
-      fetchUsersWithPayroll().catch(()=>({docs:[],size:0})),
+      fetchUsersWithPayroll().catch((e)=>{ _dashWarnOnce('users', e); return {docs:[],size:0,payrollDenied:false}; }),
       safeGet(db.collection('tasks'), 'tasks'),
       safeGet(db.collection('attendance'), 'attendance')
     ]);
+    const payHidden = !!(usersSnap && usersSnap.payrollDenied);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const tasks = tasksSnap.docs.map(d=>d.data());
     const DONE_TASK_STATUSES = ['done','approved','archived'];
@@ -3578,6 +3614,7 @@ async function renderProgressReports() {
 
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('📈',20)} Progress Reports & KPIs</h2><span class="badge badge-blue">${monthLabel}</span></div>
+      ${payHidden?`<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Not shown to you:</strong> Payroll. Pay figures on this page are withheld, not zero — the salary breakdown in each person's Standings is hidden rather than computed from missing data. Task and attendance figures below are unaffected.</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card accent"><div class="kpi-label">All Tasks (Total)</div><div class="kpi-value">${tasks.length}</div><div class="kpi-sub">${tasks.filter(isDoneTask).length} done</div></div>
         <div class="kpi-card green"><div class="kpi-label">This Month Tasks</div><div class="kpi-value">${monthTasks.length}</div><div class="kpi-sub">${monthTasks.filter(isDoneTask).length} done</div></div>
@@ -3613,7 +3650,7 @@ async function renderProgressReports() {
                     <td class="tc-detail" data-label="This Month" style="font-size:12px"><strong>${uMDone}</strong>/${uMTotal}</td>
                     <td class="tc-detail" data-label="All Time" style="font-size:12px"><strong>${uDone}</strong>/${uTotal}</td>
                     <td class="tc-net"><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
-                    <td class="tc-actions"><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
+                    <td class="tc-actions"><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" data-payhidden="${payHidden?'1':'0'}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
                   </tr>`;
                 }).join('')}
               </tbody>
@@ -3682,7 +3719,7 @@ async function renderProgressReports() {
                       <td class="tc-detail" data-label="All Tasks Done">${uDone}/${uTotal}</td>
                       <td class="tc-detail" data-label="This Month">${uMDone}/${uMTotal}</td>
                       <td class="tc-net"><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
-                      <td class="tc-actions"><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
+                      <td class="tc-actions"><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" data-payhidden="${payHidden?'1':'0'}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
                     </tr>`;
                   }).join('')}
                 </tbody>
@@ -3716,7 +3753,11 @@ async function renderProgressReports() {
         btn.dataset.uid,
         decodeURIComponent(btn.dataset.name),
         { mDone: +btn.dataset.mdone, mTotal: +btn.dataset.mtotal,
-          salary: +btn.dataset.salary, allowance: +btn.dataset.allowance, deductions: +btn.dataset.deductions }
+          salary: +btn.dataset.salary, allowance: +btn.dataset.allowance, deductions: +btn.dataset.deductions,
+          // Carries the /payroll denial through to the Standings panel so it
+          // withholds the pay breakdown rather than rendering ₱0 from data it
+          // was never allowed to read.
+          payHidden: btn.dataset.payhidden === '1' }
       ));
     });
     // Card view (≤700px): tap a member row (outside its View button) to
@@ -3753,7 +3794,7 @@ async function renderCompany() {
   function switchCompanyTab(tab) {
     const ct = document.getElementById('company-tab-content');
     if (tab==='overview')        renderCompanyOverview(ct, canAdd);
-    else if (tab==='memos')      renderCompanyMemos(ct, isPresident() || currentRole==='manager'); // memos: managers are admins per firestore.rules + sidebar
+    else if (tab==='memos')      renderCompanyMemos(ct, canManageMemos());
     else if (tab==='policies')   renderCompanyPolicies(ct, canAdd);
     else if (tab==='downloads')  renderCompanyDownloads(ct, canAdd);
     else if (tab==='handbook')   renderCompanyHandbook(ct, canAdd);
@@ -4023,6 +4064,25 @@ async function renderCompanyOverview(ct, canAdd) {
   }
   if (window.lucide) lucide.createIcons({ nodes: [ct] });
 }
+
+// ── Who may write a memo ──────────────────────────
+// ONE predicate for the ONE collection, called from BOTH doors into it. Before
+// this existed the Company screen's Memos tab and the standalone Memos page
+// gave different answers for the same person: the Company tab dropped
+// 'secretary' (under a comment claiming it mirrored firestore.rules, which it
+// did not), so the Corporate Secretary — whose signature artefact memos and
+// board resolutions are — lost the "+ New Memo" button depending on which
+// route they walked in through, and read that as "I am not allowed to write
+// memos". The boundary is memos create/delete = isAdmin() (president |
+// manager | secretary), whose client mirror is isAdminPriv() in
+// js/departments.js. Guarded so a load-order surprise degrades to the old
+// explicit list rather than to `undefined` (i.e. no button at all).
+function canManageMemos() {
+  return (typeof window.isAdminPriv === 'function')
+    ? window.isAdminPriv()
+    : (isPresident() || currentRole === 'manager' || currentRole === 'secretary');
+}
+window.canManageMemos = canManageMemos;
 
 // ── Company: Memos ────────────────────────────────
 // Memos support optional "conforme" — tagged recipients must tick an
@@ -4370,7 +4430,7 @@ async function renderMemosPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `<div class="page-header"><h2>${emojiIcon('📋',20)} Memos</h2></div><div id="memos-page-host"></div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
-  renderCompanyMemos(document.getElementById('memos-page-host'), isPresident() || currentRole==='manager' || currentRole==='secretary');
+  renderCompanyMemos(c.querySelector('#memos-page-host'), canManageMemos());
 }
 window.renderMemosPage = renderMemosPage;
 
@@ -4577,6 +4637,21 @@ async function renderDepartments() {
     .filter(k => k !== 'Brilliant Steel')
     .filter(k => !_blocked.includes(k));
 
+  // DEPARTMENTS keys with no case in renderDeptModule's switch (js/app.js) —
+  // i.e. keys whose "department screen" is renderGenericDept's static
+  // "Module coming soon" card. Keep this list in step with that switch: if a
+  // screen ships for one of these, delete it from here in the same commit.
+  //
+  // 'Admin' was removed 2026-08-10, in the same change that gave it a real
+  // screen (js/app.js `case 'Admin': renderAdminDept()`). Leaving it here would
+  // have dimmed the Admin card to "No screen yet" and made it unclickable for
+  // EVERY role — president, manager, accountant, employee and secretary alike —
+  // while the screen it denies existing sat one router case away. That is the
+  // failure mode this list is designed to have, which is why the instruction
+  // above says "in the same commit": the list and the switch are one fact
+  // stored twice.
+  const _DEAD_DEPT_SCREENS = [];
+
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('🗂️',20)} Departments</h2>
@@ -4586,14 +4661,23 @@ async function renderDepartments() {
       ${allDepts.map(name => {
         const cfg = DEPARTMENTS[name] || {};
         const subtabs = (cfg.subtabs || []).slice(0, 4);
+        // A card is only a door if renderDeptModule has a case for it. 'Admin'
+        // is the one DEPARTMENTS key that does not (see the switch in js/app.js
+        // — every other key is routed), so it falls to renderGenericDept's
+        // "Module coming soon" placeholder. Offering it with a "Tap to open →"
+        // hint was a dead control for every role that can see this grid; say so
+        // on the card instead of letting the tap answer for us. Kept visible
+        // rather than filtered out: Admin is a real department in config, and a
+        // silently-missing card reads as a bug of its own.
+        const _built = !_DEAD_DEPT_SCREENS.includes(name);
         return `
-          <div class="dept-card dept-card-clickable" data-dept="${name}" style="border-top-color:${cfg.color||'var(--primary-light)'}; cursor:pointer">
+          <div class="dept-card${_built?' dept-card-clickable':''}" data-dept="${name}" style="border-top-color:${cfg.color||'var(--primary-light)'}; cursor:${_built?'pointer':'default'};${_built?'':'opacity:.62'}">
             <div class="dept-icon-large">${window.deptIconTile(cfg, 44)}</div>
             <div class="dept-name" style="font-weight:700;font-size:14px;margin:4px 0">${name}</div>
             <div class="dept-subtabs-preview">
               ${subtabs.map(s => `<span class="dept-subtab-chip">${s}</span>`).join('')}
             </div>
-            <div class="dept-open-hint">Tap to open →</div>
+            <div class="dept-open-hint">${_built?'Tap to open →':'No screen yet'}</div>
           </div>`;
       }).join('')}
     </div>
@@ -4653,13 +4737,39 @@ async function renderAnalytics() {
   // dashboard — this is that pattern, not a third one.
   const _denied = [];
   const _DENY_NAMES = { ledger:'Income & expenses (ledger)', job_costs:'Job costs & margins',
-                        payslips:'Payslips', payroll:'Payroll', expenses:'Expenses' };
+                        payslips:'Payslips', payroll:'Payroll', expenses:'Expenses',
+                        strategy_notes:'Strategy notes' };
   const _noteDenied = (key, e) => {
     if (!(e && (e.code === 'permission-denied' || e.code === 'permission_denied'))) return;
     const base = String(key).split(':')[0];
     const nm = _DENY_NAMES[base] || base;
-    if (_denied.indexOf(nm) === -1) _denied.push(nm);
+    if (_denied.indexOf(nm) === -1) { _denied.push(nm); _paintDeniedBanner(); }
   };
+  // The banner has to be able to GROW after the first paint. payslips,
+  // cash_advances and expenses are deliberately lazy (Phase 86 item 2) — they
+  // are only read when their subtab is first opened, long after this page's
+  // HTML has been serialized. Composing the banner once meant those denials
+  // were discovered into an array nobody read again, and the Finance tab went
+  // on to state "Payslips — This Month (0) / No payslips this month" about a
+  // read that was REFUSED — a fabricated claim about payroll on the one screen
+  // this codebase went to real trouble to make honest. So: a live host div,
+  // repainted by _noteDenied whenever the list changes.
+  const _deniedBannerHtml = () => !_denied.length ? '' :
+    `<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Some figures are not shown to you:</strong> ${escHtml(_denied.join(', '))}. Wherever those feed a figure on this page it is marked withheld rather than printed as ₱0 — the data was refused, not measured as zero.</span></div>`;
+  const _paintDeniedBanner = () => {
+    // Scoped to this screen's own container: openPage keeps a dying page in the
+    // DOM for ~300ms, and an unscoped id lookup finds the dead one.
+    const host = c.querySelector('#an-denied-banner');
+    if (host) host.innerHTML = _deniedBannerHtml();
+  };
+  // ── THE RULE FOR THIS SCREEN ────────────────────────────────────────────
+  // Never render a peso figure that was not successfully read. A withheld
+  // marker is correct; a ₱0 is a claim about the business that an oversight
+  // role has no way to check — and the owner has already had this reported to
+  // them once. Denial keys are the _DENY_NAMES keys above.
+  const _isDenied = (key) => _denied.indexOf(_DENY_NAMES[key] || key) !== -1;
+  const _withheldTag = (size) => `<span style="font-size:${size||15}px;font-weight:700;color:var(--text-muted)">${emojiIcon('🔒',14)} Withheld</span>`;
+  const _withheldNote = (why) => `<div class="empty-state" style="padding:22px"><div class="empty-icon">${emojiIcon('🔒',36)}</div><p style="font-size:12px;color:var(--text-muted);max-width:34ch;margin:0 auto">${escHtml(why)}</p></div>`;
   const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); _noteDenied(label, e); return { docs:[], size:0 }; } };
   // Analytics re-reads the same heavy collections on every visit — cache 60s, keyed by the
   // active period so switching "This Month" ↔ "YTD" ↔ "All Time" doesn't serve stale rows
@@ -4846,6 +4956,18 @@ async function renderAnalytics() {
       M.cash = await window.BankAccounts.cashPosition();
   } catch(_) { /* denied/offline → placeholder */ }
 
+  // The Corporate Secretary is barred from the Finance DEPARTMENT everywhere
+  // else in the app (the Departments grid filters it, renderDeptModule refuses
+  // dept:Finance, the # Finance chat channel is gone) — and then this screen
+  // handed them a subtab literally labelled "Finance". Every genuinely-Finance
+  // input on it is refused and banner-named, so what actually rendered was a
+  // Finance-headed page mixing honest zeros with the two figures they ARE
+  // granted (CA outstanding, inventory turns) — which no per-tile marker could
+  // untangle. Same one-line filter renderDepartments already applies, using the
+  // same client mirror of the owner ruling.
+  const _anBlockedDepts = (window.currentRole === 'secretary')
+    ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
+    : [];
   const SUBTABS = [
     {id:'overview',label:'Overview',icon:emojiIcon('📊',16)},
     {id:'sales',label:'Sales',icon:emojiIcon('🛒',16)},
@@ -4854,11 +4976,11 @@ async function renderAnalytics() {
     {id:'production',label:'Production',icon:emojiIcon('🏭',16)},
     {id:'government',label:'Gov. Biddings',icon:emojiIcon('🏛️',16)},
     {id:'strategy',label:'Strategy',icon:emojiIcon('🎯',16)},
-  ];
+  ].filter(t => !(t.id === 'finance' && _anBlockedDepts.includes('Finance')));
 
   c.innerHTML=`
     <div class="page-header"><h2>${emojiIcon('📊',20)} Analytics & Performance</h2></div>
-    ${_denied.length?`<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Some figures are not shown to you:</strong> ${escHtml(_denied.join(', '))}. Anything derived from them reads ₱0 on this page because the data was withheld — not because it is zero.</span></div>`:''}
+    <div id="an-denied-banner">${_deniedBannerHtml()}</div>
     ${window.chipTabs(SUBTABS.map(t=>({key:t.id,label:t.label,icon:t.icon})), 'overview', {cls:'an-subtabs'})}
     <div id="analytics-content"></div>
   `;
@@ -4888,6 +5010,21 @@ async function renderAnalytics() {
     const grossProfit = jcRev - jcCost;
     const grossMargin = jcRev>0 ? Math.round(grossProfit/jcRev*100) : null;
     // ── Receivables (open projects — job + design, via unified shape) ──
+    // ‼️ FLAG FOR NEIL (2026-08-10) — DELIBERATELY LEFT AS-IS, needs your call.
+    // Receivables, the AR-aging table and Top Clients by signed contract are
+    // real money figures and they render in full for the Corporate Secretary:
+    // who owes the company how much, how much has been collected, and the top
+    // clients by contract value. They survive the Finance carve-out because
+    // they are DENORMALIZED — derived from job_projects/projects, whose read
+    // rules are `!isPartner()` because those collections are the operational
+    // project spine that Production and Sales run on. So this is not a hole in
+    // the money tier, it is a question about scope: does AR count as Finance?
+    // Hiding it here is a one-line change (gate on window.isMoneyPriv() and
+    // render the withheld treatment, exactly like the ledger figures above),
+    // but it would also strip the same numbers from manager workflows that use
+    // them daily — so it is not a change to make on an auditor's say-so.
+    // Same question applies to the Contract ₱ / Recorded ₱ tiles on Sales
+    // Orders (js/departments.js). Decide once, then apply to both.
     const arOf = p => +p.arBalance||0; // normalized shape already derives arBalance
     const openProjects = allProjects.filter(p=>!['paid','cancelled','completed'].includes(p.stage));
     const receivables = sum(openProjects, arOf);
@@ -4903,7 +5040,26 @@ async function renderAnalytics() {
     // ── v12 WS40 Spec 3 — Conclusions card ──
     const _sevColor = { bad: window.cssVar('--danger','#FF453A'), warn: window.cssVar('--warning','#FF9F0A'),
       info: window.cssVar('--text-muted','#8e8e93'), good: window.cssVar('--success','#30D158') };
-    const _insights = window.Insights.compute(M).slice(0, window.ANALYTICS_POLICY.maxInsights);
+    // Which of this tab's money inputs were refused. Every figure below that is
+    // derived from one of them renders as withheld instead of ₱0.
+    const _ledgerHidden = _isDenied('ledger');
+    const _jcHidden     = _isDenied('job_costs');
+    const _payHidden    = _isDenied('payroll');
+    // The rule engine's fallback sentence — "No red flags this period — cash
+    // flow positive, receivables current, win rate steady" — fires whenever no
+    // bad/warn rule matched. With the ledger and payroll withheld, netP and
+    // payrollRatio are 0, so no rule CAN match and the reader is told the
+    // company is healthy on the strength of data that was never read. That is
+    // the worst lie on the page because it is prose, not a number. Drop it and
+    // say what actually happened. (window.Insights lives in js/config.js and is
+    // shared with the digest cron — filtered here, at the one call site that
+    // knows about the denials, rather than changed there.)
+    const _rawInsights = window.Insights.compute(M)
+      .filter(i => !(_denied.length && i.id === 'all-clear'));
+    if (_denied.length) _rawInsights.push({ id:'withheld', severity:'info', icon:'🔒',
+      text:`No conclusion can be drawn about ${escHtml(_denied.join(', '))} — those figures are outside your access, so the rules that watch them did not run.`,
+      action:'Ask the President or Finance for anything money-related on this page.' });
+    const _insights = _rawInsights.slice(0, window.ANALYTICS_POLICY.maxInsights);
     const _insightsHtml = _insights.map(i=>`
       <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         <span style="font-size:16px;line-height:1.3">${i.icon}</span>
@@ -4916,17 +5072,17 @@ async function renderAnalytics() {
     wrap.innerHTML=`
       <div id="an-overview-period">${window.periodPicker(anPeriod, {closedBadge:true})}</div>
       <div class="kpi-row" style="margin-top:16px">
-        <div class="kpi-card green"><div class="kpi-label">Revenue (${anPlabel})</div><div class="kpi-value">₱${fmt(revMTD)}</div><div style="margin-top:4px">${_anDelta(revMTD,revPrev)}</div></div>
-        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Cash (${anPlabel})</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${_anDelta(netMTD,netPrev)}</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
+        <div class="kpi-card ${_ledgerHidden?'':'green'}"><div class="kpi-label">Revenue (${anPlabel})</div><div class="kpi-value">${_ledgerHidden?_withheldTag():'₱'+fmt(revMTD)}</div><div style="margin-top:4px">${_ledgerHidden?`<span style="font-size:11px;color:var(--text-muted)">income &amp; expense ledger not shown to you</span>`:_anDelta(revMTD,revPrev)}</div></div>
+        <div class="kpi-card ${_ledgerHidden?'':(netMTD>=0?'green':'warn')}"><div class="kpi-label">Net Cash (${anPlabel})</div><div class="kpi-value">${_ledgerHidden?_withheldTag():'₱'+fmt(netMTD)}</div><div style="margin-top:4px">${_ledgerHidden?`<span style="font-size:11px;color:var(--text-muted)">needs the ledger</span>`:_anDelta(netMTD,netPrev)}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${_jcHidden?_withheldTag():(grossMargin==null?'—':grossMargin+'%')}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${_jcHidden?'job costs &amp; margins not shown to you':(grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit')}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">₱${fmt(totalPayroll)}/mo</div></div>
+        <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${(_payHidden||_ledgerHidden)?_withheldTag():(payrollPct==null?'—':payrollPct+'%')}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${_payHidden?'payroll not shown to you':(_ledgerHidden?'needs the ledger':'₱'+fmt(totalPayroll)+'/mo')}</div></div>
         <div class="kpi-card ${M.cash?(M.cash.total>=window.ANALYTICS_POLICY.cashFloor?'green':'warn'):''}"><div class="kpi-label">${emojiIcon('🏦',16)} Cash Position</div><div class="kpi-value">${M.cash?'₱'+fmt(M.cash.total):'—'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${M.cash?'Excludes statutory remittances until the WS39 remittance flow ships.':'Register bank accounts (Finance → Bank Accounts) to activate'}</div>${_cashAccts.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">${_cashAccts.length} account${_cashAccts.length===1?'':'s'} ›</summary><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${_cashAccts.map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px"><span>${escHtml(window.BankAccounts.label(x.account))}</span><span style="font-weight:600">₱${fmt(x.balance)}</span></div>`).join('')}</div></details>`:''}</div>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>${emojiIcon('📌',20)} Conclusions</h3></div><div class="card-body">${_insightsHtml}<div style="margin-top:8px;text-align:right"><a href="javascript:void(0)" id="an-see-strategy" style="font-size:12px;font-weight:600">See all → ${emojiIcon('🎯',16)} Strategy</a></div></div></div>
       <div class="an-row2" style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px">
-        <div class="card"><div class="card-header"><h3>Cash Flow — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-cash-chart"></canvas></div></div></div>
-        <div class="card"><div class="card-header"><h3>Revenue vs Cost</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-margin-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Cash Flow — last 6 months</h3></div><div class="card-body">${_ledgerHidden?_withheldNote('Cash in and cash out come from the income & expense ledger, which is outside your access. Six flat bars at zero would read as “no money moved”, so the chart is withheld instead.'):`<div class="chart-wrap"><canvas id="bh-cash-chart"></canvas></div>`}</div></div>
+        <div class="card"><div class="card-header"><h3>Revenue vs Cost</h3></div><div class="card-body">${_jcHidden?_withheldNote('Job costs and margins are outside your access, so this split cannot be drawn honestly.'):`<div class="chart-wrap"><canvas id="bh-margin-chart"></canvas></div>`}</div></div>
       </div>
       <div class="an-row2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Top Clients by Revenue</h3></div><div class="card-body">${topClients.length?topClients.map(([name,val])=>`
@@ -4940,11 +5096,14 @@ async function renderAnalytics() {
         </table></div></div></div>
       </div>
       <div class="card"><div class="card-header"><h3>Team Performance</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards">
-        <thead><tr><th>Name</th><th>Role</th><th>Dept</th><th>Tasks Done</th><th>Net Pay</th></tr></thead>
+        <thead><tr><th>Name</th><th>Role</th><th>Dept</th><th>Tasks Done</th><th>Net Pay${_payHidden?` ${emojiIcon('🔒',12)}`:''}</th></tr></thead>
         <tbody>${users.map(u=>{
           const done=tasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length;
           const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);
-          return `<tr class="an-team-row"><td class="tc-name">${escHtml(u.displayName||u.email||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Role"><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></td><td class="tc-detail" data-label="Dept">${escHtml((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—')}</td><td class="tc-detail" data-label="Tasks Done">${done}</td><td class="tc-net">₱${fmt(net)}</td></tr>`;
+          // Pay lives in payroll/{uid}; when that LIST was refused these three
+          // fields are ABSENT, so a ₱0 here would state that every person in
+          // the company earns nothing. Say "withheld" instead.
+          return `<tr class="an-team-row"><td class="tc-name">${escHtml(u.displayName||u.email||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Role"><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></td><td class="tc-detail" data-label="Dept">${escHtml((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—')}</td><td class="tc-detail" data-label="Tasks Done">${done}</td><td class="tc-net">${_payHidden?`<span style="color:var(--text-muted);font-weight:600">Withheld</span>`:'₱'+fmt(net)}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4953,15 +5112,21 @@ async function renderAnalytics() {
     document.getElementById('an-see-strategy')?.addEventListener('click', () => {
       c.querySelector('.an-subtabs .chip-tab[data-chip="strategy"]')?.click();
     });
-    // Cash in vs cash out, 6-month trend
-    if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('bh-cash-chart'),{type:'bar',data:{labels:months6.map(m=>m.label),datasets:[
-      {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:CT.good},
-      {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:CT.bad},
-    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text,callback:v=>'₱'+window.fmtN2(v)},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
-    // Gross profit vs cost (profitability)
-    if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:[CT.good,CT.muted],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
+    // Cash in vs cash out, 6-month trend. Skipped entirely when the ledger was
+    // refused — the canvas isn't in the DOM in that case (a withheld notice took
+    // its place), and Chart.js throws on a null context.
+    if (!_ledgerHidden) {
+      if (!window.Chart) { await window.ensureChart(); }
+      new Chart(document.getElementById('bh-cash-chart'),{type:'bar',data:{labels:months6.map(m=>m.label),datasets:[
+        {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:CT.good},
+        {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:CT.bad},
+      ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text,callback:v=>'₱'+window.fmtN2(v)},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
+    }
+    // Gross profit vs cost (profitability) — same guard, job_costs side.
+    if (!_jcHidden) {
+      if (!window.Chart) { await window.ensureChart(); }
+      new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:[CT.good,CT.muted],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
+    }
     window.bindPeriodPicker(document.getElementById('an-overview-period'), (newKey) => {
       window._AN_PERIOD = newKey; window._anRenderOverview && window._anRenderOverview();
     }, { closedBadge:true, activeKey: anPeriod });
@@ -5069,14 +5234,19 @@ async function renderAnalytics() {
     const doneMktMTD=mktTasks.filter(t=>['done','approved','archived'].includes(t.status)&&ymOf(t.createdAt)===thisMonth).length;
     const doneMktPrev=mktTasks.filter(t=>['done','approved','archived'].includes(t.status)&&ymOf(t.createdAt)===lastMonth).length;
     const costPerTask=doneMkt.length?mktExp/doneMkt.length:0;
+    // /expenses read is `createdBy == uid || isMoneyAdmin()`, and a collection
+    // LIST is not provable from the query — so for anyone outside the money
+    // tier this whole array came back refused, not empty. Both money tiles
+    // below are pure functions of it, so both must say so.
+    const _expHidden = _isDenied('expenses');
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card"><div class="kpi-label">Team Members</div><div class="kpi-value">${mktUsers.length}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Tasks</div><div class="kpi-value">${mktTasks.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneMkt.length}</div><div style="margin-top:4px">${delta(doneMktMTD,doneMktPrev,true)}</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Budget Used</div><div class="kpi-value">₱${fmt(mktExp)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Cost / Completed Task</div><div class="kpi-value">₱${fmt(costPerTask)}</div></div>
+        <div class="kpi-card ${_expHidden?'':'warn'}"><div class="kpi-label">Budget Used</div><div class="kpi-value">${_expHidden?_withheldTag():'₱'+fmt(mktExp)}</div>${_expHidden?`<div style="margin-top:4px;font-size:11px;color:var(--text-muted)">expenses not shown to you</div>`:''}</div>
+        <div class="kpi-card"><div class="kpi-label">Cost / Completed Task</div><div class="kpi-value">${_expHidden?_withheldTag():'₱'+fmt(costPerTask)}</div>${_expHidden?`<div style="margin-top:4px;font-size:11px;color:var(--text-muted)">needs expenses</div>`:''}</div>
         <div class="kpi-card"><div class="kpi-label">Submissions</div><div class="kpi-value">${mktSubs.length}</div></div>
       </div>
       <div class="an-row2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -5124,6 +5294,11 @@ async function renderAnalytics() {
     const totalExp=ledDebits.reduce((s,l)=>s+(l.amount||0),0);
     const expThisMonth=ledDebits.filter(l=>Period.match(l.date,finAnPeriod)).reduce((s,l)=>s+(l.amount||0),0);
     const payslipsThisMonth=payslips.filter(p=>inMonth(p));
+    // loadFinanceExtras() ran a line ago, so _denied is current by now — this is
+    // the lazy read whose denial the old once-written banner could never name.
+    // "Payslips — This Month (0) / No payslips this month" is a factual claim
+    // about payroll; it must never be produced by a refused read.
+    const _psHidden = _isDenied('payslips');
     const finIn = ym => sum(ledger.filter(l=>ledgerKind(l)==='income'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
     const finOut= ym => sum(ledger.filter(l=>ledgerKind(l)==='expense'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
     const finInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&Period.match(l.date,finAnPeriod)),l=>l.amount);
@@ -5178,10 +5353,10 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Cash Advance Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-ca-chart"></canvas></div></div></div>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Net Income — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-net-chart"></canvas></div></div></div>
-      <div class="card"><div class="card-header"><h3>Payslips — This Month (${payslipsThisMonth.length})</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table table-cards">
+      <div class="card"><div class="card-header"><h3>Payslips — This Month${_psHidden?'':` (${payslipsThisMonth.length})`}</h3>${_psHidden?`<span class="badge badge-gray" style="white-space:nowrap">${emojiIcon('🔒',14)} Not shown</span>`:''}</div><div class="card-body">${_psHidden?_withheldNote('Payslips are outside your access. Reporting a count of 0 here would state that no one was paid this month — a claim about payroll that this page has no data for.'):`<div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Worker</th><th>Pay Period</th><th>Gross</th><th>Net</th><th>Prepared By</th></tr></thead>
         <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr class="pslip-row"><td class="tc-name">${escHtml(p.workerName||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td><td class="tc-detail" data-label="Pay Period">${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td class="tc-detail" data-label="Gross">₱${fmt(p.grossPay||0)}</td><td class="tc-net">₱${fmt(p.netPay||0)}</td><td class="tc-detail" data-label="Prepared By">${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
-      </table></div></div></div>
+      </table></div>`}</div></div>
     `;
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     wrap.querySelectorAll('tr.pslip-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
@@ -5290,10 +5465,28 @@ async function renderAnalytics() {
   // market-research notes (decision 10). Reuses M/allClients/etc from the shared
   // renderAnalytics closure — zero new reads beyond Overview's own fetch, except
   // the ≤6-doc strategy_notes read (cached). No charts in v1 (no ensureChart).
+  // strategy_notes is keyed by a free-form deptKey (one doc per id), so adding a
+  // category costs no rules change and no index. 'crm' and 'ventures' are here
+  // because the two departments the owner put the Corporate Secretary on this
+  // week had nowhere to write strategy at all — the CRM screen's own tabs are
+  // Dashboard/Leads/Pipeline with a static SOP panel, so a CRM strategy
+  // proposal had no home in the system for anyone, President included.
+  //
+  // 'finance' is dropped for the Corporate Secretary. The chip row is the one
+  // path that never consulted SECRETARY_BLOCKED_DEPTS, so a role barred from
+  // the Finance department could read Finance's market-research notes two
+  // clicks from a first-class sidebar entry — and unlike the ledger/payroll
+  // reads on this same screen that one is not denied, so it rendered real
+  // prose with no banner and no zero. Note these ids are LOWERCASE, so they do
+  // not match SECRETARY_BLOCKED_DEPTS entries directly; map, don't compare.
+  const _stratBlocked = (window.currentRole === 'secretary')
+    ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance','IT']).map(d => d.toLowerCase())
+    : [];
   const STRAT_DEPTS = [
     {id:'general',label:'General'}, {id:'sales',label:'Sales'}, {id:'marketing',label:'Marketing'},
+    {id:'crm',label:'CRM'}, {id:'ventures',label:'Ventures'},
     {id:'production',label:'Production'}, {id:'finance',label:'Finance'}, {id:'gov',label:'Gov. Biddings'},
-  ];
+  ].filter(d => !_stratBlocked.includes(d.id));
   // v1 ship matrix (Spec 8) — cross-referenced against V12-PLAN workstreams 28/29/30/32/36
   // so a later session knows exactly what "wires in" once each of those ships.
   const STRAT_SHIP_MATRIX = [
@@ -5315,16 +5508,49 @@ async function renderAnalytics() {
   const renderStrategy = async () => {
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML = window.skeletonHtml('rows');
-    const notesSnap = await cg('strategy_notes', db.collection('strategy_notes'));
+    // 2026-08-10 — firestore.rules now guards this collection per deptKey
+    // (strategyDeptOpen(): the Corporate Secretary may not read 'finance' or
+    // 'it'). A LIST is evaluated against the QUERY, not per returned document,
+    // and a bare collection read constrains nothing — so under that guard the
+    // unfiltered read below is refused OUTRIGHT for them and they lose every
+    // chip, not just Finance. Stop asking for the doc we may not have: fetch
+    // exactly the allowed keys BY ID, where the rule's deptKey is bound and
+    // each get() is decided on its own. Everyone else keeps the single cheap
+    // list. Same 60s TTL either way; per-key entries so the composer below can
+    // invalidate just the doc it wrote.
     const notesByDept = {};
-    notesSnap.docs.forEach(d=>{ notesByDept[d.id] = d.data(); });
+    if (_stratBlocked.length) {
+      const _ids = STRAT_DEPTS.map(d=>d.id);
+      const _docs = await Promise.all(_ids.map(id =>
+        dbCachedGet('strategy_notes:'+id, () => db.collection('strategy_notes').doc(id).get(), 60000)
+          .catch(e => { _dashWarnOnce('strategy_notes:'+id, e); _noteDenied('strategy_notes', e); return null; })));
+      _docs.forEach((d,i)=>{ if (d && d.exists) notesByDept[_ids[i]] = d.data(); });
+    } else {
+      const notesSnap = await cg('strategy_notes', db.collection('strategy_notes'));
+      notesSnap.docs.forEach(d=>{ notesByDept[d.id] = d.data(); });
+    }
     let activeDept = STRAT_DEPTS.some(d=>d.id===window._AN_STRAT_DEPT) ? window._AN_STRAT_DEPT : 'general';
-    const canWrite = ['president','manager','finance'].includes(currentRole);
+    // 'secretary' added 2026-08-10. The boundary rule for strategy_notes write
+    // is isOpsAdmin() (firestore.rules), which lists them — so the composer was
+    // hidden from a role the rules already permit, and the owner had assigned
+    // them a CRM strategy proposal with nowhere to put it. Keep this list in
+    // step with isOpsAdmin(), not with the money tier: 'finance' is here for the
+    // same reason, and neither is an isAdmin() question.
+    const canWrite = ['president','manager','secretary','finance'].includes(currentRole);
 
     const _sevColor = { bad: window.cssVar('--danger','#FF453A'), warn: window.cssVar('--warning','#FF9F0A'),
       info: window.cssVar('--text-muted','#8e8e93'), good: window.cssVar('--success','#30D158') };
     const _sevLabel = { bad:`${emojiIcon('🔴',16)} Needs attention`, warn:`${emojiIcon('🟠',16)} Watch`, info:`${emojiIcon('🔵',16)} Notable`, good:`${emojiIcon('🟢',16)} On track` };
-    const allInsights = window.Insights.compute(M);   // uncapped — Overview shows a capped preview of the same list
+    // uncapped — Overview shows a capped preview of the same list. Same
+    // withheld-data correction as Overview's copy: with the ledger/payroll
+    // refused no bad/warn rule can fire, and the engine's "No red flags this
+    // period" fallback would then declare the company healthy on data nobody
+    // read. Drop it and name what was missing instead.
+    const allInsights = window.Insights.compute(M)
+      .filter(i => !(_denied.length && i.id === 'all-clear'));
+    if (_denied.length) allInsights.push({ id:'withheld', severity:'info', icon:'🔒',
+      text:`No conclusion can be drawn about ${escHtml(_denied.join(', '))} — those figures are outside your access, so the rules that watch them did not run.`,
+      action:'Ask the President or Finance for anything money-related on this page.' });
     const insightsHtml = ['bad','warn','info','good'].map(sev => {
       const rows = allInsights.filter(i=>i.severity===sev);
       if (!rows.length) return '';
@@ -5376,7 +5602,10 @@ async function renderAnalytics() {
             entries: firebase.firestore.FieldValue.arrayUnion(entry),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
+          // Both shapes of the cache — the shared list key and the per-key doc
+          // entry the secretary's by-id path uses (see renderStrategy's fetch).
           dbCacheInvalidate('strategy_notes');
+          dbCacheInvalidate('strategy_notes:' + activeDept);
           Notifs.success('Note added');
           notesByDept[activeDept] = notesByDept[activeDept] || { entries: [] };
           notesByDept[activeDept].entries = [...(notesByDept[activeDept].entries||[]), entry];

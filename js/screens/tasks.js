@@ -97,6 +97,50 @@ function selectableTaskStatuses(list, currentStatus) {
 const DONE_STATUSES  = ['done','approved','archived'];
 const SCORE_STATUSES = ['approved','on-hold','archived'];
 
+// ── Task authority — ONE predicate for every privilege gate in this file ─────
+// Mirrors firestore.rules' isOpsAdmin() (president | manager | secretary |
+// finance), which is the tier the tasks UPDATE rule admits BESIDES the assignee
+// (firestore.rules:815-817), and which isAdmin() — create/delete — is a subset
+// of. Until 2026-08-10 this file spelled that set out as a literal
+// `president|owner|manager|finance` in FIVE separate places, every one of them
+// written against isFinanceOrAdmin(), a rules helper that was DELETED in the
+// 2026-08-09 split. Its successor on this verb, isOpsAdmin(), added 'secretary'
+// — so all five literals silently withheld company-wide task authority from the
+// Corporate Secretary while the rules granted it and their own dashboard counted
+// every task in the company. Five copies is how that happened; there is one now.
+//
+// Delegates to window.isOpsPriv() (js/departments.js) rather than re-listing the
+// roles, so the client mirror of the rule lives in exactly one place. isOpsPriv()
+// reads window.currentRole, which is the session role every caller in this file
+// is handed. president/owner are honoured explicitly first only because one
+// external caller passes a literal 'president' fallback for the moment
+// window.currentRole is unset (js/screens/approvals.js, the review-task list);
+// both are inside isOpsPriv()'s set anyway, so this never widens it.
+function taskOpsPriv(role) {
+  if (role === 'president' || role === 'owner') return true;
+  return typeof window.isOpsPriv === 'function' && window.isOpsPriv();
+}
+
+// ⚠ THE DEPARTMENT WALL, APPLIED TO EVERY OVERSIGHT TASK LIST.
+// Putting the Corporate Secretary on the oversight LAYOUT (see the branch in
+// renderTasks) is correct — their own dashboard already counts company-wide
+// open and overdue tasks. But the lists behind that layout read the tasks
+// collection UNFILTERED and group by department, so without this they would
+// see every # Finance and # IT task: title, description and assignee. That is
+// the exact boundary the owner drew twice ("all departments except finance,
+// and IT"), reopened from a direction nobody was watching.
+//
+// This is a UI-layer scope, deliberately. The rules cannot express it without
+// breaking the list query — tasks are read as one full-collection get, and a
+// per-document department test is not provable from that query, which is how
+// the conversations inbox was nearly broken on this same pass. The read is
+// permitted; what we owe is not to SHOW it.
+function scopeTasksToRole(tasks) {
+  const blocked = window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'];
+  if ((window.currentRole || '') !== 'secretary') return tasks;
+  return tasks.filter(t => !blocked.includes(t.department || ''));
+}
+
 function normTask(data,id) {
   const t={id,...data};
   if (!Array.isArray(t.assignedTo))      t.assignedTo      = t.assignedTo     ?[t.assignedTo]     :[];
@@ -199,7 +243,7 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
   try {
     let snap = await db.collection('tasks').where('department','==',deptName).get()
       .catch(()=>({docs:[]}));
-    let tasks = snap.docs.map(d=>normTask(d.data(),d.id));
+    let tasks = scopeTasksToRole(snap.docs.map(d=>normTask(d.data(),d.id)));
     // Non-dept-members only see tasks they're involved in
     if (!isAdmin) {
       tasks = tasks.filter(t=>(t.assignedTo||[]).includes(currentUser.uid)||t.createdBy===currentUser.uid);
@@ -262,9 +306,17 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
 // ══════════════════════════════════════════════════
 window.renderTasks = async function(currentUser, currentRole, currentDept) {
   const c = deptContainer();
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  const isAdmin = taskOpsPriv(currentRole);   // see taskOpsPriv() — was a literal that omitted 'secretary'
 
-  if (currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance') {
+  // The oversight LAYOUT (Departmental / Overdue / Near Due / My Tasks) rather
+  // than the employee filter dropdown. 'secretary' joins it because the
+  // Corporate Secretary's own dashboard already paints company-wide Open Tasks
+  // and Overdue tiles off the unfiltered tasks collection — sending them to the
+  // employee list next to those tiles is the contradiction this fixes, and the
+  // Overdue chip here is the screen those tiles were pointing at all along.
+  // (The read is the same full-collection get the rules already allow every
+  // internal role: firestore.rules:793.)
+  if (currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance' || currentRole === 'secretary') {
     c.innerHTML = `
       <div class="page-header">
         <h2>${emojiIcon('✅',20)} Tasks</h2>
@@ -328,7 +380,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     const snap = typeof dbCachedGet==='function'
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
       : await db.collection('tasks').get().catch(()=>({docs:[]}));
-    let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).filter(t=>!DONE_STATUSES.includes(t.status)&&t.status!=='archived');
+    let tasks = scopeTasksToRole(snap.docs.map(d=>normTask(d.data(),d.id))).filter(t=>!DONE_STATUSES.includes(t.status)&&t.status!=='archived');
     if (sub === 'overdue') {
       tasks = tasks.filter(t=>t.dueDate && t.dueDate < todayStr)
         .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
@@ -361,7 +413,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
       const filter = document.getElementById('pres-mine-filter')?.value||'all';
       const snap   = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
-      let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+      let tasks = scopeTasksToRole(snap.docs.map(d=>normTask(d.data(),d.id))).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
       if (filter!=='all') tasks = tasks.filter(t=>t.status===filter);
       if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [list] }); return; }
       if (window.lucide) lucide.createIcons({ nodes: [list] });
@@ -378,7 +430,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     const snap  = typeof dbCachedGet==='function'
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
       : await db.collection('tasks').get();
-    const tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const tasks = scopeTasksToRole(snap.docs.map(d=>normTask(d.data(),d.id))).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks yet</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [wrap] }); return; }
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
@@ -411,7 +463,7 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   const list   = document.getElementById('tasks-list');
   const filter = document.getElementById('task-filter')?.value||'mine';
   list.innerHTML = window.skeletonHtml('rows');
-  const isPriv = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  const isPriv = taskOpsPriv(currentRole);   // see taskOpsPriv() — was a literal that omitted 'secretary'
 
   const userDepts = window.currentDepts || [];
   let snap;
@@ -434,7 +486,7 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
       : await db.collection('tasks').get().catch(()=>({docs:[]}));
   }
 
-  let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  let tasks = scopeTasksToRole(snap.docs.map(d=>normTask(d.data(),d.id))).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
   // For non-admin: filter to dept tasks or their own tasks
   if (!isPriv && filter!=='mine') {
     tasks = tasks.filter(t=>
@@ -640,11 +692,15 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     return;
   }
   const t       = normTask(snap.data(),snap.id);
-  // Task edit gating: admin/finance roles — this MUST match the Firestore tasks
-  // update rule (assignee-or-finance-or-admin → isFinanceOrAdmin()). Dept
-  // membership alone does NOT grant task edit/reassign/score/follow-up (that would
-  // surface buttons the backend rejects). 'owner' is legacy/unused in ROLES.
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  // Task edit gating: this MUST match the Firestore tasks UPDATE rule
+  // (assignee-or-isOpsAdmin() → firestore.rules:815-817, whose own comment calls
+  // that clause load-bearing for the Corporate Secretary). It used to name
+  // isFinanceOrAdmin(), which no longer exists — it was split into isOpsAdmin()/
+  // isMoneyAdmin() on 2026-08-09 and the successor on THIS verb re-admits
+  // 'secretary'. Dept membership alone still does NOT grant task edit/reassign/
+  // score/follow-up (that would surface buttons the backend rejects).
+  // 'owner' is legacy/unused in ROLES.
+  const isAdmin = taskOpsPriv(currentRole);
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
   const canEdit    = isAdmin||isAssignee||isCreator;
@@ -662,6 +718,15 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // v14 Phase 2a — header action buttons move to openPage's opts.headerRightHTML
   // (the title slot only takes plain text; back-button + Overlay push/teardown
   // are now owned by openPage itself, so none of that is hand-rolled here).
+  // NOTE for the next reader: Delete's gate below is WIDER than the boundary.
+  // tasks delete is isAdmin() (firestore.rules:820) = president|manager|
+  // secretary, so the 'finance' leg of isAdmin here — and `isCreator` for a
+  // plain employee — still show a trash button Firestore refuses. That
+  // asymmetry predates the secretary work and is left alone deliberately:
+  // narrowing it changes what finance and task authors can do, which is an
+  // owner call, not a role-scoping fix. The secretary IS in the rule's
+  // isAdmin(), so for them this button is now correct rather than merely
+  // visible.
   const headerRightHTML = `
     ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">${emojiIcon('📤',16)} Submit</button>`:''}
     ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn" aria-label="Edit task">${emojiIcon('✎',16)}</button>`:''}
@@ -1017,9 +1082,10 @@ async function recomputePresidentTaskScore(uid) {
 
 async function openEditTaskModal(taskId, t, currentUser, currentRole) {
   // Task edit gating: admin roles only — MUST match the Firestore tasks update
-  // rule (assignee-or-admin), so we don't render an assignment dropdown the
-  // backend will reject for a non-admin dept member.
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  // rule (assignee-or-isOpsAdmin(), firestore.rules:815-817), so we don't render
+  // an assignment dropdown the backend will reject for a non-admin dept member.
+  // Same predicate as paintTaskDetail above; see taskOpsPriv().
+  const isAdmin = taskOpsPriv(currentRole);
   // Window first, content second — see the inversion note above openTaskDetail.
   // Note the shape this one had: the `await` below is INSIDE `if (isAdmin)`, so
   // for a non-admin this function never suspended and already opened in the tap
@@ -1314,7 +1380,7 @@ window.renderSubmissions = async function(currentUser, currentRole, currentDept)
 
 async function loadSubsList(currentUser, currentRole, currentDept) {
   const list = document.getElementById('subs-list');
-  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
+  const isPrivileged = taskOpsPriv(currentRole);
   const snap = isPrivileged
     ? await db.collection('submissions').get().catch(()=>({docs:[]}))
     : await db.collection('submissions').where('createdBy','==',currentUser.uid).get().catch(()=>({docs:[]}));
@@ -1370,7 +1436,7 @@ function paintSubDetail(panel, bodyEl, subId, snap, currentUser, currentRole) {
   // CLOSED MID-FLIGHT — see pageStillLive(); same reasoning, same bail.
   if (!pageStillLive(panel)) return;
   const s = {id:snap.id,...snap.data()};
-  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
+  const isPrivileged = taskOpsPriv(currentRole);
 
   setLoadedPanelTitle(panel, (s.title||''));
   bodyEl.innerHTML = `

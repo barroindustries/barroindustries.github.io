@@ -359,6 +359,47 @@ window.renderApprovals = async function(currentUser) {
     }
   };
 
+  // ── Pane-scoped sibling of _apq() ────────────────────────────────────────
+  // ⚠ 2026-08-10 — the 2026-08-09 "THE QUEUE USED TO LIE WHEN DENIED" fix
+  // landed on the COUNT phase and stopped there. The two panes that actually
+  // LIST records kept their bare `.catch(() => ({docs:[]}))`, so the Finance
+  // Requests pane could print "No finance requests" a few inches below a banner
+  // saying that very queue is withheld, and History silently dropped every
+  // finance-delete row from the 30-day trail with nothing on screen to say so.
+  // Both are live for the Corporate Secretary, whose read on
+  // finance_delete_requests is refused by canFinance() while the sibling
+  // payroll_delete_requests is deliberately open to them (owner ruling 1) — so
+  // the pane really is HALF a queue, which is exactly the state a bare catch
+  // cannot express.
+  //
+  // Same contract as _apq: fail soft (a denial must never blank a pane), but
+  // STAMP the failure. It reports back to the CALLER instead of into the
+  // page-level _deniedQueues array, because the chip row and its banner were
+  // painted once at page load and must not be re-derived — or grown — every
+  // time a pane reloads. Each pane builds its own banner from what its OWN
+  // queries did.
+  const _paneQ = (label, q) => q.get().catch(e => {
+    console.error('approval pane query failed', label, e);
+    const denied = !!e && (e.code === 'permission-denied' || /permission/i.test(e.message || ''));
+    return { docs: [], failed: true, denied, _label: label };
+  });
+  // Banner for a pane whose own queries did not all come back. Takes the raw
+  // results so a pane can hand it everything it fetched and get '' when all is
+  // well (a real QuerySnapshot carries no `failed`). Deliberately the same
+  // alert-banner shell and the same "Not shown to you" wording as the
+  // page-level _deniedBanner, so the two can never contradict each other.
+  const _paneDeniedBanner = (results) => {
+    const bad = (results || []).filter(r => r && r.failed);
+    if (!bad.length) return '';
+    const labels = bad.map(r => r._label).filter(Boolean);
+    return `<div class="alert-banner" style="cursor:default;margin-bottom:10px">
+      <span>${emojiIcon('🔒',16)} <strong>Not shown to you:</strong> ${escHtml(labels.join(', '))}.
+      ${bad.every(r => r.denied)
+        ? 'This list is incomplete rather than empty — those items exist, you just cannot see them. The President and Finance still can.'
+        : 'This list could not be loaded in full, so it is incomplete rather than empty. Try refreshing.'}</span>
+    </div>`;
+  };
+
   // Draws one chip's pane into `wrap`. Called ONLY via loadApprovalsSub above,
   // which has already put the pane into its loading state and will restore it.
   const renderApprovalsPane = async (sub, wrap) => {
@@ -874,18 +915,25 @@ window.renderApprovals = async function(currentUser) {
       // newest first, 30-day lookback, no action buttons.
       const cutoff = new Date(Date.now() - 30*24*60*60*1000);
       const RESOLVED = new Set(['approved','rejected','denied','applied']);
+      // All ten used to be bare `.catch(()=>({docs:[]}))` with not even a
+      // console.error — the worst version of the silent-zero bug, because an
+      // audit trail that is quietly SHORT is indistinguishable from one that is
+      // complete. Routed through _paneQ so this pane can name what it did not
+      // get; the page-level banner above was computed once from the COUNT phase
+      // and is not re-derived per pane, so History has to say it itself.
       const [sgH, atH, caH, subH, frH, fdH, qaH, lvH, rzH, poH] = await Promise.all([
-        db.collection('signup_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('attendance_extensions').orderBy('requestedAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('cash_advances').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('submissions').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('approval_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('leave_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('pending_raises').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
-        db.collection('purchase_requisitions').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]}))
+        _paneQ('Sign-ups',                 db.collection('signup_requests').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Attendance',               db.collection('attendance_extensions').orderBy('requestedAt','desc').limit(150)),
+        _paneQ('Cash Advances',            db.collection('cash_advances').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Work submissions',         db.collection('submissions').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Payroll delete requests',  db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Finance delete requests',  db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Quote / ROA',              db.collection('approval_requests').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Leave',                    db.collection('leave_requests').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Raises',                   db.collection('pending_raises').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Purchase approvals',       db.collection('purchase_requisitions').orderBy('createdAt','desc').limit(150))
       ]);
+      const histBanner = _paneDeniedBanner([sgH, atH, caH, subH, frH, fdH, qaH, lvH, rzH, poH]);
       const tsOf = x => (x.resolvedAt || x.approvedAt || x.decidedAt || x.updatedAt || x.createdAt);
       const mk = (d, type, icon, label, name, detail) => {
         const x = d.data(); const ts = tsOf(x);
@@ -914,11 +962,14 @@ window.renderApprovals = async function(currentUser) {
         .slice(0,100);
 
       if (!items.length) {
-        wrap.innerHTML = `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('🗄️',44)}</div><h4>Nothing resolved yet</h4><p>Approved, rejected, or denied requests from the last 30 days will show up here.</p></div>`;
+        // Same rule as the Finance Requests pane: only claim emptiness for the
+        // collections that actually answered.
+        wrap.innerHTML = `${histBanner}<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('🗄️',44)}</div><h4>${histBanner ? 'Nothing resolved in the queues you can see' : 'Nothing resolved yet'}</h4><p>Approved, rejected, or denied requests from the last 30 days will show up here${histBanner ? ', except for the queues named above' : ''}.</p></div>`;
         if (window.lucide) lucide.createIcons({ nodes: [wrap] });
         return;
       }
       wrap.innerHTML = `
+        ${histBanner}
         <div style="display:flex;flex-direction:column;gap:10px">
           ${items.map(item => {
             const tileColor = HIST_TYPE_COLOR[item.type] || 'var(--primary)';
@@ -945,10 +996,17 @@ window.renderApprovals = async function(currentUser) {
     }
 
     if (sub === 'finance-requests') {
+      // TWO collections feed this ONE chip, and they do not have the same
+      // audience: payroll_delete_requests is readable by the Corporate
+      // Secretary (firestore.rules — the explicit `|| isSecretary()` carve-out
+      // for owner ruling 1), finance_delete_requests is not (canFinance()).
+      // Routed through _paneQ so a half-refused pane says so instead of
+      // rendering the other half as the whole truth.
       const [psnap, fsnap] = await Promise.all([
-        db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
-        db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};})
+        _paneQ('Payroll delete requests', db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100)),
+        _paneQ('Finance delete requests', db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(100))
       ]);
+      const paneBanner = _paneDeniedBanner([psnap, fsnap]);
       const reqs = [
         ...psnap.docs.map(d=>({id:d.id,kind:'payroll',...d.data()})),
         ...fsnap.docs.map(d=>({id:d.id,kind:'finance',...d.data()}))
@@ -979,8 +1037,13 @@ window.renderApprovals = async function(currentUser) {
           ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">${actionsOf(r)}</div>`:''}
         </div>`;
 
+      // The empty state is only allowed to claim emptiness for queues we
+      // actually got to read. With a denial in hand it states the truth
+      // instead — "nothing in the part you can see" — matching the wording the
+      // Secretary dashboard already uses for the same pair of collections.
       wrap.innerHTML = `
-        ${!pending.length && !resolved.length ? `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('💼',44)}</div><h4>No finance requests</h4></div>` : ''}
+        ${paneBanner}
+        ${!pending.length && !resolved.length ? `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('💼',44)}</div><h4>${paneBanner ? 'Nothing here that you can see' : 'No finance requests'}</h4>${paneBanner ? `<p>The queue named above is not included, so this pane cannot tell you whether anything is waiting in it.</p>` : ''}</div>` : ''}
         ${pending.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
           <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
             ${pending.map(r=>reqCard(r,canDelete)).join('')}
@@ -1328,7 +1391,7 @@ window.renderApprovals = async function(currentUser) {
             ${item.quoteNumber?`<span style="font-family:monospace">${escHtml(item.quoteNumber)}</span>`:''}
             ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
           </div>
-          ${(item.status==='pending'&&canActOn('quote-approval')) ? (item.quoteId ? `
+          ${item.status!=='pending' ? '' : canActOn('quote-approval') ? (item.quoteId ? `
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
             <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
             <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
@@ -1338,9 +1401,32 @@ window.renderApprovals = async function(currentUser) {
             <span style="font-size:11px;color:var(--text-muted)">(no linked quote)</span>
             <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="approved">Mark Approved</button>
             <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="rejected">Mark Rejected</button>
-          </div>`) : ''}
+          </div>`)
+          // Cannot act. This branch used to emit '' — so the Corporate
+          // Secretary got a pending quote approval with no buttons and no
+          // reason, on the SAME request the All Requests chip hands them an
+          // escalate button for. Two chips, one role, one request, two
+          // different answers reads as a half-loaded screen. Mirrors the All
+          // Requests markup exactly (escalate if canEscalate, otherwise the 🔒
+          // "who does approve this" badge) so the two panes cannot drift again.
+          // The rule agrees they may not act: approval_requests update admits
+          // isSeniorAdmin(), or isAdmin() only for the minor types, which the
+          // quote types are not.
+          : canEscalate('quote-approval') ? `
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn-secondary btn-sm esc-btn" data-label="${escHtml('Quote Approval — ' + (item.quoteNumber || 'Quote') + (item.clientName ? ' (' + item.clientName + ')' : ''))}">${emojiIcon('🙋',16)} Request President approval</button>
+          </div>` : `
+          <div style="margin-top:12px">
+            <span class="badge badge-gray" style="font-size:11px">${emojiIcon('🔒',11)} President / Manager approves</span>
+          </div>`}
         </div>`).join('')}</div>`;
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+      // Same escalation handler the All Requests pane wires; requestPresidentApproval
+      // is defined once at the top of renderApprovals and is shared by both.
+      wrap.querySelectorAll('.esc-btn').forEach(btn => onClickSafe(btn, async () => {
+        btn.disabled = true;
+        await requestPresidentApproval(btn.dataset.label || 'a quote approval');
+      }));
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () =>
         openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno,
           clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, () => loadApprovalsSub('roa'))));

@@ -23,6 +23,17 @@ rules_version = '2';
 //        allowed into folders that ARE one of their own departments.
 //      – profile-photos stay owner-scoped; tasks/posts/General stay
 //        collaborative (company-wide).
+//      – THE CORPORATE SECRETARY BOUNDARY (owner ruling, closed in
+//        firestore.rules 2026-08-09 and here 2026-08-10): role
+//        'secretary' has company-wide access EXCEPT Finance and IT.
+//        Storage enforces that on Finance/*, IT/* and the dept_Finance
+//        / dept_IT chat-file paths. The exclusion is always written on
+//        the ROLE, never left to department membership, because the
+//        ruling is that an assignment must never beat the role
+//        decision — a secretary handed the Finance or IT department
+//        still gets nothing. Conversely Ventures is opened to them BY
+//        ROLE, so their assigned Ventures review works without anyone
+//        remembering to assign the department.
 //
 //  WHY "internal (non-partner)" RATHER THAN STRICT PER-DEPT MEMBERSHIP
 //  ------------------------------------------------------------------
@@ -131,7 +142,15 @@ service firebase.storage {
       // list, ENUMERABLE — by any internal non-partner staffer. Without this the
       // Firestore record would be Ventures-only while the file it points at was
       // company-wide, which defeats the point of the restriction.
-      return seg == 'Finance' || seg == 'Ventures'
+      // 'IT' is reserved (2026-08-10) for the same reason, one ruling later. The
+      // 2026-08-09 pass closed IT to the Corporate Secretary in firestore.rules
+      // (canIt() = !isSecretary() && canDept('IT')) but never came here, and 'IT'
+      // is a perfectly ordinary department key — js/app.js's Files tab writes
+      // IT/Personal/* and IT/Shared/* — so it fell straight through to the
+      // generic {department} block, which admits ANY internal non-partner. It now
+      // has its own block below; a reserved segment with no block of its own is a
+      // deny-all, so the two edits are a pair and neither is optional.
+      return seg == 'Finance' || seg == 'Ventures' || seg == 'IT'
         || seg == 'tasks' || seg == 'posts'
         || seg == 'general' || seg == 'General'
         || seg == 'profile-photos' || seg == 'task-comments'
@@ -191,10 +210,25 @@ service firebase.storage {
     // signed-in user, but LIST is forbidden — DM conversation ids are
     // derivable from uids (dm_{a}_{b}), so enumeration must be blocked; the
     // Date.now()-prefixed filename keeps full paths unguessable.
+    //
+    // 2026-08-10 sweep — one exception to "direct GET is open to any signed-in
+    // user". The department channels' conversation ids are literally
+    // 'dept_<Department>' (js/chat.js builds `'dept_' + dept`), so dept_Finance
+    // and dept_IT are the one set of convIds that are NOT unguessable, and they
+    // are exactly the two channels firestore.rules' deptChannelOpen() keeps the
+    // Corporate Secretary out of. The filename still has to be guessed, so this
+    // was never wide open — but the Storage half should say what the Firestore
+    // half says rather than lean on the filename. No legitimate flow is lost:
+    // the message doc that carries the URL is denied to them anyway.
+    function chatConvOpenToMe(convId) {
+      return claimRole() != 'secretary'
+        || (convId != 'dept_Finance' && convId != 'dept_IT');
+    }
     match /chat-files/{convId}/{fileName} {
-      allow get:  if isSignedIn();
+      allow get:  if isSignedIn() && chatConvOpenToMe(convId);
       allow list: if false;
-      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && chatConvOpenToMe(convId)
+        && (request.resource == null || isValidDocument());
       allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
 
@@ -215,9 +249,40 @@ service firebase.storage {
     //  • create (new object) → internal staff. Employees file expense receipts.
     //  • overwrite/delete (existing object) → finance tier only — a non-finance
     //    staffer can add a file but can't tamper with or destroy existing ones.
+    //
+    //  2026-08-10 — the Corporate Secretary exclusion. The 2026-08-09 pass added
+    //  `claimRole() != 'secretary'` to isFinanceClaim()'s DEPT leg, which closed
+    //  the payslip folder and the overwrite/delete tier — but this block never
+    //  calls isFinanceClaim() on the read or create path at all, so the one rule
+    //  that most needed the ruling was left as `!isPartnerClaim()`: every scanned
+    //  receipt, BIR filing, ledger scan and SSS/government document under
+    //  Finance/* stayed readable, and new objects droppable, by that role. Owner
+    //  ruling: Finance is closed to the Corporate Secretary, and a department
+    //  assignment must never beat the role decision — so the conjunct is on the
+    //  ROLE, stated on read and write alike. Nobody else is touched: Finance
+    //  staff, the president and a manager all keep the finance tier, and an
+    //  ordinary employee filing an expense receipt is not a secretary.
+    // Not every subfolder under Finance/ belongs to Finance. Two OPERATIONAL
+    // screens file their attachments here and are owned by other departments:
+    //   Finance/SalesOrders  — Sales > Create Sales Order   (js/departments.js:3163)
+    //   Finance/Collections  — Production > Collections     (js/screens/production.js:847)
+    // Those are a receipt stapled to a sales order and a proof-of-payment
+    // stapled to a collection — the operational record, not Finance's own
+    // filings. Blocking the Corporate Secretary from them broke two screens they
+    // are entitled to use, which is the opposite of what the boundary is for.
+    // Everything else here — Taxes, Ledger, Records, payslips, and the SSS/Gov
+    // and Accounting archives the Files Hub used to hand out — stays closed.
+    function financeOperationalSubfolder(sub) {
+      return sub == 'SalesOrders' || sub == 'Collections';
+    }
+    function financeTreeOpenToCaller(sub) {
+      return claimRole() != 'secretary' || financeOperationalSubfolder(sub);
+    }
     match /Finance/{subfolder}/{fileName} {
-      allow read: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim();
+      allow read: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim()
+        && financeTreeOpenToCaller(subfolder);
       allow write: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim()
+        && financeTreeOpenToCaller(subfolder)
         && (request.resource == null || isValidDocument())   // size cap on writes
         && (resource == null || isFinanceClaim());           // overwrite/delete → finance
     }
@@ -281,10 +346,49 @@ service firebase.storage {
     // was company-wide. This block restores access, scoped: department members
     // and admins only, partners never. isMemberOf() reads the Auth CUSTOM CLAIM
     // (syncUserClaims), not the users doc — Storage rules cannot read Firestore.
+    //
+    // 2026-08-10 — the two rule files disagreed about who an "admin" is, and
+    // Ventures is where that bit. firestore.rules' isAdmin() is
+    // president|manager|secretary, so canDept('Ventures') already lets the
+    // Corporate Secretary read, create, edit and delete a venture brief. Here
+    // isAdminClaim() is president|manager ONLY — deliberately, because it is also
+    // the gate on attendance-selfie overwrite and on isOwnerOrAdmin(), and
+    // widening it would loosen both by accident. So the secretary passed neither
+    // leg of isMemberOf('Ventures') and the ref.put() of the brief's supporting
+    // document was refused, while the brief itself saved fine: "review Ventures",
+    // one of the three tasks assigned to the role, half-failed. Fixed by ROLE
+    // rather than by department so it holds whether or not they are ever assigned
+    // the Ventures department — the owner should not have to remember.
+    function isVenturesMember() {
+      return isMemberOf('Ventures') || claimRole() == 'secretary';
+    }
     match /Ventures/{subfolder}/{fileName} {
-      allow read: if isSignedIn() && !isPartnerClaim() && isMemberOf('Ventures');
-      allow write: if isSignedIn() && !isPartnerClaim() && isMemberOf('Ventures')
+      allow read: if isSignedIn() && !isPartnerClaim() && isVenturesMember();
+      allow write: if isSignedIn() && !isPartnerClaim() && isVenturesMember()
         && (request.resource == null || isValidDocument());   // size cap on writes
+    }
+
+    // ── IT department folders (2026-08-10) ──────────────────────────────────
+    // 'IT' is now in isReservedTop(), so the generic {department} block below
+    // skips it — and a reserved segment with no block of its own is a DENY-ALL,
+    // which would lock the IT department out of its own files. This block is
+    // therefore mandatory, not optional. It carries the same three verbs and the
+    // same isOwnerOrAdmin() ownership test as the generic block, so nothing about
+    // how IT staff use their folder changes; what changes is WHO reaches it —
+    // members and admins, never the Corporate Secretary. The explicit role
+    // conjunct sits on top of isMemberOf() because isMemberOf() would otherwise
+    // let an IT department assignment hand the role back what the role decision
+    // took away (owner ruling: assignment never beats the role), exactly the
+    // back door isFinanceClaim() closed on 2026-08-09.
+    match /IT/{subfolder}/{fileName} {
+      allow read: if isSignedIn() && !isPartnerClaim()
+        && claimRole() != 'secretary' && isMemberOf('IT');
+      allow create: if isSignedIn() && !isPartnerClaim()
+        && claimRole() != 'secretary' && isMemberOf('IT')
+        && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && !isPartnerClaim()
+        && claimRole() != 'secretary' && isMemberOf('IT')
+        && isOwnerOrAdmin();
     }
 
     match /{department}/{subfolder}/{fileName} {

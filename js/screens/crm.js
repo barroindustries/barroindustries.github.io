@@ -125,13 +125,33 @@ const CRM_FUNNEL_META = {
   Lost:         { color: '#636366',                icon: '💤' },
 };
 
-// Fetch both lead directories in parallel. Both reads MUST .catch(()=>({docs:[]}))
-// per this pass's hard rule — a denied read (e.g. a partner account somehow
-// reaching this screen) must never blank the whole Dashboard/Pipeline tab.
+// Fetch both lead directories in parallel.
+//
+// NO swallowing `.catch(()=>({docs:[]}))` here. That WAS this file's original
+// hard rule and it was the wrong rule: it made crmFetchAll a promise that can
+// never reject, which made withLoadingAndError's error+Retry branch
+// (js/ui-states.js) structurally unreachable on the two tabs built on it. A
+// failed read painted a complete, confident page — every KPI 0, every funnel
+// row 0/0/0, and the green "✅ No follow-ups due — every lead is on track" —
+// pixel-identical to a CRM that genuinely has no leads in it, with no Retry.
+// The partner account the catches were written for is already refused at the
+// boundary (firestore.rules: aec_contacts/roc_leads `read: isAuth() &&
+// !isPartner()`), so they bought nothing there and cost the error state for
+// every real reader. Both directory tabs of this same feature —
+// renderROCDirectory below and renderAECDirectory (sales.js) — have always
+// surfaced a failed read with a Retry; the Dashboard and Pipeline now agree
+// with their own siblings instead of contradicting them tab to tab.
+//
+// Each read is tagged with WHICH directory failed before being re-thrown. A
+// re-throwing .catch is the opposite of a swallowing one: the promise still
+// rejects, it just rejects with something a human can act on.
 async function crmFetchAll() {
+  const failing = (label) => (err) => {
+    throw new Error(`Couldn't load the ${label} — ${(err && err.message) || String(err)}`);
+  };
   const [aecSnap, rocSnap] = await Promise.all([
-    db.collection('aec_contacts').get().catch(() => ({ docs: [] })),
-    db.collection('roc_leads').get().catch(() => ({ docs: [] })),
+    db.collection('aec_contacts').get().catch(failing('AEC lead directory')),
+    db.collection('roc_leads').get().catch(failing('ROC lead directory')),
   ]);
   return {
     aec: aecSnap.docs.map(d => ({ id: d.id, ...d.data() })),
@@ -249,7 +269,22 @@ async function renderROCDirectory(container, currentUser, currentRole) {
   // Same write-access model as the (now-widened) AEC directory: CRM OR Sales
   // dept members, matching the roc_leads firestore.rules create/update rule.
   const canEdit = canEditDept('CRM') || canEditDept('Sales');
-  const canDeleteDirect = ['president', 'owner', 'manager'].includes(currentRole);
+  // Delete gate = the client mirror of the roc_leads DELETE rule
+  // (firestore.rules: `allow delete: if isAuth() && isAdmin()`), not a
+  // hand-rolled role array. The literal this replaces —
+  // ['president','owner','manager'] — omitted 'secretary', whom isAdmin() DOES
+  // include, so the Corporate Secretary could add and edit leads but was never
+  // shown the delete button for a single one. That is the whole of "prune the
+  // junk" in a lead directory, and these two lead collections deliberately
+  // carry NO delete-request flow to fall back on (the rule's own comment says
+  // so: low-stakes list, not a finance record), so there was no escalation
+  // either. isAdminPriv() (js/departments.js) is president/owner/manager/
+  // secretary — exactly isAdmin(), with 'owner' as the legacy alias for
+  // president. renderAECDirectory (sales.js) now resolves through the same
+  // predicate, and drawVentureBrief (ventures.js) — written days later against
+  // the byte-identical `allow delete: if isAuth() && isAdmin()` rule — already
+  // listed the role; only these two lead directories had been left behind.
+  const canDeleteDirect = window.isAdminPriv();
   const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10));
 
   const isOverdue = r => r.nextFollowUp && r.nextFollowUp <= today && !window.ROC_TERMINAL.includes(rocFunnelStatus(r));
@@ -398,7 +433,11 @@ async function renderROCDirectory(container, currentUser, currentRole) {
         window.logAudit && window.logAudit('delete', 'roc_lead', b.dataset.id, { restaurantName: b.dataset.name });
         Notifs.success('ROC lead deleted');
         renderROCDirectory(container, currentUser, currentRole);
-      } catch (ex) { Notifs.showToast('Delete failed', 'error'); }
+      // Say WHY, the same way the Save handler above already does. A bare
+      // "Delete failed" on a button that is now offered to a wider set of
+      // roles is the least actionable message possible — a rules denial, an
+      // offline write and a doc someone else already removed all read the same.
+      } catch (ex) { Notifs.showToast('Delete failed: ' + (ex.message || ex.code), 'error'); }
     }));
   };
 

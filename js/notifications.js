@@ -234,8 +234,8 @@ window.Notifs = (() => {
     // Purchasing / inventory
     po_approval:{icon:'🧮',accent:'#F76707'}, po_approval_result:{icon:'🧮',accent:'#2F9E44'},
     purchase_submitted:{icon:'🧮',accent:'#F76707'}, low_stock:{icon:'📦',accent:'#E8590C'},
-    // AEC / Sales pipeline
-    aec_followup:{icon:'📇',accent:'#1C7ED6'},
+    // CRM pipeline (AEC = architects/engineers/contractors, ROC = restaurants)
+    aec_followup:{icon:'📇',accent:'#1C7ED6'}, roc_followup:{icon:'🍽️',accent:'#1C7ED6'},
     // Drawings / design
     drawing_for_review:{icon:'📐',accent:'#7048E8'}, drawing_assigned:{icon:'📐',accent:'#7048E8'},
     drawing_approved:{icon:'✅',accent:'#7048E8'}, drawing_released:{icon:'📐',accent:'#7048E8'},
@@ -605,7 +605,31 @@ window.Notifs = (() => {
       db.collection('users').where('departments', 'array-contains', department).get().catch(e => { lookupError = e; return {docs:[]}; })
     ]);
     const seen = new Set();
-    const allDocs = [...snap1.docs, ...snap2.docs].filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+    const matched = [...snap1.docs, ...snap2.docs].filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+
+    // ── The Corporate Secretary carve-out, applied at the fan-out ──────────
+    // Owner ruling (2026-08-08): the Corporate Secretary reaches every
+    // department EXCEPT Finance and IT, and a department ASSIGNMENT must never
+    // beat that role decision. Both boundary files honour it — firestore.rules'
+    // isFinanceDept() and storage.rules each carry a `role != 'secretary'`
+    // conjunct — but neither can help here: a notification is a write into the
+    // RECIPIENT's own inbox, and notifications create is deliberately open to
+    // any authenticated sender (that openness is the whole cross-user "send"
+    // mechanism). So the rules cannot strip a Finance alert on the way in, and
+    // the recipient is legitimately reading their own inbox on the way out.
+    // The exclusion has to happen right here, at the ONE fan-out chokepoint —
+    // per-call-site would mean remembering it in every sendToDept('Finance')
+    // caller, and js/departments.js alone has three that carry peso amounts
+    // (sales-order totals, expense/income entries, the CA-reconciliation
+    // shortfall).
+    // SECRETARY_BLOCKED_DEPTS (js/departments.js) is the ONE definition of the
+    // blocked set for the whole client; read at call time so a change there
+    // cannot leave a second stale copy behind here.
+    const secretaryBlocked = (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT']).includes(department);
+    const allDocs = secretaryBlocked
+      ? matched.filter(d => ((d.data() || {}).role || '') !== 'secretary')
+      : matched;
+
     // No user is assigned to this department — the alert would otherwise vanish.
     // For critical handoffs (opts.fallbackToOwner), route it to the owner/president
     // instead so e.g. a job sent to Production with no Production user is never lost.
@@ -617,6 +641,11 @@ window.Notifs = (() => {
           // a neutral note instead of falsely claiming no one is assigned.
           console.warn(`sendToDept: user lookup for "${department}" failed — routing to owner without asserting no members exist`, lookupError);
           await sendToOwner({ ...notifData, body: `[${department} recipient lookup failed] ${notifData.body || ''}`.slice(0, 2000) });
+        } else if (matched.length) {
+          // Members DO exist — they were all excluded by the carve-out above.
+          // Say that, rather than "no user assigned", which would be false and
+          // would send someone to People & Roles to fix a non-problem.
+          await sendToOwner({ ...notifData, body: `[no eligible ${department} recipient] ${notifData.body || ''}`.slice(0, 2000) });
         } else {
           await sendToOwner({ ...notifData, body: `[no ${department} user assigned] ${notifData.body || ''}`.slice(0, 2000) });
         }
@@ -1232,28 +1261,80 @@ window.Notifs = (() => {
     } catch (_) { /* inventory read denied / offline — skip silently */ }
   }
 
-  // ── AEC follow-up daily digest (Sales + admins) ─
-  // One batched notification per user per day: contacts whose followUpDate has
-  // arrived and whose stage isn't terminal. Mirrors checkLowStock's shape:
-  // role/dept-scoped, dedupKey'd by day, silent on permission errors.
+  // ── CRM follow-up daily digest (CRM/Sales + the oversight tier) ─
+  // One batched notification per directory per user per day: leads whose
+  // follow-up date has arrived and whose stage isn't terminal. Mirrors
+  // checkLowStock's shape: role/dept-scoped, dedupKey'd by day, silent on
+  // permission errors.
+  //
+  // Still exported as checkAECFollowups because js/app.js calls it by that name
+  // at login; it now covers BOTH directories, because both moved into the same
+  // department and both carry a follow-up date.
+  //
+  // WHO GETS IT (2026-08-10). Was president/manager or the Sales department —
+  // which left out the Corporate Secretary, the person the owner assigned to
+  // organize the CRM this week, and left out anyone in the CRM department who
+  // isn't also in Sales. Now: the oversight tier (isAdminPriv() — the client
+  // mirror of firestore.rules' isAdmin(), which includes the secretary; CRM is
+  // NOT one of their two blocked departments) OR either lead-owning department.
+  //
+  // WHERE IT LANDS. The AEC directory MOVED from Sales into CRM on 2026-08-04
+  // (js/screens/crm.js, js/config.js) — the old 'dept:Sales' link landed on a
+  // screen that no longer has an AEC tab, so both links point at 'dept:CRM'.
   async function checkAECFollowups(uid, role) {
-    const isSales = (window.currentDepts || []).includes('Sales');
-    if (!['president','manager'].includes(role) && !isSales) return;
+    const depts = window.currentDepts || [];
+    const isCrm = depts.includes('CRM') || depts.includes('Sales');
+    // isAdminPriv lives in js/departments.js, which loads AFTER this file — but
+    // this only ever runs post-login, long after parse. The literal is a
+    // load-order fallback, not a second source of truth.
+    const isOversight = window.isAdminPriv
+      ? window.isAdminPriv()
+      : ['president','owner','manager','secretary'].includes(role);
+    if (!isOversight && !isCrm) return;
+    const todayStr = window.bizDate();
+
+    // AEC (architects / engineers / contractors)
     try {
       const snap = await dbCachedGet('aec_contacts', () => db.collection('aec_contacts').get().catch(()=>({docs:[]})), 45000);
-      const todayStr  = window.bizDate();
-      const terminal  = window.AEC_TERMINAL || ['partner','dormant'];  // defensive: departments.js defines it
+      const terminal  = window.AEC_TERMINAL || ['partner','dormant'];  // defensive: sales.js defines it
       const due = snap.docs.map(d => d.data())
         .filter(c => c.followUpDate && c.followUpDate <= todayStr && !terminal.includes(c.stage || 'new'));
-      if (!due.length) return;
-      const names = due.slice(0,5).map(c => c.company || c.contactPerson).filter(Boolean).join(', ');
-      const more  = due.length > 5 ? ` +${due.length-5} more` : '';
-      await send(uid, {
-        title: `📇 ${due.length} AEC follow-up${due.length>1?'s':''} due`,
-        body:  `Overdue: ${names}${more}. Open Sales → AEC to follow up.`,
-        icon:  '📇', type: 'aec_followup', link: 'dept:Sales',
-        dedupKey: `aec-fu-${uid}-${todayStr}`,
-      });
+      if (due.length) {
+        const names = due.slice(0,5).map(c => c.company || c.contactPerson).filter(Boolean).join(', ');
+        const more  = due.length > 5 ? ` +${due.length-5} more` : '';
+        await send(uid, {
+          title: `📇 ${due.length} AEC follow-up${due.length>1?'s':''} due`,
+          body:  `Overdue: ${names}${more}. Open CRM → AEC Leads to follow up.`,
+          icon:  '📇', type: 'aec_followup', link: 'dept:CRM',
+          dedupKey: `aec-fu-${uid}-${todayStr}`,
+        });
+      }
+    } catch (_) { /* read denied / offline — skip silently */ }
+
+    // ROC (restaurants) — the same directory shape, its own collection, its own
+    // date field (nextFollowUp) and its own terminal set. It had a due banner on
+    // the CRM screen but no notifier at all, so a ROC follow-up only surfaced if
+    // somebody happened to open the tab. Sent as a SECOND notification rather
+    // than merged into one: the two directories have different owners day to day
+    // and each row's Open link goes to the same place either way.
+    try {
+      const snap = await dbCachedGet('roc_leads', () => db.collection('roc_leads').get().catch(()=>({docs:[]})), 45000);
+      // ROC stores the literal status label (js/screens/crm.js's rocFunnelStatus
+      // is just a safe accessor over ROC_STATUSES), so no vocabulary bridge is
+      // needed here — an unset/unknown status is simply never terminal.
+      const terminal = window.ROC_TERMINAL || ['Won','Lost'];
+      const due = snap.docs.map(d => d.data())
+        .filter(r => r.nextFollowUp && r.nextFollowUp <= todayStr && !terminal.includes(r.status || 'New'));
+      if (due.length) {
+        const names = due.slice(0,5).map(r => r.restaurantName || r.contactPerson).filter(Boolean).join(', ');
+        const more  = due.length > 5 ? ` +${due.length-5} more` : '';
+        await send(uid, {
+          title: `🍽️ ${due.length} ROC follow-up${due.length>1?'s':''} due`,
+          body:  `Overdue: ${names}${more}. Open CRM → ROC Leads to follow up.`,
+          icon:  '🍽️', type: 'roc_followup', link: 'dept:CRM',
+          dedupKey: `roc-fu-${uid}-${todayStr}`,
+        });
+      }
     } catch (_) { /* read denied / offline — skip silently */ }
   }
 

@@ -222,8 +222,14 @@ const qePeso = n => '₱' + Math.round(Number(n) || 0).toLocaleString('en-PH');
 const qeNum  = (v, d) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
 window._qeItems = window._qeItems || [];   // basket persists within the session
 
+// Set when BOTH sources below fail, cleared on every fresh attempt. Read by
+// renderQuickEstimate, which refuses to draw a priceable-looking calculator
+// over a product list it never actually received.
+window._qeDBError = null;
+
 async function qeLoadDB() {
   if (window._qeDB) return window._qeDB;
+  window._qeDBError = null;
   // Firestore first — same shape/mapping as quote-builder-v2.html's
   // loadDatabase(), so the two tools can never disagree on a live price.
   try {
@@ -263,12 +269,24 @@ async function qeLoadDB() {
   // Fallback: static JSON (offline / Firestore empty / read error)
   try {
     const r = await fetch('products-database.json?v=' + Date.now());
+    // fetch() only rejects on a NETWORK failure — a 404/500 resolves happily
+    // and then r.json() either throws on the error body or, worse, parses a
+    // stray JSON payload into a product database that isn't one.
+    if (!r.ok) throw new Error('products-database.json → HTTP ' + r.status);
     window._qeDB = await r.json();
+    return window._qeDB;
   } catch (e) {
     console.warn('Quick Estimate: products DB load failed', e);
-    window._qeDB = { categories: [], products: [], constants: {} };
+    // Do NOT park the failure in window._qeDB. Caching an empty product list
+    // in the SUCCESS slot meant every later visit short-circuited on the first
+    // line of this function and rendered a fully-formed calculator whose only
+    // dropdown option was "— Select a product —": indistinguishable from a
+    // company with no products, permanent for the rest of the session, and
+    // un-retryable by construction. Record the failure instead and let the
+    // caller say so; the next call re-attempts both sources.
+    window._qeDBError = e;
+    return { categories: [], products: [], constants: {} };
   }
-  return window._qeDB;
 }
 
 // Unit price for product `p` given the chosen dims/specs — faithful port of the
@@ -323,7 +341,9 @@ function qeReadCtx(p) {
 function qeSelectedProduct() {
   const sel = document.getElementById('qe-product');
   if (!sel || !sel.value) return null;
-  return (window._qeDB.products || []).find(p => p.id === sel.value) || null;
+  // Guard _qeDB itself, not just .products: it is no longer written on a total
+  // load failure (see qeLoadDB), so it can legitimately be undefined here.
+  return (((window._qeDB && window._qeDB.products) || [])).find(p => p.id === sel.value) || null;
 }
 
 // Dimension / spec inputs shown depend on the selected product's formula
@@ -488,6 +508,21 @@ function qeCreateFormalQuote() {
 async function renderQuickEstimate(container, currentUser, currentRole) {
   container.innerHTML = window.skeletonHtml('cards');
   const db = await qeLoadDB();
+  // An unreadable product database used to render as a complete, working-looking
+  // calculator whose product dropdown was simply empty — the same "confident
+  // nothing" this pass removed from the CRM funnel. Say it failed, and offer the
+  // retry the cached-failure bug in qeLoadDB used to make impossible.
+  if (window._qeDBError) {
+    const msg = window._qeDBError.message || String(window._qeDBError);
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div>
+      <h4>Couldn't load the product database</h4>
+      <p>${escHtml(msg)}</p>
+      <p style="font-size:11px;color:var(--text-muted);max-width:420px;margin:6px auto 0">Prices come from the live <code>products</code> collection, with <code>products-database.json</code> as the offline fallback — both were unreachable, so nothing can be priced right now.</p>
+      <button type="button" class="btn-secondary btn-sm qe-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    container.querySelector('.qe-retry-btn')?.addEventListener('click', () => renderQuickEstimate(container, currentUser, currentRole));
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
+    return;
+  }
   const cats = db.categories || [];
   const products = (db.products || []).slice();
 
@@ -665,17 +700,29 @@ function sopFmtDate(ts){
 
 async function renderSalesSOP(container) {
   container.innerHTML = window.skeletonHtml('rows');
-  let data = null;
+  let data = null, loadErr = null;
   try {
     const doc = await db.collection('settings').doc('sales_sop').get();
     if (doc.exists) data = doc.data();
-  } catch(_){}
+  } catch(err){
+    // Was a bare `catch(_){}`. Falling through to DEFAULT_SALES_SOP stays the
+    // right BEHAVIOUR — the default is the real playbook and an unreadable
+    // settings doc must not blank the tab — but presenting it silently is the
+    // lie: a President edit may well exist and simply not have loaded, and the
+    // reader has no way to tell "this is the company's SOP" from "this is the
+    // shipped default because the saved one didn't arrive". Keep the fallback,
+    // and say which one they are looking at.
+    loadErr = err;
+  }
   if (!data || !Array.isArray(data.steps) || !data.steps.length) data = DEFAULT_SALES_SOP;
   window._salesSopData = data;
-  renderSalesSOPView(container, data);
+  renderSalesSOPView(container, data, loadErr);
 }
 
-function renderSalesSOPView(container, data) {
+// `loadErr` is optional and set only by renderSalesSOP above; the editor's
+// Cancel path re-renders with two arguments and so shows no banner, which is
+// correct — that path is displaying data it definitely has.
+function renderSalesSOPView(container, data, loadErr) {
   const O = SALES_SOP_ORANGE;
   const steps = Array.isArray(data.steps) ? data.steps : [];
   const rules = Array.isArray(data.rules) ? data.rules : [];
@@ -684,7 +731,15 @@ function renderSalesSOPView(container, data) {
     ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">Updated ${sopFmtDate(data.updatedAt)}${data.updatedBy?(' · '+escHtml(data.updatedBy)):''}</div>`
     : '';
 
+  const loadWarn = loadErr
+    ? `<div class="alert-banner alert-warn" style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span>${emojiIcon('⚠️',16)} Showing the built-in default SOP — the saved version couldn't be read (${escHtml(loadErr.message||String(loadErr))}). Any edits the President has published are <strong>not</strong> reflected below.</span>
+        <button type="button" class="btn-secondary btn-sm sop-reload-btn">Retry</button>
+      </div>`
+    : '';
+
   container.innerHTML = `
+    ${loadWarn}
     <div style="background:linear-gradient(135deg,rgba(230,81,0,.14),rgba(230,81,0,.04));border:1px solid rgba(230,81,0,.35);border-radius:14px;padding:16px 18px;margin-bottom:16px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px">
@@ -743,6 +798,10 @@ function renderSalesSOPView(container, data) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
 
+  // Scoped to this container, not document.getElementById — openPage keeps a
+  // dying panel in the DOM for ~300ms and an unscoped lookup can find its
+  // Retry button instead of this one.
+  container.querySelector('.sop-reload-btn')?.addEventListener('click', () => renderSalesSOP(container));
   if (canEdit) document.getElementById('sop-edit-btn')?.addEventListener('click', () => renderSalesSOPEditor(container, data));
 }
 
@@ -1219,7 +1278,12 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           btn.disabled = false; btn.textContent = 'Repair now';
         }
       });
-    }).catch(()=>{});
+    // Deliberately non-blocking and non-visual: this probe only decides whether
+    // to OFFER a repair banner, so a failed probe withholds an offer rather
+    // than asserting anything false — unlike the swallowed reads this pass
+    // removed elsewhere in the file. Logged so it is at least diagnosable
+    // instead of vanishing.
+    }).catch(err => console.warn('[bkq] stranded-BK-quote probe failed — repair banner not offered', err));
   }
 }
 
@@ -1395,7 +1459,24 @@ async function renderAECDirectory(container, currentUser, currentRole) {
   // Sales-only members keep working exactly as before; this only ADDS
   // capability for CRM members, never removes any.
   const canEdit = canEditDept('Sales') || canEditDept('CRM');
-  const canDeleteDirect = ['president','owner','manager'].includes(currentRole);
+  // Delete gate = the client mirror of the aec_contacts DELETE rule
+  // (firestore.rules: `allow delete: if isAuth() && isAdmin()`), not a
+  // hand-rolled role array. Note the asymmetry this fixes: canEdit one line up
+  // has always resolved through canEditDept(), which is secretary-aware, so
+  // Add and Edit were offered to the Corporate Secretary while the literal
+  // below — ['president','owner','manager'] — silently withheld Delete from
+  // the one role assigned to organize this directory. aec_contacts and
+  // roc_leads deliberately have NO delete-request flow (the rule's own comment
+  // calls them low-stakes lists), so there was no escalation to fall back on
+  // either: the capability the boundary already granted was simply unreachable.
+  // isAdminPriv() (js/departments.js) is president/owner/manager/secretary —
+  // exactly isAdmin(), 'owner' being the legacy alias for president.
+  // Deliberately NOT applied to the bs_quotes delete gate further down this
+  // file (renderBSQuotationsSummary): that one is stricter than its rule too,
+  // but a quote is a money-bearing record and its screen already offers a
+  // working "Request Delete" escalation, so it is a narrower-UI choice rather
+  // than a dead end. Widening it is the owner's call, not this fix's.
+  const canDeleteDirect = window.isAdminPriv();
   const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
 
   const isOverdue = c => c.followUpDate && c.followUpDate <= today && !window.AEC_TERMINAL.includes(aecStageOf(c));
@@ -1575,7 +1656,10 @@ async function renderAECDirectory(container, currentUser, currentRole) {
         window.logAudit && window.logAudit('delete','aec_contact',b.dataset.id,{company:b.dataset.company});
         Notifs.success('AEC contact deleted');
         renderAECDirectory(container, currentUser, currentRole);
-      } catch(ex){ Notifs.showToast('Delete failed','error'); }
+      // Say WHY — matches the Save handler above. A bare "Delete failed" on a
+      // button now offered to a wider set of roles cannot be acted on: a rules
+      // denial, an offline write and an already-deleted doc all read the same.
+      } catch(ex){ Notifs.showToast('Delete failed: ' + (ex.message||ex.code),'error'); }
     }));
   };
 
@@ -1717,9 +1801,18 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
     // the query has no orderBy, so it must not share a cache key with the
     // ordered Files/Client-Data query (would leak scope-mismatched results).
     const bsqKey = canSeeAll ? 'bs_quotes-flat-all' : `bs_quotes-flat-own-${currentUser.uid}`;
+    // The two `.catch(()=>({docs:[]}))` that used to sit on these reads are
+    // gone. This whole body is already wrapped in the try/catch below, which
+    // paints a named error + Retry — but the swallowing catches resolved the
+    // rejection before it could ever get there, so a denied or offline read
+    // rendered a fully-formed screen claiming zero quotes, ₱0 pipeline, 0%
+    // win rate and five empty status buckets. Every one of those is a
+    // confident number derived from nothing. dbCachedGet re-throws (and
+    // negative-caches for 4s) rather than storing a failure as data, so the
+    // rejection now reaches the handler that can tell the user about it.
     const snap = await dbCachedGet(bsqKey, () => canSeeAll
-      ? db.collection('bs_quotes').get().catch(()=>({docs:[]}))
-      : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get().catch(()=>({docs:[]})),
+      ? db.collection('bs_quotes').get()
+      : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get(),
       50000);
     const all = snap.docs.map(d=>({id:d.id,...d.data()}))
       // Partners cannot see records created by Sales (non-partner) users
@@ -1860,8 +1953,10 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
     bindQuoteActions(qsContent, currentUser, currentRole, container);
   } catch (err) {
     // 8-point #3 — add a retry action to the pre-existing H5-fix error state
-    // (message-only before this pass).
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Something went wrong</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsq-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    // (message-only before this pass). Titled after the thing that failed, the
+    // same way every other list in this file names its own failure, now that
+    // the swallowing catches above no longer keep this branch unreachable.
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load partner quotations</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsq-retry-btn" style="margin-top:14px">Retry</button></div>`;
     container.querySelector('.bsq-retry-btn')?.addEventListener('click', () => renderBSQuotationsSummary(container, currentUser, currentRole));
     if (window.lucide) lucide.createIcons({ nodes: [container] });
   }
@@ -1896,7 +1991,9 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         Notifs.success('Quote deleted');
         window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
-      } catch(ex){ Notifs.showToast('Delete failed','error'); }
+      // Name the cause — a rules denial and an offline write are very different
+      // problems and "Delete failed" distinguishes neither.
+      } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
     });
   });
   // Request delete (partner / sales staff) — flags the quote + notifies the president

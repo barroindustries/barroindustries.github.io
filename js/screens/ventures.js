@@ -478,18 +478,39 @@ function drawVentureBrief(host, view, ventures, v) {
         title: 'This brief is empty',
         hint: canEdit ? 'Tap Edit to write the executive summary and fill in the outline.' : undefined
       }) : ''}
+
+    ${vtReviewPanelHtml(v, canEdit)}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [view] });
+  vtBindReviewPanel(host, view, ventures, v);
 
   view.querySelector('.vt-edit')?.addEventListener('click', () => openVentureEditor(host, view, ventures, v));
   view.querySelector('.vt-print')?.addEventListener('click', () => openVenturePrintBrief(v));
   view.querySelector('.vt-del')?.addEventListener('click', async () => {
-    const ok = await confirmDialog({
+    // TYPE-TO-CONFIRM, 2026-08-10. This used to be one tap on a plain
+    // confirmDialog, and what it destroys is not a row in a list: it is the
+    // executive summary and every prose section of a brief someone wrote by
+    // hand, with no soft-delete flag, no archive (the 'archived' STATUS is a
+    // display badge, not a tombstone — see vtStatusMeta) and no restore. The
+    // owner's ruling was to KEEP the capability and make the gesture cost
+    // something, so this follows the one existing precedent in this app for an
+    // unrecoverable delete — FilesHub's "purge from bin" (js/departments.js),
+    // a required promptDialog whose text must match exactly — except that the
+    // phrase is the VENTURE'S OWN NAME rather than the word DELETE, so muscle
+    // memory from one brief cannot carry over to the next one.
+    // Comparison is trimmed and case-insensitive: this is typed on a phone,
+    // and the point is deliberate re-reading of the name, not typing accuracy.
+    const phrase = String(v.name || '').trim() || 'DELETE';
+    const typed = await promptDialog({
       title: 'Delete venture',
-      message: `Delete "${escHtml(v.name || 'this venture')}" and its whole brief? This cannot be undone.`,
-      danger: true, html: true, confirmLabel: 'Delete'
+      message: `This permanently deletes the whole brief for "${phrase}" — executive summary, every section, links and the attachment reference. There is no archive and no undo. To confirm, type the venture name exactly: ${phrase}`,
+      placeholder: phrase, required: true, confirmLabel: 'Delete forever'
     });
-    if (!ok) return;
+    if (typed == null) return;                       // Back / Esc / Cancel
+    if (String(typed).trim().toLowerCase() !== phrase.toLowerCase()) {
+      window.Notifs?.showToast?.(`Nothing deleted — type "${phrase}" exactly to confirm.`, 'error');
+      return;
+    }
     try {
       await db.collection('ventures').doc(v.id).delete();
       window.logAudit && window.logAudit('delete', 'venture', v.id, { name: v.name || '' });
@@ -512,6 +533,145 @@ function vtSectionHtml(s) {
       ${bullets.length ? `<ul>${bullets.map(b => `<li>${vtFmt(b)}</li>`).join('')}</ul>` : ''}
       ${s.note ? `<div class="vt-note">${emojiIcon('💡', 13)} ${vtFmt(s.note)}</div>` : ''}
     </div>`;
+}
+
+// ══════════════════════════════════════════════════
+//  Review notes — the REVIEWER's surface (added 2026-08-10)
+// ══════════════════════════════════════════════════
+// WHY THIS EXISTS. Reviewing ventures is a standing job (the Corporate
+// Secretary was given it explicitly), and until now this screen had nowhere to
+// put a review. The only thing called a "note" is sections[].note — a side-note
+// field INSIDE the author's own editor — so recording an observation meant
+// opening the editor, typing into someone else's prose, and saving, which
+// re-stamps updatedBy with the reviewer's email and makes the reviewer look
+// like the author of the brief. That is not a review surface; it is an edit.
+//
+// WHY A FIELD AND NOT A COLLECTION. The obvious shape is a `venture_notes`
+// collection (or a ventures/{id}/notes subcollection), and both need a
+// firestore.rules match block that does not exist — rules do NOT cascade into
+// subcollections, and an unruled collection is a silent permission-denied, i.e.
+// a review surface that looks empty instead of refusing. `reviewNotes` is an
+// ordinary array field on the venture doc, so it is covered by the ventures
+// UPDATE rule that is already deployed (canDept('Ventures') plus the name/status
+// checks, which a merge update satisfies because request.resource.data is the
+// MERGED document) — no rules change, no deploy, nothing that can silently fail.
+//
+// WHAT MAKES IT A REVIEW AND NOT AN EDIT. The write below touches ONLY
+// reviewNotes/reviewedAt/reviewedBy. It never writes summary, sections, links
+// or updatedBy, so the "Updated <date> · <email>" line in the hero keeps meaning
+// what it says: who last changed the AUTHOR'S prose. And vtSaveVenture's payload
+// does not carry reviewNotes and uses .update() (never .set()), so an author
+// saving the brief cannot wipe a reviewer's notes either. The two are
+// independent by construction, in both directions.
+//
+// `at` is a client Timestamp.now(), not serverTimestamp() — a sentinel is
+// illegal inside an array element. Same call this repo already makes for task
+// follow-ups (js/screens/tasks.js), and the display is a date, not an audit
+// instant.
+function vtReviewNotes(v) {
+  return (Array.isArray(v && v.reviewNotes) ? v.reviewNotes : [])
+    .filter(Boolean)
+    .slice()
+    .sort((a, b) => ((b && b.at && b.at.seconds) || 0) - ((a && a.at && a.at.seconds) || 0));
+}
+// A note may be removed by whoever wrote it, or by an admin role (the client
+// mirror of firestore.rules' isAdmin(): president/manager/secretary). The write
+// itself is the same ventures update either way — this only decides whether the
+// control is offered.
+function vtCanRemoveNote(n) {
+  const me = (window._vtCurrentUser && window._vtCurrentUser.uid)
+    || (window.currentUser && window.currentUser.uid) || '';
+  if (n && n.byUid && n.byUid === me) return true;
+  return typeof window.isAdminPriv === 'function' ? window.isAdminPriv() : false;
+}
+function vtReviewPanelHtml(v, canEdit) {
+  const notes = vtReviewNotes(v);
+  return `
+    <div class="vt-sec" style="margin-top:12px" id="vt-review">
+      <h4>${emojiIcon('🔍', 15)} Review notes${notes.length ? ` (${notes.length})` : ''}</h4>
+      <p style="font-size:11.5px;color:var(--text-muted);margin:0 0 10px;line-height:1.6">
+        A reviewer's observations, kept beside the brief and never inside it — adding one
+        does not change the author's prose or the “Updated by” stamp above.
+      </p>
+      ${notes.length ? `<div style="display:flex;flex-direction:column;gap:8px">${notes.map(n => `
+        <div class="vt-note" style="display:flex;gap:8px;align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);margin-bottom:3px">
+              ${escHtml(n.byName || 'Reviewer')}${n.at ? ' · ' + escHtml(vtFmtDate(n.at)) : ''}
+            </div>
+            <div style="font-size:12.5px;color:var(--text);line-height:1.65;overflow-wrap:anywhere">${vtProse(n.body || '')}</div>
+          </div>
+          ${vtCanRemoveNote(n) ? `<button type="button" class="btn-secondary btn-sm vt-note-rm" data-nid="${escHtml(n.id || '')}"
+              title="Remove this note" aria-label="Remove this review note"
+              style="color:var(--danger);min-height:44px;min-width:44px;flex:0 0 auto">${emojiIcon('trash-2', 13)}</button>` : ''}
+        </div>`).join('')}</div>`
+        : `<div style="font-size:12px;color:var(--text-muted);font-style:italic">No review notes yet.</div>`}
+      ${canEdit ? `
+        <label class="vt-lbl" style="margin-top:12px">Add a review note</label>
+        <textarea class="vt-fld" id="vt-note-input" rows="3"
+          placeholder="What you observed, what needs a decision, what to check next. Use **bold** for emphasis."></textarea>
+        <div style="margin-top:8px"><button type="button" class="btn-primary btn-sm vt-note-add" style="min-height:44px">${emojiIcon('💬', 15)} Add note</button></div>
+      ` : ''}
+    </div>`;
+}
+function vtBindReviewPanel(host, view, ventures, v) {
+  view.querySelector('.vt-note-add')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const ta = view.querySelector('#vt-note-input');
+    const body = ((ta && ta.value) || '').trim();
+    if (!body) { window.Notifs?.showToast?.('Write the note first.', 'error'); return; }
+    const me = window._vtCurrentUser || window.currentUser || {};
+    const entry = {
+      // Collision-free id from Firestore's own generator (the join key the
+      // remove path matches on) — the same trick task follow-ups use.
+      id: db.collection('ventures').doc().id,
+      body,
+      byUid: me.uid || '',
+      byName: (window.userProfile && window.userProfile.displayName) || me.email || 'Reviewer',
+      at: firebase.firestore.Timestamp.now()
+    };
+    btn.disabled = true;
+    try {
+      // arrayUnion, not a read-modify-write of the whole array: two reviewers
+      // adding a note at the same moment must not overwrite each other.
+      await db.collection('ventures').doc(v.id).update({
+        reviewNotes: firebase.firestore.FieldValue.arrayUnion(entry),
+        reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        reviewedBy: entry.byName
+      });
+      if (ta) ta.value = '';
+      window.Notifs?.success?.('Review note added');
+      reloadVentures(host, v.slug);
+    } catch (ex) {
+      btn.disabled = false;
+      window.Notifs?.showToast?.('Could not add the note — ' + ((ex && (ex.message || ex.code)) || ex), 'error');
+    }
+  });
+
+  view.querySelectorAll('.vt-note-rm').forEach(b => b.addEventListener('click', async () => {
+    const nid = b.dataset.nid;
+    if (!(await confirmDialog({ title: 'Remove review note', message: 'Remove this review note? The brief itself is untouched.', danger: true, confirmLabel: 'Remove' }))) return;
+    b.disabled = true;
+    try {
+      // Re-read first and hand arrayRemove the element EXACTLY as the server
+      // holds it. arrayRemove matches by deep equality, so removing a note
+      // rebuilt from the stale render could silently match nothing; this way it
+      // matches, and it is still atomic — a note added by someone else between
+      // the read and the write survives, which a read-filter-write would drop.
+      const fresh = await db.collection('ventures').doc(v.id).get();
+      const arr = (fresh.exists && Array.isArray(fresh.data().reviewNotes)) ? fresh.data().reviewNotes : [];
+      const target = arr.find(n => n && n.id === nid);
+      if (!target) { window.Notifs?.showToast?.('That note is already gone.'); reloadVentures(host, v.slug); return; }
+      await db.collection('ventures').doc(v.id).update({
+        reviewNotes: firebase.firestore.FieldValue.arrayRemove(target)
+      });
+      window.Notifs?.success?.('Note removed');
+      reloadVentures(host, v.slug);
+    } catch (ex) {
+      b.disabled = false;
+      window.Notifs?.showToast?.('Could not remove the note — ' + ((ex && (ex.message || ex.code)) || ex), 'error');
+    }
+  }));
 }
 
 // ══════════════════════════════════════════════════
@@ -546,6 +706,11 @@ function openVentureEditor(host, view, ventures, existing) {
       ? src.links.map(l => ({ label: (l && l.label) || '', url: (l && l.url) || '' }))
       : [],
     fileUrl: src.fileUrl || null,
+    // { name, failed, message } while a file has been PICKED but not confirmed
+    // attached; null otherwise. Lives on the draft so it survives the full
+    // re-render every add-section / reorder / remove-link does. See the
+    // attachment-integrity note in drawVentureEditor.
+    pendingUpload: null,
     order: isFinite(Number(src.order)) ? Number(src.order) : ventures.length,
   };
   // Slugs already in use by OTHER ventures — the uniqueness set for this edit.
@@ -590,6 +755,13 @@ function drawVentureEditor(host, view, ventures, isNew) {
       ${emojiIcon('✏️', 16)} <b style="color:var(--text)">${isNew ? 'New venture.' : 'Editing this venture.'}</b>
       Documentation only — prose, links and files. Use <code>**bold**</code> for emphasis.
       The outline is a starting point: rename, reorder, add or remove any section.
+      <div style="margin-top:6px">
+        ${emojiIcon('👀', 14)} Anyone with Ventures access reads this brief — that includes the
+        Corporate Secretary, whose access is by ROLE and does not depend on a department
+        assignment. Keep figures in Finance: the Finance boundary is drawn around
+        collections, not around what a sentence happens to say, so a revenue or margin
+        number typed into a section body is simply readable here.
+      </div>
     </div>
 
     <div class="vt-2col">
@@ -631,6 +803,7 @@ function drawVentureEditor(host, view, ventures, isNew) {
         <a href="${(typeof safeHttpUrl === 'function') ? safeHttpUrl(d.fileUrl) : escHtml(d.fileUrl)}" target="_blank" rel="noopener noreferrer" class="btn-secondary btn-sm" style="min-height:44px;display:inline-flex;align-items:center">${emojiIcon('📎', 14)}&nbsp;Current attachment</a>
         <button type="button" class="btn-secondary btn-sm vt-rm-file" style="color:var(--danger);min-height:44px">Remove</button>
       </div>` : ''}
+    <div id="vt-upload-notice"></div>
     <div id="vt-upload"></div>
 
     <div class="vt-savebar">
@@ -640,16 +813,51 @@ function drawVentureEditor(host, view, ventures, isNew) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [view] });
 
-  // Upload area — Firebase Storage first, mirrored to Drive nightly (js/drive.js).
-  // Storage path is Ventures/Briefs/*, already covered by storage.rules'
+  // ── Upload area + ATTACHMENT INTEGRITY ──────────────────────────────────
+  // Firebase Storage first, mirrored to Drive nightly (js/drive.js).
+  //
+  // ⚠ 2026-08-10 — the note that stood here was STALE and actively misleading.
+  // It said the Ventures/Briefs/* path was "already covered by storage.rules'
   // generic /{department}/{subfolder}/{fileName} block ('Ventures' is not a
-  // reserved top-level segment), so no storage.rules change was needed.
+  // reserved top-level segment), so no storage.rules change was needed". Both
+  // halves are false: 'Ventures' IS a reserved top-level segment and has its own
+  // dedicated block, gated on isMemberOf('Ventures') = isAdminClaim() ||
+  // hasClaimDept('Ventures') — and storage.rules' isAdminClaim() is
+  // president|manager only, where firestore.rules' isAdmin() also includes
+  // 'secretary'. So the two rule files disagree about who may do the same job:
+  // Firestore lets the Corporate Secretary read, create, edit and delete a
+  // venture brief with no department assignment, and Storage refuses their
+  // upload unless their profile carries the Ventures department. That is a
+  // storage.rules fix (or a one-click department assignment) and is not made
+  // here — this file must not be read as evidence that it is already handled.
+  //
+  // Independently of who is allowed to upload, the REPORTING was broken, and
+  // that half is fixed below. On a refused upload js/drive.js's handleFile
+  // paints a red bar with the raw error, hides it after three seconds, raises
+  // no toast, and — because it is the SUCCESS callback that carries the URL —
+  // never tells this screen anything happened. The draft's fileUrl stayed null,
+  // Save then wrote fileUrl:null and reported a cheerful "Venture saved". The
+  // brief saved; the document did not, and the user was told otherwise.
+  //
+  // drive.js is not ours to change, so the PICK is what gets recorded here: a
+  // file chosen and never confirmed by the success callback IS an attachment
+  // this brief has not got, and that test depends on no message format and no
+  // timing. The observer further down only enriches the wording when drive.js
+  // does report a failure in its own status line.
   if (window.Drive && window.Drive.renderUploadArea) {
     window.Drive.renderUploadArea('vt-upload', (res) => {
       const d2 = window._vtDraft; if (!d2) return;
-      d2.fileUrl = (res && (res.url || res.link)) || null;
+      const url = (res && (res.url || res.link)) || null;
+      d2.fileUrl = url;
+      // Only a real link clears the "not attached" state. A callback that
+      // arrives with nothing usable is a failure wearing a success costume.
+      d2.pendingUpload = url ? null
+        : { name: (res && res.name) || 'the file', failed: true, message: 'The upload returned no link.' };
+      vtPaintUploadNotice(view);
     }, { label: 'Attach a document', dept: 'Ventures', subfolder: 'Briefs' });
   }
+  vtWatchUpload(view);
+  vtPaintUploadNotice(view);
 
   // Derive the slug from the name until the owner edits the slug themselves.
   const nameEl = view.querySelector('#vt-f-name');
@@ -718,6 +926,67 @@ function drawVentureEditor(host, view, ventures, isNew) {
   });
 }
 
+// ── Attachment integrity helpers (see the long note in drawVentureEditor) ──
+// One observer at a time: drawVentureEditor rebuilds the whole view (and with
+// it drive.js's status node) on every add-section / reorder / remove-link, so
+// the previous one is dropped rather than left watching a detached node.
+let _vtUploadObs = null;
+function vtWatchUpload(view) {
+  if (_vtUploadObs) { try { _vtUploadObs.disconnect(); } catch (_) {} _vtUploadObs = null; }
+  if (!view) return;
+  // drive.js builds these ids from the container id it was handed ('vt-upload').
+  const input  = view.querySelector('#file-input-vt-upload');
+  const label  = view.querySelector('#upload-label-vt-upload');
+  const status = view.querySelector('#upload-status-vt-upload');
+
+  // A pick is a promise of an attachment. It is kept only when the success
+  // callback lands; until then this brief does not have the file, and Save
+  // below must not claim otherwise.
+  const markPending = (file) => {
+    const d = window._vtDraft; if (!d || !file) return;
+    d.pendingUpload = { name: file.name || 'the file', failed: false, message: '' };
+    vtPaintUploadNotice(view);
+  };
+  input?.addEventListener('change', (e) => markPending(e.target.files && e.target.files[0]));
+  label?.addEventListener('drop', (e) => markPending(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]));
+
+  // Enrichment only. drive.js writes its outcome into that status line and then
+  // hides the whole bar three seconds later; watching the text is how the real
+  // reason survives past those three seconds and onto a notice that stays put.
+  // If this never fires (different message wording, no MutationObserver), the
+  // pending flag above still does the load-bearing work on its own.
+  if (status && typeof MutationObserver === 'function') {
+    _vtUploadObs = new MutationObserver(() => {
+      const d = window._vtDraft; if (!d || !d.pendingUpload) return;
+      const txt = (status.textContent || '').trim();
+      if (!/^❌|upload failed/i.test(txt)) return;
+      d.pendingUpload.failed = true;
+      d.pendingUpload.message = txt.replace(/^❌\s*/, '');
+      vtPaintUploadNotice(view);
+    });
+    _vtUploadObs.observe(status, { childList: true, characterData: true, subtree: true });
+  }
+}
+// The persistent counterpart to drive.js's three-second bar. Rendered from the
+// draft, so it survives every editor redraw and is still on screen at the moment
+// the user reaches for Save.
+function vtPaintUploadNotice(view) {
+  const host = view && view.querySelector('#vt-upload-notice');
+  if (!host) return;
+  const p = window._vtDraft && window._vtDraft.pendingUpload;
+  if (!p) { host.innerHTML = ''; return; }
+  const danger = !!p.failed;
+  host.innerHTML = `
+    <div style="margin-bottom:8px;padding:9px 12px;border-radius:10px;line-height:1.55;font-size:12px;
+                border:1px solid ${danger ? 'var(--danger,#FF3B30)' : 'var(--border)'};
+                background:var(--surface2);color:var(--text)">
+      <b>${danger ? 'Not attached' : 'Still uploading'}:</b> ${escHtml(p.name)}.
+      ${danger
+        ? `This file was refused by Storage, so the brief does not have it${p.message ? ' — ' + escHtml(p.message) : ''}. Saving now saves everything else <b>without</b> this attachment. If this keeps happening, the Ventures folder permission is the thing to fix, not the file.`
+        : `Wait for the upload to finish before saving — a save right now would leave the file off the brief.`}
+    </div>`;
+}
+
 // Read the editor inputs back into the working draft. EVERY lookup is scoped
 // to `view` (never document.*), so this stays correct even if this screen is
 // ever hosted somewhere a second instance can exist — see this file's header.
@@ -781,6 +1050,27 @@ async function vtSaveVenture(host, view, ventures, isNew) {
     .map(l => ({ label: (l.label || '').trim(), url: (l.url || '').trim() }))
     .filter(l => ((typeof safeHttpUrl === 'function') ? safeHttpUrl(l.url) : l.url));
 
+  // ── A save that lost a file must not report success ──────────────────────
+  // pendingUpload is set the moment a file is picked and cleared only when the
+  // upload confirms (see the attachment-integrity note in drawVentureEditor).
+  // Still set at Save time means one of two things — the upload was refused, or
+  // it is still in flight — and in BOTH the brief is about to be written
+  // without the document the user believes they attached. So it is said out
+  // loud, before the write, and the outcome toast at the bottom is downgraded
+  // if they choose to go ahead anyway. Their prose is never thrown away: the
+  // only two outcomes are "save without the file" and "go back to the editor".
+  const lostFile = d.pendingUpload;
+  if (lostFile) {
+    const ok = await confirmDialog({
+      title: lostFile.failed ? 'Attachment was not uploaded' : 'Attachment is still uploading',
+      message: lostFile.failed
+        ? `“${lostFile.name}” was refused and is not attached to this venture. Saving now saves the brief WITHOUT it.`
+        : `“${lostFile.name}” has not finished uploading. Saving now saves the brief WITHOUT it.`,
+      danger: true, confirmLabel: 'Save without the file', cancelLabel: 'Go back'
+    });
+    if (!ok) return;
+  }
+
   const btn = view.querySelector('.vt-save');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
@@ -808,7 +1098,16 @@ async function vtSaveVenture(host, view, ventures, isNew) {
     }
     const slug = d.slug;
     window._vtDraft = null;
-    window.Notifs?.success?.(isNew ? 'Venture created' : 'Venture saved');
+    // The write succeeded — but "saved" is only the whole truth when nothing
+    // was lost on the way. An error-styled toast naming the missing file is
+    // what stops the user walking away believing the document is filed.
+    if (lostFile) {
+      window.Notifs?.showToast?.(
+        `${isNew ? 'Venture created' : 'Venture saved'} — but “${lostFile.name}” was NOT attached. Re-attach it when the upload works.`,
+        'error');
+    } else {
+      window.Notifs?.success?.(isNew ? 'Venture created' : 'Venture saved');
+    }
     window.setSubroute(slug);
     // Re-fetch so the chip row picks up a renamed / brand-new venture.
     reloadVentures(host, slug);

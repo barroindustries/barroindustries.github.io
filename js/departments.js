@@ -20,6 +20,19 @@ function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'
 // whose write the boundary will refuse.
 window.SECRETARY_BLOCKED_DEPTS = ['Finance', 'IT'];
 
+// The blocked-set test as ONE expression, for the predicates that are keyed on
+// DEPARTMENT MEMBERSHIP rather than on role. Owner ruling 3: an assignment must
+// never beat the role decision — "one dropdown in People & Roles" cannot restore
+// Finance access — so a `currentDepts.includes('Finance')` leg needs this said
+// explicitly, exactly as firestore.rules' isFinanceDept() carries its own
+// `role != 'secretary'` conjunct. Mirrors js/app.js's _deptBlockedForRole (the
+// navigation interception point), which is deliberately private to that file.
+function deptBlockedForSecretary(dept) {
+  return (window.currentRole || '') === 'secretary'
+    && (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT']).includes(dept);
+}
+window.deptBlockedForSecretary = deptBlockedForSecretary;
+
 // Returns true if user is an admin role OR is a member of the given department.
 // Use this for write-access checks inside department modules so that dept members
 // can manage their own content regardless of their system role.
@@ -3233,7 +3246,12 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       // EXACT unchanged manual "Record Sale" queue that existed before this
       // change — zero regression risk either way.
       let autoPosted = false;
-      const canAutoPostLedger = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
+      // isFinancePriv() is canEditDept('Finance'), which resolves to exactly the
+      // same set this used to spell out by hand (president/owner/manager/finance
+      // OR a Finance-DEPARTMENT member) MINUS the Corporate Secretary — who the
+      // hand-rolled version admitted through the department leg the moment their
+      // profile listed Finance, posting straight to the ledger. Owner ruling 3.
+      const canAutoPostLedger = isFinancePriv();
       if (canAutoPostLedger && paid > 0 && paid <= contract + 0.01) {
         try {
           const vatTreatment = document.getElementById('so-vat').value;
@@ -3313,7 +3331,11 @@ window.renderSalesOrders = async function(container){
   // Anyone non-partner can SEE the list (read rule). Recording posts to the ledger,
   // which is open to finance/admin roles OR Finance-DEPARTMENT staff (matching the
   // canFinance() Firestore rule), so a Finance-dept member can register the sale.
-  const isFin = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
+  // isFinancePriv() is that same set — and, unlike the literal it replaced, it
+  // drops the Corporate Secretary, whom canFinance() also excludes: the old
+  // department leg handed them Record Sale / To Production the moment their
+  // profile listed Finance, and the ledger write would then have been refused.
+  const isFin = isFinancePriv();
   c.innerHTML=window.skeletonHtml('table');
   const snap = await db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -3967,8 +3989,12 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   // Root collection, name computed at runtime — no backup registration needed:
   // scripts/monthly-backup.js discovers every root collection via db.listCollections().
   const collection = `budgets_${dept.toLowerCase().replace(/\s+/g,'_')}`;
-  // Allow: admins, finance, president, and members of this dept
-  const isDeptMember = (window.currentDepts||[]).includes(dept);
+  // Allow: admins, finance, president, and members of this dept — except that a
+  // department assignment must never beat the Corporate Secretary's role
+  // decision (owner ruling 3). Without this guard, putting them in the Finance
+  // department would have handed them budgets_finance edit rights through the
+  // membership leg, which no role in the list above grants them.
+  const isDeptMember = (window.currentDepts||[]).includes(dept) && !deptBlockedForSecretary(dept);
   const canEdit = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance'||isDeptMember;
   // The shared ledger (actual spend) is finance/admin-only per Firestore rules.
   // Dept members who aren't finance can still see + edit budget allocations, but

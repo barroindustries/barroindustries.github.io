@@ -426,6 +426,18 @@ window.Meetings = (function () {
     const counts = { yes: 0, no: 0, maybe: 0 };
     Object.values(m.rsvp || {}).forEach(v => { if (counts[v] != null) counts[v]++; });
 
+    // ORGANISER-ONLY WRITE, ON PURPOSE — `mine` gates Edit, "Notes & follow-up"
+    // and "Cancel meeting" below, and must keep gating them.
+    // The whole-company READ is a different question and a settled one: the
+    // oversight tier (isAdminTier — President, Manager, Corporate Secretary; see
+    // loadMonth) opens every meeting on purpose, and narrowing that is a schema
+    // change, not a gate change, because a meeting carries no department field.
+    // WRITE was never granted alongside it. firestore.rules narrows meeting
+    // update/cancel/delete to the organiser or a SENIOR admin — which excludes
+    // the Corporate Secretary — so rendering any of these three on a meeting
+    // somebody else organised would be a control whose tap is refused, this
+    // app's most common defect class. A "cancel on the President's behalf"
+    // power, if ever wanted, needs the rule widened first, not this gate.
     body.innerHTML = `
       ${m.status === 'cancelled' ? `<div class="alert-banner" style="cursor:default;margin-bottom:12px"><span>${h.ico('⚠', 16)} This meeting was cancelled.</span></div>` : ''}
       <div class="card">

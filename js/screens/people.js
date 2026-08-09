@@ -90,9 +90,29 @@ window.renderPosts = async function() {
     return;
   }
 
+  // Department tabs. The dropdown in openNewPostModal offers EVERY department
+  // (Object.keys(DEPARTMENTS)), but this list used to be currentDepts alone — so
+  // an oversight role, whose company-wide reach comes from their ROLE and not
+  // from a department assignment, could file a post into a feed it then had no
+  // tab for. Write-only department feeds. For the isAdmin() tier (president /
+  // manager / Corporate Secretary) build the list from the departments they can
+  // actually reach; the posts read rule already permits every one of them.
+  // The Corporate Secretary's two closed departments are subtracted here the
+  // same way the Departments grid (js/screens/dashboards.js) and the chat
+  // channel list (js/chat.js) subtract them — this list is presentation only,
+  // firestore.rules is the boundary.
+  const _blockedDepts = (window.currentRole === 'secretary')
+    ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
+    : [];
+  const _reachableDepts = ((typeof window.isAdminPriv === 'function' && window.isAdminPriv())
+      ? Object.keys(window.DEPARTMENTS || {})
+      : (currentDepts || []))
+    .filter(d => !_blockedDepts.includes(d));
   const postTabs = [
     {key:'General', label:'General'},
-    ...currentDepts.map(d => ({key:d, label:d})),
+    // Set, not a plain-object seen-map: a department name that collides with an
+    // Object.prototype key would silently drop its own tab.
+    ...[...new Set(_reachableDepts)].map(d => ({key:d, label:d})),
     ...(canApprove ? [{key:'Pending', label:'Pending Approval'}] : [])
   ];
   c.innerHTML = `
@@ -117,14 +137,28 @@ window.renderPosts = async function() {
 // before, with ONE addition: an optional Share button (opts.share).
 //
 // opts:
-//   canApprove — viewer may approve/reject/pin (president/manager)
-//   isOwn      — viewer authored this post (Edit/Delete)
-//   share      — render the "Share" button (feed only; never in the detail view,
-//                and never for an external partner — see loadPosts)
+//   canApprove  — viewer may APPROVE/REJECT a pending post (president/manager).
+//                 This is the ONE post verb the owner's ruling withheld from the
+//                 Corporate Secretary, and firestore.rules agrees: an update that
+//                 touches `status` requires isSeniorAdmin(), which excludes them.
+//   canModerate — viewer may PIN/UNPIN, or delete someone else's post. A SEPARATE
+//                 flag on purpose. The rules split these three verbs deliberately:
+//                 a non-`status` update (pinning writes `pinned`) is allowed to
+//                 isAdmin(), and delete is allowed to author-or-isAdmin() — and
+//                 isAdmin() includes 'secretary'. Riding pin+delete on canApprove
+//                 hid two capabilities the boundary grants the oversight role, so
+//                 they could neither pin a company announcement nor take down an
+//                 inappropriate post. Defaults to canApprove so the read-only
+//                 detail view (openPostById, which passes canApprove:false)
+//                 stays button-less exactly as before.
+//   isOwn       — viewer authored this post (Edit/Delete)
+//   share       — render the "Share" button (feed only; never in the detail view,
+//                 and never for an external partner — see loadPosts)
 window.postCardHtml = function(p, opts) {
   opts = opts || {};
-  const canApprove = !!opts.canApprove;
-  const isOwn      = !!opts.isOwn;
+  const canApprove  = !!opts.canApprove;
+  const canModerate = ('canModerate' in opts) ? !!opts.canModerate : canApprove;
+  const isOwn       = !!opts.isOwn;
   const ts = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
   const hearts = p.hearts || [];
   const hearted = hearts.includes(currentUser.uid);
@@ -154,8 +188,8 @@ window.postCardHtml = function(p, opts) {
         <button class="btn-primary btn-sm post-memo-open" data-memo-id="${escHtml(p.memoId)}">${emojiIcon('📋',16)} Read &amp; Conforme</button>
         ${shareBtn}
         <div style="display:flex;gap:6px;margin-left:auto">
-          ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
-          ${canApprove ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
+          ${(canModerate || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
+          ${canModerate ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -190,8 +224,8 @@ window.postCardHtml = function(p, opts) {
       ${shareBtn}
       <div style="display:flex;gap:6px;margin-left:auto">
         ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>` : ''}
-        ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
-        ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
+        ${(canModerate || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
+        ${canModerate && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -345,6 +379,12 @@ async function loadPosts(dept, pageSize) {
       return;
     }
     const canApprove = isRealPresident() || currentRole === 'manager';
+    // Pin/unpin and moderator-delete are the isAdmin() tier, NOT the approval
+    // tier — see window.postCardHtml's opts comment. isAdminPriv()
+    // (js/departments.js) is the client mirror of firestore.rules' isAdmin(),
+    // so president/manager/Corporate Secretary; it deliberately excludes
+    // finance, which the rules exclude too.
+    const canModerate = (typeof window.isAdminPriv === 'function') ? window.isAdminPriv() : canApprove;
     // Sharing a post into chat copies up to 140 chars of its title/body VERBATIM
     // into the chat message doc (ref.label), and from there into the target
     // conversation's inbox preview and every recipient's push body. An external
@@ -356,6 +396,7 @@ async function loadPosts(dept, pageSize) {
     const postMap = new Map(posts.map(p => [p.id, p]));
     container.innerHTML = posts.map(p => window.postCardHtml(p, {
       canApprove,
+      canModerate,
       isOwn: p.authorId === currentUser.uid,
       // Only a PUBLISHED post is shareable — a pending/rejected draft must not
       // be broadcast into chat before it clears approval.
@@ -454,13 +495,20 @@ async function loadPosts(dept, pageSize) {
 }
 
 function openNewPostModal(publishDirectly) {
+  // Same subtraction as the tab list above: the Corporate Secretary must not be
+  // offered Finance or IT as a destination for a post. Presentation only —
+  // firestore.rules is what actually refuses the write.
+  const _postDeptBlocked = (window.currentRole === 'secretary')
+    ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
+    : [];
+  const _postDepts = Object.keys(window.DEPARTMENTS || {}).filter(d => !_postDeptBlocked.includes(d));
   openPage(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
     <div class="form-group"><label>Title (optional)</label><input id="post-title" placeholder="Post title…"/></div>
     <div class="form-group"><label>Content</label><textarea id="post-content" rows="5" placeholder="Write your message…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
     <div class="form-group"><label>Department</label>
       <select id="post-dept" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         <option value="General">General (All Staff)</option>
-        ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<option value="${d}">${d}</option>`).join('')}
+        ${_postDepts.map(d=>`<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('')}
       </select>
     </div>
     <div id="post-file-area"></div>
@@ -2221,10 +2269,27 @@ async function openPresidentCashAdvanceModal(users) {
     const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
     const pending = reqs.filter(r=>r.status==='pending');
     const approved = reqs.filter(r=>r.status==='approved').length;
-    // Grant/accrual utilities are gated client-side to president/manager/finance —
-    // NOT secretary (secretary keeps balance WRITE access for the approve-decrement
-    // path per rules, but the direct grant/accrual buttons stay finance/admin-only).
-    const canGrant = ['president','manager','finance'].includes(currentRole);
+    // Grant / accrual / holidays utilities. This used to be a hardcoded
+    // president|manager|finance list that excluded the Corporate Secretary, on the
+    // theory that only the approve-decrement path needed balance writes. Re-checked
+    // against the boundary and the exclusion was wrong on all three buttons:
+    //   • Adjust Balance      → leave_balances write   = isOpsAdmin()  (includes them)
+    //   • Run Annual Accrual  → leave_accruals create/update + leave_balances write
+    //                                                  = isOpsAdmin()  (includes them)
+    //   • Manage Holidays     → settings_holidays write = isOpsAdmin() (includes them)
+    // and firestore.rules' own isOpsAdmin() comment names leave and holidays as
+    // "the Corporate Secretary's actual job". Manage Holidays was doubly wrong:
+    // renderHolidaysAdmin (this file) and the Holidays Admin sidebar entry
+    // (js/app.js) BOTH already admit them, so the button was hiding a page they
+    // could reach one click away. isOpsPriv() is the client mirror of
+    // isOpsAdmin(); using it keeps this in step with the rest of the HR /
+    // attendance / leave surface instead of drifting again.
+    // NOTE: this widens nothing on the MONEY tier — leave days are not pay, and
+    // the money queues (cash advance, raises, payroll deletes) stay read-only for
+    // them on their own screens.
+    const canGrant = (typeof window.isOpsPriv === 'function')
+      ? window.isOpsPriv()
+      : ['president','manager','finance'].includes(currentRole);
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('🌴',20)} Leave Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${canGrant?`<button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button><button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button><button class="btn-secondary btn-sm" id="lv-holidays">${emojiIcon('📅',16)} Manage Holidays</button>`:''}<button class="btn-secondary btn-sm" id="leave-csv">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
       ${window.sopPanel('How Leave works', LEAVE_SOP_STEPS, {open:false})}
@@ -2466,7 +2531,8 @@ async function openPresidentCashAdvanceModal(users) {
 
 
 // ═══════════════════════════════════════════════════
-//  GLOBAL SEARCH — across tasks, clients, inventory, products, quotes
+//  GLOBAL SEARCH — across tasks, clients, CRM leads (AEC + ROC), ventures,
+//  inventory, products, quotes and files
 //  Internal staff only. Partners / Brilliant-Steel-only are gated out (some of
 //  these collections are partner-readable at the rules level, so the UI must
 //  explicitly exclude them — never rely on rules alone here).
@@ -2489,7 +2555,7 @@ async function openPresidentCashAdvanceModal(users) {
 
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('🔎',20)} Search</h2></div>
-      <input id="gsearch-input" placeholder="Search tasks, clients, inventory, products, quotes, files…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
+      <input id="gsearch-input" placeholder="Search tasks, clients, CRM leads, ventures, inventory, products, quotes, files…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
         style="width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font-size:15px;margin-bottom:14px"/>
       <div id="gsearch-results">${window.renderEmptyState({icon:'🔎', title:'Type to search across the company.'})}</div>`;
     if (window.lucide) lucide.createIcons({ nodes: [c] });
@@ -2501,7 +2567,19 @@ async function openPresidentCashAdvanceModal(users) {
       if(sources) return sources;
       const toArr = s => s.docs.map(d=>({id:d.id,...d.data()}));
       const safe = p => p.then(toArr).catch(()=>[]);
-      const [tasks, quotes, cl, inv, prod, files] = await Promise.all([
+      // CRM + Ventures were added to this list 2026-08-10. Without them there was
+      // no way to FIND a duplicate contact by name across the two lead
+      // directories — "organize the CRM" meant eyeballing a ~330-row table — and
+      // a venture brief could only be reached by scrolling the Portfolio grid.
+      // Both reads are already permitted (aec_contacts/roc_leads: any non-partner;
+      // ventures: canDept('Ventures')), so this needs no rules change; a viewer
+      // the rules refuse just gets [] from the .catch and no group renders.
+      // Who searches the CRM: the departments that own it, plus the admin tier.
+      // canEditDept already resolves the Corporate Secretary correctly (CRM is
+      // not in SECRETARY_BLOCKED_DEPTS), so this needs no role literal.
+      const _gsCanCrm = (typeof canEditDept === 'function')
+        && (canEditDept('CRM') || canEditDept('Sales'));
+      const [tasks, quotes, cl, inv, prod, files, aec, roc, ventures] = await Promise.all([
         (typeof dbCachedGet==='function'?dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000):db.collection('tasks').get()).then(toArr).catch(()=>[]),
         (typeof getAllQuotes==='function'?getAllQuotes():db.collection('bk_quotes').get()).then(toArr).catch(()=>[]),
         window.Clients.listAll().catch(()=>[]),
@@ -2511,10 +2589,25 @@ async function openPresidentCashAdvanceModal(users) {
         // frozen/unenumerable and NOT searched. Company-visible + mine + shared-with-me,
         // via FilesHub's rules-provable 3-query fan-out, capped at 1000 like Products.
         (typeof FilesHub!=='undefined' ? FilesHub.loadFiles(null).then(a=>a.slice(0,1000)) : Promise.resolve([])).catch(()=>[]),
+        // CRM leads carry customer contact details — company, contact person,
+        // phone, email. The rules admit every non-partner to read them, so
+        // putting them in GLOBAL search would surface that book to every
+        // employee who types a name, which is a wider change than the defect
+        // asked for (the defect was that the Corporate Secretary could not find
+        // duplicates while organising the CRM). Scope the source to the people
+        // who actually work the CRM; everyone else searches as before.
+        (_gsCanCrm ? safe(db.collection('aec_contacts').limit(1000).get()) : Promise.resolve([])),
+        (_gsCanCrm ? safe(db.collection('roc_leads').limit(1000).get())    : Promise.resolve([])),
+        safe(db.collection('ventures').limit(500).get()),
       ]);
       sources = { tasks, quotes,
         clients: cl.map(x=>({...x, _brand:(x.brands&&x.brands[0])==='design'?'design':(x.brands&&x.brands.includes('bs'))?'bs':'sales'})),
-        inv, prod, files };
+        inv, prod, files,
+        // One CRM group, both directories — a duplicate that exists once as an
+        // AEC contact and once as an ROC lead is the case this is for, so
+        // splitting them into two cards would hide exactly what it should show.
+        crm: [...aec.map(x=>({...x, _crm:'AEC'})), ...roc.map(x=>({...x, _crm:'ROC'}))],
+        ventures };
       return sources;
     }
 
@@ -2538,6 +2631,10 @@ async function openPresidentCashAdvanceModal(users) {
           prod:    S.prod.filter(p=>hit(q,p.title,p.name,p.shortName,p.id,p.category)),
           quotes:  S.quotes.filter(qt=>hit(q,qt.quoteNumber,qt.clientName,qt.status)),
           files:   S.files.filter(f=>hit(q,f.name,f.description,f.scope)),
+          // AEC (company) and ROC (restaurantName) name their subject
+          // differently — match both, or half the directory is unsearchable.
+          crm:     S.crm.filter(x=>hit(q,x.company,x.restaurantName,x.contactPerson,x.email,x.phone)),
+          ventures:S.ventures.filter(v=>hit(q,v.name,v.tagline,v.summary,v.stage)),
         };
       }, (r) => {
         _gsFilesStash = {}; r.files.forEach(f=>{ _gsFilesStash[f.id]=f; });
@@ -2547,10 +2644,18 @@ async function openPresidentCashAdvanceModal(users) {
           groupHtml(`${emojiIcon('📦',16)}`,'Inventory',r.inv,i=>rowItem(`${emojiIcon('📦',16)}`,i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
           groupHtml(`${emojiIcon('🛒',16)}`,'Products',r.prod,p=>rowItem(`${emojiIcon('🛒',16)}`,p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
           groupHtml(`${emojiIcon('📄',16)}`,'Quotes',r.quotes,qt=>rowItem(`${emojiIcon('📄',16)}`,(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`)) +
-          groupHtml(`${emojiIcon('📁',16)}`,'Files',r.files,f=>rowItem(f.kind==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📄',16)}`,f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`));
+          groupHtml(`${emojiIcon('📁',16)}`,'Files',r.files,f=>rowItem(f.kind==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📄',16)}`,f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`)) +
+          // Both CRM directories live behind the CRM department's own tabs, so
+          // the row lands on the department; the _crm tag ('AEC'/'ROC') tells the
+          // reader which tab to open, and is what makes a cross-directory
+          // duplicate visible at a glance.
+          groupHtml(`${emojiIcon('🏢',16)}`,'CRM Leads',r.crm,x=>rowItem(`${emojiIcon('🏢',16)}`,x.company||x.restaurantName||'Lead',(x._crm||'')+(x.contactPerson?' · '+x.contactPerson:'')+(x.phone?' · '+x.phone:''),`navigateTo('dept:CRM')`)) +
+          // v.icon is OWNER-AUTHORED text and must never reach the raw icon slot
+          // (see the ventures doc-shape note) — a fixed emoji is used instead.
+          groupHtml(`${emojiIcon('🚀',16)}`,'Ventures',r.ventures,v=>rowItem(`${emojiIcon('🚀',16)}`,v.name||'Venture',(v.status||'')+(v.tagline?' · '+v.tagline:''),`navigateTo('dept:Ventures')`));
       }, {
         loadingText: 'Searching…',
-        emptyCheck: r => (r.tasks.length+r.clients.length+r.inv.length+r.prod.length+r.quotes.length+r.files.length)===0,
+        emptyCheck: r => (r.tasks.length+r.clients.length+r.inv.length+r.prod.length+r.quotes.length+r.files.length+r.crm.length+r.ventures.length)===0,
         emptyState: { icon: '🤷', title: `No results for "${qRaw}"`, hint: 'Try a different keyword, or check spelling.' }
       });
     }
@@ -2573,7 +2678,19 @@ window.renderFilesHub = function(){
   const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
   if(blocked){ c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Files Hub is not available for this account</h4></div>`; return; }
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // Who gets the aggregate "everything" chip. Unchanged audience — but see
+  // hasBroadRead below: this flag no longer decides what the chip is CALLED.
   const isAdminRole = ['president','manager','owner','secretary'].includes(window.currentRole);
+  // Does the viewer's Firestore read actually return every file, or the
+  // 3-query fan-out (company-visibility + own + shared-with-me)? FilesHub owns
+  // that answer (js/drive.js) and now exports it, because this screen and the
+  // data layer used to keep TWO different admin lists: this file counted the
+  // Corporate Secretary as an admin, drive.js did not, so a view labelled "All
+  // Scopes" silently omitted every private and unshared file in the company and
+  // told the one role whose job is oversight that it was looking at everything.
+  // One list, one source, no drift.
+  const hasBroadRead = (window.FilesHub && typeof FilesHub.hasBroadRead === 'function')
+    ? FilesHub.hasBroadRead() : false;
 
   // Seed list of the 12 known pre-WS38 scopes (Spec 9) — Brilliant Steel's
   // per-subtab scopes are dynamic (data-driven by its own subtab list) and stay
@@ -2591,12 +2708,34 @@ window.renderFilesHub = function(){
     { key:'references',      label:'References',        dept:'Design'     },
     { key:'files',           label:'Production',        dept:'Production' }
   ];
-  const scopeByKey = {}; SEED_SCOPES.forEach(s=>{ scopeByKey[s.key]=s; });
+  // ⚠ SCOPE PICKER = A DEPARTMENT SURFACE. Every seed scope carries the
+  // department that owns it, and two of them ('SSS & Gov Docs', 'Accounting')
+  // are Finance's — the exact folders js/screens/finance.js uploads SSS/BIR
+  // filings and the accounting archive into. This list had NO role filter, so
+  // the sidebar's "Files" tab offered the Corporate Secretary two chips
+  // literally labelled with Finance's document archive, and every row in them
+  // carries a working download anchor on `url` (a token-bearing Storage link —
+  // the metadata IS the file). Subtract their closed departments here, the same
+  // way the Departments grid (js/screens/dashboards.js) and the chat channel
+  // list (js/chat.js) already do. Presentation only: firestore.rules and
+  // storage.rules are the boundary, and the data layer subtracts the same
+  // departments again in FilesHub.loadFiles (js/drive.js) so the aggregate view
+  // and global search cannot re-open the same door.
+  const _blockedDepts = (window.currentRole === 'secretary')
+    ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
+    : [];
+  const SCOPES = SEED_SCOPES.filter(s => !_blockedDepts.includes(s.dept));
+  const scopeByKey = {}; SCOPES.forEach(s=>{ scopeByKey[s.key]=s; });
+  // Honest label. "All Scopes" is only true for the roles whose single broad
+  // query really does return everything; for the fan-out roles the same view is
+  // "everything I am allowed to see", and saying so is the whole point. Computed
+  // once because the disabled-search hint below quotes the chip by name.
+  const allScopeLabel = hasBroadRead ? 'All Scopes' : 'Everything I Can See';
   const chips = [
-    ...(isAdminRole ? [{ key:'__all__', label:'All Scopes', icon:emojiIcon('🌐',16) }] : []),
-    ...SEED_SCOPES.map(s=>({ key:s.key, label:s.label }))
+    ...(isAdminRole ? [{ key:'__all__', label: allScopeLabel, icon:emojiIcon('🌐',16) }] : []),
+    ...SCOPES.map(s=>({ key:s.key, label:s.label }))
   ];
-  const defaultKey = isAdminRole ? '__all__' : SEED_SCOPES[0].key;
+  const defaultKey = isAdminRole ? '__all__' : SCOPES[0].key;
 
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('📁',20)} Files Hub</h2></div>
@@ -2620,16 +2759,39 @@ window.renderFilesHub = function(){
     // disables the box with an honest hint instead of leaving it a silent trap.
     const searchBox = document.getElementById('fh-hub-search');
     if (key === '__all__') {
-      if (searchBox) { searchBox.disabled = false; searchBox.placeholder = 'Search my files…'; }
+      if (searchBox) { searchBox.disabled = false; searchBox.placeholder = 'Search files…'; }
       fc.innerHTML = window.skeletonHtml('rows');
       FilesHub.loadFiles(null).then(files => {
         allScopeFiles = files;
         renderAllScope();
+      }).catch(err => {
+        // Without this the skeleton sat there forever and read as "still
+        // loading" — an empty-looking file list is exactly the kind of denied
+        // read this role must never be shown as "nothing here".
+        fc.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load your files</h4><p>${escHtml(err && err.message ? err.message : String(err))}</p><button type="button" class="btn-secondary btn-sm" id="fh-hub-retry">Retry</button></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [fc] });
+        fc.querySelector('#fh-hub-retry')?.addEventListener('click', () => loadScope('__all__'));
       });
       return;
     }
-    if (searchBox) { searchBox.disabled = true; searchBox.placeholder = 'Search only works in "All Scopes"'; searchBox.value = ''; }
-    const seed = scopeByKey[key] || { label:key, dept:'General' };
+    // Quote the aggregate chip by its REAL label — and only when the viewer
+    // actually has that chip, or the hint points at a control they cannot see.
+    if (searchBox) {
+      searchBox.disabled = true;
+      searchBox.placeholder = isAdminRole ? `Search only works in "${allScopeLabel}"` : 'Search is not available in this scope';
+      searchBox.value = '';
+    }
+    // Unknown key = a scope this viewer's department filter removed, or a stale
+    // chip from a cached build. The old fallback ({label:key, dept:'General'})
+    // had no `key` of its own, so bindFileCollection received scope===undefined
+    // and threw on scope.toLowerCase() — and for a filtered-out scope it would
+    // have re-opened the very list the filter above closed. Refuse both.
+    const seed = scopeByKey[key];
+    if (!seed) {
+      fc.innerHTML = window.renderEmptyState({icon:'🔒', title:'That file scope is not available for your account'});
+      if (window.lucide) lucide.createIcons({ nodes: [fc] });
+      return;
+    }
     fc.innerHTML = window.renderFileCollection(seed.label, `fh-hub-${key}`, window.currentRole);
     window.bindFileCollection(`fh-hub-${key}`, window.currentUser, seed.dept, seed.key);
   };
@@ -2638,9 +2800,23 @@ window.renderFilesHub = function(){
     const fc = document.getElementById('fh-hub-content');
     const q = (document.getElementById('fh-hub-search')?.value||'').trim().toLowerCase();
     const showing = q ? allScopeFiles.filter(f=>hit(q,f.name,f.description,f.scope,f.department)) : allScopeFiles;
-    if (!showing.length) { fc.innerHTML = window.renderEmptyState({icon:'📁', title:'No files found', hint:'Try a different scope, or upload the first file here.'}); if (window.lucide) lucide.createIcons({ nodes: [fc] }); return; }
+    // Say what this list is, when it is not everything. The fan-out roles get
+    // company-visibility files plus their own plus what has been shared with
+    // them — a private, unshared file simply is not here, and an oversight role
+    // that assumes otherwise draws the wrong conclusion from an empty result.
+    //
+    // Computed BEFORE the empty-result return, because empty is the case where
+    // the note does the most work: "no files" and "no files you can see" look
+    // identical, and only one of them means the folder is actually empty.
+    const scopeNote = hasBroadRead ? '' :
+      `<p style="font-size:11px;color:var(--text-muted);margin:0 0 8px">Showing company-visible files, your own uploads, and files shared with you. Files kept private by their owner are not listed.</p>`;
+    if (!showing.length) {
+      fc.innerHTML = scopeNote + window.renderEmptyState({icon:'📁', title:'No files found', hint: hasBroadRead ? 'Try a different scope, or upload the first file here.' : 'Nothing here that you can see — a private file would not be listed. Try a different scope, or upload the first file here.'});
+      if (window.lucide) lucide.createIcons({ nodes: [fc] });
+      return;
+    }
     _gsFilesStashHub = {}; showing.forEach(f=>{ _gsFilesStashHub[f.id]=f; });
-    fc.innerHTML = `<div class="table-wrap"><table class="data-table table-cards">
+    fc.innerHTML = scopeNote + `<div class="table-wrap"><table class="data-table table-cards">
       <thead><tr><th>Name</th><th>Scope</th><th>Dept</th><th>Uploader</th><th>Date</th><th></th></tr></thead>
       <tbody>${showing.map(f=>`<tr>
         <td class="tc-name"><a href="#" class="fh-hub-open" data-id="${f.id}" style="color:var(--primary);font-weight:600">${f.kind==='link'?`${emojiIcon('🔗',16)} `:`${emojiIcon('📄',16)} `}${escHtml(f.name||'File')}</a></td>

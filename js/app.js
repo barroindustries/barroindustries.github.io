@@ -3158,6 +3158,21 @@ function renderDeptModule(dept) {
     return;
   }
   switch(dept) {
+    // Admin — was the last department still falling through to
+    // renderGenericDept's static "Module coming soon" card, and TWO labelled
+    // controls pointed straight at it: the Corporate Secretary dashboard's
+    // "Admin — Policies & HR Docs" quick action and the Admin card in the
+    // All-Departments grid (both js/screens/dashboards.js). A coming-soon
+    // dialog in a shipped product is worse than no button at all.
+    // There is no Admin *data* to render — DEPARTMENTS['Admin'].subtabs is []
+    // (js/config.js) and no collection is scoped to it — but everything those
+    // labels promise does exist, just filed under other screens: policies /
+    // handbook / downloads are Company tabs, memos are their own page, HR
+    // documents are the HR department. So this case is a signpost, not a
+    // placeholder: every row it paints goes somewhere real. Fixing the
+    // destination (rather than the two buttons) closes both dead ends at once
+    // and without touching a file another pass owns.
+    case 'Admin':                      renderAdminDept(); break;
     case 'Marketing':                  renderMarketing(currentUser, currentRole); break;
     case 'Finance':                    renderFinance(currentUser, currentRole); break;
     case 'HR':                         window.renderHR?.(currentUser, currentRole); break;
@@ -3204,6 +3219,48 @@ function renderDeptModule(dept) {
 // so the 'Government Biddings' case below keeps calling it unqualified —
 // resolves fine as a global regardless of which script defines it, same as
 // every other bare-global forward-reference this wave's passes document.
+
+// ── Admin department — corporate records signpost ────────────────────────
+// See the 'Admin' case in renderDeptModule above for why this exists. Kept
+// deliberately thin: it ends a dead end, it is not meant to grow into a second
+// dashboard. Every row routes to a screen that already gates itself, so this
+// list never has to re-implement a permission check — with one exception, HR,
+// which is management & finance only (js/screens/hr.js renderHR) and would
+// otherwise offer a locked door to an employee assigned to the Admin
+// department. isOpsPriv() (js/departments.js) is that screen's own tier.
+function renderAdminDept() {
+  const cfg = DEPARTMENTS['Admin'];
+  const c = document.getElementById('page-content');
+  const opsTier = (typeof window.isOpsPriv === 'function') ? window.isOpsPriv() : false;
+  const rows = [
+    ['company',        'building-2',      'Policies, Handbook &amp; Downloads', 'Company rules, the employee handbook and official forms'],
+    ['memos',          'clipboard-check', 'Memos &amp; Resolutions',            'Corporate memos and board resolutions'],
+    ['sops',           'book-open',       'SOPs',                               'Standard operating procedures, by department'],
+    ...(opsTier ? [['dept:HR', 'user-cog', 'HR Documents', 'People &amp; roles, employment records, leave and attendance']] : []),
+    ['team-directory', 'users',           'Team Directory',                     'Who is who, and which department they sit in']
+  ];
+  c.innerHTML = `
+    <div class="page-header" style="display:flex;align-items:center;gap:10px">${window.deptIconTile(cfg||'Admin', 32)}<h2 style="margin:0">Admin</h2></div>
+    <div class="card">
+      <div class="card-header"><h3>Corporate Records</h3></div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+        <p style="margin:0 0 4px;font-size:13px;color:var(--text-muted)">Admin has no records of its own — the company's governance documents live on the screens below.</p>
+        ${rows.map(([page, icon, label, blurb]) => `
+          <button class="quick-action-btn" data-page="${page}" style="align-items:flex-start;text-align:left">
+            <i data-lucide="${icon}"></i>
+            <span><span style="display:block">${label}</span><span style="display:block;font-size:11px;color:var(--text-muted);font-weight:400">${blurb}</span></span>
+          </button>`).join('')}
+      </div>
+    </div>`;
+  // Handlers bound through `c`, not a document-wide query: openPage/navigateTo
+  // can leave a dying page in the DOM for ~300ms, and a document-scoped
+  // [data-page] sweep would also grab the sidebar's own nav buttons and
+  // double-bind them.
+  c.querySelectorAll('[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => navigateTo(btn.dataset.page));
+  });
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
+}
 
 function renderGenericDept(dept) {
   const cfg = DEPARTMENTS[dept];

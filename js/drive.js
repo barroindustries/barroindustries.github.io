@@ -191,7 +191,15 @@ window.Drive = (() => {
   // exactly what made this bug undiagnosable. Map the codes that actually occur
   // to something the user can act on; anything unmapped still surfaces its raw
   // code, so the next report arrives with evidence attached.
-  function uploadErrorMessage(err) {
+  //
+  // `kind` — 'photo' (the default, so the two existing profile-photo callers in
+  // js/app.js keep their wording byte-for-byte) or 'file'. Only the
+  // storage/unauthorized branch differs, and it has to: for an avatar that code
+  // really does mean "wrong format or too big", but for a document upload it
+  // overwhelmingly means the folder is not open to this account, and telling
+  // someone their contract PDF "must be an image under 15MB" sends them off
+  // chasing a problem they do not have.
+  function uploadErrorMessage(err, kind) {
     // String(): a DOMException carries a NUMERIC legacy .code (InvalidStateError
     // = 11, NotFoundError = 8, AbortError = 20, QuotaExceededError = 22), and
     // those DO occur on iOS when a File's backing blob has gone away or a
@@ -208,13 +216,23 @@ window.Drive = (() => {
     // full-screen overlay with no way out.
     let code = '', message = '';
     try { code = String((err && err.code) || ''); } catch (_) {}
-    try { message = String(message || ''); } catch (_) {}
+    // 2026-08-10: this read `String(message || '')` — message reading ITSELF,
+    // which is always '' at that point. Every avatar/* branch below therefore
+    // fell through to the generic "Upload failed." and the specific, actionable
+    // text those errors were written to carry ("That photo is too large (15MB
+    // maximum)", "…couldn't be read on this device") never reached anyone. Read
+    // the ERROR's message, still guarded — this function's contract is that it
+    // never throws, because every caller is inside the catch block that is the
+    // user's last line of defence.
+    try { message = String((err && err.message) || ''); } catch (_) {}
     if (code.indexOf('avatar/') === 0) return message || 'Upload failed.';
     switch (code) {
       case 'storage/unauthenticated':
         return 'Your session ended. Please sign in again and retry.';
       case 'storage/unauthorized':
-        return 'That photo was rejected — it must be an image under 15MB. Please try a different one.';
+        return kind === 'file'
+          ? "You don't have permission to upload into this folder — nothing was saved. Please tell an administrator."
+          : 'That photo was rejected — it must be an image under 15MB. Please try a different one.';
       case 'storage/quota-exceeded':
         return 'Company file storage is full. Please tell an administrator.';
       case 'storage/retry-limit-exceeded':
@@ -349,6 +367,10 @@ window.Drive = (() => {
 
     const handleFile = async (file) => {
       progress.classList.remove('hidden');
+      // Clear a previous failure's red bar — the error state is now persistent
+      // (see the catch below), so the NEXT attempt has to reset it explicitly
+      // or a successful retry would still be painted as a failure.
+      bar.style.background = '';
       bar.style.width = '20%';
       status.textContent = `Uploading ${file.name}…`;
       try {
@@ -360,14 +382,25 @@ window.Drive = (() => {
         if (onUpload) onUpload(result, file);
         setTimeout(() => { progress.classList.add('hidden'); bar.style.width = '0%'; }, 2000);
       } catch (err) {
+        // A failed attachment is SILENT unless we say so loudly. This used to
+        // print the raw Firebase message ("Firebase Storage: User does not have
+        // permission…") into a progress bar that hid itself after 3 seconds, and
+        // raised nothing else — so a denied upload looked like a slow one, the
+        // caller's onUpload never fired, and the surrounding form then saved
+        // happily with fileUrl:null and a green "saved" toast. The document was
+        // gone and the person was told it worked.
+        //
+        // Two changes: translate the code through uploadErrorMessage() — which
+        // exists for exactly this and was never wired to this path — and raise a
+        // toast, which survives the bar. The bar itself now stays put; there is
+        // nothing useful about hiding the only record of the failure.
+        const msg = uploadErrorMessage(err, 'file');
         bar.style.width = '100%';
         bar.style.background = 'var(--danger)';
-        status.textContent = `❌ Upload failed: ${err.message}`;
-        setTimeout(() => {
-          progress.classList.add('hidden');
-          bar.style.width = '0%';
-          bar.style.background = '';
-        }, 3000);
+        status.textContent = `❌ ${file.name} — ${msg}`;
+        // Plain text sink: never emojiIcon() here (it returns markup).
+        try { window.Notifs && Notifs.showToast(`Upload failed — ${msg}`, 'error'); } catch (_) {}
+        console.warn('[drive] upload failed', err);
       }
     };
 
@@ -481,6 +514,38 @@ window.Drive = (() => {
    Contract for WS34/WS35 — see fable-workplan/38-files-hub.md.
 ═══════════════════════════════════════════════════ */
 window.FilesHub = {
+  // ── Who reads EVERY hub_files doc in one unfiltered query, and who takes the
+  // 3-query fan-out. This used to be an anonymous literal repeated inside
+  // loadFiles and canEdit, and a THIRD, DIFFERENT literal lived in
+  // renderFilesHub (js/screens/people.js) which also counted 'secretary' as an
+  // admin. The screen therefore labelled its default view "All Scopes" while
+  // this layer quietly gave the Corporate Secretary the fan-out — a view that
+  // omits every private and unshared file, presented to the one role whose job
+  // is oversight as if it were everything. One exported predicate, so the
+  // screen can ask instead of guessing. ('owner' is the legacy alias for
+  // president, matching the role lists elsewhere in the app.)
+  BROAD_READ_ROLES: ['president','manager','owner'],
+  hasBroadRead() { return this.BROAD_READ_ROLES.includes(window.currentRole); },
+
+  // ── Departments whose files a role may not see, as a doc-level predicate.
+  // Owner ruling: the Corporate Secretary reaches every department EXCEPT
+  // Finance and IT. hub_files carries the owning `department` on every doc
+  // (window.bindFileCollection stamps it, js/departments.js), so the wall can be
+  // enforced on the DATA rather than on each screen that happens to list files
+  // — which matters because the aggregate Files Hub view and Global Search both
+  // come through loadFiles, and filtering only the scope chips would have left
+  // both of those doors open. `scope` is checked too as a legacy safety net:
+  // pre-WS38 migrated docs can be missing `department`, and 'sss'/'accounting'
+  // are Finance's own scopes by construction (js/screens/finance.js).
+  // This is the AFFORDANCE half only — firestore.rules is the boundary.
+  _FINANCE_SCOPE_KEYS: ['sss','accounting'],
+  _hiddenFor(f) {
+    if (window.currentRole !== 'secretary') return false;
+    const blocked = window.SECRETARY_BLOCKED_DEPTS || ['Finance','IT'];
+    if (blocked.includes(f.department)) return true;
+    return blocked.includes('Finance') && this._FINANCE_SCOPE_KEYS.includes(f.scope);
+  },
+
   // ── Read fan-out. Rules cannot be satisfied by one unfiltered query for
   // non-admins, so merge 3 provable queries (admins: 1 broad query).
   async loadFiles(scope /* string|null = all scopes */, { includeDeleted=false } = {}) {
@@ -490,16 +555,16 @@ window.FilesHub = {
       if (scope) q = q.where('scope','==',scope);
       return q.where('deleted','==', includeDeleted);
     };
-    const isAdminRole = ['president','manager','owner'].includes(window.currentRole);
     const snaps = await Promise.all(
-      isAdminRole
+      this.hasBroadRead()
         ? [ base().get().catch(()=>({docs:[]})) ]
         : [ base().where('visibility','==','company').get().catch(()=>({docs:[]})),
             base().where('uploadedBy','==',uid).get().catch(()=>({docs:[]})),
             base().where('sharedUserIds','array-contains',uid).get().catch(()=>({docs:[]})) ]);
     const seen = {}; const out = [];
     snaps.forEach(s => s.docs.forEach(d => { if (!seen[d.id]) { seen[d.id]=1; out.push({id:d.id,...d.data()}); } }));
-    return out.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    return out.filter(f => !this._hiddenFor(f))
+              .sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
   },
   async loadFolders(scope) {
     const snap = await db.collection('hub_folders').where('scope','==',scope).get().catch(()=>({docs:[]}));
@@ -511,7 +576,11 @@ window.FilesHub = {
     return parts.join(' / ');
   },
   canEdit(f) {
-    return ['president','manager','owner'].includes(window.currentRole)
+    // A file the viewer is not allowed to SEE is never editable, whatever the
+    // ACL says — a stale share or an editorUserIds entry left behind by a
+    // department move must not become a way back into a closed department.
+    if (this._hiddenFor(f)) return false;
+    return this.hasBroadRead()
       || f.uploadedBy === currentUser.uid
       || (f.editorUserIds||[]).includes(currentUser.uid);
   },

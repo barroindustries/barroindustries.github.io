@@ -361,6 +361,15 @@ window.Chat = (() => {
     return Object.keys(window.DEPARTMENTS || {})
       .filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept);
   }
+  // Is THIS dept channel closed to a user holding THIS role? Takes the role as
+  // an argument rather than reading window.currentRole, because the two callers
+  // below ask about OTHER people (who to notify, who to offer as an @mention),
+  // not about the signed-in user. Reads SECRETARY_BLOCKED_DEPTS
+  // (js/departments.js) so the whole client keeps one definition of the set.
+  function _deptChannelClosedToRole(role, department) {
+    return role === 'secretary'
+      && (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT']).includes(department);
+  }
   function myDeptChannels() {
     if (typeof isPartner === 'function' && isPartner()) return [];  // partners NEVER
     // ⚠ CARVE-OUT GAP (2026-08-09). _isAdminRole() includes 'secretary', so the
@@ -369,14 +378,37 @@ window.Chat = (() => {
     // ("corporate secretary can access all departments except finance, and
     // IT"). Neither SECRETARY_BLOCKED_DEPTS nor canIt() reached chat.
     //
-    // ⚠ THIS IS THE UI HALF ONLY. firestore.rules' convMember()/memberOfDoc()
-    // still grant dept-channel membership through isAdmin(), which still
-    // contains 'secretary' — so the boundary itself does NOT yet refuse a
-    // direct read or post to conversations/dept_Finance. Closing that needs a
-    // !isSecretary() guard on the dept-membership disjunct in firestore.rules
-    // (mirroring canIt()), an emulator differential and a separate deploy.
-    // Reported, deliberately not changed in this pass: rules ahead of a stale
-    // cached client denies reads the old build still sends.
+    // THE RULES HALF SHIPPED (2026-08-09) — this filter is now defence in
+    // depth, not the only control. firestore.rules defines deptChannelOpen(d)
+    // (= !isSecretary() || d is neither Finance nor IT) and applies it on all
+    // three verbs of the dept-membership branch: memberOfDoc(), convMember()
+    // and the dept-channel create rule. A direct read or post to
+    // conversations/dept_Finance BY THAT BRANCH is refused at the boundary.
+    // Keep this filter anyway: it stops the UI listing a channel the boundary
+    // would then deny, which reads to the user as a broken app.
+    //
+    // The rules-side hole this used to describe is CLOSED (2026-08-10). For the
+    // record, because the shape is worth remembering: memberOfDoc() tests
+    // `uid in participants` first and unconditionally, and the conversations
+    // update rule had a group-management branch gated on
+    // `createdBy == uid || isAdmin()` — isAdmin() includes 'secretary' — that
+    // allowed `participants` with NO membership precondition. Since a dept doc
+    // id is deterministic ('dept_' + name), one write of {participants:[myUid]}
+    // to conversations/dept_Finance made that first disjunct true and handed
+    // over the whole thread, straight past deptChannelOpen().
+    //
+    // It was closed on the WRITE side, which is the only side that can be
+    // closed: that branch now requires memberOfDoc() and refuses to touch
+    // participants/participantNames on a type=='dept' doc, so a dept
+    // conversation's participants array can never become non-empty (create
+    // already pins it to []). Fencing the READ instead was tried and reverted
+    // the same day — `allow read` also serves LIST, a list rule must be
+    // provable from the query alone, and the inbox query
+    // (participants array-contains uid) cannot prove a type field, so the fence
+    // denied every inbox for every role.
+    //
+    // The filter below therefore remains what it always was: the client half,
+    // so the channels never appear. It is not load-bearing for security.
     const blocked = (window.currentRole === 'secretary')
       ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
       : [];
@@ -2409,6 +2441,16 @@ window.Chat = (() => {
       return snap.docs.map(d => ({ id: d.id, ...d.data() }))
         .filter(u => u.department === conv.department ||
                      (Array.isArray(u.departments) && u.departments.includes(conv.department)))
+        // Owner ruling 3: a department ASSIGNMENT must never beat the role
+        // decision. A Corporate Secretary whose profile lists Finance or IT is
+        // a member by this filter, but the rules refuse them the channel
+        // (deptChannelOpen, firestore.rules) — so notifying them would deliver
+        // the message preview, in-app AND on the lock screen, for a thread that
+        // then will not open. Same reasoning as the partner guard in
+        // _forwardBlockReason below: a push notification never passes through
+        // the conversation rules, so the SENDER's client is the only place this
+        // can be stopped.
+        .filter(u => !_deptChannelClosedToRole(u.role, conv.department))
         .map(u => u.id);                    // actual members only — NOT implicit admins
     }
     return (conv.participants || []).slice();
@@ -4584,6 +4626,14 @@ window.Chat = (() => {
       const u = _usersByUid[uid];
       const inDept = u.department === conv.department || (Array.isArray(u.departments) && u.departments.includes(conv.department));
       const isChannelAdmin = ['president', 'manager', 'secretary'].includes(u.role);
+      // …but 'secretary' is a channel admin everywhere EXCEPT # Finance and
+      // # IT, which the owner closed to them and firestore.rules'
+      // deptChannelOpen() now refuses. Without this they stayed offerable in
+      // the typeahead, and a mention is AUTHORITATIVE for delivery
+      // (_notifyRecipients merges the mention set on top of membership) — so
+      // one @tag would have pushed a Finance message preview to the one role
+      // that must not receive it, linked to a thread they cannot open.
+      if (_deptChannelClosedToRole(u.role, conv.department)) return null;
       return (inDept || isChannelAdmin) ? { uid, name: u.displayName || u.email || 'User' } : null;
     }).filter(Boolean);
   }

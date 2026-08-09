@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.118';
+window.APP_VERSION = '14.0.119';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -546,7 +546,32 @@ window.NAV_REGISTRY = {
       { key:'tasks',        icon:'check-square', label:'Tasks',            page:'tasks' },
       { key:'posts',        icon:'megaphone',    label:'Posts',            page:'posts' },
       { key:'company',      icon:'building-2',   label:'Company',          page:'company' },
+      // Memos & board resolutions. The router case ('memos' → renderMemosPage,
+      // js/app.js navigateTo) and the rules (memos create/delete = isAdmin(),
+      // i.e. exactly this variant's three roles) have both been in place for
+      // ages — what was missing was any nav entry at all, so the page was
+      // reachable only from one dashboard tile and from notification deep
+      // links. Anyone navigating by the sidebar concluded the capability did
+      // not exist, which for the Corporate Secretary is their signature
+      // artefact. Sits next to Company because the Company screen's Memos tab
+      // is the same content viewed the other way round.
+      { key:'memos',        icon:'clipboard-check', label:'Memos',         page:'memos' },
       { key:'departments',  icon:'layout-grid',  label:'All Departments',  page:'departments' },
+      // CRM and Ventures, promoted out of the "All Departments" grid into
+      // first-class entries (owner, 2026-08-10: the Corporate Secretary is
+      // organising the CRM and reviewing Ventures this week). Unlike 'staff',
+      // this variant has NO {deptLoop:true} placeholder — an admin's chrome is
+      // a flat company-wide list, not their own assigned departments — so a
+      // department surfaces here only if it is named explicitly, the same way
+      // 'hr' already is below. Before this they were three interactions deep
+      // (Dashboard → All Departments → card) on desktop and drawer-only on
+      // mobile.
+      // No `when:` predicate on purpose: canDept() in firestore.rules admits
+      // all three admin roles to both, and neither is in
+      // SECRETARY_BLOCKED_DEPTS (js/departments.js), so gating either one out
+      // would hide a capability the boundary actually grants.
+      { key:'crm',          icon:'target',       label:'CRM',              page:'dept:CRM' },
+      { key:'ventures',     icon:'rocket',       label:'Ventures',         page:'dept:Ventures' },
       { key:'approvals',    icon:'shield-check', label:'Approvals',        page:'approvals', section:true },
       { key:'progress',     icon:'trending-up',  label:'Progress Reports', page:'progress' },
       { key:'team',         icon:'users',        label:'Team Directory',   page:'team-directory', section:true },
@@ -626,6 +651,14 @@ window.NAV_REGISTRY = {
       { icon:'message-circle', label:'Chat',    page:'chat'            },
       { icon:'users',          label:'Team',    page:'team-directory'  },
       { icon:'shield-check',   label:'Approve', page:'approvals'       },
+      // Mirrors the two sidebar entries added above. On mobile the bar itself
+      // is capped at 5 (_bottomNavSplit, js/app.js), so these land in the
+      // "More" sheet alongside Team and Approve rather than pushing anything
+      // out of the visible four — which is exactly what that sheet is for, and
+      // is still one tap closer than the hamburger drawer these two used to
+      // require.
+      { icon:'target',         label:'CRM',      page:'dept:CRM'       },
+      { icon:'rocket',         label:'Ventures', page:'dept:Ventures'  },
       { icon:'circle-user',    label:'Profile', page:'my-profile'      }
     ],
     // Bottom Nav — Generic Partner (any company)
@@ -878,23 +911,42 @@ window.ymAddMonths = function(ym, delta) {
   return y + '-' + String(m).padStart(2, '0');
 };
 
+// The ledger and the general journal are MONEY-TIER reads (firestore.rules):
+// a collection LIST is denied outright for the Corporate Secretary and for
+// every non-money role. The readers below have always swallowed that denial
+// into a bare {docs:[]} so a screen stays alive instead of blanking — but a
+// bare empty snapshot is then summed into a confident "Revenue ₱0 / Net Cash
+// ₱0", which is the same silent-zero choke point fetchUsersWithPayroll
+// documents above, and the reason Analytics told the Secretary the company
+// earned nothing.
+//
+// The catch stays. What changes is that the denial is RECORDED on the
+// resolved value, in the identical `_denied`/`_error` shape fetchUsersWithPayroll
+// already stamps, so a caller can render "not shown to you" instead of a
+// number nobody produced. Purely additive: every existing caller reads only
+// `.docs`, and a non-permission failure still resolves empty with _denied
+// false (it is a fetch problem, not a boundary, and must not be labelled one).
+window.deniedSnap = function(e) {
+  return { docs: [], _denied: !!(e && e.code === 'permission-denied'), _error: e };
+};
+
 // ── Bounded ledger readers (WS16) — return {docs:[{data()}...]} like a snapshot ──
 // Cached per RESOLVED period key so switching period re-queries only that range.
 // 'all' (or an unbounded need) falls back to the full cached read.
 window.ledgerForPeriod = function(periodKey) {
   const p = Period.parse(periodKey);
   if (p.type === 'all')
-    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 45000);
+    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(window.deniedSnap), 45000);
   return dbCachedGet('ledger:' + p.key,
     () => db.collection('ledger').where('date','>=',p.start).where('date','<=',p.end)
-            .get().catch(() => ({docs:[]})), 45000);
+            .get().catch(window.deniedSnap), 45000);
 };
 // Everything on/after startYYYYMMDD (for the 6-month trend etc.). Bounded, cached by start.
 window.ledgerSince = function(startYmd) {
   if (!startYmd)
-    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 60000);
+    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(window.deniedSnap), 60000);
   return dbCachedGet('ledger>=' + startYmd,
-    () => db.collection('ledger').where('date','>=',startYmd).get().catch(() => ({docs:[]})), 60000);
+    () => db.collection('ledger').where('date','>=',startYmd).get().catch(window.deniedSnap), 60000);
 };
 // Bounded general_journal reader — symmetric with ledgerForPeriod (v12 WS39).
 // general_journal has no active writer today (legacy/orphaned collection, read-only)
@@ -904,10 +956,10 @@ window.ledgerSince = function(startYmd) {
 window.gjForPeriod = function(periodKey) {
   const p = Period.parse(periodKey);
   if (p.type === 'all')
-    return dbCachedGet('gj', () => db.collection('general_journal').get().catch(() => ({docs:[]})), 45000);
+    return dbCachedGet('gj', () => db.collection('general_journal').get().catch(window.deniedSnap), 45000);
   return dbCachedGet('gj:' + p.key,
     () => db.collection('general_journal').where('date','>=',p.start).where('date','<=',p.end)
-            .get().catch(() => ({docs:[]})), 45000);
+            .get().catch(window.deniedSnap), 45000);
 };
 
 // ── Bank accounts registry (v12 WS36) ──────────────────────────────────────

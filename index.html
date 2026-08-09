@@ -110,11 +110,19 @@
     <div id="login-role-picker">
       <p class="login-pick-label">Sign in as</p>
       <div class="login-role-cards" role="group" aria-label="Portal">
-        <button class="login-role-card" data-type="admin" title="President · Manager · Secretary · Accountant">
+        <!-- Portal labels MUST match ROLE_TYPE_MAP (js/app.js): the login-type
+             gate signs a user out mid-boot when the card they picked disagrees
+             with their role's mapped portal. 'finance' (Accountant) maps to
+             'employee' there — deliberately, it is an employee-tier account
+             everywhere else in the app — so it belongs on the Employee card.
+             It used to be advertised here on Admin, which meant an Accountant
+             following the tooltip got a forced sign-out and a cleared password
+             field. -->
+        <button class="login-role-card" data-type="admin" title="President · Manager · Secretary">
           <span class="lrc-icon"><i data-lucide="shield"></i></span>
           <span class="lrc-label">Admin</span>
         </button>
-        <button class="login-role-card" data-type="employee" title="Staff · Agent">
+        <button class="login-role-card" data-type="employee" title="Staff · Agent · Accountant">
           <span class="lrc-icon"><i data-lucide="user"></i></span>
           <span class="lrc-label">Employee</span>
         </button>
@@ -197,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.118 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.119 · Barro Industries</div>
   </div>
 </div>
 
