@@ -1335,6 +1335,62 @@ service cloud.firestore {
     // payroll surface the owner's ruling 2 takes away from the secretary.
     // 'disbursed' is reachable ONLY by the president, ONLY from 'verified', and
     // is immutable afterward — no clause below permits updating a disbursed doc.
+    // ── WEEKLY (Operations Team) PAY RUN ──────────────────────────────────
+    // pay_weeks/{YYYY-MM-DD} — the doc id is the week's MONDAY DATE, not an ISO
+    // week number. Week numbering collides at a year boundary in a way that
+    // silently merges two different weeks into one id, and the Monday date is
+    // already the field every weekly payslip is indexed on.
+    //
+    // Deliberately mirrors pay_runs' state machine — draft -> computed ->
+    // verified -> disbursing -> disbursed — with ONE owner-ruled difference
+    // (2026-08-10): FINANCE may release a verified week, where the monthly run
+    // reserves that for the President. A weekly cadence is 52 releases a year
+    // and production workers are the least able to absorb a late payday, so
+    // requiring the President at each one makes payday wait on one person.
+    // Everything genuinely irreversible stays President-only: the reopen paths
+    // and delete.
+    //
+    // This block ships BEFORE the screen that reads it, on purpose. Every denied
+    // read in this app collapses into an empty list, and on a pay run an empty
+    // list is indistinguishable from "nobody is owed anything".
+    match /pay_weeks/{weekId} {
+      allow read: if isAuth() && isMoneyAdmin();
+      allow create: if isAuth() && isMoneyAdmin() &&
+        request.resource.data.get('state','draft') in ['draft','computed'];
+      allow update: if isAuth() && (
+        // Period-scoped exclusion — same shape and same reasoning as pay_runs.
+        // The state must not move, and a disbursed week is frozen: once money
+        // has moved, who was on that payroll is history, not a setting.
+        ( isMoneyAdmin() &&
+          resource.data.get('state','draft') in ['draft','computed','verified'] &&
+          request.resource.data.get('state','draft') == resource.data.get('state','draft') &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy']) )
+        ||
+        // compute / re-compute / verify
+        ( isMoneyAdmin() &&
+          resource.data.get('state','draft') in ['draft','computed'] &&
+          request.resource.data.get('state','') in ['computed','verified'] )
+        ||
+        // OWNER RULING 2026-08-10: Finance may release a verified week.
+        // The transactional lock (verified -> disbursing -> disbursed) is the
+        // same two-step the monthly run uses, so a second press cannot re-enter
+        // a run already in flight.
+        ( isMoneyAdmin() && (
+            ( resource.data.get('state','')=='verified'   && request.resource.data.get('state','')=='disbursing' ) ||
+            ( resource.data.get('state','')=='disbursing' && request.resource.data.get('state','')=='disbursed' )
+        ))
+        ||
+        // Reopening a week, and unsticking a half-finished disburse, stay
+        // President-only — those are the paths that can un-say something.
+        ( isPresident() && (
+            ( resource.data.get('state','')=='verified'   && request.resource.data.get('state','')=='computed' ) ||
+            ( resource.data.get('state','')=='disbursing' && request.resource.data.get('state','')=='computed' )
+        ))
+      );
+      allow delete: if isAuth() && isPresident();
+    }
+
     match /pay_runs/{month} {
       allow read: if isAuth() && isMoneyAdmin();
       allow create: if isAuth() && isMoneyAdmin() &&

@@ -529,6 +529,110 @@ window.computeWeeklyLine = function (w, days) {
   };
 };
 
+// ═══════════════════════════════════════════════════════════
+//  WEEKLY RUN — rate resolution and the weekly skip guard
+//  TYPE-B-WEEKLY-PAYROLL-SPEC / OPS-PAYROLL-PARITY-SPEC step 6. ADDITIVE.
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * The ONE place a production worker's hourly rate is decided.
+ *
+ * WHY THIS EXISTS. A worker profile can carry `hourlyRate`, `dailyRate`, both,
+ * or neither — the create form takes the two as unlinked free text. The roster
+ * column shows the DAILY rate while computeWeeklyLine reads the HOURLY one, so
+ * a worker set up with only a daily rate displays correctly on screen and
+ * computes to ₱0.00. The screen looks right while the run pays nothing.
+ *
+ * Returns { rate, source, ok, why }. A caller must check `ok` — this REFUSES at
+ * zero rather than returning 0, because a ₱0.00 line in a batch of thirty is
+ * invisible, and "everyone got paid" with one silent zero is the failure this
+ * whole design is trying to avoid.
+ */
+window.resolveWorkerHourlyRate = function (wp) {
+  const w = wp || {};
+  const hourly = Number(w.hourlyRate);
+  if (Number.isFinite(hourly) && hourly > 0) return { rate: hourly, source: 'hourlyRate', ok: true, why: '' };
+  const daily = Number(w.dailyRate);
+  if (Number.isFinite(daily) && daily > 0) {
+    // 8-hour day — the same divisor the worker profile screen already displays
+    // with (js/screens/hr.js ~3221), so the run and the profile agree.
+    return { rate: _round2(daily / 8), source: 'dailyRate/8', ok: true, why: '' };
+  }
+  return { rate: 0, source: 'none', ok: false,
+           why: 'No pay rate on file — set an hourly or daily rate on this worker\'s profile before running the week.' };
+};
+
+/**
+ * Who the WEEKLY run pays. The twin of monthlyRunSkipReason, and it has to be a
+ * separate expression: the monthly guard's job is to keep production staff OUT,
+ * so reusing it here would skip exactly the people this run exists to pay.
+ *
+ * @param w              a worker profile ({id, status, linkedUid, ...})
+ * @param periodExcluded this WEEK's exclusion map (pay_weeks/{monday}.excluded)
+ * @param opts.monthlyPaidUids  uids already on a monthly run — the double-pay
+ *                              guard from the other direction
+ */
+window.weeklyRunSkipReason = function (w, periodExcluded, opts) {
+  if (!w) return 'missing';
+  const o = opts || {};
+  // Permanent reasons first, and in this order, so the message names the real
+  // cause — the same contract monthlyRunSkipReason keeps.
+  if (w.status === 'inactive' || w.removed === true) return 'removed';
+  // THE DOUBLE-PAY GUARD, from the weekly side. The monthly run skips anyone
+  // with a linked worker profile; this skips anyone the monthly run actually
+  // paid. Both directions are needed — a person can be mis-configured into
+  // either run, and only one of the two guards would catch each case.
+  if (w.linkedUid && o.monthlyPaidUids &&
+      (o.monthlyPaidUids.has ? o.monthlyPaidUids.has(w.linkedUid) : o.monthlyPaidUids[w.linkedUid])) {
+    return 'paid-monthly';
+  }
+  const r = window.resolveWorkerHourlyRate(w);
+  if (!r.ok) return 'no-rate';
+  // Period-scoped, exactly as the monthly ruling requires (2026-08-10): an
+  // exclusion belongs to THIS WEEK, never to the person.
+  if (periodExcluded) {
+    const e = (typeof periodExcluded.get === 'function') ? periodExcluded.get(w.id) : periodExcluded[w.id];
+    if (e) return 'excluded' + (typeof e === 'string' && e ? ': ' + e : '');
+  }
+  return null;
+};
+
+/**
+ * The Monday that owns a given date, as 'YYYY-MM-DD'. This is the pay week's id.
+ *
+ * Takes and returns the STRING form and never builds a Date from a bare
+ * 'YYYY-MM-DD' — that parses as UTC midnight, which is 08:00 the same day in
+ * Manila but the PREVIOUS day for any negative offset, and a week boundary that
+ * moves by a day pays the wrong seven days. Noon-anchored with an explicit
+ * +08:00 for the same reason the calendar does it.
+ */
+window.payWeekMondayOf = function (iso) {
+  const d = new Date(String(iso).slice(0, 10) + 'T12:00:00+08:00');
+  if (isNaN(d)) return '';
+  const dow = (d.getUTCDay() + 6) % 7;            // 0 = Monday
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+};
+
+/** The seven ISO dates of a pay week, Monday first. */
+window.payWeekDays = function (mondayIso) {
+  const out = [];
+  const base = new Date(String(mondayIso).slice(0, 10) + 'T12:00:00+08:00');
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(base.getTime());
+    d.setUTCDate(d.getUTCDate() + i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+};
+
+/**
+ * Which MONTH a pay week belongs to, for month-to-date and statutory purposes.
+ * Derived from the week's MONDAY, never its end — deriving it from the end
+ * mis-bracketed 8 of 12 months in this repo once (js/screens/hr.js ~4471).
+ */
+window.payWeekMonth = function (mondayIso) { return String(mondayIso).slice(0, 7); };
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     vatSplit: window.vatSplit,
@@ -539,6 +643,11 @@ if (typeof module !== 'undefined' && module.exports) {
     computeKpiForMonth: window.computeKpiForMonth,
     applyPayLineOverride: window.applyPayLineOverride,
     computeWeeklyLine: window.computeWeeklyLine,
+    resolveWorkerHourlyRate: window.resolveWorkerHourlyRate,
+    weeklyRunSkipReason: window.weeklyRunSkipReason,
+    payWeekMondayOf: window.payWeekMondayOf,
+    payWeekDays: window.payWeekDays,
+    payWeekMonth: window.payWeekMonth,
     WEEK_DAYS: window.WEEK_DAYS,
     TRAVEL_RATE_FACTOR: window.TRAVEL_RATE_FACTOR
   };
