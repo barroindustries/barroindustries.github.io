@@ -118,6 +118,24 @@ Eleven steps. Each ships on its own. **[MONEY]** marks steps where a mistake mov
 
 ---
 
+## 5a. OWNER'S ANSWERS — 2026-08-10, BUILD TO THESE
+
+| # | Decision | Ruling |
+|---|---|---|
+| 1 | Who releases a weekly run | **Finance may release a verified week.** The President still sees every week and can Verify; 52 President-only releases a year would make payday wait on one person, and production workers are least able to absorb a late payday. |
+| 2 | Statutory on weekly pay | **Port the existing rule now.** The batch must deduct SSS/PhilHealth/Pag-IBIG exactly as the one-worker form does today — once a month, on the last pay week, only for workers configured for it. No worker's take-home changes; the rule simply keeps working when the run replaces the form. STILL SHOW THE ACCOUNTANT before the first live batch disburse — porting it faithfully is not the same as it being right. |
+| 3 | Exclusion carry-forward | **Pre-tick and confirm.** The next period opens with a previously-removed person still ticked, and Finance confirms with one click. This honours the ruling (a fresh decision every period) while making it impossible to forget — the failure mode of a clean start is the negative-net line the owner already screenshotted. |
+| 4 | Transfer receipt | **ONE RECEIPT PER WORKER**, not one for the batch. ⚠ This OVERRIDES the reading taken from the original wording ("One disburse then create payslip with the tranfer fund receipt attached in one page"), which had been interpreted as a single batch transfer. Disburse therefore collects a file per worker rather than one upload, and each payslip carries its own proof of payment. Storage path and the Disburse form both change accordingly — do not build the batch-receipt version. |
+
+**Migration of the existing flags (spec §2) — proceeding with B + C, unasked:**
+convert each live `payrollExcluded` into an exclusion for the month it was
+actually set in (the timestamp is stored), delete the old flag, and show a
+one-time banner listing those people so Finance resolves each on screen. Option
+A was never viable — it would have paid the four staff whose zero-salary lines
+produced the owner's −₱500.00 screenshot.
+
+---
+
 ## 5. DECISIONS I NEED FROM YOU
 
 Five. Everything else I have decided and listed below.
