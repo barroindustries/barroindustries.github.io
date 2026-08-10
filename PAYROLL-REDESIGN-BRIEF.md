@@ -158,6 +158,65 @@ measurements that caught the calendar chip and the sticky payslip bar today.
 
 ---
 
+## Backfilling history
+
+> "since this is a new design again, allow us to input the old records so
+> everything is up to date"
+
+A payroll with no past is not much use: several things in this app read HISTORY,
+not the current period, and they are all wrong today for anyone paid before the
+system existed —
+
+- the **BIR alphalist** is assembled from `salary_history` (js/bir.js ~795-867),
+  so a year with gaps produces a filing with gaps;
+- **13th-month pay** is a function of the year's earnings;
+- **month-to-date and year-to-date** on payslips and reports;
+- a worker's own **payslip archive**, which is the thing they ask HR for.
+
+So the redesign needs a way to enter periods that were paid before, or paid
+outside the system. It belongs on the same unified screen — a past period you
+pick and fill in — not a separate import tool, which would be another mode and
+would break the governing principle above.
+
+### ⚠ THE HAZARD, which decides how this is built
+
+**A backfilled period must not book money that is already in the books.**
+
+A normal disburse posts a Payroll Expense debit, a cash credit, the deduction
+legs and each cash-advance collection (js/departments.js disbursePayRun). If a
+backfilled June also posts those, and June's wages were already recorded — by
+the old process, by a manual journal entry, by anything — then June's expense is
+counted twice, every report is overstated, and the error is invisible because
+both entries look legitimate.
+
+The inverse is equally real: if those wages were NEVER recorded, then a backfill
+that skips the ledger leaves the books understating wages by exactly that
+amount.
+
+Both failures are silent and neither is recoverable by looking at the payroll
+screen. **This is not a decision the system can infer** — it depends on what was
+done outside it, which only the owner knows. It is therefore an explicit choice
+at entry, per period, stated in plain words, and recorded on the record itself
+so the reason is visible a year later to whoever is reconciling.
+
+### Consequences to build to, whichever way that lands
+
+- A backfilled record is **marked as backfilled**, permanently and visibly.
+  Nobody reading a payslip or a report a year from now should have to guess
+  whether a figure came from a live run or a hand-entered one.
+- It **never re-collects a cash advance**. The repayment already happened; a
+  backfill that deducts it again would take the money twice on paper and corrupt
+  the outstanding balance.
+- It **generates payslips** (that is much of the point) but must not send
+  notifications — nobody wants a push about a payslip from March.
+- It **cannot be entered for a period that already has a real run**, or the two
+  disagree about the same month with no way to tell which is true.
+- Entry has to be quick. Backfilling a year for thirty workers is 360 records; if
+  each takes a form and six clicks it will not get done, and a half-populated
+  history is worse than none because it looks complete.
+
+---
+
 ## Constraints that do not move
 
 These were ruled earlier and a redesign does not reopen them:
