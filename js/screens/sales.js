@@ -1558,7 +1558,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
 
   const openAECDetail = (c) => {
     const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
-    openPage(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
+    const _panel = openPage(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
         <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:var(--on-primary);font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:var(--on-primary);font-size:9px">${st.icon} ${st.label}</span></div>
         ${c.contactPerson ? `<div>${emojiIcon('👤',16)} ${escHtml(c.contactPerson)}</div>` : ''}
@@ -1572,13 +1572,22 @@ async function renderAECDirectory(container, currentUser, currentRole) {
         ${c.potential ? `<div style="margin-top:4px;padding:8px;background:rgba(128,128,128,.08);border-radius:8px">${emojiIcon('💬',16)} ${escHtml(c.potential)}</div>` : ''}
       </div>
     `, `${canEdit ? `<button class="btn-primary" id="aec-detail-edit">${emojiIcon('✎',16)} Edit</button>` : ''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-    document.getElementById('aec-detail-edit')?.addEventListener('click', () => { closeModal(); openAECEditor(c); });
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one. The handler then binds to a button nobody can see, and the
+    // visible button does nothing. That is exactly the "needs multiple attempts
+    // to get to the edit form" the Corporate Secretary reported on 2026-08-10,
+    // reproduced in the browser: two #aec-detail-edit in the DOM, getElementById
+    // resolving into the dead panel, the visible button firing nothing.
+    _panel.querySelector('#aec-detail-edit')?.addEventListener('click', () => { closeModal(); openAECEditor(c); });
   };
 
   const openAECEditor = (c) => {
     const e = c || {};
     const sel = 'style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"';
-    openPage(c ? 'Edit AEC Contact' : 'Add AEC Contact', `
+    const _panel = openPage(c ? 'Edit AEC Contact' : 'Add AEC Contact', `
       <div class="form-row">
         <div class="form-group"><label>Type</label><select id="aec-type" ${sel}>${window.AEC_TYPES.map(t=>`<option value="${t.key}" ${e.type===t.key?'selected':''}>${t.letter} — ${t.label}</option>`).join('')}</select></div>
         <div class="form-group"><label>Stage</label><select id="aec-stage" ${sel}>${window.AEC_STAGES.map(s=>`<option value="${s.key}" ${aecStageOf(e)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select></div>
@@ -1604,24 +1613,33 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       </div>
       <div class="form-group"><label>Feedback / partnership potential</label><textarea id="aec-potential" rows="3">${escHtml(e.potential||'')}</textarea></div>
     `, `<button class="btn-primary" id="aec-save-btn">${c ? 'Save' : 'Save Contact'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('aec-save-btn').addEventListener('click', async () => {
-      const company = document.getElementById('aec-company').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one. The handler then binds to a button nobody can see, and the
+    // visible button does nothing. That is exactly the "needs multiple attempts
+    // to get to the edit form" the Corporate Secretary reported on 2026-08-10,
+    // reproduced in the browser: two #aec-save-btn in the DOM, getElementById
+    // resolving into the dead panel, the visible button firing nothing.
+    _panel.querySelector('#aec-save-btn').addEventListener('click', async () => {
+      const company = _panel.querySelector('#aec-company').value.trim();
       if (!company) { Notifs.showToast('Company is required.','error'); return; }
-      const quoteSent = document.getElementById('aec-quotesent').checked;
+      const quoteSent = _panel.querySelector('#aec-quotesent').checked;
       const data = {
-        type: document.getElementById('aec-type').value,
-        stage: document.getElementById('aec-stage').value,
+        type: _panel.querySelector('#aec-type').value,
+        stage: _panel.querySelector('#aec-stage').value,
         company,
-        contactPerson: document.getElementById('aec-person').value.trim(),
-        phone: document.getElementById('aec-phone').value.trim(),
-        email: document.getElementById('aec-email').value.trim(),
-        region: document.getElementById('aec-region').value,
-        address: document.getElementById('aec-address').value.trim(),
+        contactPerson: _panel.querySelector('#aec-person').value.trim(),
+        phone: _panel.querySelector('#aec-phone').value.trim(),
+        email: _panel.querySelector('#aec-email').value.trim(),
+        region: _panel.querySelector('#aec-region').value,
+        address: _panel.querySelector('#aec-address').value.trim(),
         quoteSent,
-        quoteSentDate: quoteSent ? (document.getElementById('aec-quotedate').value || today) : '',
-        quoteRef: document.getElementById('aec-quoteref').value.trim(),
-        potential: document.getElementById('aec-potential').value.trim(),
-        followUpDate: document.getElementById('aec-followup').value || '',
+        quoteSentDate: quoteSent ? (_panel.querySelector('#aec-quotedate').value || today) : '',
+        quoteRef: _panel.querySelector('#aec-quoteref').value.trim(),
+        potential: _panel.querySelector('#aec-potential').value.trim(),
+        followUpDate: _panel.querySelector('#aec-followup').value || '',
         lastContact: today,   // Manila-correct stamp — mirrors sales_clients
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       };

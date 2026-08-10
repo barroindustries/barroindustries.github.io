@@ -344,7 +344,7 @@ async function renderROCDirectory(container, currentUser, currentRole) {
 
   const openROCDetail = (r) => {
     const st = rocStatusMeta(rocFunnelStatus(r));
-    openPage(`${escHtml(r.restaurantName || 'ROC Lead')}`, `
+    const _panel = openPage(`${escHtml(r.restaurantName || 'ROC Lead')}`, `
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
         <div>#${r.itemNo || ''} · <span class="badge" style="background:${st.color};color:var(--on-primary);font-size:9px">${st.icon} ${escHtml(st.label)}</span></div>
         ${r.chainType ? `<div>${emojiIcon('📇', 16)} ${escHtml(r.chainType)}</div>` : ''}
@@ -358,13 +358,22 @@ async function renderROCDirectory(container, currentUser, currentRole) {
         ${r.remarks ? `<div style="margin-top:4px;padding:8px;background:rgba(128,128,128,.08);border-radius:8px">${emojiIcon('💬', 16)} ${escHtml(r.remarks)}</div>` : ''}
       </div>
     `, `${canEdit ? `<button class="btn-primary" id="roc-detail-edit">${emojiIcon('✎', 16)} Edit</button>` : ''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-    document.getElementById('roc-detail-edit')?.addEventListener('click', () => { closeModal(); openROCEditor(r); });
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one. The handler then binds to a button nobody can see, and the
+    // visible button does nothing. That is exactly the "needs multiple attempts
+    // to get to the edit form" the Corporate Secretary reported on 2026-08-10,
+    // reproduced in the browser: two #roc-detail-edit in the DOM, getElementById
+    // resolving into the dead panel, the visible button firing nothing.
+    _panel.querySelector('#roc-detail-edit')?.addEventListener('click', () => { closeModal(); openROCEditor(r); });
   };
 
   const openROCEditor = (r) => {
     const e = r || {};
     const sel = 'style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"';
-    openPage(r ? 'Edit ROC Lead' : 'Add ROC Lead', `
+    const _panel = openPage(r ? 'Edit ROC Lead' : 'Add ROC Lead', `
       <div class="form-group"><label>Restaurant Name</label><input id="roc-name" value="${escHtml(e.restaurantName || '')}" placeholder="Restaurant / chain name"/></div>
       <div class="form-row">
         <div class="form-group"><label>Chain Type</label><input id="roc-chain" value="${escHtml(e.chainType || '')}" placeholder="e.g. Fast food, Fine dining, Franchise"/></div>
@@ -385,21 +394,30 @@ async function renderROCDirectory(container, currentUser, currentRole) {
       </div>
       <div class="form-group"><label>Remarks</label><textarea id="roc-remarks" rows="3">${escHtml(e.remarks || '')}</textarea></div>
     `, `<button class="btn-primary" id="roc-save-btn">${r ? 'Save' : 'Save Lead'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('roc-save-btn').addEventListener('click', async () => {
-      const restaurantName = document.getElementById('roc-name').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one. The handler then binds to a button nobody can see, and the
+    // visible button does nothing. That is exactly the "needs multiple attempts
+    // to get to the edit form" the Corporate Secretary reported on 2026-08-10,
+    // reproduced in the browser: two #roc-save-btn in the DOM, getElementById
+    // resolving into the dead panel, the visible button firing nothing.
+    _panel.querySelector('#roc-save-btn').addEventListener('click', async () => {
+      const restaurantName = _panel.querySelector('#roc-name').value.trim();
       if (!restaurantName) { Notifs.showToast('Restaurant name is required.', 'error'); return; }
       const data = {
         restaurantName,
-        chainType: document.getElementById('roc-chain').value.trim(),
-        cuisine: document.getElementById('roc-cuisine').value.trim(),
-        contactPerson: document.getElementById('roc-person').value.trim(),
-        phone: document.getElementById('roc-phone').value.trim(),
-        email: document.getElementById('roc-email').value.trim(),
-        cityProvince: document.getElementById('roc-city').value.trim(),
-        kitchenSize: document.getElementById('roc-kitchen').value.trim(),
-        status: document.getElementById('roc-status').value,
-        nextFollowUp: document.getElementById('roc-followup').value || '',
-        remarks: document.getElementById('roc-remarks').value.trim(),
+        chainType: _panel.querySelector('#roc-chain').value.trim(),
+        cuisine: _panel.querySelector('#roc-cuisine').value.trim(),
+        contactPerson: _panel.querySelector('#roc-person').value.trim(),
+        phone: _panel.querySelector('#roc-phone').value.trim(),
+        email: _panel.querySelector('#roc-email').value.trim(),
+        cityProvince: _panel.querySelector('#roc-city').value.trim(),
+        kitchenSize: _panel.querySelector('#roc-kitchen').value.trim(),
+        status: _panel.querySelector('#roc-status').value,
+        nextFollowUp: _panel.querySelector('#roc-followup').value || '',
+        remarks: _panel.querySelector('#roc-remarks').value.trim(),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       };
       try {
