@@ -341,18 +341,61 @@ html.theme-astral .btn-primary {
    affected every checkbox inside a .form-group, not just the meeting invite
    list where it was spotted. The file already had the same carve-out on the
    [readonly] rule below, which is why that one looks right.
-   Specificity 0,2,1 beats the 0,1,1 rule above without !important. */
+   Specificity 0,2,1 beats the 0,1,1 rule above without !important.
+
+   ── WIDENED 2026-08-10 ("check the other forms with checkboxes") ──
+   The carve-out is now stated TWICE inside one rule: a bare `input[type=…]`
+   (0,1,1) that reaches EVERY checkbox/radio in the app — table cells
+   (bir.js reconcile, finance.js bank reconcile), chat member pickers, the
+   login row, ad-hoc labels — plus the original `.form-group`-scoped form
+   (0,2,1) that still outranks the text-field rules above. A selector list
+   carries per-selector specificity, so one rule covers both without
+   duplication.
+
+   SIZE: explicit 16px, not the UA's 13px. 13px is the size the fix landed on
+   by default and it is too small to hit reliably on a phone; 16px is also
+   what most call sites were already hand-setting inline (width:16px;height:16px)
+   to fight the broken rule. With one baseline stated here, those inline sizes
+   — and the 18px ones that disagreed with them — are redundant and are being
+   deleted at source, so every tick in the app is finally the same size.
+
+   PLACED HIGH IN THE FILE ON PURPOSE. Two later rules deliberately override
+   this and must keep winning; both are later in source order AND tie or beat
+   it on specificity, so the cascade does the work with no !important:
+     • `.notif-toggle-wrap input[type="checkbox"]` (~line 7350) — the visually
+       hidden input behind the notification SWITCH. If this baseline ever
+       out-ranked it, a real 16px tick would paint on top of the switch.
+     • `input.ba-recon-chk` (~line 7396) — the deliberately-24px money control
+       in the Bank Account drilldown.
+   Anything new that needs a different size must beat 0,1,1 and sit below.
+
+   vertical-align:middle only bites in INLINE contexts (a plain
+   `<label><input> text</label>`); flex/grid parents ignore it. It replaces the
+   UA baseline alignment, which drops the box onto the text baseline and reads
+   as sitting low next to its label. In a flex label, `flex:0 0 auto` plus the
+   parent's own align-items does the same job. */
+input[type="checkbox"],
+input[type="radio"],
 .form-group input[type="checkbox"],
 .form-group input[type="radio"] {
-  width: auto; min-height: 0; padding: 0; border: 0;
+  width: 16px; height: 16px;
+  min-height: 0; padding: 0; border: 0;
   background: none; border-radius: 0;
   -webkit-appearance: auto; appearance: auto;
   accent-color: var(--primary-light, var(--primary, #3B5BDB));
   flex: 0 0 auto;                /* never stretch inside a flex label */
+  vertical-align: middle;        /* inline labels only; flex parents ignore it */
   margin: 0; cursor: pointer;
 }
 
-.form-group input:focus,
+/* Checkboxes/radios are excluded from the text-field focus treatment: they
+   carry `border:0`, so `border-color` does nothing, and the 3px box-shadow
+   halo fires on MOUSE/TOUCH focus too — clicking a tick left a blue glow
+   stuck around it that reads as a rendering fault, not as focus. Keyboard
+   focus is already covered by the universal `:focus-visible` outline in the
+   ACCESSIBILITY section (~line 7300), which is pointer-aware. Same :not()
+   convention the [readonly] rule below has always used. */
+.form-group input:not([type=checkbox]):not([type=radio]):focus,
 .form-group textarea:focus,
 .form-group select:focus {
   border-color: var(--primary);
@@ -381,9 +424,50 @@ html.theme-astral .btn-primary {
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* V13 Phase 131 — 44px-tall label-wrap so bare checkboxes get a real tap
-   target on touch (checkbox itself stays visually small). */
-label.check-row { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; cursor: pointer; }
-.check-row input[type=checkbox] { width: 18px; height: 18px; }
+   target on touch (checkbox itself stays visually small).
+
+   2026-08-10 audit: this class was shipped in V13 and then sat unused for a
+   year — every checkbox in the app hand-rolled its own
+   `<label style="display:flex;align-items:center;gap:8px">` instead, and some
+   left the text outside the label entirely, leaving a ~16px tap target on a
+   phone. The per-screen partitions are adopting it now, so it has to hold up
+   inside a .form-group as well as outside one.
+
+   Three fixes so it actually does:
+   1. The hard-coded 18px checkbox size is GONE. It was one of the three
+      competing sizes in the app (13 / 16 / 18); the single baseline above now
+      governs, so a .check-row tick matches every other tick.
+   2. Typography reset, so adopters stop having to write one inline (meetings.js
+      already carries a hand-written copy). `.form-group label` (~line 320) is
+      `display:block; text-transform:uppercase; font-size:var(--fs-xs);
+      color:var(--text-muted)` — right for a field caption, wrong for a person's
+      name or a sentence sitting next to a tick, which is how the meeting invite
+      list came to render staff as "JUAN DELA CRUZ" in muted grey caps.
+      The `.form-group label.check-row` half of the selector is what makes this
+      stick: plain `label.check-row` is 0,1,1 and only beats `.form-group label`
+      (also 0,1,1) on source order — and the ≤640px density block near the end
+      of the file re-states `.form-group label { font-size:11px }` LATER, so on
+      every phone the caption styling would have won again. 0,2,1 settles it at
+      all widths. Size is --fs-base (the body default) so a .check-row outside
+      any form reads identically to the text around it.
+   3. `.check-row-top` for labels that WRAP. `align-items:center` is right for
+      one line and wrong for three — it floats the tick into the middle of the
+      paragraph. The modifier pins it to the first line (the 0.30em nudge drops
+      the 16px box off the line's top edge onto its cap height). Use it on long
+      labels — finance's "Active (uncheck to close — kept forever, hidden from
+      pickers)" wraps on every phone, and chat.js/meetings.js are currently
+      hand-writing `align-items:flex-start` + a 4px nudge inline to get this. */
+label.check-row,
+.form-group label.check-row {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 44px; padding: 4px 8px; cursor: pointer;
+  font-size: var(--fs-base); font-weight: 500; color: var(--text);
+  text-transform: none; letter-spacing: normal; margin-bottom: 0;
+}
+label.check-row.check-row-top,
+.form-group label.check-row.check-row-top { align-items: flex-start; }
+.check-row-top input[type="checkbox"],
+.check-row-top input[type="radio"] { margin-top: 0.30em; }
 
 /* V13 Phase 124 — Form kit: required marker, hint/error slots, disabled/readonly/error
    states. Purely additive: only fires on opt-in classes (.required, .has-error) or the
@@ -4209,9 +4293,14 @@ html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !im
   cursor: pointer; margin-bottom: 14px;
   user-select: none;
 }
-.remember-row input[type="checkbox"] {
-  width: 16px; height: 16px; accent-color: var(--primary-light); cursor: pointer;
-}
+/* The `.remember-row input[type="checkbox"]` rule that used to sit here
+   (width:16px; height:16px; accent-color:var(--primary-light); cursor:pointer)
+   was deleted in the 2026-08-10 checkbox audit — it is now byte-for-byte what
+   the global checkbox baseline (~line 377) already gives every tick in the
+   app, and keeping a second copy is exactly how the app ended up with three
+   different checkbox sizes. `.remember-row` itself still owns the row layout
+   (flex + gap + the label wrap that makes "Keep me signed in on this device"
+   tappable). Nothing here to re-add. */
 
 
 /* ═══════════════════════════════════════════════════════════
@@ -4405,22 +4494,36 @@ html.theme-dark .modal-overlay, html.theme-astral .modal-overlay { background: r
    .bottom-nav::before (+ reduced-motion guard) was removed — Dark has no
    equivalent pseudo-element, so Astral's bottom nav no longer has one either. */
 
-/* ══════ FORM INPUTS ══════ token-driven, no blur */
-.form-group input,
+/* ══════ FORM INPUTS ══════ token-driven, no blur
+   All three of these re-state the TEXT-FIELD look (surface fill, 1px border,
+   focus halo) far below the checkbox baseline at ~line 377, so they must
+   exclude checkboxes/radios explicitly or source order hands them the win:
+     • the dark-theme line below is `html.theme-dark .form-group input` —
+       specificity 0,2,2, which OUT-RANKS the baseline's .form-group form
+       (0,2,1) outright, so it was the one rule in the file that survived the
+       carve-out entirely. Measured before this change on Dark: a checkbox in
+       a .form-group computed `background-color: rgb(36,40,45)` — a text-field
+       fill re-applied to a tick. Chrome doesn't paint a background on an
+       `appearance:auto` checkbox so it wasn't visible there, but the rule had
+       no business matching, and other engines are not obliged to ignore it.
+     • the :focus rule is the same stuck-blue-glow-on-click problem excluded up
+       at ~line 398; excluded here too or the exclusion only half-works.
+   Same :not() convention as the [readonly] rule in the Forms section. */
+.form-group input:not([type=checkbox]):not([type=radio]),
 .form-group textarea,
 .form-group select {
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: none;
 }
-.form-group input:focus,
+.form-group input:not([type=checkbox]):not([type=radio]):focus,
 .form-group textarea:focus,
 .form-group select:focus {
   background: var(--surface);
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
-html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.theme-dark .form-group select { background: var(--surface-2); }
+html.theme-dark .form-group input:not([type=checkbox]):not([type=radio]), html.theme-dark .form-group textarea, html.theme-dark .form-group select { background: var(--surface-2); }
 
 /* ══════ BUTTONS ══════ token-driven, no blur */
 .btn-secondary {
@@ -7238,7 +7341,13 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   height: 26px;
   cursor: pointer;
 }
-.notif-toggle-wrap input { opacity: 0; width: 0; height: 0; position: absolute; }
+/* This is the hidden input BEHIND the switch — not a checkbox the user ever
+   sees. The global checkbox baseline (~line 377) would give it a real 16px
+   box, which would paint a tick on top of the slider. Qualified with
+   [type="checkbox"] (0,2,1 vs the baseline's 0,1,1) so it wins on specificity
+   as well as on source order — this rule must never depend on staying below
+   the baseline in the file. */
+.notif-toggle-wrap input[type="checkbox"] { opacity: 0; width: 0; height: 0; min-height: 0; position: absolute; margin: 0; appearance: none; -webkit-appearance: none; }
 .notif-toggle-slider {
   position: absolute;
   inset: 0;
@@ -7279,7 +7388,12 @@ html.light .notif-toggle-slider { background: rgba(0,0,0,0.15); }
                       row to a DIFFERENT bank account.
      Both sit in the same card row on a phone, so a fat-finger miss on one hits
      the other. Size only — no behaviour change; the handlers are untouched. */
-  .ba-recon-chk { width: 24px; height: 24px; flex-shrink: 0; }
+  /* 2026-08-10: qualified `.ba-recon-chk` → `input.ba-recon-chk`. As a bare
+     class it was 0,1,0 and the new global checkbox baseline (~line 377) is
+     0,1,1, so the baseline's 16px would have OUT-RANKED this regardless of
+     source order and quietly shrunk the money control back below the size it
+     was deliberately given. Tying at 0,1,1 and sitting later, it wins again. */
+  input.ba-recon-chk { width: 24px; height: 24px; flex-shrink: 0; }
   .ba-retag-sel { min-height: 44px; }
 }
 
@@ -7755,7 +7869,19 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
      346) forces 16px there to stop iOS auto-zoom-on-focus. */
   .form-group { margin-bottom: 10px; }
   .form-group label { font-size: 11px; margin-bottom: 3px; }
-  .form-group input,
+  /* 2026-08-10 checkbox audit — CHECKED, and this one is NOT a live bug, but
+     it is one edit away from becoming the mobile version of the original
+     defect, so the exclusion is stated rather than left to be re-derived.
+     `.form-group input` here is 0,1,1 (a media query adds no specificity), so
+     the checkbox baseline's (~line 377) `.form-group input[type=…]` form at 0,2,1 already
+     beats it and a tick keeps its 16px box at ≤640px — measured at 375x812,
+     coarse pointer: 16x16, min-height 0, padding 0. What it would have done
+     unopposed is `min-height:40px; padding:8px 10px` — a 16px tick stretched
+     into a 40px-tall padded slab on every phone. The baseline's bare
+     `input[type=…]` half is only 0,1,1 and TIES this rule, so anything that
+     ever drops the .form-group-scoped half would hand this the win silently.
+     Same :not() convention as the [readonly] rule in the Forms section. */
+  .form-group input:not([type=checkbox]):not([type=radio]),
   .form-group select {
     min-height: 40px;
     padding: 8px 10px;

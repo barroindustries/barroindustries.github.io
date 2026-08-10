@@ -1219,7 +1219,14 @@ async function openCampaignModal(camp, onChange) {
     }
   }
 
-  const chBoxes = (window.LEAD_SOURCES||[]).map(s => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 10px 2px 0">
+  // V14 checkbox pass (2026-08-10). These sit inside the `Channels` .form-group,
+  // so the carve-out at css/styles.css ~345 already restores a real native tick —
+  // nothing here needs inline sizing. `check-row` (styles.css ~385) is the house
+  // convention for a bare checkbox's tap target: it supplies display:inline-flex,
+  // align-items:center, gap and a 44px min-height, which is why those three inline
+  // declarations were dropped instead of being repeated. gap/font-size/margin stay
+  // because they differ from the convention (these are compact wrapping chips).
+  const chBoxes = (window.LEAD_SOURCES||[]).map(s => `<label class="check-row" style="gap:4px;font-size:12px;margin:2px 10px 2px 0">
       <input type="checkbox" class="mc-channel" value="${s.code}" ${(camp?.channels||[]).includes(s.code)?'checked':''}/> ${escHtml(s.label)}
     </label>`).join('');
 
@@ -3481,8 +3488,15 @@ async function openRecordSaleModal(o, container){
       <span style="color:var(--text-muted)">Output VAT (12%)</span><span id="rs-vatamt" style="text-align:right">₱${fmt(+(defaultAmt-defaultAmt/1.12).toFixed(2))}</span>
       <span style="color:var(--text-muted)">Balance after this</span><span id="rs-bal" style="text-align:right;font-weight:700">₱${fmt(Math.max(0,contract-defaultAmt))}</span>
     </div></div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
-      <input type="checkbox" id="rs-prod" checked style="width:16px;height:16px"/> Transfer to Production now (start the job)
+    <!-- CHECKED BY DEFAULT and it starts a production job, so the state has to be
+         unmistakable and the tap target real. NOT inside a .form-group, so the
+         css/styles.css ~345 checkbox carve-out never reached it and the old inline
+         16x16 was sizing it alone; class check-row (styles.css ~385) now gives the
+         shared 18px box and a 44px-tall label. display:flex is kept over the
+         convention's inline-flex so the whole row, not just the text, is tappable;
+         gap/align-items/cursor are dropped because check-row supplies them. -->
+    <label class="check-row" style="display:flex;font-size:13px;margin-top:4px">
+      <input type="checkbox" id="rs-prod" checked/> Transfer to Production now (start the job)
     </label>
     <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Posts income to the ledger (with VAT split), updates the project's collected balance, and notifies Production.</div>
     <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>

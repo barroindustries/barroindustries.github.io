@@ -51,9 +51,41 @@ body{font-family:var(--font);background:var(--gray-light);color:var(--text);font
   color:var(--mid-blue);margin-bottom:9px;border-bottom:2px solid var(--light-blue);padding-bottom:5px;
   display:flex;align-items:center;justify-content:space-between;}
 label{font-size:11px;font-weight:600;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.4px;}
-input,select,textarea{border:1.5px solid var(--gray-mid);border-radius:6px;padding:6px 8px;
+/* TEXT FIELDS ONLY. Checkbox/radio are deliberately excluded from this rule and
+   the :focus rule below — see the carve-out underneath. (Same defect the main
+   app's css/styles.css had: this rule treats a tick box like a text field.
+   width:100% stretched it across the row, and the ≤768px override further down
+   set min-height:40px on it, so on a phone every tick in this document rendered
+   as a 13x40 vertical sliver. Measured 2026-08-10 at 390px wide.)
+   outline:none on :focus also mattered: on a checkbox there is no border to
+   re-colour, so all it did was delete the keyboard focus ring. */
+input:not([type="checkbox"]):not([type="radio"]),select,textarea{
+  border:1.5px solid var(--gray-mid);border-radius:6px;padding:6px 8px;
   font-size:13px;font-family:var(--font);width:100%;transition:border-color .15s;}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue);}
+input:not([type="checkbox"]):not([type="radio"]):focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue);}
+
+/* ── CHECKBOXES & RADIOS — the one place their size lives ──────────────────
+   This document is standalone (loaded in an <iframe> from Sales/Partners), so
+   the css/styles.css carve-out does NOT reach it; this is its local twin, and
+   it matches that file's 16px baseline so a tick looks the same in the app and
+   in the quote builder. 16px, not the UA's 13px: 13px is too small to hit
+   reliably on a phone.
+   Every call site used to carry its own `width:auto` patch (.pc-check input,
+   .verify-waive input, three inline styles) to fight the text-field rule above.
+   With the root fixed those are redundant and have been deleted at source.
+   Specificity 0,1,1 — `input.term-cb` below ties it and sits later in source
+   order, which is how the terms checkbox keeps its deliberate 22px touch size
+   on mobile. Anything else that needs a different size must do the same.
+   accent-color is the brand blue by default; the Verify & File modal overrides
+   it to amber on purpose (those are warning / "are you sure" controls). */
+input[type="checkbox"],input[type="radio"]{
+  width:16px;height:16px;min-height:0;padding:0;border:0;
+  background:none;border-radius:0;
+  -webkit-appearance:auto;appearance:auto;
+  accent-color:var(--mid-blue);
+  flex:0 0 auto;              /* never stretch inside a flex label */
+  vertical-align:middle;      /* inline labels only; flex parents ignore it */
+  margin:0;cursor:pointer;}
 .fg{display:flex;flex-direction:column;gap:3px;}
 .fg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
 .fg.full{grid-column:1/-1;}
@@ -233,8 +265,19 @@ tr:hover td{background:#fafbff;}
   background:var(--gray-light);border-radius:8px;padding:10px 14px;margin-top:12px;}
 .pc-row{display:flex;align-items:center;gap:7px;}
 .pc-lbl{font-size:11px;font-weight:600;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.4px;}
+/* .pc-check is this document's label-wrap convention: the tick's real tap
+   target is the whole label (44px tall on mobile, see the ≤768px block), not
+   the 16px box. It used to carry a `.pc-check input{width:auto}` patch to stop
+   the text-field rule stretching the tick across the row — the root is fixed at
+   the top of this file now, so that patch is gone. */
 .pc-check{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;}
-.pc-check input{width:auto;cursor:pointer;}
+/* The two full-width ones ("Use custom payment milestones instead…", "Show
+   payment details on this quote") wrap to 2-3 lines on a phone. Centring parks
+   the tick halfway down the paragraph; align it to the FIRST line instead
+   (margin-top optically centres it on that line). Short one-line rows keep
+   centring — for them the two are identical anyway. */
+.fg.full > .pc-check{align-items:flex-start;}
+.fg.full > .pc-check input{margin-top:1px;}
 .pricing-controls select{width:auto;min-width:110px;font-size:12px;padding:5px 7px;font-weight:600;}
 .pc-hint{font-size:10px;color:var(--gray-dark);font-style:italic;}
 
@@ -308,7 +351,20 @@ tr:hover td{background:#fafbff;}
 .terms-block p,.terms-block li{font-size:12px;color:var(--text);line-height:1.35;}
 .terms-block.full{grid-column:1/-1;}
 .term-off{opacity:.35;}
-.term-cb{width:14px;height:14px;cursor:pointer;accent-color:var(--mid-blue);flex-shrink:0;}
+/* `input.term-cb`, not `.term-cb`: the checkbox carve-out at the top of this
+   file is `input[type=checkbox]` (0,1,1), so a bare class (0,1,0) would lose
+   and this control's deliberate mobile size (22px, below) would silently stop
+   applying. Same specificity + later in source = it wins.
+   Desktop size dropped in favour of the 16px baseline so it matches every
+   other tick; only the mobile touch enlargement is kept. */
+input.term-cb{cursor:pointer;accent-color:var(--mid-blue);flex-shrink:0;}
+/* The tick is the only control for "include this term in the client's quote",
+   so it gets a real label rather than sitting loose next to the heading text.
+   Everything is inherited on purpose: the global `label{}` rule would otherwise
+   repaint the term title 11px/600/grey (and, in print, override the h4's 8pt). */
+.term-toggle{display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  font-size:inherit;font-weight:inherit;color:inherit;
+  text-transform:inherit;letter-spacing:inherit;}
 .term-content{min-height:18px;outline:none;border-radius:4px;padding:2px 4px;transition:background .15s;margin-top:1px;}
 .term-content:hover{background:rgba(46,95,138,.06);cursor:text;}
 .term-content:focus{background:rgba(46,95,138,.09);outline:1.5px dashed var(--mid-blue);}
@@ -387,14 +443,22 @@ tr:hover td{background:#fafbff;}
   .pricing-controls select{flex:1;min-width:0;min-height:40px;}
   .pricing-controls input[type="number"]{flex:1;min-width:0;min-height:40px;width:auto!important;}
   /* Terms on/off checkbox was a bare 14px box — under the 44px touch target
-     guideline every other mobile control here follows (audit finding). */
-  .term-cb{width:22px;height:22px;}
+     guideline every other mobile control here follows (audit finding).
+     `input.term-cb` ties the carve-out's specificity and sits later, so this
+     enlargement still wins. The 44px-tall .term-toggle label around it is the
+     real tap target; 22px keeps the box itself visible at arm's length. */
+  input.term-cb{width:22px;height:22px;}
+  .term-toggle{min-height:44px;}
   .terms-block h4{min-height:40px;display:flex;align-items:center;gap:9px;}
   .pay-tbl td,.pay-tbl th{font-size:12px;padding:6px 7px;}
   .lead-in{width:100%!important;}
   /* 16px floor (not the old 14px) — anything smaller triggers iOS Safari's
-     auto-zoom-on-focus, which then leaves the layout zoomed in */
-  input,select,textarea{font-size:16px!important;padding:8px 8px!important;min-height:40px;}
+     auto-zoom-on-focus, which then leaves the layout zoomed in.
+     Checkbox/radio excluded: min-height:40px on a 16px tick box is what
+     stretched every checkbox in this document into a vertical sliver on a
+     phone. Their touch target is the surrounding label (.pc-check /
+     .term-toggle are 44px tall here), not the box itself. */
+  input:not([type="checkbox"]):not([type="radio"]),select,textarea{font-size:16px!important;padding:8px 8px!important;min-height:40px;}
   .toggle-pills button{font-size:10.5px;}
   .reload-btn,.btn{font-size:11px;}
   .qno-box{font-size:12px;padding:5px 9px;}
@@ -493,9 +557,13 @@ tr:hover td{background:#fafbff;}
 .verify-info{flex:1;}
 .verify-label{font-weight:700;font-size:13px;}
 .verify-val{font-size:12px;color:var(--gray-dark);margin-top:2px;}
-.verify-waive{display:flex;align-items:center;gap:6px;margin-top:6px;
+/* flex-start, not center: this label wraps on a phone and the tick was landing
+   mid-paragraph instead of beside the first line */
+.verify-waive{display:flex;align-items:flex-start;gap:6px;margin-top:6px;
   font-size:11px;font-weight:600;color:var(--orange);cursor:pointer;}
-.verify-waive input[type=checkbox]{width:auto;cursor:pointer;accent-color:var(--orange);}
+/* size/cursor come from the checkbox carve-out; only the warning colour is
+   local (the old width:auto patch for the text-field rule is no longer needed) */
+.verify-waive input[type=checkbox]{accent-color:var(--orange);margin-top:1px;}
 .filed-badge{background:var(--green);color:white;padding:4px 11px;border-radius:20px;
   font-size:11px;font-weight:700;letter-spacing:.5px;display:none;white-space:nowrap;}
 .filed-badge.show{display:inline-flex;align-items:center;gap:5px;}
@@ -3980,8 +4048,10 @@ function renderTerms(){
     const defaultContent=typeof t.content==='function' ? t.content(getValidDays()) : t.content;
     html+=`<div class="terms-block ${enabled?'':'term-off'}">
       <h4>
-        <input type="checkbox" class="term-cb" ${enabled?'checked':''} onchange="toggleTerm('${t.id}',this)">
-        ${t.title}
+        <label class="term-toggle">
+          <input type="checkbox" class="term-cb" ${enabled?'checked':''} onchange="toggleTerm('${t.id}',this)">
+          ${t.title}
+        </label>
       </h4>
       <div class="term-content" contenteditable="true" onblur="saveTerm('${t.id}',this)">${termsContent[t.id]||defaultContent}</div>
     </div>`;
@@ -4708,12 +4778,16 @@ function buildVerifyModal(){
       <div class="verify-info">
         <div class="verify-label" style="font-size:13px;font-weight:700">This quote was reopened from an existing filing</div>
         <div class="verify-val" style="margin-top:4px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:6px">
-            <input type="radio" name="fileMode" value="revision" ${fileMode!=='update'?'checked':''} onchange="setFileMode('revision')" style="width:auto;cursor:pointer;accent-color:#F0A500;">
+          <!-- align-items:flex-start (was center): both option texts wrap to 2-3
+               lines on a phone and the radio was parking mid-paragraph. Size and
+               cursor now come from the checkbox/radio carve-out in the
+               stylesheet; only the amber accent stays local. -->
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;margin-bottom:6px">
+            <input type="radio" name="fileMode" value="revision" ${fileMode!=='update'?'checked':''} onchange="setFileMode('revision')" style="accent-color:var(--accent);margin-top:1px;">
             <span>File as a new revision — keeps the original quote untouched</span>
           </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-            <input type="radio" name="fileMode" value="update" ${fileMode==='update'?'checked':''} onchange="setFileMode('update')" style="width:auto;cursor:pointer;accent-color:#F0A500;">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px">
+            <input type="radio" name="fileMode" value="update" ${fileMode==='update'?'checked':''} onchange="setFileMode('update')" style="accent-color:var(--accent);margin-top:1px;">
             <span>Update the original quote in place — no new copy</span>
           </label>
         </div>
@@ -4764,8 +4838,8 @@ function buildVerifyModal(){
     <div class="verify-info">
       <div class="verify-label" style="font-size:13px;font-weight:700">Request Approval Before Filing?</div>
       <div class="verify-val" style="margin-top:4px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-          <input type="checkbox" id="reqApprovalCheck" ${reqApproval?'checked':''} style="width:auto;cursor:pointer;accent-color:#F0A500;">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="reqApprovalCheck" ${reqApproval?'checked':''} style="accent-color:var(--accent);margin-top:1px;">
           <span>Send to president for review first — they can edit and return before filing</span>
         </label>
       </div>

@@ -690,7 +690,7 @@ window.renderTeamTab = async function() {
         </div>
         <div class="form-group"><label>Department(s)</label>
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:4px">
-            ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
+            ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<label class="check-row"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
           </div>
         </div>
       `, `<button class="btn-primary" id="save-inv-btn">Send Invite</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -2132,7 +2132,7 @@ async function openPresidentCashAdvanceModal(users) {
     <div class="form-group"><label>Purpose / Notes</label>
       <textarea id="pca-reason" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
+    <label class="check-row" style="display:flex;align-items:flex-start;margin-top:6px">
       <input type="checkbox" id="pca-private" checked/>
       <span style="font-size:13px">${emojiIcon('🔒',13)} Private — visible only to this employee, president &amp; finance</span>
     </label>

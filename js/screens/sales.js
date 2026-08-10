@@ -577,7 +577,10 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
 
     <!-- Totals -->
     <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px">
-      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text);margin-bottom:10px;cursor:pointer">
+      <!-- The tick is the native control (no inline width/height — see the checkbox
+           carve-out in css/styles.css). min-height gives this a real tap target: it
+           was a 14px-tall row, and a stray tap here moves the customer's total by 12%. -->
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text);margin-bottom:10px;cursor:pointer;min-height:44px">
         <input type="checkbox" id="qe-vat" onchange="qeRenderTotals()"> Add VAT (12%)
       </label>
       <div id="qe-totals"></div>
@@ -1621,7 +1624,9 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       </div>
       <div class="form-group"><label>Address</label><textarea id="aec-address" rows="2">${escHtml(e.address||'')}</textarea></div>
       <div class="form-group" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="aec-quotesent" ${e.quoteSent?'checked':''}/> Quotation sent</label>
+        <!-- min-height only: the label was a 13px-tall strip beside two 38px inputs.
+             No width/height on the input — the native tick is sized by the carve-out. -->
+        <label style="display:flex;align-items:center;gap:6px;margin:0;min-height:38px"><input type="checkbox" id="aec-quotesent" ${e.quoteSent?'checked':''}/> Quotation sent</label>
         <input id="aec-quotedate" type="date" value="${escHtml(e.quoteSentDate||'')}" style="max-width:150px"/>
         <input id="aec-quoteref" placeholder="Quote # (optional)" value="${escHtml(e.quoteRef||'')}" style="max-width:160px"/>
       </div>

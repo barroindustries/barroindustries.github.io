@@ -239,7 +239,14 @@ function openQCModal(order, onSaved){
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border-bottom:1px solid var(--border);padding:7px 0">
           <span style="font-size:12px;flex:1">${escHtml(it.label)}</span>
           <span style="display:flex;gap:8px;flex-shrink:0">
-            ${['pass','fail','na'].map(s=>`<label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="qc-${it.id}" value="${s}" ${stateOf(it.id)===s?'checked':''}/>${s==='pass'?`${emojiIcon('✅',16)}`:s==='fail'?`${emojiIcon('❌',16)}`:'N/A'}</label>`).join('')}
+            ${/* Native radios (13px) — deliberately no inline width/height, matching the
+                  checkbox/radio carve-out in css/styles.css. The vertical padding is the
+                  point: each of the three was a 32x21 target 3px from its neighbour, and
+                  the tap that slips from ❌ to ✅ passes a unit that failed inspection.
+                  Padding is 6px vertical / 2px horizontal on purpose — horizontal padding
+                  steals width from the checklist text beside it (flex:1), which would just
+                  push every row into three lines. */''}
+            ${['pass','fail','na'].map(s=>`<label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer;padding:6px 2px"><input type="radio" name="qc-${it.id}" value="${s}" ${stateOf(it.id)===s?'checked':''}/>${s==='pass'?`${emojiIcon('✅',16)}`:s==='fail'?`${emojiIcon('❌',16)}`:'N/A'}</label>`).join('')}
           </span>
         </div>`).join('')}
     </div>

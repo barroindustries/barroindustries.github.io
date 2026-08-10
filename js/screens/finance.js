@@ -1667,11 +1667,23 @@ function openBankAccountModal(a, onDone) {
       <div class="form-group"><label>Opening Date</label><input id="ba-openingdate" type="date" value="${a.openingDate||(window.bizDate?window.bizDate():today())}"/></div>
     </div>
     <div class="form-group"><label>Notes (optional)</label><input id="ba-notes" value="${escHtml(a.notes||'')}"/></div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
-      <input type="checkbox" id="ba-default" ${a.isDefault?'checked':''} style="width:16px;height:16px"/> Default account (preselected in pickers)
+    <!-- These two labels sit OUTSIDE any .form-group, so neither the broken
+         .form-group input{width:100%;-webkit-appearance:none} rule nor its
+         2026-08-10 carve-out ever applied — the ticks were always drawn natively.
+         What the inline width/height:16px did was give this modal a THIRD checkbox
+         size (13 native / 16 here / 18 elsewhere); dropped, so .check-row
+         input[type=checkbox] (css/styles.css ~386) sizes them at the house 18px.
+         .check-row also supplies the 44px tap wrap; padding is overridden to 8px 0
+         so the rows stay flush-left with the fields above instead of indenting 8px.
+         ba-active is the multi-line one — its text wraps to 2-3 lines on a phone, and
+         align-items:center would float the tick against the MIDDLE of the
+         paragraph, so it uses the flex-start + margin-top:2px pattern already used
+         for the memo conforme checkbox in js/screens/dashboards.js (~4361). -->
+    <label class="check-row" style="display:flex;font-size:13px;margin-top:4px;padding:8px 0">
+      <input type="checkbox" id="ba-default" ${a.isDefault?'checked':''}/> Default account (preselected in pickers)
     </label>
-    ${isEdit?`<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
-      <input type="checkbox" id="ba-active" ${a.active!==false?'checked':''} style="width:16px;height:16px"/> Active (uncheck to close — kept forever, hidden from pickers)
+    ${isEdit?`<label class="check-row" style="display:flex;font-size:13px;margin-top:4px;padding:8px 0;align-items:flex-start;line-height:1.5">
+      <input type="checkbox" id="ba-active" ${a.active!==false?'checked':''} style="margin-top:2px"/> Active (uncheck to close — kept forever, hidden from pickers)
     </label>`:''}
     <div id="ba-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="ba-save-btn">${isEdit?'Save':'Add Account'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -1755,7 +1767,7 @@ async function renderBankAccountDrilldown(a) {
           <td data-label="Ref #"><code>${escHtml(r.refNumber||'—')}</code></td>
           <td data-label="Amount" style="color:${r.bankFlow==='in'?'var(--success)':'var(--danger)'}">${r.bankFlow==='in'?'+':'-'}₱${fmt(r.amount||0)}</td>
           <td data-label="Running Balance" style="font-weight:700">₱${fmt(running)}</td>
-          <td data-label="Reconciled"><input type="checkbox" class="ba-recon-chk" data-id="${escHtml(r.id)}" ${r.reconciled?'checked':''}/></td>
+          <td data-label="Reconciled"><input type="checkbox" class="ba-recon-chk" data-id="${escHtml(r.id)}" ${r.reconciled?'checked':''} aria-label="Reconciled"/></td>
           <td data-label="Re-tag to"><select class="ba-retag-sel" data-id="${escHtml(r.id)}" style="padding:3px 6px;max-width:60%">${bankOpts}</select></td>
         </tr>`; }).join('')}</tbody>
       </table></div>`}

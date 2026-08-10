@@ -1999,16 +1999,28 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           ${caBalance > 0 ? `
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
             <label style="font-weight:600">${emojiIcon('💳',16)} Cash Advance — Outstanding ₱${fmt(caBalance)}${inst?` · Installment ${inst.installmentNo} of ${inst.terms}`:''}</label>
+            <!-- Repayment-mode radio group. This block is NOT inside a .form-group,
+                 so the css/styles.css .form-group input {width:100%;-webkit-appearance:none}
+                 rule (and its 2026-08-10 checkbox/radio carve-out) never reached it —
+                 the radios always rendered as native dots with a visible selected
+                 state. Shared name="ep-ca-mode" groups them; installment is checked
+                 whenever mode isn't 'full', so exactly one is always pre-selected and
+                 nobody can be looking at a group with no visible answer.
+                 label.check-row (css/styles.css ~385) is the house 44px tap-target
+                 wrap — added here because a 13px radio is not a phone-sized target on
+                 a control that decides how much of a cash advance comes out of this
+                 pay run. padding overridden to 4px 0 so the dots stay flush with the
+                 section heading instead of indenting 8px. -->
             <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <label class="check-row" style="font-size:13px;padding:4px 0">
                 <input type="radio" name="ep-ca-mode" value="installment" ${plan.mode!=='full'?'checked':''}/>
                 This month's installment — ₱${fmt(plan.caPlanned)}
               </label>
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <label class="check-row" style="font-size:13px;padding:4px 0">
                 <input type="radio" name="ep-ca-mode" value="full" ${plan.mode==='full'?'checked':''}/>
                 Pay off full balance — ₱${fmt(caBalance)}
               </label>
-              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+              <label class="check-row" style="font-size:13px;padding:4px 0">
                 <input type="radio" name="ep-ca-mode" value="custom"/>
                 Custom amount
                 <input id="ep-ca-custom" type="number" min="0" max="${caBalance}" step="0.01" style="width:120px;margin-left:4px" placeholder="0.00"/>
@@ -3237,9 +3249,24 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     </div>
     <div class="form-row">
       <div class="form-group"><label>Cash Advance Balance (₱)</label><input id="hrp-ca-balance" type="number" value="${profile?.caBalance||0}" inputmode="decimal"/></div>
+      <!-- Include-in-Payroll. Two things were wrong here and both are fixed in place:
+           (1) the inline width/height:18px was a workaround for the .form-group
+               input{width:100%} bug, which is now carved out at source in
+               css/styles.css (~345). The inline sizing OUTRANKED the carve-out and
+               was one of three different checkbox sizes in the app; dropped, so the
+               .check-row input[type=checkbox]{width:18px;height:18px} house rule
+               (~386) sizes it like every other label-wrapped checkbox.
+           (2) .form-group label paints labels as uppercase, muted, 11-12px field
+               CAPTIONS. On a checkbox that decides whether a worker appears in the
+               pay run at all, "INCLUDE IN PAYROLL" in muted micro-caps reads as a
+               heading rather than a live option, so text-transform/colour/size are
+               overridden back to ordinary option text. display:flex is stated inline
+               rather than left to label.check-row because that class only beats
+               .form-group label{display:block} on source order, and this control is
+               not one to leave depending on which rule was written last. -->
       <div class="form-group" style="display:flex;align-items:center;padding-top:22px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
-          <input type="checkbox" id="hrp-include-payroll" ${profile?.includeInPayroll!==false?'checked':''} style="width:18px;height:18px"/>
+        <label class="check-row" style="display:flex;padding:4px 0;font-weight:600;font-size:13px;text-transform:none;letter-spacing:0;color:var(--text);margin-bottom:0">
+          <input type="checkbox" id="hrp-include-payroll" ${profile?.includeInPayroll!==false?'checked':''}/>
           Include in Payroll
         </label>
       </div>
@@ -3633,9 +3660,13 @@ function openWorkSiteForm(site, currentUser, onSave) {
     </div>
     <div class="form-row">
       <div class="form-group"><label>Radius (meters)</label><input id="ws-radius" type="number" min="10" step="1" value="${site?.radiusM||150}"/></div>
+      <!-- Same treatment as hrp-include-payroll above: the inline 18px sizing is
+           dropped (the css/styles.css carve-out + .check-row now size it), the label
+           gets the 44px .check-row tap wrap, and .form-group label's uppercase/muted
+           caption styling is overridden so "Active" reads as the option it is. -->
       <div class="form-group" style="display:flex;align-items:center;padding-top:22px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
-          <input type="checkbox" id="ws-active" ${site?.active!==false?'checked':''} style="width:18px;height:18px"/> Active
+        <label class="check-row" style="display:flex;padding:4px 0;font-weight:600;font-size:13px;text-transform:none;letter-spacing:0;color:var(--text);margin-bottom:0">
+          <input type="checkbox" id="ws-active" ${site?.active!==false?'checked':''}/> Active
         </label>
       </div>
     </div>

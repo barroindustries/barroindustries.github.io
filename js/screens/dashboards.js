@@ -4226,8 +4226,8 @@ async function renderCompanyMemos(ct, canAdd) {
       const q = filter.trim().toLowerCase();
       const rows = people.filter(u => !q || (u.name||'').toLowerCase().includes(q) || (u.role||'').toLowerCase().includes(q));
       listEl.innerHTML = rows.length ? rows.map(u => `
-        <label style="display:flex;gap:9px;align-items:center;padding:6px 4px;font-size:13px;cursor:pointer;border-radius:6px">
-          <input type="checkbox" class="memo-recip-chk" data-uid="${u.id}" ${selected.has(u.id)?'checked':''} style="width:16px;height:16px;cursor:pointer"/>
+        <label class="check-row" style="display:flex;gap:9px;padding:6px 4px;font-size:13px;border-radius:6px">
+          <input type="checkbox" class="memo-recip-chk" data-uid="${u.id}" ${selected.has(u.id)?'checked':''}/>
           <span>${escHtml(u.name)} <span style="color:var(--text-muted);font-size:11px">· ${escHtml(u.role||'')}</span></span>
         </label>`).join('') : `<div style="font-size:12px;color:var(--text-muted);padding:8px">No matches</div>`;
       listEl.querySelectorAll('.memo-recip-chk').forEach(chk => chk.addEventListener('change', () => {
@@ -4358,8 +4358,8 @@ function openMemoDetailModal(m, onChange) {
         ${emojiIcon('✓',16)} You gave your conforme${conformeDate(cm.conformes[me])?` on <b>${conformeDate(cm.conformes[me])}</b>`:''}.</div>`;
     } else {
       conformeBlock = `<div style="margin-top:16px;padding:14px;border-radius:10px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.35)">
-        <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.5;color:var(--text)">
-          <input type="checkbox" id="memo-conforme-chk" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;cursor:pointer"/>
+        <label class="check-row" style="display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;color:var(--text)">
+          <input type="checkbox" id="memo-conforme-chk" style="margin-top:2px;flex-shrink:0"/>
           <span><b>Conforme.</b> I have read and understood this memo and signify my agreement.</span>
         </label>
         <button class="btn-primary" id="memo-conforme-btn" disabled style="margin-top:12px;opacity:.55">Submit Conforme</button>

@@ -540,7 +540,22 @@ window.Meetings = (function () {
         ${peopleDenied
           ? `<p style="font-size:12px;color:var(--warning)">The staff list could not be read, so nobody can be added here. The meeting will be yours only.</p>`
           : `<div id="mt-people" style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px">
-              ${people.map(p => `<label style="display:flex;gap:8px;align-items:center;padding:4px 2px;font-size:13px">
+              ${/* The tick itself is now the native control — css/styles.css carves
+                    checkbox/radio out of the .form-group text-field rule, so DO NOT
+                    add width/height back here (that is what produced three different
+                    checkbox sizes across the app). Three things still had to be said
+                    inline, because this row sits inside a .form-group and inherits
+                    `.form-group label` (uppercase, letter-spaced, muted, 600):
+                    1. the text reset — these are PEOPLE'S NAMES, not a field caption,
+                       and they were rendering as "JUAN DELA CRUZ" in muted grey;
+                    2. align-items:flex-start + the 4px nudge on the box — a long name
+                       wraps to 2-3 lines and `center` floated the tick into the middle
+                       of the block instead of beside the first line;
+                    3. padding:10px — the row was a 23px tap target on a phone, and
+                       mis-ticking here invites the wrong person. ~41px matches the
+                       intent of the 44px `label.check-row` convention in styles.css
+                       without adopting its 18px box. */''}
+              ${people.map(p => `<label class="check-row check-row-top">
                 <input type="checkbox" value="${h.esc(p.uid)}"${pre.has(p.uid) ? ' checked' : ''}/>
                 <span>${h.esc(p.name)}</span></label>`).join('')}
             </div>

@@ -1348,7 +1348,9 @@ window.birRenderBankRecBody = async function (bodyEl, accounts, state, currentUs
       <td style="font-size:12px">${escHtml(r.description || '—')}</td>
       <td><code>${escHtml(r.refNumber || '—')}</code></td>
       <td style="color:${r.bankFlow === 'in' ? 'var(--success)' : 'var(--danger)'}">${r.bankFlow === 'in' ? '+' : '-'}₱${fmt(r.amount || 0)}</td>
-      <td style="text-align:center"><input type="checkbox" class="brec-clear-chk" data-id="${escHtml(r.id)}" ${r.cleared ? 'checked' : ''} ${canClear ? '' : 'disabled'}/></td>
+      <td style="text-align:center"><input type="checkbox" class="brec-clear-chk" data-id="${escHtml(r.id)}" ${r.cleared ? 'checked' : ''} ${canClear ? '' : 'disabled'}
+        aria-label="Mark cleared: ${escHtml(r.date || '')} ${escHtml(r.description || '')}"
+        title="${canClear ? 'Tick when this transaction appears on the bank statement' : 'Read-only — you cannot change cleared status'}"/></td>
     </tr>`).join('');
 
   const unclearedHtml = uncleared.map(r => `<li>${r.date || '—'} — ${escHtml(r.description || '—')} — ${r.bankFlow === 'in' ? '+' : '-'}₱${fmt(r.amount || 0)}</li>`).join('');

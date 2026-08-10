@@ -5491,7 +5491,7 @@ window.Chat = (() => {
     const candidates = dmCandidates(users).filter(u => !existing.has(u.id));
     const rowHtml = u => {
       const ini = (u.displayName || u.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-      return `<label class="item-card" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
+      return `<label class="item-card check-row" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
         <input type="checkbox" class="chat-addmember-cb" value="${escHtml(u.id)}"/>
         <div class="ms-avatar ms-avatar-md">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:escHtml(ini)}</div>
         <div style="flex:1;min-width:0;font-weight:600">${escHtml(u.displayName||u.email)}</div>
@@ -5990,12 +5990,12 @@ window.renderChatPage = async function() {
         <div style="font-weight:700;margin-bottom:8px">${emojiIcon('👥',16)} New Group</div>
         <input id="chat-group-name" class="ms-input" placeholder="Group name" style="width:100%;margin-bottom:8px"/>
         <div id="chat-group-members" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-          ${candidates.map(u => `<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer">
+          ${candidates.map(u => `<label class="check-row">
             <input type="checkbox" class="chat-group-member-cb" value="${escHtml(u.id)}"/>
             <span>${escHtml(u.displayName||u.email)}</span>
           </label>`).join('')}
         </div>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">
+        <label class="check-row" style="display:flex;align-items:flex-start;margin-top:10px">
           <input type="checkbox" id="chat-group-announcement-cb"/>
           <span style="font-size:12px;color:var(--text-muted)">Announcement channel — only you and admins can post</span>
         </label>
