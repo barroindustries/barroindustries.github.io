@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.129';
+window.APP_VERSION = '14.0.130';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -617,9 +617,10 @@ window.NAV_REGISTRY = {
     // person who runs the company is the wrong depth for the money screen.
     //
     // MOVED BEHIND "All Departments" (each still one tap, nothing removed from
-    // the app): Posts, Memos, Company, Progress Reports, HR, Attendance,
-    // Projects, Sales Orders, Inventory. If any of those turn out to be daily
-    // for you, moving one back is a single line here.
+    // the app): Posts, Memos, Progress Reports, HR, Attendance, Projects,
+    // Sales Orders, Inventory. If any of those turn out to be daily for you,
+    // moving one back is a single line here — Company came back that way the
+    // same day it was trimmed out, which is the process working, not a mistake.
     //
     // CRM and Ventures STAY despite the trim: the owner asked for both by name
     // on 2026-08-09 for the Corporate Secretary's first week, and this variant
@@ -635,6 +636,7 @@ window.NAV_REGISTRY = {
       { key:'files-hub',   icon:'folder-open', label:'Files',           page:'files-hub' },
       { key:'analytics',   icon:'bar-chart-2', label:'Analytics',       page:'analytics' },
       { key:'team',        icon:'users',       label:'Team',            page:'team-directory' },
+      { key:'company',     icon:'building-2',  label:'Company',         page:'company' },
 
       // ── Departments: the hub, plus the two in active use this week
       { key:'departments', icon:'layout-grid', label:'All Departments', page:'departments', section:true, sectionLabel:'Departments' },
