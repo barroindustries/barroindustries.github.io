@@ -942,6 +942,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   // 'linked-worker-profile' is paid weekly; 'removed' / 'excluded: …' are
   // separate reasons the preview reports on its own line below, so they stay in
   // `employees` here and are surfaced there rather than vanishing silently.
+  // No exclusion map passed ON PURPOSE. This one feeds isPaidWeekly only, which
+  // asks about 'production' / 'linked-worker-profile' — the two permanent
+  // double-pay reasons, evaluated BEFORE any exclusion in the guard. Handing it
+  // a period map would change nothing and would imply this predicate is
+  // period-sensitive, which it must not become: the weekly/monthly split is a
+  // property of the person, not of the month.
   const _skipOf = (u) => window.monthlyRunSkipReason(u, linkedUids);
   const isPaidWeekly = (u) => ['production','linked-worker-profile'].includes(_skipOf(u));
   // Production-class staff are paid WEEKLY via Payroll → Operations Team,
@@ -1364,7 +1370,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // re-evaluated retroactively (the bug that made "viewing July" show
     // today's salaries). Falls through to the live-preview branch below only
     // when no run doc exists yet for this month.
-    const runDoc  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    // null from this catch is AMBIGUOUS — it means both "no run yet" (the normal
+    // case for an uncomputed month) and "the read failed". They render
+    // identically and mean opposite things: the second would show a person
+    // removed from THIS month as payable. Distinguish them so the screen can say.
+    let _runReadFailed = false;
+    const runDoc  = await db.collection('pay_runs').doc(month).get()
+      .catch(() => { _runReadFailed = true; return null; });
     const runData = (runDoc && runDoc.exists) ? runDoc.data() : null;
     if (runData && Array.isArray(runData.lines) && runData.lines.length) {
       const computedAtLabel = (runData.computedAt && typeof runData.computedAt.toDate === 'function')
@@ -1528,8 +1540,42 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // predicate (window.monthlyRunSkipReason), and only the wording is
     // localised for the screen. A new skip reason added to the engine can no
     // longer be missed here.
+    // THIS MONTH's exclusions, straight off the run document already read above
+    // — no extra fetch. Owner ruling 2026-08-10: an exclusion belongs to the
+    // period, not the person, so the roster must be told WHICH period it is
+    // showing. Passing nothing here would render everyone as payable and the
+    // screen would disagree with the engine.
+    const _periodExcluded = (runData && runData.excluded) || {};
+
+    // ── ONE-TIME MIGRATION BANNER (owner ruling 2026-08-10, spec §2 option B+C) ──
+    // The old payrollExcluded flag went live 2026-08-07 and carried no month, so
+    // it meant "skip for ever". Under the new ruling it means nothing, and simply
+    // ignoring it would put those people straight back into the next run — they
+    // are the zero-salary staff whose −₱500.00 lines prompted the original
+    // report, so that would book an expense and collect a cash advance from
+    // someone who draws no pay.
+    //
+    // So: anyone still carrying the flag is NAMED here until a human resolves
+    // them on this screen. Read-only and advisory — it changes no figure. It
+    // disappears on its own once the last flag is cleared.
+    const _legacyFlagged = employees.filter(e => e.payrollExcluded === true &&
+                                                 !Object.prototype.hasOwnProperty.call(_periodExcluded, e.id));
+    if (_legacyFlagged.length && captionEl) {
+      const names = _legacyFlagged.map(e => escHtml(e.displayName || e.email || e.id)).join(', ');
+      captionEl.innerHTML =
+        `<span style="color:var(--warning)">${emojiIcon('⚠',13)} <strong>${_legacyFlagged.length}</strong> `
+        + `${_legacyFlagged.length === 1 ? 'person was' : 'people were'} removed from payroll under the old rule, which had no month `
+        + `and skipped them for ever: <strong>${names}</strong>. Removal now applies to ONE month only. `
+        + `Remove them from <strong>${escHtml(month)}</strong> if they still should not be paid, or leave them to be paid this month.</span>`;
+    }
+    if (_runReadFailed && captionEl) {
+      // Say it, rather than quietly showing everyone as payable. Compute itself
+      // refuses outright on this (computePayRun), so the screen must not imply
+      // the roster below it is complete.
+      captionEl.innerHTML = `<span style="color:var(--warning)">${emojiIcon('⚠',13)} This month's payroll record could not be read, so anyone removed from THIS month may still be listed below. Reload before computing.</span>`;
+    }
     const _skipReason = (u) => {
-      const r = window.monthlyRunSkipReason(u, _linkedUids);
+      const r = window.monthlyRunSkipReason(u, _linkedUids, _periodExcluded);
       if (!r) return null;
       if (r === 'removed') return 'offboarded';
       if (r === 'production' || r === 'linked-worker-profile') return 'paid weekly (Operations Team)';
@@ -1698,24 +1744,34 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // statutory work had to: `employees` is captured once and re-rendered from
     // memory, so without this the roster would show the OLD state until the
     // next navigation while Compute used the new one.
+    // ── PERIOD-SCOPED, owner ruling 2026-08-10 ────────────────────────────
+    // "removing of certain members on payroll is strictly applied on that
+    // payroll period only unless said member is removed from system."
+    //
+    // Writes to pay_runs/{month}.excluded — THIS MONTH's own map — not to
+    // payroll/{uid}. The old flag carried no month, so one removal skipped the
+    // person in every later run: no payslip, no salary history, no ledger
+    // entry, their cash advance stopped being collected, and they fell out of
+    // the BIR alphalist, all with no signal anywhere.
+    //
+    // set({merge:true}) rather than update(): the run document does not exist
+    // for a month nobody has computed yet, and removing someone from an
+    // uncomputed month is the normal case. firestore.rules carries a matching
+    // clause fenced to these three keys with the state frozen (2026-08-10) —
+    // without it the state-transition rule would have denied this write on a
+    // draft month.
     const _setPayrollExcluded = async (uid, excluded, reason) => {
-      const patch = excluded
-        ? { payrollExcluded: true, payrollExcludedReason: reason || '',
-            payrollExcludedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            payrollExcludedBy: (currentUser && currentUser.uid) || '' }
-        : { payrollExcluded: firebase.firestore.FieldValue.delete(),
-            payrollExcludedReason: firebase.firestore.FieldValue.delete(),
-            payrollExcludedAt: firebase.firestore.FieldValue.delete(),
-            payrollExcludedBy: firebase.firestore.FieldValue.delete() };
-      await db.collection('payroll').doc(uid).set(patch, { merge: true });
-      const emp = employees.find(e => e.id === uid);
-      if (emp) {
-        if (excluded) { emp.payrollExcluded = true; emp.payrollExcludedReason = reason || ''; }
-        else { delete emp.payrollExcluded; delete emp.payrollExcludedReason; }
-      }
-      window.dbCacheInvalidate && window.dbCacheInvalidate('users');
-      window.logAudit && window.logAudit('update', 'payroll', uid,
-        { payrollExcluded: excluded, reason: reason || '' });
+      const F = firebase.firestore.FieldValue;
+      await db.collection('pay_runs').doc(month).set({
+        excluded: { [uid]: excluded ? (reason || true) : F.delete() },
+        excludedUpdatedAt: F.serverTimestamp(),
+        excludedUpdatedBy: (currentUser && currentUser.uid) || ''
+      }, { merge: true });
+      // No in-memory patch: both callers follow this with loadPayrollTable(month),
+      // which re-reads pay_runs/{month} itself. A second copy of the same fact
+      // could only ever drift from the first.
+      window.logAudit && window.logAudit('update', 'pay_run_exclusion', month,
+        { uid, excluded, reason: reason || '', period: month });
     };
     tbody.querySelectorAll('.pr-exclude-btn').forEach(btn => {
       btn.addEventListener('click', () => window.busy(btn, async () => {

@@ -1340,6 +1340,30 @@ service cloud.firestore {
       allow create: if isAuth() && isMoneyAdmin() &&
         request.resource.data.get('state','draft') in ['draft','computed'];
       allow update: if isAuth() && (
+        // ── PERIOD-SCOPED PAYROLL EXCLUSION (owner ruling 2026-08-10) ────────
+        // "removing of certain members on payroll is strictly applied on that
+        // payroll period only unless said member is removed from system."
+        // The exclusion therefore lives on THIS MONTH'S run document, not on the
+        // person — the old payroll/{uid}.payrollExcluded flag carried no month,
+        // so excluding someone in June skipped them in July and every month
+        // after, silently.
+        //
+        // This clause is NOT covered by the state-transition clause below: that
+        // one requires the state to MOVE into computed/verified, which a DRAFT
+        // month (one nobody has computed yet) cannot do — so without this, the
+        // very first exclusion of a month would be denied. Verified against the
+        // existing rule before adding.
+        //
+        // Fenced to the `excluded` map and its bookkeeping ONLY, and the state
+        // must not move, so this can never be used to smuggle a run through its
+        // lifecycle or edit a computed line. A DISBURSED month is frozen: once
+        // money has moved, who was on that payroll is history, not a setting.
+        ( isMoneyAdmin() &&
+          resource.data.get('state','draft') in ['draft','computed','verified'] &&
+          request.resource.data.get('state','draft') == resource.data.get('state','draft') &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy']) )
+        ||
         ( isMoneyAdmin() &&
           resource.data.get('state','draft') in ['draft','computed'] &&
           request.resource.data.get('state','') in ['computed','verified'] )

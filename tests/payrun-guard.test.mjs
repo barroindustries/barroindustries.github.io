@@ -1,6 +1,6 @@
 // tests/payrun-guard.test.mjs — the monthly pay run's DOUBLE-PAY GUARD.
 //
-// window.monthlyRunSkipReason(u, linkedUids) (js/departments.js) is the single
+// window.monthlyRunSkipReason(u, linkedUids, periodExcluded) (js/departments.js) is the single
 // named expression that decides who the MONTHLY (Office Team) run pays. Every
 // `null` it returns is a person who gets computed, verified and disbursed; every
 // non-null string is a person deliberately left out, surfaced in the run's
@@ -14,7 +14,12 @@
 //                        profile is one human, payable once
 //   • excluded         — staff with no salary on file were computed anyway, so
 //                        the statutory table deducted SSS/PhilHealth from a base
-//                        of 0 and the roster showed NEGATIVE net pay
+//                        of 0 and the roster showed NEGATIVE net pay.
+//                        SCOPE CHANGED 2026-08-10 by owner ruling: an exclusion
+//                        now applies to ONE PERIOD, read from that run's own
+//                        `excluded` map, not from a flag on the person. The old
+//                        flag had no month, so excluding someone once skipped
+//                        them for ever, silently.
 //
 // Until now the guard had no durable test: the harnesses that checked it during
 // the build and the review were both ad-hoc and thrown away, so nothing stopped
@@ -128,23 +133,67 @@ describe('monthly pay run — offboarded and excluded staff', () => {
     }
   });
 
-  it('skips staff flagged as excluded from payroll', () => {
-    assert.equal(
-      skipReason({ ...payable(), payrollExcluded: true }, noLinks),
-      'excluded');
+  // ── PERIOD-SCOPED EXCLUSION — owner ruling 2026-08-10 ──────────────────
+  // "removing of certain members on payroll is strictly applied on that payroll
+  // period only unless said member is removed from system."
+  //
+  // These four tests REPLACE four that pinned the old permanent behaviour
+  // (a payrollExcluded flag on the person). That behaviour was the bug: set
+  // once, it skipped the person in every later run, silently — no payslip, no
+  // salary history, no ledger entry, and their cash advance stopped being
+  // collected. The pins changed because the RULING changed, which is the only
+  // legitimate reason to move a money pin.
+  it('skips someone this period excludes', () => {
+    assert.equal(skipReason(payable(), noLinks, { u1: true }), 'excluded');
   });
 
   it('carries the exclusion reason through to the skipped list', () => {
-    assert.equal(
-      skipReason({ ...payable(), payrollExcluded: true, payrollExcludedReason: 'unpaid intern' }, noLinks),
+    assert.equal(skipReason(payable(), noLinks, { u1: 'unpaid intern' }),
       'excluded: unpaid intern');
   });
 
-  it('treats only payrollExcluded === true as excluded', () => {
-    for (const v of ['false', '', 0, null, undefined]) {
-      assert.equal(skipReason({ ...payable(), payrollExcluded: v }, noLinks), null,
-        `payrollExcluded: ${JSON.stringify(v)} must not skip payment`);
+  it('PAYS them in a period that does not exclude them — the whole point', () => {
+    // June excludes, July does not. Under the old flag this person stayed
+    // unpaid from June onwards forever.
+    const june = { u1: 'on leave without pay' };
+    const july = {};
+    assert.equal(skipReason(payable(), noLinks, june), 'excluded: on leave without pay');
+    assert.equal(skipReason(payable(), noLinks, july), null);
+  });
+
+  it('pays them when no exclusion map is passed at all', () => {
+    // A caller that cannot read the map must not accidentally skip everyone.
+    // computePayRun refuses outright rather than passing {} — this pins the
+    // guard's own half of that contract.
+    assert.equal(skipReason(payable(), noLinks), null);
+    assert.equal(skipReason(payable(), noLinks, null), null);
+    assert.equal(skipReason(payable(), noLinks, undefined), null);
+  });
+
+  it('ignores a falsy entry, so a stale put-back cannot skip anyone', () => {
+    for (const v of [false, '', 0, null, undefined]) {
+      assert.equal(skipReason(payable(), noLinks, { u1: v }), null,
+        `excluded[u1] = ${JSON.stringify(v)} must not skip payment`);
     }
+  });
+
+  it('only excludes the uid it names', () => {
+    assert.equal(skipReason({ ...payable(), id: 'u2' }, noLinks, { u1: true }), null);
+  });
+
+  it('accepts a Map as well as a plain object', () => {
+    assert.equal(skipReason(payable(), noLinks, new Map([['u1', 'sick']])), 'excluded: sick');
+  });
+
+  it('REMOVED still wins over a period exclusion', () => {
+    // The owner's stated exception: removal from the system is the one thing
+    // that persists. The message must name the real cause.
+    assert.equal(skipReason({ ...payable(), removed: true }, noLinks, { u1: true }), 'removed');
+  });
+
+  it('the double-pay guard still wins over a period exclusion', () => {
+    assert.equal(skipReason({ ...payable(), payClass: 'production' }, noLinks, { u1: true }), 'production');
+    assert.equal(skipReason(payable(), new Set(['u1']), { u1: true }), 'linked-worker-profile');
   });
 });
 
@@ -166,11 +215,11 @@ describe('monthly pay run — defensive inputs', () => {
       [payable(), noLinks], [null, noLinks],
       [{ ...payable(), removed: true }, noLinks],
       [{ ...payable(), payClass: 'production' }, noLinks],
-      [{ ...payable(), payrollExcluded: true }, noLinks],
+      [payable(), noLinks, { u1: true }],
       [payable(), new Set(['u1'])]
     ];
-    for (const [u, l] of cases) {
-      const r = skipReason(u, l);
+    for (const [u, l, ex] of cases) {
+      const r = skipReason(u, l, ex);
       assert.ok(r === null || (typeof r === 'string' && r.length > 0),
         `guard returned ${JSON.stringify(r)} — must be null or a non-empty string`);
     }

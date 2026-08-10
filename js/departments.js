@@ -1933,7 +1933,37 @@ window.RaiseFlow = (function () {
    NOTE ON ROLE: no clause here reads `role`. Every office role — president,
    manager, Corporate Secretary, finance, employee, agent — is paid by the
    monthly run on exactly the same terms. */
-window.monthlyRunSkipReason = function(u, linkedUids) {
+/* ── PERIOD-SCOPED EXCLUSION (owner ruling, 2026-08-10) ────────────────────
+   "removing of certain members on payroll is strictly applied on that payroll
+   period only unless said member is removed from system."
+
+   WHAT WAS WRONG. payrollExcluded was written to payroll/{uid} with NO MONTH
+   attached and read here with no month attached, so excluding someone from June
+   excluded them from July, August and every month after — until a human
+   remembered to put them back. The roster said so in its own words ("Excluded
+   from this and every run until put back on payroll") and the consequences were
+   silent: no payslip, no salary history, no ledger entry, no notification,
+   their cash advance stopped being collected, and they dropped out of the BIR
+   alphalist. After Compute the only trace was a count, with the names in a
+   hover tooltip unreachable on a phone.
+
+   Sharper still: a flag with no month meant that RECOMPUTING June today applied
+   a decision made in August to June's run — and the unpaid-months card invites
+   exactly that.
+
+   WHAT IT IS NOW. `periodExcluded` is that period's own exclusion map, read
+   from pay_runs/{month}.excluded. Of the five reasons a person is skipped, this
+   is the ONLY one that is period-scoped. The four permanent ones — partner,
+   removed from the system, production pay class, linked worker profile — stay
+   AHEAD of it in the same order, because three of them are the double-pay guard
+   and one is the owner's stated exception. Their 13 pinned tests are unchanged.
+
+   ⚠ ORDER IS LOAD-BEARING. `removed` must keep winning over an exclusion, so a
+   person who left the company reads as "removed", not as "excluded this month".
+   ⚠ A MISSING periodExcluded MEANS PAY THEM. Callers that cannot read the run
+   document must NOT silently pass {} — see computePayRun, which now refuses to
+   compute on a failed read rather than paying someone a period says to skip. */
+window.monthlyRunSkipReason = function(u, linkedUids, periodExcluded) {
   if (!u) return 'missing';
   // Money-critical — a fired/offboarded user (users/{uid}.removed === true, set
   // by People → Remove; js/app.js's auth gate already blocks THEIR login on this
@@ -1947,9 +1977,33 @@ window.monthlyRunSkipReason = function(u, linkedUids) {
   // 0, but the statutory table still applied — so the roster showed a NEGATIVE
   // net pay (owner screenshot: four people at -P500.00, base P0.00 with SSS
   // -250 and PhilHealth -250 deducted from nothing).
-  if (u.payrollExcluded === true)
-    return 'excluded' + (u.payrollExcludedReason ? ': ' + u.payrollExcludedReason : '');
+  // Owner-requested (2026-08-07): not everyone on the staff list draws a
+  // payroll. Before this, someone with no salary set was still computed — base
+  // 0, but the statutory table still applied — so the roster showed a NEGATIVE
+  // net pay (owner screenshot: four people at -P500.00, base P0.00 with SSS
+  // -250 and PhilHealth -250 deducted from nothing).
+  //
+  // Now read from THIS PERIOD's map rather than a flag on the person. An entry
+  // may be `true` or a reason string; anything falsy is not an exclusion, so a
+  // stale `false` left behind by a put-back cannot skip anyone.
+  if (periodExcluded) {
+    const e = (typeof periodExcluded.get === 'function') ? periodExcluded.get(u.id) : periodExcluded[u.id];
+    if (e) return 'excluded' + (typeof e === 'string' && e ? ': ' + e : '');
+  }
   return null;
+};
+
+/* Read one period's exclusion map. Returns null — NOT {} — when the run
+   document could not be READ, so the caller can tell "nobody is excluded" apart
+   from "I do not know who is excluded". Those are the same shape and opposite
+   meanings, and this app collapses denials into empty results everywhere else,
+   which on a pay run would mean paying someone the period says to skip. */
+window.periodExclusionsFor = async function(month) {
+  try {
+    const d = await db.collection('pay_runs').doc(month).get();
+    if (!d.exists) return {};                      // no run yet = nobody excluded yet
+    return (d.data() || {}).excluded || {};
+  } catch (_) { return null; }                     // could not read — caller must stop
 };
 
 window.computePayRun = async function(month, { policy } = {}) {
@@ -1986,10 +2040,21 @@ window.computePayRun = async function(month, { policy } = {}) {
     wpSnap.docs.map(d=>d.data()).filter(p=>p.status!=='inactive' && p.linkedUid).map(p=>p.linkedUid)
   );
 
+  // THIS MONTH's exclusions (owner ruling 2026-08-10 — period-scoped, not a flag
+  // on the person). Read BEFORE any line is built, and REFUSE on a failed read:
+  // returning null here means "I could not find out who is excluded", which is
+  // not the same as "nobody is excluded" even though both are falsy. Computing
+  // through a denial would pay someone this period says to skip — the exact
+  // silent-zero failure this app collapses into everywhere else.
+  const periodExcluded = await window.periodExclusionsFor(month);
+  if (periodExcluded === null) {
+    throw new Error('Could not read this month\'s payroll exclusions — nothing was computed. Try again in a moment.');
+  }
+
   const skipped = [];
   const employees = [];
   for (const u of allStaff) {
-    const reason = window.monthlyRunSkipReason(u, linkedUids);
+    const reason = window.monthlyRunSkipReason(u, linkedUids, periodExcluded);
     if (reason) { skipped.push({ uid:u.id, name:u.displayName||u.email, reason }); continue; }
     employees.push(u);
   }
