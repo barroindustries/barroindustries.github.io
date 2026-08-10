@@ -1893,14 +1893,17 @@ async function renderFinanceDashboard() {
         <td data-label="Oldest" style="text-align:center;color:${ageCol(g.oldest)};font-weight:600">${g.oldest}d</td>
         <td data-label="Projects" style="text-align:center">${g.count}</td>
       </tr>`).join('');
-      openPage(`${emojiIcon('📥',16)} Receivables by Client`, `
+      const _panel = openPage(`${emojiIcon('📥',16)} Receivables by Client`, `
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Open project balances, oldest first — chase the top of the list. Total <strong>₱${formatNum(arTotal)}</strong> across ${arClients.length} client${arClients.length===1?'':'s'}.</div>
         <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="data-table table-cards no-toggle">
           <thead><tr><th>Client</th><th style="text-align:right">Outstanding</th><th style="text-align:center">Oldest</th><th style="text-align:center">Projects</th></tr></thead>
           <tbody>${rows||'<tr><td colspan="4">No open receivables</td></tr>'}</tbody>
         </table></div>`,
         `<button class="btn-secondary" id="ar-csv-btn">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
-      document.getElementById('ar-csv-btn')?.addEventListener('click', ()=>window.exportCSV('receivables-by-client', arClients, [
+      // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in
+      // the DOM for ~300ms, so a document-wide lookup resolves into the DYING
+      // panel: the CSV button the user can see gets no handler at all.
+      _panel.querySelector('#ar-csv-btn')?.addEventListener('click', ()=>window.exportCSV('receivables-by-client', arClients, [
         {key:'client',label:'Client'},{key:'total',label:'Outstanding',get:g=>g.total},{key:'oldest',label:'Oldest (days)',get:g=>g.oldest},{key:'count',label:'Open Projects',get:g=>g.count}]));
     });
   } catch(err) {
@@ -2297,7 +2300,7 @@ async function renderSOPs() {
 // the original built-in SOPs). The textarea round-trips raw HTML safely.
 function openSOPEditor(id, sop) {
   sop = sop || { title:'', items:[], order:0 };
-  openPage(id ? 'Edit SOP' : 'Add SOP', `
+  const _panel = openPage(id ? 'Edit SOP' : 'Add SOP', `
     <div class="form-group"><label>Title (include an emoji, e.g. ${emojiIcon('📅',16)} Daily Attendance)</label>
       <input id="sop-e-title" value="${escHtml(sop.title||'')}" placeholder="📋 Procedure name"/></div>
     <div class="form-group"><label>Steps — one per line (you can use &lt;strong&gt; and &lt;em&gt;)</label>
@@ -2305,10 +2308,15 @@ function openSOPEditor(id, sop) {
     <div id="sop-e-err" class="error-msg hidden" style="margin-top:6px"></div>
   `, `<button class="btn-primary" id="sop-e-save">Save</button>${id?'<button class="btn-danger" id="sop-e-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  document.getElementById('sop-e-save').addEventListener('click', async () => {
-    const title = document.getElementById('sop-e-title').value.trim();
-    const items = document.getElementById('sop-e-items').value.split('\n').map(x=>x.trim()).filter(Boolean);
-    const err = document.getElementById('sop-e-err');
+  // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+  // DOM for ~300ms; a document-wide lookup then resolves into the DYING panel —
+  // the Save handler binds a button nobody can see, and worse, a save that does
+  // fire reads the PREVIOUS SOP's title/steps and writes them onto this one.
+  const $ = (sel) => _panel.querySelector(sel);
+  $('#sop-e-save').addEventListener('click', async () => {
+    const title = $('#sop-e-title').value.trim();
+    const items = $('#sop-e-items').value.split('\n').map(x=>x.trim()).filter(Boolean);
+    const err = $('#sop-e-err');
     if (!title || !items.length) { err.textContent='Title and at least one step are required.'; err.classList.remove('hidden'); return; }
     const data = { title, items, order: sop.order ?? 0 };
     try {
@@ -2317,7 +2325,7 @@ function openSOPEditor(id, sop) {
       closeModal(); renderSOPs();
     } catch(e) { err.textContent = 'Save failed: '+(e.message||e.code); err.classList.remove('hidden'); }
   });
-  document.getElementById('sop-e-del')?.addEventListener('click', async () => {
+  $('#sop-e-del')?.addEventListener('click', async () => {
     if (!await confirmDialog({ message: 'Delete this SOP permanently?', danger: true })) return;
     try { await db.collection('sops').doc(id).delete(); closeModal(); renderSOPs(); }
     catch(e) { Notifs.showToast('Delete failed','error'); }
@@ -2452,7 +2460,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     document.querySelectorAll('.grade-emp-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const { uid, name, presgrade, presnotes, presimprove } = btn.dataset;
-        openPage(`Grade: ${name}`, `
+        const _panel = openPage(`Grade: ${name}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Improvement areas are visible to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="pres-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
@@ -2465,10 +2473,16 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
             <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${escHtml(presimprove||'')}</textarea>
           </div>
         `, `<button class="btn-primary" id="save-pres-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-        document.getElementById('save-pres-grade-btn')?.addEventListener('click', async () => {
-          const grade   = parseInt(document.getElementById('pres-grade-input').value);
-          const notes   = document.getElementById('pres-grade-notes').value.trim();
-          const improve = document.getElementById('pres-improve-input').value.trim();
+        // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page
+        // in the DOM for ~300ms: grade employee A, close, grade employee B
+        // inside that window, and a document-wide lookup reads A's typed grade
+        // and notes and writes them onto B's kpi_evals doc — and notifies B
+        // about a grade they were never given.
+        const $ = (sel) => _panel.querySelector(sel);
+        $('#save-pres-grade-btn')?.addEventListener('click', async () => {
+          const grade   = parseInt($('#pres-grade-input').value);
+          const notes   = $('#pres-grade-notes').value.trim();
+          const improve = $('#pres-improve-input').value.trim();
           if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter 1–10.','error'); return; }
           await db.collection('kpi_evals').doc(uid).set({
             presidentGrade: grade, presidentNotes: notes,
@@ -2898,7 +2912,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
 
   // Self Evaluation button
   document.getElementById('self-eval-btn')?.addEventListener('click', () => {
-    openPage(`Self-Assessment — ${monthLabel}`, `
+    const _panel = openPage(`Self-Assessment — ${monthLabel}`, `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
         This is <strong>required for payroll</strong> every 1st of the month. Be honest — the president also grades you.
       </p>
@@ -2915,10 +2929,14 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <textarea id="self-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Be specific about areas you want to work on…">${escHtml(evalData.selfImprovements||'')}</textarea>
       </div>
     `, `<button class="btn-primary" id="save-self-eval-btn">Submit Assessment</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('save-self-eval-btn')?.addEventListener('click', async () => {
-      const grade    = parseInt(document.getElementById('self-grade-input').value);
-      const notes    = document.getElementById('self-notes-input').value.trim();
-      const improve  = document.getElementById('self-improve-input').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in
+    // the DOM for ~300ms, so a document-wide lookup resolves into the dying
+    // panel — the Submit button reads the previous form's values.
+    const $ = (sel) => _panel.querySelector(sel);
+    $('#save-self-eval-btn')?.addEventListener('click', async () => {
+      const grade    = parseInt($('#self-grade-input').value);
+      const notes    = $('#self-notes-input').value.trim();
+      const improve  = $('#self-improve-input').value.trim();
       if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter a grade between 1 and 10.','error'); return; }
       if (!notes)   { Notifs.showToast('Please describe your accomplishments.','error'); return; }
       if (!improve) { Notifs.showToast('Please describe your improvement areas.','error'); return; }
@@ -4168,7 +4186,7 @@ async function renderCompanyMemos(ct, canAdd) {
 
   // ── Create modal ──
   document.getElementById('add-memo-btn')?.addEventListener('click',()=>{
-    openPage('New Memo',`
+    const _panel = openPage('New Memo',`
       <div class="form-group"><label>Memo Title</label><input id="memo-title" placeholder="e.g. Updated Leave Policy"/></div>
       <div class="form-group"><label>From</label><input id="memo-from" placeholder="Management / HR / Finance" value="${escHtml(currentUser?.displayName||'Management')}"/></div>
       <div class="form-group"><label>Content</label><textarea id="memo-content" rows="7" placeholder="Write the memo here…"></textarea></div>
@@ -4186,13 +4204,23 @@ async function renderCompanyMemos(ct, canAdd) {
     `,`<button class="btn-primary" id="save-memo-btn">Publish Memo</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
     let uploadedFile=null;
+    // NOTE (not fixed here): Drive.renderUploadArea takes a container ID STRING
+    // and resolves it with its own document.getElementById (js/drive.js). Same
+    // dying-panel hazard as everything below, but the cure is a drive.js
+    // signature change (accept an Element) — out of this file's scope.
     Drive.renderUploadArea('memo-file-upload',r=>{uploadedFile=r;},{label:'Attach document (optional)',dept:'Admin',subfolder:'Memos'});
+
+    // ⚠ EVERY LOOKUP BELOW IS SCOPED TO THIS PANEL, NOT document. openPage keeps
+    // a CLOSING page in the DOM for ~300ms; a document-wide lookup then resolves
+    // into the DYING panel, so the visible Publish button gets no handler, and a
+    // publish that does fire reads the PREVIOUS memo's title/from/content.
+    const $ = (sel) => _panel.querySelector(sel);
 
     // Populate the recipient picker.
     const selected = new Set();
     let people = [];
-    const listEl  = document.getElementById('memo-recip-list');
-    const countEl = document.getElementById('memo-recip-count');
+    const listEl  = $('#memo-recip-list');
+    const countEl = $('#memo-recip-count');
     const updateCount = () => { countEl.textContent = selected.size ? `${selected.size} tagged — must give conforme` : 'No one tagged'; };
     const paintList = (filter='') => {
       const q = filter.trim().toLowerCase();
@@ -4222,24 +4250,24 @@ async function renderCompanyMemos(ct, canAdd) {
         paintList();
       } catch(err) { listEl.innerHTML = `<div style="font-size:12px;color:var(--danger);padding:8px">Could not load people: ${escHtml(err.message)}</div>`; }
     })();
-    document.getElementById('memo-recip-search').addEventListener('input', e => paintList(e.target.value));
-    document.getElementById('memo-recip-toggle').addEventListener('click', () => {
-      const visible = people.filter(u => { const q=document.getElementById('memo-recip-search').value.trim().toLowerCase(); return !q || (u.name||'').toLowerCase().includes(q) || (u.role||'').toLowerCase().includes(q); });
+    $('#memo-recip-search').addEventListener('input', e => paintList(e.target.value));
+    $('#memo-recip-toggle').addEventListener('click', () => {
+      const visible = people.filter(u => { const q=$('#memo-recip-search').value.trim().toLowerCase(); return !q || (u.name||'').toLowerCase().includes(q) || (u.role||'').toLowerCase().includes(q); });
       const allOn = visible.length && visible.every(u => selected.has(u.id));
       visible.forEach(u => allOn ? selected.delete(u.id) : selected.add(u.id));
       updateCount();
-      paintList(document.getElementById('memo-recip-search').value);
+      paintList($('#memo-recip-search').value);
     });
 
-    document.getElementById('save-memo-btn').addEventListener('click',async()=>{
-      const title=document.getElementById('memo-title').value.trim();
+    $('#save-memo-btn').addEventListener('click',async()=>{
+      const title=$('#memo-title').value.trim();
       if(!title) { Notifs.showToast('Memo title required','error'); return; }
-      const from    = document.getElementById('memo-from').value.trim();
-      const content = document.getElementById('memo-content').value;
+      const from    = $('#memo-from').value.trim();
+      const content = $('#memo-content').value;
       const recipients = [...selected];
       const recipientNames = {};
       recipients.forEach(uid => { const p = people.find(x=>x.id===uid); recipientNames[uid] = p ? p.name : uid; });
-      const saveBtn = document.getElementById('save-memo-btn');
+      const saveBtn = $('#save-memo-btn');
       saveBtn.disabled = true; saveBtn.textContent = 'Publishing…';
       try {
         const memoRef = await db.collection('memos').add({
@@ -4355,10 +4383,14 @@ function openMemoDetailModal(m, onChange) {
   }
 
   // v14 Batch5 A3 — memo detail/conforme-tracker: detail+history content, CONVERT.
-  // All ids referenced below (memo-conforme-chk/-btn, del-memo-btn) are queried
-  // via document.getElementById, which is document-scoped — no dependency on
-  // the old #modal-body singleton, so this is a same-signature swap.
-  openPage(m.title,`
+  // ⚠ 2026-08-10: the ids below (memo-conforme-chk/-btn, del-memo-btn) are now
+  // queried off the RETURNED PANEL, not document. openPage keeps a CLOSING page
+  // in the DOM for ~300ms — open memo A, back out, open memo B inside that
+  // window, and getElementById resolves into A's dying panel: B's visible
+  // Conforme/Delete buttons are dead, and the handlers went to A's invisible
+  // ones (whose Delete carries A's memo id). This is the defect the Corporate
+  // Secretary reported as "needs several taps before it opens".
+  const _panel = openPage(m.title,`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
     <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
     ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open Attachment</a>`:''}
@@ -4368,8 +4400,8 @@ function openMemoDetailModal(m, onChange) {
   `);
 
   // Wire the conforme checkbox → enable submit → record acknowledgment.
-  const chk = document.getElementById('memo-conforme-chk');
-  const btn = document.getElementById('memo-conforme-btn');
+  const chk = _panel.querySelector('#memo-conforme-chk');
+  const btn = _panel.querySelector('#memo-conforme-btn');
   if (chk && btn) {
     chk.addEventListener('change', () => {
       btn.disabled = !chk.checked;
@@ -4396,7 +4428,7 @@ function openMemoDetailModal(m, onChange) {
       }
     });
   }
-  document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this memo?', danger:true})){await window.deleteMemo(e2.currentTarget.dataset.id);closeModal();onChange?.();}});
+  _panel.querySelector('#del-memo-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this memo?', danger:true})){await window.deleteMemo(e2.currentTarget.dataset.id);closeModal();onChange?.();}});
 }
 window.openMemoDetailModal = openMemoDetailModal;
 
@@ -4462,15 +4494,18 @@ async function renderCompanyPolicies(ct, canAdd) {
       card.addEventListener('click',e=>{
         if(e.target.tagName==='A') return;
         const p=policies.find(x=>x.id===card.dataset.id);
-        // v14 Batch5 A3 — policy detail view: CONVERT (detail content). del-policy-btn
-        // is looked up via document.getElementById, unaffected by the container swap.
-        openPage(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${(typeof safeHttpUrl==='function')?safeHttpUrl(p.fileUrl):p.fileUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
-        document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this policy?', danger:true})){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
+        // v14 Batch5 A3 — policy detail view: CONVERT (detail content).
+        // ⚠ 2026-08-10: del-policy-btn is queried off the RETURNED PANEL, not
+        // document. openPage keeps a CLOSING page in the DOM for ~300ms, so an
+        // unscoped lookup binds the PREVIOUS policy's dying Delete button —
+        // carrying the previous policy's data-id, i.e. deleting the wrong doc.
+        const _panel = openPage(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${(typeof safeHttpUrl==='function')?safeHttpUrl(p.fileUrl):p.fileUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
+        _panel.querySelector('#del-policy-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this policy?', danger:true})){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
       });
     });
   }
   document.getElementById('add-policy-btn')?.addEventListener('click',()=>{
-    openPage('Add Policy',`
+    const _panel = openPage('Add Policy',`
       <div class="form-group"><label>Title</label><input id="pol-title"/></div>
       <div class="form-group"><label>Icon</label><input id="pol-icon" placeholder="📄" maxlength="4"/></div>
       <div class="form-group"><label>Short Description</label><input id="pol-desc"/></div>
@@ -4478,10 +4513,16 @@ async function renderCompanyPolicies(ct, canAdd) {
       <div id="pol-file-upload"></div>
     `,`<button class="btn-primary" id="save-pol-btn">Save Policy</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let uploadedFile=null;
+    // NOTE (not fixed here): Drive.renderUploadArea resolves this container ID
+    // with its own document.getElementById (js/drive.js) — same hazard, but the
+    // cure belongs in drive.js.
     Drive.renderUploadArea('pol-file-upload',r=>{uploadedFile=r;},{label:'Attach document',dept:'Admin',subfolder:'Policies'});
-    document.getElementById('save-pol-btn').addEventListener('click',async()=>{
-      const title=document.getElementById('pol-title').value.trim(); if(!title) return;
-      await db.collection('policies').add({title,icon:document.getElementById('pol-icon').value.trim()||`${emojiIcon('📄',16)}`,description:document.getElementById('pol-desc').value.trim(),content:document.getElementById('pol-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms, so an unscoped lookup binds — and reads — the dying panel.
+    const $ = (sel) => _panel.querySelector(sel);
+    $('#save-pol-btn').addEventListener('click',async()=>{
+      const title=$('#pol-title').value.trim(); if(!title) return;
+      await db.collection('policies').add({title,icon:$('#pol-icon').value.trim()||`${emojiIcon('📄',16)}`,description:$('#pol-desc').value.trim(),content:$('#pol-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
       closeModal(); renderCompanyPolicies(ct,canAdd);
     });
   });
@@ -4534,7 +4575,7 @@ async function renderCompanyDownloads(ct, canAdd) {
   if(window.lucide) lucide.createIcons({nodes:[list]});
 
   document.getElementById('add-dl-btn')?.addEventListener('click',()=>{
-    openPage('Upload Resource',`
+    const _panel = openPage('Upload Resource',`
       <div class="form-group"><label>Title</label><input id="dl-title" placeholder="e.g. Daily Time Record Form"/></div>
       <div class="form-group"><label>Category</label>
         <select id="dl-cat"><option value="Forms">Forms</option><option value="Templates">Templates</option><option value="Reports">Reports</option><option value="Others">Others</option></select>
@@ -4543,10 +4584,16 @@ async function renderCompanyDownloads(ct, canAdd) {
       <div id="dl-file-upload"></div>
     `,`<button class="btn-primary" id="save-dl-btn">Upload</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let uploadedFile=null;
+    // NOTE (not fixed here): Drive.renderUploadArea resolves this container ID
+    // with its own document.getElementById (js/drive.js) — same hazard, but the
+    // cure belongs in drive.js.
     Drive.renderUploadArea('dl-file-upload',r=>{uploadedFile=r;},{label:'Select file to upload',dept:'Admin',subfolder:'Resources'});
-    document.getElementById('save-dl-btn').addEventListener('click',async()=>{
-      const title=document.getElementById('dl-title').value.trim(); if(!title||!uploadedFile) return;
-      await db.collection('resources').add({title,category:document.getElementById('dl-cat').value,description:document.getElementById('dl-desc').value.trim(),fileUrl:uploadedFile.url,source:uploadedFile.source,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms, so an unscoped lookup binds — and reads — the dying panel.
+    const $ = (sel) => _panel.querySelector(sel);
+    $('#save-dl-btn').addEventListener('click',async()=>{
+      const title=$('#dl-title').value.trim(); if(!title||!uploadedFile) return;
+      await db.collection('resources').add({title,category:$('#dl-cat').value,description:$('#dl-desc').value.trim(),fileUrl:uploadedFile.url,source:uploadedFile.source,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
       closeModal(); renderCompanyDownloads(ct,canAdd);
     });
   });
@@ -4603,15 +4650,18 @@ async function renderCompanyHandbook(ct, canAdd) {
   if(window.lucide) lucide.createIcons({nodes:[ct]});
 
   document.getElementById('add-handbook-btn')?.addEventListener('click',()=>{
-    openPage('Add Handbook Section',`
+    const _panel = openPage('Add Handbook Section',`
       <div class="form-group"><label>Section Title</label><input id="hb-title"/></div>
       <div class="form-group"><label>Icon (Lucide name)</label><input id="hb-icon" placeholder="e.g. file-text, clock, shield-check" value="file-text"/></div>
       <div class="form-group"><label>Content</label><textarea id="hb-content" rows="8" placeholder="Write section content…"></textarea></div>
     `,`<button class="btn-primary" id="save-hb-btn">Add Section</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('save-hb-btn').addEventListener('click',async()=>{
-      const title=document.getElementById('hb-title').value.trim(); if(!title) return;
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms, so an unscoped lookup binds — and reads — the dying panel.
+    const $ = (sel) => _panel.querySelector(sel);
+    $('#save-hb-btn').addEventListener('click',async()=>{
+      const title=$('#hb-title').value.trim(); if(!title) return;
       const order = sections.length + defaultSections.length;
-      await db.collection('handbook').add({title,icon:document.getElementById('hb-icon').value.trim()||'file-text',content:document.getElementById('hb-content').value,order,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      await db.collection('handbook').add({title,icon:$('#hb-icon').value.trim()||'file-text',content:$('#hb-content').value,order,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
       closeModal(); renderCompanyHandbook(ct,canAdd);
     });
   });
@@ -4690,7 +4740,7 @@ async function renderDepartments() {
   });
 
   document.getElementById('add-dept-btn')?.addEventListener('click', () => {
-    openPage('Add Department', `
+    const _panel = openPage('Add Department', `
       <div class="form-group"><label>Name</label>
         <select id="dept-name-sel">
           <option value="">-- Select --</option>
@@ -4702,16 +4752,19 @@ async function renderDepartments() {
       <div class="form-group"><label>Department Head</label><input id="dept-head"/></div>
       <div class="form-group"><label>Members (comma-separated)</label><textarea id="dept-members" rows="3"></textarea></div>
     `, `<button class="btn-primary" id="save-dept-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('dept-name-sel').onchange = function() {
-      document.getElementById('dept-custom-wrap').classList.toggle('hidden', this.value !== 'custom');
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms, so an unscoped lookup binds — and reads — the dying panel.
+    const $ = (sel) => _panel.querySelector(sel);
+    $('#dept-name-sel').onchange = function() {
+      $('#dept-custom-wrap').classList.toggle('hidden', this.value !== 'custom');
     };
-    document.getElementById('save-dept-btn').addEventListener('click', async () => {
-      const sel  = document.getElementById('dept-name-sel').value;
-      const name = sel === 'custom' ? document.getElementById('dept-custom-name').value.trim() : sel;
+    $('#save-dept-btn').addEventListener('click', async () => {
+      const sel  = $('#dept-name-sel').value;
+      const name = sel === 'custom' ? $('#dept-custom-name').value.trim() : sel;
       if (!name) return;
-      const members = document.getElementById('dept-members').value.split(',').map(s=>s.trim()).filter(Boolean);
+      const members = $('#dept-members').value.split(',').map(s=>s.trim()).filter(Boolean);
       await db.collection('departments').add({
-        name, head: document.getElementById('dept-head').value.trim(),
+        name, head: $('#dept-head').value.trim(),
         members, createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); renderDepartments();
@@ -5815,13 +5868,19 @@ function _getWorkerAuth() {
 
 // ── Create Worker Account (username + password, no email required) ────────
 function openCreateWorkerModal() {
+  // ⚠ Panel-scoped, like the rest of this form (see the note under the openPage
+  // call below). Unscoped, this was the same dying-panel bug in reverse: with a
+  // closing Create-Worker panel still in the DOM, typing a name in the NEW form
+  // read/wrote the OLD form's #cw-name/#cw-username, so the visible username
+  // field silently stayed empty. `panel` is always initialised by the time this
+  // runs — it is only ever called from a listener bound on `panel`.
   const suggestUsername = () => {
-    const name = document.getElementById('cw-name')?.value.trim() || '';
+    const name = panel.querySelector('#cw-name')?.value.trim() || '';
     const parts = name.toLowerCase().replace(/[^a-z0-9 ]/g,'').split(/\s+/).filter(Boolean);
     let uname = '';
     if (parts.length >= 2) uname = parts[0][0] + parts[parts.length-1]; // e.g. jdelacruz
     else if (parts.length === 1) uname = parts[0];
-    const el = document.getElementById('cw-username');
+    const el = panel.querySelector('#cw-username');
     if (el && !el._edited) el.value = uname;
   };
 
@@ -6052,7 +6111,7 @@ function openCreateWorkerModal() {
 
 function openEditEmployeeModal(u) {
   const curDepts = Array.isArray(u.departments)&&u.departments.length ? u.departments : u.department ? [u.department] : [];
-  openPage(`Edit: ${u.displayName||u.email}`,`
+  const _panel = openPage(`Edit: ${u.displayName||u.email}`,`
     ${u.username ? `
     <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="font-size:13px">${emojiIcon('👷',13)} Worker account — login: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></span>
@@ -6073,24 +6132,31 @@ function openEditEmployeeModal(u) {
     <div class="form-group"><label>Deductions (₱)</label><input id="eu-deduct" type="number" inputmode="decimal" value="${u.deductions||0}"/></div>
   `,`<button class="btn-primary" id="save-eu-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  document.getElementById('save-eu-btn').addEventListener('click',async()=>{
-    const dept1=document.getElementById('eu-dept').value;
-    const dept2=document.getElementById('eu-dept2').value;
+  // ⚠ SCOPED TO THIS PANEL, NOT document. This is the money-adjacent half of the
+  // dying-panel bug: openPage keeps a CLOSING page in the DOM for ~300ms, so
+  // editing employee A, backing out, then editing employee B inside that window
+  // made every read below resolve into A's panel. `u` is still B — so B's
+  // users/{uid} and payroll/{uid} docs were written with A's name, employee id,
+  // role, departments, salary, allowance and deductions.
+  const $ = (sel) => _panel.querySelector(sel);
+  $('#save-eu-btn').addEventListener('click',async()=>{
+    const dept1=$('#eu-dept').value;
+    const dept2=$('#eu-dept2').value;
     const depts=[dept1,dept2].filter(Boolean);
     await db.collection('users').doc(u.id).update({
-      displayName:document.getElementById('eu-name').value.trim(),
-      employeeId:document.getElementById('eu-eid').value.trim(),
-      title:document.getElementById('eu-title').value.trim(),
-      role:document.getElementById('eu-role').value,
+      displayName:$('#eu-name').value.trim(),
+      employeeId:$('#eu-eid').value.trim(),
+      title:$('#eu-title').value.trim(),
+      role:$('#eu-role').value,
       departments:depts, department:depts[0]||'',
     });
     // Pay is stored in the protected payroll/{uid} collection (finance/admin write).
     await db.collection('payroll').doc(u.id).set({
-      salary:parseFloat(document.getElementById('eu-salary').value)||0,
-      allowance:parseFloat(document.getElementById('eu-allow').value)||0,
-      deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
+      salary:parseFloat($('#eu-salary').value)||0,
+      allowance:parseFloat($('#eu-allow').value)||0,
+      deductions:parseFloat($('#eu-deduct').value)||0,
     }, {merge:true});
-    window.logAudit && window.logAudit('update','payroll',u.id,{ salary:parseFloat(document.getElementById('eu-salary').value)||0 });
+    window.logAudit && window.logAudit('update','payroll',u.id,{ salary:parseFloat($('#eu-salary').value)||0 });
     dbCacheInvalidate('users'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 
@@ -6103,7 +6169,9 @@ function openEditEmployeeModal(u) {
   // reveals Edit Employee underneath. Converting either half to openPage
   // would lose that free in-place swap and require opts.replace plumbing for
   // no UX gain, so both stay modals.
-  document.getElementById('eu-reset-pw-btn')?.addEventListener('click', () => {
+  // (The rp-* ids inside this handler belong to the openModal it opens, NOT to
+  // this panel — they stay document-scoped on purpose.)
+  $('#eu-reset-pw-btn')?.addEventListener('click', () => {
     const newPw = generatePassword(u.displayName||'worker');
     openModal(`${emojiIcon('🔑',16)} Reset Password`, `
       <p style="margin-bottom:10px">Set a new password for <strong>${escHtml(u.displayName)}</strong> (username: <code>${escHtml(u.username)}</code>).</p>

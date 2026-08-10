@@ -178,7 +178,16 @@ async function renderProjects(container, currentUser, currentRole) {
   });
 
   document.getElementById('add-project-btn')?.addEventListener('click', () => {
-    openPage('New Project', `
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms (js/app.js defers the
+    // node removal so the exit transition can play). Open a second window inside
+    // that gap and TWO panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is the
+    // DYING one. The handler then binds a button nobody can see while the visible
+    // button has no handler at all, and the field reads below would pull the
+    // PREVIOUS form's values. Reproduced in-browser 2026-08-10 (Corporate
+    // Secretary's "takes several taps / needs a second tab" report).
+    const npPanel = openPage('New Project', `
       <div class="form-group"><label>Project Name</label><input id="proj-name" placeholder="e.g. Kitchen Design — ABC Corp"/></div>
       <div class="form-group"><label>Client</label><input id="proj-client" placeholder="Client name"/></div>
       <div class="form-row">
@@ -189,14 +198,14 @@ async function renderProjects(container, currentUser, currentRole) {
       <div class="form-group"><label>Notes</label><textarea id="proj-notes" rows="3"></textarea></div>
     `, `<button class="btn-primary" id="save-proj-btn">Save Project</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-    document.getElementById('save-proj-btn').addEventListener('click', async () => {
+    npPanel.querySelector('#save-proj-btn').addEventListener('click', async () => {
       await db.collection('projects').add({
-        name:           document.getElementById('proj-name').value.trim(),
-        client:         document.getElementById('proj-client').value.trim(),
-        startDate:      document.getElementById('proj-start').value,
-        dueDate:        document.getElementById('proj-due').value,
-        contractAmount: parseFloat(document.getElementById('proj-contract').value) || 0,
-        notes:          document.getElementById('proj-notes').value.trim(),
+        name:           npPanel.querySelector('#proj-name').value.trim(),
+        client:         npPanel.querySelector('#proj-client').value.trim(),
+        startDate:      npPanel.querySelector('#proj-start').value,
+        dueDate:        npPanel.querySelector('#proj-due').value,
+        contractAmount: parseFloat(npPanel.querySelector('#proj-contract').value) || 0,
+        notes:          npPanel.querySelector('#proj-notes').value.trim(),
         status:         'active',
         createdBy:      currentUser.uid,
         createdAt:      firebase.firestore.FieldValue.serverTimestamp()
@@ -342,7 +351,12 @@ function renderProjOverview(host, p, currentUser, currentRole, canBill){
     ${canManage?`<button class="btn-primary btn-sm" id="proj-edit-btn">${emojiIcon('✏️',16)} Edit / Link / Delegate</button>`:''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [host] });
-  document.getElementById('proj-edit-btn')?.addEventListener('click',()=>openProjectEditModal(p, currentUser, currentRole, canBill));
+  // ⚠ SCOPED TO `host`, NOT document. `host` is THIS project panel's
+  // #pd-tab-body (openProjectDetail's showTab). Every reopen path in that hub
+  // does `Overlay.clearAll(); openProjectDetail(...)` in one tick and openPage
+  // defers node removal by 300ms, so a dying project panel — earlier in document
+  // order — still holds a #proj-edit-btn and wins a document-wide lookup.
+  host.querySelector('#proj-edit-btn')?.addEventListener('click',()=>openProjectEditModal(p, currentUser, currentRole, canBill));
 }
 
 // ── Financials tab (logic lifted verbatim from the original project detail) ──
@@ -389,7 +403,9 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
   });
 
   // Record a payment
-  document.getElementById('proj-payment-btn')?.addEventListener('click', async () => {
+  // ⚠ SCOPED TO `host` (this project panel's #pd-tab-body) — see the note in
+  // renderProjOverview above; a dying project panel carries the same ids.
+  host.querySelector('#proj-payment-btn')?.addEventListener('click', async () => {
     // ── WINDOW INVERSION (v14 smoothness pass) ────────────────────────────────
     // openPage() takes a FINISHED html string, so this handler used to
     // `await window.BankAccounts.optionsHTML()` BEFORE calling it: between
@@ -411,28 +427,34 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
       // there is no form to save in the first place.
       `<button class="btn-primary" id="save-pay-btn" disabled>Save Payment</button><button class="btn-secondary" id="pay-back-btn">Cancel</button>`);
     const payBody = payPanel.querySelector('.page-panel-body');
-    document.getElementById('pay-back-btn').addEventListener('click', reopen);
-    document.getElementById('save-pay-btn').addEventListener('click', async () => {
-      const amt = parseFloat(document.getElementById('pay-amt').value) || 0;
+    // ⚠ SCOPED TO payPanel, NOT document.
+    // A dismissed Record Payment window stays in the DOM for ~300ms. Record a
+    // payment, then open Record Payment again inside that gap, and a document-wide
+    // lookup resolves into the DEAD window: Save binds to a button nobody can see,
+    // and — the money half of this bug — the reads below would take the PREVIOUS
+    // payment's amount/date/method/note/bank and post THEM to the ledger.
+    payPanel.querySelector('#pay-back-btn').addEventListener('click', reopen);
+    payPanel.querySelector('#save-pay-btn').addEventListener('click', async () => {
+      const amt = parseFloat(payPanel.querySelector('#pay-amt').value) || 0;
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
       // v14 prod-fixlist — mirror production.js's openProjectBillingModal gate:
       // don't let a payment land with zero bank-account attribution when the
       // registry is populated (pay-bank previously had no validation at all).
-      const bankSel = document.getElementById('pay-bank').value;
+      const bankSel = payPanel.querySelector('#pay-bank').value;
       if (!bankSel && (await window.BankAccounts.list()).length) {
         Notifs.showToast('Select the company account that received this payment.','error'); return;
       }
       const acct = await window.BankAccounts.pick(bankSel);
       const payment = {
         amount: amt,
-        date:   document.getElementById('pay-date').value || today(),
-        method: document.getElementById('pay-method').value.trim(),
-        note:   document.getElementById('pay-note').value.trim(),
+        date:   payPanel.querySelector('#pay-date').value || today(),
+        method: payPanel.querySelector('#pay-method').value.trim(),
+        note:   payPanel.querySelector('#pay-note').value.trim(),
         byName: currentUser.displayName || currentUser.email || '',
         by:     currentUser.uid
       };
       if (!(await confirmDialog({message:`Record payment of ₱${fmt(amt)} for "${escHtml(p.name)}"? This updates the project balance.`, html:true}))) return;
-      const payBtn = document.getElementById('save-pay-btn');
+      const payBtn = payPanel.querySelector('#save-pay-btn');
       if (payBtn) payBtn.disabled = true; // guard against double-click double-posting
       try {
         // v13 Phase 13 — the project.payments append now rides inside the SAME
@@ -509,9 +531,13 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
   });
 
   // Create a billing invoice for collection of balance
-  document.getElementById('proj-invoice-btn')?.addEventListener('click', () => {
+  // ⚠ SCOPED TO `host` (this project panel's #pd-tab-body) — see renderProjOverview.
+  host.querySelector('#proj-invoice-btn')?.addEventListener('click', () => {
     const bal = (Number(p.contractAmount)||0) - projectPaid(p);
-    openPage('Billing Invoice — Collection of Balance', `
+    // ⚠ SCOPED TO THIS PANEL, NOT document — openPage's ~300ms teardown window
+    // means a dying invoice window can win a document-wide lookup, arming its
+    // buttons and feeding this invoice the PREVIOUS one's amount/date/bill-to.
+    const invPanel = openPage('Billing Invoice — Collection of Balance', `
       <div class="form-group"><label>Bill To</label><input id="inv-billto" value="${escHtml(p.client||'')}"/></div>
       <div class="form-row">
         <div class="form-group"><label>Invoice Date</label><input id="inv-date" type="date" value="${today()}"/></div>
@@ -521,19 +547,19 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
       <div class="form-group"><label>Amount to Collect (₱)</label><input id="inv-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
       <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="inv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to Barro Industries OPC.</textarea></div>
     `, `<button class="btn-primary" id="gen-inv-btn">Generate Invoice</button><button class="btn-secondary" id="inv-back-btn">Cancel</button>`);
-    document.getElementById('inv-back-btn').addEventListener('click', reopen);
-    document.getElementById('gen-inv-btn').addEventListener('click', async () => {
-      const amt = parseFloat(document.getElementById('inv-amt').value) || 0;
+    invPanel.querySelector('#inv-back-btn').addEventListener('click', reopen);
+    invPanel.querySelector('#gen-inv-btn').addEventListener('click', async () => {
+      const amt = parseFloat(invPanel.querySelector('#inv-amt').value) || 0;
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
       const contractC = Number(p.contractAmount) || 0;
       const paidC     = projectPaid(p);
       const inv = {
-        date:           document.getElementById('inv-date').value || today(),
-        due:            document.getElementById('inv-due').value || '',
-        billTo:         document.getElementById('inv-billto').value.trim(),
-        desc:           document.getElementById('inv-desc').value.trim(),
+        date:           invPanel.querySelector('#inv-date').value || today(),
+        due:            invPanel.querySelector('#inv-due').value || '',
+        billTo:         invPanel.querySelector('#inv-billto').value.trim(),
+        desc:           invPanel.querySelector('#inv-desc').value.trim(),
         amount:         amt,
-        notes:          document.getElementById('inv-notes').value.trim(),
+        notes:          invPanel.querySelector('#inv-notes').value.trim(),
         contractAmount: contractC,
         paidToDate:     paidC,
         balanceBefore:  contractC - paidC,
@@ -542,7 +568,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         createdAt:      today()
       };
       if (!(await confirmDialog({message:`Generate billing invoice for ₱${fmt(amt)} (${escHtml(p.name||'')})?`, html:true}))) return;
-      const invBtn = document.getElementById('gen-inv-btn');
+      const invBtn = invPanel.querySelector('#gen-inv-btn');
       if (invBtn) invBtn.disabled = true; // guard against double-click double-posting
       try {
         // v14 prod-fixlist — was minting 'INV-' + today().replace(/-/g,'') + '-' +
@@ -602,7 +628,8 @@ async function renderProjectTasks(host, p, currentUser, currentRole, canBill){
   `;
   if (window.lucide) lucide.createIcons({ nodes: [host] });
   host.querySelectorAll('.item-card[data-id]').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id, currentUser, currentRole)));
-  document.getElementById('proj-add-task-btn')?.addEventListener('click',()=>openAddProjectTaskModal(p, currentUser, currentRole, canBill));
+  // ⚠ SCOPED TO `host` (this project panel's #pd-tab-body) — see renderProjOverview.
+  host.querySelector('#proj-add-task-btn')?.addEventListener('click',()=>openAddProjectTaskModal(p, currentUser, currentRole, canBill));
 }
 
 // ── Activity tab — merged project + drawing timeline ──
@@ -650,7 +677,10 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
   // Cancel is data-independent and live immediately; Save ships `disabled`
   // because every field it reads (#pe-name … #pe-job) is injected by the fill —
   // see the same reasoning spelled out at the Record Payment call site above.
-  document.getElementById('pe-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'); });
+  // ⚠ SCOPED TO pePanel, NOT document — openPage's ~300ms teardown window means
+  // a dying Edit Project window still holds #pe-cancel-btn/#pe-save-btn and every
+  // #pe-* field, and would win a document-wide lookup.
+  pePanel.querySelector('#pe-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'); });
 
   const peFormHtml = (users, clients, jobs) => `
     <div class="form-group"><label>Project Name</label><input id="pe-name" value="${escHtml(p.name||'')}"/></div>
@@ -689,15 +719,15 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
     <div class="form-group"><label>Notes</label><textarea id="pe-notes" rows="3">${escHtml(p.notes||'')}</textarea></div>
   `;
 
-  document.getElementById('pe-save-btn').addEventListener('click', async () => {
+  pePanel.querySelector('#pe-save-btn').addEventListener('click', async () => {
     const prevTeam = new Set(p.team||[]);
     const prevJob  = p.jobProjectId || null;
-    const clientSel = document.getElementById('pe-client');
-    const leadSel   = document.getElementById('pe-lead');
-    const jobSel    = document.getElementById('pe-job');
+    const clientSel = pePanel.querySelector('#pe-client');
+    const leadSel   = pePanel.querySelector('#pe-lead');
+    const jobSel    = pePanel.querySelector('#pe-job');
     const clientId  = clientSel.value || null;
     const clientNameSel = clientSel.options[clientSel.selectedIndex]?.dataset.name || '';
-    const newContractAmount = parseFloat(document.getElementById('pe-contract').value) || 0;
+    const newContractAmount = parseFloat(pePanel.querySelector('#pe-contract').value) || 0;
     // v14 prod-fixlist — renderProjFinancials/renderProjects treat balance<=0.005
     // as "Fully Paid" purely from (contract - collected). Letting the contract be
     // edited below what's already been collected silently flipped a project to
@@ -709,14 +739,14 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
       return;
     }
     const update = {
-      name:           document.getElementById('pe-name').value.trim() || p.name || 'Project',
-      client:         document.getElementById('pe-clientname').value.trim() || clientNameSel || '',
+      name:           pePanel.querySelector('#pe-name').value.trim() || p.name || 'Project',
+      client:         pePanel.querySelector('#pe-clientname').value.trim() || clientNameSel || '',
       clientId,
-      startDate:      document.getElementById('pe-start').value,
-      dueDate:        document.getElementById('pe-due').value,
-      status:         document.getElementById('pe-status').value,
+      startDate:      pePanel.querySelector('#pe-start').value,
+      dueDate:        pePanel.querySelector('#pe-due').value,
+      status:         pePanel.querySelector('#pe-status').value,
       contractAmount: newContractAmount,
-      notes:          document.getElementById('pe-notes').value.trim(),
+      notes:          pePanel.querySelector('#pe-notes').value.trim(),
       designLead:     leadSel.value || null,
       designLeadName: leadSel.value ? (leadSel.options[leadSel.selectedIndex]?.dataset.name || null) : null,
       team:           team.map(a=>a.uid),
@@ -841,7 +871,8 @@ async function renderProjectDrawings(host, p, currentUser, currentRole, canBill)
     const d = drawings.find(x=>x.id===card.dataset.dwg);
     if (d) openDrawingDetail(d, p, currentUser, currentRole, canBill);
   }));
-  document.getElementById('proj-add-dwg-btn')?.addEventListener('click',()=>openDrawingCreateModal(p, currentUser, currentRole, canBill));
+  // ⚠ SCOPED TO `host` (this project panel's #pd-tab-body) — see renderProjOverview.
+  host.querySelector('#proj-add-dwg-btn')?.addEventListener('click',()=>openDrawingCreateModal(p, currentUser, currentRole, canBill));
 }
 
 // ── Per-project Files (v12 WS35 — WS38 Files Hub contract, scope 'projects') ──
@@ -873,8 +904,9 @@ async function renderProjectFiles(host, p, currentUser, currentRole){
   host.querySelectorAll('.pf-view-btn').forEach(b=>b.addEventListener('click',()=>{
     const f = files.find(x=>x.id===b.dataset.id); if (f) window.openFilePreview(f);
   }));
-  document.getElementById('pf-upload-btn')?.addEventListener('click', async () => {
-    const area = document.getElementById('pf-upload-area'); area.style.display='block';
+  // ⚠ SCOPED TO `host` (this project panel's #pd-tab-body) — see renderProjOverview.
+  host.querySelector('#pf-upload-btn')?.addEventListener('click', async () => {
+    const area = host.querySelector('#pf-upload-area'); area.style.display='block';
     const fid = await DesignFolders.ensureProjectFolder(p);   // lazy folder creation
     Drive.renderUploadArea('pf-upload-area', async (r, file) => {
       const FV = firebase.firestore.FieldValue;
@@ -909,22 +941,26 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
   let uploaded = null;
   const dwPanel = openPage('New Drawing', window.skeletonHtml('rows', 5), `<button class="btn-primary" id="dw-save-btn" disabled>Create Drawing</button><button class="btn-secondary" id="dw-cancel-btn">Cancel</button>`);
   const dwBody  = dwPanel.querySelector('.page-panel-body');
-  document.getElementById('dw-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
-  document.getElementById('dw-save-btn').addEventListener('click', async () => {
-    const title = document.getElementById('dw-title').value.trim();
+  // ⚠ SCOPED TO dwPanel, NOT document — openPage's ~300ms teardown window means
+  // a dying New Drawing window still holds every #dw-* id and would win a
+  // document-wide lookup, both at bind time and inside the save handler (which
+  // would then create the drawing from the PREVIOUS form's title/no./type).
+  dwPanel.querySelector('#dw-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
+  dwPanel.querySelector('#dw-save-btn').addEventListener('click', async () => {
+    const title = dwPanel.querySelector('#dw-title').value.trim();
     if (!title){ Notifs.showToast('Enter a drawing title','error'); return; }
-    const asel = document.getElementById('dw-assignee');
+    const asel = dwPanel.querySelector('#dw-assignee');
     const assignedTo = asel.value || null;
     const assignedToName = asel.value ? (asel.options[asel.selectedIndex]?.dataset.name || null) : null;
-    const note = document.getElementById('dw-note').value.trim();
+    const note = dwPanel.querySelector('#dw-note').value.trim();
     const who = window.userProfile?.displayName || currentUser.email || '';
     const nowIso = new Date().toISOString();
     const rev0 = { rev:'A', status:'draft', fileUrl:uploaded?.url||null, fileName:uploaded?.name||null, driveUrl:uploaded?.driveUrl||null, note, by:currentUser.uid, byName:who, at:nowIso };
     try {
       const ref = await db.collection('design_drawings').add({
         projectId: project.id, projectName: project.name||'',
-        title, drawingNo: document.getElementById('dw-no').value.trim(),
-        type: document.getElementById('dw-type').value,
+        title, drawingNo: dwPanel.querySelector('#dw-no').value.trim(),
+        type: dwPanel.querySelector('#dw-type').value,
         status:'draft', currentRev:'A',
         fileUrl:uploaded?.url||null, fileName:uploaded?.name||null, driveUrl:uploaded?.driveUrl||null, fileSource:uploaded?.source||(uploaded?'firebase':null),
         assignedTo, assignedToName, approver:null, approverName:null, approvedAt:null,
@@ -990,7 +1026,14 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
   // through reopenDrawing() below (clearAll + reconstruct both levels), never
   // a bare call. A genuine drill-in (from the Drawings tab list or the
   // cross-project dashboard) calls this directly — that's a real push.
-  openPage(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
+  // ⚠ SCOPED TO THIS PANEL, NOT document (see the const below).
+  // reopenDrawing() runs `Overlay.clearAll(); openProjectDetail(...);
+  // openDrawingDetail(...)` in ONE tick and openPage defers node removal by
+  // ~300ms, so the OLD drawing panel is still in the document and EARLIER in
+  // document order. Every document-wide lookup here armed the DEAD copy: Back,
+  // New Revision, Edit and the status-transition buttons all fired nothing on
+  // the window the user was actually looking at.
+  const ddPanel = openPage(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge badge-gray">Rev ${escHtml(d.currentRev||'A')}</span>
       <span class="badge ${st.badge}">${st.label}</span>
@@ -1017,10 +1060,12 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
     ${trans.map(t=>`<button class="${t.cls} btn-sm dwg-trans-btn" data-to="${t.to}">${t.label}</button>`).join('')}
     <button class="btn-secondary" id="dwg-back-btn">Back</button>
   `);
-  document.getElementById('dwg-back-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
-  document.getElementById('dwg-rev-btn')?.addEventListener('click',()=>openDrawingRevisionModal(d, project, currentUser, currentRole, canBill));
-  document.getElementById('dwg-edit-btn')?.addEventListener('click',()=>openDrawingEditModal(d, project, currentUser, currentRole, canBill));
-  document.querySelectorAll('.dwg-trans-btn').forEach(b=>b.addEventListener('click',()=>changeDrawingStatus(d, b.dataset.to, project, currentUser, currentRole, canBill)));
+  ddPanel.querySelector('#dwg-back-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
+  ddPanel.querySelector('#dwg-rev-btn')?.addEventListener('click',()=>openDrawingRevisionModal(d, project, currentUser, currentRole, canBill));
+  ddPanel.querySelector('#dwg-edit-btn')?.addEventListener('click',()=>openDrawingEditModal(d, project, currentUser, currentRole, canBill));
+  // querySelectorAll was doubly wrong here: document-wide it matched BOTH panels'
+  // transition buttons, so the dying panel's buttons were wired too.
+  ddPanel.querySelectorAll('.dwg-trans-btn').forEach(b=>b.addEventListener('click',()=>changeDrawingStatus(d, b.dataset.to, project, currentUser, currentRole, canBill)));
 }
 
 // Refresh drawing detail in place after a status change / revision / edit.
@@ -1110,16 +1155,20 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
 
 function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill){
   const newRev = nextRev(d.currentRev||'A');
-  openPage(`New Revision — Rev ${newRev}`, `
+  // ⚠ SCOPED TO THIS PANEL, NOT document (see the const below) — openPage's
+  // ~300ms teardown window means a dying revision window still holds #rv-note /
+  // #rv-save-btn / #rv-cancel-btn, so the save could cut this revision using the
+  // PREVIOUS drawing's change note.
+  const rvPanel = openPage(`New Revision — Rev ${newRev}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Cutting <strong>Rev ${escHtml(newRev)}</strong> of "${escHtml(d.title||'')}". The drawing returns to <strong>Draft</strong> for re-review.</div>
     <div class="form-group"><label>Change Note</label><textarea id="rv-note" rows="3" placeholder="What changed in this revision"></textarea></div>
     <div class="form-group"><label>Updated File (optional)</label><div id="rv-file"></div></div>
   `, `<button class="btn-primary" id="rv-save-btn">Save Rev ${newRev}</button><button class="btn-secondary" id="rv-cancel-btn">Cancel</button>`);
   let uploaded = null;
   Drive.renderUploadArea('rv-file', r=>{ uploaded=r; }, {label:'Upload updated DWG/PDF', dept:'Design', subfolder:'Drawings'});
-  document.getElementById('rv-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
-  document.getElementById('rv-save-btn').addEventListener('click', async () => {
-    const note = document.getElementById('rv-note').value.trim();
+  rvPanel.querySelector('#rv-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
+  rvPanel.querySelector('#rv-save-btn').addEventListener('click', async () => {
+    const note = rvPanel.querySelector('#rv-note').value.trim();
     const who = window.userProfile?.displayName || currentUser.email || '';
     const nowIso = new Date().toISOString();
     const fileUrl  = uploaded?.url || d.fileUrl || null;
@@ -1150,17 +1199,20 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
   // ── WINDOW INVERSION (v14 smoothness pass) ── window first, users read second.
   const dePanel = openPage('Edit Drawing', window.skeletonHtml('rows', 3), `<button class="btn-primary" id="de-save-btn" disabled>Save</button><button class="btn-secondary" id="de-cancel-btn">Cancel</button>`);
   const deBody  = dePanel.querySelector('.page-panel-body');
-  document.getElementById('de-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
-  document.getElementById('de-save-btn').addEventListener('click', async () => {
-    const asel = document.getElementById('de-assignee');
+  // ⚠ SCOPED TO dePanel, NOT document — reopenDrawing() reconstructs two levels
+  // in one tick, so a dying Edit Drawing window can still hold every #de-* id and
+  // would win a document-wide lookup at bind time AND inside the save handler.
+  dePanel.querySelector('#de-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
+  dePanel.querySelector('#de-save-btn').addEventListener('click', async () => {
+    const asel = dePanel.querySelector('#de-assignee');
     const assignedTo = asel.value || null;
     const assignedToName = asel.value ? (asel.options[asel.selectedIndex]?.dataset.name || null) : null;
     const prevAssignee = d.assignedTo || null;
     const who = window.userProfile?.displayName || currentUser.email || '';
     const update = {
-      title:     document.getElementById('de-title').value.trim() || d.title,
-      drawingNo: document.getElementById('de-no').value.trim(),
-      type:      document.getElementById('de-type').value,
+      title:     dePanel.querySelector('#de-title').value.trim() || d.title,
+      drawingNo: dePanel.querySelector('#de-no').value.trim(),
+      type:      dePanel.querySelector('#de-type').value,
       assignedTo, assignedToName,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
@@ -1211,16 +1263,19 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
   let picks = [];
   const ptPanel = openPage('Delegate Task — '+escHtml(project.name||''), window.skeletonHtml('rows', 4), `<button class="btn-primary" id="pt-save-btn" disabled>Create Task</button><button class="btn-secondary" id="pt-cancel-btn">Cancel</button>`);
   const ptBody  = ptPanel.querySelector('.page-panel-body');
-  document.getElementById('pt-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'); });
-  document.getElementById('pt-save-btn').addEventListener('click', async () => {
-    const title = document.getElementById('pt-title').value.trim();
+  // ⚠ SCOPED TO ptPanel, NOT document — openPage's ~300ms teardown window means a
+  // dying Delegate Task window still holds every #pt-* id, so the save could
+  // create the task from the PREVIOUS form's title/description/priority/due date.
+  ptPanel.querySelector('#pt-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'); });
+  ptPanel.querySelector('#pt-save-btn').addEventListener('click', async () => {
+    const title = ptPanel.querySelector('#pt-title').value.trim();
     if (!title){ Notifs.showToast('Enter a task title','error'); return; }
     const who = window.userProfile?.displayName || currentUser.email || '';
     try {
       const ref = await db.collection('tasks').add({
-        title, description: document.getElementById('pt-desc').value.trim(),
-        priority: document.getElementById('pt-priority').value, status:'backlog',
-        dueDate: document.getElementById('pt-due').value,
+        title, description: ptPanel.querySelector('#pt-desc').value.trim(),
+        priority: ptPanel.querySelector('#pt-priority').value, status:'backlog',
+        dueDate: ptPanel.querySelector('#pt-due').value,
         department:'Design', projectId:project.id, projectName:project.name||'',
         assignedTo:picks.map(a=>a.uid), assignedToNames:picks.map(a=>a.name),
         createdBy:currentUser.uid, createdByName:who,

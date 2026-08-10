@@ -880,7 +880,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.grade-task-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id, currentUser, _role)));
       wrap.querySelectorAll('.grade-kpi-btn').forEach(btn=>btn.addEventListener('click',()=>{
         const { uid, name } = btn.dataset;
-        openPage(`${emojiIcon('⭐',16)} Grade: ${escHtml(name||'')}`, `
+        const _panel = openPage(`${emojiIcon('⭐',16)} Grade: ${escHtml(name||'')}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Development areas are shown to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="ap-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" placeholder="e.g. 8"/></div>
@@ -889,10 +889,19 @@ window.renderApprovals = async function(currentUser) {
           <div class="form-group"><label>${emojiIcon('📝',16)} Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
             <textarea id="ap-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving?"></textarea></div>
         `, `<button class="btn-primary" id="ap-save-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-        document.getElementById('ap-save-grade-btn')?.addEventListener('click', async ()=>{
-          const grade   = parseInt(document.getElementById('ap-grade-input').value);
-          const notes   = document.getElementById('ap-grade-notes').value.trim();
-          const improve = document.getElementById('ap-improve-input').value.trim();
+        // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in
+        // the DOM for ~300ms; grade a second employee inside that window and two
+        // panels carry #ap-grade-input at once. document.getElementById() returns
+        // the FIRST in document order — the DYING one — so Save Grade binds to a
+        // button nobody can see, and once it does fire it reads the PREVIOUS
+        // employee's grade/notes and writes them onto THIS employee's kpi_evals
+        // doc. Same defect openQuoteApprovalReview below already scopes against
+        // (Corporate Secretary report, reproduced in-browser 2026-08-10).
+        const $g = (id) => _panel.querySelector('#' + id);
+        $g('ap-save-grade-btn')?.addEventListener('click', async ()=>{
+          const grade   = parseInt($g('ap-grade-input').value);
+          const notes   = $g('ap-grade-notes').value.trim();
+          const improve = $g('ap-improve-input').value.trim();
           if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter 1–10.','error'); return; }
           await db.collection('kpi_evals').doc(uid).set({
             presidentGrade: grade, presidentNotes: notes, presidentImprovements: improve,

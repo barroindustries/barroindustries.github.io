@@ -319,7 +319,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     renderTickets('all');
     document.getElementById('it-ticket-filter').onchange = e => renderTickets(e.target.value);
     document.getElementById('new-it-ticket-btn')?.addEventListener('click', () => {
-      openPage('New IT Ticket', `
+      const _panel = openPage('New IT Ticket', `
         <div class="form-group"><label>Title</label><input id="it-t-title" placeholder="Brief description of issue"/></div>
         <div class="form-row">
           <div class="form-group"><label>Category</label>
@@ -332,14 +332,23 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         <div class="form-group"><label>Description</label><textarea id="it-t-desc" rows="4" placeholder="What's happening? Include any error messages."></textarea></div>
         <div class="form-group"><label>Requested By</label><input id="it-t-req" value="${escHtml(currentUser.displayName||'')}"/></div>
       `, `<button class="btn-primary" id="save-it-ticket-btn">Submit Ticket</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('save-it-ticket-btn').addEventListener('click', async () => {
-        const title = document.getElementById('it-t-title').value.trim();
+      // ⚠ SCOPED TO THIS PANEL, NOT document.
+      // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+      // inside that window and two panels carry the same element ids at once —
+      // document.getElementById() returns the FIRST match in document order, which
+      // is the DYING panel. At bind time that hands the handler to a button nobody
+      // can see (and the visible button gets none); inside the handler the field
+      // reads pull the PREVIOUS record's values and write them onto THIS record.
+      // That is the "several taps before the Edit form opens" the Corporate
+      // Secretary reported on 2026-08-10, reproduced in the browser.
+      _panel.querySelector('#save-it-ticket-btn').addEventListener('click', async () => {
+        const title = _panel.querySelector('#it-t-title').value.trim();
         if (!title) { Notifs.showToast('Please enter a title.','error'); return; }
         await db.collection('it_tickets').add({
-          title, category: document.getElementById('it-t-cat').value,
-          priority: document.getElementById('it-t-pri').value,
-          description: document.getElementById('it-t-desc').value.trim(),
-          requestedBy: document.getElementById('it-t-req').value.trim(),
+          title, category: _panel.querySelector('#it-t-cat').value,
+          priority: _panel.querySelector('#it-t-pri').value,
+          description: _panel.querySelector('#it-t-desc').value.trim(),
+          requestedBy: _panel.querySelector('#it-t-req').value.trim(),
           status: 'open', createdBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -400,7 +409,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     bindAssetRowToggle(content);
     if (canEdit) {
       document.getElementById('new-asset-btn')?.addEventListener('click', () => {
-        openPage('Add Asset', `
+        const _panel = openPage('Add Asset', `
           <div class="form-row">
             <div class="form-group"><label>Asset Name</label><input id="a-name" placeholder="e.g. Dell Laptop 01"/></div>
             <div class="form-group"><label>Type</label>
@@ -419,15 +428,16 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           </div>
           <div class="form-group"><label>Notes</label><textarea id="a-notes" rows="2"></textarea></div>
         `, `<button class="btn-primary" id="save-asset-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-        document.getElementById('save-asset-btn').addEventListener('click', async () => {
+        // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+        _panel.querySelector('#save-asset-btn').addEventListener('click', async () => {
           await db.collection('it_assets').add({
-            name: document.getElementById('a-name').value.trim(),
-            type: document.getElementById('a-type').value,
-            serial: document.getElementById('a-serial').value.trim(),
-            assignedTo: document.getElementById('a-assigned').value.trim(),
-            purchasedDate: document.getElementById('a-date').value,
-            status: document.getElementById('a-status').value,
-            notes: document.getElementById('a-notes').value.trim(),
+            name: _panel.querySelector('#a-name').value.trim(),
+            type: _panel.querySelector('#a-type').value,
+            serial: _panel.querySelector('#a-serial').value.trim(),
+            assignedTo: _panel.querySelector('#a-assigned').value.trim(),
+            purchasedDate: _panel.querySelector('#a-date').value,
+            status: _panel.querySelector('#a-status').value,
+            notes: _panel.querySelector('#a-notes').value.trim(),
             createdBy: currentUser.uid,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -438,7 +448,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         btn.addEventListener('click', () => {
           const asset = assets.find(a=>a.id===btn.dataset.id);
           if (!asset) return;
-          openPage('Edit Asset', `
+          const _panel = openPage('Edit Asset', `
             <div class="form-row">
               <div class="form-group"><label>Asset Name</label><input id="ea-name" value="${escHtml(asset.name||'')}"/></div>
               <div class="form-group"><label>Assigned To</label><input id="ea-assigned" value="${escHtml(asset.assignedTo||'')}"/></div>
@@ -452,12 +462,13 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
             </div>
             <div class="form-group"><label>Notes</label><textarea id="ea-notes" rows="2">${escHtml(asset.notes||'')}</textarea></div>
           `, `<button class="btn-primary" id="upd-asset-btn">Update</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-          document.getElementById('upd-asset-btn').addEventListener('click', async () => {
+          // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+          _panel.querySelector('#upd-asset-btn').addEventListener('click', async () => {
             await db.collection('it_assets').doc(asset.id).update({
-              name: document.getElementById('ea-name').value.trim(),
-              assignedTo: document.getElementById('ea-assigned').value.trim(),
-              status: document.getElementById('ea-status').value,
-              notes: document.getElementById('ea-notes').value.trim(),
+              name: _panel.querySelector('#ea-name').value.trim(),
+              assignedTo: _panel.querySelector('#ea-assigned').value.trim(),
+              status: _panel.querySelector('#ea-status').value,
+              notes: _panel.querySelector('#ea-notes').value.trim(),
               updatedAt: firebase.firestore.FieldValue.serverTimestamp()
             });
             closeModal(); loadITContent(currentUser, currentRole, 'Assets', canEdit);
@@ -540,7 +551,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       tr.classList.toggle('tc-expanded');
     }));
     document.getElementById('new-sw-btn')?.addEventListener('click', () => {
-      openPage('Add Software / License', `
+      const _panel = openPage('Add Software / License', `
         <div class="form-row">
           <div class="form-group"><label>Software Name</label><input id="sw-name" placeholder="e.g. Adobe Creative Cloud"/></div>
           <div class="form-group"><label>Vendor</label><input id="sw-vendor" placeholder="e.g. Adobe"/></div>
@@ -558,17 +569,18 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </div>
         <div class="form-group"><label>Notes</label><textarea id="sw-notes" rows="2"></textarea></div>
       `, `<button class="btn-primary" id="save-sw-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('save-sw-btn').addEventListener('click', async () => {
-        const name = document.getElementById('sw-name').value.trim();
+      // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+      _panel.querySelector('#save-sw-btn').addEventListener('click', async () => {
+        const name = _panel.querySelector('#sw-name').value.trim();
         if (!name) { Notifs.showToast('Enter a name.','error'); return; }
         await db.collection('it_software').add({
-          name, vendor: document.getElementById('sw-vendor').value.trim(),
-          licenseType: document.getElementById('sw-ltype').value,
-          seats: parseInt(document.getElementById('sw-seats').value)||1,
-          licenseKey: document.getElementById('sw-key').value.trim(),
-          purchasedDate: document.getElementById('sw-bought').value,
-          expiryDate: document.getElementById('sw-exp').value,
-          notes: document.getElementById('sw-notes').value.trim(),
+          name, vendor: _panel.querySelector('#sw-vendor').value.trim(),
+          licenseType: _panel.querySelector('#sw-ltype').value,
+          seats: parseInt(_panel.querySelector('#sw-seats').value)||1,
+          licenseKey: _panel.querySelector('#sw-key').value.trim(),
+          purchasedDate: _panel.querySelector('#sw-bought').value,
+          expiryDate: _panel.querySelector('#sw-exp').value,
+          notes: _panel.querySelector('#sw-notes').value.trim(),
           status: 'active', createdBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -579,7 +591,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       btn.addEventListener('click', () => {
         const sw = items.find(x=>x.id===btn.dataset.id);
         if (!sw) return;
-        openPage('Edit Software / License', `
+        const _panel = openPage('Edit Software / License', `
           <div class="form-row">
             <div class="form-group"><label>Software Name</label><input id="esw-name" value="${escHtml(sw.name||'')}"/></div>
             <div class="form-group"><label>Vendor</label><input id="esw-vendor" value="${escHtml(sw.vendor||'')}"/></div>
@@ -606,23 +618,24 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           </div>
           <div class="form-group"><label>Notes</label><textarea id="esw-notes" rows="2">${escHtml(sw.notes||'')}</textarea></div>
         `, `<button class="btn-primary" id="upd-sw-btn">Update</button><button class="btn-danger" id="del-sw-btn">Delete</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-        document.getElementById('upd-sw-btn').addEventListener('click', async () => {
-          const name = document.getElementById('esw-name').value.trim();
+        // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+        _panel.querySelector('#upd-sw-btn').addEventListener('click', async () => {
+          const name = _panel.querySelector('#esw-name').value.trim();
           if (!name) { Notifs.showToast('Enter a name.','error'); return; }
           await db.collection('it_software').doc(sw.id).update({
-            name, vendor: document.getElementById('esw-vendor').value.trim(),
-            licenseType: document.getElementById('esw-ltype').value,
-            seats: parseInt(document.getElementById('esw-seats').value)||1,
-            licenseKey: document.getElementById('esw-key').value.trim(),
-            purchasedDate: document.getElementById('esw-bought').value,
-            expiryDate: document.getElementById('esw-exp').value,
-            status: document.getElementById('esw-status').value,
-            notes: document.getElementById('esw-notes').value.trim(),
+            name, vendor: _panel.querySelector('#esw-vendor').value.trim(),
+            licenseType: _panel.querySelector('#esw-ltype').value,
+            seats: parseInt(_panel.querySelector('#esw-seats').value)||1,
+            licenseKey: _panel.querySelector('#esw-key').value.trim(),
+            purchasedDate: _panel.querySelector('#esw-bought').value,
+            expiryDate: _panel.querySelector('#esw-exp').value,
+            status: _panel.querySelector('#esw-status').value,
+            notes: _panel.querySelector('#esw-notes').value.trim(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
           });
           closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
         });
-        document.getElementById('del-sw-btn').addEventListener('click', async () => {
+        _panel.querySelector('#del-sw-btn').addEventListener('click', async () => {
           if (!(await confirmDialog({message:`Delete software record "${escHtml(sw.name||'')}"? This cannot be undone.`, danger:true, html:true}))) return;
           await db.collection('it_software').doc(sw.id).delete();
           closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
@@ -672,7 +685,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       tr.classList.toggle('tc-expanded');
     }));
     document.getElementById('new-access-btn')?.addEventListener('click', () => {
-      openPage('Grant Access', `
+      const _panel = openPage('Grant Access', `
         <div class="form-row">
           <div class="form-group"><label>Employee Name</label><input id="ac-emp" placeholder="Full name"/></div>
           <div class="form-group"><label>System / App</label><input id="ac-sys" placeholder="e.g. Google Workspace, Firebase"/></div>
@@ -685,14 +698,15 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </div>
         <div class="form-group"><label>Notes</label><textarea id="ac-notes" rows="2"></textarea></div>
       `, `<button class="btn-primary" id="save-access-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('save-access-btn').addEventListener('click', async () => {
+      // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+      _panel.querySelector('#save-access-btn').addEventListener('click', async () => {
         await db.collection('it_access').add({
-          employee: document.getElementById('ac-emp').value.trim(),
-          system: document.getElementById('ac-sys').value.trim(),
-          level: document.getElementById('ac-lvl').value,
-          date: document.getElementById('ac-date').value,
+          employee: _panel.querySelector('#ac-emp').value.trim(),
+          system: _panel.querySelector('#ac-sys').value.trim(),
+          level: _panel.querySelector('#ac-lvl').value,
+          date: _panel.querySelector('#ac-date').value,
           grantedBy: currentUser.displayName||currentUser.uid,
-          notes: document.getElementById('ac-notes').value.trim(),
+          notes: _panel.querySelector('#ac-notes').value.trim(),
           status: 'active', createdBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -744,7 +758,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       </div>`;
     if (window.lucide) lucide.createIcons({ nodes: [content] });
     const netModal = (existing) => {
-      openPage(existing?'Edit Network Note':'Add Network Note', `
+      const _panel = openPage(existing?'Edit Network Note':'Add Network Note', `
         <div class="form-row">
           <div class="form-group"><label>Title</label><input id="net-title" value="${escHtml(existing?.title||'')}" placeholder="e.g. Office WiFi Credentials"/></div>
           <div class="form-group"><label>Type</label>
@@ -753,12 +767,13 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </div>
         <div class="form-group"><label>Content / Notes</label><textarea id="net-content" rows="6" placeholder="SSID, passwords, IPs, ports, etc.">${escHtml(existing?.content||'')}</textarea></div>
       `, `<button class="btn-primary" id="save-net-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('save-net-btn').addEventListener('click', async () => {
-        const title = document.getElementById('net-title').value.trim();
+      // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+      _panel.querySelector('#save-net-btn').addEventListener('click', async () => {
+        const title = _panel.querySelector('#net-title').value.trim();
         if (!title) { Notifs.showToast('Enter a title.','error'); return; }
         const payload = {
-          title, type: document.getElementById('net-type').value,
-          content: document.getElementById('net-content').value,
+          title, type: _panel.querySelector('#net-type').value,
+          content: _panel.querySelector('#net-content').value,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
         };
         if (existing) {
@@ -792,7 +807,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
 
 function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
   const isAssigned = canEdit || ticket.createdBy === currentUser.uid;
-  openPage(`${emojiIcon('🎫',16)} ${escHtml(ticket.title||'Ticket')}`, `
+  const _panel = openPage(`${emojiIcon('🎫',16)} ${escHtml(ticket.title||'Ticket')}`, `
     <div style="margin-bottom:12px">
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
         <span class="badge ${window.statusBadgeClass('it_ticket', ticket.status||'open')}">${window.statusLabel2('it_ticket', ticket.status||'open')}</span>
@@ -818,11 +833,12 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
     `:'<p style="font-size:12px;color:var(--text-muted)">Only IT staff can update this ticket.</p>'}
   `, canEdit?`<button class="btn-primary" id="upd-ticket-btn">Update Ticket</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
     :`<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-  document.getElementById('upd-ticket-btn')?.addEventListener('click', async () => {
+  // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
+  _panel.querySelector('#upd-ticket-btn')?.addEventListener('click', async () => {
     await db.collection('it_tickets').doc(ticket.id).update({
-      status: document.getElementById('it-t-status').value,
-      assignedTo: document.getElementById('it-t-assign').value.trim(),
-      resolutionNotes: document.getElementById('it-t-res').value.trim(),
+      status: _panel.querySelector('#it-t-status').value,
+      assignedTo: _panel.querySelector('#it-t-assign').value.trim(),
+      resolutionNotes: _panel.querySelector('#it-t-res').value.trim(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedBy: currentUser.uid
     });

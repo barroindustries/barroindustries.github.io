@@ -1328,6 +1328,17 @@ window.Chat = (() => {
     _threadPanelEl = p;           // liveness guard + focusin host for the soft-keyboard
                                   // re-pin below — never an id lookup
 
+    // ⚠ EVERY lookup for this panel's own elements below goes through `p`, not
+    // document.getElementById. openPage keeps a CLOSING page in the DOM for
+    // ~300ms, and the `replace:` above falls back to a plain PUSH whenever the
+    // top of the Overlay stack isn't a page (the lightbox case documented in
+    // openPage, js/app.js) — so two #chat-thread-panel copies genuinely coexist,
+    // each carrying #chat-input / #chat-send / #chat-thread-scroll and the rest.
+    // document.getElementById returns the FIRST in document order, i.e. the
+    // DYING panel: the visible composer would be wired to nothing, and doSend
+    // would read the previous thread's textarea. Same defect class the
+    // Corporate Secretary reported on the CRM on 2026-08-10.
+
     // openPage's generic .page-panel-body is padded + its own overflow:auto
     // scroll container; the messenger layout owns its OWN internal scroll
     // region (#chat-thread-scroll/.messenger-body) and needs to fill the
@@ -1344,7 +1355,7 @@ window.Chat = (() => {
     // ONE HEADER PER WINDOW note above) rather than by an inline style from
     // here — all that's left is routing the messenger header's own back chevron
     // through the window stack, so Back/Esc/swipe-back/the chevron are one path.
-    document.getElementById('chat-panel-back')
+    p.querySelector('#chat-panel-back')
       ?.addEventListener('click', () => window.Overlay.dismissTop());
 
     _applyWallpaper(conv);
@@ -1355,23 +1366,23 @@ window.Chat = (() => {
     // _openMediaTab's About section now (Fix 4) — nothing to bind here.
 
     // Wave5 M3 (J4) — ⓘ Shared Media/Files/Links info page.
-    document.getElementById('chat-info-btn')?.addEventListener('click', () => _openMediaTab(conv));
+    p.querySelector('#chat-info-btn')?.addEventListener('click', () => _openMediaTab(conv));
 
     // Wave2 practicality batch (P0) — in-thread search wiring. The heavy
     // lifting (match computation, highlight, scroll-to-hit, paged
     // loadEarlier() on demand) lives in the module-level _threadSearch*
     // helpers below; this just wires the header button + collapsible bar.
-    document.getElementById('chat-search-btn')?.addEventListener('click', () => _toggleThreadSearch());
-    document.getElementById('chat-search-close')?.addEventListener('click', () => _toggleThreadSearch(false));
-    document.getElementById('chat-search-prev')?.addEventListener('click', () => _threadSearchStep(-1));
-    document.getElementById('chat-search-next')?.addEventListener('click', () => _threadSearchStep(1));
+    p.querySelector('#chat-search-btn')?.addEventListener('click', () => _toggleThreadSearch());
+    p.querySelector('#chat-search-close')?.addEventListener('click', () => _toggleThreadSearch(false));
+    p.querySelector('#chat-search-prev')?.addEventListener('click', () => _threadSearchStep(-1));
+    p.querySelector('#chat-search-next')?.addEventListener('click', () => _threadSearchStep(1));
     let _threadSearchDebTimer = null;
-    document.getElementById('chat-search-input-thread')?.addEventListener('input', e => {
+    p.querySelector('#chat-search-input-thread')?.addEventListener('input', e => {
       const v = e.target.value;
       clearTimeout(_threadSearchDebTimer);
       _threadSearchDebTimer = setTimeout(() => _setThreadSearchQuery(v), 150);
     });
-    document.getElementById('chat-search-input-thread')?.addEventListener('keydown', e => {
+    p.querySelector('#chat-search-input-thread')?.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); _threadSearchStep(e.shiftKey ? -1 : 1); }
       else if (e.key === 'Escape') { _toggleThreadSearch(false); }
     });
@@ -1397,11 +1408,11 @@ window.Chat = (() => {
     // meeting pointer is metadata, not a competing upload, so it rides
     // alongside text/photo/file in one send.
     let pendingFile = null, pendingLink = null, pendingImages = [], pendingRef = null, pendingMeeting = null;
-    const fileInp = document.getElementById('chat-file');
-    const cameraInp = document.getElementById('chat-camera');
-    const filePreview = document.getElementById('chat-file-preview');
-    const input = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('chat-send');
+    const fileInp = p.querySelector('#chat-file');
+    const cameraInp = p.querySelector('#chat-camera');
+    const filePreview = p.querySelector('#chat-file-preview');
+    const input = p.querySelector('#chat-input');
+    const sendBtn = p.querySelector('#chat-send');
     // Wave2 practicality batch — filePreview now composes from up to 2
     // independent slots (the file/image/link group, plus pendingRef), joined
     // with a middle dot when both are present.
@@ -1426,8 +1437,8 @@ window.Chat = (() => {
     // when tapped, and auto-collapses once the composer has text (below, in
     // the input handler). The emoji button is untouched — it stays its own
     // persistent icon beside the input, per spec.
-    const attachToggle = document.getElementById('chat-attach-toggle');
-    const attachExpand = document.getElementById('chat-attach-expand');
+    const attachToggle = p.querySelector('#chat-attach-toggle');
+    const attachExpand = p.querySelector('#chat-attach-expand');
     const setAttachExpanded = open => {
       if (!attachToggle || !attachExpand) return;
       attachExpand.classList.toggle('hidden', !open);
@@ -1538,7 +1549,7 @@ window.Chat = (() => {
       e.target.value = '';
       if (f) _addPendingImages([f]);
     });
-    document.getElementById('chat-link').addEventListener('click', async () => {
+    p.querySelector('#chat-link').addEventListener('click', async () => {
       let url = ((await promptDialog({ message: 'Paste a link to attach:' })) || '').trim();
       if (!url) return;
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
@@ -1551,7 +1562,7 @@ window.Chat = (() => {
     // Wave2 practicality batch (P0) — "Attach a record" picker (task/quote/
     // bidding). Independent of the file/image/link group above — see
     // pendingRef's own comment at declaration.
-    document.getElementById('chat-attach-ref')?.addEventListener('click', () => {
+    p.querySelector('#chat-attach-ref')?.addEventListener('click', () => {
       _openRefPicker(ref => {
         pendingRef = ref;
         updateFilePreview();
@@ -1566,7 +1577,7 @@ window.Chat = (() => {
     // dept channels are created with participants:[] and membership is derived
     // from each user's department, so reading participants here would invite
     // NOBODY. _targetsFor is the one function that resolves this correctly.
-    document.getElementById('chat-attach-meeting')?.addEventListener('click', async () => {
+    p.querySelector('#chat-attach-meeting')?.addEventListener('click', async () => {
       setAttachExpanded(false);
       if (typeof window.openMeetingEditor !== 'function') { Notifs.error('Calendar unavailable'); return; }
       let invitees = [];
@@ -1622,16 +1633,16 @@ window.Chat = (() => {
     // (same pattern as the wallpaper popover; _emojiMenuOpen/_emojiOutsideClick
     // are module-level so teardownThread can clean up the document listener
     // if the panel closes while the grid is open).
-    document.getElementById('chat-emoji-btn')?.addEventListener('click', e => {
+    p.querySelector('#chat-emoji-btn')?.addEventListener('click', e => {
       e.stopPropagation();
-      const grid = document.getElementById('chat-emoji-grid'); if (!grid) return;
+      const grid = p.querySelector('#chat-emoji-grid'); if (!grid) return;
       const willOpen = grid.classList.contains('hidden');
       grid.classList.toggle('hidden');
       _emojiMenuOpen = willOpen;
       if (willOpen) document.addEventListener('click', _emojiOutsideClick, true);
       else document.removeEventListener('click', _emojiOutsideClick, true);
     });
-    document.getElementById('chat-emoji-grid')?.addEventListener('click', e => {
+    p.querySelector('#chat-emoji-grid')?.addEventListener('click', e => {
       const opt = e.target.closest('.ms-emoji-opt'); if (!opt) return;
       _insertEmojiAtCursor(input, opt.dataset.emoji);
       updateSendState(); _autoGrow(input);
@@ -1641,9 +1652,9 @@ window.Chat = (() => {
     // Wave5 M2 (J6) — @mention typeahead: selecting a candidate replaces the
     // in-progress "@query" token (from chat-mention-dd's data-atPos, set by
     // _updateMentionTypeahead) with "@DisplayName " and restores focus/caret.
-    document.getElementById('chat-mention-dd')?.addEventListener('click', e => {
+    p.querySelector('#chat-mention-dd')?.addEventListener('click', e => {
       const opt = e.target.closest('.ms-mention-opt'); if (!opt) return;
-      const dd = document.getElementById('chat-mention-dd');
+      const dd = p.querySelector('#chat-mention-dd');
       const at = parseInt(dd.dataset.atPos || '-1', 10);
       if (at < 0) return;
       const pos = input.selectionStart;
@@ -1699,7 +1710,7 @@ window.Chat = (() => {
       fileInp.value = ''; pendingFile = null; pendingLink = null; pendingImages = []; pendingRef = null; pendingMeeting = null;
       updateFilePreview();
       _replyTarget = null; _renderReplyChip();               // Wave5 M2 — clears on optimistic send, like the composer text
-      document.getElementById('chat-mention-dd')?.classList.add('hidden');
+      p.querySelector('#chat-mention-dd')?.classList.add('hidden');
       clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
       updateSendState();
       _addPendingMessage({ clientKey, text, file, images, link, replyTo, ref, meeting });
@@ -1793,9 +1804,9 @@ window.Chat = (() => {
     // Wave5 M1 (J7) — scroll-to-bottom FAB: appears >300px up, badge tallies
     // messages that arrived while scrolled up (_renderThread), tap smooth-
     // scrolls to bottom and clears the tally.
-    document.getElementById('chat-thread-scroll')?.addEventListener('scroll', _onThreadScroll, { passive: true });
-    document.getElementById('chat-scroll-fab')?.addEventListener('click', () => {
-      const scrollEl = document.getElementById('chat-thread-scroll');
+    p.querySelector('#chat-thread-scroll')?.addEventListener('scroll', _onThreadScroll, { passive: true });
+    p.querySelector('#chat-scroll-fab')?.addEventListener('click', () => {
+      const scrollEl = p.querySelector('#chat-thread-scroll');
       if (!scrollEl) return;
       scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
       _scrollFabUnseen = 0;
@@ -5062,13 +5073,19 @@ window.Chat = (() => {
       <div id="chat-ref-tabs"></div>
       <input id="chat-ref-search" class="ms-input" placeholder="Search…" style="width:100%;margin:10px 0"/>
       <div id="chat-ref-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>`;
-    window.openPage('Attach a record', body);
-    document.getElementById('chat-ref-tabs').innerHTML = window.chipTabs(tabs, 'task');
+    // ⚠ SCOPED TO THE RETURNED PANEL, never document.getElementById — openPage
+    // keeps a CLOSING page in the DOM for ~300ms, so opening this picker again
+    // from a second thread inside that window puts two #chat-ref-tabs /
+    // #chat-ref-list / #chat-ref-search in the document at once and a
+    // document-wide lookup resolves the DYING one: the chips and search box
+    // stop responding and rows render into a panel nobody can see.
+    const panel = window.openPage('Attach a record', body);
+    panel.querySelector('#chat-ref-tabs').innerHTML = window.chipTabs(tabs, 'task');
 
     let allRows = [];   // current tab's rows: [{kind,id,label,collection?}]
 
     function renderRows(query) {
-      const listEl = document.getElementById('chat-ref-list');
+      const listEl = panel.querySelector('#chat-ref-list');
       if (!listEl) return;
       const q = (query || '').trim().toLowerCase();
       const filtered = q ? allRows.filter(r => r.label.toLowerCase().includes(q)) : allRows;
@@ -5086,7 +5103,7 @@ window.Chat = (() => {
     }
 
     async function loadTab(kind) {
-      const listEl = document.getElementById('chat-ref-list');
+      const listEl = panel.querySelector('#chat-ref-list');
       if (listEl) listEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
       let rows = [];
       if (kind === 'task') {
@@ -5119,11 +5136,11 @@ window.Chat = (() => {
           label: `${g.title || g.name || 'Untitled'} (${buckets[i].label})` }; }));
       }
       allRows = rows;
-      renderRows(document.getElementById('chat-ref-search')?.value || '');
+      renderRows(panel.querySelector('#chat-ref-search')?.value || '');
     }
 
-    window.bindChipTabs(document.getElementById('chat-ref-tabs'), key => loadTab(key));
-    document.getElementById('chat-ref-search')?.addEventListener('input', e => renderRows(e.target.value));
+    window.bindChipTabs(panel.querySelector('#chat-ref-tabs'), key => loadTab(key));
+    panel.querySelector('#chat-ref-search')?.addEventListener('input', e => renderRows(e.target.value));
     loadTab('task');
   }
 
@@ -5467,15 +5484,22 @@ window.Chat = (() => {
       }</div>
       ${candidates.length ? `<button class="btn-primary btn-sm" id="chat-addmember-btn" style="margin-top:12px" disabled>Add selected</button>
       <div id="chat-addmember-err" class="error-msg hidden" style="margin-top:6px"></div>` : ''}`;
-    window.openPage('Add members', body);
-    const listEl = document.getElementById('chat-addmember-list');
-    const btn = document.getElementById('chat-addmember-btn');
+    // ⚠ THIS PANEL's own elements are scoped to the returned panel, never
+    // document.getElementById — openPage keeps a CLOSING page in the DOM for
+    // ~300ms, so a second Add-members picker opened inside that window would
+    // otherwise read the DYING panel's checkboxes and add the PREVIOUS group's
+    // selection to THIS conversation. (The two `document.querySelector` calls
+    // further down are DELIBERATELY document-wide: `.chat-about-members` and
+    // `.chat-about-subtitle` live in the Shared Media page UNDERNEATH this one.)
+    const panel = window.openPage('Add members', body);
+    const listEl = panel.querySelector('#chat-addmember-list');
+    const btn = panel.querySelector('#chat-addmember-btn');
     listEl?.addEventListener('change', () => {
       if (btn) btn.disabled = !listEl.querySelectorAll('.chat-addmember-cb:checked').length;
     });
     btn?.addEventListener('click', async () => {
-      const err = document.getElementById('chat-addmember-err');
-      const picked = Array.from(document.querySelectorAll('.chat-addmember-cb:checked')).map(cb => cb.value);
+      const err = panel.querySelector('#chat-addmember-err');
+      const picked = Array.from(panel.querySelectorAll('.chat-addmember-cb:checked')).map(cb => cb.value);
       if (!picked.length) return;
       btn.disabled = true; btn.textContent = 'Adding…';
       const nameUpdates = {};
@@ -5613,8 +5637,17 @@ window.Chat = (() => {
       <div id="chat-mediatab-media">${mediaHtml}</div>
       <div id="chat-mediatab-files" class="hidden">${filesHtml}</div>
       <div id="chat-mediatab-links" class="hidden">${linksHtml}</div>`;
-    window.openPage('Shared Media', body);
-    const chipsEl = document.getElementById('chat-mediatab-chips');
+    // ⚠ THIS PANEL's own elements are scoped to the returned panel, never
+    // document.* — openPage keeps a CLOSING page in the DOM for ~300ms, so the
+    // ⓘ button tapped again (or from a second thread) inside that window puts
+    // two copies of every id/class below in the document and a document-wide
+    // lookup resolves the DYING one: chips dead, rename/photo/leave dead, and
+    // the member list patched on a panel nobody can see.
+    // The two lookups that stay document-wide below (`.ms-thread-title` and
+    // `#chat-thread-avatar`) are DELIBERATE — they belong to the chat THREAD
+    // panel underneath this one, which is exactly what they mean to patch.
+    const panel = window.openPage('Shared Media', body);
+    const chipsEl = panel.querySelector('#chat-mediatab-chips');
     if (chipsEl) {
       chipsEl.innerHTML = window.chipTabs([
         { key: 'media', label: 'Media', count: mediaItems.length || null },
@@ -5623,10 +5656,10 @@ window.Chat = (() => {
       ], 'media');
       window.bindChipTabs(chipsEl, key => {
         ['media', 'files', 'links'].forEach(k =>
-          document.getElementById('chat-mediatab-' + k)?.classList.toggle('hidden', k !== key));
+          panel.querySelector('#chat-mediatab-' + k)?.classList.toggle('hidden', k !== key));
       });
     }
-    document.getElementById('chat-mediatab-media')?.querySelectorAll('.chat-mediatab-thumb').forEach(t => {
+    panel.querySelector('#chat-mediatab-media')?.querySelectorAll('.chat-mediatab-thumb').forEach(t => {
       t.addEventListener('click', () => _openLightbox(mediaItems, parseInt(t.dataset.idx, 10)));
     });
 
@@ -5634,7 +5667,7 @@ window.Chat = (() => {
     // above omits these controls entirely for everyone else, so nothing here
     // has anything to bind to on a non-admin's page).
     if (isGroupAdmin) {
-      document.getElementById('chat-about-rename-btn')?.addEventListener('click', async () => {
+      panel.querySelector('#chat-about-rename-btn')?.addEventListener('click', async () => {
         const newName = await promptDialog({ message: 'Group name:', value: conv.name || '' });
         if (newName === null) return;
         const trimmed = newName.trim();
@@ -5642,17 +5675,18 @@ window.Chat = (() => {
         try {
           await db.collection('conversations').doc(conv.id).update({ name: trimmed });
           conv.name = trimmed;
-          const aboutTitleEl = document.querySelector('.chat-about-title');
+          const aboutTitleEl = panel.querySelector('.chat-about-title');
           if (aboutTitleEl) aboutTitleEl.textContent = trimmed;
+          // Deliberately document-wide: the thread panel UNDER this page.
           const threadTitleEl = document.querySelector('.ms-thread-title');
           if (threadTitleEl) threadTitleEl.textContent = trimmed;
           Notifs.success('Group renamed');
         } catch (_) { Notifs.showToast('Rename failed', 'error'); }
       });
-      document.getElementById('chat-about-avatar')?.addEventListener('click', () => {
-        document.getElementById('chat-about-photo-input')?.click();
+      panel.querySelector('#chat-about-avatar')?.addEventListener('click', () => {
+        panel.querySelector('#chat-about-photo-input')?.click();
       });
-      document.getElementById('chat-about-photo-input')?.addEventListener('change', async e => {
+      panel.querySelector('#chat-about-photo-input')?.addEventListener('change', async e => {
         const f = e.target.files?.[0]; e.target.value = '';
         if (!f || !/^image\//.test(f.type || '')) return;
         try {
@@ -5663,17 +5697,18 @@ window.Chat = (() => {
           await db.collection('conversations').doc(conv.id).update({ photoUrl: url });
           conv.photoUrl = url;
           const imgHtml = `<img src="${escHtml(url)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`;
-          const aboutAvatarEl = document.getElementById('chat-about-avatar');
+          const aboutAvatarEl = panel.querySelector('#chat-about-avatar');
           if (aboutAvatarEl) aboutAvatarEl.innerHTML = imgHtml;
           // Wave5 M4 — patch the thread header's own avatar live too ("avatar
           // renders photoUrl everywhere" — the inbox row picks it up on its
           // own next refresh, once the conversations snapshot echoes back).
+          // Deliberately document-wide: the thread panel UNDER this page.
           const threadAvatarEl = document.getElementById('chat-thread-avatar');
           if (threadAvatarEl) threadAvatarEl.innerHTML = imgHtml;
           Notifs.success('Group photo updated');
         } catch (_) { Notifs.showToast('Photo upload failed', 'error'); }
       });
-      document.getElementById('chat-about-addmember-btn')?.addEventListener('click', () => _openAddMembersPicker(conv));
+      panel.querySelector('#chat-about-addmember-btn')?.addEventListener('click', () => _openAddMembersPicker(conv));
       // v14 chat re-audit fix — group admin could Add members but had no
       // Remove-member control anywhere (the only way OFF the roster was the
       // self-only Leave button). Removing another participant falls under
@@ -5682,7 +5717,7 @@ window.Chat = (() => {
       // the SAME branch rename/photo/add-members already rely on, so this
       // needs no rules change. Gated to isGroupAdmin, and never shown on the
       // admin's own row (self-removal is what Leave is for).
-      document.querySelector('.chat-about-members')?.addEventListener('click', async e => {
+      panel.querySelector('.chat-about-members')?.addEventListener('click', async e => {
         const btn = e.target.closest('.chat-about-member-remove'); if (!btn) return;
         const uid = btn.dataset.uid;
         const nm = (conv.participantNames && conv.participantNames[uid]) || 'this person';
@@ -5695,12 +5730,12 @@ window.Chat = (() => {
           });
           conv.participants = (conv.participants || []).filter(x => x !== uid);
           if (conv.participantNames) delete conv.participantNames[uid];
-          const membersEl = document.querySelector('.chat-about-members');
+          const membersEl = panel.querySelector('.chat-about-members');
           if (membersEl) {
             membersEl.innerHTML = conv.participants.map(u => _memberRowHtml(u, conv, isGroupAdmin)).join('');
             if (window.lucide) lucide.createIcons({ nodes: [membersEl] });
           }
-          const subtitleEl = document.querySelector('.chat-about-subtitle');
+          const subtitleEl = panel.querySelector('.chat-about-subtitle');
           if (subtitleEl) subtitleEl.textContent = `${conv.participants.length} member${conv.participants.length!==1?'s':''}`;
           Notifs.success('Member removed');
         } catch (_) {
@@ -5720,25 +5755,25 @@ window.Chat = (() => {
     // needed). _setWallpaper is unchanged: it always targets whatever
     // conversation is currently open (_openConvId/_openConv), which is this
     // page's conv since the info page only ever opens from an open thread.
-    document.getElementById('chat-about-wallpaper-btn')?.addEventListener('click', () => {
-      const btn = document.getElementById('chat-about-wallpaper-btn');
-      const list = document.getElementById('chat-about-wallpaper-list');
+    panel.querySelector('#chat-about-wallpaper-btn')?.addEventListener('click', () => {
+      const btn = panel.querySelector('#chat-about-wallpaper-btn');
+      const list = panel.querySelector('#chat-about-wallpaper-list');
       if (!list || !btn) return;
       const willOpen = list.classList.contains('hidden');
       list.classList.toggle('hidden', !willOpen);
       btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
       btn.classList.toggle('chat-about-row-open', willOpen);
     });
-    document.getElementById('chat-about-wallpaper-list')?.querySelectorAll('.ms-wallpaper-opt').forEach(optBtn => {
+    panel.querySelector('#chat-about-wallpaper-list')?.querySelectorAll('.ms-wallpaper-opt').forEach(optBtn => {
       optBtn.addEventListener('click', () => {
         _setWallpaper(optBtn.dataset.wp);
-        document.getElementById('chat-about-wallpaper-list')?.classList.add('hidden');
-        const btn = document.getElementById('chat-about-wallpaper-btn');
+        panel.querySelector('#chat-about-wallpaper-list')?.classList.add('hidden');
+        const btn = panel.querySelector('#chat-about-wallpaper-btn');
         btn?.setAttribute('aria-expanded', 'false');
         btn?.classList.remove('chat-about-row-open');
       });
     });
-    document.getElementById('chat-about-leave-btn')?.addEventListener('click', async () => {
+    panel.querySelector('#chat-about-leave-btn')?.addEventListener('click', async () => {
       if (!(await confirmDialog({ message: 'Leave this group?', danger: true }))) return;
       await db.collection('conversations').doc(conv.id)
         .update({ participants: firebase.firestore.FieldValue.arrayRemove(currentUser.uid) })
@@ -5949,10 +5984,16 @@ window.renderChatPage = async function() {
         <div id="chat-group-err" class="error-msg hidden" style="margin-top:6px"></div>
       </div>` : ''}
     `;
-    window.openPage('New Message', body);
+    // ⚠ SCOPED TO THE RETURNED PANEL, never document.* — openPage keeps a
+    // CLOSING page in the DOM for ~300ms, so reopening "New Message" inside
+    // that window puts two of every id below in the document and a
+    // document-wide lookup resolves the DYING one: the search box and Create
+    // Group stop responding, and once they do fire they would create a group
+    // from the PREVIOUS panel's name and ticked members.
+    const panel = window.openPage('New Message', body);
 
     const wireRows = () => {
-      document.getElementById('chat-pick-list')?.querySelectorAll('.chat-pick-user').forEach(row => {
+      panel.querySelector('#chat-pick-list')?.querySelectorAll('.chat-pick-user').forEach(row => {
         row.addEventListener('click', () => {
           const uid = row.dataset.uid;
           window.Overlay.dismissTop();
@@ -5962,17 +6003,17 @@ window.renderChatPage = async function() {
     };
     wireRows();
 
-    document.getElementById('chat-pick-search')?.addEventListener('input', e => {
-      const listEl = document.getElementById('chat-pick-list');
+    panel.querySelector('#chat-pick-search')?.addEventListener('input', e => {
+      const listEl = panel.querySelector('#chat-pick-list');
       if (listEl) listEl.innerHTML = buildListHtml(e.target.value);
       wireRows();
     });
 
-    document.getElementById('chat-group-create-btn')?.addEventListener('click', async () => {
-      const btn = document.getElementById('chat-group-create-btn');
-      const name = document.getElementById('chat-group-name')?.value.trim();
-      const err = document.getElementById('chat-group-err');
-      const picked = Array.from(document.querySelectorAll('.chat-group-member-cb:checked')).map(cb => cb.value);
+    panel.querySelector('#chat-group-create-btn')?.addEventListener('click', async () => {
+      const btn = panel.querySelector('#chat-group-create-btn');
+      const name = panel.querySelector('#chat-group-name')?.value.trim();
+      const err = panel.querySelector('#chat-group-err');
+      const picked = Array.from(panel.querySelectorAll('.chat-group-member-cb:checked')).map(cb => cb.value);
       if (!name) { if (err) { err.textContent = 'Group name is required.'; err.classList.remove('hidden'); } return; }
       if (!picked.length) { if (err) { err.textContent = 'Pick at least one member.'; err.classList.remove('hidden'); } return; }
       const myUid = currentUser.uid;
@@ -5990,7 +6031,7 @@ window.renderChatPage = async function() {
       // rule needs 'announcement' added alongside 'dm'/'group' (see this
       // batch's report); message-create there is what actually enforces
       // "only admin/creator may post" server-side.
-      const isAnnouncement = !!document.getElementById('chat-group-announcement-cb')?.checked;
+      const isAnnouncement = !!panel.querySelector('#chat-group-announcement-cb')?.checked;
       try {
         const ref = await db.collection('conversations').add({
           type: isAnnouncement ? 'announcement' : 'group', participants, participantNames, name,

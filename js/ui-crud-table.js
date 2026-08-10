@@ -201,11 +201,20 @@ window.renderFinanceCrudTable = async function(container, cfg) {
       // pattern of `const bankOpts = await BankAccounts.optionsHTML(); openPage(...)`.
       const preData = cfg.addModal.beforeOpen ? await cfg.addModal.beforeOpen() : null;
       const body = typeof cfg.addModal.bodyHtml === 'function' ? cfg.addModal.bodyHtml(preData) : cfg.addModal.bodyHtml;
-      openPage(cfg.addModal.title, body, cfg.addModal.footerHtml);
+      // Capture the panel and hand it to ctx. buildDoc implementations read
+      // their form fields back by id, and without a panel to scope to they had
+      // to go through document — which during openPage's teardown window reads
+      // the PREVIOUS record's values and writes them onto this one. These are
+      // the finance journals (Cash Receipts, Cash Disbursements, Taxes,
+      // Records), so that is a wrong-amount bug, not a cosmetic one.
+      // ctx.$ is the scoped accessor; ctx.panel is there for anything that
+      // needs the element itself.
+      const _panel = openPage(cfg.addModal.title, body, cfg.addModal.footerHtml);
       let uploadedFile = null;
-      const ctx = { setFile: (f) => { uploadedFile = f; }, getFile: () => uploadedFile, currentUser, currentRole };
+      const ctx = { setFile: (f) => { uploadedFile = f; }, getFile: () => uploadedFile, currentUser, currentRole,
+                    panel: _panel, $: (id) => _panel.querySelector('#' + id) };
       if (cfg.addModal.afterOpen) cfg.addModal.afterOpen(ctx, preData);
-      const saveBtn = document.getElementById(cfg.addModal.saveBtnId);
+      const saveBtn = _panel.querySelector('#' + cfg.addModal.saveBtnId);
       saveBtn && saveBtn.addEventListener('click', () => window.busy(saveBtn, async () => {
         try {
           const doc = await cfg.addModal.buildDoc(ctx, preData);

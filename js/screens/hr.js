@@ -147,7 +147,7 @@ function _hrPanelError(container, err, retry) {
 function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, targetField, current }, currentUser, onDone) {
   const cur = parseFloat(current) || 0;
   const _isPres = typeof isRealPresident === 'function' && isRealPresident();
-  openPage(`${emojiIcon('💸',16)} Give Raise — ${escHtml(subjectName||'')}`, `
+  const _panel = openPage(`${emojiIcon('💸',16)} Give Raise — ${escHtml(subjectName||'')}`, `
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
       Current ${escHtml(fieldLabel)}: <strong style="color:var(--text)">₱${fmt(cur)}</strong>
     </div>
@@ -168,15 +168,24 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
     </div>
     ${!_isPres?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Raises are approval-routed — this will be sent to the President.</div>`:''}
   `, `<button class="btn-primary" id="raise-save-btn">${_isPres?'Apply Raise':'Request Raise'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+  // record inside that window and two panels carry the same element ids at
+  // once — document.getElementById() returns the FIRST match in document
+  // order, which is the DYING panel. At bind time the handler lands on a
+  // button nobody can see (the visible one gets none); inside the handler
+  // the field reads pull the PREVIOUS record's values and write them onto
+  // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+  const $rz = (id) => _panel.querySelector('#' + id);
 
-  const newInp = document.getElementById('raise-new');
-  const amtInp = document.getElementById('raise-amt');
-  const pctInp = document.getElementById('raise-pct');
-  const prev   = document.getElementById('raise-preview');
+  const newInp = $rz('raise-new');
+  const amtInp = $rz('raise-amt');
+  const pctInp = $rz('raise-pct');
+  const prev   = $rz('raise-preview');
   // Button text is date/role aware (v12 WS23): a future-dated raise SCHEDULES
   // rather than applies, even for the President.
   const _btnLabel = () => {
-    const effM = (document.getElementById('raise-eff')?.value || today()).slice(0,7);
+    const effM = ($rz('raise-eff')?.value || today()).slice(0,7);
     if (!_isPres) return 'Request Raise';
     return effM <= today().slice(0,7) ? 'Apply Raise' : 'Schedule Raise';
   };
@@ -191,17 +200,17 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
   amtInp.addEventListener('input', () => { if (amtInp.value !== '') { newInp.value = (cur + (parseFloat(amtInp.value)||0)).toFixed(2); pctInp.value = ''; } refresh(); });
   pctInp.addEventListener('input', () => { if (pctInp.value !== '') { newInp.value = (cur * (1 + (parseFloat(pctInp.value)||0)/100)).toFixed(2); amtInp.value = ''; } refresh(); });
   newInp.addEventListener('input', () => { amtInp.value = ''; pctInp.value = ''; refresh(); });
-  document.getElementById('raise-eff').addEventListener('change', () => {
-    const b = document.getElementById('raise-save-btn'); if (b) b.textContent = _btnLabel();
+  $rz('raise-eff').addEventListener('change', () => {
+    const b = $rz('raise-save-btn'); if (b) b.textContent = _btnLabel();
   });
 
-  document.getElementById('raise-save-btn').addEventListener('click', async () => {
+  $rz('raise-save-btn').addEventListener('click', async () => {
     const nv = parseFloat(newInp.value) || 0;
     if (nv <= 0)    { Notifs.showToast('Enter a valid new amount','error'); return; }
     if (nv === cur) { Notifs.showToast('New amount is unchanged','error'); return; }
-    const reason = document.getElementById('raise-reason').value.trim();
-    const eff    = document.getElementById('raise-eff').value || today();
-    const btn = document.getElementById('raise-save-btn');
+    const reason = $rz('raise-reason').value.trim();
+    const eff    = $rz('raise-eff').value || today();
+    const btn = $rz('raise-save-btn');
     btn.disabled = true; btn.textContent = 'Submitting…';
     try {
       const res = await window.RaiseFlow.submitRaise(
@@ -347,12 +356,12 @@ window.openScheduledRaises = async function() {
     // already held the real rows. Post-inversion the buttons do not exist
     // until the assignment one line up, so wiring any earlier would silently
     // bind nothing and Approve/Reject would be dead controls.
-    document.querySelectorAll('.sr-approve-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
+    panel.querySelectorAll('.sr-approve-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
       const r = await window.RaiseFlow.approve(btn.dataset.id);
       Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
       window.openScheduledRaises();
     }));
-    document.querySelectorAll('.sr-reject-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
+    panel.querySelectorAll('.sr-reject-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
       const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
       await window.RaiseFlow.reject(btn.dataset.id, reason);
       Notifs.error('Raise declined.');
@@ -624,7 +633,7 @@ async function openPayrollReconciliation() {
 
   // ── Three-way section: month picker + diff table for the selected month ──
   const allMonths = runsSnap.docs.map(d=>d.id).sort().reverse();
-  const monthSel = document.getElementById('recon3-month-sel');
+  const monthSel = _reconPanel.querySelector('#recon3-month-sel');
   if (monthSel) {
     monthSel.innerHTML = allMonths.length
       ? allMonths.map(m => `<option value="${m}">${escHtml(window.fmtMonthLabel ? window.fmtMonthLabel(m) : m)}</option>`).join('')
@@ -632,8 +641,8 @@ async function openPayrollReconciliation() {
   }
   let recon3Rows = [];
   const loadThreeWay = async (month) => {
-    const body3 = document.getElementById('recon3-body');
-    const csv3  = document.getElementById('recon3-csv-btn');
+    const body3 = _reconPanel.querySelector('#recon3-body');
+    const csv3  = _reconPanel.querySelector('#recon3-csv-btn');
     if (!month) {
       if (body3) body3.innerHTML = `<div class="empty-state" style="padding:20px"><p style="color:var(--text-muted)">No pay runs recorded yet.</p></div>`;
       if (csv3) csv3.disabled = true;
@@ -648,7 +657,7 @@ async function openPayrollReconciliation() {
     monthSel.addEventListener('change', () => loadThreeWay(monthSel.value));
     await loadThreeWay(monthSel.value || allMonths[0]);
   }
-  document.getElementById('recon3-csv-btn')?.addEventListener('click', () => window.exportCSV('payroll-reconciliation-3way-' + (monthSel?.value||''), recon3Rows, [
+  _reconPanel.querySelector('#recon3-csv-btn')?.addEventListener('click', () => window.exportCSV('payroll-reconciliation-3way-' + (monthSel?.value||''), recon3Rows, [
     { key:'month', label:'Month' }, { key:'name', label:'Employee' }, { key:'uid', label:'Employee UID' },
     { key:'ledgerAmt', label:'Ledger Amount' }, { key:'payrunNet', label:'Payrun Net' }, { key:'historyNet', label:'History Net' },
     { key:'status', label:'Status' }, { key:'delta', label:'Delta' }
@@ -699,7 +708,7 @@ async function openPayrollReconciliation() {
   }
 
   flags.sort((a,b) => (a.month<b.month?1:-1));
-  const body = document.getElementById('recon-body');
+  const body = _reconPanel.querySelector('#recon-body');
   if (!body) return;
   body.innerHTML = !flags.length
     ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No discrepancies found across ${runs.length} pay run(s).</p></div>`
@@ -716,7 +725,7 @@ async function openPayrollReconciliation() {
       </table></div>`;
   if (window.lucide) lucide.createIcons({ nodes: [body] });
 
-  const csvBtn = document.getElementById('recon-csv-btn');
+  const csvBtn = _reconPanel.querySelector('#recon-csv-btn');
   if (csvBtn) {
     csvBtn.disabled = !flags.length;
     csvBtn.addEventListener('click', () => window.exportCSV('payroll-reconciliation', flags, [
@@ -1095,7 +1104,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const hid = btn.dataset.id;
         const rec = history.find(h => h.id === hid);
         if (!rec) return;
-        openPage(`Edit Payroll Record — ${escHtml(rec.userName||'?')} (${escHtml(rec.month||'?')})`, `
+        const _panel = openPage(`Edit Payroll Record — ${escHtml(rec.userName||'?')} (${escHtml(rec.month||'?')})`, `
           <div class="form-row">
             <div class="form-group"><label>Base Salary</label><input id="hpe-salary" type="number" value="${rec.salary||0}" inputmode="decimal"/></div>
             <div class="form-group"><label>Allowance</label><input id="hpe-allow" type="number" value="${rec.allowance||0}" inputmode="decimal"/></div>
@@ -1107,19 +1116,28 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <div class="form-group"><label>Final Pay</label><input id="hpe-final" type="number" value="${rec.finalPay||0}" inputmode="decimal"/></div>
           <div class="form-group"><label>Notes (optional)</label><input id="hpe-notes" type="text" value="${escHtml(rec.notes||'')}" placeholder="e.g. 13th month included"/></div>
         `, `<button class="btn-primary" id="save-hpe-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        // ⚠ SCOPED TO THIS PANEL, NOT document.
+        // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+        // record inside that window and two panels carry the same element ids at
+        // once — document.getElementById() returns the FIRST match in document
+        // order, which is the DYING panel. At bind time the handler lands on a
+        // button nobody can see (the visible one gets none); inside the handler
+        // the field reads pull the PREVIOUS record's values and write them onto
+        // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+        const $hpe = (id) => _panel.querySelector('#' + id);
 
-        document.getElementById('save-hpe-btn').addEventListener('click', async () => {
+        $hpe('save-hpe-btn').addEventListener('click', async () => {
           // H2 fix — every other money-posting path guards on assertPeriodOpen
           // before writing; this edit modal didn't, so a closed month could be
           // silently re-posted. Mirrors the try/catch-return pattern used elsewhere
           // (assertPeriodOpen already shows its own toast on rejection).
           try { await window.assertPeriodOpen(rec.month + '-01'); } catch (e) { return; }
-          const salary    = parseFloat(document.getElementById('hpe-salary').value)||0;
-          const allowance = parseFloat(document.getElementById('hpe-allow').value)||0;
-          const deductions= parseFloat(document.getElementById('hpe-deduct').value)||0;
-          const netPay    = parseFloat(document.getElementById('hpe-net').value)||0;
-          const finalPay  = parseFloat(document.getElementById('hpe-final').value)||0;
-          const notes     = document.getElementById('hpe-notes').value.trim();
+          const salary    = parseFloat($hpe('hpe-salary').value)||0;
+          const allowance = parseFloat($hpe('hpe-allow').value)||0;
+          const deductions= parseFloat($hpe('hpe-deduct').value)||0;
+          const netPay    = parseFloat($hpe('hpe-net').value)||0;
+          const finalPay  = parseFloat($hpe('hpe-final').value)||0;
+          const notes     = $hpe('hpe-notes').value.trim();
           await db.collection('salary_history').doc(hid).update({
             salary, allowance, deductions, netPay, finalPay,
             ...(notes ? { notes } : {}),
@@ -2018,7 +2036,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const _epStatPairs = [['ep-sss-mode','ep-sss'],['ep-ph-mode','ep-ph'],['ep-pi-mode','ep-pi'],['ep-tax-mode','ep-tax']];
         const _epSyncStatInputs = () => {
           _epStatPairs.forEach(([modeId, inputId]) => {
-            const sel = document.getElementById(modeId), inp = document.getElementById(inputId);
+            const sel = panel.querySelector('#'+modeId), inp = panel.querySelector('#'+inputId);
             if (!sel || !inp) return;
             const inert = (sel.value === 'auto' || sel.value === 'exempt');
             inp.disabled = inert;
@@ -2028,7 +2046,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
                       : '';
           });
         };
-        _epStatPairs.forEach(([modeId]) => document.getElementById(modeId)?.addEventListener('change', _epSyncStatInputs));
+        _epStatPairs.forEach(([modeId]) => panel.querySelector('#'+modeId)?.addEventListener('change', _epSyncStatInputs));
         _epSyncStatInputs();
 
         // ── LISTENERS AFTER THE FILL ──────────────────────────────────────
@@ -2037,14 +2055,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         // because none of these ids existed until the assignment above.
         if (caBalance > 0) {
           const updateRemaining = () => {
-            const mode   = document.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
+            const mode   = panel.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
             const custom = parseFloat(panel.querySelector('#ep-ca-custom')?.value)||0;
             const amt    = mode==='full' ? caBalance : mode==='custom' ? Math.min(custom, caBalance) : plan.caPlanned;
             panel.querySelector('#ep-ca-remaining').textContent = fmt(Math.max(0, caBalance-amt));
           };
-          document.querySelectorAll('input[name="ep-ca-mode"]').forEach(r=>r.addEventListener('change', updateRemaining));
+          panel.querySelectorAll('input[name="ep-ca-mode"]').forEach(r=>r.addEventListener('change', updateRemaining));
           panel.querySelector('#ep-ca-custom')?.addEventListener('input', () => {
-            const radio = document.querySelector('input[name="ep-ca-mode"][value="custom"]');
+            const radio = panel.querySelector('input[name="ep-ca-mode"][value="custom"]');
             if (radio) radio.checked = true;
             updateRemaining();
           });
@@ -2092,7 +2110,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               const m = {};
               [['sss','ep-sss-mode'],['philhealth','ep-ph-mode'],['pagibig','ep-pi-mode'],['tax','ep-tax-mode']]
                 .forEach(([k, elId]) => {
-                  const v = document.getElementById(elId)?.value;
+                  const v = panel.querySelector('#'+elId)?.value;
                   m[k] = (v === 'auto' || v === 'fixed' || v === 'exempt')
                     ? v : firebase.firestore.FieldValue.delete();
                 });
@@ -2111,7 +2129,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
           // Statutory-config spec §4.2 — the modes actually chosen, read back
           // from the same selects the write above used.
-          const _epModeOf = (elId) => { const v = document.getElementById(elId)?.value; return (v==='auto'||v==='fixed'||v==='exempt') ? v : 'default'; };
+          const _epModeOf = (elId) => { const v = panel.querySelector('#'+elId)?.value; return (v==='auto'||v==='fixed'||v==='exempt') ? v : 'default'; };
           const _epModes  = { sss:_epModeOf('ep-sss-mode'), philhealth:_epModeOf('ep-ph-mode'), pagibig:_epModeOf('ep-pi-mode'), tax:_epModeOf('ep-tax-mode') };
 
           // Override tracking (v12 WS21 decision 4) — flag divergence from the
@@ -2123,7 +2141,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
                 // is inert (nothing reads it), so "divergence" from the table is
                 // noise, not an override worth auditing.
                 if (_epModes[field] === 'auto' || _epModes[field] === 'exempt') return;
-                const typed = parseFloat(document.getElementById(elId).value)||0;
+                const typed = parseFloat(panel.querySelector('#'+elId).value)||0;
                 if (typed && Math.abs(typed-computed) > 0.01) {
                   window.logAudit && window.logAudit('statutory-override','payroll',uid,{ field, computed, entered: typed });
                 }
@@ -2176,7 +2194,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           // as the transition mechanism — CashAdvance.planFor() reads it ahead of
           // WS20's frozen pay_runs.lines[i].caPlan on the next Compute.
           if (caBalance > 0) {
-            const mode = document.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
+            const mode = panel.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
             const overrideRef = db.collection('payroll_ca_overrides').doc(`${uid}_${month}`);
             if (mode === 'installment') {
               await overrideRef.delete().catch(()=>{}); // revert to the plan default
@@ -2246,11 +2264,20 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     const lastSetLabel = (existing && existing.setAt && typeof existing.setAt.toDate === 'function')
       ? `Last set by ${escHtml(existing.setByName||'—')} · ${window.fmtManila(existing.setAt)}` : '';
 
-    openPage(`Note to ${escHtml(name||'employee')} — ${window.fmtMonthLabel(month)}`, `
+    const _panel = openPage(`Note to ${escHtml(name||'employee')} — ${window.fmtMonthLabel(month)}`, `
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${emojiIcon('💬',14)} Shown to the employee on their payslip and Personal Finance pay view. Display-only — never affects any pay calculation.</div>
       <div class="form-group"><label>Note to employee</label><textarea id="emp-note-text" rows="4" placeholder="e.g. Includes prorated 13th month; SSS contribution corrected this month.">${escHtml((existing&&existing.text)||'')}</textarea></div>
       ${lastSetLabel?`<div style="font-size:11px;color:var(--text-muted)">${lastSetLabel}</div>`:''}
     `, `<button class="btn-primary" id="emp-note-save-btn">Save</button>${existing&&existing.text?`<button class="btn-danger" id="emp-note-clear-btn">Clear Note</button>`:''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+    // record inside that window and two panels carry the same element ids at
+    // once — document.getElementById() returns the FIRST match in document
+    // order, which is the DYING panel. At bind time the handler lands on a
+    // button nobody can see (the visible one gets none); inside the handler
+    // the field reads pull the PREVIOUS record's values and write them onto
+    // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+    const $note = (id) => _panel.querySelector('#' + id);
 
     const persist = async (text) => {
       const entry = text ? {
@@ -2272,8 +2299,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       );
     };
 
-    document.getElementById('emp-note-save-btn').addEventListener('click', () => window.busy(document.getElementById('emp-note-save-btn'), async () => {
-      const text = document.getElementById('emp-note-text').value.trim();
+    $note('emp-note-save-btn').addEventListener('click', () => window.busy($note('emp-note-save-btn'), async () => {
+      const text = $note('emp-note-text').value.trim();
       if (!text) { Notifs.showToast('Enter a note, or use Clear Note to remove an existing one.','error'); return; }
       await persist(text);
       closeModal();
@@ -2281,7 +2308,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       loadPayrollTable(month);
     }));
 
-    document.getElementById('emp-note-clear-btn')?.addEventListener('click', () => window.busy(document.getElementById('emp-note-clear-btn'), async () => {
+    $note('emp-note-clear-btn')?.addEventListener('click', () => window.busy($note('emp-note-clear-btn'), async () => {
       if (!(await confirmDialog({message:`Clear the note for ${escHtml(name||'')}?`}))) return;
       await persist(null);
       closeModal();
@@ -2331,16 +2358,25 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         </div>
       </div>`).join('');
 
-    openPage(`Adjust — ${escHtml(line.name||'')} (${window.fmtMonthLabel(month)})`, `
+    const _panel = openPage(`Adjust — ${escHtml(line.name||'')} (${window.fmtMonthLabel(month)})`, `
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Overrides apply on top of this frozen computed run and are fully reversible before Verify. Leave a field blank to keep it as computed.</div>
       ${fieldHtml}
       <div id="adj-negative-warn" style="display:none;color:var(--danger);font-size:12px;margin:4px 0"></div>
       <div class="form-group"><label>Reason (required)</label><input id="adj-note" placeholder="Why is this override needed?" value="${escHtml((existing&&existing.note)||'')}"/></div>
       <div style="font-size:13px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">Preview net pay: <strong id="adj-preview-final">₱${fmt(line.finalPay)}</strong></div>
     `, `<button class="btn-primary" id="adj-save-btn">Save</button>${existing?`<button class="btn-danger" id="adj-reset-btn">Reset to computed</button>`:''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+    // record inside that window and two panels carry the same element ids at
+    // once — document.getElementById() returns the FIRST match in document
+    // order, which is the DYING panel. At bind time the handler lands on a
+    // button nobody can see (the visible one gets none); inside the handler
+    // the field reads pull the PREVIOUS record's values and write them onto
+    // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+    const $adj = (id) => _panel.querySelector('#' + id);
 
     const numVal = (key) => {
-      const v = document.getElementById(`adj-${key}`)?.value;
+      const v = $adj(`adj-${key}`)?.value;
       return (v === '' || v == null) ? undefined : parseFloat(v);
     };
     const updatePreview = () => {
@@ -2355,18 +2391,18 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         caPlan: line.caPlan, caBalance: line.caBalance
       });
       if (finalPayOvr != null) preview = window.applyPayLineOverride(preview, { finalPay: finalPayOvr, note:'preview' });
-      const warnEl = document.getElementById('adj-negative-warn');
+      const warnEl = $adj('adj-negative-warn');
       if (warnEl) {
         if (preview.finalPay < 0) { warnEl.style.display='block'; warnEl.textContent = `Warning: preview take-home is negative (₱${fmt(preview.finalPay)}).`; }
         else { warnEl.style.display='none'; }
       }
-      const prevEl = document.getElementById('adj-preview-final');
+      const prevEl = $adj('adj-preview-final');
       if (prevEl) prevEl.textContent = `₱${fmt(preview.finalPay)}`;
     };
-    FIELD_DEFS.forEach(([key]) => document.getElementById(`adj-${key}`)?.addEventListener('input', updatePreview));
+    FIELD_DEFS.forEach(([key]) => $adj(`adj-${key}`)?.addEventListener('input', updatePreview));
 
-    document.getElementById('adj-save-btn')?.addEventListener('click', () => window.busy(document.getElementById('adj-save-btn'), async () => {
-      const note = document.getElementById('adj-note').value.trim();
+    $adj('adj-save-btn')?.addEventListener('click', () => window.busy($adj('adj-save-btn'), async () => {
+      const note = $adj('adj-note').value.trim();
       if (!note) { Notifs.showToast('Reason is required.','error'); return; }
       // Stale-page guard — mirrors the Verify handler's re-check pattern below.
       const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
@@ -2389,7 +2425,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       loadPayRunStrip(month); loadPayrollTable(month); loadUnpaidStrip();
     }));
 
-    document.getElementById('adj-reset-btn')?.addEventListener('click', () => window.busy(document.getElementById('adj-reset-btn'), async () => {
+    $adj('adj-reset-btn')?.addEventListener('click', () => window.busy($adj('adj-reset-btn'), async () => {
       if (!(await confirmDialog({message:`Reset ${escHtml(line.name||'')}'s ${window.fmtMonthLabel(month)} pay to the computed values? This clears the override.`}))) return;
       await db.collection('pay_runs').doc(month).update({ ['overrides.'+uid]: firebase.firestore.FieldValue.delete() });
       await window.computePayRun(month);
@@ -2817,7 +2853,7 @@ window.openWorkerIDModal = async function(profile, onDone) {
   // LISTENER AFTER THE FILL — #wid-print only exists in the footer, which was
   // rendered at open time, but it is bound here so it can never fire before
   // `token` is resolved.
-  document.getElementById('wid-print')?.addEventListener('click', () => {
+  panel.querySelector('#wid-print')?.addEventListener('click', () => {
     window.printIDCards([window.buildIdVerifyDoc('worker', profile, null)], [token||'']);
   });
   if (onDone) onDone();
@@ -3077,7 +3113,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   // records that the decision was made deliberately rather than never made.
   const _hrpScOf = (k) => (profile?.statConfig && ['auto','fixed','exempt'].includes(profile.statConfig[k])) ? profile.statConfig[k] : 'default';
 
-  openPage(`${isEdit?'Edit':'Add'} Worker Profile`, `
+  const _panel = openPage(`${isEdit?'Edit':'Add'} Worker Profile`, `
     <div class="form-row">
       <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${escHtml(profile?.name||'')}"/></div>
       <div class="form-group"><label>ID Number</label>
@@ -3215,6 +3251,15 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       <div style="font-size:11px;color:var(--text-muted);margin-top:4px">v14 Type-B self-service: set this if the worker is paid weekly here AND has a regular-staff login — the monthly payroll run hard-skips this uid to prevent double pay. Pick from the suggestions (matched by name/email) so the uid is never mistyped — it's re-checked on Save either way.</div>
     </div>
   `, `<button class="btn-primary" id="hrp-save-btn">${isEdit?'Update':'Save'} Profile</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+  // record inside that window and two panels carry the same element ids at
+  // once — document.getElementById() returns the FIRST match in document
+  // order, which is the DYING panel. At bind time the handler lands on a
+  // button nobody can see (the visible one gets none); inside the handler
+  // the field reads pull the PREVIOUS record's values and write them onto
+  // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+  const $hrp = (id) => _panel.querySelector('#' + id);
 
   // Stable doc id (pre-allocate for new profiles so the photo path is known).
   const profileId = profile?.id || db.collection('worker_profiles').doc().id;
@@ -3226,7 +3271,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   // suggestion UI (mobile datalist support varies) — the field stays a plain
   // text input, re-validated (existence + uniqueness) on Save below either way. ──
   (async () => {
-    const listEl = document.getElementById('hrp-linked-uid-list');
+    const listEl = $hrp('hrp-linked-uid-list');
     if (!listEl) return;
     try {
       const usersSnap = await window.dbCachedGet('users', () => db.collection('users').get());
@@ -3238,24 +3283,24 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     } catch (_) { /* best-effort — free-text uid entry still works without it */ }
   })();
 
-  document.getElementById('hrp-gen-id')?.addEventListener('click', async () => {
-    const btn = document.getElementById('hrp-gen-id'); btn.disabled = true; btn.textContent = '…';
-    try { document.getElementById('hrp-id').value = await window.nextWorkerIdNumber(); }
+  $hrp('hrp-gen-id')?.addEventListener('click', async () => {
+    const btn = $hrp('hrp-gen-id'); btn.disabled = true; btn.textContent = '…';
+    try { $hrp('hrp-id').value = await window.nextWorkerIdNumber(); }
     catch(e){ Notifs.showToast('Could not generate ID number','error'); }
     btn.disabled = false; btn.textContent = 'Generate';
   });
 
-  document.getElementById('hrp-photo-file')?.addEventListener('change', async (e) => {
+  $hrp('hrp-photo-file')?.addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const st = document.getElementById('hrp-photo-status'); st.textContent = 'Uploading…';
+    const st = $hrp('hrp-photo-status'); st.textContent = 'Uploading…';
     try {
       uploadedPhotoUrl = await window.Drive.uploadWorkerPhoto(f, profileId);
-      document.getElementById('hrp-photo-prev').innerHTML = `<img src="${escHtml(uploadedPhotoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`;
+      $hrp('hrp-photo-prev').innerHTML = `<img src="${escHtml(uploadedPhotoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`;
       st.textContent = '✅ Photo uploaded';
     } catch(err){ st.textContent = '❌ ' + (err.message||'Upload failed'); }
   });
 
-  document.getElementById('hrp-save-btn').addEventListener('click', async () => {
+  $hrp('hrp-save-btn').addEventListener('click', async () => {
     // v14 re-audit fix — this doc carries dailyRate/hourlyRate, foodAllowance,
     // allowances.meal/transport and caBalance, so firestore.rules gates
     // worker_profiles create/update on isMoneyAdmin(). Re-check here rather
@@ -3266,9 +3311,9 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       Notifs.showToast('Worker pay changes are President / Manager / Finance only.','error');
       return;
     }
-    const name = document.getElementById('hrp-name').value.trim();
+    const name = $hrp('hrp-name').value.trim();
     if (!name) { Notifs.showToast('Name is required','error'); return; }
-    const linkedUid = document.getElementById('hrp-linked-uid').value.trim();
+    const linkedUid = $hrp('hrp-linked-uid').value.trim();
     // ── Validate the Linked Login Account uid BEFORE writing — a copy/paste
     // mistake here used to either silently break the bridge (no existence
     // check) or, worse, link to a DIFFERENT real employee's account (no
@@ -3277,7 +3322,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     // allowed by firestore.rules for finance/admin (users: any authed read;
     // worker_profiles: isFinanceOrAdmin() read), so no rules change needed. ──
     if (linkedUid) {
-      const saveBtn = document.getElementById('hrp-save-btn');
+      const saveBtn = $hrp('hrp-save-btn');
       if (saveBtn) saveBtn.disabled = true;
       let userDoc;
       try {
@@ -3304,34 +3349,34 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     // Statutory-config spec §5.1 — per-type mode chosen on this form.
     // 'default' means the key must be ABSENT on the doc so every reader takes
     // the no-config path (Type B: compute nothing, deduct nothing).
-    const _wpModeOf = (elId) => { const v = document.getElementById(elId)?.value; return (v==='auto'||v==='fixed'||v==='exempt') ? v : 'default'; };
+    const _wpModeOf = (elId) => { const v = $hrp(elId)?.value; return (v==='auto'||v==='fixed'||v==='exempt') ? v : 'default'; };
     const _wpModes  = { sss:_wpModeOf('hrp-stat-sss-mode'), philhealth:_wpModeOf('hrp-stat-ph-mode'), pagibig:_wpModeOf('hrp-stat-pib-mode'), tax:_wpModeOf('hrp-stat-tax-mode') };
 
     const data = {
       name,
-      idNumber: document.getElementById('hrp-id').value.trim(),
+      idNumber: $hrp('hrp-id').value.trim(),
       photoUrl: uploadedPhotoUrl || '',
-      jobTitle: document.getElementById('hrp-title').value.trim(),
-      department: document.getElementById('hrp-dept').value,
-      employmentType: document.getElementById('hrp-emptype').value,
-      workType: document.getElementById('hrp-worktype').value,
+      jobTitle: $hrp('hrp-title').value.trim(),
+      department: $hrp('hrp-dept').value,
+      employmentType: $hrp('hrp-emptype').value,
+      workType: $hrp('hrp-worktype').value,
       // v12 WS23 — dailyRate/hourlyRate are read-only in edit mode (change via
       // 💸 Raise instead); the inputs don't exist in the DOM then, so omit them
       // from the write entirely rather than reading a null element.
       ...(isEdit ? {} : {
-        dailyRate: parseFloat(document.getElementById('hrp-daily').value)||0,
-        hourlyRate: parseFloat(document.getElementById('hrp-hourly').value)||0,
+        dailyRate: parseFloat($hrp('hrp-daily').value)||0,
+        hourlyRate: parseFloat($hrp('hrp-hourly').value)||0,
       }),
-      foodAllowance: parseFloat(document.getElementById('hrp-food').value)||0,
-      issuedOn: document.getElementById('hrp-issued').value,
+      foodAllowance: parseFloat($hrp('hrp-food').value)||0,
+      issuedOn: $hrp('hrp-issued').value,
       allowances: {
-        meal: parseFloat(document.getElementById('hrp-meal').value)||0,
-        transport: parseFloat(document.getElementById('hrp-transport').value)||0,
+        meal: parseFloat($hrp('hrp-meal').value)||0,
+        transport: parseFloat($hrp('hrp-transport').value)||0,
       },
-      ssNum: document.getElementById('hrp-sss').value.trim(),
-      phNum: document.getElementById('hrp-ph').value.trim(),
-      pagibigNum: document.getElementById('hrp-pib').value.trim(),
-      tinNum: document.getElementById('hrp-tin').value.trim(),
+      ssNum: $hrp('hrp-sss').value.trim(),
+      phNum: $hrp('hrp-ph').value.trim(),
+      pagibigNum: $hrp('hrp-pib').value.trim(),
+      tinNum: $hrp('hrp-tin').value.trim(),
       // Statutory-config spec §5.1 — modes (FieldValue.delete() = key absent =
       // today's default: nothing computed, nothing deducted) plus the flat
       // fixed AMOUNTS. The four numbers are inert on an unconfigured profile:
@@ -3344,15 +3389,15 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
         });
         return m;
       })(),
-      sss:        parseFloat(document.getElementById('hrp-stat-sss-amt')?.value)||0,
-      philhealth: parseFloat(document.getElementById('hrp-stat-ph-amt')?.value)||0,
-      pagibig:    parseFloat(document.getElementById('hrp-stat-pib-amt')?.value)||0,
-      tax:        parseFloat(document.getElementById('hrp-stat-tax-amt')?.value)||0,
-      address: document.getElementById('hrp-addr').value.trim(),
-      phone: document.getElementById('hrp-phone').value.trim(),
-      status: document.getElementById('hrp-status').value,
-      caBalance: parseFloat(document.getElementById('hrp-ca-balance').value)||0,
-      includeInPayroll: document.getElementById('hrp-include-payroll').checked,
+      sss:        parseFloat($hrp('hrp-stat-sss-amt')?.value)||0,
+      philhealth: parseFloat($hrp('hrp-stat-ph-amt')?.value)||0,
+      pagibig:    parseFloat($hrp('hrp-stat-pib-amt')?.value)||0,
+      tax:        parseFloat($hrp('hrp-stat-tax-amt')?.value)||0,
+      address: $hrp('hrp-addr').value.trim(),
+      phone: $hrp('hrp-phone').value.trim(),
+      status: $hrp('hrp-status').value,
+      caBalance: parseFloat($hrp('hrp-ca-balance').value)||0,
+      includeInPayroll: $hrp('hrp-include-payroll').checked,
       linkedUid,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -3508,7 +3553,7 @@ async function openWorkSitesPage(currentUser, currentRole) {
   // nobody notices — until a Type-B worker at a new gate cannot self-clock,
   // because a worker can only punch inside an ACTIVE site.
   const canEdit = (typeof window.isOpsPriv === 'function') ? window.isOpsPriv() : isFinancePriv();
-  openPage(`${emojiIcon('📍',16)} Work Sites`, `
+  const _panel = openPage(`${emojiIcon('📍',16)} Work Sites`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
       Type-B (Production) workers can only self-service Time In/Out within the radius of an <strong>active</strong> site below.
       Add every gate/floor a worker might clock in from.
@@ -3516,11 +3561,20 @@ async function openWorkSitesPage(currentUser, currentRole) {
     <div id="ws-list">${window.skeletonHtml('rows')}</div>
     ${canEdit ? `<button class="btn-primary" id="ws-add-btn" style="width:100%;margin-top:12px">${emojiIcon('➕',16)} Add Work Site</button>` : ''}
   `, '', {});
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+  // record inside that window and two panels carry the same element ids at
+  // once — document.getElementById() returns the FIRST match in document
+  // order, which is the DYING panel. At bind time the handler lands on a
+  // button nobody can see (the visible one gets none); inside the handler
+  // the field reads pull the PREVIOUS record's values and write them onto
+  // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+  const $ws = (id) => _panel.querySelector('#' + id);
 
   async function load() {
     const snap = await db.collection('geo_sites').orderBy('name').get().catch(()=>({docs:[]}));
     const sites = snap.docs.map(d=>({id:d.id,...d.data()}));
-    const listEl = document.getElementById('ws-list');
+    const listEl = $ws('ws-list');
     if (!listEl) return;
     listEl.innerHTML = !sites.length
       ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📍',44)}</div><p>No work sites yet. Add one to enable Type-B self-service Time In.</p></div>`
@@ -3559,7 +3613,7 @@ async function openWorkSitesPage(currentUser, currentRole) {
     });
   }
 
-  document.getElementById('ws-add-btn')?.addEventListener('click', () => openWorkSiteForm(null, currentUser, load));
+  $ws('ws-add-btn')?.addEventListener('click', () => openWorkSiteForm(null, currentUser, load));
   load();
 }
 
@@ -3721,11 +3775,14 @@ async function openPayslipHistory(currentUser, currentRole) {
       panel = openPage(`${emojiIcon('📄',16)} Payslip Summary`, bodyHTML, '', {replace:true});
     }
     if (window.lucide) lucide.createIcons({ nodes: [panel] });
-    bindRows();
+    bindRows(panel);
   };
 
-  const bindRows = () => {
-    document.querySelectorAll('.ps-view-btn').forEach(btn => {
+  // `root` is the live panel — see the scoping note on openSalaryRaiseModal.
+  // These .ps-* buttons live inside the panel; a document-wide lookup would
+  // bind the DYING panel's copies during openPage's ~300ms teardown window.
+  const bindRows = (root) => {
+    root.querySelectorAll('.ps-view-btn').forEach(btn => {
       const ps = list.find(p=>p.id===btn.dataset.id);
       btn.addEventListener('click', async () => {
         if (!ps) return;
@@ -3734,7 +3791,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B'));
       });
     });
-    document.querySelectorAll('.ps-advance-btn').forEach(btn => onClickSafe(btn, async () => {
+    root.querySelectorAll('.ps-advance-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
         const next = btn.dataset.next;
         if (!ps || !next) return;
@@ -3782,7 +3839,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         ps.status = next;
         renderModal();
     }));
-    document.querySelectorAll('.ps-edit-btn').forEach(btn => onClickSafe(btn, () => {
+    root.querySelectorAll('.ps-edit-btn').forEach(btn => onClickSafe(btn, () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
         // openPayslipEdit pushes ON TOP of this summary page (a real drill-in,
         // not a self-refresh), so its onSave can't just call renderModal()
@@ -3791,7 +3848,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         // open collapses both back to one entry, mirroring the task-edit pattern.
         if (ps) openPayslipEdit(ps, currentUser, () => { window.Overlay.clearAll(); openPayslipHistory(currentUser, currentRole); });
     }));
-    document.querySelectorAll('.ps-del-btn').forEach(btn => onClickSafe(btn, async () => {
+    root.querySelectorAll('.ps-del-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
         if (!ps) return;
         // President deletes immediately; finance staff file a request. The CA
@@ -3806,7 +3863,7 @@ async function openPayslipHistory(currentUser, currentRole) {
           renderModal();
         }
     }));
-    document.querySelectorAll('.ps-override-btn').forEach(btn => onClickSafe(btn, async () => {
+    root.querySelectorAll('.ps-override-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
         if (!ps) return;
         const choice = await promptDialog({title:'Manual override', message:`Set status for ${escHtml(ps.workerName)}'s payslip.\nOptions: ${PAYSLIP_STAGES.join(', ')}`, value:ps.status||'draft', html:true});
@@ -3875,7 +3932,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
       amount no longer matches any table bracket, so the employer share reverts to
       &ldquo;computed manually&rdquo; rather than printing a pair that cannot exist.
     </div>` : '';
-  openPage(`${emojiIcon('✎',16)} Edit Payslip — ${escHtml(ps.workerName||'')}`, `
+  const _panel = openPage(`${emojiIcon('✎',16)} Edit Payslip — ${escHtml(ps.workerName||'')}`, `
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''}</div>
     <div class="form-row">
       <div class="form-group"><label>Rate / HR (₱)</label><input id="pe-rph" type="number" step="0.01" value="${r.ratePerHr||0}" inputmode="decimal"/></div>
@@ -3901,17 +3958,26 @@ function openPayslipEdit(ps, currentUser, onSave) {
     <div class="form-group"><label>Amount Already Paid (₱)</label><input id="pe-paid" type="number" value="${ps.paid||0}" inputmode="decimal"/></div>
     <div id="pe-net" style="text-align:right;font-weight:800;font-size:14px;margin-top:6px">Net: ₱${fmt(ps.netPay||0)}</div>
   `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second
+  // record inside that window and two panels carry the same element ids at
+  // once — document.getElementById() returns the FIRST match in document
+  // order, which is the DYING panel. At bind time the handler lands on a
+  // button nobody can see (the visible one gets none); inside the handler
+  // the field reads pull the PREVIOUS record's values and write them onto
+  // THIS record. Corporate Secretary report, reproduced 2026-08-10.
+  const $pe = (id) => _panel.querySelector('#' + id);
 
-  const num = id => parseFloat(document.getElementById(id).value)||0;
+  const num = id => parseFloat($pe(id).value)||0;
   const recompute = () => {
     const gross = num('pe-rph')*num('pe-hrs') + num('pe-ot') + num('pe-allow');
     const ded = num('pe-sss')+num('pe-ph')+num('pe-pib')+num('pe-ca')+num('pe-loans')+num('pe-tax');
-    document.getElementById('pe-net').textContent = 'Net: ₱'+fmt(gross - ded - num('pe-paid'));
+    $pe('pe-net').textContent = 'Net: ₱'+fmt(gross - ded - num('pe-paid'));
   };
   ['pe-rph','pe-hrs','pe-ot','pe-allow','pe-sss','pe-ph','pe-pib','pe-ca','pe-loans','pe-tax','pe-paid']
-    .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+    .forEach(id => $pe(id).addEventListener('input', recompute));
 
-  document.getElementById('pe-save-btn').addEventListener('click', () => window.busy(document.getElementById('pe-save-btn'), async () => {
+  $pe('pe-save-btn').addEventListener('click', () => window.busy($pe('pe-save-btn'), async () => {
     const rph=num('pe-rph'), hrs=num('pe-hrs'), otT=num('pe-ot'), alT=num('pe-allow');
     const sss=num('pe-sss'), ph=num('pe-ph'), pib=num('pe-pib'), ca=num('pe-ca'), loans=num('pe-loans'), tax=num('pe-tax'), paid=num('pe-paid');
     const reg = parseFloat((rph*hrs).toFixed(2));
@@ -5424,14 +5490,14 @@ window.openPayslipEditPanel = async function(model, backFn) {
   panel.querySelector('#pe-save-btn')?.addEventListener('click', () => window.busy(panel.querySelector('#pe-save-btn'), async () => {
     // ID formats are free-text (existing convention, no validation beyond
     // trim — matches the Edit Payroll modal's own gov-ID inputs, hr.js).
-    const name  = document.getElementById('pe-name')?.value.trim()  || '';
-    const title = document.getElementById('pe-title')?.value.trim() || '';
-    const dept  = document.getElementById('pe-dept')?.value.trim()  || '';
-    const empId = document.getElementById('pe-empid')?.value.trim()|| '';
-    const tin   = document.getElementById('pe-tin')?.value.trim()   || '';
-    const sss   = document.getElementById('pe-sss')?.value.trim()   || '';
-    const ph    = document.getElementById('pe-ph')?.value.trim()    || '';
-    const pib   = document.getElementById('pe-pib')?.value.trim()   || '';
+    const name  = panel.querySelector('#pe-name')?.value.trim()  || '';
+    const title = panel.querySelector('#pe-title')?.value.trim() || '';
+    const dept  = panel.querySelector('#pe-dept')?.value.trim()  || '';
+    const empId = panel.querySelector('#pe-empid')?.value.trim()|| '';
+    const tin   = panel.querySelector('#pe-tin')?.value.trim()   || '';
+    const sss   = panel.querySelector('#pe-sss')?.value.trim()   || '';
+    const ph    = panel.querySelector('#pe-ph')?.value.trim()    || '';
+    const pib   = panel.querySelector('#pe-pib')?.value.trim()   || '';
     if (!name) { Notifs.showToast('Name is required.', 'error'); return; }
 
     // Per-target try/catch — firestore.rules gates users/{uid} (Name/

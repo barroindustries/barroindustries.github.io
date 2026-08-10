@@ -232,7 +232,7 @@ const QC_CHECKLIST = [
 function openQCModal(order, onSaved){
   const prev = order.qc || null;
   const stateOf = id => prev?.items?.find(i=>i.id===id)?.state || '';
-  openPage(`${emojiIcon('🔍',16)} Quality Checking — `+escHtml(order.orderNo||order.title||''), `
+  const _panel = openPage(`${emojiIcon('🔍',16)} Quality Checking — `+escHtml(order.orderNo||order.title||''), `
     ${prev?`<div style="font-size:11px;margin-bottom:8px;color:${prev.result==='passed'?'var(--success)':'var(--danger)'}">Last inspection: <b>${prev.result}</b> · ${escHtml(prev.byName||'')} · ${prev.at?new Date(prev.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</div>`:''}
     <div style="display:flex;flex-direction:column">
       ${QC_CHECKLIST.map(it=>`
@@ -246,14 +246,20 @@ function openQCModal(order, onSaved){
     <div class="form-group" style="margin-top:10px"><label>Inspection notes</label><textarea id="qc-notes" rows="2" placeholder="Rework needed, remarks…">${escHtml(prev?.notes||'')}</textarea></div>
     <div id="qc-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="qc-save">Save Inspection</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('qc-save').addEventListener('click', async ()=>{
-    const err = document.getElementById('qc-err');
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Inspect two orders in
+  // a row and both panels carry `#qc-save`/`#qc-notes` and the same
+  // `qc-<item>` radio names — document.* resolves the DYING panel first, so the
+  // visible Save does nothing and, once it does fire, it reads the PREVIOUS
+  // order's checklist and writes that inspection onto this order.
+  _panel.querySelector('#qc-save').addEventListener('click', async ()=>{
+    const err = _panel.querySelector('#qc-err');
     const items = QC_CHECKLIST.map(it=>({ id:it.id, label:it.label,
-      state: document.querySelector(`input[name="qc-${it.id}"]:checked`)?.value || '' }));
+      state: _panel.querySelector(`input[name="qc-${it.id}"]:checked`)?.value || '' }));
     if (items.some(i=>!i.state)) { err.textContent='Mark every item (pass / fail / N/A).'; err.classList.remove('hidden'); return; }
     if (items.every(i=>i.state==='na')) { err.textContent='At least one item must actually be inspected (not all N/A).'; err.classList.remove('hidden'); return; }
     const result = items.some(i=>i.state==='fail') ? 'failed' : 'passed';
-    const qc = { result, items, notes: document.getElementById('qc-notes').value.trim(),
+    const qc = { result, items, notes: _panel.querySelector('#qc-notes').value.trim(),
       by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'', at: new Date().toISOString() };
     try {
       await db.collection('production_orders').doc(order.id).update({ qc, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
@@ -265,10 +271,10 @@ function openQCModal(order, onSaved){
   });
 }
 
-function openDeliveryReceiptModal(order, onSaved){
+function openDeliveryReceiptModal(order, onSaved, opts){
   const dr = order.deliveryReceipt || null;
   if (dr) {   // view / reprint mode
-    openPage(`${emojiIcon('🧾',16)} Delivery Receipt — `+escHtml(dr.no||''), `
+    const _viewPanel = openPage(`${emojiIcon('🧾',16)} Delivery Receipt — `+escHtml(dr.no||''), `
       <div style="font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
         <span style="color:var(--text-muted)">Receipt #</span><b>${escHtml(dr.no||'')}</b>
         <span style="color:var(--text-muted)">Received by</span><span>${escHtml(dr.receivedBy||'')}</span>
@@ -277,11 +283,12 @@ function openDeliveryReceiptModal(order, onSaved){
         <span style="color:var(--text-muted)">Recorded by</span><span>${escHtml(dr.byName||'')}</span>
       </div>`,
       `<button class="btn-primary" id="dr-print">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
-    document.getElementById('dr-print')?.addEventListener('click', ()=>printDeliveryReceipt(order));
+    // ⚠ SCOPED TO THIS PANEL, NOT document — see openQCModal's note above.
+    _viewPanel.querySelector('#dr-print')?.addEventListener('click', ()=>printDeliveryReceipt(order));
     return;
   }
   const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
-  openPage(`${emojiIcon('🧾',16)} Record Delivery Receipt — `+escHtml(order.orderNo||order.title||''), `
+  const _panel = openPage(`${emojiIcon('🧾',16)} Record Delivery Receipt — `+escHtml(order.orderNo||order.title||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Required before this order can be marked <b>Delivered</b>. Fill it in with the client's receiving rep at handover.</div>
     <div class="form-row">
       <div class="form-group"><label>Received by (client rep)</label><input id="dr-name" placeholder="e.g. Maria Santos — Purchasing"/></div>
@@ -289,17 +296,20 @@ function openDeliveryReceiptModal(order, onSaved){
     </div>
     <div class="form-group"><label>Notes (optional)</label><textarea id="dr-notes" rows="2" placeholder="Condition on arrival, partial delivery, etc."></textarea></div>
     <div id="dr-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="dr-save">Save Receipt</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('dr-save').addEventListener('click', async ()=>{
-    const err = document.getElementById('dr-err');
-    const receivedBy = document.getElementById('dr-name').value.trim();
+  `, `<button class="btn-primary" id="dr-save">Save Receipt</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, opts || {});
+  // ⚠ SCOPED TO THIS PANEL, NOT document — see openQCModal's note above. A
+  // receipt recorded during the teardown window would otherwise take the
+  // PREVIOUS order's "received by"/date/notes and burn a DR serial on them.
+  _panel.querySelector('#dr-save').addEventListener('click', async ()=>{
+    const err = _panel.querySelector('#dr-err');
+    const receivedBy = _panel.querySelector('#dr-name').value.trim();
     if(!receivedBy){ err.textContent='"Received by" is required — the client rep who accepted the delivery.'; err.classList.remove('hidden'); return; }
-    const btn=document.getElementById('dr-save'); btn.disabled=true;
+    const btn=_panel.querySelector('#dr-save'); btn.disabled=true;
     try {
       const no = await window.nextSerial('delivery_receipt','DR');   // DR-2026-000001 (atomic; a failed save burns a serial — fine)
       const byName = userProfile?.displayName||currentUser.email||'';
-      const deliveryReceipt = { no, receivedBy, date: document.getElementById('dr-date').value || dayStr,
-        notes: document.getElementById('dr-notes').value.trim(), by: currentUser.uid, byName, at: new Date().toISOString() };
+      const deliveryReceipt = { no, receivedBy, date: _panel.querySelector('#dr-date').value || dayStr,
+        notes: _panel.querySelector('#dr-notes').value.trim(), by: currentUser.uid, byName, at: new Date().toISOString() };
       await db.collection('production_orders').doc(order.id).update({ deliveryReceipt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('production_orders'); dbCacheInvalidate('job_projects'); }
       if (order.projectId) { try { await db.collection('job_projects').doc(order.projectId).update({
@@ -567,7 +577,7 @@ window.renderProjectLifecycle = async function(){
 // NOTE: named openJobProjectDetail (not openProjectDetail) deliberately. The Design
 // board defines window.openProjectDetail; in this shared global script a bare
 // `openProjectDetail` would resolve to that Design modal and shadow this one.
-function openJobProjectDetail(p){
+function openJobProjectDetail(p, opts){
   if(!p) return;
   const st=jobStage(p.stage);
   const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
@@ -658,7 +668,7 @@ function openJobProjectDetail(p){
     ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
     ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
-    <button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    <button class="btn-secondary" onclick="closeModal()">Close</button>`, opts || {});
   // SCOPED TO THIS PANEL — these six were document.getElementById. The Billing
   // Invoice sub-flow returns with `Overlay.clearAll(); openJobProjectDetail(p)`
   // in ONE tick (production.js, the jinv cancel path) and openPage defers node
@@ -706,7 +716,7 @@ function openJobProjectDetail(p){
 function openProjectMarginModal(p){
   const isShared = !!(p.split&&p.split.isShared);
   const pct = (p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50;
-  openPage(`${emojiIcon('💰',16)} Edit Profit Factors — `+(escHtml(p.clientName||p.projectNo||'Project')), `
+  const _panel = openPage(`${emojiIcon('💰',16)} Edit Profit Factors — `+(escHtml(p.clientName||p.projectNo||'Project')), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Expected earnings = (Contract − Capital) × split%.</div>
     <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}" inputmode="decimal"/>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Total material + labor + overhead to produce this job.</div></div>
@@ -719,30 +729,36 @@ function openProjectMarginModal(p){
     </div></div>
     <div id="pm-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="pm-save">Save Factors</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // ⚠ SCOPED TO THIS PANEL, NOT document — same defect as openJobProjectDetail's
+  // footer above. Two projects' factor forms alive at once share #pm-capital /
+  // #pm-pct, so an unscoped read would take the PREVIOUS project's capital and
+  // split % and write them onto THIS project's job_projects doc — margin,
+  // partner share and Barro share all silently wrong.
+  const $pm = (id) => _panel.querySelector('#' + id);
   const recompute=()=>{
-    const cap=parseFloat(document.getElementById('pm-capital').value)||0;
+    const cap=parseFloat($pm('pm-capital').value)||0;
     const margin=(p.contractAmount||0)-cap;
-    document.getElementById('pm-margin').textContent='₱'+fmt(margin);
+    $pm('pm-margin').textContent='₱'+fmt(margin);
     if(isShared){
-      const pp=Math.max(0,Math.min(100,parseFloat(document.getElementById('pm-pct').value)||0));
-      document.getElementById('pm-share').textContent='₱'+fmt(margin*(pp/100));
-      document.getElementById('pm-barro').textContent='₱'+fmt(margin*((100-pp)/100));
+      const pp=Math.max(0,Math.min(100,parseFloat($pm('pm-pct').value)||0));
+      $pm('pm-share').textContent='₱'+fmt(margin*(pp/100));
+      $pm('pm-barro').textContent='₱'+fmt(margin*((100-pp)/100));
     }
   };
-  document.getElementById('pm-capital').addEventListener('input',recompute);
-  document.getElementById('pm-pct')?.addEventListener('input',recompute);
-  document.getElementById('pm-save').addEventListener('click', async ()=>{
-    const err=document.getElementById('pm-err');
-    const cap=parseFloat(document.getElementById('pm-capital').value)||0;
+  $pm('pm-capital').addEventListener('input',recompute);
+  $pm('pm-pct')?.addEventListener('input',recompute);
+  $pm('pm-save').addEventListener('click', async ()=>{
+    const err=$pm('pm-err');
+    const cap=parseFloat($pm('pm-capital').value)||0;
     if(cap<0){ err.textContent='Capital cannot be negative.'; err.classList.remove('hidden'); return; }
     const who=userProfile?.displayName||currentUser.email;
     const update={ capital:cap, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
       timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Profit factors updated (capital ₱${window.fmtN2(cap)})`, by:who }) };
     if(isShared){
-      let pp=Math.max(0,Math.min(100,parseFloat(document.getElementById('pm-pct').value)||0));
+      let pp=Math.max(0,Math.min(100,parseFloat($pm('pm-pct').value)||0));
       update['split.partnerPct']=pp; update['split.barroPct']=100-pp;
     }
-    const saveBtn=document.getElementById('pm-save'); saveBtn.disabled=true; // guard against double-click double-posting
+    const saveBtn=$pm('pm-save'); saveBtn.disabled=true; // guard against double-click double-posting
     try{
       await db.collection('job_projects').doc(p.id).update(update);
       window.logAudit && window.logAudit('update','project',p.id,{ capital:cap, partnerPct:update['split.partnerPct'] });
@@ -842,30 +858,45 @@ async function openProjectBillingModal(p){
   // openPage's own sweep ran long before this fill, so without this pass every
   // one of those icons stays an empty <i>.
   if (window.lucide) lucide.createIcons({ nodes: [pbBody] });
-  window.wireBirOrButtons && window.wireBirOrButtons();
+  // Scope the sweep to THIS panel — wireBirOrButtons already takes an optional
+  // root (js/bir.js), and the only .bir-or-btn here is #pb-ref, just injected
+  // above. (KNOWN RESIDUAL, js/bir.js not owned by this pass: the handler it
+  // binds writes the minted serial with document.getElementById(dataset.field),
+  // so during openPage's ~300ms teardown the OR number can still land in a
+  // dying panel's #pb-ref. Fixing that needs the field lookup scoped inside
+  // bir.js.)
+  window.wireBirOrButtons && window.wireBirOrButtons(panel);
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('pb-receipt-upload',(r)=>{receipt=r;},{label:'Upload OR / proof',accept:'image/*,.pdf',dept:'Finance',subfolder:'Collections'});
+  // ⚠ SCOPED TO THIS PANEL, NOT document — same rule as the pb-save release at
+  // the bottom of this renderer, now applied to every field too. Record Payment
+  // can be reopened straight from the job-project detail (which itself reopens
+  // via Overlay.clearAll() + openJobProjectDetail in one tick), so a second
+  // panel routinely exists while the first is still in its 300ms teardown. An
+  // unscoped read would post the PREVIOUS project's amount/VAT/OR ref into the
+  // ledger and against THIS project's AR.
+  const $pb = (id) => panel.querySelector('#' + id);
   const pbRecompute=()=>{
-    const { recorded, net, vat }=window.vatSplit(parseFloat(document.getElementById('pb-amount').value)||0, document.getElementById('pb-vat').value);
-    document.getElementById('pb-rec').textContent='₱'+fmt(recorded);
-    document.getElementById('pb-net').textContent='₱'+fmt(net);
-    document.getElementById('pb-vatamt').textContent='₱'+fmt(vat);
+    const { recorded, net, vat }=window.vatSplit(parseFloat($pb('pb-amount').value)||0, $pb('pb-vat').value);
+    $pb('pb-rec').textContent='₱'+fmt(recorded);
+    $pb('pb-net').textContent='₱'+fmt(net);
+    $pb('pb-vatamt').textContent='₱'+fmt(vat);
   };
-  document.getElementById('pb-amount').addEventListener('input',pbRecompute);
-  document.getElementById('pb-vat').addEventListener('change',pbRecompute);
+  $pb('pb-amount').addEventListener('input',pbRecompute);
+  $pb('pb-vat').addEventListener('change',pbRecompute);
   pbRecompute();
-  document.getElementById('pb-save').addEventListener('click', async ()=>{
-    const err=document.getElementById('pb-err');
-    const saveBtn=document.getElementById('pb-save');
-    const entered=parseFloat(document.getElementById('pb-amount').value)||0;
+  $pb('pb-save').addEventListener('click', async ()=>{
+    const err=$pb('pb-err');
+    const saveBtn=$pb('pb-save');
+    const entered=parseFloat($pb('pb-amount').value)||0;
     if(entered<=0){ err.textContent='Enter an amount.'; err.classList.remove('hidden'); return; }
-    const vatTreatment=document.getElementById('pb-vat').value;
+    const vatTreatment=$pb('pb-vat').value;
     const { recorded:amount, net, vat:vatAmount }=window.vatSplit(entered,vatTreatment);
     const newCollected=(p.amountCollected||0)+amount;
     const newAR=Math.max(0,(p.contractAmount||0)-newCollected);
     const who=userProfile?.displayName||currentUser.email;
-    const type=document.getElementById('pb-type').value, method=document.getElementById('pb-method').value, orRef=document.getElementById('pb-ref').value.trim();
-    const acctSel=document.getElementById('pb-bankacct').value;
+    const type=$pb('pb-type').value, method=$pb('pb-method').value, orRef=$pb('pb-ref').value.trim();
+    const acctSel=$pb('pb-bankacct').value;
     if (!acctSel && (await window.BankAccounts.list()).length) {
       err.textContent = 'Select the company account that received this payment.'; err.classList.remove('hidden'); return;
     }
@@ -945,7 +976,10 @@ async function openJobBillingInvoiceModal(p){
   // clearAll() first — Billing Invoice is pushed ON TOP of this hub's page
   // (never nested deeper), so a bare reopen would leave a stale hidden copy
   // behind; same rule as Design's openProjectDetail reopen sites above.
-  document.getElementById('jinv-back').addEventListener('click', ()=>{ window.Overlay.clearAll(); openJobProjectDetail(p); });
+  // ⚠ SCOPED TO THIS PANEL, NOT document — this footer button is the one bound
+  // during the skeleton frame, which is precisely when a previous panel may
+  // still be in openPage's 300ms teardown and would win a document-wide lookup.
+  panel.querySelector('#jinv-back').addEventListener('click', ()=>{ window.Overlay.clearAll(); openJobProjectDetail(p); });
   // Renderer body deliberately not re-indented — see openProjectBillingModal.
   await window.withLoadingAndError(jinvBody, () => window.BankAccounts.optionsHTML(), (bankOpts) => {
   if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
@@ -989,41 +1023,47 @@ async function openJobBillingInvoiceModal(p){
   if (window.lucide) lucide.createIcons({ nodes: [jinvBody] });
 
   // ── Kind toggle + live balance-schedule preview (v12 WS36) ──
-  const kindSel=document.getElementById('jinv-kind'), dpWrap=document.getElementById('jinv-dp-wrap');
-  const balModeSel=document.getElementById('jinv-balmode'), intWrap=document.getElementById('jinv-int-wrap');
+  // ⚠ SCOPED TO THIS PANEL, NOT document — same defect as Record Payment above.
+  // Cancel here reopens the job-project detail via Overlay.clearAll(), so a
+  // second Billing Invoice panel can easily exist while the first is still in
+  // openPage's 300ms teardown; a document-wide read would mint an invoice
+  // serial against the PREVIOUS project's amount, dates and bank account.
+  const $jinv = (id) => panel.querySelector('#' + id);
+  const kindSel=$jinv('jinv-kind'), dpWrap=$jinv('jinv-dp-wrap');
+  const balModeSel=$jinv('jinv-balmode'), intWrap=$jinv('jinv-int-wrap');
   const renderSchedPreview=()=>{
-    if(kindSel.value!=='downpayment'){ document.getElementById('jinv-sched-preview').innerHTML=''; return; }
-    const pct=parseFloat(document.getElementById('jinv-dppct').value)||0;
-    const dpAmt=parseFloat(document.getElementById('jinv-amt').value)||0;
-    const schedule=window.buildBalanceSchedule(contract, dpAmt, balModeSel.value, parseFloat(document.getElementById('jinv-interest').value)||0,
-      document.getElementById('jinv-date').value||today(), document.getElementById('jinv-complete').value||null);
-    document.getElementById('jinv-sched-preview').innerHTML=schedule.map(s=>`${s.seq}. ${s.label} — ${s.dueDate||'TBD'} — ₱${fmt(s.amount)}`).join('<br>');
+    if(kindSel.value!=='downpayment'){ $jinv('jinv-sched-preview').innerHTML=''; return; }
+    const pct=parseFloat($jinv('jinv-dppct').value)||0;
+    const dpAmt=parseFloat($jinv('jinv-amt').value)||0;
+    const schedule=window.buildBalanceSchedule(contract, dpAmt, balModeSel.value, parseFloat($jinv('jinv-interest').value)||0,
+      $jinv('jinv-date').value||today(), $jinv('jinv-complete').value||null);
+    $jinv('jinv-sched-preview').innerHTML=schedule.map(s=>`${s.seq}. ${s.label} — ${s.dueDate||'TBD'} — ₱${fmt(s.amount)}`).join('<br>');
   };
   kindSel.addEventListener('change', ()=>{
     dpWrap.style.display = kindSel.value==='downpayment' ? '' : 'none';
     if(kindSel.value==='downpayment'){
-      const pct=parseFloat(document.getElementById('jinv-dppct').value)||0;
-      document.getElementById('jinv-amt').value=(+(contract*(pct/100))).toFixed(2);
-      document.getElementById('jinv-desc').value=`Downpayment (${pct}% of contract)`;
+      const pct=parseFloat($jinv('jinv-dppct').value)||0;
+      $jinv('jinv-amt').value=(+(contract*(pct/100))).toFixed(2);
+      $jinv('jinv-desc').value=`Downpayment (${pct}% of contract)`;
     }
     renderSchedPreview();
   });
   balModeSel.addEventListener('change', ()=>{ intWrap.style.display=/^install/.test(balModeSel.value)?'':'none'; renderSchedPreview(); });
-  ['jinv-dppct','jinv-interest','jinv-complete','jinv-date','jinv-amt'].forEach(id=>document.getElementById(id).addEventListener('input', renderSchedPreview));
+  ['jinv-dppct','jinv-interest','jinv-complete','jinv-date','jinv-amt'].forEach(id=>$jinv(id).addEventListener('input', renderSchedPreview));
 
-  document.getElementById('jinv-gen').addEventListener('click', async ()=>{
-    const err=document.getElementById('jinv-err');
-    const amt=parseFloat(document.getElementById('jinv-amt').value)||0;
+  $jinv('jinv-gen').addEventListener('click', async ()=>{
+    const err=$jinv('jinv-err');
+    const amt=parseFloat($jinv('jinv-amt').value)||0;
     if(amt<=0){ err.textContent='Enter a valid amount.'; err.classList.remove('hidden'); return; }
     const kind = kindSel.value==='downpayment' ? 'downpayment' : 'standard';
     const who=userProfile?.displayName||currentUser.email||'';
     const inv={
-      date:           document.getElementById('jinv-date').value||today(),
-      due:            document.getElementById('jinv-due').value||'',
-      billTo:         document.getElementById('jinv-billto').value.trim(),
-      desc:           document.getElementById('jinv-desc').value.trim(),
+      date:           $jinv('jinv-date').value||today(),
+      due:            $jinv('jinv-due').value||'',
+      billTo:         $jinv('jinv-billto').value.trim(),
+      desc:           $jinv('jinv-desc').value.trim(),
       amount:         amt,
-      notes:          document.getElementById('jinv-notes').value.trim(),
+      notes:          $jinv('jinv-notes').value.trim(),
       contractAmount: contract,
       paidToDate:     paid,
       balanceBefore:  bal,
@@ -1034,9 +1074,9 @@ async function openJobBillingInvoiceModal(p){
     };
     let pct=null, schedule=null;
     if(kind==='downpayment'){
-      pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('jinv-dppct').value)||0));
-      const completeDate = document.getElementById('jinv-complete').value||null;
-      schedule = window.buildBalanceSchedule(contract, amt, balModeSel.value, parseFloat(document.getElementById('jinv-interest').value)||0, inv.date, completeDate);
+      pct = Math.max(0, Math.min(100, parseFloat($jinv('jinv-dppct').value)||0));
+      const completeDate = $jinv('jinv-complete').value||null;
+      schedule = window.buildBalanceSchedule(contract, amt, balModeSel.value, parseFloat($jinv('jinv-interest').value)||0, inv.date, completeDate);
       inv.kind = 'downpayment'; inv.dpPercent = pct; inv.schedule = schedule;
     } else {
       inv.kind = 'standard';
@@ -1044,7 +1084,7 @@ async function openJobBillingInvoiceModal(p){
     // v12 WS36 decision 9 — the registry SUPERSEDES the quote's free-text bankDetails;
     // snapshot the chosen account onto the invoice so a later account edit never
     // rewrites an issued invoice.
-    const acct = await window.BankAccounts.pick(document.getElementById('jinv-bankacct').value);
+    const acct = await window.BankAccounts.pick($jinv('jinv-bankacct').value);
     if (acct.bankAccountId) {
       const full = (await window.BankAccounts.list({activeOnly:false})).find(a=>a.id===acct.bankAccountId);
       if (full) inv.bank = { nickname:full.nickname||'', type:full.type||'bank', bankName:full.bankName||'', branch:full.branch||'', accountName:full.accountName||'', accountNo:full.accountNo||'' };
@@ -1552,8 +1592,15 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   `;
   if (window.lucide) lucide.createIcons({ nodes: [poBody] });
 
+  // ⚠ SCOPED TO THIS PANEL, NOT document — same rule as the three footer
+  // releases at the bottom of this renderer, now applied to the whole form.
+  // Pipeline cards open this window one after another, and openPage keeps the
+  // outgoing panel in the DOM for ~300ms: an unscoped read would save the
+  // PREVIOUS order's title/client/qty/stage/materials onto THIS order's doc,
+  // including the QC and delivery-receipt gate decisions.
+  const $po = (id) => panel.querySelector('#' + id);
   // Materials editor (dynamic rows)
-  const matsWrap = document.getElementById('po-mats');
+  const matsWrap = $po('po-mats');
   const consumed = !!e.materialsConsumed;
   const addMatRow = (itemId='', qty='') => {
     if (!matsWrap) return;
@@ -1570,34 +1617,39 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   };
   (e.materials||[]).forEach(m=>addMatRow(m.itemId, m.qty));
   if (!consumed && !(e.materials||[]).length) addMatRow();
-  document.getElementById('po-add-mat')?.addEventListener('click', ()=>addMatRow());
+  $po('po-add-mat')?.addEventListener('click', ()=>addMatRow());
 
   // v12 WS28 — per-stage worker chips (initialised from the CURRENT stage's assignment)
   let asgSel = [];
   { const cur = e.assignments?.[normProdStageId(e.stage)];
     if (cur) asgSel = (cur.workerIds||[]).map((id,i)=>({ id, name:(cur.workerNames||[])[i]||id })); }
-  const renderWChips = () => { const w=document.getElementById('po-workers-chips'); if(!w) return;
+  const renderWChips = () => { const w=$po('po-workers-chips'); if(!w) return;
     w.innerHTML = asgSel.map(x=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${escHtml(x.id)}">${emojiIcon('👷',16)} ${escHtml(x.name)} ${emojiIcon('✕',16)}</span>`).join('')||'<span style="font-size:11px;color:var(--text-muted)">No workers assigned to this stage yet.</span>';
     if (window.lucide) lucide.createIcons({ nodes: [w] });
     w.querySelectorAll('[data-uid]').forEach(ch=>ch.addEventListener('click',()=>{ asgSel=asgSel.filter(x=>x.id!==ch.dataset.uid); renderWChips(); })); };
   renderWChips();
-  document.getElementById('po-worker-add')?.addEventListener('click', ()=>{
-    const sel=document.getElementById('po-worker-sel'); const id=sel.value; if(!id) return;
+  $po('po-worker-add')?.addEventListener('click', ()=>{
+    const sel=$po('po-worker-sel'); const id=sel.value; if(!id) return;
     if(!asgSel.some(x=>x.id===id)) asgSel.push({ id, name: sel.options[sel.selectedIndex]?.dataset.name||'' });
     sel.value=''; renderWChips(); });
 
-  document.getElementById('po-dr')?.addEventListener('click', ()=>{ closeModal(); openDeliveryReceiptModal({...e, id:order.id}, onSaved); });
+  // // ⚠ replace, never closeModal()-then-open: dismissTop() is history.back(), which is
+  // ASYNC, so the queued back lands AFTER the new panel is pushed and pops the panel
+  // that was just opened — it flashes up and dies, and repeated taps drift the Overlay
+  // and history stacks apart until a later close unwinds to the page underneath.
+  // (President's report 2026-08-10, reproduced in-browser.) See js/screens/sales.js.
+  $po('po-dr')?.addEventListener('click', ()=>openDeliveryReceiptModal({...e, id:order.id}, onSaved, { replace:true }));
 
   const collectMaterials = () => [...matsWrap.querySelectorAll('.po-mat-row')].map(r=>{
     const sel = r.querySelector('.pm-item'); const opt = sel.options[sel.selectedIndex];
     return { itemId: sel.value, name: opt?.dataset.name||'', unitCost: parseFloat(opt?.dataset.cost||0)||0, qty: parseFloat(r.querySelector('.pm-qty').value)||0 };
   }).filter(m=>m.itemId && m.qty>0);
 
-  document.getElementById('po-consume')?.addEventListener('click', async ()=>{
+  $po('po-consume')?.addEventListener('click', async ()=>{
     const materials = collectMaterials();
     if (!materials.length) { Notifs.showToast('Add at least one material with a quantity.','error'); return; }
     if (!(await confirmDialog({message:`Consume these materials? This deducts stock and posts COS to the ledger (one-time).`, danger:true}))) return;
-    const btn = document.getElementById('po-consume'); btn.disabled = true;
+    const btn = $po('po-consume'); btn.disabled = true;
     try {
       await db.collection('production_orders').doc(order.id).update({ materials });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders');
@@ -1610,21 +1662,21 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     } catch(ex){ Notifs.showToast('Consume failed: '+(ex.message||ex),'error'); btn.disabled=false; }
   });
 
-  document.getElementById('po-save').addEventListener('click', async ()=>{
-    const title = document.getElementById('po-title').value.trim();
-    const err = document.getElementById('po-err');
+  $po('po-save').addEventListener('click', async ()=>{
+    const title = $po('po-title').value.trim();
+    const err = $po('po-err');
     if(!title){ err.textContent='Product / work description is required.'; err.classList.remove('hidden'); return; }
-    const projSel = document.getElementById('po-project');
+    const projSel = $po('po-project');
     const projectId = projSel?.value || '';
     const data = {
-      title, client: document.getElementById('po-client').value.trim(),
-      qty: parseInt(document.getElementById('po-qty').value)||1,
-      quoteRef: document.getElementById('po-quote').value.trim(),
+      title, client: $po('po-client').value.trim(),
+      qty: parseInt($po('po-qty').value)||1,
+      quoteRef: $po('po-quote').value.trim(),
       projectId: projectId || null,
-      stage: document.getElementById('po-stage').value,
-      priority: document.getElementById('po-priority').value,
-      dueDate: document.getElementById('po-due').value,
-      notes: document.getElementById('po-notes').value.trim(),
+      stage: $po('po-stage').value,
+      priority: $po('po-priority').value,
+      dueDate: $po('po-due').value,
+      notes: $po('po-notes').value.trim(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
     // v12 WS28 — mirror the rules-side transition gates (friendly errors)
@@ -1655,7 +1707,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       else delete asg[data.stage];
       data.assignments = asg;                       // legacy `team` left untouched on the doc
     } else {
-      data.team = document.getElementById('po-team')?.value.trim() || '';
+      data.team = $po('po-team')?.value.trim() || '';
     }
     if (order && data.stage !== _prevStage) {       // stage changed via the select → history + since-marker
       data.stageHistory = firebase.firestore.FieldValue.arrayUnion({
@@ -1699,7 +1751,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       closeModal(); Notifs.success('Order saved'); onSaved && onSaved();
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
-  document.getElementById('po-del')?.addEventListener('click', async ()=>{
+  $po('po-del')?.addEventListener('click', async ()=>{
     if(!(await confirmDialog({message:'Delete this production order?', danger:true}))) return;
     try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders'); closeModal(); Notifs.success('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
@@ -2271,7 +2323,12 @@ async function openRfqModal(currentUser, onDone, prefill) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [rfqBody] });
 
-  const itemsWrap = document.getElementById('rfq-items');
+  // ⚠ SCOPED TO THIS PANEL, NOT document — same rule as the rfq-save release at
+  // the bottom of this renderer. The bulk "From low stock" generator can open
+  // this window right after another one closes, and an unscoped read would file
+  // the PREVIOUS RFQ's title/supplier/dept/items under a freshly minted serial.
+  const $rfq = (id) => panel.querySelector('#' + id);
+  const itemsWrap = $rfq('rfq-items');
   const addRow = (desc = '', qty = '', unit = '', itemId = '') => {
     const row = document.createElement('div');
     row.className = 'rfq-item-row';
@@ -2295,10 +2352,10 @@ async function openRfqModal(currentUser, onDone, prefill) {
   };
   if (Array.isArray(prefill.items) && prefill.items.length) prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit, it.itemId || ''));
   else { addRow(); addRow(); }
-  document.getElementById('rfq-add-item').addEventListener('click', () => addRow());
+  $rfq('rfq-add-item').addEventListener('click', () => addRow());
 
-  document.getElementById('rfq-save').addEventListener('click', async () => {
-    const title = document.getElementById('rfq-title').value.trim();
+  $rfq('rfq-save').addEventListener('click', async () => {
+    const title = $rfq('rfq-title').value.trim();
     if (!title) { Notifs.showToast('Enter a title.', 'error'); return; }
     const items = [...itemsWrap.querySelectorAll('.rfq-item-row')].map(row => {
       const sel = row.querySelector('.ri-item');
@@ -2311,7 +2368,7 @@ async function openRfqModal(currentUser, onDone, prefill) {
         unitPrice: null };
     }).filter(it => it.desc || it.itemId);
     if (!items.length) { Notifs.showToast('Add at least one item.', 'error'); return; }
-    const btn = document.getElementById('rfq-save'); btn.disabled = true;
+    const btn = $rfq('rfq-save'); btn.disabled = true;
     try {
       // v14 prod-fixlist — atomic serial instead of `RFQ-${yr}-${Date.now().slice(-4)}`,
       // which repeats every 10s and can collide on a busy procurement day (or via
@@ -2321,11 +2378,11 @@ async function openRfqModal(currentUser, onDone, prefill) {
       const rfqNo = await window.nextSerial('rfq', 'RFQ');
       await db.collection('purchase_requisitions').add({
         rfqNo, title,
-        supplier: document.getElementById('rfq-supplier').value.trim(),
-        requestingDept: document.getElementById('rfq-dept').value,
-        neededBy: document.getElementById('rfq-needed').value,
-        deliverTo: document.getElementById('rfq-deliver').value.trim(),
-        notes: document.getElementById('rfq-notes').value.trim(),
+        supplier: $rfq('rfq-supplier').value.trim(),
+        requestingDept: $rfq('rfq-dept').value,
+        neededBy: $rfq('rfq-needed').value,
+        deliverTo: $rfq('rfq-deliver').value.trim(),
+        notes: $rfq('rfq-notes').value.trim(),
         items, stage: 'rfq', total: 0, status: 'quoting',
         createdBy: currentUser.uid,
         createdByName: window.userProfile?.displayName || currentUser.email,
@@ -2936,16 +2993,22 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [recBody] });
 
-  const acctSel = document.getElementById('rec-acct');
+  // ⚠ SCOPED TO THIS PANEL, NOT document — same rule as the rec-save release at
+  // the bottom of this renderer. This window posts to the Cash Disbursement
+  // Journal AND mirrors into the ledger; a read that resolved into a dying
+  // panel would post the PREVIOUS purchase's amount, payee, debit account and
+  // paying bank account against THIS purchase requisition.
+  const $rec = (id) => panel.querySelector('#' + id);
+  const acctSel = $rec('rec-acct');
   acctSel.addEventListener('change', () => {
-    document.getElementById('rec-sundry-wrap').style.display = acctSel.value === 'sundry' ? '' : 'none';
+    $rec('rec-sundry-wrap').style.display = acctSel.value === 'sundry' ? '' : 'none';
   });
-  document.getElementById('rec-use-stocked')?.addEventListener('click', () => {
-    document.getElementById('rec-amt').value = stockedValue; recVatPreview(); acctWarn();
+  $rec('rec-use-stocked')?.addEventListener('click', () => {
+    $rec('rec-amt').value = stockedValue; recVatPreview(); acctWarn();
   });
   const acctWarn = () => {
-    const w = document.getElementById('rec-acct-warn'); if (!w || stockedValue == null) return;
-    const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
+    const w = $rec('rec-acct-warn'); if (!w || stockedValue == null) return;
+    const amt = parseFloat($rec('rec-amt').value) || 0;
     if (acctSel.value === 'inventory' && stockedValue <= 0)
       w.textContent = '⚠ Nothing from this PR landed in stock — booking it as an Inventory asset will overstate inventory.';
     else if (acctSel.value === 'material' && stockedValue > 0)
@@ -2955,34 +3018,34 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
     else w.textContent = '';
   };
   acctSel.addEventListener('change', acctWarn);
-  document.getElementById('rec-amt').addEventListener('input', acctWarn);
+  $rec('rec-amt').addEventListener('input', acctWarn);
   acctWarn();
   const recVatPreview = () => {
-    const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
-    const vat = document.getElementById('rec-vat').value === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
-    document.getElementById('rec-vat-preview').textContent = vat > 0 ? `Input VAT ₱${fmt(vat)} reclaimable` : 'No input VAT';
+    const amt = parseFloat($rec('rec-amt').value) || 0;
+    const vat = $rec('rec-vat').value === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
+    $rec('rec-vat-preview').textContent = vat > 0 ? `Input VAT ₱${fmt(vat)} reclaimable` : 'No input VAT';
   };
-  document.getElementById('rec-amt').addEventListener('input', recVatPreview);
-  document.getElementById('rec-vat').addEventListener('change', recVatPreview);
+  $rec('rec-amt').addEventListener('input', recVatPreview);
+  $rec('rec-vat').addEventListener('change', recVatPreview);
   recVatPreview();
 
-  document.getElementById('rec-save').addEventListener('click', async () => {
-    const reference = document.getElementById('rec-ref').value.trim();
-    const payee = document.getElementById('rec-payee').value.trim();
-    const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
+  $rec('rec-save').addEventListener('click', async () => {
+    const reference = $rec('rec-ref').value.trim();
+    const payee = $rec('rec-payee').value.trim();
+    const amt = parseFloat($rec('rec-amt').value) || 0;
     const acct = acctSel.value;
     if (!payee) { Notifs.showToast('Enter a payee.', 'error'); return; }
     if (!amt) { Notifs.showToast('Enter the amount.', 'error'); return; }
-    const bankSel = document.getElementById('rec-bank').value;
+    const bankSel = $rec('rec-bank').value;
     if (!bankSel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.', 'error'); return; }
     const bankAcct = await window.BankAccounts.pick(bankSel);
-    const saveBtn = document.getElementById('rec-save'); saveBtn.disabled = true;
+    const saveBtn = $rec('rec-save'); saveBtn.disabled = true;
     try {
       if (reference) {
         const dupe = await db.collection('cash_disbursement_journal').where('reference', '==', reference).limit(1).get().catch(() => ({ empty: true }));
         if (!dupe.empty && !(await confirmDialog({message:`A disbursement with reference "${escHtml(reference)}" already exists. Post another?`, html:true}))) { saveBtn.disabled = false; return; }
       }
-      const dueDate = document.getElementById('rec-date').value;
+      const dueDate = $rec('rec-date').value;
       await window.assertPeriodOpen(dueDate);
       // H10 fix — a fresh transactional re-check + claim of recordedToFinance, so
       // two Finance users racing to post the same PR can't both create a CDJ row
@@ -3010,7 +3073,7 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
         onDone && onDone();
         return;
       }
-      const vatTreatment = document.getElementById('rec-vat').value;
+      const vatTreatment = $rec('rec-vat').value;
       const inputVat = vatTreatment === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
       // acct==='inventory' still writes the amount into debitMaterial (so legacy
       // readers of the CDJ doc keep summing correctly); debitAccount is what
@@ -3022,7 +3085,7 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
         debitMaterial:     (acct === 'material' || acct === 'inventory') ? amt : 0,
         debitAP:           acct === 'ap' ? amt : 0,
         debitLabor:        0,
-        debitSundryAcct:   acct === 'sundry' ? document.getElementById('rec-sundry').value.trim() : '',
+        debitSundryAcct:   acct === 'sundry' ? $rec('rec-sundry').value.trim() : '',
         debitSundryAmount: acct === 'sundry' ? amt : 0,
         debitAccount:      acct,
         vatAmount: inputVat, vatTreatment,

@@ -216,7 +216,7 @@ function isRealPresident() {
 
   function itemModal(item, onSaved){
     const e=item||{};
-    openPage(item?'Edit Item':'Add Inventory Item', `
+    const _panel = openPage(item?'Edit Item':'Add Inventory Item', `
       <div class="form-group"><label>Name</label><input id="iv-name" value="${escHtml(e.name||'')}" placeholder="e.g. Stainless Sheet 4x8 ga.16"/></div>
       <div class="form-row">
         <div class="form-group"><label>Type</label><select id="iv-kind"><option value="material" ${e.kind!=='product'?'selected':''}>Raw Material</option><option value="product" ${e.kind==='product'?'selected':''}>Finished Good</option></select></div>
@@ -234,20 +234,29 @@ function isRealPresident() {
       </div>
       <div id="iv-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="iv-save">Save</button>${item?'<button class="btn-danger" id="iv-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('iv-save').addEventListener('click', async ()=>{
-      const name=document.getElementById('iv-name').value.trim();
-      const err=document.getElementById('iv-err');
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a button nobody can see and the
+    // visible button does nothing — and a save that runs in that window reads
+    // the PREVIOUS record's field values and writes them onto this one.
+    // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
+    const $iv = (id) => _panel.querySelector('#' + id);
+    $iv('iv-save').addEventListener('click', async ()=>{
+      const name=$iv('iv-name').value.trim();
+      const err=$iv('iv-err');
       if(!name){ err.textContent='Name is required.'; err.classList.remove('hidden'); return; }
-      const data={ name, kind:document.getElementById('iv-kind').value,
-        unit:document.getElementById('iv-unit').value.trim(), category:document.getElementById('iv-cat').value.trim(),
-        qty:parseFloat(document.getElementById('iv-qty').value)||0, reorderLevel:parseFloat(document.getElementById('iv-reorder').value)||0,
-        unitCost:parseFloat(document.getElementById('iv-cost').value)||0,
-        supplier:document.getElementById('iv-supplier').value.trim(), supplierContact:document.getElementById('iv-supcontact').value.trim(),
+      const data={ name, kind:$iv('iv-kind').value,
+        unit:$iv('iv-unit').value.trim(), category:$iv('iv-cat').value.trim(),
+        qty:parseFloat($iv('iv-qty').value)||0, reorderLevel:parseFloat($iv('iv-reorder').value)||0,
+        unitCost:parseFloat($iv('iv-cost').value)||0,
+        supplier:$iv('iv-supplier').value.trim(), supplierContact:$iv('iv-supcontact').value.trim(),
         updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
       try{
         if(item){
           const oldQty = item.qty||0;
-          const newQty = parseFloat(document.getElementById('iv-qty').value)||0;
+          const newQty = parseFloat($iv('iv-qty').value)||0;
           const delta = newQty - oldQty;
           const upd = { ...data };
           delete upd.qty;
@@ -267,7 +276,7 @@ function isRealPresident() {
         closeModal(); Notifs.success('Item saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
-    document.getElementById('iv-del')?.addEventListener('click', async ()=>{
+    $iv('iv-del')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({ message: 'Delete this item?', danger: true }))) return;
       try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items'); closeModal(); Notifs.success('Item deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
@@ -276,23 +285,32 @@ function isRealPresident() {
 
   function moveModal(item, type, onSaved){
     if(!item) return;
-    openPage((type==='in'?`${emojiIcon('➕',16)} Stock In — `:`${emojiIcon('➖',16)} Stock Out — `)+(item.name||''), `
+    const _panel = openPage((type==='in'?`${emojiIcon('➕',16)} Stock In — `:`${emojiIcon('➖',16)} Stock Out — `)+(item.name||''), `
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Current on-hand: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
       <div class="form-group"><label>Quantity to ${type==='in'?'add':'remove'}</label><input id="mv-qty" type="number" inputmode="decimal" step="0.01" min="0"/></div>
       ${type==='out'?`<div class="form-group"><label>Project / Job (optional)</label><input id="mv-project" placeholder="e.g. Gerry's Grill — Bulacan"/></div>`:''}
       <div class="form-group"><label>Note (optional)</label><input id="mv-note" placeholder="PO #, reason, etc."/></div>
       <div id="mv-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="mv-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('mv-save').addEventListener('click', async ()=>{
-      const qty=parseFloat(document.getElementById('mv-qty').value)||0;
-      const err=document.getElementById('mv-err');
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a button nobody can see and the
+    // visible button does nothing — and a save that runs in that window reads
+    // the PREVIOUS record's field values and writes them onto this one.
+    // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
+    const $mv = (id) => _panel.querySelector('#' + id);
+    $mv('mv-save').addEventListener('click', async ()=>{
+      const qty=parseFloat($mv('mv-qty').value)||0;
+      const err=$mv('mv-err');
       if(qty<=0){ err.textContent='Enter a quantity greater than 0.'; err.classList.remove('hidden'); return; }
       const delta = type==='in'? qty : -qty;
       try{
         await db.collection('inventory_items').doc(item.id).update({ qty: firebase.firestore.FieldValue.increment(delta), updatedAt:firebase.firestore.FieldValue.serverTimestamp() });
         await window.postStockMovement({ itemId:item.id, itemName:item.name||'', type, qty,
-          project: type==='out'?(document.getElementById('mv-project')?.value.trim()||''):'',
-          note:document.getElementById('mv-note').value.trim(),
+          project: type==='out'?($mv('mv-project')?.value.trim()||''):'',
+          note:$mv('mv-note').value.trim(),
           source:'manual', unitCost:item.unitCost||null, qtyAfter:(item.qty||0)+delta });
         window.logAudit&&window.logAudit('create','stock_movement',item.id,{itemName:item.name||'',type,qty,delta});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
@@ -394,7 +412,7 @@ function isRealPresident() {
 
   function jobModal(job, onSaved){
     const e=job||{};
-    openPage(job?'Edit Job Cost':'New Job Cost', `
+    const _panel = openPage(job?'Edit Job Cost':'New Job Cost', `
       <div class="form-group"><label>Project / Client</label><input id="jb-project" value="${escHtml(e.project||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
       <div class="form-group"><label>Quote Ref (optional)</label><input id="jb-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-..."/></div>
       <div class="form-row">
@@ -407,13 +425,22 @@ function isRealPresident() {
       </div>
       <div id="jb-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="jb-save">Save</button>${job?'<button class="btn-danger" id="jb-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('jb-save').addEventListener('click', async ()=>{
-      const project=document.getElementById('jb-project').value.trim();
-      const err=document.getElementById('jb-err');
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a button nobody can see and the
+    // visible button does nothing — and a save that runs in that window reads
+    // the PREVIOUS record's field values and writes them onto this one.
+    // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
+    const $jb = (id) => _panel.querySelector('#' + id);
+    $jb('jb-save').addEventListener('click', async ()=>{
+      const project=$jb('jb-project').value.trim();
+      const err=$jb('jb-err');
       if(!project){ err.textContent='Project name is required.'; err.classList.remove('hidden'); return; }
-      const data={ project, quoteRef:document.getElementById('jb-quote').value.trim(),
-        revenue:parseFloat(document.getElementById('jb-rev').value)||0, materialsCost:parseFloat(document.getElementById('jb-mat').value)||0,
-        laborCost:parseFloat(document.getElementById('jb-lab').value)||0, otherCost:parseFloat(document.getElementById('jb-oth').value)||0,
+      const data={ project, quoteRef:$jb('jb-quote').value.trim(),
+        revenue:parseFloat($jb('jb-rev').value)||0, materialsCost:parseFloat($jb('jb-mat').value)||0,
+        laborCost:parseFloat($jb('jb-lab').value)||0, otherCost:parseFloat($jb('jb-oth').value)||0,
         updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
       try{
         if(job) await db.collection('job_costs').doc(job.id).update(data);
@@ -421,7 +448,7 @@ function isRealPresident() {
         closeModal(); Notifs.success('Job cost saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
-    document.getElementById('jb-del')?.addEventListener('click', async ()=>{
+    $jb('jb-del')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({ message: 'Delete this job cost?', danger: true }))) return;
       // Re-audit 2026-08-03: this deleted a money-adjacent job-cost record with only
       // a toast — no audit trail of who removed it (unlike itemModal's delete a few

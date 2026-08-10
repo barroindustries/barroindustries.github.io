@@ -823,7 +823,11 @@ function statusLabel(s) {
 //  COMMENTS — Messenger-style UI with seen receipts
 // ══════════════════════════════════════════════════
 window.renderComments = async function(collection, docId, containerId, currentUser) {
-  const container = document.getElementById(containerId);
+  // liveEl: callers pass an id STRING for a container that lives INSIDE an
+  // openPage panel (tasks.js 'task-comments-wrap' / 'sub-comments-wrap'), so
+  // during the teardown window the comment thread rendered into the dying
+  // panel and the visible task showed none. See window.liveEl (js/config.js).
+  const container = (window.liveEl ? window.liveEl(containerId) : document.getElementById(containerId));
   if (!container) return;
 
   const isAdmin = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
@@ -1219,7 +1223,7 @@ async function openCampaignModal(camp, onChange) {
       <input type="checkbox" class="mc-channel" value="${s.code}" ${(camp?.channels||[]).includes(s.code)?'checked':''}/> ${escHtml(s.label)}
     </label>`).join('');
 
-  openPage(isEdit ? 'Edit Campaign' : 'New Campaign', `
+  const _panel = openPage(isEdit ? 'Edit Campaign' : 'New Campaign', `
     <div class="form-group"><label>Name</label><input id="mc-name" value="${escHtml(camp?.name||'')}" placeholder="e.g. Q3 High-Pressure Stove Push"/></div>
     <div class="form-group"><label>Description</label><textarea id="mc-desc" rows="2">${escHtml(camp?.description||'')}</textarea></div>
     <div class="form-row">
@@ -1240,22 +1244,29 @@ async function openCampaignModal(camp, onChange) {
     <div id="mc-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="mc-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  document.getElementById('mc-save').addEventListener('click', async () => {
-    const err = document.getElementById('mc-err');
-    const name = document.getElementById('mc-name').value.trim();
-    const startDate = document.getElementById('mc-start').value || '';
-    const endDate = document.getElementById('mc-end').value || '';
+  // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+  // DOM for ~300ms; a second record opened inside that window puts two panels
+  // carrying the same ids in the DOM at once, and document.getElementById()
+  // returns the FIRST in document order — the DYING one. Bind-time that gives a
+  // dead button; inside the handler it is worse, because the save would read the
+  // PREVIOUS campaign's field values and write them onto this one.
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('mc-save').addEventListener('click', async () => {
+    const err = $('mc-err');
+    const name = $('mc-name').value.trim();
+    const startDate = $('mc-start').value || '';
+    const endDate = $('mc-end').value || '';
     if (!name) { err.textContent = 'Name is required.'; err.classList.remove('hidden'); return; }
     if (startDate && endDate && endDate < startDate) { err.textContent = 'End date must be on or after start date.'; err.classList.remove('hidden'); return; }
-    const channels = Array.from(document.querySelectorAll('.mc-channel:checked')).map(cb => cb.value);
+    const channels = Array.from(_panel.querySelectorAll('.mc-channel:checked')).map(cb => cb.value);
     const FV = firebase.firestore.FieldValue;
     const who = userProfile?.displayName || currentUser.email;
     const data = {
-      name, description: document.getElementById('mc-desc').value.trim(),
-      channels, status: document.getElementById('mc-status').value,
+      name, description: $('mc-desc').value.trim(),
+      channels, status: $('mc-status').value,
       startDate, endDate,
-      budget: Math.max(0, parseFloat(document.getElementById('mc-budget').value) || 0),
-      budgetLineId: canMoneyTier ? (document.getElementById('mc-line').value || null) : (camp?.budgetLineId ?? null),
+      budget: Math.max(0, parseFloat($('mc-budget').value) || 0),
+      budgetLineId: canMoneyTier ? ($('mc-line').value || null) : (camp?.budgetLineId ?? null),
       updatedAt: FV.serverTimestamp()
     };
     try {
@@ -1273,15 +1284,18 @@ async function openCampaignModal(camp, onChange) {
 
   // Spec 5c — Materials panel (Phase B: real Hub data once WS38 ships; Phase A
   // shows a placeholder). Only for an existing campaign being edited.
-  if (isEdit) await renderCampaignMaterialsPanel(camp);
+  if (isEdit) await renderCampaignMaterialsPanel(camp, _panel);
 }
 
 // Phase B (WS38-coupled): one hub_folders doc per campaign (scope:'materials',
 // deterministic id `materials__<campaignId>`), files listed/uploaded through
 // window.FilesHub — ordinary Hub data, nothing throwaway. Phase A (FilesHub not
 // yet defined) shows a placeholder instead.
-async function renderCampaignMaterialsPanel(camp) {
-  const wrap = document.getElementById('mc-materials');
+async function renderCampaignMaterialsPanel(camp, _panel) {
+  // ⚠ Scoped to the campaign editor panel that called us (its #mc-materials),
+  // not document — a closing editor panel lingers ~300ms and would otherwise
+  // win the getElementById race and receive THIS campaign's materials list.
+  const wrap = (_panel || document).querySelector('#mc-materials');
   if (!wrap) return;
   if (typeof window.FilesHub === 'undefined') {
     wrap.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">${emojiIcon('📁',11)} Materials arrive with the Files Hub (WS38).</div>`;
@@ -1423,7 +1437,7 @@ async function renderMktLeads(content, currentUser, currentRole) {
 function openLeadCaptureModal(camps, onSaved) {
   const campOptions = camps.filter(c0 => c0.status !== 'cancelled')
     .map(c0 => `<option value="${c0.id}">${escHtml(c0.name||'')}</option>`).join('');
-  openPage('Capture Lead', `
+  const _panel = openPage('Capture Lead', `
     <div class="form-group"><label>Name</label><input id="lc-name" placeholder="Contact name"/></div>
     <div class="form-group"><label>Company</label><input id="lc-company"/></div>
     <div class="form-row">
@@ -1441,18 +1455,22 @@ function openLeadCaptureModal(camps, onSaved) {
     <div class="form-group"><label>Notes</label><textarea id="lc-notes" rows="2"></textarea></div>
     <div id="lc-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="lc-save">Capture Lead</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('lc-save').addEventListener('click', async () => {
-    const err = document.getElementById('lc-err');
-    const name = document.getElementById('lc-name').value.trim();
+  // ⚠ SCOPED TO THIS PANEL, NOT document — a closing capture panel lingers ~300ms
+  // and would win the getElementById race, so the save would read the PREVIOUS
+  // lead's fields and write them onto this one.
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('lc-save').addEventListener('click', async () => {
+    const err = $('lc-err');
+    const name = $('lc-name').value.trim();
     if (!name) { err.textContent = 'Name is required.'; err.classList.remove('hidden'); return; }
     const vals = {
-      company: document.getElementById('lc-company').value.trim(),
-      phone: document.getElementById('lc-phone').value.trim(),
-      email: document.getElementById('lc-email').value.trim(),
+      company: $('lc-company').value.trim(),
+      phone: $('lc-phone').value.trim(),
+      email: $('lc-email').value.trim(),
     };
-    const notes = document.getElementById('lc-notes').value.trim();
-    const source = document.getElementById('lc-source').value;
-    const campaignId = document.getElementById('lc-campaign').value || null;
+    const notes = $('lc-notes').value.trim();
+    const source = $('lc-source').value;
+    const campaignId = $('lc-campaign').value || null;
     try {
       const existing = await window.Clients.findByName(name);
       const FV = firebase.firestore.FieldValue;
@@ -1579,7 +1597,7 @@ async function renderMktPromos(content, currentUser, currentRole) {
 function openPromoModal(promo, camps, onSaved) {
   const isEdit = !!promo;
   const campOptions = camps.map(c0 => `<option value="${c0.id}" ${promo?.campaignId===c0.id?'selected':''}>${escHtml(c0.name||'')}</option>`).join('');
-  openPage(isEdit ? 'Edit Promo' : 'New Promo', `
+  const _panel = openPage(isEdit ? 'Edit Promo' : 'New Promo', `
     <div class="form-group"><label>Title</label><input id="pm-title" value="${escHtml(promo?.title||'')}" placeholder="e.g. 10% off double-burner ranges"/></div>
     <div class="form-row">
       <div class="form-group"><label>Start date</label><input id="pm-start" type="date" value="${escHtml(promo?.startDate||'')}"/></div>
@@ -1596,20 +1614,24 @@ function openPromoModal(promo, camps, onSaved) {
     <div class="form-group"><label>Notes</label><textarea id="pm-notes" rows="2">${escHtml(promo?.notes||'')}</textarea></div>
     <div id="pm-promo-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="pm-promo-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('pm-promo-save').addEventListener('click', async () => {
-    const err = document.getElementById('pm-promo-err');
-    const title = document.getElementById('pm-title').value.trim();
+  // ⚠ SCOPED TO THIS PANEL, NOT document — a closing promo panel lingers ~300ms
+  // and would win the getElementById race, so the save would read the PREVIOUS
+  // promo's fields and write them onto this one.
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('pm-promo-save').addEventListener('click', async () => {
+    const err = $('pm-promo-err');
+    const title = $('pm-title').value.trim();
     if (!title) { err.textContent = 'Title is required.'; err.classList.remove('hidden'); return; }
-    const startDate = document.getElementById('pm-start').value || '';
-    const endDate = document.getElementById('pm-end').value || startDate;
+    const startDate = $('pm-start').value || '';
+    const endDate = $('pm-end').value || startDate;
     if (startDate && endDate < startDate) { err.textContent = 'End date must be on or after start date.'; err.classList.remove('hidden'); return; }
     const FV = firebase.firestore.FieldValue;
     const who = userProfile?.displayName || currentUser.email;
     const data = {
       title, startDate, endDate,
-      channel: document.getElementById('pm-channel').value || '',
-      campaignId: document.getElementById('pm-campaign').value || null,
-      notes: document.getElementById('pm-notes').value.trim(),
+      channel: $('pm-channel').value || '',
+      campaignId: $('pm-campaign').value || null,
+      notes: $('pm-notes').value.trim(),
       updatedAt: FV.serverTimestamp()
     };
     try {
@@ -3120,7 +3142,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         ? (total > 0 ? +(100*(quotePay.downPayment||0)/total).toFixed(1) : '')
         : (parseFloat(quotePay.downPaymentMode) || ''))
     : '';
-  openPage(`${emojiIcon('🧾',16)} Create Sales Order`, `
+  const _panel = openPage(`${emojiIcon('🧾',16)} Create Sales Order`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
     <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
     <div class="form-row">
@@ -3161,19 +3183,25 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
   `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('so-receipt-upload',(r)=>{receipt=r;},{label:'Upload receipt (photo/PDF)',accept:'image/*,.pdf',dept:'Finance',subfolder:'SalesOrders'});
-  document.getElementById('so-save').addEventListener('click', () => window.busy(document.getElementById('so-save'), async ()=>{
-    const err=document.getElementById('so-err');
-    const contract=parseFloat(document.getElementById('so-contract').value)||0;
-    const paid=parseFloat(document.getElementById('so-paid').value)||0;
-    const project=document.getElementById('so-project').value.trim();
+  // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+  // DOM for ~300ms; convert a second won quote inside that window and two panels
+  // carry the same ids, with document.getElementById() resolving into the DYING
+  // one. Money-critical here: the save would read the PREVIOUS quote's contract
+  // amount, payment received and DP% and write them onto THIS order + ledger.
+  const $ = (id) => _panel.querySelector('#' + id);
+  $('so-save').addEventListener('click', () => window.busy($('so-save'), async ()=>{
+    const err=$('so-err');
+    const contract=parseFloat($('so-contract').value)||0;
+    const paid=parseFloat($('so-paid').value)||0;
+    const project=$('so-project').value.trim();
     if(!project){ err.textContent='Project is required.'; err.classList.remove('hidden'); return; }
-    const dpPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('so-dp-pct').value)||0)) || null;
+    const dpPercent = Math.max(0, Math.min(100, parseFloat($('so-dp-pct').value)||0)) || null;
     // Sales→Production handoff fields (owner's rule) — optional here (Sales may not
     // know the target date yet), but REQUIRED before this order can actually be sent
     // to Production; see ensureProdHandoffFields/transferOrderToProduction below.
-    const targetDate = document.getElementById('so-target-date').value || '';
-    const priority = document.getElementById('so-priority').value || '';
-    const notes = document.getElementById('so-notes').value.trim();
+    const targetDate = $('so-target-date').value || '';
+    const priority = $('so-priority').value || '';
+    const notes = $('so-notes').value.trim();
     try{
       // 1) create the master project (the spine that ties the whole job together)
       const proj = await createJobProject({ ...d, total:contract, dpPercent, items: quoteItems, targetDate, priority, notes });
@@ -3182,7 +3210,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
         clientId: d.clientId || null,
         project, contractAmount:contract, paymentReceived:paid, items:quoteItems,
-        paymentMethod:document.getElementById('so-method').value,
+        paymentMethod:$('so-method').value,
         notes, targetDate, priority,
         receiptUrl:receipt?.url||null, receiptName:receipt?.name||null,
         status:'pending', createdBy:currentUser.uid, createdByName:userProfile?.displayName||currentUser.email,
@@ -3254,7 +3282,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       const canAutoPostLedger = isFinancePriv();
       if (canAutoPostLedger && paid > 0 && paid <= contract + 0.01) {
         try {
-          const vatTreatment = document.getElementById('so-vat').value;
+          const vatTreatment = $('so-vat').value;
           const { recorded, net, vat:vatAmount } = window.vatSplit(paid, vatTreatment);
           await window.Ledger.upsertByRef(`SO-${ref.id}`, () => ({
             ref: `SO-${ref.id}`, date: today(), kind: 'credit',
@@ -3276,7 +3304,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
           const newAR = Math.max(0, contract - newCollected);
           await db.collection('job_projects').doc(proj.id).update({
             amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-            payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount:recorded, vatAmount, net, method:document.getElementById('so-method').value, orRef:'', date:today(), by:who, ledgerId:window.Ledger._sanitize(`SO-${ref.id}`), auto:true }),
+            payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount:recorded, vatAmount, net, method:$('so-method').value, orRef:'', date:today(), by:who, ledgerId:window.Ledger._sanitize(`SO-${ref.id}`), auto:true }),
             timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale auto-recorded ₱${window.fmtN2(recorded)} at order creation`, by:who })
           });
           autoPosted = true;
@@ -3311,10 +3339,15 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
           : '');
         err.classList.remove('hidden');
         if (ex.existingProjectId) {
-          document.getElementById('so-open-existing-btn')?.addEventListener('click', async () => {
+          $('so-open-existing-btn')?.addEventListener('click', async () => {
             try {
               const exSnap = await db.collection('job_projects').doc(ex.existingProjectId).get();
-              if (exSnap.exists && typeof openJobProjectDetail === 'function') { closeModal(); openJobProjectDetail({ id: exSnap.id, ...exSnap.data() }); }
+              // // ⚠ replace, never closeModal()-then-open: dismissTop() is history.back(), which is
+  // ASYNC, so the queued back lands AFTER the new panel is pushed and pops the panel
+  // that was just opened — it flashes up and dies, and repeated taps drift the Overlay
+  // and history stacks apart until a later close unwinds to the page underneath.
+  // (President's report 2026-08-10, reproduced in-browser.) See js/screens/sales.js.
+    if (exSnap.exists && typeof openJobProjectDetail === 'function') openJobProjectDetail({ id: exSnap.id, ...exSnap.data() }, { replace:true });
             } catch(_){}
           });
         }
@@ -3407,7 +3440,7 @@ async function openRecordSaleModal(o, container){
   const salesNoted = o.paymentReceived||0;
   const defaultAmt = o.recordedAmount||salesNoted||0;
   const bankOpts = await window.BankAccounts.optionsHTML(o.bankAccountId);
-  openPage(`${emojiIcon('💵',16)} Register Sale — `+escHtml(o.clientName||''), `
+  const _panel = openPage(`${emojiIcon('💵',16)} Register Sale — `+escHtml(o.clientName||''), `
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
       <div style="font-weight:700;margin-bottom:6px">${emojiIcon('📋',16)} Sales Order Terms</div>
       <div style="display:grid;grid-template-columns:1fr auto;gap:3px 12px">
@@ -3455,32 +3488,39 @@ async function openRecordSaleModal(o, container){
     <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="rs-save">Approve &amp; Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   window.wireBirOrButtons && window.wireBirOrButtons();
+  // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+  // DOM for ~300ms; register a second sale inside that window and two panels
+  // carry the same ids, with document.getElementById() resolving into the DYING
+  // one. This is the money-critical case: the ledger post would take the
+  // PREVIOUS order's approved amount, VAT treatment, method, OR number and bank
+  // account and book them against THIS sales order.
+  const $ = (id) => _panel.querySelector('#' + id);
   const recompute=()=>{
-    const entered=parseFloat(document.getElementById('rs-amount').value)||0;
-    const t=document.getElementById('rs-vat').value;
+    const entered=parseFloat($('rs-amount').value)||0;
+    const t=$('rs-vat').value;
     const { recorded, net, vat }=window.vatSplit(entered,t);
-    document.getElementById('rs-appr').textContent='₱'+fmt(recorded);
-    document.getElementById('rs-net').textContent='₱'+fmt(net);
-    document.getElementById('rs-vatamt').textContent='₱'+fmt(vat);
-    document.getElementById('rs-bal').textContent='₱'+fmt(Math.max(0,contract-recorded));
+    $('rs-appr').textContent='₱'+fmt(recorded);
+    $('rs-net').textContent='₱'+fmt(net);
+    $('rs-vatamt').textContent='₱'+fmt(vat);
+    $('rs-bal').textContent='₱'+fmt(Math.max(0,contract-recorded));
   };
-  document.getElementById('rs-amount').addEventListener('input',recompute);
-  document.getElementById('rs-vat').addEventListener('change',recompute);
-  document.getElementById('rs-save').addEventListener('click', async ()=>{
-    const err=document.getElementById('rs-err');
-    const saveBtn=document.getElementById('rs-save');
-    const entered=parseFloat(document.getElementById('rs-amount').value)||0;
+  $('rs-amount').addEventListener('input',recompute);
+  $('rs-vat').addEventListener('change',recompute);
+  $('rs-save').addEventListener('click', async ()=>{
+    const err=$('rs-err');
+    const saveBtn=$('rs-save');
+    const entered=parseFloat($('rs-amount').value)||0;
     if(entered<0){ err.textContent='Amount cannot be negative.'; err.classList.remove('hidden'); return; }
-    const method=document.getElementById('rs-method').value, orRef=document.getElementById('rs-ref').value.trim();
-    const toProd=document.getElementById('rs-prod').checked;
+    const method=$('rs-method').value, orRef=$('rs-ref').value.trim();
+    const toProd=$('rs-prod').checked;
     const who=userProfile?.displayName||currentUser.email;
-    const vatTreatment=document.getElementById('rs-vat').value;
+    const vatTreatment=$('rs-vat').value;
     // `amount` = recorded total (the cash figure that hits the ledger + project balance)
     const { recorded:amount, net, vat:vatAmount }=window.vatSplit(entered,vatTreatment);
     // Guard the common foot-gun: entering the VAT-inclusive contract price as
     // "exclusive" grosses it up 12% over the contract → phantom over-collection.
     if(contract>0 && amount > contract + 0.5 && !(await confirmDialog({message:`Recorded total ₱${fmt(amount)} exceeds the contract ₱${fmt(contract)} (VAT-${vatTreatment}). Record anyway?`}))){ return; }
-    const acctSel = document.getElementById('rs-bankacct').value;
+    const acctSel = $('rs-bankacct').value;
     if (amount > 0 && !acctSel && (await window.BankAccounts.list()).length) {
       err.textContent = 'Select the company account that received this payment.'; err.classList.remove('hidden'); return;
     }
@@ -3555,7 +3595,7 @@ function ensureProdHandoffFields(o){
   return new Promise(resolve=>{
     const hasAll = !!((o.targetDate||'').trim() && (o.notes||'').trim() && (o.priority||'').trim());
     if (hasAll) { resolve(true); return; }
-    openPage(`${emojiIcon('🏭',16)} Before sending to Production`, `
+    const _panel = openPage(`${emojiIcon('🏭',16)} Before sending to Production`, `
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Target date, priority and notes weren't all set on this order yet — Production needs them before the job can start.</div>
       <div class="form-row">
         <div class="form-group"><label>Target Date</label><input id="ph-date" type="date" value="${escHtml(o.targetDate||'')}"/></div>
@@ -3569,12 +3609,16 @@ function ensureProdHandoffFields(o){
       <div class="form-group"><label>Notes for Production</label><textarea id="ph-notes" rows="3" placeholder="What to build, special instructions…">${escHtml(o.notes||'')}</textarea></div>
       <div id="ph-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="ph-save">Save &amp; Send to Production</button><button class="btn-secondary" id="ph-cancel">Cancel</button>`);
-    document.getElementById('ph-cancel').addEventListener('click', ()=>{ closeModal(); resolve(false); });
-    document.getElementById('ph-save').addEventListener('click', () => window.busy(document.getElementById('ph-save'), async ()=>{
-      const err=document.getElementById('ph-err');
-      const targetDate=document.getElementById('ph-date').value;
-      const priority=document.getElementById('ph-priority').value;
-      const notes=document.getElementById('ph-notes').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document — a closing hand-off panel lingers
+    // ~300ms and would win the getElementById race, so this save could stamp the
+    // PREVIOUS order's target date, priority and Production notes onto this one.
+    const $ = (id) => _panel.querySelector('#' + id);
+    $('ph-cancel').addEventListener('click', ()=>{ closeModal(); resolve(false); });
+    $('ph-save').addEventListener('click', () => window.busy($('ph-save'), async ()=>{
+      const err=$('ph-err');
+      const targetDate=$('ph-date').value;
+      const priority=$('ph-priority').value;
+      const notes=$('ph-notes').value.trim();
       if(!targetDate || !priority || !notes){ err.textContent='Target date, priority and notes are all required before sending to Production.'; err.classList.remove('hidden'); return; }
       try{
         await db.collection('sales_orders').doc(o.id).update({ targetDate, priority, notes });
@@ -3723,7 +3767,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 
   const openClientEditor = (cl) => {
     const e = cl || {};
-    openPage(cl?'Edit Client':'Add Client', `
+    const _panel = openPage(cl?'Edit Client':'Add Client', `
       <div class="form-group"><label>Name</label><input id="cl-name" value="${escHtml(e.name||'')}" placeholder="Client full name"/></div>
       <div class="form-group"><label>Company</label><input id="cl-company" value="${escHtml(e.company||'')}" placeholder="Company name"/></div>
       <div class="form-row">
@@ -3737,17 +3781,25 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       <div class="form-group"><label>Address</label><textarea id="cl-address" rows="2">${escHtml(e.address||'')}</textarea></div>
       <div class="form-group"><label>Notes</label><textarea id="cl-notes" rows="2">${escHtml(e.notes||'')}</textarea></div>
     `, `<button class="btn-primary" id="save-client-btn">${cl?'Save':'Save Client'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('save-client-btn').addEventListener('click', async () => {
-      const name = document.getElementById('cl-name').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms, so editing a second client inside that window puts two
+    // #save-client-btn / #cl-name in the DOM and document.getElementById()
+    // resolves into the DYING one — the visible Save does nothing, and worse,
+    // the save that DOES run reads the PREVIOUS client's fields and writes them
+    // onto this client's record. This is the Corporate Secretary's 2026-08-10
+    // "the Edit form needs several taps" report.
+    const $ = (id) => _panel.querySelector('#' + id);
+    $('save-client-btn').addEventListener('click', async () => {
+      const name = $('cl-name').value.trim();
       if (!name) { Notifs.showToast('Name is required.','error'); return; }
       const data = {
-        name, company: document.getElementById('cl-company').value.trim(),
-        email: document.getElementById('cl-email').value.trim(),
-        phone: document.getElementById('cl-phone').value.trim(),
-        address: document.getElementById('cl-address').value.trim(),
-        notes: document.getElementById('cl-notes').value.trim(),
-        stage: document.getElementById('cl-stage').value,
-        followUpDate: document.getElementById('cl-followup').value || '',
+        name, company: $('cl-company').value.trim(),
+        email: $('cl-email').value.trim(),
+        phone: $('cl-phone').value.trim(),
+        address: $('cl-address').value.trim(),
+        notes: $('cl-notes').value.trim(),
+        stage: $('cl-stage').value,
+        followUpDate: $('cl-followup').value || '',
         lastContact: today,
         nameKey: window.Clients.nameKey(name),                       // keep the join key in sync on rename
         ...(cl ? {} : { brands: [brandKey], contactLog: [] }),       // brand membership on create only
@@ -3945,8 +3997,11 @@ async function openClientHub(cl, opts) {
   const chTabs = body.querySelector('.ch-tabs');
   if (chTabs && window.bindChipTabs) {
     window.bindChipTabs(chTabs, (key) => {
-      const timelinePane = document.getElementById('ch-tab-timeline');
-      const detailsPane = document.getElementById('ch-tab-details');
+      // ⚠ Scoped to THIS hub's body, not document — a closing client hub lingers
+      // ~300ms and its panes carry the same ids, so document.getElementById()
+      // would flip the DYING panel's tabs and leave the visible ones frozen.
+      const timelinePane = body.querySelector('#ch-tab-timeline');
+      const detailsPane = body.querySelector('#ch-tab-details');
       if (timelinePane) timelinePane.style.display = key === 'timeline' ? '' : 'none';
       if (detailsPane) detailsPane.style.display = key === 'details' ? '' : 'none';
     });
@@ -3963,19 +4018,23 @@ async function openClientHub(cl, opts) {
     if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
     closeModal(); opts.onChange && opts.onChange();
   };
-  document.getElementById('ch-stage')?.addEventListener('change', async e => {
+  // ⚠ SCOPED TO THIS PANEL, NOT document. Opening a second client's hub while
+  // the previous one is still in its ~300ms teardown puts two #ch-stage /
+  // #ch-log / #ch-fu-* in the DOM; document.getElementById() would bind these
+  // handlers to the DYING hub, leaving the visible controls inert.
+  body.querySelector('#ch-stage')?.addEventListener('change', async e => {
     try { await patch({ stage: e.target.value }); Notifs.success('Stage updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
-  document.getElementById('ch-log')?.addEventListener('click', async () => {
+  body.querySelector('#ch-log')?.addEventListener('click', async () => {
     const note = (await promptDialog({message:'What happened? (call, site visit, email…)', multiline:true}))||'';
     if (!note.trim()) return;
     try { await patch({ lastContact: today }, { date: today, by: who(), note: note.trim() }); Notifs.success('Contact logged'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
-  document.getElementById('ch-fu-done')?.addEventListener('click', async () => {
+  body.querySelector('#ch-fu-done')?.addEventListener('click', async () => {
     const next = ((await promptDialog({message:`Follow-up done ${emojiIcon('✓',16)} — schedule the next one? (YYYY-MM-DD, blank = none)`}))||'').trim();
     try { await patch({ followUpDate: next, lastContact: today }, { date: today, by: who(), note: 'Follow-up done' + (next ? ' → next ' + next : '') }); Notifs.success('Follow-up updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
-  document.getElementById('ch-fu-set')?.addEventListener('click', async () => {
+  body.querySelector('#ch-fu-set')?.addEventListener('click', async () => {
     const d = ((await promptDialog({message:'Follow-up date (YYYY-MM-DD)'}))||'').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { if (d) Notifs.showToast('Use YYYY-MM-DD','error'); return; }
     try { await patch({ followUpDate: d }); Notifs.success('Follow-up set'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -4100,16 +4159,20 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
 
   // Add budget line
   document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {
-    openPage('Add Budget Line', `
+    const _panel = openPage('Add Budget Line', `
       <div class="form-group"><label>Item Name</label><input id="bg-name" placeholder="e.g. Social Media Ads"/></div>
       <div class="form-group"><label>Allocated Budget (₱)</label><input id="bg-budget" type="number" step="0.01" min="0" inputmode="decimal"/></div>
     `, `<button class="btn-primary" id="save-bg-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('save-bg-btn').addEventListener('click', async () => {
-      const name = document.getElementById('bg-name').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document — a closing budget-line panel lingers
+    // ~300ms and would win the getElementById race, so this could save the
+    // PREVIOUS line's name and allocated budget.
+    const $ = (id) => _panel.querySelector('#' + id);
+    $('save-bg-btn').addEventListener('click', async () => {
+      const name = $('bg-name').value.trim();
       if (!name) { Notifs.showToast('Enter item name','error'); return; }
       await db.collection(collection).add({
         name,
-        budget: parseFloat(document.getElementById('bg-budget').value)||0,
+        budget: parseFloat($('bg-budget').value)||0,
         dept,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -4120,7 +4183,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   // Log expense / income → writes to shared Finance ledger
   document.getElementById('log-expense-btn')?.addEventListener('click', () => {
     const lineOptions = items.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name)}">${escHtml(i.name)}</option>`).join('');
-    openPage('Log Expense / Income', `
+    const _panel = openPage('Log Expense / Income', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="exp-date" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Type</label>
@@ -4147,25 +4210,32 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       </div>
     `, `<button class="btn-primary" id="save-exp-btn">Save & Sync to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms; log a second entry inside that window and two panels carry
+    // the same ids, with document.getElementById() resolving into the DYING one.
+    // Money-critical: the ledger row would take the PREVIOUS entry's amount,
+    // description, date, type and budget line.
+    const $ = (id) => _panel.querySelector('#' + id);
+
     // v12 WS39 — Input VAT only applies to a debit/expense entry.
     const expUpdateVatVisibility = () => {
-      const wrap = document.getElementById('exp-vat-wrap');
-      if (wrap) wrap.style.display = (document.getElementById('exp-type').value==='debit') ? '' : 'none';
+      const wrap = $('exp-vat-wrap');
+      if (wrap) wrap.style.display = ($('exp-type').value==='debit') ? '' : 'none';
     };
-    document.getElementById('exp-type').addEventListener('change', expUpdateVatVisibility);
+    $('exp-type').addEventListener('change', expUpdateVatVisibility);
     expUpdateVatVisibility();
 
-    document.getElementById('save-exp-btn').addEventListener('click', async () => {
-      const amount = parseFloat(document.getElementById('exp-amount').value)||0;
-      const desc   = document.getElementById('exp-desc').value.trim();
+    $('save-exp-btn').addEventListener('click', async () => {
+      const amount = parseFloat($('exp-amount').value)||0;
+      const desc   = $('exp-desc').value.trim();
       if (!desc) { Notifs.showToast('Enter a description','error'); return; }
       if (!amount) { Notifs.showToast('Enter an amount','error'); return; }
-      const type = document.getElementById('exp-type').value;
-      const lineId = document.getElementById('exp-line').value;
-      const lineSel = document.getElementById('exp-line');
+      const type = $('exp-type').value;
+      const lineId = $('exp-line').value;
+      const lineSel = $('exp-line');
       const lineName = lineId ? lineSel.options[lineSel.selectedIndex].dataset.name : null;
       const uName = userProfile?.displayName || currentUser.email;
-      const expDate = document.getElementById('exp-date').value || today();
+      const expDate = $('exp-date').value || today();
       try { await window.assertPeriodOpen(expDate); } catch (e) { return; } // toast already shown
       const category = dept + (type==='credit'?' Income':' Expense');
 
@@ -4180,7 +4250,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         dept,
         budgetLineId:  lineId || null,
         budgetLineName:lineName || null,
-        refNumber:     document.getElementById('exp-ref').value.trim() || null,
+        refNumber:     $('exp-ref').value.trim() || null,
         // v12 WS39 — input-VAT capture on dept budget-expense debit entries.
         ...( type==='debit' && window.readVatField ? window.readVatField('exp-vat', amount) : {} ),
         addedBy:       currentUser.uid,
@@ -4402,13 +4472,15 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     // ── New version ──
     listEl.querySelectorAll('.fh-version').forEach(b => b.addEventListener('click', () => {
       const f = allFiles.find(x=>x.id===b.dataset.id); if (!f) return;
-      openPage(`Upload new version — ${escHtml(f.name||'File')}`, `
+      const _panel = openPage(`Upload new version — ${escHtml(f.name||'File')}`, `
         <div id="fh-version-upload"></div>
         <div class="form-group"><label>Note (optional)</label><input id="fh-version-note" placeholder="What changed?"/></div>
       `, `<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       Drive.renderUploadArea('fh-version-upload', async (result, file) => {
         try {
-          await FilesHub.uploadNewVersion(f, result, file, document.getElementById('fh-version-note').value.trim());
+          // ⚠ Scoped to THIS panel — a closing version panel lingers ~300ms and
+          // document.getElementById() would read the PREVIOUS file's note.
+          await FilesHub.uploadNewVersion(f, result, file, _panel.querySelector('#fh-version-note').value.trim());
           Notifs.success('New version uploaded.'); closeModal(); loadFiles();
         } catch(e) { Notifs.showToast('Upload failed: ' + (e.message||e), 'error'); }
       }, { label:'Choose new version', dept, subfolder:'Files', allowLinks:false });
@@ -4423,7 +4495,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       const deptOpts = Object.keys(window.DEPARTMENTS||{}).map(d=>`<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('');
       const roleOpts = ['president','manager','employee','agent','finance'].map(r=>`<option value="${r}">${r}</option>`).join('');
       const alreadyShared = (f.shares||[]).length ? (f.shares||[]).map(s=>escHtml(s.label||s.id)).join(', ') : '—';
-      openPage(`Share "${escHtml(f.name||'File')}"`, `
+      const _panel = openPage(`Share "${escHtml(f.name||'File')}"`, `
         <div class="form-group"><label>Share with</label>
           <select id="fh-share-type">
             <option value="user">Specific person</option>
@@ -4442,22 +4514,26 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
         </div>
         <div style="font-size:11px;color:var(--text-muted)">Already shared with: ${alreadyShared}</div>
       `, `<button class="btn-primary" id="fh-share-save">Share</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      const typeSel = document.getElementById('fh-share-type');
-      const uSel = document.getElementById('fh-share-target-user');
-      const dSel = document.getElementById('fh-share-target-dept');
-      const rSel = document.getElementById('fh-share-target-role');
+      // ⚠ SCOPED TO THIS PANEL, NOT document — a closing share panel lingers
+      // ~300ms and would win the getElementById race, so the share could be
+      // granted to the target picked for the PREVIOUS file.
+      const $ = (id) => _panel.querySelector('#' + id);
+      const typeSel = $('fh-share-type');
+      const uSel = $('fh-share-target-user');
+      const dSel = $('fh-share-target-dept');
+      const rSel = $('fh-share-target-role');
       typeSel.addEventListener('change', () => {
         uSel.classList.toggle('hidden', typeSel.value!=='user');
         dSel.classList.toggle('hidden', typeSel.value!=='dept');
         rSel.classList.toggle('hidden', typeSel.value!=='role');
       });
-      document.getElementById('fh-share-save').addEventListener('click', async () => {
+      $('fh-share-save').addEventListener('click', async () => {
         const type = typeSel.value;
         const sel = type==='user' ? uSel : type==='dept' ? dSel : rSel;
         const id = sel.value;
         if (!id) { Notifs.showToast('Choose a target','error'); return; }
         const label = type==='user' ? (sel.options[sel.selectedIndex]?.textContent||id) : id;
-        const perm = document.getElementById('fh-share-perm').value;
+        const perm = $('fh-share-perm').value;
         try { await FilesHub.share(f, {type, id, label}, perm); Notifs.success('Shared.'); closeModal(); loadFiles(); }
         catch(e) { Notifs.showToast('Share failed: ' + (e.message||e), 'error'); }
       });
@@ -4489,7 +4565,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   uploadBtn?.addEventListener('click', () => {
     const folderOpts = allFolders.map(fo=>`<option value="${fo.id}">${escHtml(fo.name)}</option>`).join('');
     const prefill = (activeFolder!=='All' && activeFolder!=='__archived__' && activeFolder!=='__bin__') ? activeFolder : '';
-    openPage('Upload File', `
+    const _panel = openPage('Upload File', `
       <div class="form-group"><label>File Name / Title</label><input id="fn-title" placeholder="Descriptive name"/></div>
       <div class="form-group"><label>File Type</label>
         <select id="fn-type"><option>Document</option><option>Image</option><option>Spreadsheet</option><option>PDF</option><option>Other</option></select>
@@ -4504,17 +4580,23 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       </div>
       <div id="fn-upload-area"></div>
     `, `<button class="btn-primary" id="save-fn-btn">Upload</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    if (prefill) document.getElementById('fn-folder').value = prefill;
-    document.getElementById('fn-folder').addEventListener('change', e => {
-      document.getElementById('fn-folder-new').classList.toggle('hidden', e.target.value !== '__new__');
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms; open a second Upload File inside that window and two panels
+    // carry the same ids, with document.getElementById() resolving into the DYING
+    // one — the visible Upload button does nothing, and the upload that does run
+    // reads the PREVIOUS panel's title, type and folder.
+    const $ = (id) => _panel.querySelector('#' + id);
+    if (prefill) $('fn-folder').value = prefill;
+    $('fn-folder').addEventListener('change', e => {
+      $('fn-folder-new').classList.toggle('hidden', e.target.value !== '__new__');
     });
     let uploadedFile = null, uploadedRaw = null;
     Drive.renderUploadArea('fn-upload-area', (r, file) => { uploadedFile = r; uploadedRaw = file; }, { label: 'Choose file', dept, subfolder: 'Files' });
-    document.getElementById('save-fn-btn').addEventListener('click', async () => {
+    $('save-fn-btn').addEventListener('click', async () => {
       const uploaderName = (window.userProfile && userProfile.displayName) || currentUser.email;
-      let folderId = document.getElementById('fn-folder').value;
+      let folderId = $('fn-folder').value;
       if (folderId === '__new__') {
-        const newName = document.getElementById('fn-folder-new').value.trim();
+        const newName = $('fn-folder-new').value.trim();
         if (!newName) { Notifs.showToast('Enter a folder name','error'); return; }
         if (RESERVED_FOLDER_NAMES.includes(newName.toLowerCase())) { Notifs.showToast('Reserved name','error'); return; }
         const ref = await db.collection('hub_folders').add({
@@ -4526,14 +4608,14 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       }
       const isLink = uploadedFile && uploadedFile.kind === 'link';
       const now = new Date().toISOString();
-      const title = document.getElementById('fn-title').value.trim() || (uploadedFile?.name || 'File');
+      const title = $('fn-title').value.trim() || (uploadedFile?.name || 'File');
       const versionEntry = { v:1, url: uploadedFile?.url||'', name: uploadedFile?.name||title,
         size: uploadedRaw?.size||null, contentType: uploadedRaw?.type||null, note:'',
         by: currentUser.uid, byName: uploaderName, at: now };
       await db.collection(collection).add({
         name: title,
         description: '',
-        fileType: document.getElementById('fn-type').value,
+        fileType: $('fn-type').value,
         kind: isLink ? 'link' : 'file',
         scope: scopeKey,
         department: dept,
@@ -4580,7 +4662,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   addLinkBtn?.addEventListener('click', () => {
     const folderOpts = allFolders.map(fo=>`<option value="${fo.id}">${escHtml(fo.name)}</option>`).join('');
     const prefill = (activeFolder!=='All' && activeFolder!=='__archived__' && activeFolder!=='__bin__') ? activeFolder : '';
-    openPage('Add Link', `
+    const _panel = openPage('Add Link', `
       <div class="form-group"><label>Title</label><input id="lk-title" placeholder="e.g. Google Drive folder, Spec sheet"/></div>
       <div class="form-group"><label>URL</label><input id="lk-url" type="url" placeholder="https://…"/></div>
       <div class="form-group"><label>Description</label><textarea id="lk-desc" rows="2" placeholder="Optional notes about this link"></textarea></div>
@@ -4589,19 +4671,23 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       </div>
       <div id="lk-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="save-lk-btn">Add Link</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    if (prefill) document.getElementById('lk-folder').value = prefill;
-    document.getElementById('save-lk-btn').addEventListener('click', async () => {
-      const err = document.getElementById('lk-err');
-      const title = document.getElementById('lk-title').value.trim();
-      let url = document.getElementById('lk-url').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document — a closing Add Link panel lingers
+    // ~300ms and would win the getElementById race, so this could save the
+    // PREVIOUS link's title, URL, description and folder.
+    const $ = (id) => _panel.querySelector('#' + id);
+    if (prefill) $('lk-folder').value = prefill;
+    $('save-lk-btn').addEventListener('click', async () => {
+      const err = $('lk-err');
+      const title = $('lk-title').value.trim();
+      let url = $('lk-url').value.trim();
       if (!title) { err.textContent='Enter a title.'; err.classList.remove('hidden'); return; }
       if (!url)   { err.textContent='Enter a URL.'; err.classList.remove('hidden'); return; }
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;  // tolerate bare domains
       const uploaderName = (window.userProfile && userProfile.displayName) || currentUser.email;
       const now = new Date().toISOString();
-      const folderId = document.getElementById('lk-folder').value || null;
+      const folderId = $('lk-folder').value || null;
       await db.collection(collection).add({
-        name: title, description: document.getElementById('lk-desc').value.trim(),
+        name: title, description: $('lk-desc').value.trim(),
         fileType: 'Other', kind: 'link', scope: scopeKey, department: dept,
         folderId,
         url, driveUrl: null, size: null, contentType: null, source: 'link',
@@ -4692,25 +4778,32 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
       <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
       ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block">${emojiIcon('📎',12)} View File</a>`:''}
     `;
-    openPage(escHtml(d.title||d.name||'Bidding'), body,
+    const _panel = openPage(escHtml(d.title||d.name||'Bidding'), body,
       canManageGov
         ? `<button class="btn-primary" id="gb-save">Save</button><button class="btn-danger" id="gb-del">Delete</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`
         : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     let gbFile = null;
     Drive.renderUploadArea('gb-file-area', r => { gbFile = r; }, { label: d.fileUrl ? 'Replace file' : 'Attach file', dept: 'Government Biddings', subfolder: collection });
 
-    document.getElementById('gb-save')?.addEventListener('click', async () => {
-      const title = document.getElementById('gb-title').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
+    // DOM for ~300ms; open a second bid inside that window and two panels carry
+    // the same ids, with document.getElementById() resolving into the DYING one.
+    // Bind-time that gives a dead Save/Delete; inside the handler it would write
+    // the PREVIOUS bid's title, agency, deadline and ABC onto THIS bid — and the
+    // bucket read decides a move (create-in-target + delete-here) batch.
+    const $ = (id) => _panel.querySelector('#' + id);
+    $('gb-save')?.addEventListener('click', async () => {
+      const title = $('gb-title').value.trim();
       if (!title) { Notifs.showToast('Enter a title.','error'); return; }
-      const targetCol = document.getElementById('gb-bucket').value;
+      const targetCol = $('gb-bucket').value;
       const payload = {
         title,
-        description: document.getElementById('gb-desc').value.trim(),
-        agency: document.getElementById('gb-agency').value.trim(),
-        refNo: document.getElementById('gb-refno').value.trim(),
-        deadline: document.getElementById('gb-deadline').value || null,
-        abc: parseFloat(document.getElementById('gb-abc').value) || null,
-        status: document.getElementById('gb-status').value,
+        description: $('gb-desc').value.trim(),
+        agency: $('gb-agency').value.trim(),
+        refNo: $('gb-refno').value.trim(),
+        deadline: $('gb-deadline').value || null,
+        abc: parseFloat($('gb-abc').value) || null,
+        status: $('gb-status').value,
         fileUrl: gbFile?.url || d.fileUrl || null,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
       };
@@ -4730,7 +4823,7 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
       }
       closeModal(); loadDocs();
     });
-    document.getElementById('gb-del')?.addEventListener('click', async () => {
+    $('gb-del')?.addEventListener('click', async () => {
       if (!(await confirmDialog({message:`Delete "${escHtml(d.title||d.name||'this bid')}"? This cannot be undone.`, danger:true, html:true}))) return;
       await db.collection(collection).doc(d.id).delete();
       closeModal(); Notifs.success('Bid deleted.'); loadDocs();
@@ -4739,7 +4832,7 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
 
   loadDocs();
   document.getElementById(`add-doc-btn-${collection}`)?.addEventListener('click', () => {
-    openPage(`Add ${title}`, `
+    const _panel = openPage(`Add ${title}`, `
       <div class="form-group"><label>Title</label><input id="gd-title"/></div>
       ${isGov?`<div class="form-row"><div class="form-group"><label>Procuring Entity / Agency</label><input id="gd-agency"/></div><div class="form-group"><label>Reference / Bid No.</label><input id="gd-refno"/></div></div>
       <div class="form-row"><div class="form-group"><label>Submission Deadline</label><input id="gd-deadline" type="date"/></div><div class="form-group"><label>ABC (₱)</label><input id="gd-abc" type="number" inputmode="decimal"/></div></div>`:''}
@@ -4748,20 +4841,24 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
     `, `<button class="btn-primary" id="save-gd-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let uploadedFile = null;
     Drive.renderUploadArea('gd-file-area', r => { uploadedFile = r; }, { label: 'Attach file', dept: title, subfolder: collection });
-    document.getElementById('save-gd-btn').addEventListener('click', async () => {
-      const title = document.getElementById('gd-title').value.trim();
+    // ⚠ SCOPED TO THIS PANEL, NOT document — a closing Add panel lingers ~300ms
+    // and would win the getElementById race, so this could file the PREVIOUS
+    // entry's title, agency, deadline and ABC as a brand-new record.
+    const $ = (id) => _panel.querySelector('#' + id);
+    $('save-gd-btn').addEventListener('click', async () => {
+      const title = $('gd-title').value.trim();
       if (!title) { Notifs.showToast('Enter a title.','error'); return; }
       await db.collection(collection).add({
         title,
-        description: document.getElementById('gd-desc').value.trim(),
+        description: $('gd-desc').value.trim(),
         // Gov-bidding fields exist only in the isGov add form above — reading
         // them unconditionally would throw on the Marketing/Sales collections
         // that share this renderer (their inputs don't exist).
         ...(isGov ? {
-          agency: document.getElementById('gd-agency').value.trim(),
-          refNo: document.getElementById('gd-refno').value.trim(),
-          deadline: document.getElementById('gd-deadline').value || null,
-          abc: parseFloat(document.getElementById('gd-abc').value) || null,
+          agency: $('gd-agency').value.trim(),
+          refNo: $('gd-refno').value.trim(),
+          deadline: $('gd-deadline').value || null,
+          abc: parseFloat($('gd-abc').value) || null,
         } : {}),
         fileUrl: uploadedFile?.url || null,
         status: 'active',

@@ -192,11 +192,19 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved, 
   const flush = () => { if (!buf.length) return; body += buf.length===2 ? `<div class="form-row">${buf.join('')}</div>` : buf[0]; buf = []; };
   fields.forEach(f => { if (f.full) { flush(); body += fieldHtml(f); } else { buf.push(fieldHtml(f)); if (buf.length===2) flush(); } });
   flush();
-  openPage('Edit '+title, body, `<button class="btn-primary" id="fe-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('fe-save').addEventListener('click', async () => {
+  const _panel = openPage('Edit '+title, body, `<button class="btn-primary" id="fe-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+  // inside that window and two panels carry the same ids at once —
+  // document.getElementById() returns the FIRST in document order, which is the
+  // DYING one. Bind-time that means the Save button nobody can see gets the
+  // handler; at SAVE time it is worse — `#fe-<key>` would read the PREVIOUS
+  // record's field values and .update() them onto THIS docId. Money-adjacent,
+  // silent, and the same defect the Corporate Secretary reported on 2026-08-10.
+  _panel.querySelector('#fe-save').addEventListener('click', async () => {
     const upd = {};
     fields.forEach(f => {
-      const el = document.getElementById('fe-'+f.key);
+      const el = _panel.querySelector('#fe-'+CSS.escape(f.key));
       if (!el) return;
       upd[f.key] = f.type === 'number' ? (parseFloat(el.value)||0) : (typeof el.value === 'string' ? el.value.trim() : el.value);
     });
@@ -321,7 +329,7 @@ function renderFinanceNav(currentUser, currentRole, subtab) {
 // header, plus the Cash-Advance data-repair entry that used to sit in the
 // Cash Advances tab header. Handlers are moved verbatim (unchanged functions).
 function openFinanceToolsPage() {
-  openPage(`${emojiIcon('🔧',16)} Finance Tools`, `
+  const _panel = openPage(`${emojiIcon('🔧',16)} Finance Tools`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">President-only maintenance &amp; data-repair utilities. Used occasionally — kept out of the daily Reports and Cash Advances workflow.</p>
     <div class="card" style="margin-bottom:12px">
       <div class="card-header"><h3>Ledger maintenance</h3></div>
@@ -341,7 +349,8 @@ function openFinanceToolsPage() {
       </div>
     </div>
   `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-  document.getElementById('fin-tools-ca-repair-btn')?.addEventListener('click', () => openCADataRepairModal());
+  // ⚠ SCOPED TO THIS PANEL, NOT document — see financeEditModal's note above.
+  _panel.querySelector('#fin-tools-ca-repair-btn')?.addEventListener('click', () => openCADataRepairModal());
 }
 
 // ── v14 Wave 4 Batch F2: Rebuild rollups (president, Finance Tools) ────────
@@ -482,11 +491,11 @@ async function renderTaxesTab(container, currentUser, currentRole) {
       saveBtnId: 'save-tax-btn',
       afterOpen: (ctx) => { Drive.renderUploadArea('tax-file-area', f => ctx.setFile(f), {label:'Attach BIR receipt/form',dept:'Finance',subfolder:'Taxes'}); },
       buildDoc: (ctx) => ({
-        period:   document.getElementById('tax-period').value.trim(),
-        type:     document.getElementById('tax-type').value,
-        amount:   parseFloat(document.getElementById('tax-amount').value)||0,
-        dueDate:  document.getElementById('tax-due').value,
-        status:   document.getElementById('tax-status').value,
+        period:   ctx.$('tax-period').value.trim(),
+        type:     ctx.$('tax-type').value,
+        amount:   parseFloat(ctx.$('tax-amount').value)||0,
+        dueDate:  ctx.$('tax-due').value,
+        status:   ctx.$('tax-status').value,
         fileUrl:  ctx.getFile()?.url||null, fileName: ctx.getFile()?.name||null,
         filedBy:  ctx.currentUser.uid, filedByName: userProfile?.displayName||ctx.currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1201,6 +1210,13 @@ function openBreakevenClassifyEditor(categories, cfg, onSaved) {
   const selections = {};
   categories.forEach(cat => { const s = explicitOf(cat); if (s) selections[cat] = s; });
   let manualRows = (Array.isArray(cfg.manualFixed) ? cfg.manualFixed : []).map(m => ({ label:m.label||'', amount:+m.amount||0 }));
+  // ⚠ EVERY lookup below is scoped to THIS panel, not document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Two Classify editors
+  // alive at once share every id/class here, and document.* resolves into the
+  // DYING one — the visible chips stop responding, and the Save handler would
+  // read the dead panel's manual-cost inputs. Assigned at the openPage call
+  // below; bind()/render() only ever run after that, never before.
+  let _panel = null;
 
   const chipRow = (cat) => {
     const explicit = selections[cat];
@@ -1224,32 +1240,32 @@ function openBreakevenClassifyEditor(categories, cfg, onSaved) {
   </div>`;
 
   const bind = () => {
-    document.querySelectorAll('#bke-classify-cats [data-cat]').forEach(b => b.addEventListener('click', () => {
+    _panel.querySelectorAll('#bke-classify-cats [data-cat]').forEach(b => b.addEventListener('click', () => {
       selections[b.dataset.cat] = b.dataset.val; render();
     }));
-    document.querySelectorAll('.bke-reset').forEach(b => b.addEventListener('click', () => {
+    _panel.querySelectorAll('.bke-reset').forEach(b => b.addEventListener('click', () => {
       delete selections[b.dataset.cat]; render();
     }));
-    document.querySelectorAll('.bke-m-label,.bke-m-amount').forEach(inp => inp.addEventListener('change', () => {
+    _panel.querySelectorAll('.bke-m-label,.bke-m-amount').forEach(inp => inp.addEventListener('change', () => {
       const i = +inp.dataset.i;
       if (inp.classList.contains('bke-m-label')) manualRows[i].label = inp.value.trim();
       else manualRows[i].amount = parseFloat(inp.value)||0;
     }));
-    document.querySelectorAll('.bke-m-del').forEach(b => b.addEventListener('click', () => {
+    _panel.querySelectorAll('.bke-m-del').forEach(b => b.addEventListener('click', () => {
       manualRows.splice(+b.dataset.i, 1); render();
     }));
   };
   const render = () => {
-    document.getElementById('bke-classify-cats').innerHTML = categories.length
+    _panel.querySelector('#bke-classify-cats').innerHTML = categories.length
       ? categories.map(chipRow).join('')
       : `<div style="font-size:12px;color:var(--text-muted)">No categories posted this period yet.</div>`;
-    document.getElementById('bke-classify-manual').innerHTML = manualRows.map(manualRowHtml).join('')
+    _panel.querySelector('#bke-classify-manual').innerHTML = manualRows.map(manualRowHtml).join('')
       || `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">No manual fixed costs added.</div>`;
     if (window.lucide) lucide.createIcons();
     bind();
   };
 
-  window.openPage(`${emojiIcon('🏷',18)} Classify Break-even Costs`, `
+  _panel = window.openPage(`${emojiIcon('🏷',18)} Classify Break-even Costs`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Tag each ledger category Fixed or Variable for break-even math. Untouched categories keep using the built-in keyword default (rent/utilities/salaries → Fixed; materials/COS/freight/commissions → Variable) until classified here. "None" deliberately excludes a category from both totals.</p>
     <div id="bke-classify-cats" style="margin-bottom:16px"></div>
     <h4 style="margin:14px 0 6px">${emojiIcon('➕',16)} Manual Fixed Costs</h4>
@@ -1259,8 +1275,8 @@ function openBreakevenClassifyEditor(categories, cfg, onSaved) {
   `, `<button class="btn-primary" id="bke-classify-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   render();
-  document.getElementById('bke-m-add').addEventListener('click', () => { manualRows.push({label:'',amount:0}); render(); });
-  document.getElementById('bke-classify-save').addEventListener('click', () => window.busy(document.getElementById('bke-classify-save'), async () => {
+  _panel.querySelector('#bke-m-add').addEventListener('click', () => { manualRows.push({label:'',amount:0}); render(); });
+  _panel.querySelector('#bke-classify-save').addEventListener('click', () => window.busy(_panel.querySelector('#bke-classify-save'), async () => {
     const fixed = new Set(cfg.fixed || []), variable = new Set(cfg.variable || []), none = new Set(cfg.none || []);
     // Only categories actually shown in THIS editor session get re-decided;
     // everything outside that list (another period's categories) is left
@@ -1391,7 +1407,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     // highest-priority guard of the whole ledger surface (v12 WS12).
     const acctOptsFor = (accountType) => (window.COA[accountType]||[])
       .map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('');
-    openPage('New Ledger Entry', `
+    const _panel = openPage('New Ledger Entry', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="led-date" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Type</label>
@@ -1419,12 +1435,16 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     `, `<button class="btn-primary" id="save-led-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let ledFile = null;
     Drive.renderUploadArea('led-file-area', r=>{ledFile=r;},{label:'Attach receipt/invoice',dept:'Finance',subfolder:'Ledger'});
-    const typeSel = document.getElementById('led-type'), acctTypeSel = document.getElementById('led-accttype'), acctSel = document.getElementById('led-account');
+    // ⚠ SCOPED TO THIS PANEL, NOT document — see financeEditModal's note at the
+    // top of this file. This is the ledger's manual-posting form: a document-wide
+    // lookup during openPage's ~300ms teardown window reads the PREVIOUS entry's
+    // date/amount/ref/description and posts THOSE into the ledger.
+    const typeSel = _panel.querySelector('#led-type'), acctTypeSel = _panel.querySelector('#led-accttype'), acctSel = _panel.querySelector('#led-account');
     // v12 WS39 — Input VAT only makes sense on a debit/expense row; show/hide
     // it as the type/account-type selections change (starts hidden: default
     // type is 'credit').
     const ledUpdateVatVisibility = () => {
-      const wrap = document.getElementById('led-vat-wrap');
+      const wrap = _panel.querySelector('#led-vat-wrap');
       if (wrap) wrap.style.display = (typeSel.value==='debit' && acctTypeSel.value==='expense') ? '' : 'none';
     };
     typeSel.addEventListener('change', () => {
@@ -1434,10 +1454,10 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     });
     acctTypeSel.addEventListener('change', () => { acctSel.innerHTML = acctOptsFor(acctTypeSel.value); ledUpdateVatVisibility(); });
     ledUpdateVatVisibility();
-    document.getElementById('save-led-btn').addEventListener('click', () => window.busy(document.getElementById('save-led-btn'), async () => {
-      const date = document.getElementById('led-date').value;
-      const amount = parseFloat(document.getElementById('led-amount').value)||0;
-      const ref = document.getElementById('led-ref').value.trim();
+    _panel.querySelector('#save-led-btn').addEventListener('click', () => window.busy(_panel.querySelector('#save-led-btn'), async () => {
+      const date = _panel.querySelector('#led-date').value;
+      const amount = parseFloat(_panel.querySelector('#led-amount').value)||0;
+      const ref = _panel.querySelector('#led-ref').value.trim();
       // Guard like the CRJ/CDJ modals: a blank amount would post a ₱0 row, and a
       // blank ref makes Ledger.post throw inside busy() (no catch) — the click
       // would silently do nothing.
@@ -1449,7 +1469,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       const result = await window.Ledger.post({
         ref, date, kind: typeSel.value,
         accountType: acctTypeSel.value, account: acctSel.value, category: acctSel.value,
-        description: document.getElementById('led-desc').value.trim(),
+        description: _panel.querySelector('#led-desc').value.trim(),
         amount,
         extra: {
           fileUrl: ledFile?.url||null,
@@ -1627,7 +1647,7 @@ function openBankAccountModal(a, onDone) {
   const isEdit = !!a;
   a = a || { nickname:'', type:'bank', bankName:'', accountName:'', accountNo:'', branch:'',
     openingBalance:0, openingDate:(window.bizDate?window.bizDate():today()), active:true, isDefault:false, sortOrder:0, notes:'' };
-  openPage(isEdit?'Edit Bank Account':'Add Bank Account', `
+  const _panel = openPage(isEdit?'Edit Bank Account':'Add Bank Account', `
     <div class="form-row">
       <div class="form-group"><label>Nickname</label><input id="ba-nickname" value="${escHtml(a.nickname||'')}" placeholder="e.g. BDO Checking — Main"/></div>
       <div class="form-group"><label>Type</label><select id="ba-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
@@ -1655,26 +1675,31 @@ function openBankAccountModal(a, onDone) {
     </label>`:''}
     <div id="ba-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="ba-save-btn">${isEdit?'Save':'Add Account'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('ba-save-btn').addEventListener('click', async () => {
-    const err = document.getElementById('ba-err');
-    const nickname = document.getElementById('ba-nickname').value.trim();
+  // ⚠ SCOPED TO THIS PANEL, NOT document — see financeEditModal's note at the
+  // top of this file. Editing one account straight after another would
+  // otherwise read the DYING panel's fields and write the previous account's
+  // nickname/number/opening balance onto this doc id.
+  const $ba = (id) => _panel.querySelector('#' + id);
+  $ba('ba-save-btn').addEventListener('click', async () => {
+    const err = $ba('ba-err');
+    const nickname = $ba('ba-nickname').value.trim();
     if (!nickname) { err.textContent='Nickname is required.'; err.classList.remove('hidden'); return; }
     const data = {
       nickname,
-      type: document.getElementById('ba-type').value,
-      bankName: document.getElementById('ba-bankname').value.trim(),
-      accountName: document.getElementById('ba-acctname').value.trim(),
-      accountNo: document.getElementById('ba-acctno').value.trim(),
-      branch: document.getElementById('ba-branch').value.trim(),
+      type: $ba('ba-type').value,
+      bankName: $ba('ba-bankname').value.trim(),
+      accountName: $ba('ba-acctname').value.trim(),
+      accountNo: $ba('ba-acctno').value.trim(),
+      branch: $ba('ba-branch').value.trim(),
       currency: 'PHP',
-      openingBalance: parseFloat(document.getElementById('ba-opening').value)||0,
-      openingDate: document.getElementById('ba-openingdate').value || (window.bizDate?window.bizDate():today()),
-      isDefault: document.getElementById('ba-default').checked,
+      openingBalance: parseFloat($ba('ba-opening').value)||0,
+      openingDate: $ba('ba-openingdate').value || (window.bizDate?window.bizDate():today()),
+      isDefault: $ba('ba-default').checked,
       sortOrder: a.sortOrder||0,
-      notes: document.getElementById('ba-notes').value.trim(),
+      notes: $ba('ba-notes').value.trim(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
-    if (isEdit) data.active = document.getElementById('ba-active').checked;
+    if (isEdit) data.active = $ba('ba-active').checked;
     try {
       if (data.isDefault) {
         // At most one isDefault=true — clear every other doc's flag first.
@@ -1841,23 +1866,23 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       `,
       footerHtml: `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
       saveBtnId: 'save-crj-btn',
-      afterOpen: () => { window.wireBirOrButtons && window.wireBirOrButtons(); },
+      afterOpen: (ctx) => { window.wireBirOrButtons && window.wireBirOrButtons(ctx.panel); },
       buildDoc: async (ctx) => {
-        const customer = document.getElementById('crj-customer').value.trim();
-        const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
+        const customer = ctx.$('crj-customer').value.trim();
+        const debitCash = parseFloat(ctx.$('crj-cash').value)||0;
         if (!customer) { Notifs.showToast('Enter a customer name.','error'); return null; }
         if (!debitCash) { Notifs.showToast('Enter the cash amount received.','error'); return null; }
-        const crjAcct = await window.BankAccounts.pick(document.getElementById('crj-bank').value);
+        const crjAcct = await window.BankAccounts.pick(ctx.$('crj-bank').value);
         const crjData = {
-          reference:           document.getElementById('crj-ref').value.trim(),
-          date:                document.getElementById('crj-date').value,
+          reference:           ctx.$('crj-ref').value.trim(),
+          date:                ctx.$('crj-date').value,
           customer,
           debitCash,
-          debitSalesDiscount:  parseFloat(document.getElementById('crj-discount').value)||0,
-          creditAR:            parseFloat(document.getElementById('crj-ar').value)||0,
-          creditSalesRevenue:  parseFloat(document.getElementById('crj-revenue').value)||0,
-          creditSundryAcct:    document.getElementById('crj-sundry-acct').value.trim(),
-          creditSundryAmount:  parseFloat(document.getElementById('crj-sundry-amt').value)||0,
+          debitSalesDiscount:  parseFloat(ctx.$('crj-discount').value)||0,
+          creditAR:            parseFloat(ctx.$('crj-ar').value)||0,
+          creditSalesRevenue:  parseFloat(ctx.$('crj-revenue').value)||0,
+          creditSundryAcct:    ctx.$('crj-sundry-acct').value.trim(),
+          creditSundryAmount:  parseFloat(ctx.$('crj-sundry-amt').value)||0,
           bankAccountId:  crjAcct.bankAccountId||null,
           bankAccountName: crjAcct.bankAccountName||null,
           addedBy:    ctx.currentUser.uid,
@@ -1956,29 +1981,29 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       footerHtml: `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
       saveBtnId: 'save-cdj-btn',
       buildDoc: async (ctx) => {
-        const payee = document.getElementById('cdj-payee').value.trim();
-        const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
+        const payee = ctx.$('cdj-payee').value.trim();
+        const creditCash = parseFloat(ctx.$('cdj-cash').value)||0;
         if (!payee) { Notifs.showToast('Enter a payee name.','error'); return null; }
         if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return null; }
         // Input VAT only applies to VATable purchases (material + sundry). Direct labor
         // carries no input VAT, so it's excluded from the VAT base.
-        const _cdjVatBase = (parseFloat(document.getElementById('cdj-material').value)||0)
-          + (parseFloat(document.getElementById('cdj-sundry-amt').value)||0);
-        const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjVatBase,'inclusive').vat;
-        const cdjBankSel = document.getElementById('cdj-bank').value;
+        const _cdjVatBase = (parseFloat(ctx.$('cdj-material').value)||0)
+          + (parseFloat(ctx.$('cdj-sundry-amt').value)||0);
+        const _cdjInputVat = ctx.$('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjVatBase,'inclusive').vat;
+        const cdjBankSel = ctx.$('cdj-bank').value;
         if (!cdjBankSel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.', 'error'); return null; }
         const cdjAcct = await window.BankAccounts.pick(cdjBankSel);
         const cdjData = {
-          reference:         document.getElementById('cdj-ref').value.trim(),
-          date:              document.getElementById('cdj-date').value,
+          reference:         ctx.$('cdj-ref').value.trim(),
+          date:              ctx.$('cdj-date').value,
           payee,
           creditCash,
-          debitMaterial:     parseFloat(document.getElementById('cdj-material').value)||0,
-          debitAP:           parseFloat(document.getElementById('cdj-ap').value)||0,
-          debitLabor:        parseFloat(document.getElementById('cdj-labor').value)||0,
-          debitSundryAcct:   document.getElementById('cdj-sundry-acct').value.trim(),
-          debitSundryAmount: parseFloat(document.getElementById('cdj-sundry-amt').value)||0,
-          vatAmount: _cdjInputVat, vatTreatment: document.getElementById('cdj-vat').value,
+          debitMaterial:     parseFloat(ctx.$('cdj-material').value)||0,
+          debitAP:           parseFloat(ctx.$('cdj-ap').value)||0,
+          debitLabor:        parseFloat(ctx.$('cdj-labor').value)||0,
+          debitSundryAcct:   ctx.$('cdj-sundry-acct').value.trim(),
+          debitSundryAmount: parseFloat(ctx.$('cdj-sundry-amt').value)||0,
+          vatAmount: _cdjInputVat, vatTreatment: ctx.$('cdj-vat').value,
           bankAccountId:  cdjAcct.bankAccountId||null,
           bankAccountName: cdjAcct.bankAccountName||null,
           addedBy:    ctx.currentUser.uid,
@@ -2056,12 +2081,12 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       saveBtnId: 'save-rec-btn',
       afterOpen: (ctx) => { Drive.renderUploadArea('rec-file-area', f => ctx.setFile(f), {label:'Attach receipt scan / photo',dept:'Finance',subfolder:'Records'}); },
       buildDoc: (ctx) => ({
-        date:         document.getElementById('rec-date').value,
-        type:         document.getElementById('rec-type').value,
-        description:  document.getElementById('rec-desc').value.trim(),
-        amount:       parseFloat(document.getElementById('rec-amount').value)||0,
-        party:        document.getElementById('rec-party').value.trim(),
-        notes:        document.getElementById('rec-notes').value.trim(),
+        date:         ctx.$('rec-date').value,
+        type:         ctx.$('rec-type').value,
+        description:  ctx.$('rec-desc').value.trim(),
+        amount:       parseFloat(ctx.$('rec-amount').value)||0,
+        party:        ctx.$('rec-party').value.trim(),
+        notes:        ctx.$('rec-notes').value.trim(),
         fileUrl:      ctx.getFile()?.url||null, fileName: ctx.getFile()?.name||null,
         encodedBy:    ctx.currentUser.uid,
         encodedByName:userProfile?.displayName||ctx.currentUser.email,
@@ -2088,7 +2113,7 @@ function openCADataRepairModal(onDone) {
     const listRows = (arr, cols) => arr.length
       ? arr.map(r => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(r.userName)} — ${cols(r)}</div>`).join('')
       : `<div style="font-size:12px;color:var(--text-muted)">None found.</div>`;
-    openPage(`${emojiIcon('🔄',16)} Cash Advance Data Repair — Dry Run`, `
+    const _panel = openPage(`${emojiIcon('🔄',16)} Cash Advance Data Repair — Dry Run`, `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Scanned every cash_advances record. Nothing has been written yet.</p>
       <div style="margin-bottom:14px"><strong>Status 'active' → 'approved'</strong> (${report.normalizedActive.length})${listRows(report.normalizedActive, r=>`will be normalized`)}</div>
       <div style="margin-bottom:14px"><strong>Interest restored</strong> (${report.interestRestored.length})${listRows(report.interestRestored, r=>`₱${fmt(r.from)} → ₱${fmt(r.to)}`)}</div>
@@ -2097,7 +2122,9 @@ function openCADataRepairModal(onDone) {
     `, total
       ? `<button class="btn-primary" id="ca-repair-apply-btn">Apply ${total} Fix${total>1?'es':''}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
       : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-    document.getElementById('ca-repair-apply-btn')?.addEventListener('click', async () => {
+    // ⚠ SCOPED TO THIS PANEL, NOT document — see financeEditModal's note at the
+    // top of this file. This button writes to live cash-advance records.
+    _panel.querySelector('#ca-repair-apply-btn')?.addEventListener('click', async () => {
       if (!(await confirmDialog({message:`Apply ${total} cash-advance data fix(es)? This writes to live records.`}))) return;
       await window.runCADataRepair(false);
       closeModal();

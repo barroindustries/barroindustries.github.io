@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.121';
+window.APP_VERSION = '14.0.122';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -15,6 +15,33 @@ window.APP_VERSION = '14.0.121';
 // regardless of the device's own timezone — so the app is correct even when an
 // admin opens it while travelling abroad.
 window.BIZ_TZ = 'Asia/Manila';
+// ── window.liveEl(id) — resolve an id to the LIVE panel, not the dying one ──
+// openPage appends each page panel to <body> and leaves a CLOSING panel in the
+// DOM for ~300ms so the slide-out can play. Inside that window two panels carry
+// the same ids, and document.getElementById() returns the FIRST match in
+// DOCUMENT ORDER — which is the OLD one. Handlers then bind to controls nobody
+// can see; worse, a form submit in that window reads the PREVIOUS record's
+// values and writes them onto the current one. (President's report 2026-08-10:
+// the CRM Edit button "needed multiple attempts", then navigated to Departments.)
+//
+// Panels are APPENDED, so the newest is always LAST in document order —
+// verified in-browser: with two #dup elements, all[0] is inside the dying panel
+// and all[all.length-1] is inside the live one. Taking the last match is
+// therefore the correct inverse of getElementById's first-wins rule.
+//
+// This exists for the SHARED HELPERS that take an id STRING and cannot be given
+// a panel by their caller (Drive.renderUploadArea, readVatField,
+// wireBirOrButtons, renderComments). Ordinary screen code should NOT use this —
+// it should capture openPage's return and use panel.querySelector, which is
+// exact rather than merely usually-right.
+window.liveEl = function (id) {
+  if (!id) return null;
+  try {
+    const all = document.querySelectorAll('#' + (window.CSS && CSS.escape ? CSS.escape(id) : id));
+    return all.length ? all[all.length - 1] : null;
+  } catch (_) { return document.getElementById(id); }
+};
+
 window.bizDate = function(date) {
   // → "YYYY-MM-DD" in Manila time. Pass a Date to convert it, or omit for today.
   return new Intl.DateTimeFormat('en-CA', {

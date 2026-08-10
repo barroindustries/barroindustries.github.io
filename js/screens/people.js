@@ -458,15 +458,22 @@ async function loadPosts(dept, pageSize) {
       const post    = postMap.get(id) || {};
       const oldTitle   = post.title || '';
       const oldContent = post.content || '';
-      openPage(`${emojiIcon('✎',16)} Edit Post`, `
+      const _panel = openPage(`${emojiIcon('✎',16)} Edit Post`, `
         <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" placeholder="Post title…"/></div>
         <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
       `, `<button class="btn-primary" id="save-post-edit-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('edit-post-title').value   = oldTitle;
-      document.getElementById('edit-post-content').value = oldContent;
-      document.getElementById('save-post-edit-btn').addEventListener('click', async () => {
-        const title   = document.getElementById('edit-post-title').value.trim();
-        const content = document.getElementById('edit-post-content').value.trim();
+      // ⚠ SCOPED TO THIS PANEL, NOT document.
+      // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+      // inside that window and two panels carry the same ids at once —
+      // document.getElementById() returns the FIRST in document order, which is
+      // the DYING one, so the handler binds to a button nobody can see and the
+      // visible button does nothing (and a save can read the PREVIOUS record's
+      // field values). Reported by the Corporate Secretary 2026-08-10.
+      _panel.querySelector('#edit-post-title').value   = oldTitle;
+      _panel.querySelector('#edit-post-content').value = oldContent;
+      _panel.querySelector('#save-post-edit-btn').addEventListener('click', async () => {
+        const title   = _panel.querySelector('#edit-post-title').value.trim();
+        const content = _panel.querySelector('#edit-post-content').value.trim();
         if (!content) { Notifs.showToast('Content required','error'); return; }
         await db.collection('posts').doc(id).update({
           title, content,
@@ -502,7 +509,7 @@ function openNewPostModal(publishDirectly) {
     ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
     : [];
   const _postDepts = Object.keys(window.DEPARTMENTS || {}).filter(d => !_postDeptBlocked.includes(d));
-  openPage(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
+  const _panel = openPage(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
     <div class="form-group"><label>Title (optional)</label><input id="post-title" placeholder="Post title…"/></div>
     <div class="form-group"><label>Content</label><textarea id="post-content" rows="5" placeholder="Write your message…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
     <div class="form-group"><label>Department</label>
@@ -517,13 +524,20 @@ function openNewPostModal(publishDirectly) {
   let uploadedFile = null;
   Drive.renderUploadArea('post-file-area', r => { uploadedFile = r; }, { label: 'Attach image or file', dept: 'posts', subfolder: 'attachments' });
 
-  document.getElementById('save-post-btn').addEventListener('click', async () => {
-    const content = document.getElementById('post-content').value.trim();
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+  // inside that window and two panels carry the same ids at once —
+  // document.getElementById() returns the FIRST in document order, which is
+  // the DYING one, so the handler binds to a button nobody can see and the
+  // visible button does nothing (and a save can read the PREVIOUS record's
+  // field values). Reported by the Corporate Secretary 2026-08-10.
+  _panel.querySelector('#save-post-btn').addEventListener('click', async () => {
+    const content = _panel.querySelector('#post-content').value.trim();
     if (!content) { Notifs.showToast('Write something first.', 'error'); return; }
-    const dept = document.getElementById('post-dept').value;
+    const dept = _panel.querySelector('#post-dept').value;
     const status = publishDirectly ? 'published' : 'pending';
     await db.collection('posts').add({
-      title:       document.getElementById('post-title').value.trim(),
+      title:       _panel.querySelector('#post-title').value.trim(),
       content,
       dept,
       status,
@@ -537,7 +551,7 @@ function openNewPostModal(publishDirectly) {
       createdAt:   firebase.firestore.FieldValue.serverTimestamp()
     });
     if (status === 'published') {
-      await Notifs.sendToAll({title:`📣 New Post`, body:`${userProfile.displayName||'Someone'} posted: ${document.getElementById('post-title').value.trim()||content.slice(0,40)}`, icon:'📣', type:'post'});
+      await Notifs.sendToAll({title:`📣 New Post`, body:`${userProfile.displayName||'Someone'} posted: ${_panel.querySelector('#post-title').value.trim()||content.slice(0,40)}`, icon:'📣', type:'post'});
     } else {
       await Notifs.sendToOwner({title:'New Post Awaiting Approval', body:`${userProfile.displayName} submitted a post for review.`, icon:'📋', type:'post_approval'});
     }
@@ -661,7 +675,7 @@ window.renderTeamTab = async function() {
 
   if (pres) {
     document.getElementById('invite-user-btn')?.addEventListener('click', () => {
-      openPage('Invite Team Member', `
+      const _panel = openPage('Invite Team Member', `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">They'll receive a password reset email to set their own password.</p>
         <div class="form-group"><label>Email</label><input id="inv-email" type="email" placeholder="employee@barroindustries.com"/></div>
         <div class="form-group"><label>Display Name</label><input id="inv-name" placeholder="Full name"/></div>
@@ -681,16 +695,23 @@ window.renderTeamTab = async function() {
         </div>
       `, `<button class="btn-primary" id="save-inv-btn">Send Invite</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       // Company field is only relevant for the Partner role — reveal it when picked.
-      const invRole = document.getElementById('inv-role');
+      // ⚠ SCOPED TO THIS PANEL, NOT document.
+      // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+      // inside that window and two panels carry the same ids at once —
+      // document.getElementById() returns the FIRST in document order, which is
+      // the DYING one, so the handler binds to a button nobody can see and the
+      // visible button does nothing (and a save can read the PREVIOUS record's
+      // field values). Reported by the Corporate Secretary 2026-08-10.
+      const invRole = _panel.querySelector('#inv-role');
       const syncCompany = () => {
-        const g = document.getElementById('inv-company-group');
+        const g = _panel.querySelector('#inv-company-group');
         if (g) g.style.display = (invRole.value === 'partner') ? 'block' : 'none';
       };
       invRole?.addEventListener('change', syncCompany); syncCompany();
-      document.getElementById('save-inv-btn').addEventListener('click', async () => {
-        const email = document.getElementById('inv-email').value.trim();
+      _panel.querySelector('#save-inv-btn').addEventListener('click', async () => {
+        const email = _panel.querySelector('#inv-email').value.trim();
         if (!email) { Notifs.showToast('Enter an email.','error'); return; }
-        const depts = [...document.querySelectorAll('.inv-dept-cb:checked')].map(cb=>cb.value);
+        const depts = [..._panel.querySelectorAll('.inv-dept-cb:checked')].map(cb=>cb.value);
         try {
           // Use a secondary app instance so the admin session is not replaced
           const secondaryApp = firebase.initializeApp(window.firebaseConfig, `invite-${Date.now()}`);
@@ -709,10 +730,10 @@ window.renderTeamTab = async function() {
           });
           await db.collection('users').doc(uid).set({
             uid, email,
-            displayName: document.getElementById('inv-name').value.trim() || email.split('@')[0],
-            phone: document.getElementById('inv-phone').value.trim(),
-            role:        document.getElementById('inv-role').value,
-            company:     document.getElementById('inv-company')?.value.trim() || '',
+            displayName: _panel.querySelector('#inv-name').value.trim() || email.split('@')[0],
+            phone: _panel.querySelector('#inv-phone').value.trim(),
+            role:        _panel.querySelector('#inv-role').value,
+            company:     _panel.querySelector('#inv-company')?.value.trim() || '',
             departments: depts, department: depts[0]||'',
             employeeId:  empId,
             photoUrl:'', startDate: window.bizDate(),
@@ -1019,12 +1040,19 @@ function openEomStandingsModal(standings, month) {
     ? `<button class="btn-secondary" disabled style="opacity:.6">${emojiIcon('✓',16)} Announced</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
     : `<button class="btn-primary" id="eom-announce-btn">${emojiIcon('📣',16)} Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
 
-  openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
+  const _panel = openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ranked by task KPI (50%), attendance (40%) and performance grade (10%). Revealed &amp; awarded on the 5th.</p>
     <div>${rows}</div>
   `, footer);
 
-  document.getElementById('eom-announce-btn')?.addEventListener('click', async () => {
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+  // inside that window and two panels carry the same ids at once —
+  // document.getElementById() returns the FIRST in document order, which is
+  // the DYING one, so the handler binds to a button nobody can see and the
+  // visible button does nothing (and a save can read the PREVIOUS record's
+  // field values). Reported by the Corporate Secretary 2026-08-10.
+  _panel.querySelector('#eom-announce-btn')?.addEventListener('click', async () => {
     try {
       await db.collection('settings').doc('employeeOfMonth').set({ announcedMonth: month }, { merge: true });
       if (winner.uid !== currentUser.uid && Notifs?.send) {
@@ -1562,7 +1590,7 @@ window.renderAttendancePage = async function() {
           const recKind = window.attRecKind ? window.attRecKind(cur) : null;
           const isLeaveDay = recKind === 'leave' || recKind === 'unpaid-leave';
           const curStatus = isLeaveDay ? 'leave' : (cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent');
-          openPage(`${emojiIcon('✎',16)} Attendance — ${date}`, `
+          const _panel = openPage(`${emojiIcon('✎',16)} Attendance — ${date}`, `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${escHtml(targetName)}</strong></p>
             <div class="form-group"><label>Status</label>
               <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
@@ -1582,10 +1610,17 @@ window.renderAttendancePage = async function() {
           // Option button toggle
           const colors = {present:'#30d158',half:'#ffaa00',absent:'#ff453a',leave:'#af52de'};
           const bgs    = {present:'rgba(48,209,88,.15)',half:'rgba(255,170,0,.15)',absent:'rgba(255,69,58,.12)',leave:'rgba(175,82,222,.15)'};
-          document.querySelectorAll('.att-status-opt').forEach(optBtn => {
+          // ⚠ SCOPED TO THIS PANEL, NOT document.
+          // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+          // inside that window and two panels carry the same ids at once —
+          // document.getElementById() returns the FIRST in document order, which is
+          // the DYING one, so the handler binds to a button nobody can see and the
+          // visible button does nothing (and a save can read the PREVIOUS record's
+          // field values). Reported by the Corporate Secretary 2026-08-10.
+          _panel.querySelectorAll('.att-status-opt').forEach(optBtn => {
             optBtn.addEventListener('click', () => {
-              document.getElementById('att-status-sel').value = optBtn.dataset.val;
-              document.querySelectorAll('.att-status-opt').forEach(b => {
+              _panel.querySelector('#att-status-sel').value = optBtn.dataset.val;
+              _panel.querySelectorAll('.att-status-opt').forEach(b => {
                 b.style.borderColor = 'var(--border)';
                 b.style.background = 'var(--surface)';
               });
@@ -1594,9 +1629,9 @@ window.renderAttendancePage = async function() {
             });
           });
 
-          document.getElementById('save-att-btn').addEventListener('click', async () => {
-            const status = document.getElementById('att-status-sel').value;
-            const note   = document.getElementById('att-note').value.trim();
+          _panel.querySelector('#save-att-btn').addEventListener('click', async () => {
+            const status = _panel.querySelector('#att-status-sel').value;
+            const note   = _panel.querySelector('#att-note').value.trim();
             const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
             const FV  = firebase.firestore.FieldValue;
             // Guard: converting an approved leave day into a worked/absent day needs
@@ -1741,7 +1776,7 @@ window.renderHolidaysAdmin = async function(container) {
   }
 
   function openHolidayModal(date, existing) {
-    openPage(date ? `${emojiIcon('✏️',16)} Edit Holiday` : '＋ Add Holiday', `
+    const _panel = openPage(date ? `${emojiIcon('✏️',16)} Edit Holiday` : '＋ Add Holiday', `
       <div class="form-group"><label>Date</label><input id="hol-date" type="date" value="${escHtml(date||`${year}-01-01`)}" ${date?'disabled':''}/></div>
       <div class="form-group"><label>Name</label><input id="hol-name" type="text" value="${escHtml(existing?.name||'')}" placeholder="e.g. Maundy Thursday"/></div>
       <div class="form-group"><label>Type</label>
@@ -1752,11 +1787,18 @@ window.renderHolidaysAdmin = async function(container) {
       </div>
       <div id="hol-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="hol-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('hol-save-btn').addEventListener('click', async () => {
-      const d = document.getElementById('hol-date').value || date;
-      const name = document.getElementById('hol-name').value.trim();
-      const type = document.getElementById('hol-type').value;
-      const err = document.getElementById('hol-err');
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a button nobody can see and the
+    // visible button does nothing (and a save can read the PREVIOUS record's
+    // field values). Reported by the Corporate Secretary 2026-08-10.
+    _panel.querySelector('#hol-save-btn').addEventListener('click', async () => {
+      const d = _panel.querySelector('#hol-date').value || date;
+      const name = _panel.querySelector('#hol-name').value.trim();
+      const type = _panel.querySelector('#hol-type').value;
+      const err = _panel.querySelector('#hol-err');
       if (!d || !name) { err.textContent = 'Date and name are required.'; err.classList.remove('hidden'); return; }
       closeModal();
       await saveOverride(d, { name, type });
@@ -2067,7 +2109,7 @@ async function openPresidentCashAdvanceModal(users) {
     `<option value="${u.id}">${escHtml(u.displayName||u.email)} (${u.role||'employee'})</option>`
   ).join('');
 
-  openPage('Record Cash Advance for Employee', `
+  const _panel = openPage('Record Cash Advance for Employee', `
     <div class="form-group">
       <label>Employee</label>
       <select id="pca-uid" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
@@ -2096,14 +2138,21 @@ async function openPresidentCashAdvanceModal(users) {
     </label>
   `, `<button class="btn-primary" id="save-pca-btn">Save Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  document.getElementById('save-pca-btn').addEventListener('click', () => window.busy(document.getElementById('save-pca-btn'), async () => {
-    const uid     = document.getElementById('pca-uid').value;
-    const amount  = parseFloat(document.getElementById('pca-amount').value)||0;
-    const monthly = parseFloat(document.getElementById('pca-monthly').value)||0;
-    const terms   = parseInt(document.getElementById('pca-terms').value)||1;
-    const date    = document.getElementById('pca-date').value;
-    const reason  = document.getElementById('pca-reason').value.trim();
-    const isPriv  = document.getElementById('pca-private').checked;
+  // ⚠ SCOPED TO THIS PANEL, NOT document.
+  // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+  // inside that window and two panels carry the same ids at once —
+  // document.getElementById() returns the FIRST in document order, which is
+  // the DYING one, so the handler binds to a button nobody can see and the
+  // visible button does nothing (and a save can read the PREVIOUS record's
+  // field values). Reported by the Corporate Secretary 2026-08-10.
+  _panel.querySelector('#save-pca-btn').addEventListener('click', () => window.busy(_panel.querySelector('#save-pca-btn'), async () => {
+    const uid     = _panel.querySelector('#pca-uid').value;
+    const amount  = parseFloat(_panel.querySelector('#pca-amount').value)||0;
+    const monthly = parseFloat(_panel.querySelector('#pca-monthly').value)||0;
+    const terms   = parseInt(_panel.querySelector('#pca-terms').value)||1;
+    const date    = _panel.querySelector('#pca-date').value;
+    const reason  = _panel.querySelector('#pca-reason').value.trim();
+    const isPriv  = _panel.querySelector('#pca-private').checked;
 
     if (!uid)    { Notifs.showToast('Please select an employee.','error'); return; }
     if (!amount) { Notifs.showToast('Enter a valid amount.','error'); return; }
@@ -2350,7 +2399,7 @@ async function openPresidentCashAdvanceModal(users) {
     const users = snap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(u => u.role !== 'partner')
       .sort((a,b) => (a.displayName||a.email||'').localeCompare(b.displayName||b.email||''));
-    openPage('＋ Adjust Balance', `
+    const _panel = openPage('＋ Adjust Balance', `
       <div class="form-group"><label>Employee</label>
         <select id="lv-grant-uid" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
           ${users.map(u=>`<option value="${u.id}">${esc(u.displayName||u.email||u.id)}</option>`).join('')}
@@ -2371,11 +2420,18 @@ async function openPresidentCashAdvanceModal(users) {
     // overwrite semantics are visible instead of a silent trap. The write itself
     // (.set with merge:true) is UNCHANGED — this only fixes what the admin sees
     // before they commit it.
-    const uidSel = document.getElementById('lv-grant-uid');
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a button nobody can see and the
+    // visible button does nothing (and a save can read the PREVIOUS record's
+    // field values). Reported by the Corporate Secretary 2026-08-10.
+    const uidSel = _panel.querySelector('#lv-grant-uid');
     const loadCurrent = async () => {
       const uid = uidSel.value;
-      const hint = document.getElementById('lv-grant-current');
-      const vacInput = document.getElementById('lv-grant-vac'), sickInput = document.getElementById('lv-grant-sick');
+      const hint = _panel.querySelector('#lv-grant-current');
+      const vacInput = _panel.querySelector('#lv-grant-vac'), sickInput = _panel.querySelector('#lv-grant-sick');
       if (!uid) { hint.textContent = ''; return; }
       hint.textContent = 'Loading current balance…';
       try {
@@ -2388,11 +2444,11 @@ async function openPresidentCashAdvanceModal(users) {
     };
     uidSel.addEventListener('change', loadCurrent);
     loadCurrent();
-    document.getElementById('lv-grant-save').addEventListener('click', async ()=>{
-      const uid = document.getElementById('lv-grant-uid').value;
-      const vacation = Math.max(0, Number(document.getElementById('lv-grant-vac').value)||0);
-      const sick = Math.max(0, Number(document.getElementById('lv-grant-sick').value)||0);
-      const err = document.getElementById('lv-grant-err');
+    _panel.querySelector('#lv-grant-save').addEventListener('click', async ()=>{
+      const uid = _panel.querySelector('#lv-grant-uid').value;
+      const vacation = Math.max(0, Number(_panel.querySelector('#lv-grant-vac').value)||0);
+      const sick = Math.max(0, Number(_panel.querySelector('#lv-grant-sick').value)||0);
+      const err = _panel.querySelector('#lv-grant-err');
       if(!uid){ err.textContent='Pick an employee.'; err.classList.remove('hidden'); return; }
       try{
         await db.collection('leave_balances').doc(uid).set(
@@ -2405,7 +2461,7 @@ async function openPresidentCashAdvanceModal(users) {
 
   function openLeaveModal(bal, c){
     const today = window.bizDate?window.bizDate():new Date().toISOString().slice(0,10);
-    openPage(`${emojiIcon('🌴',16)} Request Leave`, `
+    const _panel = openPage(`${emojiIcon('🌴',16)} Request Leave`, `
       <div class="form-group"><label>Leave Type</label>
         <select id="lv-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
           ${LEAVE_TYPES.map(t=>`<option value="${t.id}">${t.icon} ${t.label}${t.drawsBalance?` (${bal[t.id]||0} left)`:''}</option>`).join('')}
@@ -2419,14 +2475,21 @@ async function openPresidentCashAdvanceModal(users) {
       <div class="form-group"><label>Reason</label><textarea id="lv-reason" rows="2" placeholder="Brief reason"></textarea></div>
       <div id="lv-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="lv-save">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    const upd = ()=>{ const d=leaveWorkingDays(document.getElementById('lv-start').value, document.getElementById('lv-end').value); document.getElementById('lv-days-hint').textContent=`${d} working day${d!==1?'s':''} (excl. Sundays & holidays)`; };
-    document.getElementById('lv-start').addEventListener('change',upd);
-    document.getElementById('lv-end').addEventListener('change',upd);
-    document.getElementById('lv-save').addEventListener('click', async ()=>{
-      const type=document.getElementById('lv-type').value;
-      const startDate=document.getElementById('lv-start').value, endDate=document.getElementById('lv-end').value;
-      const reason=document.getElementById('lv-reason').value.trim();
-      const err=document.getElementById('lv-err');
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a button nobody can see and the
+    // visible button does nothing (and a save can read the PREVIOUS record's
+    // field values). Reported by the Corporate Secretary 2026-08-10.
+    const upd = ()=>{ const d=leaveWorkingDays(_panel.querySelector('#lv-start').value, _panel.querySelector('#lv-end').value); _panel.querySelector('#lv-days-hint').textContent=`${d} working day${d!==1?'s':''} (excl. Sundays & holidays)`; };
+    _panel.querySelector('#lv-start').addEventListener('change',upd);
+    _panel.querySelector('#lv-end').addEventListener('change',upd);
+    _panel.querySelector('#lv-save').addEventListener('click', async ()=>{
+      const type=_panel.querySelector('#lv-type').value;
+      const startDate=_panel.querySelector('#lv-start').value, endDate=_panel.querySelector('#lv-end').value;
+      const reason=_panel.querySelector('#lv-reason').value.trim();
+      const err=_panel.querySelector('#lv-err');
       const days=leaveWorkingDays(startDate,endDate);
       if(!startDate||!endDate||days<=0){ err.textContent='Pick a valid date range.'; err.classList.remove('hidden'); return; }
       const lt=leaveType(type);

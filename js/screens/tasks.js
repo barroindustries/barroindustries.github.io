@@ -878,9 +878,26 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
 
+  // SCOPED LOOKUPS — do NOT use document.getElementById below. Same rule (and
+  // the same reproduced defect) as openEditTaskModal/openAddTaskModal further
+  // down: openPage appends a NEW panel per call, keeps buried ones in the DOM
+  // as .page-under, and defers teardown removal by 300ms — so open task A,
+  // close it, open task B inside that window and BOTH panels carry #cs-input,
+  // #status-sel, #pres-score at once. A document-wide lookup returns the FIRST
+  // in document order, i.e. the DYING panel: the handler binds to a control
+  // nobody can see (the visible button does nothing — the Corporate Secretary's
+  // "takes several taps"), and worse, a save that fires in that window READS
+  // TASK A'S FIELD VALUES AND WRITES THEM ONTO TASK B. `panel` is the element
+  // openPage handed back for THIS task, so every lookup here goes through it.
+  // Every id below is emitted by this function's own headerRightHTML/bodyHTML
+  // (or by followUpCardInner, inside #fu-section) — all of it inside `panel`.
+  // The one deliberate exception is updateCardFollowUpBadge(), which targets
+  // the task CARD in the list behind the panel and stays document-wide.
+  const $p = (id) => panel.querySelector('#' + id);
+
   // Current Standing save
-  document.getElementById('cs-save-btn')?.addEventListener('click', async () => {
-    const val = document.getElementById('cs-input').value.trim();
+  $p('cs-save-btn')?.addEventListener('click', async () => {
+    const val = $p('cs-input').value.trim();
     const uSnap = await db.collection('users').doc(currentUser.uid).get();
     const actorName = uSnap.exists ? uSnap.data().displayName : currentUser.email;
     await db.collection('tasks').doc(taskId).update({
@@ -901,14 +918,14 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // Load employees for designate
   if (isAdmin) {
     dbCachedGet('users', ()=>db.collection('users').get(), 60000).then(empSnap=>{
-      const sel=document.getElementById('reassign-sel'); if(!sel)return;
+      const sel=$p('reassign-sel'); if(!sel)return;
       const emps=empSnap.docs.map(d=>({id:d.id,...d.data()})).filter(e=>!t.assignedTo.includes(e.id)).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
       sel.innerHTML=`<option value="">— Select employee —</option>`+emps.map(e=>`<option value="${e.id}" data-name="${escHtml(e.displayName||e.email)}">${escHtml(e.displayName||e.email)}</option>`).join('');
     });
   }
 
-  document.getElementById('update-status-btn')?.addEventListener('click', async()=>{
-    const newStatus=document.getElementById('status-sel').value;
+  $p('update-status-btn')?.addEventListener('click', async()=>{
+    const newStatus=$p('status-sel').value;
     if (newStatus===t.status) { Notifs.showToast('Status unchanged','error'); return; }
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
@@ -927,7 +944,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  document.getElementById('submit-task-btn')?.addEventListener('click', async()=>{
+  $p('submit-task-btn')?.addEventListener('click', async()=>{
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     await db.collection('tasks').doc(taskId).update({status:'review',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
@@ -942,21 +959,21 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // history.back() involved), so there's no dismissTop()/popstate race to dodge
   // any more (see the deleted v13 Phase 105 workaround). Back from Edit reveals
   // this task detail exactly as the user left it.
-  document.getElementById('edit-task-btn')?.addEventListener('click',()=>{
+  $p('edit-task-btn')?.addEventListener('click',()=>{
     openEditTaskModal(taskId,t,currentUser,currentRole);
   });
 
-  document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
+  $p('del-task-btn')?.addEventListener('click', async()=>{
     if (!(await confirmDialog({message:'Delete this task?', danger:true}))) return;
     await db.collection('tasks').doc(taskId).delete();
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  document.getElementById('designate-btn')?.addEventListener('click', async()=>{
-    const sel=document.getElementById('reassign-sel');
+  $p('designate-btn')?.addEventListener('click', async()=>{
+    const sel=$p('reassign-sel');
     const newUid=sel.value; const newName=sel.options[sel.selectedIndex]?.dataset.name||'';
-    const note=document.getElementById('task-instruction')?.value.trim();
+    const note=$p('task-instruction')?.value.trim();
     if (!newUid) { Notifs.showToast('Select an employee','error'); return; }
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
@@ -983,7 +1000,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
       const fresh=await db.collection('tasks').doc(taskId).get();
       if(fresh.exists){ const ft=normTask(fresh.data(),taskId); t.followUps=ft.followUps; t.openFollowUpCount=ft.openFollowUpCount; }
     }catch(e){ console.warn('[followups] reload failed',e); }
-    const sec=document.getElementById('fu-section');
+    const sec=$p('fu-section');
     if(sec){ sec.innerHTML=followUpCardInner(t,fuFlags); bindFollowUps(); }
     updateCardFollowUpBadge(taskId, t.openFollowUpCount||0);
   }
@@ -991,9 +1008,9 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // Admin → assignee: record a follow-up request. Re-fetches first so a concurrent
   // follow-up isn't clobbered, and notifies against the freshest assignee set.
   async function onRequestFollowUp(){
-    const input=document.getElementById('fu-input');
+    const input=$p('fu-input');
     const msg=(input?.value||'').trim();
-    const btn=document.getElementById('fu-request-btn'); if(btn) btn.disabled=true;
+    const btn=$p('fu-request-btn'); if(btn) btn.disabled=true;
     try{
       const uSnap=await db.collection('users').doc(currentUser.uid).get();
       const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
@@ -1053,13 +1070,13 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   }
 
   function bindFollowUps(){
-    document.getElementById('fu-request-btn')?.addEventListener('click', onRequestFollowUp);
-    document.querySelectorAll('#fu-section .fu-addr-btn').forEach(b=>b.addEventListener('click', ()=>onAddressFollowUp(b.dataset.fu)));
+    $p('fu-request-btn')?.addEventListener('click', onRequestFollowUp);
+    panel.querySelectorAll('#fu-section .fu-addr-btn').forEach(b=>b.addEventListener('click', ()=>onAddressFollowUp(b.dataset.fu)));
   }
   bindFollowUps();
 
-  document.getElementById('save-score-btn')?.addEventListener('click', async()=>{
-    const score=parseFloat(document.getElementById('pres-score').value);
+  $p('save-score-btn')?.addEventListener('click', async()=>{
+    const score=parseFloat($p('pres-score').value);
     if (!score||score<1||score>10) { Notifs.showToast('Enter 1–10','error'); return; }
     await db.collection('tasks').doc(taskId).update({presidentScore:score});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
@@ -1460,12 +1477,16 @@ function paintSubDetail(panel, bodyEl, subId, snap, currentUser, currentRole) {
   window.lucide?.createIcons({ nodes: [bodyEl] });
 
   renderComments('submissions', subId, 'sub-comments-wrap', currentUser);
-  document.getElementById('approve-btn')?.addEventListener('click', async e => {
+  // SCOPED TO THIS PANEL — see the scoped-lookups note in paintTaskDetail. With
+  // a closing submission panel still in the DOM, document.getElementById would
+  // wire Approve/Reject into the dying one (the id is the same in both), so the
+  // visible buttons do nothing until the old panel finally leaves.
+  panel.querySelector('#approve-btn')?.addEventListener('click', async e => {
     await db.collection('submissions').doc(e.currentTarget.dataset.id).update({status:'approved'});
     if (s.createdBy) await Notifs.send(s.createdBy, {title:'✅ Submission Approved',body:`"${s.title}" was approved.`,icon:'✅',type:'submission_reviewed',link:'submissions'});
     closeModal(); renderSubmissions(currentUser, currentRole, '');
   });
-  document.getElementById('reject-btn')?.addEventListener('click', async e => {
+  panel.querySelector('#reject-btn')?.addEventListener('click', async e => {
     await db.collection('submissions').doc(e.currentTarget.dataset.id).update({status:'rejected'});
     if (s.createdBy) await Notifs.send(s.createdBy, {title:'❌ Submission Rejected',body:`"${s.title}" was rejected.`,icon:'❌',type:'submission_reviewed',link:'submissions'});
     closeModal(); renderSubmissions(currentUser, currentRole, '');
@@ -1473,7 +1494,7 @@ function paintSubDetail(panel, bodyEl, subId, snap, currentUser, currentRole) {
 }
 
 function openAddSubModal(currentUser) {
-  openPage('New Submission', `
+  const _panel = openPage('New Submission', `
     <div class="form-group"><label>Title</label><input id="s-title" placeholder="Submission title"/></div>
     <div class="form-group"><label>Type</label>
       <select id="s-type">
@@ -1489,13 +1510,18 @@ function openAddSubModal(currentUser) {
   let uploadedFile = null;
   Drive.renderUploadArea('sub-file-upload', (result) => { uploadedFile = result; }, { label:'Attach a file or link (optional)', accept:'*' });
 
-  document.getElementById('create-sub-btn').addEventListener('click', async () => {
+  // SCOPED TO THIS PANEL — see the scoped-lookups note in paintTaskDetail. Two
+  // New Submission panels can overlap for ~300ms; a document-wide lookup binds
+  // Submit to the dead one, and once it does fire it reads the ABANDONED
+  // draft's title/type/details and files THOSE instead of what the user typed.
+  const $s = (id) => _panel.querySelector('#' + id);
+  $s('create-sub-btn').addEventListener('click', async () => {
     const snap = await db.collection('users').doc(currentUser.uid).get();
     const name = snap.exists ? snap.data().displayName : currentUser.email;
     await db.collection('submissions').add({
-      title:           document.getElementById('s-title').value.trim(),
-      type:            document.getElementById('s-type').value,
-      description:     document.getElementById('s-desc').value.trim(),
+      title:           $s('s-title').value.trim(),
+      type:            $s('s-type').value,
+      description:     $s('s-desc').value.trim(),
       status:          'pending',
       createdBy:       currentUser.uid,
       submittedByName: name,
@@ -1505,7 +1531,7 @@ function openAddSubModal(currentUser) {
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
     // Notify owner
-    await Notifs.sendToOwner({ title:'📋 New Submission', body:`${name} submitted: "${document.getElementById('s-title').value.trim()}"`, icon:'📋', type:'submission_new', link:'submissions' });
+    await Notifs.sendToOwner({ title:'📋 New Submission', body:`${name} submitted: "${$s('s-title').value.trim()}"`, icon:'📋', type:'submission_new', link:'submissions' });
     closeModal();
     Notifs.success('Submission sent!');
     renderSubmissions(currentUser, window.currentRole || '', (window.currentDepts||[])[0] || '');

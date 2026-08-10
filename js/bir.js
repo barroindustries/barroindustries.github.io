@@ -54,7 +54,11 @@ window.vatFieldHTML = function (id, def) {
     </select></div>`;
 };
 window.readVatField = function (id, amount) {
-  const t = document.getElementById(id)?.value || 'exempt';
+  // MONEY PATH — liveEl, not getElementById. This is read inside a save
+  // handler, so during openPage's teardown window it was taking the PREVIOUS
+  // entry's VAT treatment and booking it against THIS ledger row. See
+  // window.liveEl (js/config.js).
+  const t = (window.liveEl ? window.liveEl(id) : document.getElementById(id))?.value || 'exempt';
   return { vatTreatment: t, inputVat: t === 'exempt' ? 0 : window.vatSplit(amount || 0, 'inclusive').vat };
 };
 
@@ -107,7 +111,9 @@ window.wireBirOrButtons = function (scope) {
     btn.addEventListener('click', async () => {
       try {
         const serial = await window.nextSerialInRange(btn.dataset.series);
-        const input = document.getElementById(btn.dataset.field);
+        // MONEY PATH — a minted OR number written into the dying panel is a
+        // serial burned against a receipt nobody can see. See window.liveEl.
+        const input = (window.liveEl ? window.liveEl(btn.dataset.field) : document.getElementById(btn.dataset.field));
         if (input) input.value = serial;
       } catch (err) {
         if (window.Notifs && window.Notifs.showToast) window.Notifs.showToast(err.message || 'Could not mint serial', 'error');

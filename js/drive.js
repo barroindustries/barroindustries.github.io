@@ -298,7 +298,11 @@ window.Drive = (() => {
   function renderUploadArea(containerId, onUpload, {
     accept = '*', label = 'Attach File', dept = 'General', subfolder = '', multiple = false, allowLinks = true
   } = {}) {
-    const container = document.getElementById(containerId);
+    // liveEl, not getElementById: this helper is handed an id STRING, so the
+    // caller cannot scope it. Inside openPage's ~300ms teardown the upload
+    // widget was being mounted into the DYING panel and the visible form showed
+    // no file chooser at all. See window.liveEl (js/config.js).
+    const container = (window.liveEl ? window.liveEl(containerId) : document.getElementById(containerId));
     if (!container) return;
 
     container.innerHTML = `
