@@ -1008,6 +1008,10 @@ async function loadUserProfile(user) {
     // Expose state on window so inline onclick handlers in templates can access them
     window.currentUser  = currentUser;
     window.currentRole  = currentRole;
+    // Merge any confirmed government rates over the placeholder table. Best
+    // effort and never awaited into the boot path: a failed load leaves the
+    // placeholder, which keeps payroll BLOCKED — the safe direction.
+    window.loadStatutoryTables && window.loadStatutoryTables();
     window.currentDepts = currentDepts;
     window.userProfile  = userProfile;
     applyUserUI();

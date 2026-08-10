@@ -243,7 +243,7 @@ const FINANCE_GROUPS = [
   // chip row but is NOT gone as a route: see FINANCE_LEGACY_KEYS below.
   { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','Cash Advances','SSS / Gov'] },
   { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
-  { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR'] },
+  { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR','Gov Rates'] },
   { key:'Records',               label:'Records',               members:['Records','Tasks'] },
 ];
 const FINANCE_KEY_TO_GROUP = {};
@@ -403,6 +403,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;
+    case 'Gov Rates':    await window.renderStatutoryRatesTab(content, currentUser, currentRole); break;
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
     case 'Bank Accounts': await window.renderBankAccounts(content); break;
     case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;

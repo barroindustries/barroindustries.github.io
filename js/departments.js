@@ -2143,10 +2143,22 @@ window.disbursePayRun = async function(month, opts = {}) {
   const _statTable = window.STATUTORY && window.STATUTORY[_payYear];
   if (!_statTable || _statTable.verified !== true) {
     await window.confirmDialog({
-      title: 'Disbursement blocked',
-      message: 'Statutory tables are unverified placeholder rates. Disbursing is blocked until the accountant-verified tables are loaded.',
-      confirmLabel: 'Understood', cancelLabel: 'Understood', danger: true
-    });
+      title: 'Payroll cannot be released yet',
+      // Was: two buttons both reading "Understood", naming no way forward and
+      // nobody who could provide one. The gate is right — paying real wages on
+      // placeholder government rates, and remitting the wrong amounts, is worse
+      // than paying late — but a safety gate with no route out is a dead end,
+      // and this one blocked the Office Team payroll all year. There is now a
+      // screen that satisfies it without a code deploy.
+      html: true,
+      message: 'The SSS, PhilHealth, Pag-IBIG and withholding figures for <strong>' + _payYear
+        + '</strong> are still the placeholders the app ships with. Paying on them would pay the wrong amounts '
+        + 'and remit the wrong amounts to the government, so releasing is blocked.<br><br>'
+        + '<strong>To unblock it:</strong> whoever files your BIR returns confirms the ' + _payYear
+        + ' rates in <strong>Finance → Taxes &amp; BIR → Gov Rates</strong>. It takes a few minutes and needs no update to the app.',
+      confirmLabel: 'Open Gov Rates', cancelLabel: 'Not now', danger: true
+    }) && typeof window.renderFinance === 'function'
+      && window.renderFinance(window.currentUser, window.currentRole, 'Gov Rates');
     return;
   }
   const runRef = db.collection('pay_runs').doc(month);
@@ -2177,7 +2189,34 @@ window.disbursePayRun = async function(month, opts = {}) {
     }
     throw new Error(`This run is not in Verified state (currently: ${d.state||'draft'}).`);
   });
-  const lines = run.lines || [];
+  // ⚠ RE-FILTER AGAINST THIS MONTH'S EXCLUSIONS BEFORE PAYING ANYONE.
+  // The lines were FROZEN at Compute. firestore.rules deliberately permits an
+  // exclusion write while a run is 'verified', so this sequence is legal and was
+  // silently wrong:
+  //     Compute -> Verify -> remove someone -> Disburse
+  // The person still had a frozen line, so they got a payslip, their cash
+  // advance was collected and their expense leg posted — the removal ignored
+  // entirely, because nothing between Compute and payment re-read `excluded`.
+  //
+  // Identical to the defect found and fixed on the WEEKLY side (2026-08-10,
+  // js/payroll-weekly.js); this is its monthly twin, and it exists because the
+  // two runs were written independently — which is exactly what the owner's
+  // unify ruling removes.
+  //
+  // It has been LATENT only because disbursement is blocked by the unverified
+  // statutory tables (see the gate below). Fixed BEFORE that gate can open, so
+  // loading verified rates cannot expose it.
+  const _runExcl = (run && run.excluded) || {};
+  const _isExcl = (uid) => {
+    const e = (typeof _runExcl.get === 'function') ? _runExcl.get(uid) : _runExcl[uid];
+    return !!e;
+  };
+  const _allLines = run.lines || [];
+  const lines = _allLines.filter(l => l && !_isExcl(l.uid || l.userId || l.id));
+  const _heldBack = _allLines.length - lines.length;
+  if (_heldBack > 0) {
+    console.info('[payroll] ' + _heldBack + ' line(s) held back — removed from ' + month + ' after this run was computed.');
+  }
   if (!lines.length) { Notifs.showToast('This run has no computed lines.','error'); return; }
 
   // Checked once, before any write — a closed month can't be disbursed (v12 WS12).

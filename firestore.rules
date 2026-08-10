@@ -1353,6 +1353,28 @@ service cloud.firestore {
     // This block ships BEFORE the screen that reads it, on purpose. Every denied
     // read in this app collapses into an empty list, and on a pay run an empty
     // list is indistinguishable from "nobody is owed anything".
+    // ── STATUTORY RATE TABLES ─────────────────────────────────────────────
+    // statutory_tables/{year} — the SSS / PhilHealth / Pag-IBIG / withholding
+    // figures every payslip is computed from, and the `verified` flag that
+    // disbursePayRun blocks on.
+    //
+    // Added 2026-08-10 because the flag lived in a source file and nothing in
+    // the app could write it, so the Office Team payroll could not be disbursed
+    // at all — the accountant who knows the real rates cannot deploy code.
+    //
+    // WRITE IS PRESIDENT-ONLY. This one document decides what every employee is
+    // paid and what is remitted to the government; it is the highest-leverage
+    // record in the app. Read is the money tier, because the payslip screens
+    // need it to compute at all.
+    match /statutory_tables/{year} {
+      allow read: if isAuth() && isMoneyAdmin();
+      allow create, update: if isAuth() && isPresident()
+        && request.resource.data.get('verifiedBy', '') == request.auth.uid
+        && request.resource.data.get('source', '') is string
+        && request.resource.data.get('source', '') != '';
+      allow delete: if false;   // a superseded year stays, for the audit trail
+    }
+
     match /pay_weeks/{weekId} {
       allow read: if isAuth() && isMoneyAdmin();
       allow create: if isAuth() && isMoneyAdmin() &&

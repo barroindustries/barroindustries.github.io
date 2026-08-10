@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.143 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.144 · Barro Industries</div>
   </div>
 </div>
 
@@ -617,6 +617,11 @@
      way, and js/screens/hr.js/js/app.js reach forward into this file's
      window.renderFinance/financeEditModal identically. -->
 <script defer src="js/screens/finance.js"></script>
+<!-- Government contribution rates. Loads after finance.js, which routes to it.
+     This is the screen that unblocks payroll: the verified flag lived in
+     js/statutory-tables.js and nothing could write it, so disbursement was
+     impossible without a code deploy. -->
+<script defer src="js/screens/statutory-rates.js"></script>
 <!-- v14 Wave 7 Pass 8 — Approvals screen (owner/oversight approval
      queue), split verbatim out of js/departments.js. Re-checked for
      clean extraction now that js/svc-approvals.js (v13 Phase 35) already

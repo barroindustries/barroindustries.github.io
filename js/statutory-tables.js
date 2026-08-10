@@ -41,6 +41,52 @@ window.STATUTORY = {
   },
 };
 
+/* ── LOADING VERIFIED RATES WITHOUT A CODE DEPLOY ──────────────────────────
+   Owner, 2026-08-10: "will need to use payroll tomorrow".
+
+   The table above is PLACEHOLDER and `verified:false`, and disbursePayRun
+   blocks on exactly that (js/departments.js). The gate is correct — paying real
+   wages on invented SSS/PhilHealth/Pag-IBIG rates would be far worse than not
+   paying on time. But until now the ONLY way to satisfy it was to edit this
+   source file and deploy, which the person who actually knows the rates (an
+   accountant) cannot do. A safety gate with no route out is a dead end, and it
+   has blocked the Office Team payroll all year.
+
+   So the rates may now come from Firestore — statutory_tables/{year} — entered
+   and attested in the app by the President. This function merges that doc OVER
+   the placeholder above, per section, so a partially-entered year still gets
+   the fields it does have. `verified` is taken ONLY from the stored doc: the
+   hardcoded default can never mark itself verified.
+
+   Called once at boot (js/app.js, after auth). Failing to load leaves the
+   placeholder in place, i.e. still blocked — which is the safe direction. */
+window.loadStatutoryTables = async function () {
+  try {
+    const snap = await db.collection('statutory_tables').get();
+    snap.forEach((d) => {
+      const year = String(d.id);
+      const t = d.data() || {};
+      const base = window.STATUTORY[year] || {};
+      window.STATUTORY[year] = {
+        ...base,
+        ...t,
+        sss:        { ...(base.sss || {}),        ...(t.sss || {}) },
+        philhealth: { ...(base.philhealth || {}), ...(t.philhealth || {}) },
+        pagibig:    { ...(base.pagibig || {}),    ...(t.pagibig || {}) },
+        withholdingMonthly: Array.isArray(t.withholdingMonthly) && t.withholdingMonthly.length
+          ? t.withholdingMonthly : base.withholdingMonthly,
+        // Only a STORED table can be verified. A missing field reads false.
+        verified: t.verified === true
+      };
+    });
+    return true;
+  } catch (_) {
+    // Denied or offline: keep the placeholder, stay blocked. Never assume
+    // verified on a failed read — that is the one direction that pays wrong.
+    return false;
+  }
+};
+
 function round2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
 
 // computeStatutory({grossPay, year}) -> { ee:{sss,philhealth,pagibig,tax}, er:{sss,philhealth,pagibig}, unverified }
