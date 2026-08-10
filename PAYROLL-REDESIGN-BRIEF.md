@@ -37,6 +37,34 @@ Today there is no handoff at all, only an overlap.
 screens he knows will move, explicitly to stop us patching the same thing every
 week.
 
+## The governing principle
+
+> "dont make it so confusing to process payroll"
+
+This outranks every other goal in this document. A redesign that is more correct,
+more flexible and more unified but still takes a paragraph to explain has failed.
+
+**The test.** Someone who has never seen the screen should be able to pay the
+crew without anyone telling them what a step means. Not "with training" — on
+sight.
+
+**What that forbids.** Adding a step to solve a problem. Every capability the
+owner asked for — corrections after payment, off-cycle pay, one-off amounts,
+holding one person — must appear as something you do TO A PERSON ON THE ROSTER,
+not as another mode, another screen or another button in a strip. Flexibility
+that arrives as more surface area is the disease, not the cure.
+
+**Specifically, the step count must go DOWN.** Today it is Compute -> Verify ->
+Disburse, three deliberate actions with no plain-English meaning, on two separate
+tabs, reachable through two departments. If the redesign does not end with fewer
+things to understand than that, it is not the redesign he asked for. The three
+steps exist for real reasons — a frozen line nobody can quietly edit, a review
+before money moves, a lock so a double press cannot double pay — and those
+reasons must survive. But they should be things the SYSTEM does, surfaced as one
+obvious action and one obvious safeguard, not three chores handed to a person.
+
+---
+
 ## The keystone ruling — UNIFY THEM
 
 > "unify it as well, treat disbursement of office and operations the same, the
@@ -90,6 +118,43 @@ period. Unified does not mean "pay everyone in one click regardless of cycle" �
 it means the weekly run and the monthly run are THE SAME SCREEN doing the same
 things, with the period picker choosing which period you are paying. If that is
 not what was meant, it needs saying before the build starts.
+
+---
+
+## Mobile is a requirement, not a tier
+
+> "make sure its mobile usable, no data gets cut or hidden"
+
+Two separate demands, and the second is the strict one.
+
+**Usable on a phone.** Payroll gets opened on a phone as often as a laptop. Every
+action in the flow must be completable at 375px — not merely visible.
+
+**NO DATA CUT OR HIDDEN.** This rules out three things the app currently does:
+
+1. **Horizontal scroll that clips columns.** A roster has ~11 figures per worker
+   (days, hours, OT, travel, earnings, allowances, other deductions, statutory,
+   cash advance, net). They do not fit 375px in a table, and a table that scrolls
+   sideways hides the net pay behind a swipe nobody discovers.
+2. **The `table-cards` expand/collapse pattern.** It hides every cell marked
+   `tc-detail` behind a tap. That is right for a directory and WRONG here: on a
+   pay roster a hidden deduction is the definition of data hidden. The weekly
+   screen built today uses exactly this pattern and therefore fails this rule.
+3. **Truncation.** No ellipsis on a name or a figure. A shortened peso amount is
+   a wrong peso amount to whoever is reading it.
+
+**What that forces.** On a phone the roster cannot be a table at all. It has to
+be one CARD PER WORKER showing every component at once — which is fine, because
+a worker's pay is about eight short label/value pairs, and a card can hold that
+comfortably at 375px without a single hidden field. The table shape returns on a
+wide screen where the columns genuinely fit.
+
+**Verification standard for this work.** "Looks fine on my machine" is not
+evidence. Every payroll screen ships only after a measured check at 375px:
+`document.documentElement.scrollWidth <= innerWidth` (no page-level horizontal
+scroll), zero elements with `text-overflow: ellipsis` in the roster, and every
+figure present in the accessibility tree without a tap. Those are the same
+measurements that caught the calendar chip and the sticky payslip bar today.
 
 ---
 
