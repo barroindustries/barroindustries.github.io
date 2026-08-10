@@ -37,6 +37,62 @@ Today there is no handoff at all, only an overlap.
 screens he knows will move, explicitly to stop us patching the same thing every
 week.
 
+## The keystone ruling — UNIFY THEM
+
+> "unify it as well, treat disbursement of office and operations the same, the
+> difference is just the system of computing their pay"
+
+This is the answer to the two-tab complaint, and it is a better model than the
+one currently built. Stated precisely:
+
+**ONE payroll. ONE roster. ONE Compute. ONE release. ONE payslip pipeline. ONE
+ledger posting. `payClass` selects a COMPUTE STRATEGY for a line — and nothing
+else.**
+
+Everything downstream of the number is identical for both teams:
+who is in the run, who is held out and why, the review, the release, the
+payslip, the receipt, the cash-advance collection, the expense leg, the audit
+trail. None of that has any business knowing whether someone is paid monthly or
+weekly.
+
+What legitimately differs is ONLY the arithmetic that produces one line:
+
+| | Office Team | Operations Team |
+|---|---|---|
+| Basis | monthly salary (+ KPI) | hours from punches |
+| Rate | salary / period | hourly, or daily ÷ 8 |
+| Extras | allowances | overtime at plain rate, travel at half |
+| Absence | leave rules | no clock-in = absent unless overridden with a reason |
+| Statutory | monthly | monthly, on the last pay week of the month |
+
+Both already exist and are frozen and tested — `computePayLine` and
+`computeWeeklyLine` in `js/money-core.js`, 257 pinned tests. **The maths is not
+what is wrong.** The redesign puts one screen and one release in front of the
+two of them instead of two of everything.
+
+### What this dissolves
+
+- The two-tab split disappears. You open Payroll, you pick a period, you see
+  everyone due in it.
+- Two state machines (`pay_runs` and `pay_weeks`, built two days apart) collapse
+  toward one shape, so a fix to release, exclusion or receipts lands once
+  instead of twice — the duplication that produced today's defects, where the
+  double-post guard was live on one side and dead on the other.
+- The double-pay guard gets simpler to reason about: one run per period, one
+  line per person, so "paid twice" becomes structurally harder rather than
+  something two separate guards must agree about.
+- "Which screen do I use" stops being a question.
+
+### The one honest complication
+
+A month and a week are different lengths, so a single run still covers ONE
+period. Unified does not mean "pay everyone in one click regardless of cycle" —
+it means the weekly run and the monthly run are THE SAME SCREEN doing the same
+things, with the period picker choosing which period you are paying. If that is
+not what was meant, it needs saying before the build starts.
+
+---
+
 ## Constraints that do not move
 
 These were ruled earlier and a redesign does not reopen them:
