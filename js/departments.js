@@ -3366,6 +3366,148 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
 }
 
 // Finance/admin view of incoming sales orders — record income to the ledger.
+/* ═══════════════════════════════════════════════════════════════════════
+   DELETE A SALES ORDER — the cascade, not a row delete.
+   Owner, 2026-08-10: "allow to delete a sales order, since i was just testing
+   the other one to see functons".
+
+   firestore.rules already permitted this (`sales_orders` delete = isPresident());
+   what was missing was a button and, more importantly, the cleanup behind it.
+   Creating one order writes to SIX places, so removing only the row would leave:
+     • income booked in the ledger against a sale that no longer exists
+     • a production job with no order behind it, still live in Production
+     • a quote stuck at status 'won', pointing at a dead salesOrderId
+     • a client parked at stage 'won'
+     • a PUBLIC order-tracking page that still resolves for anyone with the link
+
+   OWNER RULINGS (2026-08-10) encoded here:
+     1. The ledger entry is REVERSED, never deleted — an offsetting row so the
+        books net to zero and both halves stay visible to an auditor. Same shape
+        the cash-advance repayment reversal uses: opposite `kind` against the
+        SAME account, distinct ref.
+     2. FULL cascade, with a preview of exactly what will go, and type-to-confirm.
+     3. President only — matches the rule, so the UI never offers what the server
+        would refuse.
+
+   ORDER OF OPERATIONS IS DELIBERATE. The reversal posts FIRST: if the ledger
+   write fails (a closed period, a denied write), nothing has been destroyed yet
+   and the whole thing aborts. The public tracking page goes next, because it is
+   the only artefact exposed outside the company. The sales order itself goes
+   LAST, through window.financeDelete, so it remains the thing that "exists"
+   while its dependents are being unwound — a crash halfway leaves an order you
+   can see and retry, not orphans you cannot find.
+   ═══════════════════════════════════════════════════════════════════════ */
+window.deleteSalesOrder = async function(o, onDone) {
+  if (!o || !o.id) return;
+  if (!(typeof isRealPresident === 'function' && isRealPresident())) {
+    Notifs.showToast('Only the President can delete a sales order.', 'error'); return;
+  }
+
+  // ── Preview. Read, never assume: the row's `status` says 'recorded' but the
+  // ledger entry only exists if a payment was actually taken, so a ₱0 order can
+  // be 'recorded' with nothing in the books. Look before telling the owner what
+  // will happen.
+  const ledgerRef = `SO-${o.id}`;
+  let ledgerRow = null;
+  try {
+    const ls = await db.collection('ledger').where('refNumber', '==', ledgerRef).limit(1).get();
+    ledgerRow = ls.docs.length ? { id: ls.docs[0].id, ...ls.docs[0].data() } : null;
+  } catch (_) { ledgerRow = undefined; }   // undefined = could not check
+
+  // FAIL CLOSED. If the ledger could not be READ, we cannot know whether income
+  // was booked against this order, and deleting anyway risks leaving revenue on
+  // the books for a sale that no longer exists — silently, with the order gone
+  // and nothing left to trace it by. Warning and proceeding was the first cut
+  // here; that is informed consent for a cosmetic risk, not a money one. Every
+  // other guard in this app that touches money or a boundary refuses on an
+  // unreadable input (_assertShareTargetSafe, financeDelete), and this matches.
+  if (ledgerRow === undefined) {
+    Notifs.showToast('Could not check the ledger for this order, so nothing was deleted — try again in a moment.', 'error');
+    return;
+  }
+
+  const qColl = (typeof window.quoteCollectionFor === 'function')
+    ? window.quoteCollectionFor(o.company) : 'bk_quotes';
+  const bits = [];
+  bits.push(`the sales order itself (${o.clientName || 'unnamed'}, ${window.fmt ? window.fmt(o.contractAmount || 0) : ''})`);
+  if (ledgerRow)               bits.push(`a REVERSING ledger entry for ${window.fmt ? window.fmt(ledgerRow.amount || 0) : ''} — the original stays, the two net to zero`);
+  else if (ledgerRow === null) bits.push('no ledger entry — nothing was ever posted to the books for this order');
+  if (o.projectId)             bits.push('its production job, and that job\'s payment record');
+  if (o.quoteId)               bits.push('the quote rolls back from "won" so it can be used again');
+  if (o.trackingToken)         bits.push('the PUBLIC order-tracking page (the link stops working)');
+
+  // promptDialog, not confirmDialog: type-to-confirm is the house pattern for a
+  // destructive action you cannot undo (js/screens/ventures.js does the same for
+  // a venture brief), and confirmDialog has no such option. Note promptDialog
+  // ESCAPES its message, so this preview is plain text — no markup.
+  const phrase = String(o.clientName || '').trim() || 'DELETE';
+  const typed = await promptDialog({
+    title: 'Delete sales order',
+    message: 'This removes:\n\n• ' + bits.join('\n• ')
+      + '\n\nThere is no undo. To confirm, type the client name exactly: ' + phrase,
+    placeholder: phrase, required: true, confirmLabel: 'Delete order'
+  });
+  if (typed == null) return;                        // Back / Esc / Cancel
+  // Trimmed and case-insensitive: this gets typed on a phone, and the point is
+  // deliberate re-reading of the name, not typing accuracy.
+  if (String(typed).trim().toLowerCase() !== phrase.toLowerCase()) {
+    Notifs.showToast(`Nothing deleted — type "${phrase}" exactly to confirm.`, 'error');
+    return;
+  }
+
+  const who = (window.userProfile && userProfile.displayName) || (window.currentUser && currentUser.email) || '';
+  try {
+    // 1) REVERSE THE LEDGER FIRST — the only step that can fail for a reason
+    // outside our control (closed period). Abort before destroying anything.
+    if (ledgerRow) {
+      await window.Ledger.post({
+        ref: ledgerRef + '-REV',
+        date: (typeof today === 'function') ? today() : window.bizDate(),
+        kind: 'debit',                                  // opposite of the original credit
+        accountType: 'income', account: 'Sales Revenue', category: 'Sales Revenue',
+        description: `REVERSAL — sales order deleted (${o.clientName || ''}${o.quoteNumber ? ' ' + o.quoteNumber : ''}) by ${who}`,
+        amount: Number(ledgerRow.amount) || 0,
+        source: 'Finance', projectId: o.projectId || null,
+        extra: { reversalOf: ledgerRef, reversedBy: who }
+      });
+    }
+
+    // 2) the PUBLIC tracking page — the only thing visible outside the company
+    if (o.trackingToken) {
+      await db.collection('order_tracking').doc(o.trackingToken).delete().catch(() => {});
+    }
+
+    // 3) roll the quote back so it can be re-used
+    if (o.quoteId) {
+      await db.collection(qColl).doc(o.quoteId).update({
+        status: 'sent',
+        salesOrderId: firebase.firestore.FieldValue.delete(),
+        projectId:    firebase.firestore.FieldValue.delete()
+      }).catch(() => {});
+    }
+
+    // 4) the production job
+    if (o.projectId) {
+      await db.collection('job_projects').doc(o.projectId).delete().catch(() => {});
+    }
+
+    // 5) the sales order LAST, through the established delete path (President →
+    //    direct; anyone else → a request, though the guard above means only the
+    //    President reaches here at all).
+    await window.financeExecuteDelete('sales_orders', o.id);
+
+    window.logAudit && window.logAudit('delete', 'sales_order', o.id, {
+      client: o.clientName, contract: o.contractAmount,
+      ledgerReversed: !!ledgerRow, projectDeleted: !!o.projectId, trackingRevoked: !!o.trackingToken
+    });
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('sales_orders'); dbCacheInvalidate('clients'); }
+    Notifs.success('Sales order deleted.');
+    onDone && onDone();
+  } catch (e) {
+    Notifs.showToast('Delete failed: ' + (e.message || e.code || e) + ' — nothing further was removed.', 'error');
+  }
+};
+
 window.renderSalesOrders = async function(container){
   const c = container || deptContainer();
   // Anyone non-partner can SEE the list (read rule). Recording posts to the ledger,
@@ -3403,7 +3545,7 @@ window.renderSalesOrders = async function(container){
         <td class="tc-detail" data-label="Receipt">${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
         <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(o.createdByName||'')}</td>
         <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.autoRecorded?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px" title="Posted to the ledger automatically when the order was created">${emojiIcon('⚡',9)} auto</span>`:''}${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
-        <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}</td>
+        <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}${(typeof isRealPresident==='function'&&isRealPresident())?` <button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`:''}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}
     </div></div>`;
@@ -3422,6 +3564,10 @@ window.renderSalesOrders = async function(container){
     try{ const tok = await window.ensureOrderTracking(o); window.showOrderTrackModal(window.orderTrackUrl(tok), o.clientName||o.project||''); }
     catch(e){ Notifs.showToast('Could not create link: '+(e.message||e.code),'error'); }
     b.disabled=false; b.innerHTML=orig;
+  }));
+  c.querySelectorAll('.so-del-btn').forEach(b=>b.addEventListener('click', ()=>{
+    const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
+    window.deleteSalesOrder(o, ()=>window.renderSalesOrders(container));
   }));
   if(isFin){
     c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', ()=>{

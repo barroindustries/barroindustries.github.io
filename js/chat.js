@@ -1416,6 +1416,15 @@ window.Chat = (() => {
     // pendingMeeting is independent for the same reason as pendingRef: a
     // meeting pointer is metadata, not a competing upload, so it rides
     // alongside text/photo/file in one send.
+    // ⚠ pendingMeeting is currently NEVER SET, deliberately. Scheduling from a
+    // thread now posts the card itself (Meetings.save -> Chat.postMeetingToChat),
+    // so arming the composer as well would post the same meeting twice. The slot
+    // and its plumbing (updateFilePreview / updateSendState / the send snapshot /
+    // the restore-on-failure branch) are kept intact because sendMessage's
+    // `meeting` argument is still very much live — postMeetingToChat passes it
+    // directly — and because "attach an EXISTING meeting to a message I am
+    // writing" is the obvious next use for this slot. Do not delete it thinking
+    // it is dead; it is unused, which is not the same thing.
     let pendingFile = null, pendingLink = null, pendingImages = [], pendingRef = null, pendingMeeting = null;
     const fileInp = p.querySelector('#chat-file');
     const cameraInp = p.querySelector('#chat-camera');
@@ -1599,16 +1608,16 @@ window.Chat = (() => {
       let invitees = [];
       try { invitees = await _targetsFor(conv); } catch (_) {}
       invitees = Array.from(new Set(invitees.concat([currentUser.uid])));
-      window.openMeetingEditor(null, { convId: conv.id, invitees }, async (id) => {
-        // Attach a POINTER, never the meeting's mutable state — the deployed
-        // message rules allow exactly three shapes of message update and none
-        // of them would let an RSVP be written onto the message doc.
-        let title = 'Meeting';
-        try { const m = await window.Meetings.get(id); if (m && m.title) title = m.title; } catch (_) {}
-        pendingMeeting = { id, title };
-        updateFilePreview();
-        updateSendState();
-        try { Notifs.showToast('Meeting created — it is on the Calendar. Send to share it here.'); } catch (_) {}
+      window.openMeetingEditor(null, { convId: conv.id, invitees }, async () => {
+        // NOTHING is armed on the composer here. Meetings.save() posts the card
+        // into this thread itself the moment the meeting is created (owner:
+        // "notify on chat if theres a meeting scheduled"), so arming
+        // pendingMeeting as well would post it a SECOND time when the organiser
+        // next pressed Send. The card that lands is a POINTER — never the
+        // meeting's mutable state, because the deployed message rules allow
+        // exactly three shapes of message update and none would let an RSVP be
+        // written onto the message doc.
+        try { Notifs.showToast('Meeting created — posted here and on the Calendar.'); } catch (_) {}
       });
     };
     p.querySelector('#chat-attach-meeting')?.addEventListener('click', _scheduleFromThread);
@@ -5015,6 +5024,29 @@ window.Chat = (() => {
   // restriction (firestore.rules ~860-866).
   //
   // Today's only caller is the Posts feed's Share button (js/screens/people.js).
+  // ── Post a meeting card into a thread, from outside chat ────────────────
+  // Owner, 2026-08-10: "notify on chat if theres a meeting scheduled". Before
+  // this, scheduling from a thread only ARMED the composer — the card was a
+  // pending attachment and the thread showed nothing until you pressed Send. If
+  // you closed the editor and moved on, nobody in the thread ever learned the
+  // meeting existed.
+  //
+  // Routed through _assertShareTargetSafe, exactly like shareToChat: it re-reads
+  // the conversation FRESH and fails closed. That is not ceremony — a meeting
+  // card posted into a thread containing an external partner would hand them the
+  // meeting, and the picker/caller's view of who is in a thread is a snapshot
+  // that can be stale by the time this runs.
+  async function postMeetingToChat(convId, meeting) {
+    if (!convId || !meeting || !meeting.id) return false;
+    const guard = await _assertShareTargetSafe({ id: convId });
+    if (!guard.ok) { try { Notifs.showToast(guard.reason, 'error'); } catch (_) {} return false; }
+    try {
+      await sendMessage({ text: '', clientKey: _newClientKey(), conv: guard.conv,
+                          meeting: { id: meeting.id, title: meeting.title || 'Meeting' } });
+      return true;
+    } catch (_) { return false; }
+  }
+
   async function shareToChat(payload) {
     if (!payload || !payload.kind || !payload.id) return;
     // Every conversation an external partner is in contains an external partner
@@ -5871,7 +5903,7 @@ window.Chat = (() => {
            // button (js/screens/people.js). The partner block lives INSIDE it,
            // at both the picker and the pre-send re-check, so no caller can
            // route around it.
-           shareToChat,
+           shareToChat, postMeetingToChat,
            // Test seams for the partner block (headless harness only — nothing
            // in the app calls these). Exposed so the guard can be exercised
            // against a constructed partner conversation without a production

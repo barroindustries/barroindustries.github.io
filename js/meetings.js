@@ -139,6 +139,23 @@ window.Meetings = (function () {
     body.createdAt     = firebase.firestore.FieldValue.serverTimestamp();
     const ref = await db.collection(COLL).add(body);
     notifyInvited(Object.assign({ id: ref.id }, body), invitees.filter(u => u !== me));
+    // Owner, 2026-08-10: "notify on chat if theres a meeting scheduled".
+    // A meeting created FROM a thread posts its card into that thread straight
+    // away, so everyone there sees it without the organiser having to press
+    // Send afterwards. The card is a POINTER — time, location and RSVP counts
+    // are read live from this doc, so it stays correct as people reply.
+    //
+    // Best-effort by design: the meeting is already saved, and a chat post that
+    // fails (partner in the thread, denied write, offline) must never make the
+    // caller think the meeting itself failed. Chat's own guard decides whether
+    // the post is allowed and says so.
+    //
+    // A meeting created from the CALENDAR has no convId and therefore no thread
+    // to post into — invitees still get the invite notification and the
+    // morning-of reminder, which is the whole notification path for that case.
+    if (body.convId && window.Chat && typeof Chat.postMeetingToChat === 'function') {
+      Chat.postMeetingToChat(body.convId, { id: ref.id, title: body.title }).catch(() => {});
+    }
     return ref.id;
   }
 
