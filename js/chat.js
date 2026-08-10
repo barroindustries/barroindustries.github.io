@@ -1235,6 +1235,14 @@ window.Chat = (() => {
     // Wave2 practicality batch (P0) — in-thread search trigger, right beside
     // the (i) info button (same .ms-thread-menu-btn treatment).
     const searchBtnHtml = `<button id="chat-search-btn" class="ms-thread-menu-btn" title="Search in this chat" aria-label="Search in this chat">${emojiIcon('search', 18)}</button>`;
+    // Owner, 2026-08-10: "making meetings, must be available in chat".
+    // It already was — but only inside the ➕ attach tray, which starts
+    // collapsed, so it took two taps and sat unlabelled among four other
+    // icons. Scheduling with the people in a thread is a THREAD-level action,
+    // not an attachment, so it belongs up here beside Search where it is
+    // visible without hunting. The tray copy stays for the case where someone
+    // wants to attach the meeting card to a message they are already writing.
+    const meetBtnHtml = `<button id="chat-meet-btn" class="ms-thread-menu-btn" title="Schedule a meeting with this chat" aria-label="Schedule a meeting with this chat">${emojiIcon('calendar-plus', 18)}</button>`;
     // Wave2 practicality batch (P2 stretch) — announcement channel: only the
     // creator or an admin may post; everyone else gets a read-only banner
     // instead of the composer. The composer markup below is ALWAYS rendered
@@ -1260,6 +1268,7 @@ window.Chat = (() => {
           <div class="ms-thread-title">${escHtml(title)}</div>
           <div class="ms-thread-subtitle">${subtitleHtml}</div>
         </div>
+        ${meetBtnHtml}
         ${searchBtnHtml}
         ${infoBtnHtml}
       </div>
@@ -1577,7 +1586,14 @@ window.Chat = (() => {
     // dept channels are created with participants:[] and membership is derived
     // from each user's department, so reading participants here would invite
     // NOBODY. _targetsFor is the one function that resolves this correctly.
-    p.querySelector('#chat-attach-meeting')?.addEventListener('click', async () => {
+    // ONE scheduling flow, two doors: the header button and the ➕ tray. Both
+    // pre-fill the invitee list from the thread's REAL members and both attach
+    // the resulting meeting card to the composer, so whichever you reach for,
+    // the meeting lands on the calendar and the thread gets a card pointing at
+    // it. (js/meetings.js writes the same `meetings` collection the Calendar
+    // screen reads, so "reflect in the calendar" is automatic — the card in
+    // chat is only a pointer.)
+    const _scheduleFromThread = async () => {
       setAttachExpanded(false);
       if (typeof window.openMeetingEditor !== 'function') { Notifs.error('Calendar unavailable'); return; }
       let invitees = [];
@@ -1592,8 +1608,11 @@ window.Chat = (() => {
         pendingMeeting = { id, title };
         updateFilePreview();
         updateSendState();
+        try { Notifs.showToast('Meeting created — it is on the Calendar. Send to share it here.'); } catch (_) {}
       });
-    });
+    };
+    p.querySelector('#chat-attach-meeting')?.addEventListener('click', _scheduleFromThread);
+    p.querySelector('#chat-meet-btn')?.addEventListener('click', _scheduleFromThread);
 
     // Wave5 M3 (J4) — paste an image from the clipboard directly into the
     // composer (desktop). Only preventDefault when an image was actually

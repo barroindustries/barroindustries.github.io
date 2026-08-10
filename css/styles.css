@@ -333,6 +333,25 @@ html.theme-astral .btn-primary {
   transition: border-color var(--t2), box-shadow var(--t2), background var(--t2);
   outline: none; -webkit-appearance: none;
 }
+/* ⚠ Checkboxes and radios are NOT text fields, and the rule above treats them
+   as if they were: width:100% stretches a tick box across the whole row, and
+   -webkit-appearance:none strips the tick itself, so what renders is a big
+   empty rounded rectangle with the label shoved to the far right. That is the
+   President's 2026-08-10 report — "the tick icon does not make sense" — and it
+   affected every checkbox inside a .form-group, not just the meeting invite
+   list where it was spotted. The file already had the same carve-out on the
+   [readonly] rule below, which is why that one looks right.
+   Specificity 0,2,1 beats the 0,1,1 rule above without !important. */
+.form-group input[type="checkbox"],
+.form-group input[type="radio"] {
+  width: auto; min-height: 0; padding: 0; border: 0;
+  background: none; border-radius: 0;
+  -webkit-appearance: auto; appearance: auto;
+  accent-color: var(--primary-light, var(--primary, #3B5BDB));
+  flex: 0 0 auto;                /* never stretch inside a flex label */
+  margin: 0; cursor: pointer;
+}
+
 .form-group input:focus,
 .form-group textarea:focus,
 .form-group select:focus {
