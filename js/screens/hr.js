@@ -2972,7 +2972,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     </div>
     <div id="hrp-trouble-panel"></div>
     ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-      ${isPayPriv?`<button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>`:''}
+      ${isPayPriv?`<button class="btn-secondary btn-sm" id="hrp-goto-accounts-btn" title="Create the login and the worker record together">${emojiIcon('🔑',16)} Create Worker Account</button>`:''}
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">${emojiIcon('📄',16)} All Payslips</button>
       <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
       <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">${emojiIcon('🪪',16)} Batch Print IDs</button>
@@ -3030,7 +3030,18 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
 
   // Add profile
   if (isPriv) {
-    document.getElementById('hrp-add-btn')?.addEventListener('click', () => openHRProfileForm(null, currentUser, currentRole, ()=>renderFinanceHRProfiles(container,currentUser,currentRole)));
+    // Owner, 2026-08-10: "there shouldnt be add worker because this is done by hr".
+    // The old "+ Add Worker Profile" here created a worker RECORD ONLY — no
+    // login, no self-service Time In, and it could never be linked to an
+    // account afterwards. So the payroll screen quietly minted a second, weaker
+    // kind of worker, which is the opposite of the one-create-path the spec
+    // calls for. Removed. This now sends you to the place that mints BOTH the
+    // Firebase login (with a generated password) and the worker record in one
+    // go — HR → Accounts & Logins → Create Worker Account.
+    document.getElementById('hrp-goto-accounts-btn')?.addEventListener('click', () => {
+      if (typeof window.openCreateWorkerModal === 'function') { window.openCreateWorkerModal(); return; }
+      navigateTo('team');   // the screen it lives on, if this loads before dashboards.js
+    });
     document.getElementById('hrp-payslip-history-btn')?.addEventListener('click', () => openPayslipHistory(currentUser, currentRole));
     document.getElementById('hrp-raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
     document.getElementById('hrp-batch-id-btn')?.addEventListener('click', () => window.batchPrintWorkerIDs(profiles.filter(p=>p.status!=='inactive')));
@@ -4246,7 +4257,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
          the usual --surface tint over it as a background-image gives the
          identical card look with nothing showing through, and stays
          theme-driven — both are the same tokens the cards above use. -->
-    <div style="position:sticky;bottom:0;background-color:var(--bg);background-image:linear-gradient(var(--surface),var(--surface));border:1.5px solid var(--border);border-radius:10px;padding:12px;margin-top:14px">
+    <div class="ps-live-total" style="position:sticky;bottom:0;background-color:var(--bg);background-image:linear-gradient(var(--surface),var(--surface));border:1.5px solid var(--border);border-radius:10px;padding:12px;margin-top:14px">
       <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">This payslip</div>
       <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:4px"><span>Gross pay</span><strong id="ps-sum-gross">₱0.00</strong></div>
       <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:4px"><span>Total deductions</span><strong id="ps-sum-ded" style="color:var(--danger)">₱0.00</strong></div>

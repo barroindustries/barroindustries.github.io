@@ -6109,6 +6109,14 @@ function openCreateWorkerModal() {
   });
 }
 
+// Exposed 2026-08-10: the Operations Team payroll tab now routes its
+// "Create Worker Account" button straight here, instead of offering a
+// record-only "+ Add Worker Profile" that could never gain a login.
+// This is the ONE form that mints a real Firebase Auth uid with a
+// generated password AND the linked worker record together.
+window.openCreateWorkerModal = openCreateWorkerModal;
+
+
 function openEditEmployeeModal(u) {
   const curDepts = Array.isArray(u.departments)&&u.departments.length ? u.departments : u.department ? [u.department] : [];
   const _panel = openPage(`Edit: ${u.displayName||u.email}`,`

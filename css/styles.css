@@ -8212,3 +8212,31 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .cal-chip { font-size:11px; padding:2px 5px; }
   .cal-more { font-size:11px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PAYSLIP GENERATOR — the live-total bar (js/screens/hr.js)
+   Owner, 2026-08-10: "why is there a floating payslip" + "not mobile
+   optimized". The bar is position:sticky;bottom:0 so the figure stays on
+   screen while you fill the form in — which is right, and is why it was
+   built. What was wrong is that on a phone it is ~150px tall, so it covered
+   the very fields being typed into: the rate, allowance and hours inputs
+   scroll BEHIND it and cannot be brought clear.
+
+   Two fixes, no behaviour change on desktop:
+   1. On a phone the bar collapses to ONE line — the net figure, which is the
+      only one worth watching while typing. The breakdown is still there on
+      the payslip itself and in Preview.
+   2. Whatever height it ends up, the form gets that much bottom padding so
+      the last field can always be scrolled above it. A sticky footer without
+      this always hides its own form's tail.
+══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 700px) {
+  .ps-live-total { padding: 8px 12px !important; margin-top: 10px !important; }
+  /* Collapse to the net line: hide the three component rows and the basis
+     note, keep the row that carries Net pay. */
+  .ps-live-total > div:not(:nth-last-child(2)) { display: none !important; }
+  .ps-live-total > div:nth-last-child(2) { border-top: 0 !important; padding-top: 0 !important; margin: 0 !important; }
+  .ps-live-total #ps-sum-net { font-size: 18px !important; }
+  /* The form's tail must be able to clear the bar. */
+  .page-panel-body:has(.ps-live-total) { padding-bottom: 84px; }
+}
