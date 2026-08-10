@@ -1248,35 +1248,10 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 8px 0 calc(env(safe-area-inset-bottom, 0px) + 20px) 2px; scrollbar-width: none; }
 .sidebar-nav::-webkit-scrollbar { display: none; }
 
-/* Sidebar group header. Became a real <button> on 2026-08-10 so it can fold
-   its group (owner: "way too much happening in the left side app drawer") —
-   the type/appearance resets below keep it looking exactly like the label it
-   replaced, so nothing about the drawer's appearance changed except the
-   chevron and the fact that it now responds to a tap. */
 .nav-section-label {
   font-size: var(--fs-2xs); font-weight: 700; color: var(--text-light);
   text-transform: uppercase; letter-spacing: 1.2px;
   padding: 12px 16px 4px;
-  /* button resets */
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  width: 100%; background: none; border: 0; font-family: inherit;
-  text-align: left; cursor: pointer; -webkit-appearance: none; appearance: none;
-}
-.nav-sec-chev {
-  width: 14px; height: 14px; flex-shrink: 0; opacity: .55;
-  transition: transform var(--t1);
-}
-.nav-group.folded .nav-sec-chev { transform: rotate(-90deg); }
-/* display:none, not max-height — a folded group must contribute NO height and
-   must not be tabbable. The drawer is the thing being shortened. */
-.nav-group.folded .nav-group-items { display: none; }
-@media (hover:hover) { .nav-section-label:hover { color: var(--text); } }
-.nav-section-label:hover .nav-sec-chev { opacity: .9; }
-/* The icon-rail tier (820–1023px) hides labels entirely; a header that folds
-   things the user then cannot see the names of would be a trap, so groups are
-   force-expanded there. The existing rule at ~3281 hides .nav-section-label. */
-@media (min-width: 820px) and (max-width: 1023px) {
-  .nav-group.folded .nav-group-items { display: block; }
 }
 
 .nav-item {

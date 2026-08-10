@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.128';
+window.APP_VERSION = '14.0.129';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -586,13 +586,16 @@ window.NAV_REGISTRY = {
     // one labelled group, "Management", was a grab-bag of seven that included
     // Calendar and Files; "Catalog" held a single item.
     //
-    // Now: seven groups, every one labelled, none with a single item, ordered
-    // by how often the thing is actually opened rather than by when it was
-    // built. The first four carry no header — they are the every-day set and a
-    // header above Dashboard would be noise. Groups marked `collapsed:true`
-    // start folded and remember whatever the user does next (see
-    // buildSidebarNav in js/app.js), which is what actually shortens the
-    // drawer: 23 rows becomes 13 on open.
+    // Now: three labelled groups, ordered by how often the thing is actually
+    // opened rather than by when it was built. The first five carry no header —
+    // they are the every-day set and a header above Dashboard would be noise.
+    //
+    // Headings are PLAIN LABELS. They were briefly foldable, while this list ran
+    // to 23 entries and folding was the only way to make it fit; the same day it
+    // was cut to eleven the owner asked for the dropdowns back out, and at this
+    // length they were friction buying nothing. Every destination is visible
+    // without a click. If this list ever grows back past ~15, reach for FEWER
+    // ENTRIES first — folding was treating the symptom.
     //
     // Adding an entry: put it in the group it BELONGS to, not at the end.
     // A group of one means the group is wrong.
@@ -639,7 +642,7 @@ window.NAV_REGISTRY = {
       { key:'ventures',    icon:'rocket',      label:'Ventures',        page:'dept:Ventures' },
 
       // ── President-only, folded: you go here deliberately, never in passing.
-      { key:'product-db',  icon:'package',      label:'Product Database', page:'product-database', section:true, sectionLabel:'System', collapsed:true, when:'isPresident' },
+      { key:'product-db',  icon:'package',      label:'Product Database', page:'product-database', section:true, sectionLabel:'System', when:'isPresident' },
       { key:'audit-log',   icon:'scroll-text',  label:'Audit Log',        page:'audit-log',        when:'isPresident' },
       { key:'sys-health',  icon:'activity',     label:'System Health',    page:'system-health',    when:'isPresident' }
     ],
@@ -701,7 +704,7 @@ window.NAV_REGISTRY = {
       // ── Operational screens, each shown only to the departments that use
       // them. The Accountant reaches HR here (owner: "Allow accountant access
       // to hr") — renderHR already admitted the role, there was simply no way in.
-      { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', section:true, sectionLabel:'Operations', collapsed:true, when:'hasProjectsDept' },
+      { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', section:true, sectionLabel:'Operations', when:'hasProjectsDept' },
       { key:'sales-orders',icon:'receipt',     label:'Sales Orders', page:'sales-orders',  when:'hasSalesOrdersDept' },
       { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory',     when:'hasProductionDept' },
       { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR',       when:'isFinanceRole' },
