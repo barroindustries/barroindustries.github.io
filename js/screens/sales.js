@@ -1581,10 +1581,24 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     // to get to the edit form" the Corporate Secretary reported on 2026-08-10,
     // reproduced in the browser: two #aec-detail-edit in the DOM, getElementById
     // resolving into the dead panel, the visible button firing nothing.
-    _panel.querySelector('#aec-detail-edit')?.addEventListener('click', () => { closeModal(); openAECEditor(c); });
+    // ⚠ REPLACE, DO NOT close-then-open.
+    // closeModal() is Overlay.dismissTop(), which is history.back() — and that
+    // is ASYNCHRONOUS. `closeModal(); openXEditor(c);` therefore pushes the
+    // editor's history entry FIRST and lets the queued back land SECOND, so the
+    // back pops the panel that was just opened: the editor flashes up and dies,
+    // leaving you staring at the detail panel as if the button did nothing.
+    // Tap again and the panel/history pairing drifts further, until a later
+    // close unwinds past the panel entirely and drops you on the page
+    // underneath — the President's 2026-08-10 report, "it went to dashboard
+    // after clicking edit twice", reproduced exactly in the browser.
+    //
+    // opts.replace tears the current panel's DOM down directly and swaps the
+    // Overlay entry via replaceTop, touching no history at all, so one Back
+    // still closes the (now different) surface and depth stays correct.
+    _panel.querySelector('#aec-detail-edit')?.addEventListener('click', () => openAECEditor(c, { replace: true }));
   };
 
-  const openAECEditor = (c) => {
+  const openAECEditor = (c, opts) => {
     const e = c || {};
     const sel = 'style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"';
     const _panel = openPage(c ? 'Edit AEC Contact' : 'Add AEC Contact', `
@@ -1612,7 +1626,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
         <input id="aec-quoteref" placeholder="Quote # (optional)" value="${escHtml(e.quoteRef||'')}" style="max-width:160px"/>
       </div>
       <div class="form-group"><label>Feedback / partnership potential</label><textarea id="aec-potential" rows="3">${escHtml(e.potential||'')}</textarea></div>
-    `, `<button class="btn-primary" id="aec-save-btn">${c ? 'Save' : 'Save Contact'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    `, `<button class="btn-primary" id="aec-save-btn">${c ? 'Save' : 'Save Contact'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, opts || {});
     // ⚠ SCOPED TO THIS PANEL, NOT document.
     // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
     // inside that window and two panels carry the same ids at once —

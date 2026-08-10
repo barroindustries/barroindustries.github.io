@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.120';
+window.APP_VERSION = '14.0.121';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2587,7 +2587,7 @@ window.CashAdvance = {
   // which already made this switch. SAME signature/body/footer; openPage takes
   // identical args and closeModal() (== Overlay.dismissTop()) still closes it.
   openRequestForm() {
-    openPage('Request Cash Advance', `
+    const _panel = openPage('Request Cash Advance', `
       <div class="form-group"><label>Amount Needed (₱, max ₱50,000)</label>
         <input id="ca-req-amt" type="number" inputmode="decimal" min="100" max="50000" step="100" placeholder="0.00"/>
       </div>
@@ -2606,13 +2606,22 @@ window.CashAdvance = {
       </div>
       <p style="font-size:11px;color:var(--text-muted);margin-top:2px">Interest (if any) and the exact repayment schedule are set by Finance when your request is approved.</p>
     `, `<button class="btn-primary" id="ca-req-submit-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('ca-req-submit-btn').addEventListener('click', async () => {
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a control nobody can see and the
+    // visible one does nothing — and worse, a submit that fires in that window
+    // reads the PREVIOUS record's amounts and writes them onto this one.
+    // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
+    const $ = (id) => _panel.querySelector('#' + id);
+    $('ca-req-submit-btn').addEventListener('click', async () => {
       try {
         await window.CashAdvance.request({
-          amount:     document.getElementById('ca-req-amt').value,
-          terms:      document.getElementById('ca-req-terms').value,
-          reason:     document.getElementById('ca-req-reason').value,
-          dateNeeded: document.getElementById('ca-req-date').value
+          amount:     $('ca-req-amt').value,
+          terms:      $('ca-req-terms').value,
+          reason:     $('ca-req-reason').value,
+          dateNeeded: $('ca-req-date').value
         });
         closeModal();
         Notifs.showToast('Request submitted! Waiting for approval.');
@@ -2688,7 +2697,7 @@ window.CashAdvance = {
     const a = snap.data();
     const terms = a.terms || 1;
     const bankOpts = await window.BankAccounts.optionsHTML();
-    openPage(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
+    const _panel = openPage(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
       <div class="ca-detail" style="margin-bottom:10px"><span>Principal</span><strong>₱${fmt(a.amount)}</strong></div>
       <div class="ca-detail" style="margin-bottom:10px"><span>Terms</span><span>${terms} month${terms>1?'s':''}</span></div>
       <div class="form-group"><label>Interest Rate (%/month)</label>
@@ -2698,18 +2707,27 @@ window.CashAdvance = {
         <select id="ca-appr-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
       <div id="ca-appr-preview" style="font-size:13px;color:var(--text-muted);margin-top:8px"></div>
     `, `<button class="btn-primary" id="ca-appr-confirm-btn">Approve</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    // ⚠ SCOPED TO THIS PANEL, NOT document.
+    // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+    // inside that window and two panels carry the same ids at once —
+    // document.getElementById() returns the FIRST in document order, which is
+    // the DYING one, so the handler binds to a control nobody can see and the
+    // visible one does nothing — and worse, a submit that fires in that window
+    // reads the PREVIOUS record's amounts and writes them onto this one.
+    // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
+    const $ = (id) => _panel.querySelector('#' + id);
     const updatePreview = () => {
-      const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
+      const pct = parseFloat($('ca-appr-rate').value)||0;
       const total = pct>0 ? a.amount*Math.pow(1+pct/100,terms) : a.amount;
       const monthly = total/terms;
-      document.getElementById('ca-appr-preview').innerHTML = `Employee repays <strong>₱${fmt(total)}</strong> (₱${fmt(monthly)}/mo × ${terms})`;
+      $('ca-appr-preview').innerHTML = `Employee repays <strong>₱${fmt(total)}</strong> (₱${fmt(monthly)}/mo × ${terms})`;
     };
-    document.getElementById('ca-appr-rate').addEventListener('input', updatePreview);
+    $('ca-appr-rate').addEventListener('input', updatePreview);
     updatePreview();
-    document.getElementById('ca-appr-confirm-btn').addEventListener('click', async () => {
-      const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
+    $('ca-appr-confirm-btn').addEventListener('click', async () => {
+      const pct = parseFloat($('ca-appr-rate').value)||0;
       try {
-        const acct = await window.BankAccounts.pick(document.getElementById('ca-appr-bank').value);
+        const acct = await window.BankAccounts.pick($('ca-appr-bank').value);
         await window.CashAdvance.approve(id, { interestPct: pct, bankAccount: acct });
         closeModal();
         Notifs.showToast('Approved!');
@@ -2829,19 +2847,28 @@ window.CashAdvance = {
       // account the cash landed in ('— no account —' is fine: the receivable
       // still gets credited, just without a bank-balance movement).
       const bankOpts = await window.BankAccounts.optionsHTML();
-      openPage(`Record Payment${a.userName?` — ${escHtml(a.userName)}`:''}`, `
+      const _panel = openPage(`Record Payment${a.userName?` — ${escHtml(a.userName)}`:''}`, `
         <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(a.balance||0)}</strong></div>
         <div class="form-group"><label>Amount Paid</label><input id="ca-pay-amt" type="number" inputmode="decimal" value="${a.monthlyPayment||a.balance||0}" min="0" max="${a.balance||0}"/></div>
         <div class="form-group"><label>Date</label><input id="ca-pay-date" type="date" value="${window.bizDate?window.bizDate():today()}"/></div>
         <div class="form-group"><label>Deposited to (company account)</label>
           <select id="ca-pay-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
       `, `<button class="btn-primary" id="ca-pay-confirm-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('ca-pay-confirm-btn').addEventListener('click', async () => {
+      // ⚠ SCOPED TO THIS PANEL, NOT document.
+      // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
+      // inside that window and two panels carry the same ids at once —
+      // document.getElementById() returns the FIRST in document order, which is
+      // the DYING one, so the handler binds to a control nobody can see and the
+      // visible one does nothing — and worse, a submit that fires in that window
+      // reads the PREVIOUS record's amounts and writes them onto this one.
+      // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
+      const $ = (id) => _panel.querySelector('#' + id);
+      $('ca-pay-confirm-btn').addEventListener('click', async () => {
         try {
-          const acct = await window.BankAccounts.pick(document.getElementById('ca-pay-bank').value);
+          const acct = await window.BankAccounts.pick($('ca-pay-bank').value);
           await window.CashAdvance.recordPayment(id, {
-            amount: document.getElementById('ca-pay-amt').value,
-            date:   document.getElementById('ca-pay-date').value,
+            amount: $('ca-pay-amt').value,
+            date:   $('ca-pay-date').value,
             bankAccount: acct
           });
           closeModal();
