@@ -1334,6 +1334,22 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-item[data-page="approvals"] .nav-icon  { background: linear-gradient(135deg,#FFD60A,#FF9F0A); box-shadow: 0 2px 8px rgba(255,214,10,0.35); }
 .nav-item[data-page="progress"] .nav-icon   { background: linear-gradient(135deg,#30D158,#00D4AA); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
 .nav-item[data-page="departments"] .nav-icon{ background: linear-gradient(135deg,#8B5CF6,#0A84FF); box-shadow: 0 2px 8px rgba(139,92,246,0.35); }
+/* ── Icons that were rendering as a flat grey tile ────────────────────────
+   Owner, 2026-08-10: "some icons dont have colors at the app drawer". Every
+   .nav-item gets its colour from a per-page rule here; a page with no rule
+   falls through to the base .nav-icon background (rgba(255,255,255,0.07)) and
+   reads as unfinished next to its neighbours. Six were missing — the four
+   added in the last two days (calendar, memos, CRM, Ventures) plus HR and
+   System Health, which never had one.
+
+   The dept:* entries take their DEPARTMENT's own colour from window.DEPARTMENTS
+   (Finance #2F9E44, HR #E64980, CRM #F59F00, Ventures #5F3DC4) so the sidebar
+   tile matches the tile that same department shows on the Departments grid.
+   The {deptLoop} block builds its icons inline from that gradient; these
+   static entries cannot, which is exactly why they were missed. */
+.nav-item[data-page="calendar"] .nav-icon      { background: linear-gradient(135deg,#5E5CE6,#7048E8); box-shadow: 0 2px 8px rgba(94,92,230,0.35); }
+.nav-item[data-page="memos"] .nav-icon         { background: linear-gradient(135deg,#0A84FF,#5E5CE6); box-shadow: 0 2px 8px rgba(10,132,255,0.32); }
+.nav-item[data-page="system-health"] .nav-icon { background: linear-gradient(135deg,#8E8E93,#48484A); box-shadow: 0 2px 8px rgba(142,142,147,0.28); }
 .nav-item[data-page="team"] .nav-icon       { background: linear-gradient(135deg,#0A84FF,#5856D6); box-shadow: 0 2px 8px rgba(10,132,255,0.30); }
 .nav-item[data-page="analytics"] .nav-icon  { background: linear-gradient(135deg,#FF9F0A,#FFD60A); box-shadow: 0 2px 8px rgba(255,159,10,0.35); }
 .nav-item[data-page="company"] .nav-icon    { background: linear-gradient(135deg,#FF2D78,#8B5CF6); box-shadow: 0 2px 8px rgba(139,92,246,0.30); }
@@ -1364,6 +1380,17 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 
 /* Dept pages use data-page="dept:X" — give all a gradient background */
 .nav-item[data-page^="dept:"] .nav-icon { background: linear-gradient(135deg,#FF9F0A,#FF6B6B); box-shadow: 0 2px 8px rgba(255,159,10,0.30); }
+/* ⚠ MUST STAY BELOW THE GENERIC dept:* RULE ABOVE.
+   Both are specificity 0,2,1, so this is decided purely by SOURCE ORDER — the
+   per-department colours were first written above it and silently lost, which
+   is why Finance, CRM and Ventures all rendered the same orange. Each takes its
+   own department's colour from window.DEPARTMENTS so the sidebar tile matches
+   that department's tile on the Departments grid. Any NEW dept:* entry that
+   wants its real colour goes here, not above. */
+.nav-item[data-page="dept:Finance"] .nav-icon  { background: linear-gradient(135deg,#2F9E44,#00D4AA); box-shadow: 0 2px 8px rgba(47,158,68,0.35); }
+.nav-item[data-page="dept:HR"] .nav-icon       { background: linear-gradient(135deg,#E64980,#FF6B9D); box-shadow: 0 2px 8px rgba(230,73,128,0.32); }
+.nav-item[data-page="dept:CRM"] .nav-icon      { background: linear-gradient(135deg,#F59F00,#FFB84D); box-shadow: 0 2px 8px rgba(245,159,0,0.32); }
+.nav-item[data-page="dept:Ventures"] .nav-icon { background: linear-gradient(135deg,#5F3DC4,#9775FA); box-shadow: 0 2px 8px rgba(95,61,196,0.32); }
 /* Emoji icons get same pill/gradient treatment */
 .nav-icon.emoji-icon { font-size:var(--fs-lg); display:flex; align-items:center; justify-content:center; }
 
