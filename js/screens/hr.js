@@ -821,16 +821,43 @@ window.renderPayrollHub = async function(container, currentUser, currentRole, ta
     return host._payrollHubLoad(active);
   }
 
+  // OPERATIONS TEAM (tab B) now has TWO sub-views (weekly run 2026-08-11):
+  //   'run'     → window.renderWeeklyPayrollTab — the Monday–Sunday pay run,
+  //               one press pays the week.
+  //   'workers' → renderFinanceHRProfiles — the roster this tab used to BE:
+  //               worker profiles, ID cards, the Clock kiosk, raise history,
+  //               batch ID print, and the per-worker "Payslip" button that
+  //               opens openPayslipGenerator. NOTHING here was deleted — the
+  //               owner still needs the one-worker generator for off-cycle pay
+  //               (final pay, an advance, a partial week) and for correcting a
+  //               single line, so it keeps its own door.
+  // The toggle lives in the HOST row, a SIBLING of #payroll-hub-pane, for the
+  // same reason the chip tabs do: both sub-view renderers own the pane
+  // outright and rebuild it on every self-refresh, so a control painted INSIDE
+  // the pane would be destroyed (with its listener) by the next refresh. It is
+  // also why the sub-view is a pane swap rather than an openPage overlay —
+  // renderFinanceHRProfiles binds ~8 handlers by GLOBAL document.getElementById
+  // (hrp-add-btn, hrp-sync-dir-btn, …), which is only safe while exactly one
+  // copy of that markup is in the document. The pane is that one copy.
+  let subB = 'run';
   host.innerHTML = `
-    ${window.chipTabs([
-      { key:'A', label:'Office Team' },
-      { key:'B', label:'Operations Team' }
-    ], active, { cls:'payroll-hub-tabs' })}
+    <div class="payroll-hub-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      ${window.chipTabs([
+        { key:'A', label:'Office Team' },
+        { key:'B', label:'Operations Team' }
+      ], active, { cls:'payroll-hub-tabs' })}
+      <button type="button" class="btn-secondary btn-sm" id="payroll-hub-sub-btn"
+              style="margin-left:auto;display:none"></button>
+    </div>
     <div id="payroll-hub-pane">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [host] });
+  // Scoped to `host`, never document — openPage keeps a dying panel ~300ms and
+  // a global lookup finds ITS copy of these ids (house rule; 811 lookups were
+  // fixed for exactly this last week).
   const tabsRow = host.querySelector('.payroll-hub-tabs');
   const pane    = host.querySelector('#payroll-hub-pane');
+  const subBtn  = host.querySelector('#payroll-hub-sub-btn');
 
   // Both renderers paint their own skeleton on their very first line, so a
   // switch never leaves stale content on screen and no extra skeleton is
@@ -854,25 +881,61 @@ window.renderPayrollHub = async function(container, currentUser, currentRole, ta
       b.classList.toggle('active', b.dataset.chip === key);
     });
   };
+  // The weekly run is a SEPARATE FILE loaded after this one (js/payroll-weekly.js
+  // + js/screens/payroll-weekly-ui.js — see index.html). Resolved by window.*
+  // name at CLICK/LOAD time, never at parse time, so if either file fails to
+  // load the Operations tab degrades to the roster it has always shown rather
+  // than to a blank pane — and the toggle that would lead nowhere is hidden.
+  const hasWeeklyRun = () => typeof window.renderWeeklyPayrollTab === 'function';
+  const paintSubBtn = (key) => {
+    if (!subBtn) return;
+    const show = (key === 'B') && hasWeeklyRun();
+    subBtn.style.display = show ? '' : 'none';
+    if (show) subBtn.textContent = (subB === 'run') ? 'Workers' : '← Pay Run';
+  };
   const loadTab = async (key) => {
     const want = (key === 'B') ? 'B' : 'A';
     if (busy) { pending = want; return; }        // newest wins; the in-flight render finishes untouched
     busy = true;
     setActiveChip(want);                          // programmatic entries must move the chip too —
                                                   // bindChipTabs only toggles it on a real click
+    paintSubBtn(want);
     if (tabsRow) { tabsRow.style.pointerEvents = 'none'; tabsRow.style.opacity = '0.6'; }
+    if (subBtn)  { subBtn.disabled = true; }
     try {
-      if (want === 'B') await renderFinanceHRProfiles(pane, currentUser, currentRole);
-      else              await renderPayrollManagement(pane, currentUser, currentRole);
+      if (want === 'B') {
+        // openWorkers is handed to the weekly screen so it can offer its OWN
+        // route to the roster (a link in an empty state, "no rate — fix this
+        // worker", etc.) without owning the toggle or the pane lifecycle.
+        if (subB === 'run' && hasWeeklyRun()) {
+          await window.renderWeeklyPayrollTab(pane, currentUser, currentRole, {
+            openWorkers: () => { subB = 'workers'; loadTab('B'); }
+          });
+        } else {
+          await renderFinanceHRProfiles(pane, currentUser, currentRole);
+        }
+      } else {
+        await renderPayrollManagement(pane, currentUser, currentRole);
+      }
     } catch (e) {
       _hrPanelError(pane, e, () => loadTab(want));
     } finally {
       busy = false;
       if (tabsRow) { tabsRow.style.pointerEvents = ''; tabsRow.style.opacity = ''; }
+      if (subBtn)  { subBtn.disabled = false; }
+      paintSubBtn(want);                          // hasWeeklyRun() may only have become true mid-load
       if (pending !== null) { const next = pending; pending = null; await loadTab(next); }
     }
   };
   host._payrollHubLoad = loadTab;                 // the re-entry guard above routes through this
+  // Sub-view toggle. Routed through loadTab so it inherits the SAME
+  // latest-wins serialisation as a chip click — flipping run↔workers while a
+  // render is in flight can never leave two renderers painting one pane.
+  if (subBtn) subBtn.addEventListener('click', () => {
+    subB = (subB === 'run') ? 'workers' : 'run';
+    paintSubBtn('B');
+    loadTab('B');
+  });
 
   // Scoped to the tab bar element itself (the finance.js precedent), never to
   // `host` — otherwise a chip rendered by a sub-screen inside the pane would
@@ -3900,8 +3963,18 @@ async function openPayslipHistory(currentUser, currentRole) {
         // that hits the books. Read straight off `ps`, the same object the
         // Ledger.upsertByRef call uses, so the two cannot disagree.
         const _psAmt = ps.netPay || 0;
+        // A payslip the WEEKLY RUN produced was already booked to the ledger by
+        // WeeklyRun.disburse — that press is what moved the money. Submitting it
+        // here must therefore NOT post again, and must not promise to: the
+        // ledger keys off `WPAY-{payslipId}` while the run books under its own
+        // ref, so Ledger.upsertByRef's idempotence cannot save us — the two refs
+        // simply differ and the expense lands twice. This is the same money bug
+        // in the confirm text and in the write, so both branch on one answer.
+        const _psFromRun = window.isRunGeneratedPayslip(ps);
         const _psAmtLine = next === 'submitted'
-          ? `<br/><br/>This posts <strong>₱${fmt(_psAmt)}</strong> to the General Ledger as Payroll Expense.`
+          ? (_psFromRun
+              ? `<br/><br/>Net pay: <strong>₱${fmt(_psAmt)}</strong>. This came from the weekly pay run, which already posted it to the General Ledger — filing it here will NOT post it a second time.`
+              : `<br/><br/>This posts <strong>₱${fmt(_psAmt)}</strong> to the General Ledger as Payroll Expense.`)
           : `<br/><br/>Net pay: <strong>₱${fmt(_psAmt)}</strong>.`;
         if (!(await confirmDialog({message:`Mark ${escHtml(ps.workerName||'')}'s payslip (${escHtml(ps.payPeriodStart||'')} – ${escHtml(ps.payPeriodEnd||'')}) as "${escHtml(next)}"?${_psAmtLine}`, html:true}))) return;
         const fieldPrefix = { verified:'verified', filed:'filed', submitted:'submitted' }[next];
@@ -3916,7 +3989,10 @@ async function openPayslipHistory(currentUser, currentRole) {
           [`${fieldPrefix}At`]: firebase.firestore.FieldValue.serverTimestamp()
         });
         // On Submit, post the payslip to the general ledger (Finance → Ledger)
-        if (next === 'submitted') {
+        // — UNLESS the weekly run already did (see _psFromRun above).
+        if (next === 'submitted' && _psFromRun) {
+          Notifs.success('Submitted. Already posted to the General Ledger by the weekly pay run.');
+        } else if (next === 'submitted') {
           const lref = `WPAY-${ps.id}`;
           // v12 WS36 — runs inside the payslips modal (no room for a second modal),
           // so auto-tag with the registry's default account. Mis-tagged/untagged
@@ -4144,6 +4220,150 @@ function openPayslipEdit(ps, currentUser, onSave) {
       : 'Payslip updated.');
     onSave && onSave();
   }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WEEKLY-RUN COLLISION GUARD (2026-08-11)
+//
+// TWO routes now emit a `payslips` doc for one Operations worker:
+//   1. openPayslipGenerator below — ONE worker, an arbitrary period. Kept
+//      deliberately (owner): off-cycle pay, final pay, an advance, a partial
+//      week, and correcting a single line of a run.
+//   2. window.WeeklyRun.disburse — the whole Monday–Sunday week, one press.
+//
+// Nothing structural keeps them apart. `payslips` docs are written with
+// .add() (auto-id, see the save handler below and PAYSLIP_RUN_MARKER's note),
+// so there is no natural key on (workerId, week) for Firestore to collide on:
+// both routes will happily emit a doc for the same worker and the same week.
+// That worker is then PAID TWICE — two net-pay figures, two ledger postings,
+// and two cash-advance decrements — and nothing anywhere says so.
+//
+// The guard below is the generator's half: before it writes, it asks the pay
+// week whether the run has already claimed this worker. The run's half (skip a
+// worker who already has a hand-issued payslip covering the week) belongs in
+// window.WeeklyRun.compute/disburse and is handed off, not duplicated here.
+
+/**
+ * Is this payslip one the weekly run produced?
+ *
+ * Exported because BOTH sides need one answer: hr.js reads it (below, and in
+ * openPayslipHistory's Submit handler), and js/payroll-weekly.js must STAMP
+ * it. The marker of record is `payWeekId` — the week's MONDAY date, exactly
+ * the pay_weeks doc id (window.payWeekMondayOf). The other spellings are
+ * accepted defensively so a marker that lands under a near-miss name still
+ * reads as run-generated: the failure mode of a FALSE negative here is paying
+ * or posting twice, so this errs toward "yes, the run owns it".
+ */
+window.isRunGeneratedPayslip = function (ps) {
+  if (!ps) return false;
+  return !!(ps.payWeekId || ps.weekId || ps.payRunId ||
+            ps.source === 'weekly-run' || ps.generatedBy === 'weekly-run');
+};
+
+/**
+ * Ask every pay week the period touches whether `workerId` is already paid.
+ *
+ * Returns { block, warn } — `block` is a hard refusal string (money has moved
+ * or is moving), `warn` is a confirm-first string (a run exists for the week
+ * and lists this worker, but has not been released yet).
+ *
+ * THROWS on a failed read, and the caller REFUSES THE SAVE on a throw. A
+ * denied or flaky read must never be silently read as "no run exists" — that
+ * is precisely the reading that pays someone twice. Same house rule as "a
+ * denied read must never render as an empty list on a pay screen".
+ */
+async function _weeklyRunCollision(workerId, workerName, periodStart, periodEnd) {
+  const out = { block: '', warn: '' };
+  if (!workerId || !periodStart || typeof window.payWeekMondayOf !== 'function') return out;
+
+  // A custom period may straddle more than one Monday–Sunday week, so walk
+  // every week the period touches rather than assuming one. Capped at 6 so a
+  // fat-fingered date (2026 → 2006) can't turn into a thousand reads.
+  const weekIds = [];
+  let cur = window.payWeekMondayOf(periodStart);
+  const last = window.payWeekMondayOf(periodEnd || periodStart);
+  for (let i = 0; i < 6 && cur && cur <= last; i++) {
+    weekIds.push(cur);
+    const d = new Date(cur + 'T12:00:00+08:00');
+    d.setUTCDate(d.getUTCDate() + 7);
+    cur = d.toISOString().slice(0, 10);
+  }
+  // Hitting the cap means the tail of the period went UNCHECKED. Recorded now,
+  // APPENDED at the end (never assigned to out.warn here — that would occupy
+  // the `if (!out.warn)` slot below and suppress a real collision message,
+  // which is the more important of the two). The point of this function is
+  // that "not checked" and "no collision" must not read as the same answer.
+  // (A weekly payslip spanning >6 weeks is a typo, not a use case.)
+  const truncated = !!(cur && cur <= last);
+
+  // NO .catch(()=>null) anywhere in this loop — see the throws-on-read note.
+  for (const weekId of weekIds) {
+    const snap = await db.collection('pay_weeks').doc(weekId).get();
+    if (!snap.exists) continue;                       // nobody has computed that week
+    const w     = snap.data() || {};
+    const state = w.state || 'draft';
+    if (state === 'draft') continue;                  // nothing claimed yet
+
+    // A line identifies its worker by workerId in the contract; id /
+    // workerProfileId are read too so a naming near-miss in the engine can't
+    // turn into a missed collision (false negative = double pay).
+    const line = (Array.isArray(w.lines) ? w.lines : [])
+      .find(l => l && (l.workerId === workerId || l.id === workerId || l.workerProfileId === workerId));
+    if (!line) continue;
+
+    // An exclusion is period-scoped and means "not paid by the run THIS week"
+    // — which is exactly when a hand-issued payslip is the correct thing to do.
+    const excl = w.excluded || {};
+    if (excl && Object.prototype.hasOwnProperty.call(excl, workerId) && excl[workerId]) continue;
+
+    // Both strings below land in confirmDialog({html:true}), a raw-innerHTML
+    // sink — so every interpolated value is escaped, even the ones that look
+    // like they can only be dates.
+    const label = escHtml((window.WeeklyRun && typeof window.WeeklyRun.weekLabel === 'function')
+      ? window.WeeklyRun.weekLabel(weekId) : weekId);
+    const who = escHtml(workerName || 'this worker');
+    const net = Number(line.netPay != null ? line.netPay : line.net) || 0;
+
+    if (state === 'disbursing' || state === 'disbursed') {
+      out.block = `The weekly pay run for ${label} has already paid ${who} ` +
+                  `₱${fmt(net)}. Issuing this payslip would pay them twice for the same week. ` +
+                  `If this is a correction, edit that payslip from All Payslips instead.`;
+      return out;                                     // hard stop beats any later warning
+    }
+    if (!out.warn) {
+      out.warn = `The weekly pay run for ${label} is "${escHtml(state)}" and already includes ` +
+                 `${who} for ₱${fmt(net)}. Issuing this payslip as well will pay them TWICE ` +
+                 `unless you remove them from that week first.`;
+    }
+  }
+
+  // Second collision, same route twice: a hand-issued payslip already covering
+  // this period. Reuses the (workerId, payPeriodStart) composite index
+  // payslipYtdWeekly already relies on — no new index.
+  const first = weekIds[0] || window.payWeekMondayOf(periodStart);
+  const psSnap = await db.collection('payslips')
+    .where('workerId', '==', workerId)
+    .where('payPeriodStart', '>=', first)
+    .where('payPeriodStart', '<=', (periodEnd || periodStart))
+    .get();
+  const dupes = psSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (dupes.length && !out.block) {
+    const d0   = dupes[0];
+    const via  = window.isRunGeneratedPayslip(d0) ? 'the weekly pay run' : 'hand';
+    const more = dupes.length > 1 ? ` (and ${dupes.length - 1} more)` : '';
+    const dupLine = `${escHtml(workerName || 'This worker')} already has a payslip issued by ${via} for ` +
+                    `${escHtml(d0.payPeriodStart || '?')} – ${escHtml(d0.payPeriodEnd || '?')}${more}, ` +
+                    `net ₱${fmt(d0.netPay || 0)}.`;
+    out.warn = out.warn
+      ? (out.warn + '<br/><br/>' + dupLine)
+      : (dupLine + ' Issuing another will pay them twice.');
+  }
+  if (truncated && !out.block) {
+    const t = 'This pay period covers more than six weeks, so only the first six were checked ' +
+              'against the weekly pay runs. Confirm the dates before issuing.';
+    out.warn = out.warn ? (out.warn + '<br/><br/>' + t) : t;
+  }
+  return out;
 }
 
 function openPayslipGenerator(profile, currentUser, currentRole) {
@@ -4762,6 +4982,41 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     }
     const d = collectPayslipData(profile, currentUser, panel);
     if (!d) return;
+
+    // ── DOUBLE-PAY GUARD — runs BEFORE psSaving is latched, so a refusal or a
+    // cancelled confirm leaves the button live and this modal usable. See
+    // _weeklyRunCollision's header: the weekly run and this generator both
+    // emit `payslips` docs and nothing else keeps them off the same worker's
+    // same week.
+    //
+    // A THROWN read is a REFUSAL, never a pass. "Couldn't check" and "nothing
+    // to worry about" are the same code path if you .catch() this, and that
+    // path pays someone twice.
+    let _collide;
+    try {
+      _collide = await _weeklyRunCollision(profile.id, profile.name, d.payPeriodStart, d.payPeriodEnd);
+    } catch (chkErr) {
+      console.error('weekly-run collision check failed', chkErr);
+      Notifs.showToast('Could not check this week\'s pay run — refusing to issue the payslip. Try again; if it keeps failing you may not have payroll access.', 'error');
+      return;
+    }
+    if (_collide.block) {
+      await confirmDialog({
+        title: 'Already paid for this week',
+        message: _collide.block, html: true,
+        confirmLabel: 'OK', cancelLabel: 'OK'
+      });
+      return;                                     // no branch here issues the payslip
+    }
+    if (_collide.warn) {
+      const ok = await confirmDialog({
+        title: 'Possible double payment',
+        message: _collide.warn + '<br/><br/>Issue this payslip anyway?',
+        html: true, danger: true, confirmLabel: 'Issue anyway'
+      });
+      if (!ok) return;
+    }
+
     psSaving = true;
     const saveBtn = $ps('ps-save-btn');
     const saveBtnHTML = saveBtn ? saveBtn.innerHTML : '';
