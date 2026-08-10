@@ -222,6 +222,33 @@ The IT lockdown converted four collections but missed `it_tickets` (`firestore.r
 
 ---
 
+## 3b. OWNER RULINGS — 2026-08-10, CLOSED
+
+Everything §4 below raised as an open question has now been answered. Recorded
+here so a future audit re-raises none of them.
+
+**Ruled by the owner, no change to be made:**
+
+| Question | Ruling | Consequence, accepted knowingly |
+|---|---|---|
+| Company-wide calendar READ | **Stays open** | The Corporate Secretary can read every meeting's title, agenda and follow-up notes, Finance and IT included. This is a deliberate, narrow exception to the Finance/IT wall: oversight of company scheduling is the role's job, and meeting docs carry no `department` field, so filtering would be a schema change plus a backfill. The edit/cancel half IS closed (`firestore.rules` meetings update/delete → `isOrganizer() \|\| isSeniorAdmin()`). |
+| Receivables (contract value, collected, outstanding) | **Not Finance — stays visible** | These live on the operational project and sales-order records, not the ledger, and managers work from them daily. Narrowing for the secretary would have narrowed for everyone. |
+| Partner (Brilliant Steel) quote hard delete | **Keep the request flow** | The secretary requests, the President approves (`.bs-delreq-btn` → `deleteRequested` → `Notifs.sendToOwner`). The rules would permit a direct delete; the screen deliberately does not offer one, because a filed partner quote is a money-adjacent record and one-tap permanent deletion is the wrong default. The UI being stricter than the rule is INTENTIONAL here — do not "fix" the mismatch. |
+| CRM merge / multi-select / bulk edit | **Not now** | A feature request, not a defect, and role-neutral — no role has it. Cross-directory search now exists, so duplicates can at least be found by name. Revisit only if organising the CRM actually stalls on it. |
+
+**Resolved by the fixes themselves, no longer decisions:**
+- Ventures department assignment is **no longer required** — `storage.rules` `isVenturesMember()` now admits the secretary directly, so brief attachments work with no People & Roles change. (Supersedes action item 1 below.)
+- The Accountant login card is fixed — `finance` maps to the Staff portal instead of being advertised on Admin and then rejected.
+- Ventures delete is kept but now requires typing the venture name, and a separate review-note surface means reviewing no longer overwrites the author's brief.
+- Finance delete requests, the audit log and the error log were all settled in the 2026-08-10 fix pass.
+
+**Still true and still important:** do **not** assign the Corporate Secretary to
+Finance, IT, or Production. The first two are the owner's standing ruling; the
+third was a genuine hole (assignment beat the role decision and reopened
+ledger-create) and is now closed in `firestore.rules`, but the principle stands.
+
+---
+
 ## 4. ACTION ITEMS FOR THE OWNER
 
 **1. Assign the Corporate Secretary to the Ventures department in People & Roles.** *(2 minutes, no code)*
