@@ -2664,6 +2664,11 @@ function navigateTo(page, opts) {
   window.currentSubtab = subtab;          // screens read this via initialSubtab()
   setActiveNav(page);
   updateNavBackBtn();
+  // A floating action button is a sibling of <body>, not of #page-content, so
+  // repainting the page cannot remove it. Clear it here or an "Add Contact"
+  // follows you off the CRM and onto Finance — still live, still opening a
+  // form for a directory you have left.
+  window.clearDirectoryFabs && window.clearDirectoryFabs();
   // Close task fullscreen panel if open
   if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
   // Team Chat (WS37): the inbox listener is page-scoped, not Overlay-scoped —

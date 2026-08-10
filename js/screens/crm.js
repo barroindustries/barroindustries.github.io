@@ -517,6 +517,8 @@ async function renderROCDirectory(container, currentUser, currentRole) {
   window.bindChipTabs(container.querySelector('.roc-status-tabs'), (key) => { statusFilter = key; renderTable(); });
   document.getElementById('roc-search')?.addEventListener('input', (e) => { search = e.target.value.trim().toLowerCase(); renderTable(); });
   document.getElementById('roc-add-btn')?.addEventListener('click', () => openROCEditor(null));
+  // Same floating add as the AEC directory — one helper, two directories.
+  window.mountDirectoryFab('roc-fab', canEdit, 'Add Lead', () => openROCEditor(null));
   document.getElementById('roc-csv-btn')?.addEventListener('click', () => window.exportCSV('roc-leads', shownRows(), ROC_CSV_COLUMNS));
   document.getElementById('roc-print-btn')?.addEventListener('click', () => openROCPrintSheet(shownRows(), filterLabel()));
   renderTable();

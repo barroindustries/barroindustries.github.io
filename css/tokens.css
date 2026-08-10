@@ -139,6 +139,9 @@
   --z-scrim:      85;   /* sidebar-overlay backdrop */
   --z-shell:      90;   /* sidebar, bottom-nav base */
   --z-shell-2:    94;   /* top-nav-strip */
+  --z-fab: 90;          /* floating action button — BELOW the bottom nav (it is
+                           positioned above it, not over it) and below the
+                           sidebar, which also hides it while open */
   --z-bottom-nav: 95;   /* bottom-nav */
   --z-shell-open: 96;   /* sidebar.open (above top-nav-strip) */
   --z-topbar:     100;  /* .topbar */

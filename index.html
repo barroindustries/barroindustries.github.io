@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.135 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.136 · Barro Industries</div>
   </div>
 </div>
 
@@ -566,6 +566,30 @@
      openRaiseHistory as bare globals at CLICK time (never at parse time), the
      same forward-reference convention every other js/screens/*.js file uses. -->
 <script defer src="js/screens/employee-profile.js"></script>
+<!-- WEEKLY PAY RUN (owner ruling 2026-08-10) — one press pays the Operations
+     Team for a Monday–Sunday week. Split in two on purpose, engine then screen:
+
+       js/payroll-weekly.js          window.WeeklyRun — the Firestore/state
+                                     layer (load/compute/setExcluded/
+                                     setAdjustment/verify/disburse over
+                                     pay_weeks/{weekId}). Touches no DOM.
+       js/screens/payroll-weekly-ui.js  window.renderWeeklyPayrollTab — the
+                                     screen. Calls ONLY the WeeklyRun API.
+
+     Both must load AFTER js/money-core.js (computeWeeklyLine /
+     resolveWorkerHourlyRate / weeklyRunSkipReason / payWeekMondayOf are the
+     whole of the pay maths and the engine calls them by window.* name) and
+     AFTER js/departments.js (the Manila helpers bizDate/bizDow, escHtml,
+     canEditDept, isMoneyPriv). Placed after hr.js as well because the UI
+     reaches forward into that file's openPayslipGenerator /
+     openWorkerKioskModal / renderPayslipPage for the off-cycle and
+     single-line-correction paths — at CLICK time only, never at parse time,
+     the same forward-reference convention as every other js/screens/*.js file.
+     hr.js's renderPayrollHub reaches forward into renderWeeklyPayrollTab the
+     same way (guarded by typeof, so a load-order surprise degrades to the old
+     Workers screen instead of a blank pane). -->
+<script defer src="js/payroll-weekly.js"></script>
+<script defer src="js/screens/payroll-weekly-ui.js"></script>
 <!-- v14 Wave 7 Pass 4 — Production + Purchasing + Projects (job_projects
      lifecycle) screens, split verbatim out of departments.js (a single
      contiguous tail cut — PROD_STAGES/QC/Delivery Receipt through

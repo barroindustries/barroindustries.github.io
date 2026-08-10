@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.135';
+window.APP_VERSION = '14.0.136';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1359,6 +1359,50 @@ window.exportCSV = function(filename, rows, columns) {
 //   Lucide markup from emojiIcon(); `label` is always escaped. Never pass user content
 //   as `icon` — put it in `label`.
 // activeKey: the key to mark active. opts.cls: extra class on the wrapper.
+// ── window.mountDirectoryFab(id, allowed, label, onClick) ──────────────────
+// A floating "add" button for long directory screens (owner, 2026-08-10:
+// "let it be a floating button on the right bottom side which follows along
+// when scrolling, modern design").
+//
+// APPENDED TO <body>, DELIBERATELY. position:fixed is resolved against the
+// nearest ancestor carrying a transform / filter / will-change, not against the
+// viewport — and this app puts transforms on page panels and the sidebar. A FAB
+// mounted inside the screen container would therefore scroll away with it on
+// exactly the screens it exists for. Body is the only reliable parent.
+//
+// Because it lives outside the screen, it must be torn down BY HAND when the
+// screen goes: the renderer that mounted it re-runs on every navigation, so
+// this removes any previous instance of the same id first, and a page change
+// removes it via the popstate hook below. Otherwise an Add Contact button would
+// follow you onto the Finance screen.
+window.mountDirectoryFab = function (id, allowed, label, onClick) {
+  document.getElementById(id)?.remove();
+  if (!allowed) return null;
+  const b = document.createElement('button');
+  b.className = 'fab';
+  b.id = id;
+  b.type = 'button';
+  b.setAttribute('aria-label', label);
+  b.title = label;
+  // escHtml on the label: it is a caller-supplied string going into innerHTML.
+  b.innerHTML = `<span class="fab-icon">${window.emojiIcon ? window.emojiIcon('plus', 22) : '+'}</span>`
+              + `<span class="fab-label">${window.escHtml ? window.escHtml(label) : label}</span>`;
+  b.addEventListener('click', () => { window.haptic && window.haptic('light'); onClick(); });
+  document.body.appendChild(b);
+  if (window.lucide) { try { lucide.createIcons({ nodes: [b] }); } catch (_) {} }
+  // Track it so a navigation can clear it without knowing the id.
+  (window._activeFabs = window._activeFabs || []).push(id);
+  return b;
+};
+// Any navigation drops every mounted FAB. navigateTo repaints #page-content but
+// cannot know about a sibling of <body>, so without this the button outlives
+// its screen — which is worse than not having one, because it still works and
+// opens a form for a directory you are no longer looking at.
+window.clearDirectoryFabs = function () {
+  (window._activeFabs || []).forEach(id => document.getElementById(id)?.remove());
+  window._activeFabs = [];
+};
+
 window.chipTabs = function(items, activeKey, opts) {
   opts = opts || {};
   var esc = window.escHtml || function(s){ return String(s == null ? '' : s); };

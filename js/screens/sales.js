@@ -1755,7 +1755,18 @@ async function renderAECDirectory(container, currentUser, currentRole) {
   window.bindChipTabs(container.querySelector('.aec-stage-tabs'), (key) => { stageFilter = key; renderTable(); });
   document.getElementById('aec-region-filter')?.addEventListener('change', (e) => { regionFilter = e.target.value; renderTable(); });
   document.getElementById('aec-search')?.addEventListener('input', (e) => { search = e.target.value.trim().toLowerCase(); renderTable(); });
+  // Owner, 2026-08-10: "add contact button, let it be a floating button on the
+  // right bottom side which follows along when scrolling". This directory runs
+  // to 129 rows, so the header button scrolls out of reach exactly when you are
+  // deep in the list looking for a duplicate. The FAB is appended to <body>,
+  // not to the screen container — a position:fixed element inside a transformed
+  // or scrolling ancestor is positioned against THAT ancestor, not the viewport,
+  // and would scroll away with it.
+  //
+  // Both buttons run the SAME opener; the header one stays for anyone who is
+  // already at the top.
   document.getElementById('aec-add-btn')?.addEventListener('click', () => openAECEditor(null));
+  window.mountDirectoryFab('aec-fab', canEdit, 'Add Contact', () => openAECEditor(null));
   document.getElementById('aec-csv-btn')?.addEventListener('click', () => window.exportCSV('aec-contacts', shownRows(), AEC_CSV_COLUMNS));
   document.getElementById('aec-print-btn')?.addEventListener('click', () => openAECPrintSheet(shownRows(), filterLabel()));
   renderTable();

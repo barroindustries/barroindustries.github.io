@@ -8240,3 +8240,68 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   /* The form's tail must be able to clear the bar. */
   .page-panel-body:has(.ps-live-total) { padding-bottom: 84px; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   FLOATING ACTION BUTTON — .fab
+   Owner, 2026-08-10: "add contact button, let it be a floating button on the
+   right bottom side which follows along when scrolling, modern design".
+
+   The CRM directories run to 129 rows, so the "+ Add Contact" that lived in
+   the filter row scrolled out of reach the moment you started looking for a
+   duplicate. position:fixed keeps it with you.
+
+   `.fab` was already reserved by the print rule (~line 7587,
+   `.fab,.no-print{display:none!important}`) but never defined — so printing a
+   directory already knew to drop it, and nothing else claimed the name.
+
+   GEOMETRY. It has to clear two things this app has and a desktop app does
+   not: the mobile bottom nav, and the iPhone home indicator. --sab-eff is
+   ViewportSync's corrected safe-area inset (js/config.js) — the plain
+   env(safe-area-inset-bottom) over-reports on this device, which is what put
+   a 59px gap under the chat composer once. Desktop has neither, so it sits at
+   a plain 24px.
+
+   Extends to a pill on hover/focus so the label is discoverable without
+   costing width at rest — collapsed it is a 56px circle, which is the minimum
+   comfortable thumb target and well past the 44px floor.
+══════════════════════════════════════════════════════════════════════ */
+.fab {
+  position: fixed; right: 20px; z-index: var(--z-fab, 90);
+  bottom: calc(24px + max(0px, var(--sab-eff, env(safe-area-inset-bottom, 0px))));
+  display: inline-flex; align-items: center; gap: 0;
+  height: 56px; min-width: 56px; padding: 0 16px;
+  border: 0; border-radius: 28px; cursor: pointer;
+  background: linear-gradient(135deg, var(--primary, #3B5BDB), var(--primary-light, #5C7CFA));
+  color: #fff; font: inherit; font-size: var(--fs-base); font-weight: 700;
+  box-shadow: 0 6px 20px rgba(0,0,0,.28), 0 2px 6px rgba(0,0,0,.18);
+  transition: transform var(--t1), box-shadow var(--t1), gap var(--t1);
+  -webkit-appearance: none; appearance: none;
+}
+.fab .fab-icon { display: inline-flex; flex-shrink: 0; }
+/* The label is width-animated rather than display-toggled so the pill grows
+   smoothly instead of snapping, and so it is still in the accessibility tree
+   when collapsed. */
+.fab .fab-label {
+  max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0;
+  transition: max-width var(--t2), opacity var(--t1), margin var(--t1);
+}
+@media (hover: hover) {
+  .fab:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(0,0,0,.34), 0 3px 8px rgba(0,0,0,.2); }
+  .fab:hover .fab-label, .fab:focus-visible .fab-label { max-width: 200px; opacity: 1; margin-left: 8px; }
+}
+.fab:focus-visible .fab-label { max-width: 200px; opacity: 1; margin-left: 8px; }
+.fab:active { transform: translateY(0) scale(.96); }
+/* On a phone the bottom nav owns the bottom of the screen, so clear it. */
+@media (max-width: 768px) {
+  .fab {
+    right: 16px;
+    bottom: calc(var(--bottom-nav-h, 64px) + 16px + max(0px, var(--sab-eff, env(safe-area-inset-bottom, 0px))));
+    height: 52px; min-width: 52px; padding: 0 14px;
+  }
+  /* No hover on touch, so the label would never appear — show it always, which
+     also makes the action legible to someone who has not used the app before. */
+  .fab .fab-label { max-width: 200px; opacity: 1; margin-left: 8px; }
+}
+/* The sidebar drawer covers the screen on mobile; a button floating over it
+   would tap through to the wrong thing. */
+body.sidebar-open .fab { display: none !important; }
