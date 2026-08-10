@@ -1666,12 +1666,29 @@ function getSidebarItems() {
   (reg.sidebarUniversal || []).forEach(e => {
     items.push({ icon: e.icon, label: e.label, page: e.page });
   });
+  // A group's heading rides on its FIRST entry. If that entry is conditional
+  // and gets filtered out, the heading must move to the next surviving entry —
+  // otherwise the rest of the group silently merges into the group ABOVE it and
+  // ends up under someone else's label. Carrying it forward makes group
+  // boundaries independent of which members a given role can see.
+  let pendingSection = null;
   (reg.sidebar[variant] || []).forEach(e => {
     if (e.deptLoop) { _pushDeptNavItems(items); return; }
+    if (e.section && e.sectionLabel) {
+      pendingSection = { label: e.sectionLabel, collapsed: e.collapsed === true };
+    }
     if (e.when && !_navPredicateOk(e.when)) return;
     const item = { icon: e.icon, label: e.label, page: e.page };
-    if (e.section) item.section = true;
-    if (e.sectionLabel) item.sectionLabel = e.sectionLabel;
+    if (pendingSection) {
+      item.section = true;
+      item.sectionLabel = pendingSection.label;
+      if (pendingSection.collapsed) item.collapsed = true;
+      pendingSection = null;
+    } else if (e.section) {
+      item.section = true;
+      if (e.sectionLabel) item.sectionLabel = e.sectionLabel;
+      if (e.collapsed) item.collapsed = true;
+    }
     items.push(item);
   });
   return items;
@@ -1691,25 +1708,75 @@ function _bnIcon(icon) {
   return `<span class="bn-icon emoji-icon">${icon}</span>`;
 }
 
+// ── Sidebar groups, foldable and remembered ───────────────────────────────
+// Owner, 2026-08-10: "theres way too mauch happening in the left side app
+// drawer, organize it". Measured first: 23 items, 1376px, 1.69 screens of
+// scrolling on a 375px phone, with the first ten carrying no header at all.
+//
+// The registry now declares groups (section/sectionLabel on the first item of
+// each, plus `collapsed:true` for ones that start folded). This renders each
+// group as a real container so the header can fold it, and remembers the
+// user's choice per group — so the drawer is short by default but never hides
+// anything permanently, and never re-hides something they chose to open.
+const _NAV_FOLD_KEY = 'bi-nav-folded';
+function _navFolded() {
+  try { return JSON.parse(localStorage.getItem(_NAV_FOLD_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+function _navSetFolded(label, folded) {
+  try {
+    const m = _navFolded(); m[label] = folded;
+    localStorage.setItem(_NAV_FOLD_KEY, JSON.stringify(m));
+  } catch (_) { /* private mode — folding still works, just isn't remembered */ }
+}
+
 function buildSidebarNav() {
   const nav = document.getElementById('sidebar-nav');
   if (!nav) return;
   const items = getSidebarItems();
-  let lastSectionLabel = null;
-  nav.innerHTML = items.map(item => {
-    let secLabel = '';
+  const remembered = _navFolded();
+
+  // Partition the flat list into groups. Everything before the first
+  // section-labelled item is the unheadered "every day" group, which can never
+  // be folded — the drawer must always open onto something useful.
+  const groups = [{ label: null, collapsed: false, items: [] }];
+  items.forEach(item => {
     if (item.section) {
       const label = item.sectionLabel || 'Management';
-      if (label !== lastSectionLabel) {
-        secLabel = `<div class="nav-section-label">${label}</div>`;
-        lastSectionLabel = label;
+      if (label !== groups[groups.length - 1].label) {
+        groups.push({ label, collapsed: item.collapsed === true, items: [] });
       }
     }
-    // v12 WS42 Phase 15: label wrapped in .nav-label (was a bare text node) so the
-    // 820–1023px icon-rail tier can hide it via CSS; title="" gives that tier a
-    // native hover tooltip for free — no new tooltip JS needed.
-    return `${secLabel}<button class="nav-item pressable" data-page="${item.page}" title="${escHtml(item.label)}">${item.iconHtml || _navIcon(item.icon)}<span class="nav-label">${item.label}</span></button>`;
+    groups[groups.length - 1].items.push(item);
+  });
+
+  const btnHtml = (item) =>
+    `<button class="nav-item pressable" data-page="${item.page}" title="${escHtml(item.label)}">` +
+    `${item.iconHtml || _navIcon(item.icon)}<span class="nav-label">${item.label}</span></button>`;
+
+  nav.innerHTML = groups.filter(g => g.items.length).map(g => {
+    if (!g.label) return `<div class="nav-group">${g.items.map(btnHtml).join('')}</div>`;
+    // A remembered choice always beats the registry default.
+    const folded = Object.prototype.hasOwnProperty.call(remembered, g.label)
+      ? !!remembered[g.label] : g.collapsed;
+    return `<div class="nav-group${folded ? ' folded' : ''}" data-group="${escHtml(g.label)}">
+        <button type="button" class="nav-section-label" aria-expanded="${folded ? 'false' : 'true'}">
+          <span>${escHtml(g.label)}</span><i data-lucide="chevron-down" class="nav-sec-chev"></i>
+        </button>
+        <div class="nav-group-items">${g.items.map(btnHtml).join('')}</div>
+      </div>`;
   }).join('');
+
+  nav.querySelectorAll('.nav-section-label').forEach(h => {
+    h.addEventListener('click', () => {
+      const grp = h.closest('.nav-group');
+      const folded = grp.classList.toggle('folded');
+      h.setAttribute('aria-expanded', folded ? 'false' : 'true');
+      _navSetFolded(grp.dataset.group, folded);
+      window.haptic && window.haptic('light');
+    });
+  });
+
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
       // Matches the bottom-nav-item/More-sheet-row tap haptic (re-audit

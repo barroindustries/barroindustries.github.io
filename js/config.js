@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.123';
+window.APP_VERSION = '14.0.124';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -568,52 +568,64 @@ window.NAV_REGISTRY = {
 
   sidebar: {
     // ── Admin / President Command Center (president, manager, secretary) ──
+    // ── Admin / President Command Center (president, manager, secretary) ──
+    //
+    // GROUPED, 2026-08-10 (owner: "theres way too mauch happening in the left
+    // side app drawer, organize it"). Measured before the change: 23 items,
+    // 1376px, 1.69 SCREENS of scrolling on a 375px phone — and the first TEN
+    // had no section header at all, so the drawer opened as a flat wall. The
+    // one labelled group, "Management", was a grab-bag of seven that included
+    // Calendar and Files; "Catalog" held a single item.
+    //
+    // Now: seven groups, every one labelled, none with a single item, ordered
+    // by how often the thing is actually opened rather than by when it was
+    // built. The first four carry no header — they are the every-day set and a
+    // header above Dashboard would be noise. Groups marked `collapsed:true`
+    // start folded and remember whatever the user does next (see
+    // buildSidebarNav in js/app.js), which is what actually shortens the
+    // drawer: 23 rows becomes 13 on open.
+    //
+    // Adding an entry: put it in the group it BELONGS to, not at the end.
+    // A group of one means the group is wrong.
     admin: [
-      { key:'analytics',    icon:'bar-chart-2',  label:'Analytics',        page:'analytics' },
+      // ── Every day (no header — these are the reasons the drawer gets opened)
       { key:'tasks',        icon:'check-square', label:'Tasks',            page:'tasks' },
-      { key:'posts',        icon:'megaphone',    label:'Posts',            page:'posts' },
-      { key:'company',      icon:'building-2',   label:'Company',          page:'company' },
-      // Memos & board resolutions. The router case ('memos' → renderMemosPage,
-      // js/app.js navigateTo) and the rules (memos create/delete = isAdmin(),
-      // i.e. exactly this variant's three roles) have both been in place for
-      // ages — what was missing was any nav entry at all, so the page was
-      // reachable only from one dashboard tile and from notification deep
-      // links. Anyone navigating by the sidebar concluded the capability did
-      // not exist, which for the Corporate Secretary is their signature
-      // artefact. Sits next to Company because the Company screen's Memos tab
-      // is the same content viewed the other way round.
+      { key:'calendar',     icon:'calendar-days',label:'Calendar',         page:'calendar' },
+
+      // ── Company-wide communication
+      { key:'posts',        icon:'megaphone',    label:'Posts',            page:'posts', section:true, sectionLabel:'Company' },
       { key:'memos',        icon:'clipboard-check', label:'Memos',         page:'memos' },
-      { key:'departments',  icon:'layout-grid',  label:'All Departments',  page:'departments' },
-      // CRM and Ventures, promoted out of the "All Departments" grid into
-      // first-class entries (owner, 2026-08-10: the Corporate Secretary is
-      // organising the CRM and reviewing Ventures this week). Unlike 'staff',
-      // this variant has NO {deptLoop:true} placeholder — an admin's chrome is
-      // a flat company-wide list, not their own assigned departments — so a
-      // department surfaces here only if it is named explicitly, the same way
-      // 'hr' already is below. Before this they were three interactions deep
-      // (Dashboard → All Departments → card) on desktop and drawer-only on
-      // mobile.
-      // No `when:` predicate on purpose: canDept() in firestore.rules admits
-      // all three admin roles to both, and neither is in
-      // SECRETARY_BLOCKED_DEPTS (js/departments.js), so gating either one out
-      // would hide a capability the boundary actually grants.
-      { key:'crm',          icon:'target',       label:'CRM',              page:'dept:CRM' },
-      { key:'ventures',     icon:'rocket',       label:'Ventures',         page:'dept:Ventures' },
-      { key:'approvals',    icon:'shield-check', label:'Approvals',        page:'approvals', section:true },
+      { key:'company',      icon:'building-2',   label:'Company',          page:'company' },
+
+      // ── The oversight job: what needs a decision, and how things are going
+      { key:'approvals',    icon:'shield-check', label:'Approvals',        page:'approvals', section:true, sectionLabel:'Oversight' },
+      { key:'analytics',    icon:'bar-chart-2',  label:'Analytics',        page:'analytics' },
       { key:'progress',     icon:'trending-up',  label:'Progress Reports', page:'progress' },
-      { key:'team',         icon:'users',        label:'Team Directory',   page:'team-directory', section:true },
+
+      // ── People
+      { key:'team',         icon:'users',        label:'Team Directory',   page:'team-directory', section:true, sectionLabel:'People', collapsed:true },
       { key:'hr',           icon:'user-cog',     label:'HR',               page:'dept:HR' },
       { key:'attendance',   icon:'calendar',     label:'Attendance',       page:'attendance' },
-      { key:'calendar',     icon:'calendar-days', label:'Calendar',         page:'calendar' },
-      { key:'files-hub',    icon:'folder-open',  label:'Files',            page:'files-hub' },
-      { key:'inventory',    icon:'boxes',        label:'Inventory',        page:'inventory', section:true, sectionLabel:'Operations' },
-      { key:'projects',     icon:'trending-up',  label:'Projects',         page:'projects-lifecycle' },
+
+      // ── Departments. All Departments is the hub; CRM and Ventures are here
+      // because the owner works them directly and asked for them by name.
+      { key:'departments',  icon:'layout-grid',  label:'All Departments',  page:'departments', section:true, sectionLabel:'Departments', collapsed:true },
+      { key:'crm',          icon:'target',       label:'CRM',              page:'dept:CRM' },
+      { key:'ventures',     icon:'rocket',       label:'Ventures',         page:'dept:Ventures' },
+
+      // ── The work itself
+      { key:'projects',     icon:'trending-up',  label:'Projects',         page:'projects-lifecycle', section:true, sectionLabel:'Operations', collapsed:true },
       { key:'sales-orders', icon:'receipt',      label:'Sales Orders',     page:'sales-orders' },
-      { key:'product-db',   icon:'package',      label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog', when:'isPresident' },
-      { key:'audit-log',    icon:'scroll-text',  label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security', when:'isPresident' },
-      { key:'sys-health',   icon:'activity',     label:'System Health',    page:'system-health', when:'isPresident' }
+      { key:'inventory',    icon:'boxes',        label:'Inventory',        page:'inventory' },
+      { key:'files-hub',    icon:'folder-open',  label:'Files',            page:'files-hub' },
+
+      // ── President-only. Was three separate one-item sections (Catalog,
+      // Security, and System Health orphaned under Security) — one group.
+      { key:'product-db',   icon:'package',      label:'Product Database', page:'product-database', section:true, sectionLabel:'System', collapsed:true, when:'isPresident' },
+      { key:'audit-log',    icon:'scroll-text',  label:'Audit Log',        page:'audit-log',       when:'isPresident' },
+      { key:'sys-health',   icon:'activity',     label:'System Health',    page:'system-health',   when:'isPresident' }
     ],
-    // ── Generic external partner (any company) ──
+
     genericPartner: [
       { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
       { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
@@ -643,28 +655,38 @@ window.NAV_REGISTRY = {
       { key:'files',    icon:'folder',     label:'Files',         page:'bs-files' }
     ],
     // ── Employee / Agent / Finance ──
+    // ── Employee / Agent / Accountant ──
+    // Grouped 2026-08-10 alongside the admin drawer. Same disease, milder: an
+    // ungrouped run of six, then one "Management" grab-bag of eight that
+    // included Calendar, Files, Projects and Sales Orders — none of which are
+    // management. Group headings survive a member being filtered out by
+    // `when` (see getSidebarItems), so the conditional Operations entries
+    // cannot drag the rest of their group under someone else's label.
     staff: [
-      { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
-      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts' },
-      { key:'cash',     icon:'banknote',     label:'Cash Advance',  page:'cash-advances' },
-      { key:'company',  icon:'building-2',   label:'Company',       page:'company' },
+      // ── Every day (no header)
+      { key:'tasks',    icon:'check-square',  label:'My Tasks',      page:'tasks' },
+      { key:'calendar', icon:'calendar-days', label:'Calendar',      page:'calendar' },
+
+      // ── Their own departments, generated per user
       { deptLoop:true },
-      { key:'team',        icon:'users',       label:'Team',         page:'team-directory', section:true, sectionLabel:'Management' },
-      // Owner request 2026-08-09 — "Allow accountant access to hr".
-      // renderHR (js/screens/hr.js) ALREADY admitted the finance role; what was
-      // missing was any way in. The Accountant uses this 'staff' sidebar, whose
-      // only HR route was the {deptLoop} block — i.e. HR appeared solely if they
-      // happened to be assigned to the HR department. So the screen existed and
-      // was unreachable. Payroll inside it is separately gated on isMoneyPriv(),
-      // which the Accountant has; account CREATION stays president/manager
-      // (canAccounts), matching renderTeam.
-      { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR', when:'isFinanceRole' },
-      { key:'attendance',  icon:'calendar',    label:'Attendance',   page:'attendance' },
-      { key:'calendar',    icon:'calendar-days', label:'Calendar',   page:'calendar' },
-      { key:'files',       icon:'folder',      label:'Files',        page:'files' },
-      { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory', when:'hasProductionDept' },
-      { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', when:'hasProjectsDept' },
-      { key:'sales-orders',icon:'receipt',     label:'Sales Orders', page:'sales-orders', when:'hasSalesOrdersDept' },
+
+      // ── Company-wide
+      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts', section:true, sectionLabel:'Company' },
+      { key:'company',  icon:'building-2',   label:'Company',       page:'company' },
+      { key:'files',    icon:'folder',       label:'Files',         page:'files' },
+
+      // ── Their own employment
+      { key:'cash',     icon:'banknote',     label:'Cash Advance',  page:'cash-advances', section:true, sectionLabel:'Me' },
+      { key:'attendance',icon:'calendar',    label:'Attendance',    page:'attendance' },
+      { key:'team',     icon:'users',        label:'Team',          page:'team-directory' },
+
+      // ── Operational screens, each shown only to the departments that use
+      // them. The Accountant reaches HR here (owner: "Allow accountant access
+      // to hr") — renderHR already admitted the role, there was simply no way in.
+      { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', section:true, sectionLabel:'Operations', collapsed:true, when:'hasProjectsDept' },
+      { key:'sales-orders',icon:'receipt',     label:'Sales Orders', page:'sales-orders',  when:'hasSalesOrdersDept' },
+      { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory',     when:'hasProductionDept' },
+      { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR',       when:'isFinanceRole' },
       { key:'sys-health',  icon:'activity',    label:'System Health',page:'system-health', when:'isFinanceRole' }
     ]
   },
