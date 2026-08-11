@@ -123,11 +123,16 @@ function renderGovBiddings() {
       'Won or closed bids move to Archive for the record.'
     ])}
     <div id="gov-kpis">${window.skeletonHtml('rows')}</div>
-    ${window.chipTabs(window.GOV_BUCKETS.map(b=>({key:b.label,label:b.label})), 'PhilGEPS', {cls:'gov-tabs'})}
+    ${window.chipTabs(window.GOV_BUCKETS.map(b=>({key:b.label,label:b.label})).concat([{key:'Budgeting',label:'Budgeting'}]), 'PhilGEPS', {cls:'gov-tabs'})}
     <div id="gov-content"></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
-  const loadGov = sub => renderDocCollection(document.getElementById('gov-content'), window.GOV_BUCKETS.find(b=>b.label===sub).collection, sub, currentUser, currentRole, {icon:'🏛️', dept:'Government Biddings'});
+  // DEPT-BUDGETS-SPEC-2026-08-11 — 'Budgeting' is a literal chip appended
+  // above, deliberately NOT added to window.GOV_BUCKETS itself (each bucket
+  // there maps 1:1 to a gov_* collection consumed elsewhere too).
+  const loadGov = sub => sub === 'Budgeting'
+    ? window.renderBudgeting(document.getElementById('gov-content'), currentUser, currentRole, 'Government Biddings')
+    : renderDocCollection(document.getElementById('gov-content'), window.GOV_BUCKETS.find(b=>b.label===sub).collection, sub, currentUser, currentRole, {icon:'🏛️', dept:'Government Biddings'});
   loadGov('PhilGEPS');
   window.bindChipTabs(c.querySelector('.gov-tabs'), (key)=>loadGov(key));
   loadGovKpis();
@@ -178,8 +183,8 @@ window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') 
   // records they simply aren't permitted to read.
   const itAdmin = currentRole === 'president' || currentRole === 'manager';
   const subtabs = itAdmin
-    ? ['Overview','IT Tickets','Assets','Software','Access Control','Network','Tasks']
-    : ['Overview','IT Tickets','Assets','Software','Tasks'];
+    ? ['Overview','IT Tickets','Assets','Software','Access Control','Network','Budgeting','Tasks']
+    : ['Overview','IT Tickets','Assets','Software','Budgeting','Tasks'];
   if (!itAdmin && (subtab === 'Access Control' || subtab === 'Network')) subtab = 'Overview';
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('💻',20)} IT Department</h2></div>
@@ -795,6 +800,12 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         loadITContent(currentUser, currentRole, 'Network', canEdit);
       });
     });
+    return;
+  }
+
+  // ── Budgeting ─────────────────────────────────────
+  if (sub === 'Budgeting') {
+    await window.renderBudgeting(content, currentUser, currentRole, 'IT');
     return;
   }
 

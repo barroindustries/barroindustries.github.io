@@ -2877,6 +2877,99 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
+    // ── Department budgets (DEPT-BUDGETS-SPEC-2026-08-11) ──────────────
+    // Three literal-named collections, deliberately NOT prefixed budgets_/
+    // files_: the wildcard blocks below union-grant their looser semantics to
+    // ANY same-prefixed name (see the union-permit trap note there), and
+    // budgets_* would let a dept member edit the AMOUNT Finance released to
+    // them. Money truth lives here; budgets_<dept> lines stay planning memo.
+    // Departments NEVER write /ledger — every posting is a Finance action
+    // through the existing canFinance() ledger legs.
+    match /dept_budget_releases/{docId} {
+      allow read: if isAuth() && (canFinance() || isSecretary()
+        || (!isPartner() && inDept(resource.data.get('dept', ''))));
+      allow create: if isAuth() && canFinance()
+        && request.resource.data.get('dept', '') != ''
+        && request.resource.data.get('type', '') in ['float', 'ceiling']
+        && request.resource.data.get('amount', 0) is number
+        && request.resource.data.get('amount', 0) > 0
+        && request.resource.data.get('status', '') == 'active'
+        && (request.resource.data.get('type', '') == 'ceiling'
+            || request.resource.data.get('custodianUid', '') != '');
+      allow update: if isAuth() && canFinance()
+        && request.resource.data.get('amount', 0) is number
+        && request.resource.data.get('amount', 0) > 0
+        && request.resource.data.get('status', 'active') in ['active', 'closed']
+        && request.resource.data.get('dept', '') == resource.data.get('dept', '');
+      allow delete: if isAuth() && isPresident();
+    }
+    match /dept_budget_requests/{docId} {
+      allow read: if isAuth() && (canFinance() || isSecretary()
+        || (!isPartner() && inDept(resource.data.get('dept', ''))));
+      allow create: if isAuth()
+        && (canFinance() || (!isPartner() && !isSecretary()
+                             && inDept(request.resource.data.get('dept', ''))))
+        && request.resource.data.get('requestedBy', '') == request.auth.uid
+        && request.resource.data.get('status', '') == 'pending'
+        && request.resource.data.get('dept', '') != ''
+        && request.resource.data.get('amount', 0) is number
+        && request.resource.data.get('amount', 0) > 0;
+      // Finance decides; OR the requester edits/cancels their own still-pending
+      // request (status may only stay 'pending' or become 'cancelled').
+      allow update: if isAuth() && (
+        canFinance()
+        || ( !isPartner() && !isSecretary()
+          && resource.data.get('requestedBy', '') == request.auth.uid
+          && resource.data.get('status', '') == 'pending'
+          && request.resource.data.get('status', '') in ['pending', 'cancelled']
+          && request.resource.data.get('dept', '') == resource.data.get('dept', '') )
+      );
+      allow delete: if isAuth() && ( isPresident()
+        || ( resource.data.get('requestedBy', '') == request.auth.uid
+          && resource.data.get('status', '') == 'pending' ) );
+    }
+    match /dept_spend_logs/{docId} {
+      allow read: if isAuth() && (canFinance() || isSecretary()
+        || (!isPartner() && inDept(resource.data.get('dept', ''))));
+      // Proof is REQUIRED at the boundary, not just in the form: at least one
+      // attachment, or a typed no-receipt reason (owner: receipts or an
+      // explicit, flagged excuse — a silently optional field means none).
+      allow create: if isAuth()
+        && (canFinance() || (!isPartner() && !isSecretary()
+                             && inDept(request.resource.data.get('dept', ''))))
+        && request.resource.data.get('loggedBy', '') == request.auth.uid
+        && request.resource.data.get('status', '') == 'pending'
+        && request.resource.data.get('dept', '') != ''
+        && request.resource.data.get('releaseId', '') != ''
+        && request.resource.data.get('amount', 0) is number
+        && request.resource.data.get('amount', 0) > 0
+        && ( request.resource.data.get('attachments', []).size() > 0
+          || request.resource.data.get('noReceiptReason', '') != '' );
+      // (a) Finance decides/settles — money tier, any field.
+      // (b) The logger edits their own pending/rejected log and resubmits:
+      //     status can only be 'pending' again, identity/dept keys frozen.
+      allow update: if isAuth() && (
+        canFinance()
+        || ( !isPartner() && !isSecretary()
+          && resource.data.get('loggedBy', '') == request.auth.uid
+          && resource.data.get('status', '') in ['pending', 'rejected']
+          && request.resource.data.get('status', '') == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+               ['date','description','amount','budgetLineId','budgetLineName',
+                'refNumber','attachments','noReceipt','noReceiptReason',
+                'overspendAtLog','releaseId','releaseTitle','status','updatedAt'])
+          && request.resource.data.get('amount', 0) is number
+          && request.resource.data.get('amount', 0) > 0
+          && ( request.resource.data.get('attachments', []).size() > 0
+            || request.resource.data.get('noReceiptReason', '') != '' ) )
+      );
+      // Undecided → the logger may withdraw. Decided → President only (a
+      // confirmed spend has ledger legs; those route via financeDelete).
+      allow delete: if isAuth() && ( isPresident()
+        || ( resource.data.get('loggedBy', '') == request.auth.uid
+          && resource.data.get('status', '') == 'pending' ) );
+    }
+
     // ── Payslips & Worker profiles (Brilliant Steel) ───
     match /payslips/{docId} {
       // v14 re-audit fix — the two owner branches here were BOTH dead, so a
@@ -3166,7 +3259,17 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid || !isPartner()
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuth() && canFinance();
+      // Finance keeps full update rights. Design may write ONLY the design-flow
+      // handoff fields (send-to-production stamps + the handoff trio) — never
+      // money/status/recorded* fields. hasOnly on the affected-keys diff.
+      allow update: if isAuth() && (
+        canFinance()
+        || ( canDesign()
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                  ['sentToProduction', 'sentToProductionAt',
+                   'targetDate', 'priority', 'notes',
+                   'designDoneAt', 'designDoneBy', 'noDrawingsNeeded', 'updatedAt']) )
+      );
       allow delete: if isAuth() && isPresident();
     }
 

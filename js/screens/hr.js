@@ -431,6 +431,10 @@ window.renderHR = async function(currentUser, currentRole){
     // would get a roster whose every pay column was denied and swallowed.
     ...(canPayroll ? [{ icon:'🪪', title:'Employee Profiles', desc:'Employment date, status, job, IDs · rates, cash advance, raises & payroll history', go:()=>window.renderEmployeeProfiles && window.renderEmployeeProfiles() }] : []),
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
+    // DEPT-BUDGETS-SPEC-2026-08-11 §8 — HR is a card hub, not chip tabs, so it
+    // gets its own signpost card into window.renderDeptBudgetingPage rather
+    // than a chip route through loadFinanceContent-style switches.
+    { icon:'📊', title:'Budgeting', desc:'HR department budget — releases, spends & requests', go:()=>window.renderDeptBudgetingPage('HR') },
     // ── THE HR DOOR TO PAYROLL ────────────────────────────────────────────
     // This card used to be `window.renderFinance(…, 'Payroll')` — a redirect
     // INTO Finance that repainted the header as "Finance & HR" and stacked two

@@ -499,31 +499,35 @@ if (typeof window === 'undefined') {
       return (prev && prev.excluded) || {};
     },
 
-    // ── compute ────────────────────────────────────────────────────────────
+    // ── build (read-only half, D2) ──────────────────────────────────────────
     /**
-     * Build the week. Reads worker_profiles + seven days of attendance per
-     * worker, applies weeklyRunSkipReason, resolves every rate through
-     * resolveWorkerHourlyRate, folds this week's adjustments in, and calls
-     * computeWeeklyLine once per worker. Writes pay_weeks/{weekId} at
-     * state 'computed'. Money-safe to re-run: it moves nothing.
+     * READ-ONLY line builder for a week. Reads worker_profiles, seven days of
+     * attendance_worker per worker, this week's stored adjustments+exclusions,
+     * and the monthly-paid guard; calls computeWeeklyLine once per worker.
+     * WRITES NOTHING — compute() below calls this and then writes; the live
+     * view (window.Payroll.preview) calls this and writes nothing at all
+     * (PAYROLL-LIVE-SPEC §4.5, D1/D2).
+     *
+     * Week-id validation (Monday check) is duplicated in both this and
+     * compute() deliberately — a projection is legal in any state, so the
+     * STATE GATE stays in compute() only.
+     *
+     * @param weekId
+     * @param prevDoc  optional PRE-READ run document (compute() passes its own
+     *                 read to avoid a second one); when omitted, this reads it
+     *                 itself — which is how preview() calls it bare.
      */
-    async compute(weekId) {
+    async buildLines(weekId, prevDoc) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekId || ''))) throw new Error('A pay week is identified by its Monday, as YYYY-MM-DD.');
       if (window.payWeekMondayOf(weekId) !== weekId) throw new Error(`${weekId} is not a Monday — a pay week runs Monday to Sunday.`);
 
-      // ONE read serves three jobs: the state gate, this week's exclusions, and
-      // this week's adjustments. It is NOT wrapped in a catch — a failure here
-      // must abort, because "I could not read who is excluded" is not the same
-      // fact as "nobody is excluded" even though both are falsy.
-      let prev;
-      try {
-        prev = await readRunDoc(weekId);
-      } catch (err) {
-        throw new Error('Could not read this week\'s payroll exclusions — nothing was computed. ' + (err && err.message ? err.message : ''));
-      }
-      const state = (prev && prev.state) || 'draft';
-      if (['verified', 'disbursing', 'disbursed'].includes(state)) {
-        throw new Error(`This week is ${state} — the President must reopen it before it can be computed again.`);
+      let prev = prevDoc;
+      if (prev === undefined) {
+        try {
+          prev = await readRunDoc(weekId);
+        } catch (err) {
+          throw new Error('Could not read this week\'s payroll exclusions — nothing was computed. ' + (err && err.message ? err.message : ''));
+        }
       }
       const excluded = (prev && prev.excluded) || {};
       const adjustments = (prev && prev.adjustments) || {};
@@ -689,6 +693,42 @@ if (typeof window === 'undefined') {
         warnings.push(warn('ot-double-count', `${otDoubleCountDays} day(s) ran past ${WRC.OT_THRESHOLD_HOURS}h. Overtime is paid ON TOP of the full day's hours — a 10-hour day pays 12 hours — which is exactly what the one-worker payslip does today. Confirm with the owner before this becomes the weekly default for the whole crew.`));
       }
 
+      return { lines, skipped, warnings };
+    },
+
+    // ── compute ────────────────────────────────────────────────────────────
+    /**
+     * Build the week and WRITE it. Reads worker_profiles + seven days of
+     * attendance per worker, applies weeklyRunSkipReason, resolves every rate
+     * through resolveWorkerHourlyRate, folds this week's adjustments in, and
+     * calls computeWeeklyLine once per worker — all of that now lives in
+     * buildLines() above (D2, PAYROLL-LIVE-SPEC §4.5); this method adds the
+     * state gate and the write. Writes pay_weeks/{weekId} at state 'computed'.
+     * Money-safe to re-run: it moves nothing.
+     */
+    async compute(weekId) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekId || ''))) throw new Error('A pay week is identified by its Monday, as YYYY-MM-DD.');
+      if (window.payWeekMondayOf(weekId) !== weekId) throw new Error(`${weekId} is not a Monday — a pay week runs Monday to Sunday.`);
+
+      // ONE read serves three jobs: the state gate, this week's exclusions, and
+      // this week's adjustments. It is NOT wrapped in a catch — a failure here
+      // must abort, because "I could not read who is excluded" is not the same
+      // fact as "nobody is excluded" even though both are falsy. Passed on to
+      // buildLines() below so it does not read the same document twice.
+      let prev;
+      try {
+        prev = await readRunDoc(weekId);
+      } catch (err) {
+        throw new Error('Could not read this week\'s payroll exclusions — nothing was computed. ' + (err && err.message ? err.message : ''));
+      }
+      const state = (prev && prev.state) || 'draft';
+      if (['verified', 'disbursing', 'disbursed'].includes(state)) {
+        throw new Error(`This week is ${state} — the President must reopen it before it can be computed again.`);
+      }
+
+      const built = await this.buildLines(weekId, prev);
+      const { lines, skipped, warnings } = built;
+
       const totals = {
         workerCount: lines.length,
         gross: _r2(lines.reduce((s, l) => s + l.gross, 0)),
@@ -703,8 +743,8 @@ if (typeof window === 'undefined') {
       };
 
       await RUNS().doc(weekId).set({
-        weekId, state: 'computed', month, label: WRC.weekLabel(weekId),
-        days: dates, isLastPayWeekOfMonth: isLastPayWeek,
+        weekId, state: 'computed', month: window.payWeekMonth(weekId), label: WRC.weekLabel(weekId),
+        days: window.payWeekDays(weekId), isLastPayWeekOfMonth: WRC.isLastPayWeekOfMonth(weekId),
         lines, skipped, totals, warnings,
         computedAt: stamp(), computedBy: me() && me().uid, computedByName: myName()
       }, { merge: true });
@@ -804,15 +844,26 @@ if (typeof window === 'undefined') {
     },
 
     // ── verify ─────────────────────────────────────────────────────────────
-    async verify(weekId) {
+    /**
+     * @param extra  optional plain object of ADDITIONAL fields merged into the
+     *   SAME computed -> verified write (e.g. `earlyReleaseOverride` — the
+     *   owner's Finance-approved exception to the period-end gate,
+     *   js/payroll.js's markHoursCorrect). Defaults to nothing, so every
+     *   existing caller is unaffected. Rides in this SAME write deliberately:
+     *   firestore.rules admits arbitrary extra fields on the computed->verified
+     *   transition and nothing wider — a second write after the doc already
+     *   reads 'verified' would be denied.
+     */
+    async verify(weekId, extra) {
       const d = await readRunDoc(weekId);
       if (!d) throw new Error('There is nothing to verify — compute this week first.');
       if (d.state !== 'computed') throw new Error(`Only a computed week can be verified (this one is ${d.state || 'draft'}).`);
       if (!(d.lines || []).length) throw new Error('This week has no computed lines — there is nothing to verify.');
-      await RUNS().doc(weekId).update({
+      const patch = Object.assign({
         state: 'verified', verifiedAt: stamp(),
         verifiedBy: (me() && me().uid) || null, verifiedByName: myName()
-      });
+      }, extra || {});
+      await RUNS().doc(weekId).update(patch);
       window.logAudit && window.logAudit('verify-payweek', 'pay_weeks', weekId, { workerCount: (d.lines || []).length });
     },
 

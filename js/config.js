@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.147';
+window.APP_VERSION = '14.0.148';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -246,7 +246,7 @@ window.DEPARTMENTS = {
     key: 'HR', icon: '👥', lucideIcon: 'users', color: '#E64980',
     // renderHR's card list (departments.js:3153-3159); 'Accounts & Logins' only
     // shows for president/manager, kept in its real position for accuracy.
-    subtabs: ['People & Roles', 'Payroll', 'Accounts & Logins', 'Leave', 'Attendance'], navOrder: 3
+    subtabs: ['People & Roles', 'Payroll', 'Accounts & Logins', 'Leave', 'Attendance', 'Budgeting'], navOrder: 3
   },
   'Sales': {
     key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#F76707',
@@ -254,7 +254,7 @@ window.DEPARTMENTS = {
     // 'Quick Estimate' are dead aliases that resolve to 'Quotes' — removed here.
     // 'AEC' moved out to the CRM department (2026-08-04) — the architect/
     // engineer/contractor prospecting directory now lives under CRM > AEC Leads.
-    subtabs: ['Clients', 'Quotes', 'Partner', 'Files', 'SOP', 'Tasks'], navOrder: 4
+    subtabs: ['Clients', 'Quotes', 'Partner', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
   },
   'CRM': {
     key: 'CRM', icon: '🎯', lucideIcon: 'target', color: '#F59F00',
@@ -266,7 +266,7 @@ window.DEPARTMENTS = {
     // the departments below is needed; this key is also placed immediately
     // after 'Sales' in this object's OWN order, which IS what Object.keys()
     // consumers (dept switcher/pickers) actually read.
-    subtabs: ['Dashboard', 'AEC Leads', 'ROC Leads', 'Pipeline'], navOrder: 4.5
+    subtabs: ['Dashboard', 'AEC Leads', 'ROC Leads', 'Pipeline', 'Budgeting'], navOrder: 4.5
   },
   'Marketing': {
     key: 'Marketing', icon: '📢', lucideIcon: 'megaphone', color: '#D6336C',
@@ -275,25 +275,25 @@ window.DEPARTMENTS = {
   },
   'Government Biddings': {
     key: 'Government Biddings', icon: '🏛️', lucideIcon: 'landmark', color: '#0CA678',
-    subtabs: ['PhilGEPS', 'Active Bids', 'Archive'], navOrder: 6
+    subtabs: ['PhilGEPS', 'Active Bids', 'Archive', 'Budgeting'], navOrder: 6
   },
   'IT': {
     key: 'IT', icon: '💻', lucideIcon: 'laptop', color: '#1C7ED6',
-    subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Tasks'], navOrder: 7
+    subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Budgeting', 'Tasks'], navOrder: 7
   },
   'Design': {
     key: 'Design', icon: '🎨', lucideIcon: 'palette', color: '#7048E8',
-    subtabs: ['Projects', 'Drawings', 'Clients', 'Product Designs', 'References', 'Tasks'], navOrder: 8
+    subtabs: ['Projects', 'Drawings', 'Clients', 'Product Designs', 'References', 'Budgeting', 'Tasks'], navOrder: 8
   },
   'Production': {
     key: 'Production', icon: '🏭', lucideIcon: 'factory', color: '#A05A2C',
     // renderProductionDept's real subs (departments.js:13667) — Inventory and
     // Count Form were missing, Files was there but out of place vs runtime order.
-    subtabs: ['Orders', 'Materials', 'Inventory', 'Count Form', 'Tasks', 'Files'], navOrder: 9
+    subtabs: ['Orders', 'Materials', 'Inventory', 'Count Form', 'Budgeting', 'Tasks', 'Files'], navOrder: 9
   },
   'Purchasing': {
     key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#099268',
-    subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 10
+    subtabs: ['Request for Quotation', 'Purchase Requests', 'Budgeting', 'Tasks'], navOrder: 10
   },
   'Ventures': {
     key: 'Ventures', icon: '🚀', lucideIcon: 'rocket', color: '#5F3DC4',

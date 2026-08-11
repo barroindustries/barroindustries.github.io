@@ -154,7 +154,7 @@ window.renderApprovals = async function(currentUser) {
     _deniedQueues.push({ label, chip, denied });
     return { size: 0, docs: [], failed: true, denied };
   });
-  const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2] = await Promise.all([
+  const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2] = await Promise.all([
     _apq('Sign-ups', 'signups',                 db.collection('signup_requests').where('status','==','pending')),
     _apq('Attendance', 'attendance',            db.collection('attendance_extensions').where('status','==','pending')),
     _apq('Cash Advances', 'ca',                 db.collection('cash_advances').where('status','==','pending')),
@@ -168,7 +168,11 @@ window.renderApprovals = async function(currentUser) {
     _apq('Client deletions', 'all',             db.collection('clients').where('deleteRequested','==',true)),
     _apq('Leave', 'leave',                      db.collection('leave_requests').where('status','==','pending')),
     _apq('Purchase approvals', 'all',           db.collection('purchase_requisitions').where('approvalStatus','==','pending')),
-    _apq('Raises', 'all',                       db.collection('pending_raises').where('status','==','pending_approval'))
+    _apq('Raises', 'all',                       db.collection('pending_raises').where('status','==','pending_approval')),
+    // DEPT-BUDGETS-SPEC-2026-08-11 — pending department spends waiting on
+    // Finance's confirm/reject, folded into the SAME 'finance-requests' chip
+    // as the two delete queues (equality-only filter, no composite index).
+    _apq('Dept spend confirmations', 'finance-requests', db.collection('dept_spend_logs').where('status','==','pending'))
   ]);
   // Chips whose count is now known to be incomplete, and the human labels behind
   // them. 'All Requests' sums every queue, so ANY failure makes it incomplete.
@@ -193,13 +197,15 @@ window.renderApprovals = async function(currentUser) {
   // Persistent marker on any chip whose count cannot be complete, independent of
   // what the number happens to be this render.
   const _lbl = (chip, label) => _incompleteChips.has(chip) ? (label + ' 🔒') : label;
-  let _cachedAllSnaps = { sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 };
+  let _cachedAllSnaps = { sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, deptSpendSnap2 };
   const pendingSignups = sgSnap.size || 0;
   const pendingExt     = atSnap.size || 0;
   const pendingCA      = caSnap2.size || 0;
   const pendingSubs    = subSnap2.size || 0;
   const pendingReview  = reviewTasksSnap.size || 0;
-  const pendingFinReqs = (finReqSnap2.size || 0) + (finDelSnap2.size || 0);
+  // DEPT-BUDGETS-SPEC-2026-08-11 — dept spend confirmations fold into the same
+  // Finance Requests chip as the two delete queues (§6.4).
+  const pendingFinReqs = (finReqSnap2.size || 0) + (finDelSnap2.size || 0) + (deptSpendSnap2.size || 0);
   const pendingQApprovals = qApprSnap2.size || 0;
   const pendingDeletes    = (delQSnap2.size || 0) + (delBKQSnap2.size || 0) + (delCSnap2.size || 0);
   const pendingLeave      = leaveSnap2.size || 0;
@@ -1011,11 +1017,21 @@ window.renderApprovals = async function(currentUser) {
       // for owner ruling 1), finance_delete_requests is not (canFinance()).
       // Routed through _paneQ so a half-refused pane says so instead of
       // rendering the other half as the whole truth.
-      const [psnap, fsnap] = await Promise.all([
+      // DEPT-BUDGETS-SPEC-2026-08-11 — a THIRD queue feeds this chip (see the
+      // count fetch above), but its confirm/reject action lives in Finance ONLY
+      // (window.renderDeptBudgetsAdmin) so this pane stays a link-out, not a
+      // third action list — one confirm path, not two.
+      const [psnap, fsnap, dsnap] = await Promise.all([
         _paneQ('Payroll delete requests', db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100)),
-        _paneQ('Finance delete requests', db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(100))
+        _paneQ('Finance delete requests', db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(100)),
+        _paneQ('Dept spend confirmations', db.collection('dept_spend_logs').where('status','==','pending'))
       ]);
-      const paneBanner = _paneDeniedBanner([psnap, fsnap]);
+      const paneBanner = _paneDeniedBanner([psnap, fsnap, dsnap]);
+      const deptSpendCount = (dsnap.docs || []).length;
+      const deptBudgetsCard = `<div class="alert-banner" style="cursor:default;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>${emojiIcon('💸',16)} <strong>${deptSpendCount}</strong> department spend(s) waiting for Finance confirmation</span>
+        <button type="button" class="btn-secondary btn-sm" id="fr-open-dept-budgets-btn">Open Dept Budgets</button>
+      </div>`;
       const reqs = [
         ...psnap.docs.map(d=>({id:d.id,kind:'payroll',...d.data()})),
         ...fsnap.docs.map(d=>({id:d.id,kind:'finance',...d.data()}))
@@ -1052,6 +1068,7 @@ window.renderApprovals = async function(currentUser) {
       // Secretary dashboard already uses for the same pair of collections.
       wrap.innerHTML = `
         ${paneBanner}
+        ${deptBudgetsCard}
         ${!pending.length && !resolved.length ? `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('💼',44)}</div><h4>${paneBanner ? 'Nothing here that you can see' : 'No finance requests'}</h4>${paneBanner ? `<p>The queue named above is not included, so this pane cannot tell you whether anything is waiting in it.</p>` : ''}</div>` : ''}
         ${pending.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
           <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
@@ -1063,6 +1080,10 @@ window.renderApprovals = async function(currentUser) {
           </div>` : ''}
       `;
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+
+      wrap.querySelector('#fr-open-dept-budgets-btn')?.addEventListener('click', () => {
+        window.renderFinance(currentUser, _role || 'president', 'Dept Budgets');
+      });
 
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.name)} (${btn.dataset.month}) payroll record?`, danger:true, html:true}))) return;

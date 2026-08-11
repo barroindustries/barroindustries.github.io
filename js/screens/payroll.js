@@ -8,8 +8,22 @@
 //  (renderPayrollManagement, js/screens/hr.js) and the weekly tab
 //  (renderWeeklyPayrollTab, js/screens/payroll-weekly-ui.js). The owner's
 //  keystone ruling is that there is ONE payroll; payClass picks the arithmetic
-//  for one line and nothing else differs. So there is one roster here, one
-//  period picker covering months AND weeks, and NO team tabs anywhere.
+//  for one line and nothing else differs. So there is ONE screen, ONE process,
+//  reached through TWO TEAM TABS — Office Team (month periods) and Operations
+//  Team (week periods) — with one roster, one release pipeline, one payslip/
+//  ledger/receipt path and one set of row actions underneath both. A tab and
+//  the period it can pick are the ONLY things payClass/period-kind changes;
+//  everything downstream of the number is identical (PAYROLL-LIVE-SPEC-
+//  2026-08-11 §1, superseding this header's earlier "NO team tabs anywhere" —
+//  and ONLY that line — from the brief).
+//
+//  LIVE vs FROZEN (PAYROLL-LIVE-SPEC §2, D1/D3). A period that has not ENDED
+//  yet (today <= its last calendar day) shows a READ-ONLY PROJECTION —
+//  window.Payroll.preview(periodId), built through the same frozen maths as a
+//  real prepare and WRITING NOTHING. A period that HAS ended shows the STORED
+//  FROZEN LINES — window.Payroll.load(periodId), exactly as before this build.
+//  Nothing payable is EVER read off a projection: what gets paid is always the
+//  stored frozen line, and the screen only opens the pay panel in closed mode.
 //
 //  THE SHAPE OF THE SCREEN, in the order the eye meets it:
 //     1. what is waiting, in one sentence, with the money in it
@@ -82,8 +96,11 @@ var PY_STATE_WORDS = {
 
 // Where the screen was left. Module-scope on purpose: the owner's complaint was
 // that every action bounced him back to today ("Stop losing your place",
-// audit §5). Re-entering payroll returns to the period you were working on.
-var PY_LAST_PERIOD = null;
+// audit §5). Re-entering payroll returns to the TAB and that tab's period you
+// were working on (D8) — each team remembers its own place independently.
+var PY_LAST_TEAM = null;
+var PY_LAST_PERIOD_BY_TEAM = { office: null, operations: null };
+var PY_TEAM_LABEL = { office: 'Office Team', operations: 'Operations Team' };
 
 var PY_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -191,8 +208,25 @@ function _pyRead(l) {
     takeHome:   _pyPick(l.takeHome, l.net, l.finalPay),
     rows:       Array.isArray(l.rows) ? l.rows : [],
     backfill:   l.backfill === true,
+    // "Where did the number come from" (§6.4) — Office Team only; these are
+    // already frozen onto the line by computePayLine, never recomputed here.
+    kpiScore:   _pyPick(l.detail && l.detail.kpiScore, l.kpiScore),
+    attScore:   _pyPick(l.detail && l.detail.attendanceScore, l.attScore),
+    policy:     (l.detail && l.detail.policy) || l.policy || 'flat',
+    perfFactor: _pyPick(l.perfFactor, l.detail && l.detail.perfFactor),
     raw: l
   };
+}
+
+// The rate-source codes computePayLine/resolveWorkerHourlyRate freeze onto a
+// line, mapped to the plain words the owner's "where did this come from"
+// question needs (§6.4) — never the raw code, which is engine vocabulary.
+var PY_RATE_SOURCE_WORDS = {
+  hourlyRate: 'their hourly rate',
+  dailyRate:  'daily rate ÷ 8'
+};
+function _pyRateSourceWords(src) {
+  return PY_RATE_SOURCE_WORDS[src] || String(src || '');
 }
 
 // The columns, in order. A column is shown when ANY person in the period has a
@@ -205,6 +239,13 @@ var PY_COLS = [
   { key: 'regHours',    label: 'Hours',                always: false },
   { key: 'otHours',     label: 'Overtime',             always: false },
   { key: 'travelHours', label: 'Travel hours',         always: false },
+  // Office Team, "where did the number come from" (§6.4) — present only when
+  // the line carries a score, so an Operations card never shows an empty
+  // Attendance/KPI pair. Percentages, not money — kept OUT of the totals sum
+  // below; averaging a percentage across a roster asserts a figure nobody
+  // asked for.
+  { key: 'attScore',    label: 'Attendance',           always: false },
+  { key: 'kpiScore',    label: 'KPI',                  always: false },
   { key: 'earnings',    label: 'Earnings',             always: true  },
   { key: 'allowances',  label: 'Allowances',           always: false },
   { key: 'oneOffNet',   label: 'One-off amounts',      always: false },
@@ -213,6 +254,11 @@ var PY_COLS = [
   { key: 'cashAdv',     label: 'Cash advance',         always: false },
   { key: 'takeHome',    label: 'Take-home pay',        always: true  }
 ];
+
+// Column keys that are MONEY, HOURS or COUNTS — the ones a totals row can
+// honestly sum. attScore/kpiScore are percentages and never appear here.
+var PY_SUMMABLE_KEYS = ['regHours', 'otHours', 'travelHours', 'earnings', 'allowances',
+  'oneOffNet', 'otherDed', 'statutory', 'cashAdv', 'takeHome'];
 
 // Which columns this period actually needs. Deliberately NOT "every column
 // always": an office month has no travel hours, and a column of "—" asserts
@@ -223,8 +269,7 @@ function _pyColsFor(reads) {
   const has = {};
   reads.forEach(r => {
     if (r.daysWorked != null || r.daysAbsent != null) has.days = true;
-    ['regHours', 'otHours', 'travelHours', 'earnings', 'allowances', 'oneOffNet',
-     'otherDed', 'statutory', 'cashAdv', 'takeHome'].forEach(k => {
+    PY_SUMMABLE_KEYS.concat(['attScore', 'kpiScore']).forEach(k => {
       if (r[k] != null && !(k === 'oneOffNet' && !r.oneOffs.length)) has[k] = true;
     });
   });
@@ -240,8 +285,7 @@ function _pyTotals(reads) {
   reads.forEach(r => {
     t.daysWorked += (+r.daysWorked || 0);
     t.daysAbsent += (+r.daysAbsent || 0);
-    ['regHours', 'otHours', 'travelHours', 'earnings', 'allowances', 'oneOffNet',
-     'otherDed', 'statutory', 'cashAdv', 'takeHome'].forEach(k => { t[k] += (+r[k] || 0); });
+    PY_SUMMABLE_KEYS.forEach(k => { t[k] += (+r[k] || 0); });
   });
   return t;
 }
@@ -347,6 +391,11 @@ var PY_CSS = `
 #pay-root .py-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 #pay-root .py-head select{flex:1 1 100%;min-width:0;max-width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px}
 @media (min-width:700px){#pay-root .py-head select{flex:0 1 480px}}
+/* The team tabs take the whole first line of the head row, so the picker and
+   the buttons always wrap onto a clean line below them rather than fighting
+   for space beside them at 375px. */
+#pay-root .py-team-tabs{flex:1 1 100%}
+#pay-root .py-live-banner{border-left:3px solid var(--info,var(--accent,#3b82f6))}
 #pay-root .py-headline{font-size:16px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}
 #pay-root .py-waiting-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
 #pay-root .py-waiting-row:last-child{border-bottom:0}
@@ -455,31 +504,57 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     }
     return String(periodId || '');
   }
+  // 'office' for a month period, 'operations' for a week — D8: a period's kind
+  // already decides which team it belongs to structurally (a month period only
+  // ever contains Office people; a week only Operations). One mapping, reached
+  // through the engine's own PC.teamOf where available, with the same
+  // never-blank fallback discipline as _pyKind/_pyLabel above.
+  function _pyTeam(periodId) {
+    if (window.Payroll.core && typeof window.Payroll.core.teamOf === 'function') {
+      try { const t = window.Payroll.core.teamOf(periodId); if (t) return t; } catch (_) { /* fallback below */ }
+    }
+    return _pyKind(periodId) === 'week' ? 'operations' : 'office';
+  }
   // A month sorts as its first day; a week already IS its first day. On a tie
   // (the 1st falling on a Monday) the month comes first — it is the longer
   // period and reads as the heading of the two.
   function _pySortKey(periodId) {
     return (_pyKind(periodId) === 'month' ? periodId + '-01' + '#0' : periodId + '#1');
   }
-  function _pyPeriodList(extra) {
+  // Team tabs (D8): the picker for a tab lists ONLY that team's kind of
+  // period — office sees months, operations sees weeks. `extra` is expected to
+  // already be filtered to the active team by the caller.
+  function _pyPeriodList(team, extra) {
     const set = {};
     const add = (p) => { if (p && !set[p]) set[p] = true; };
-    try { (window.Payroll.recentPeriods('week',  PY_WEEK_WINDOW)  || []).forEach(add); } catch (_) {}
-    try { (window.Payroll.recentPeriods('month', PY_MONTH_WINDOW) || []).forEach(add); } catch (_) {}
-    add(thisWeekId); add(thisMonth);
+    if (team === 'operations') {
+      try { (window.Payroll.recentPeriods('week', PY_WEEK_WINDOW) || []).forEach(add); } catch (_) {}
+      add(thisWeekId);
+    } else {
+      try { (window.Payroll.recentPeriods('month', PY_MONTH_WINDOW) || []).forEach(add); } catch (_) {}
+      add(thisMonth);
+    }
     (extra || []).forEach(add);
     return Object.keys(set).sort((a, b) => (_pySortKey(a) < _pySortKey(b) ? 1 : -1));
   }
 
+  // The default period to open for a team when nothing more specific was
+  // asked for — a team tab click, or "This week"/"This month".
+  function _pyDefaultForTeam(team) {
+    return PY_LAST_PERIOD_BY_TEAM[team] || (team === 'operations' ? thisWeekId : thisMonth);
+  }
+
   // ═════════════════════════════════════════════════════════
-  //  PAINT — one function, whole screen, always from stored data
+  //  PAINT — one function, whole screen, always from stored data (or, for a
+  //  period that has not ended yet, from the live projection — D3)
   // ═════════════════════════════════════════════════════════
   async function paint(periodId) {
     root.innerHTML = window.skeletonHtml('rows');
 
-    // What is still owing, straight from the engine. This is also how a period
-    // OUTSIDE the picker's window stays reachable: a February week nobody paid
-    // must be selectable, or it hides for ever.
+    // What is still owing, straight from the engine, UNFILTERED across both
+    // teams (D8) — this card stays cross-team on both tabs so a period owing
+    // on the OTHER tab can never hide. Also how a period outside the picker's
+    // window stays reachable: a February week nobody paid must be selectable.
     let owing = [];
     let owingError = null;
     if (typeof window.Payroll.unpaidPeriods === 'function') {
@@ -488,13 +563,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     }
     const owingIds = owing.map(o => (o && (o.periodId || o.id)) || '').filter(Boolean);
 
-    // WHICH PERIOD ARE WE LOOKING AT. In order of what the owner actually
-    // wants when he opens the screen:
-    //   1. the period he asked for (a picker change, an Open, a re-entry)
-    //   2. the OLDEST period with work waiting on somebody — that is the thing
-    //      that is late, and it is what the headline is for
-    //   3. otherwise the current week, which is where the crew's money lives
-    let want = periodId || PY_LAST_PERIOD;
+    // WHICH PERIOD ARE WE LOOKING AT, and which TAB does that put us on
+    // (D8). In order of what the owner actually wants when he opens the
+    // screen:
+    //   1. the period he asked for (a picker change, a team-tab click, an
+    //      Open from the waiting card, a re-entry)
+    //   2. the OLDEST period with work waiting on somebody, over the
+    //      UNFILTERED owing list — the chosen period's team decides the tab
+    //   3. otherwise the current week (Operations)
+    let want = periodId || (PY_LAST_TEAM ? PY_LAST_PERIOD_BY_TEAM[PY_LAST_TEAM] : null);
     if (!want) {
       const waiting = owing
         .filter(o => o && (o.state === 'prepared' || o.state === 'checked'))
@@ -504,18 +581,48 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       want = waiting[0] || thisWeekId;
     }
     selected = want;
-    PY_LAST_PERIOD = want;
+    const activeTeam = _pyTeam(selected);
+    PY_LAST_TEAM = activeTeam;
+    PY_LAST_PERIOD_BY_TEAM[activeTeam] = selected;
 
-    const periods = _pyPeriodList(owingIds.concat([want]));
+    // Every extra id offered to the picker is filtered to THIS team — an
+    // Office tab lists only months, an Operations tab only weeks (D8).
+    const sameTeamExtra = owingIds.concat([want]).filter(p => _pyTeam(p) === activeTeam);
+    const periods = _pyPeriodList(activeTeam, sameTeamExtra);
+
+    // IS THIS PERIOD STILL GOING, OR HAS IT ENDED (D3/D4/D5)? A live period
+    // shows the read-only projection (window.Payroll.preview) — never a
+    // stored line, and never a write. An ended period shows the stored
+    // frozen line (window.Payroll.load), exactly as before this build.
+    let isLive = !!(window.Payroll.core && typeof window.Payroll.core.periodEnded === 'function'
+      && !window.Payroll.core.periodEnded(selected, todayIso));
+    const periodEnd = (window.Payroll.core && typeof window.Payroll.core.periodEnd === 'function')
+      ? window.Payroll.core.periodEnd(selected) : '';
 
     // THE SELECTED PERIOD is read on its own and is allowed to fail loudly —
-    // its failure is the error state with a Retry.
-    let period = await window.Payroll.load(selected);
+    // its failure is the error state with a Retry. Both preview() and load()
+    // share that same throw-on-denial contract.
+    let period = isLive ? await window.Payroll.preview(selected) : await window.Payroll.load(selected);
 
-    // If it has not been started and this person may start it, START IT. This
-    // is the step that used to be a button called Compute. Nobody has to know
-    // it exists: you open a period and the figures are there.
-    if (canPrepare && !prepareTried[selected] && (!period || (period.state || 'notstarted') === 'notstarted')) {
+    // ⚠ THE FINANCE-APPROVED EARLY RELEASE (F1, owner ruling 2026-08-11) can
+    // move a still-calendar-live period to 'checked' or 'paid' before its
+    // last day. Once that has happened the screen must show the STORED
+    // FROZEN LINE, never a projection — what gets paid is always the frozen
+    // line (§9.5) — so re-derive from load() and drop out of live-mode
+    // display. preview() already returns the STORED state even while live,
+    // which is what makes this detectable without a second date check.
+    if (isLive && period && (period.state === 'checked' || period.state === 'paid')) {
+      isLive = false;
+      period = await window.Payroll.load(selected);
+    }
+
+    // If it has not been started and this person may start it, START IT —
+    // but ONLY for a period that has ENDED (D4). A period that has not ended
+    // has nothing worth freezing yet; looking at it must never write. This is
+    // the step that used to be a button called Compute, for the periods it
+    // still applies to. Nobody has to know it exists: you open an ended
+    // period and the figures are there.
+    if (!isLive && canPrepare && !prepareTried[selected] && (!period || (period.state || 'notstarted') === 'notstarted')) {
       prepareTried[selected] = true;
       root.innerHTML = `<div class="empty-state"><div class="empty-icon">${_pyIcon('⏳', 40)}</div>
         <h4>Working out the pay for ${_pyEsc(_pyLabel(selected))}…</h4>
@@ -536,7 +643,9 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // The rest of the picker's periods are read with allSettled, NOT all: one
     // unreadable old period must not brick the whole screen, but it must not be
     // silently dropped from "what is still owing" either — the ones that failed
-    // are named in a banner of their own.
+    // are named in a banner of their own. These stay on window.Payroll.load —
+    // they are secondary reference (the picker's suffix, the waiting card's
+    // totals), never the figures on screen for the selected period.
     const others = periods.filter(p => p !== selected);
     const settled = await Promise.allSettled(others.map(p => window.Payroll.load(p)));
     const byPeriod = {}; const unreadable = [];
@@ -552,32 +661,56 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const cols    = _pyColsFor(reads);
     const tot     = _pyTotals(reads);
     const notPaid = _pyNotPaidList(period);
-    const problems = _pyProblems(period, reads, notPaid, selected);
+    const kind    = _pyKind(selected);
+    let periodDates = [];
+    if (kind === 'week' && typeof window.payWeekDays === 'function') {
+      try { periodDates = window.payWeekDays(selected) || []; } catch (_) { periodDates = []; }
+    }
+    // D10(b) — in live mode the card's "Days" field reads "{worked} of
+    // {elapsed} so far" rather than "{worked} of 7", since the days that
+    // have not happened yet are not "absent" to omit them from. Attached
+    // directly onto each read row (rather than threaded through every
+    // function signature down to _pyFieldHtml) — the same pattern the reads
+    // already use for backfill/rateSource/etc.
+    if (isLive && kind === 'week' && periodDates.length) {
+      const elapsed = periodDates.filter(d => d <= todayIso).length;
+      reads.forEach(r => { r._elapsedTotal = elapsed; });
+    }
+    const problems = _pyProblems(period, reads, notPaid, selected, { isLive, todayIso, periodDates });
     const label   = _pyLabel(selected);
 
     // Row actions live on the ROSTER ROW, never in a menu somewhere else — that
     // is the owner's rule about flexibility not arriving as more surface area.
-    // Which ones are live depends only on the state:
-    //   'notstarted'/'prepared' — hold, adjust, add a one-off
+    // Which ones are live depends on the state AND on whether the period is
+    // still live (D6 — mid-period edits are allowed and are INPUTS, not money):
+    //   live (in progress)     — hold, adjust, add a one-off; no check/pay
+    //                            action anywhere (D5)
+    //   'notstarted'/'prepared'— hold, adjust, add a one-off
     //   'checked'               — nothing (the figures are locked; that is what
     //                             "checked" means, and unlocking is a deliberate
     //                             act with its own control)
     //   'paid'                  — correct this person, and nothing else
-    const canEditRows   = canPrepare && (state === 'notstarted' || state === 'prepared');
-    const canCorrectRow = canPay && state === 'paid';
+    const canEditRows   = canPrepare && (isLive || state === 'notstarted' || state === 'prepared');
+    const canCorrectRow = canPay && !isLive && state === 'paid';
 
     root.innerHTML = `
       <div class="py-head">
+        ${window.chipTabs([
+          { key: 'office', label: 'Office Team' },
+          { key: 'operations', label: 'Operations Team' }
+        ], activeTeam, { cls: 'py-team-tabs' })}
         <select id="py-period" aria-label="Pay period">${_pyPeriodOptions(periods, byPeriod, owing)}</select>
         <!-- The title REPEATS the visible label. A title that only carries the
              explanation becomes the button's accessible name and a screen
              reader then announces something the sighted label does not say. -->
-        <button class="btn-secondary btn-sm" id="py-thisweek" title="This week — jump to the week that contains today">This week</button>
+        <button class="btn-secondary btn-sm" id="py-thisweek" title="${activeTeam === 'operations' ? 'This week' : 'This month'} — jump to the ${activeTeam === 'operations' ? 'week' : 'month'} that contains today">${activeTeam === 'operations' ? 'This week' : 'This month'}</button>
+        ${isLive ? '<button class="btn-secondary btn-sm" id="py-refresh-figures" title="Re-read the punches, attendance and records as they stand right now">Refresh figures</button>' : ''}
       </div>
 
       <div id="py-headline"></div>
       <div id="py-unreadable"></div>
       <div id="py-waiting" style="margin-bottom:14px"></div>
+      <div id="py-whoelse" style="margin-bottom:14px"></div>
       <!-- PROBLEMS BEFORE THE BUTTON, deliberately. The button is the thing
            that costs money; anything the system is unsure about has to have
            been read before the eye reaches it. The button sits above the
@@ -589,15 +722,17 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       <div id="py-roster"></div>
     `;
 
-    _pyPaintHeadline(root.querySelector('#py-headline'), period, state, label, tot, reads, notPaid);
+    _pyPaintHeadline(root.querySelector('#py-headline'), period, state, label, tot, reads, notPaid, { isLive, todayIso, periodEnd, kind });
     _pyPaintUnreadable(root.querySelector('#py-unreadable'), unreadable, owingError);
     _pyPaintWaiting(root.querySelector('#py-waiting'), owing, byPeriod);
-    _pyPaintAction(root.querySelector('#py-action'), { period, state, label, tot, reads, notPaid });
+    _pyPaintWhoElse(root.querySelector('#py-whoelse'), period, state, canPrepare, label);
+    _pyPaintAction(root.querySelector('#py-action'), { period, state, label, tot, reads, notPaid, isLive, periodEnd, kind });
     _pyPaintProblems(root.querySelector('#py-problems'), problems);
-    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label });
+    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso });
 
     if (window.lucide) lucide.createIcons({ nodes: [root] });
-    _pyBind({ period, state, label, reads, notPaid, tot, canEditRows, canCorrectRow });
+    _pyBind({ period, state, label, reads, notPaid, tot, canEditRows, canCorrectRow, isLive, periodEnd, kind, activeTeam });
+    _pyBindHrRecordBtns(root);
   }
 
   function _pyStateOf(period) {
@@ -632,14 +767,46 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   }
 
   // ── One sentence: what is waiting, with the money in it ──────────────────
-  function _pyPaintHeadline(el, period, state, label, tot, reads, notPaid) {
+  function _pyPaintHeadline(el, period, state, label, tot, reads, notPaid, live) {
     if (!el) return;
+    const liveOpts = live || {};
+    const isLive = !!liveOpts.isLive;
     const n = reads.length;
     const people = `${n} ${n === 1 ? 'person' : 'people'}`;
     const money  = _pyPeso(tot.takeHome);
     const held   = notPaid.length ? ` ${notPaid.length} ${notPaid.length === 1 ? 'person is' : 'people are'} not being paid this period — the reasons are on the roster.` : '';
     const backfilled = (period && period.backfill)
       ? `<div class="py-sub" style="margin-top:6px">${_pyIcon('🗂', 14)} <strong>Entered by hand for a past period.</strong> These figures were typed in from records kept outside the app, not produced by a live payday.</div>` : '';
+
+    // The owner's Finance-approved early release (F1) — WHO approved it and
+    // WHY, permanently visible on the run once it exists. Never a silent
+    // loosening: this is the one place the exception is recorded, and it is
+    // shown whether the period is still live or has since moved on.
+    const override = period && period.earlyReleaseOverride;
+    const overrideNote = override
+      ? `<div class="py-sub" style="margin-top:6px">${_pyIcon('⚠️', 14)} <strong>Checked early</strong>, before ${_pyEsc(override.periodEndWas || '')
+          } — approved by ${_pyEsc(override.approvedByName || override.approvedBy || 'Finance')}: “${_pyEsc(override.reason || '')}”.</div>`
+      : '';
+
+    if (isLive) {
+      // D3/D9/D10 — the live banner, exact copy from the spec. Badge always
+      // reads "In progress" while live, even if a mid-period edit (D6) left a
+      // stored state underneath that would otherwise say "Ready to check".
+      const asOf = (period && period.asOf) || liveOpts.todayIso || '';
+      const kindWord = (liveOpts.kind === 'week') ? 'week' : 'month';
+      const officeSub = (liveOpts.kind !== 'week')
+        ? `<div class="py-sub" style="margin-top:6px">The monthly salary shows in full — it does not build up day by day. Attendance and KPI are measured up to today.</div>`
+        : '';
+      el.innerHTML = `<div class="card py-live-banner" style="margin-bottom:14px"><div class="card-body">
+          <div class="py-headline">${_pyEsc(label)} is still going — figures so far, as of ${_pyEsc(asOf)}.</div>
+          <div class="py-sub" style="margin-top:6px">These follow the punches, attendance and records as they come in. Nothing here is final, and nothing can be paid until the ${kindWord} ends on ${_pyEsc(liveOpts.periodEnd || '')}.</div>
+          <div class="py-sub" style="margin-top:6px;margin-bottom:0"><span class="badge badge-blue" style="font-size:10px">In progress</span>${held ? _pyEsc(held) : ''}</div>
+          ${officeSub}
+          ${overrideNote}
+        </div></div>`;
+      return;
+    }
+
     let text;
     if (!period || state === 'notstarted') {
       text = canPrepare
@@ -664,6 +831,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
           ${held ? _pyEsc(held) : ''}
         </div>
         ${backfilled}
+        ${overrideNote}
       </div></div>`;
   }
 
@@ -706,16 +874,73 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       const money = t && t.people ? `${t.people} ${t.people === 1 ? 'person' : 'people'} · ${_pyPeso(t.takeHome)}`
                   : (o.total != null ? _pyPeso(o.total) : 'no roster yet');
       const here = (o.id === selected);
+      // Cross-team, unfiltered on BOTH tabs (D8) — each row names its own
+      // team so a period owing on the OTHER tab can never hide.
+      const team = PY_TEAM_LABEL[_pyTeam(o.id)] || '';
       return `<div class="py-waiting-row">
         <div class="py-wlabel">
           <strong>${_pyEsc(_pyLabel(o.id))}</strong>
           <span class="badge ${o.state === 'checked' ? 'badge-blue' : o.state === 'prepared' ? 'badge-amber' : 'badge-gray'}" style="font-size:10px;margin-left:6px">${_pyEsc(PY_STATE_WORDS[o.state] || o.state)}</span>
-          <div class="py-sub" style="margin-bottom:0">${_pyEsc(money)}${here ? ' · on screen now' : ''}</div>
+          <div class="py-sub" style="margin-bottom:0">${_pyEsc(team)} · ${_pyEsc(money)}${here ? ' · on screen now' : ''}</div>
         </div>
         ${here ? '' : `<button class="btn-secondary btn-sm py-open" data-period="${_pyEsc(o.id)}">Open</button>`}
       </div>`;
     }).join('');
     el.innerHTML = `<div class="card"><div class="card-header"><h3>${rows.length} period${rows.length === 1 ? '' : 's'} not yet paid</h3></div><div class="card-body">${html}</div></div>`;
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  "WHO ELSE SHOULD BE HERE?" (D11) — the owner's "add and remove employees
+  //  who are not part of the payroll period". Remove is the existing
+  //  period-scoped Hold on a roster row; add-back is "Put back" here for a
+  //  hold, and a door to HR for anything about the PERSON (no rate, not on
+  //  payroll, removed) — never an in-place edit, because the payroll screen
+  //  does not touch a person's record (owner: "these records cannot be
+  //  edited in the payroll tab already").
+  // ═════════════════════════════════════════════════════════
+  function _pyPaintWhoElse(el, period, state, canPrepareFlag, label) {
+    if (!el) return;
+    if (!canPrepareFlag || !period || state === 'paid') { el.innerHTML = ''; return; }
+    el.innerHTML = `<button type="button" class="btn-secondary btn-sm" id="py-whoelse-btn">Who else should be here?</button>`;
+    el.querySelector('#py-whoelse-btn')?.addEventListener('click', () => _pyOpenWhoElsePanel(period, label));
+  }
+
+  function _pyOpenWhoElsePanel(period, label) {
+    const list = _pyNotPaidList(period);
+    const hrBtn = _pyHrRecordBtn();
+    const rowsHtml = list.length ? list.map(p => `<div class="py-waiting-row">
+        <div class="py-wlabel">
+          <strong>${_pyEsc(p.name)}</strong>
+          <span class="badge ${p.words.danger ? 'badge-red' : 'badge-gray'}" style="font-size:10px;margin-left:6px">${_pyEsc(p.words.short)}</span>
+          <div class="py-sub" style="margin-bottom:0${p.words.danger ? ';color:var(--danger)' : ''}">${_pyEsc(p.words.note)}</div>
+        </div>
+        ${(p.words.undoable && p.id)
+          ? `<button class="btn-secondary btn-sm py-we-putback" data-person="${_pyEsc(p.id)}" data-name="${_pyEsc(p.name)}">Put back in this period</button>`
+          : (hrBtn || '')}
+      </div>`).join('')
+      : `<div class="info-banner">${_pyIcon('✓', 16)} Everyone found for ${_pyEsc(label)} is being paid.</div>`;
+
+    const panel = openPage(`Who else should be here? — ${_pyEsc(label)}`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        Everyone found for ${_pyEsc(label)} who is not being paid, and why. Holds are for this period only.
+        Anything about the person themselves — their rate, whether they are on payroll at all — is fixed on
+        their HR record, not here.
+      </div>
+      ${rowsHtml}
+    `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+    if (window.lucide) lucide.createIcons({ nodes: [panel] });
+    panel.querySelectorAll('.py-we-putback').forEach(b => b.addEventListener('click', () => window.busy(b, async () => {
+      const name = b.dataset.name || 'this person';
+      try {
+        await window.Payroll.setHeld(selected, b.dataset.person, null);
+        await _pyRefreshFigures();
+        Notifs.success(`${name} is back in ${label}.`);
+        closeModal();
+        load(selected);
+      } catch (e) { Notifs.showToast(e && e.message ? e.message : 'The hold could not be lifted.', 'error'); }
+    })));
+    _pyBindHrRecordBtns(panel);
   }
 
   // ═════════════════════════════════════════════════════════
@@ -726,10 +951,28 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // ═════════════════════════════════════════════════════════
   function _pyPaintAction(el, o) {
     if (!el) return;
-    const { period, state, label, tot, reads, notPaid } = o;
+    const { period, state, label, tot, reads, notPaid, isLive, periodEnd, kind } = o;
     const n = reads.length;
     const people = `${n} ${n === 1 ? 'person' : 'people'}`;
     let body = '';
+
+    // ── D5 — no action buttons in an in-progress period ─────────────────────
+    // A period that has not ended cannot be checked or paid at all — the
+    // engine refuses (Payroll.markHoursCorrect). Instead of a button, the cost
+    // sentence names the end date, so the refusal is never a surprise.
+    // Finance (canPay) alone gets a subtle, separate escape hatch for a
+    // special request — never the default action, and it demands a typed
+    // reason (owner ruling 2026-08-11: approved by FINANCE, recorded on the
+    // run, never a silent loosening).
+    if (isLive) {
+      const kindWord = (kind === 'week') ? 'week' : 'month';
+      const overrideBtn = canPay
+        ? `<button class="btn-secondary btn-sm" id="py-early-btn">Release early (Finance approval)</button>`
+        : '';
+      body = `<div class="py-cost">${_pyEsc(label)} runs to ${_pyEsc(periodEnd || '')}. When it ends, the figures freeze here for HR to check, and Finance pays after that.</div>${overrideBtn}`;
+      el.innerHTML = `<div class="card"><div class="card-body"><div class="py-actbar">${body}</div></div></div>`;
+      return;
+    }
 
     if (state === 'notstarted') {
       body = canPrepare
@@ -763,13 +1006,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   //  read off the frozen line; not one of them recalculates a peso. Each row
   //  carries the person's name and a Fix that opens THEIR figures.
   // ═════════════════════════════════════════════════════════
-  function _pyProblems(period, reads, notPaid, periodId) {
+  function _pyProblems(period, reads, notPaid, periodId, live) {
     const out = [];
+    const liveOpts = live || {};
     const kind = _pyKind(periodId);
     let days = [];
     if (kind === 'week' && typeof window.payWeekDays === 'function') {
       try { days = window.payWeekDays(periodId) || []; } catch (_) { days = []; }
     }
+    const todayIso = liveOpts.todayIso || '';
 
     // The people the system refused to pay because it does not KNOW something.
     notPaid.forEach(p => {
@@ -780,8 +1025,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       // A day with no punch. This is the single most common event and the one
       // the owner named: absent-unless-punched is the ruling, so an unpunched
       // day is unpaid until somebody records a reason for it.
+      //
+      // D10 — a FUTURE day is "not yet", never "absent": computeWeeklyLine
+      // marks a day with no punches absent, and mid-week that would name
+      // Thursday-Sunday as "no clock-in", which is alarming and false. Pure
+      // string comparison on the period's own dates vs today (Manila) — zero
+      // money impact, an absent day already pays 0.
       const missing = [];
       r.rows.forEach((row, i) => {
+        if (days[i] && todayIso && days[i] > todayIso) return; // not yet — excluded entirely
         if (row && row.absent === true && !(row.override || row.overridden)) {
           missing.push(days[i] ? PY_DAY_NAMES[i] || days[i] : (PY_DAY_NAMES[i] || `day ${i + 1}`));
         }
@@ -892,7 +1144,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // ═════════════════════════════════════════════════════════
   function _pyPaintRoster(el, ctx) {
     if (!el) return;
-    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label } = ctx;
+    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso } = ctx;
 
     if (!period || (!reads.length && !notPaid.length)) {
       el.innerHTML = `<div class="empty-state">
@@ -908,9 +1160,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // Flagged first — the owner's rule that rows the system is unsure about sit
     // at the top. Flagged means: nothing to pay, an unpunched day, or an
     // advance that did not collect. Same tests as the sentences above; the two
-    // must never disagree.
+    // must never disagree. D10 — a day that has not happened yet (live mode
+    // only) is never a reason to flag someone; it excludes exactly the same
+    // dates _pyProblems does, by the same plain string comparison.
+    const hasFutureDays = isLive && Array.isArray(periodDates) && periodDates.length && todayIso;
     const flagged = (r) => (r.takeHome != null && r.takeHome <= 0)
-      || r.rows.some(row => row && row.absent === true && !(row.override || row.overridden))
+      || r.rows.some((row, i) => {
+        if (hasFutureDays && periodDates[i] && periodDates[i] > todayIso) return false;
+        return row && row.absent === true && !(row.override || row.overridden);
+      })
       || (r.caBalanceBefore != null && r.caBalanceBefore > 0 && !(r.cashAdv > 0))
       || !r.id;
     const ordered = reads.slice().sort((a, b) => {
@@ -919,8 +1177,8 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       return String(a.name).localeCompare(String(b.name));
     });
 
-    const cards = ordered.map(r => _pyPersonCard(r, cols, { canEditRows, canCorrectRow, flagged: flagged(r) })).join('');
-    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period) : '';
+    const cards = ordered.map(r => _pyPersonCard(r, cols, { canEditRows, canCorrectRow, flagged: flagged(r), isLive })).join('');
+    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period, isLive) : '';
     const notPaidCards = notPaid.map(p => _pyNotPaidCard(p, canEditRows)).join('');
 
     el.innerHTML = totalsCard + cards + (notPaid.length
@@ -928,17 +1186,35 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       : '');
   }
 
-  function _pyFieldHtml(col, r) {
+  function _pyFieldHtml(col, r, isLive) {
     const nil = '<span class="py-nil">—</span>';
     let val = nil, note = '', cls = '';
+    // Live mode: "Take-home so far" — closed mode keeps "Take-home pay"
+    // (§6.3). Never mutate `col` itself: it is a SHARED reference (from
+    // PY_COLS via _pyColsFor's filter), and mutating it here would leak the
+    // live label into every later, non-live paint.
+    const fieldLabel = (col.key === 'takeHome' && isLive) ? 'Take-home so far' : col.label;
     if (col.key === 'days') {
       if (r.daysWorked != null || r.daysAbsent != null) {
-        val = `${(+r.daysWorked || 0)} worked`;
+        // D10(b) — live mode: "so far", against the days that have actually
+        // happened yet, never against all 7 while the week is still running.
+        val = (r._elapsedTotal != null)
+          ? `${(+r.daysWorked || 0)} of ${r._elapsedTotal} so far`
+          : `${(+r.daysWorked || 0)} worked`;
         if (r.daysAbsent) note = `${r.daysAbsent} absent`;
       }
     } else if (col.key === 'regHours' || col.key === 'otHours' || col.key === 'travelHours') {
       if (r[col.key] != null) val = _pyHrs(r[col.key]);
       if (col.key === 'travelHours' && (+r.travelHours || 0) > 0) note = 'paid at half rate';
+      // Provenance (§6.4) — always-visible text, never behind a tap.
+      if (col.key === 'regHours' && r[col.key] != null) note = note ? note : 'from the punch clock';
+    } else if (col.key === 'attScore' || col.key === 'kpiScore') {
+      if (r[col.key] != null) {
+        val = Math.round((+r[col.key] || 0) * 100) + '%';
+        note = (col.key === 'attScore')
+          ? 'days present ÷ workdays so far, from the Attendance screen'
+          : 'tasks finished this period + deliverables score';
+      }
     } else if (col.key === 'takeHome') {
       if (r.takeHome != null) { val = _pyPeso(r.takeHome); cls = (r.takeHome > 0) ? 'py-plus' : 'py-minus'; }
     } else if (col.key === 'allowances') {
@@ -954,21 +1230,45 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       val = _pyPeso(r[col.key]);
     }
     return `<div class="py-f${col.key === 'takeHome' ? ' py-f-net' : ''}">
-      <span class="py-f-label">${_pyEsc(col.label)}</span>
+      <span class="py-f-label">${_pyEsc(fieldLabel)}</span>
       <span class="py-f-val ${cls}">${val}</span>
       ${note ? `<span class="py-f-note">${_pyEsc(note)}</span>` : ''}
     </div>`;
   }
 
+  // The edit door (D12/§6.5) — the payroll screen never edits a person's
+  // standing pay ("records cannot be edited in the payroll tab already",
+  // owner). Guarded on the function actually being loaded, per house rule.
+  function _pyHrRecordBtn(extraStyle) {
+    if (typeof window.renderEmployeeProfiles !== 'function') return '';
+    return `<button type="button" class="btn-secondary btn-sm py-hr-link"${extraStyle ? ` style="${extraStyle}"` : ''}>Open HR record</button>`;
+  }
+  function _pyBindHrRecordBtns(scope) {
+    scope.querySelectorAll('.py-hr-link').forEach(b => b.addEventListener('click', () => {
+      try { window.renderEmployeeProfiles(); } catch (_) { Notifs.showToast('The HR records screen could not be opened.', 'error'); }
+    }));
+  }
+
   function _pyPersonCard(r, cols, o) {
     const sub = [];
-    if (r.rate != null) sub.push(`${_pyPeso(r.rate)}/hr${r.rateSource ? ' · ' + r.rateSource : ''}`);
+    if (r.rate != null) sub.push(`${_pyPeso(r.rate)}/hr${r.rateSource ? ' · ' + _pyRateSourceWords(r.rateSource) : ''}`);
     else if (r.monthlySalary != null) sub.push(`${_pyPeso(r.monthlySalary)} a month`);
     if (r.daysOverridden) sub.push(`${r.daysOverridden} day${r.daysOverridden === 1 ? '' : 's'} paid on a recorded reason`);
     if (!r.id) sub.push('no id on this record — it cannot be changed from here');
     const oneOffLines = r.oneOffs.length
       ? `<div class="py-oneoff">${r.oneOffs.map(x => `${_pyEsc(x.label || 'One-off')}: ${x.kind === 'deduction' ? '-' : '+'}${_pyEsc(_pyPeso(x.amount))}`).join(' · ')}</div>`
       : '';
+    // The owner's "where did this come from", for a performance-scaled
+    // allowance only — a flat policy says nothing, since the allowance is not
+    // scaled and a note here would be noise (§6.4).
+    const perfLine = (r.policy === 'performance' && r.perfFactor != null)
+      ? `<div class="py-oneoff">Allowance scaled to ${Math.round(r.perfFactor * 100)}%: KPI ${r.kpiScore != null ? Math.round(r.kpiScore * 100) : '—'}% × 0.7 + attendance ${r.attScore != null ? Math.round(r.attScore * 100) : '—'}% × 0.3.</div>`
+      : '';
+    // "Pay records are kept in HR" (§6.5) — permanently visible text, never
+    // behind a tap, plus the one door out. Read-only here on purpose: the
+    // payroll screen writes only period-scoped inputs, never standing pay.
+    const hrBtn = _pyHrRecordBtn();
+    const hrLine = '<div class="py-oneoff">Pay records are kept in HR.</div>';
     const acts = [];
     if (o.canEditRows && r.id) {
       acts.push(`<button class="btn-secondary btn-sm py-adjust" data-person="${_pyEsc(r.id)}">Adjust figures</button>`);
@@ -978,11 +1278,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     if (o.canCorrectRow && r.id) {
       acts.push(`<button class="btn-secondary btn-sm py-correct" data-person="${_pyEsc(r.id)}" data-name="${_pyEsc(r.name)}">Correct this person</button>`);
     }
+    if (hrBtn) acts.push(hrBtn);
     return `<article class="py-card${o.flagged ? ' py-flagged' : ''}${(r.takeHome != null && r.takeHome <= 0) ? ' py-danger' : ''}">
       <div class="py-who"><strong>${_pyEsc(r.name)}</strong>${r.backfill ? '<span class="badge badge-gray" style="font-size:10px">entered by hand</span>' : ''}</div>
       ${sub.length ? `<div class="py-sub">${_pyEsc(sub.join(' · '))}</div>` : '<div class="py-sub"></div>'}
-      <div class="py-fields">${cols.map(c => _pyFieldHtml(c, r)).join('')}</div>
+      <div class="py-fields">${cols.map(c => _pyFieldHtml(c, r, o.isLive)).join('')}</div>
       ${oneOffLines}
+      ${perfLine}
+      ${hrLine}
       ${acts.length ? `<div class="py-rowacts">${acts.join('')}</div>` : ''}
     </article>`;
   }
@@ -992,7 +1295,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // when somebody wanted to check it. Here it is drawn on every paint from the
   // cards' own numbers, so it survives by construction and can never contradict
   // the column above it.
-  function _pyTotalsCard(tot, cols, people, notPaidCount, period) {
+  function _pyTotalsCard(tot, cols, people, notPaidCount, period, isLive) {
     const stored = _pyPick(
       period && period.totals && period.totals.takeHome,
       period && period.totals && period.totals.net,
@@ -1009,12 +1312,20 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       regHours: tot.regHours, otHours: tot.otHours, travelHours: tot.travelHours,
       earnings: tot.earnings, allowances: tot.allowances, oneOffNet: tot.oneOffNet,
       otherDed: tot.otherDed, statutory: tot.statutory, cashAdv: tot.cashAdv,
-      caBalanceBefore: null, caBalanceAfter: null, takeHome: tot.takeHome
+      caBalanceBefore: null, caBalanceAfter: null, takeHome: tot.takeHome,
+      // Percentages do not aggregate into a roster total — showing a sum or a
+      // silent average here would assert a figure nobody asked for, so the
+      // totals row states plainly that there is none.
+      attScore: null, kpiScore: null
     };
+    // Live mode: "so far — not what will be paid" (closed mode keeps
+    // "this is what goes out") — §6.3, the same distinction the live banner
+    // makes, restated at the point the eye actually lands on a peso figure.
+    const totalsSub = isLive ? 'so far — not what will be paid' : 'this is what goes out';
     return `<article class="py-card py-totals">
       <div class="py-who"><strong>Everyone — ${people} ${people === 1 ? 'person' : 'people'}</strong></div>
-      <div class="py-sub">this is what goes out${notPaidCount ? ` · ${notPaidCount} not being paid` : ''}</div>
-      <div class="py-fields">${cols.map(c => _pyFieldHtml(c, fake)).join('')}</div>
+      <div class="py-sub">${totalsSub}${notPaidCount ? ` · ${notPaidCount} not being paid` : ''}</div>
+      <div class="py-fields">${cols.map(c => _pyFieldHtml(c, fake, isLive)).join('')}</div>
       ${drift}
     </article>`;
   }
@@ -1035,12 +1346,52 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   //  person's figures onto that one.
   // ═════════════════════════════════════════════════════════
   function _pyBind(ctx) {
-    const { period, state, label, reads, tot } = ctx;
+    const { period, state, label, reads, tot, isLive, periodEnd, kind, activeTeam } = ctx;
     const readById = {}; reads.forEach(r => { if (r.id) readById[r.id] = r; });
 
     root.querySelector('#py-period')?.addEventListener('change', (e) => load(e.target.value));
-    root.querySelector('#py-thisweek')?.addEventListener('click', () => load(thisWeekId));
+    // "This week" on Operations, "This month" on Office (D8) — the button's
+    // own label already says which, painted per-tab in paint().
+    root.querySelector('#py-thisweek')?.addEventListener('click', () => load(activeTeam === 'operations' ? thisWeekId : thisMonth));
     root.querySelectorAll('.py-open').forEach(b => b.addEventListener('click', () => load(b.dataset.period)));
+
+    // ── Team tabs (D8) — house chip-tab helper, never a hand-rolled bar. A
+    // click with no more specific period jumps to that team's own last-open
+    // (or default) period; re-entry restores both the tab and its period.
+    const tabsRow = root.querySelector('.py-team-tabs');
+    if (tabsRow) window.bindChipTabs(tabsRow, (key) => load(_pyDefaultForTeam(key)));
+
+    // ── Refresh figures (live mode only) — every row action already ends in
+    // load(selected), which in live mode re-projects; this is the same thing
+    // as a plain, named button for someone who just wants the latest numbers
+    // without changing anything.
+    root.querySelector('#py-refresh-figures')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      load(selected);
+    }));
+
+    // ── The Finance-approved early release (F1, owner ruling 2026-08-11) ────
+    // Never the default action — it sits beside the refusal sentence, is only
+    // ever painted for Finance-tier viewers (canPay), and demands a typed
+    // reason. The gate itself lives in the engine (Payroll.markHoursCorrect);
+    // this is only the door to it.
+    root.querySelector('#py-early-btn')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      const reason = await window.promptDialog({
+        title: 'Release early — Finance approval',
+        message: `${label} has not ended yet — it does not close until ${periodEnd}. This is a special-request exception, approved by Finance, and the reason stays visible on this period for anyone reading it later.`,
+        placeholder: 'e.g. worker leaving before the period ends, urgent request approved by the owner',
+        confirmLabel: 'Approve and check early',
+        required: true
+      });
+      if (reason === null) return;
+      if (!String(reason).trim()) { Notifs.showToast('A reason is needed.', 'error'); return; }
+      try {
+        await window.Payroll.markHoursCorrect(selected, { earlyOverride: { reason: String(reason).trim() } });
+        Notifs.success('Approved for early release — Finance has been told.');
+      } catch (e) {
+        Notifs.showToast(e && e.message ? e.message : 'This could not be released early.', 'error');
+      }
+      load(selected);
+    }));
 
     // ── HR's half of the handoff ───────────────────────────────────────────
     root.querySelector('#py-check-btn')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
@@ -1129,8 +1480,18 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // goes down, and "now press the other button to make your change count" is
   // exactly the ceremony the old screens had. Only ever runs while the period
   // is still open — a checked or paid period is frozen on purpose.
+  //
+  // D4/D1 — MUST NOT call prepare() for a period that has not ended: an
+  // in-progress period is never worth freezing, and the live view reads
+  // Payroll.preview() (which writes nothing) on the very next load() anyway,
+  // so calling prepare() here would be a write with no display benefit —
+  // exactly the "looking must not write" rule this build exists to enforce.
   async function _pyRefreshFigures() {
     try {
+      const nowIso = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+      const isLiveNow = !!(window.Payroll.core && typeof window.Payroll.core.periodEnded === 'function'
+        && !window.Payroll.core.periodEnded(selected, nowIso));
+      if (isLiveNow) return;
       const p = await window.Payroll.load(selected);
       const st = _pyStateOf(p);
       if (st === 'notstarted' || st === 'prepared') {
@@ -1163,14 +1524,22 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     }
     const lineRows = (r && r.rows) || [];
 
+    // D10(c) — a day that has not happened yet reads "not yet" (muted), never
+    // the alarming/false "no punch — not paid"; its inputs stay enabled,
+    // because pre-recording a known future absence override is legitimate
+    // (e.g. an approved leave day later in the week).
     const dayRowsHtml = days.map((iso, i) => {
       const row = lineRows[i] || {};
       const o   = savedOvr[iso] || {};
       const punched = _pyHrs(row.hours) + ' hrs' + ((+row.otHours || 0) ? ` + ${_pyHrs(row.otHours)} overtime` : '');
       const absent  = row.absent === true;
+      const notYet  = !!(todayIso && iso > todayIso);
+      const statusLine = notYet
+        ? `<div style="font-size:11px;margin-bottom:8px;color:var(--text-muted)">not yet</div>`
+        : `<div style="font-size:11px;margin-bottom:8px;color:${absent ? 'var(--danger)' : 'var(--text-muted)'}">${absent ? 'no punch — not paid' : _pyEsc(punched)}</div>`;
       return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
         <div style="font-size:13px;font-weight:600;margin-bottom:2px">${_pyEsc(PY_DAY_NAMES[i] || '')} <span style="font-weight:400;color:var(--text-muted);font-size:11px">${_pyEsc(iso)}</span></div>
-        <div style="font-size:11px;margin-bottom:8px;color:${absent ? 'var(--danger)' : 'var(--text-muted)'}">${absent ? 'no punch — not paid' : _pyEsc(punched)}</div>
+        ${statusLine}
         <div class="form-row">
           <div class="form-group"><label>Hours to pay</label><input id="pya-h-${i}" type="number" step="0.25" min="0" inputmode="decimal" value="${o.hours != null ? _pyEsc(o.hours) : ''}" placeholder="—"/></div>
           <div class="form-group"><label>Overtime hours</label><input id="pya-ot-${i}" type="number" step="0.25" min="0" inputmode="decimal" value="${o.otHours != null ? _pyEsc(o.otHours) : ''}" placeholder="—"/></div>
@@ -1191,10 +1560,16 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
          ['otherDeductions', 'Other deductions (₱)',   adj.otherDeductions],
          ['caPlanned',       'Advance instalment (₱)', adj.caPlanned]];
 
+    const hrBtn = _pyHrRecordBtn('margin-top:6px');
     const panel = openPage(`${_pyEsc(name)} — ${_pyEsc(label)}`, `
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
         These apply to <strong>${_pyEsc(label)}</strong> only, and to ${_pyEsc(name)} only. Everyone else is untouched.
         The figures are worked out again as soon as you save.
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;padding:10px;border:1px solid var(--border);border-radius:10px">
+        ${_pyEsc(name)}'s standing pay — the salary/rate, regular allowance and standing deductions — lives on their
+        HR record and is not edited here. The boxes below apply to ${_pyEsc(label)} only.
+        ${hrBtn}
       </div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Amounts for this period</div>
@@ -1220,6 +1595,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // at once inside openPage's ~300ms teardown; a document-wide lookup reads
     // the PREVIOUS person's fields and writes them onto THIS person.
     const $ = (id) => panel.querySelector('#' + id);
+    _pyBindHrRecordBtns(panel);
     // ⚠ AN UNTOUCHED BOX IS NEVER SENT — this is a MONEY rule, not tidiness.
     // Some of these amounts can also come from the person's own profile rather
     // than from this period. If a blank box were sent as an explicit 0, opening

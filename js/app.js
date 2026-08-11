@@ -3269,7 +3269,12 @@ function renderAdminDept() {
     ['memos',          'clipboard-check', 'Memos &amp; Resolutions',            'Corporate memos and board resolutions'],
     ['sops',           'book-open',       'SOPs',                               'Standard operating procedures, by department'],
     ...(opsTier ? [['dept:HR', 'user-cog', 'HR Documents', 'People &amp; roles, employment records, leave and attendance']] : []),
-    ['team-directory', 'users',           'Team Directory',                     'Who is who, and which department they sit in']
+    ['team-directory', 'users',           'Team Directory',                     'Who is who, and which department they sit in'],
+    // DEPT-BUDGETS-SPEC-2026-08-11 §8 — Admin gets a signpost row (like every
+    // other row here), not a chip-tab switch. Special-cased in the click
+    // handler below since window.renderDeptBudgetingPage takes no `navigateTo`
+    // page string.
+    ['__dept_budgeting_admin', 'wallet', 'Budgeting', 'Admin department budget']
   ];
   c.innerHTML = `
     <div class="page-header" style="display:flex;align-items:center;gap:10px">${window.deptIconTile(cfg||'Admin', 32)}<h2 style="margin:0">Admin</h2></div>
@@ -3289,7 +3294,10 @@ function renderAdminDept() {
   // [data-page] sweep would also grab the sidebar's own nav buttons and
   // double-bind them.
   c.querySelectorAll('[data-page]').forEach(btn => {
-    btn.addEventListener('click', () => navigateTo(btn.dataset.page));
+    btn.addEventListener('click', () => {
+      if (btn.dataset.page === '__dept_budgeting_admin') { window.renderDeptBudgetingPage('Admin'); return; }
+      navigateTo(btn.dataset.page);
+    });
   });
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 }

@@ -232,6 +232,11 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved, 
 const FINANCE_GROUPS = [
   { key:'Overview',              label:'Overview',              members:['Overview'] },
   { key:'Money In/Out',          label:'Money In/Out',          members:['Ledger','Cash Receipts','Cash Disbursements','Bank Accounts'] },
+  // DEPT-BUDGETS-SPEC-2026-08-11 — Finance's view of every department's
+  // released/spent budgets, confirmations and reimbursements. A department's
+  // own view is window.renderBudgeting (js/departments.js); this is the
+  // Finance-tier admin surface (js/screens/dept-budgets.js).
+  { key:'Dept Budgets',          label:'Dept Budgets',          members:['Dept Budgets'] },
   // v14 Wave4 F5 — Balance Sheet / Cash Flow / Bank Rec land here as sub-chips.
   // v14 post-release — Break-even lands as a Reports sub-chip (owner request:
   // "Add a computation for breakeven. Rents etc.").
@@ -431,6 +436,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Sales Orders':        await window.renderSalesOrders(content); break;
     case 'Inventory':           await window.renderInventory(content, 'Stock'); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
+    case 'Dept Budgets': await window.renderDeptBudgetsAdmin(content, currentUser, currentRole); break;
     case 'Purchases':
       // View-only window into the Purchasing department's purchase requests.
       // Purchasing creates RFQs → prices → converts to Purchase Requests; Finance

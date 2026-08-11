@@ -38,7 +38,7 @@ window.renderCRM = async function (currentUser, currentRole, subtab = window.ini
   window._crmCurrentUser = currentUser;
   window._crmCurrentRole = currentRole;
   const c = deptContainer();
-  const crmTabs = ['Dashboard', 'AEC Leads', 'ROC Leads', 'Pipeline'];
+  const crmTabs = ['Dashboard', 'AEC Leads', 'ROC Leads', 'Pipeline', 'Budgeting'];
   subtab = crmTabs.includes(subtab) ? subtab : 'Dashboard';
   c.innerHTML = `
     <div class="page-header">
@@ -77,6 +77,9 @@ async function loadCRMContent(currentUser, currentRole, sub) {
       break;
     case 'Pipeline':
       await renderCRMPipeline(content, currentUser, currentRole);
+      break;
+    case 'Budgeting':
+      await window.renderBudgeting(content, currentUser, currentRole, 'CRM');
       break;
   }
 }

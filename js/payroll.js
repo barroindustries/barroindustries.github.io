@@ -187,6 +187,48 @@ if (typeof window === 'undefined') {
     return PC.kindOf(periodId) === 'month' ? String(periodId) + '-01' : String(periodId);
   };
 
+  /**
+   * The LAST calendar day of a period, ISO. A month's last day comes from
+   * window.monthBounds (pure, money-core — CALLED, never modified); a week's
+   * last day is its Sunday, payWeekDays(periodId)[6]. Falls back to
+   * PC.periodStart on any helper failure — a label/deciding function must
+   * never take the pay screen down (PAYROLL-LIVE-SPEC §4.1).
+   */
+  PC.periodEnd = function (periodId) {
+    const s = String(periodId == null ? '' : periodId);
+    try {
+      if (PC.kindOf(s) === 'month') {
+        const b = (typeof window.monthBounds === 'function') ? window.monthBounds(s, s + '-28') : null;
+        const days = b && b.daysInMonth;
+        if (days) return s + '-' + String(days).padStart(2, '0');
+        return s;
+      }
+      const days = (typeof window.payWeekDays === 'function') ? window.payWeekDays(s) : null;
+      if (days && days[6]) return days[6];
+      return s;
+    } catch (_) {
+      // Anything — including a periodId so malformed that kindOf itself
+      // throws — falls back to the string itself, never to a helper that
+      // could throw a second time. A label/deciding function must never take
+      // the pay screen down.
+      return s;
+    }
+  };
+
+  /**
+   * Has the period finished? `todayIso` is REQUIRED (callers pass
+   * window.bizDate()) so this stays wall-clock-free and testable: true iff
+   * todayIso > PC.periodEnd(periodId), a plain string compare.
+   */
+  PC.periodEnded = function (periodId, todayIso) {
+    return String(todayIso == null ? '' : todayIso) > PC.periodEnd(periodId);
+  };
+
+  /** 'office' for a month, 'operations' for a week. One mapping, one place. */
+  PC.teamOf = function (periodId) {
+    return PC.kindOf(periodId) === 'month' ? 'office' : 'operations';
+  };
+
   // ── the state machine, in the owner's words ──────────────────────────────
   // Stored state strings are UNCHANGED (pay_runs and pay_weeks both run
   // draft -> computed -> verified -> disbursing -> disbursed, and firestore.
@@ -503,6 +545,10 @@ if (typeof window === 'undefined') {
           kpiScore: l.kpiScore == null ? null : r2(l.kpiScore),
           attendanceScore: l.attScore == null ? null : r2(l.attScore),
           policy: l.policy || 'flat',
+          // Frozen straight off computePayLine's own raw output (money-core.js
+          // — CALLED, never edited): the owner's "where did the number come
+          // from" for a performance-policy allowance (PAYROLL-LIVE-SPEC §6.4).
+          perfFactor: l.perfFactor == null ? null : r2(l.perfFactor),
           withheldDeductions: r2(l.withheldDeductions != null ? l.withheldDeductions : l.otherDeductions),
           unearnedDeductions: r2(l.unearnedDeductions),
           employerShare: l.er || null,
@@ -708,57 +754,31 @@ if (typeof window === 'undefined') {
   }
 
   /**
-   * Fold this period's one-offs (and the backfill cash-advance suppression)
-   * onto the lines the underlying engine just froze, and write them back.
+   * Fold stored inputs onto RAW engine lines and normalise. PURE — no reads, no
+   * writes. `doc` may be null (no run document yet, e.g. a preview() before
+   * anyone has touched the period). Extracted out of refold() so preview() and
+   * refold() share the exact same fold logic and can never drift (D2,
+   * PAYROLL-LIVE-SPEC §4.2).
    *
-   * WHY A SECOND PASS RATHER THAN A CHANGE TO EITHER ENGINE: computePayRun and
-   * WeeklyRun.compute are the tested, live money paths, and the maths inside
-   * them is frozen. Folding on top of their output — with the identity proof in
-   * PayrollCore.applyOneOffs — adds the owner's one-off amounts without a
-   * single edit to either. It is idempotent (stripOneOffs undoes exactly what
-   * applyOneOffs did), so it can run after every prepare, every one-off and
-   * every hand edit without drifting.
-   *
-   * The write sets state 'computed' deliberately: firestore.rules only admits a
-   * pay_runs / pay_weeks update down the compute branch, which requires the
-   * resulting state to be 'computed' or 'verified'. Re-asserting the state it
-   * is already in is what makes an otherwise ordinary field write legal.
+   * @param rawLines  the lines the underlying engine just froze (or built,
+   *                  read-only, for a preview)
+   * @param kind       'week' | 'month'
+   * @param doc        the stored run document, or null
    */
-  async function refold(periodId, kind) {
-    const d = await readRun(periodId, kind);
-    if (!d) throw new Error('There is nothing to work with for ' + PC.label(periodId) + ' yet.');
-    const raw = Array.isArray(d.lines) ? d.lines : [];
+  function foldAndNormalize(rawLines, kind, doc) {
+    const d = doc || {};
+    const raw = Array.isArray(rawLines) ? rawLines : [];
     const oneOffs = d.oneOffs || {};
     const backfill = d.backfill || null;
     const suppressCa = !!(backfill && backfill.isBackfill);
     const warnings = Array.isArray(d.warnings) ? d.warnings.slice() : [];
 
-    // Fold only when there is something to fold, so a period with no one-offs
-    // and no backfill is left EXACTLY as its own engine wrote it — one fewer
-    // write, and one fewer chance to disturb a frozen line.
-    //
-    // `wasFolded` is the half that is easy to miss: if the stored lines already
-    // carry a fold and every one-off has since been taken back off, the fold
-    // still has to be re-run to UNDO it. Without this, deleting the last
-    // one-off would leave its money on the line for ever.
-    const wasFolded = raw.some((l) => PC.usableOneOffs(l && l.oneOffs).length || (l && l.cashAdvanceSuppressed));
-    const hasOneOffs = Object.keys(oneOffs).some((k) => PC.usableOneOffs(oneOffs[k]).length);
-    const needsFold = wasFolded || hasOneOffs || suppressCa;
-
-    const folded = !needsFold ? raw : raw.map((l) => {
+    const folded = raw.map((l) => {
       const pid = PC.personIdOf(l, kind);
       let out = PC.applyOneOffs(l, kind, oneOffs[pid] || []);
       if (suppressCa) out = PC.clearCashAdvance(out, kind);
       return out;
     });
-
-    if (needsFold) {
-      const patch = Object.assign(
-        { state: 'computed', lines: folded, unifiedAt: stamp(), unifiedBy: myUid() },
-        storageTotals(folded, kind)
-      );
-      await DOC(periodId, kind).set(patch, { merge: true });
-    }
 
     const held = heldMapOf(d.excluded);
     const lines = folded.map((l) => PC.normalizeLine(l, kind, { heldReason: held[PC.personIdOf(l, kind)] || null }));
@@ -779,7 +799,67 @@ if (typeof window === 'undefined') {
       warnings.push(warn('not-on-this-run', (s.name || s.workerId || s.uid || 'Someone') + ' is not on this period: ' + String(s.reason || 'no reason recorded') + '.', { personId: s.workerId || s.uid || '' }));
     });
 
-    return { lines: lines, held: held, totals: PC.totalsOf(lines), warnings: warnings };
+    return { lines: lines, held: held, totals: PC.totalsOf(lines), warnings: warnings, folded: folded };
+  }
+  // Exported PURELY so tests/payroll-live.test.mjs can pin it against fixtures
+  // without a database (§5 item 5) — never called from anywhere but refold()
+  // and preview() in production.
+  PC._foldForTest = foldAndNormalize;
+
+  /**
+   * Fold this period's one-offs (and the backfill cash-advance suppression)
+   * onto the lines the underlying engine just froze, and write them back.
+   *
+   * WHY A SECOND PASS RATHER THAN A CHANGE TO EITHER ENGINE: computePayRun and
+   * WeeklyRun.compute are the tested, live money paths, and the maths inside
+   * them is frozen. Folding on top of their output — with the identity proof in
+   * PayrollCore.applyOneOffs — adds the owner's one-off amounts without a
+   * single edit to either. It is idempotent (stripOneOffs undoes exactly what
+   * applyOneOffs did), so it can run after every prepare, every one-off and
+   * every hand edit without drifting.
+   *
+   * The write sets state 'computed' deliberately: firestore.rules only admits a
+   * pay_runs / pay_weeks update down the compute branch, which requires the
+   * resulting state to be 'computed' or 'verified'. Re-asserting the state it
+   * is already in is what makes an otherwise ordinary field write legal.
+   *
+   * Behavioural change from before this file's foldAndNormalize extraction:
+   * NONE. The `needsFold` skip (a period with no one-offs and no backfill is
+   * left exactly as its own engine wrote it) still gates the WRITE; the
+   * RETURN VALUE now comes from foldAndNormalize either way, which produces
+   * byte-identical output to the inline logic this replaced.
+   */
+  async function refold(periodId, kind) {
+    const d = await readRun(periodId, kind);
+    if (!d) throw new Error('There is nothing to work with for ' + PC.label(periodId) + ' yet.');
+    const raw = Array.isArray(d.lines) ? d.lines : [];
+    const oneOffs = d.oneOffs || {};
+    const backfill = d.backfill || null;
+    const suppressCa = !!(backfill && backfill.isBackfill);
+
+    // Fold only when there is something to fold, so a period with no one-offs
+    // and no backfill is left EXACTLY as its own engine wrote it — one fewer
+    // write, and one fewer chance to disturb a frozen line.
+    //
+    // `wasFolded` is the half that is easy to miss: if the stored lines already
+    // carry a fold and every one-off has since been taken back off, the fold
+    // still has to be re-run to UNDO it. Without this, deleting the last
+    // one-off would leave its money on the line for ever.
+    const wasFolded = raw.some((l) => PC.usableOneOffs(l && l.oneOffs).length || (l && l.cashAdvanceSuppressed));
+    const hasOneOffs = Object.keys(oneOffs).some((k) => PC.usableOneOffs(oneOffs[k]).length);
+    const needsFold = wasFolded || hasOneOffs || suppressCa;
+
+    const result = foldAndNormalize(raw, kind, d);
+
+    if (needsFold) {
+      const patch = Object.assign(
+        { state: 'computed', lines: result.folded, unifiedAt: stamp(), unifiedBy: myUid() },
+        storageTotals(result.folded, kind)
+      );
+      await DOC(periodId, kind).set(patch, { merge: true });
+    }
+
+    return { lines: result.lines, held: result.held, totals: result.totals, warnings: result.warnings };
   }
 
   // ── the ledger, for corrections only ─────────────────────────────────────
@@ -875,7 +955,79 @@ if (typeof window === 'undefined') {
         checkedBy: d.verifiedByName || d.verifiedBy || null,
         paidAt: d.disbursedAt || null,
         paidBy: d.disbursedByName || d.disbursedBy || null,
-        backfill: d.backfill || null
+        backfill: d.backfill || null,
+        // WHO approved checking this period early, and WHY — the owner's
+        // Finance-approved override to the period-end gate (D5, and the
+        // owner's 2026-08-11 ruling: Finance, not the President, approves a
+        // special-request early release). Visible on the run for as long as it
+        // exists; never silent.
+        earlyReleaseOverride: d.earlyReleaseOverride || null
+      };
+    },
+
+    /**
+     * The period AS IT STANDS RIGHT NOW, built from the live inputs through the
+     * SAME frozen maths the real pipeline uses — and WRITES NOTHING. This is
+     * the only legitimate source for an in-progress period's figures (D1).
+     * THROWS on any failed read (a denial must never render as an empty
+     * roster). Never called for money that will move: what gets paid is always
+     * the stored frozen line, never this projection.
+     *
+     * @returns same shape as load(), PLUS:
+     *   live: true
+     *   asOf: 'YYYY-MM-DD HH:mm'   Manila, via bizDate()/bizHour()
+     *   state: the STORED state if a run doc exists, else 'notstarted'
+     */
+    async preview(periodId) {
+      const kind = PC.kindOf(periodId);
+      const d = await readRun(periodId, kind);      // throws on denial, by design
+
+      let built;
+      if (kind === 'week') {
+        if (!window.WeeklyRun || typeof window.WeeklyRun.buildLines !== 'function') {
+          throw new Error('The weekly pay engine has not loaded — reload the page and try again.');
+        }
+        built = await window.WeeklyRun.buildLines(periodId);
+      } else {
+        if (typeof window.buildPayRunLines !== 'function') {
+          throw new Error('The monthly pay engine has not loaded — reload the page and try again.');
+        }
+        built = await window.buildPayRunLines(periodId, {});
+      }
+
+      const result = foldAndNormalize(built.lines, kind, d);
+      const rawState = (d && d.state) || 'draft';
+      const state = d ? PC.stateOf(rawState) : 'notstarted';
+      const todayIso = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+      const nowHour = window.bizHour ? String(window.bizHour()).padStart(2, '0') + ':00' : '';
+
+      return {
+        periodId: periodId,
+        kind: kind,
+        label: PC.label(periodId),
+        state: state,
+        stateLabel: PC.stateLabel(state),
+        inFlight: rawState === 'disbursing',
+        live: true,
+        asOf: todayIso + (nowHour ? ' ' + nowHour : ''),
+        lines: result.lines,
+        held: result.held,
+        totals: result.totals,
+        adjustments: (kind === 'week' ? (d && d.adjustments) : (d && d.overrides)) || {},
+        oneOffs: (d && d.oneOffs) || {},
+        receipts: (d && d.receipts) || {},
+        skipped: built.skipped || [],
+        warnings: (built.warnings || []).concat(result.warnings),
+        corrections: (d && d.corrections) || [],
+        notPaidYet: (d && d.failures) || [],
+        preparedAt: (d && d.computedAt) || null,
+        preparedBy: (d && (d.computedByName || d.computedBy)) || null,
+        checkedAt: (d && d.verifiedAt) || null,
+        checkedBy: (d && (d.verifiedByName || d.verifiedBy)) || null,
+        paidAt: (d && d.disbursedAt) || null,
+        paidBy: (d && (d.disbursedByName || d.disbursedBy)) || null,
+        backfill: (d && d.backfill) || null,
+        earlyReleaseOverride: (d && d.earlyReleaseOverride) || null
       };
     },
 
@@ -1105,8 +1257,49 @@ if (typeof window === 'undefined') {
      * fifty-two of these a year and not one notification before money moves —
      * the only payroll notifications in the app fire after it already has.
      */
-    async markHoursCorrect(periodId) {
+    /**
+     * @param opts.earlyOverride { reason }  A FINANCE-APPROVED exception to the
+     *   period-end gate below (owner ruling, 2026-08-11 — not in the original
+     *   spec text, which speculated a President-tier override; the owner said
+     *   Finance). Requires BOTH a non-empty typed reason AND that the caller is
+     *   Finance-tier (isMoneyPriv — the same tier the rest of this file already
+     *   calls "Finance" for the release itself). Recorded on the run document
+     *   as `earlyReleaseOverride` — who approved it, why, and against what end
+     *   date — so it stays visible on the run afterwards, never a silent
+     *   loosening. The default refusal (no override, or no Finance approval)
+     *   always names the period's end date.
+     */
+    async markHoursCorrect(periodId, opts) {
       const kind = PC.kindOf(periodId);
+      const o = opts || {};
+
+      // ── D5 — a period that has not ended cannot be checked/paid ──────────
+      // (PAYROLL-LIVE-SPEC §4.6). Checked FIRST, ahead of the state read below:
+      // a mid-period Adjust/one-off can leave the stored state reading
+      // 'computed' (-> 'prepared') for a period that is still live (D6), and
+      // that state alone must never be enough to let it be checked.
+      const todayIso = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+      let earlyOverride = null;
+      if (!PC.periodEnded(periodId, todayIso)) {
+        const reason = String((o.earlyOverride && o.earlyOverride.reason) || '').trim();
+        const mayOverride = (typeof window.isMoneyPriv === 'function') && window.isMoneyPriv();
+        if (!mayOverride || !reason) {
+          throw new Error(PC.label(periodId) + ' runs to ' + PC.periodEnd(periodId)
+            + ' and is not finished. The figures are still adding up — they can be checked and paid once the '
+            + (kind === 'week' ? 'week' : 'month') + ' ends.'
+            + (mayOverride
+              ? ' Say why this needs to go early — a reason is required.'
+              : ' For a special request, Finance can approve checking it early; the reason stays visible on this period afterwards.'));
+        }
+        earlyOverride = {
+          reason: reason,
+          approvedBy: myUid(),
+          approvedByName: myName(),
+          approvedAt: stamp(),
+          periodEndWas: PC.periodEnd(periodId)
+        };
+      }
+
       const d = await readRun(periodId, kind);
       if (!d) throw new Error('There is nothing to check for ' + PC.label(periodId) + ' yet.');
       const state = PC.stateOf(d.state);
@@ -1132,12 +1325,20 @@ if (typeof window === 'undefined') {
         if (!window.WeeklyRun || typeof window.WeeklyRun.verify !== 'function') {
           throw new Error('The weekly pay engine has not loaded — reload the page and try again.');
         }
-        await window.WeeklyRun.verify(periodId);
+        // The override rides in the SAME write that moves computed -> verified
+        // (WeeklyRun.verify's optional second arg), because firestore.rules
+        // admits arbitrary extra fields on THAT transition and nothing wider —
+        // a separate merge afterwards, once the doc already reads 'verified',
+        // would be denied (no clause covers verified -> verified with a new
+        // field).
+        await window.WeeklyRun.verify(periodId, earlyOverride ? { earlyReleaseOverride: earlyOverride } : undefined);
       } else {
-        await DOC(periodId, kind).set({
+        const patch = {
           state: 'verified', verifiedAt: stamp(),
           verifiedBy: myUid(), verifiedByName: myName()
-        }, { merge: true });
+        };
+        if (earlyOverride) patch.earlyReleaseOverride = earlyOverride;
+        await DOC(periodId, kind).set(patch, { merge: true });
       }
 
       const total = r2(payable.reduce((s, l) => s + PC.netOf(l, kind), 0));

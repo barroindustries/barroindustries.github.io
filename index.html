@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.147 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.148 · Barro Industries</div>
   </div>
 </div>
 
@@ -656,6 +656,15 @@
      way, and js/screens/hr.js/js/app.js reach forward into this file's
      window.renderFinance/financeEditModal identically. -->
 <script defer src="js/screens/finance.js"></script>
+<!-- DEPT-BUDGETS-SPEC-2026-08-11 — department budgets (release/spend/confirm/
+     reimburse). Must load after departments.js (canEditDept, deptContainer,
+     escHtml, fmt, today, onClickSafe, deptBlockedForSecretary) and
+     finance-ledger.js (window.Ledger): calls both by window.*/bare-global name
+     at click/render time only, never at parse time. departments.js's
+     renderBudgeting reaches forward into this file's window.openLogSpendForm/
+     openBudgetRequestForm/openReleaseBudgetForm/openCloseFloatModal/
+     repostFloatRelease the same way every other pass in this file documents. -->
+<script defer src="js/screens/dept-budgets.js"></script>
 <!-- Government contribution rates. Loads after finance.js, which routes to it.
      This is the screen that unblocks payroll: the verified flag lived in
      js/statutory-tables.js and nothing could write it, so disbursement was

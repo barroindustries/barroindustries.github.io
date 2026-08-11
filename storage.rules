@@ -272,8 +272,15 @@ service firebase.storage {
     // are entitled to use, which is the opposite of what the boundary is for.
     // Everything else here — Taxes, Ledger, Records, payslips, and the SSS/Gov
     // and Accounting archives the Files Hub used to hand out — stays closed.
+    // DEPT-BUDGETS-SPEC-2026-08-11 §10b — BudgetProofs (dept_spend_logs
+    // receipts, Drive.uploadFile(file,'Finance','BudgetProofs')) is likewise an
+    // operational record owned by OTHER departments, not a Finance-only
+    // filing: the Corporate Secretary has an explicit oversight READ on the
+    // dept_spend_logs queue docs (firestore.rules), and without this carve-out
+    // that oversight is blind — it can see a spend was logged but can never
+    // open the receipt.
     function financeOperationalSubfolder(sub) {
-      return sub == 'SalesOrders' || sub == 'Collections';
+      return sub == 'SalesOrders' || sub == 'Collections' || sub == 'BudgetProofs';
     }
     function financeTreeOpenToCaller(sub) {
       return claimRole() != 'secretary' || financeOperationalSubfolder(sub);

@@ -184,7 +184,7 @@ function prodStage(id){ const n = normProdStageId(id); return PROD_STAGES.find(s
 // Replaces the three drifted inline maps (old JOB_STAGES map / the two prod-advance
 // maps; the old JOB_STAGES map's qc/ready keys were dead code and are dropped).
 function trackerKeyFor(id){
-  return ({ won:'confirmed', in_production:'production',
+  return ({ won:'confirmed', in_design:'design', in_production:'production',
             qc:'qc', out_for_delivery:'ready', for_delivery:'ready',
             delivered:'delivered', paid:'delivered' })[id] || null;
 }
@@ -402,6 +402,7 @@ ${_lh ? _lh.printCSS : ''}`;
 // ═══════════════════════════════════════════════════
 const JOB_STAGES = [
   { id:'won',           label:'Won',           icon:'🤝', color:'#26a69a', dept:'Sales' },
+  { id:'in_design',     label:'In Design',     icon:'🎨', color:'#ab47bc', dept:'Design' },
   { id:'in_production', label:'In Production', icon:'🏭', color:'#7e57c2', dept:'Production' },
   { id:'for_delivery',  label:'For Delivery',  icon:'📦', color:'#26c6da', dept:'Production' },
   { id:'delivered',     label:'Delivered',     icon:'🚚', color:'#42a5f5', dept:'Production' },
@@ -673,6 +674,7 @@ function openJobProjectDetail(p, opts){
   `, `
     ${_isFinAdmin()&&!isPartnerU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
     ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
+    ${/* 'in_design' is deliberately excluded — a job in Design cannot get a production order; 'won' is kept only for legacy pre-design-flow projects. */''}
     ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`, opts || {});
@@ -777,6 +779,32 @@ function openProjectMarginModal(p){
 }
 
 async function advanceProjectStage(p, nextId){
+  // Design-flow boundaries route through the canonical handoff helpers so the
+  // generic Advance button can never skip the design queue or the handoff gate.
+  if (nextId === 'in_design' || (p.stage === 'in_design' && nextId === 'in_production')) {
+    let so = null;
+    try {
+      if (p.salesOrderId) { const s = await db.collection('sales_orders').doc(p.salesOrderId).get(); if (s.exists) so = { id:s.id, ...s.data() }; }
+      if (!so) { const q = await db.collection('sales_orders').where('projectId','==',p.id).limit(1).get(); if (q.docs.length) so = { id:q.docs[0].id, ...q.docs[0].data() }; }
+    } catch(_){}
+    if (nextId === 'in_design') {
+      if (!so) { Notifs.showToast('No sales order is linked to this project — record the sale in Finance first.','error'); return; }
+      const ok = await window.transferOrderToDesign(so);
+      if (ok) { Notifs.success('Moved to In Design'); closeModal(); window.renderProjectLifecycle(); }
+      return;
+    }
+    // in_design → in_production
+    if (so) {
+      const ok = await window.transferOrderToProduction(so);
+      if (ok) { Notifs.success('Moved to In Production'); closeModal(); window.renderProjectLifecycle(); }
+      return;
+    }
+    // No SO (legacy/manual project): fall through to the generic write below,
+    // but still demand the handoff trio on the job doc via the shared panel.
+    const ok = await window.ensureProdHandoffFields({ id:null, projectId:p.id,
+      targetDate:p.targetDate, priority:p.priority, notes:p.notes });
+    if (!ok) return;
+  }
   const who=userProfile?.displayName||currentUser.email;
   const ns=jobStage(nextId);
   try{
@@ -1136,7 +1164,7 @@ async function openJobBillingInvoiceModal(p){
 
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
   const c = deptContainer();
-  const subs = ['Orders','Materials','Inventory','Count Form','Tasks','Files'];
+  const subs = ['Orders','Materials','Inventory','Count Form','Budgeting','Tasks','Files'];
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -1164,6 +1192,7 @@ async function loadProdContent(currentUser, currentRole, sub) {
     if (sub==='Materials') return await renderProdMaterials(el, currentRole);
     if (sub==='Inventory') return await window.renderInventory(el, 'Stock');
     if (sub==='Count Form') return await renderProdInventoryForm(el, currentRole);
+    if (sub==='Budgeting') return await window.renderBudgeting(el, currentUser, currentRole, 'Production');
     if (sub==='Tasks')     return await renderDeptTasks(el, 'Production', currentUser, currentRole);
     if (sub==='Files')   { el.innerHTML = renderFileCollection('Production Files', 'production-files', currentRole);
                            bindFileCollection('production-files', currentUser, 'Production', 'Files'); return; }
@@ -1210,6 +1239,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
   // never turned into a shop-floor order — they previously lived ONLY in the
   // Projects lifecycle, so the Production team never saw them here and reported
   // "not receiving orders". Surface them so they can start a work order in one tap.
+  // 'in_design' is deliberately excluded — a job in Design cannot get a production order; 'won' is kept only for legacy pre-design-flow projects.
   const incoming = projSnap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(p=>['won','in_production'].includes(p.stage) && !(Array.isArray(p.productionOrderIds) && p.productionOrderIds.length));
   const active = orders.filter(o=>normProdStageId(o.stage)!=='delivered');
@@ -2107,7 +2137,7 @@ function purchTotal(items) {
 
 window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Request for Quotation') {
   const c = deptContainer();
-  const tabs = ['Request for Quotation', 'Purchase Requests', 'Tasks'];
+  const tabs = ['Request for Quotation', 'Purchase Requests', 'Budgeting', 'Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('🛒',20)} Purchasing</h2></div>
     ${window.sopPanel('How Purchasing works', [
@@ -2127,6 +2157,7 @@ async function loadPurchasingContent(currentUser, currentRole, sub) {
   const content = document.getElementById('purch-content');
   try {
     if (sub === 'Tasks') return await renderDeptTasks(content, 'Purchasing', currentUser, currentRole);
+    if (sub === 'Budgeting') return await window.renderBudgeting(content, currentUser, currentRole, 'Purchasing');
     if (sub === 'Purchase Requests') return await renderPurchaseRequests(content, currentUser, currentRole);
     return await renderRFQs(content, currentUser, currentRole);
   } catch (e) {

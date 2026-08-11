@@ -53,11 +53,12 @@ window.renderDesign = async function(currentUser, currentRole, subtab = 'Project
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('🎨',20)} Design</h2></div>
     ${window.sopPanel('How Design works', [
-      'Projects tracks each design job; Drawings holds the working files.',
+      'Projects tracks each design job — sales orders land here automatically when Finance records a sale; finish the drawings, then Send to Production.',
+      'Folders organizes design files — two types: Projects and Sales Orders.',
       'Clients keeps the design client book; Product Designs and References are the asset libraries.',
       'Tasks is the department board for design work in progress.'
     ])}
-    ${window.chipTabs(['Projects','Drawings','Clients','Product Designs','References','Tasks'].map(s=>({key:s,label:s})), subtab)}
+    ${window.chipTabs(['Projects','Drawings','Folders','Clients','Product Designs','References','Budgeting','Tasks'].map(s=>({key:s,label:s})), subtab)}
     <div id="design-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
@@ -70,6 +71,7 @@ async function loadDesignContent(currentUser, currentRole, sub) {
   switch(sub) {
     case 'Projects':    await renderProjects(content, currentUser, currentRole); break;
     case 'Drawings':    await renderDrawingsDashboard(content, currentUser, currentRole); break;
+    case 'Folders':     await renderDesignFolders(content, currentUser, currentRole); break;
     case 'Clients':     await renderClientProfiles(content, currentUser, currentRole, 'design'); break;
     case 'Product Designs':
       content.innerHTML = renderFileCollection('Product Designs', 'design-files', currentRole);
@@ -78,6 +80,9 @@ async function loadDesignContent(currentUser, currentRole, sub) {
     case 'References':
       content.innerHTML = renderFileCollection('Reference Files', 'design-refs', currentRole);
       bindFileCollection('design-refs', currentUser, 'Design', 'References');
+      break;
+    case 'Budgeting':
+      await window.renderBudgeting(content, currentUser, currentRole, 'Design');
       break;
     case 'Tasks':
       await renderDeptTasks(content, 'Design', currentUser, currentRole);
@@ -139,10 +144,20 @@ async function renderProjects(container, currentUser, currentRole) {
   const canAdd = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   const canBill = ['president','owner','manager','finance'].includes(currentRole) || canEditDept('Finance');
 
+  // SO projects awaiting design first — that queue is the reason Design opens
+  // this tab now — then the existing createdAt order (already sorted by the query).
+  projects = projects.slice().sort((a,b)=>{
+    const aw = a.salesOrderId && !a.productionHandoffAt ? 1 : 0;
+    const bw = b.salesOrderId && !b.productionHandoffAt ? 1 : 0;
+    return bw - aw;
+  });
+  const soQueue = projects.filter(p=>p.salesOrderId && !p.productionHandoffAt).length;
+
   container.innerHTML = `
     <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
       ${canAdd?`<button class="btn-primary btn-sm" id="add-project-btn">+ New Project</button>`:''}
     </div>
+    ${soQueue>0?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${emojiIcon('🎨',12)} ${soQueue} sales order${soQueue===1?'':'s'} waiting on design</div>`:''}
     <div class="item-list">
       ${!projects.length
         ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('🎨',44)}</div><h4>No projects yet</h4></div>`
@@ -156,6 +171,10 @@ async function renderProjects(container, currentUser, currentRole) {
               <div class="item-title">${escHtml(p.name)}</div>
               <span class="badge ${statusBadge(p.status)}">${p.status||'active'}</span>
             </div>
+            ${p.salesOrderId?`<div class="item-meta" style="margin-top:2px">
+              <span class="badge badge-purple" style="font-size:9px">${emojiIcon('🧾',9)} SALES ORDER</span>
+              ${!p.productionHandoffAt?`<span class="badge badge-orange" style="font-size:9px">awaiting design</span>`:''}
+            </div>`:''}
             <div class="item-meta">
               ${p.client?`<span>${emojiIcon('👤',16)} ${escHtml(p.client)}</span>`:''}
               ${p.dueDate?`<span>${emojiIcon('📅',16)} ${p.dueDate}</span>`:''}
@@ -331,10 +350,43 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
 };
 
 // ── Overview tab ──
-function renderProjOverview(host, p, currentUser, currentRole, canBill){
+async function renderProjOverview(host, p, currentUser, currentRole, canBill){
   const canManage = canEditDept('Design');
   const team = p.teamNames || [];
+
+  // Sales-order handoff card (Finance→Design flow, 2026-08-11) — only for
+  // auto-created SO projects. Soft-fail: never blocks the rest of the tab.
+  let so = null, job = null;
+  if (p.salesOrderId) {
+    try { const s = await db.collection('sales_orders').doc(p.salesOrderId).get(); if (s.exists) so = { id:s.id, ...s.data() }; } catch(_){}
+    if (p.jobProjectId) { try { const j = await db.collection('job_projects').doc(p.jobProjectId).get(); if (j.exists) job = { id:j.id, ...j.data() }; } catch(_){} }
+  }
+  const items = (job && Array.isArray(job.items)) ? job.items : [];
+  const canSendToProd = canEditDept('Design') && window.currentRole !== 'secretary';
+  // Design money-privacy rule (mirrors isProductionOnlyViewer): this card may
+  // show client, scope, quote number, items (name/qty/dims/spec), target date,
+  // priority, notes and stage. It must NEVER render contractAmount,
+  // paymentReceived/recordedAmount, payment method, receipts, VAT, AR/collected,
+  // margin, or split.
+  const handoffCard = so ? `
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700">${emojiIcon('🧾',16)} Sales Order — for production</div>
+        ${so.sentToProduction?`<span class="badge badge-green">Sent to Production</span>`:''}
+      </div>
+      ${items.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th style="text-align:right">Qty</th></tr></thead><tbody>
+        ${items.map(it=>`<tr><td>${escHtml(it.name||'')}${(it.dims||it.specStr)?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(it.dims||it.specStr||'')}</div>`:''}</td><td style="text-align:right">${Number(it.qty)||0} ${escHtml(it.unit||'')}</td></tr>`).join('')}
+      </tbody></table></div>`:''}
+      <div style="font-size:12px;color:var(--text-muted);margin-top:8px">Target ${escHtml(so.targetDate||'—')} · Priority ${escHtml(so.priority||'—')}</div>
+      ${(!so.sentToProduction && canSendToProd)?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn-success btn-sm" id="dsn-to-prod">${emojiIcon('🏭',16)} Send to Production</button>
+        <button class="btn-secondary btn-sm" id="dsn-no-dwg">No drawings needed — send to Production</button>
+      </div>`:''}
+    </div></div>
+  ` : '';
+
   host.innerHTML = `
+    ${handoffCard}
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px;display:grid;grid-template-columns:auto 1fr;gap:6px 12px">
       <span style="color:var(--text-muted)">Client</span><span>${p.client?escHtml(p.client):'<span style="color:var(--text-muted)">—</span>'}</span>
       <span style="color:var(--text-muted)">Status</span><span><span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span></span>
@@ -357,6 +409,40 @@ function renderProjOverview(host, p, currentUser, currentRole, canBill){
   // defers node removal by 300ms, so a dying project panel — earlier in document
   // order — still holds a #proj-edit-btn and wins a document-wide lookup.
   host.querySelector('#proj-edit-btn')?.addEventListener('click',()=>openProjectEditModal(p, currentUser, currentRole, canBill));
+
+  // Design → Production hand-off (owner's flow, 2026-08-11). Same panel-scoping
+  // rule as everything else in this hub.
+  if (so) {
+    async function sendSO(passThrough){
+      // released-drawings guard — one path, but never a silent skip
+      let released = 0, total = 0;
+      try { const ds = await db.collection('design_drawings').where('projectId','==',p.id).get();
+            total = ds.docs.length; released = ds.docs.filter(x=>x.data().status==='released').length; } catch(_){}
+      if (!passThrough && released === 0) {
+        const ok = await confirmDialog({ message: total===0
+          ? 'No drawings exist on this project yet. Send to Production anyway? (Use "No drawings needed" if this order genuinely needs none.)'
+          : `None of the ${total} drawing(s) on this project are Released yet. Send to Production anyway?` });
+        if (!ok) return;
+      }
+      if (passThrough) {
+        const ok = await confirmDialog({ message:'Mark this order as needing NO drawings and send it straight to Production?' });
+        if (!ok) return;
+        await db.collection('sales_orders').doc(so.id).update({ noDrawingsNeeded:true });
+        so.noDrawingsNeeded = true;
+      }
+      const done = await window.transferOrderToProduction(so);   // enforces the targetDate/priority/notes gate
+      if (!done) return;
+      await db.collection('projects').doc(p.id).update({
+        needsDrawings: !passThrough, productionHandoffAt: new Date().toISOString(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+      Object.assign(p, { needsDrawings:!passThrough, productionHandoffAt:new Date().toISOString() });
+      if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('projects-unified');
+      Notifs.showToast('Sent to Production','success');
+      window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview');
+    }
+    host.querySelector('#dsn-to-prod')?.addEventListener('click', (e)=>window.busy(e.currentTarget, ()=>sendSO(false)));
+    host.querySelector('#dsn-no-dwg')?.addEventListener('click', (e)=>window.busy(e.currentTarget, ()=>sendSO(true)));
+  }
 }
 
 // ── Financials tab (logic lifted verbatim from the original project detail) ──
@@ -1399,4 +1485,179 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
   document.getElementById('dwg-f-project').addEventListener('change',e=>{ fProject=e.target.value; renderList(); });
   document.getElementById('dwg-kpi-mine')?.addEventListener('click',()=>{ fStatus='for_review'; document.getElementById('dwg-f-status').value='for_review'; renderList(); });
   renderList();
+}
+
+// ══════════════════════════════════════════════════
+//  DESIGN — Folders (owner's flow, 2026-08-11): "allow design team to make
+//  folders. two type: projects, sales order". Lives entirely on hub_folders
+//  (§3.4 of the design-flow spec) — NOT a new collection, so it never competes
+//  with window.DesignFolders / the Files hub as a second file system. A folder
+//  is a plain hub_folders doc distinguished by folderType ('project' |
+//  'sales_order'); files are hub_files rows linked by folderId only.
+// ══════════════════════════════════════════════════
+async function renderDesignFolders(container, currentUser, currentRole) {
+  container.innerHTML = '<div class="loading-placeholder">Loading folders…</div>';
+  const canManage = canEditDept('Design');
+  const who = (window.userProfile && userProfile.displayName) || (currentUser && currentUser.email) || '';
+  let folders, files;
+  try {
+    // equality-only — served by the existing (scope, department) composite
+    // index (firestore.indexes.json), no new index needed.
+    const snap = await db.collection('hub_folders').where('scope','==','projects').where('department','==','Design').get();
+    folders = snap.docs.map(d=>({id:d.id,...d.data()}));
+    files = await FilesHub.loadFiles('projects').catch(()=>[]);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load folders</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm design-folders-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
+    container.querySelector('.design-folders-retry-btn')?.addEventListener('click', ()=>renderDesignFolders(container, currentUser, currentRole));
+    return;
+  }
+  // legacy docs (pre-dating folderType) read as 'project' everywhere
+  folders.forEach(f => { f.folderType = f.folderType || 'project'; });
+
+  // ── Folder detail page — files table + Upload, Rename, Delete ──────────────
+  // Nested so it shares `container`, letting Rename/Delete refresh the list
+  // beneath it on close (openPage panel-scoping rule: all lookups on `_panel`).
+  function openDesignFolderDetail(folder) {
+    const folderFiles = files.filter(f => f.folderId === folder.id && !f.deleted);
+    const canDelete = folder.createdBy === currentUser.uid || ['president','manager','secretary'].includes(currentRole);
+    const isAutoFolder = /^proj__/.test(folder.id);
+    const typeBadge = folder.folderType === 'sales_order'
+      ? `<span class="badge badge-purple">${emojiIcon('🧾',13)} Sales Order</span>`
+      : `<span class="badge badge-blue">${emojiIcon('📁',13)} Project</span>`;
+    const _panel = openPage(folder.name || 'Folder', `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        ${typeBadge}
+        ${canManage?`<button class="btn-primary btn-sm" id="dfd-upload-btn">＋ Upload</button>`:''}
+      </div>
+      ${folderFiles.length ? `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Name</th><th>By</th><th>Date</th><th>Ver</th><th></th></tr></thead><tbody>
+        ${folderFiles.map(f=>`<tr>
+          <td>${escHtml(f.name||'')}</td>
+          <td style="font-size:11px">${escHtml(f.uploaderName||'')}</td>
+          <td style="font-size:11px;color:var(--text-muted)">${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</td>
+          <td><span class="badge badge-gray">v${f.currentV||1}</span></td>
+          <td><button class="btn-secondary btn-sm dfd-view-btn" data-id="${f.id}">${emojiIcon('👁',16)}</button></td>
+        </tr>`).join('')}</tbody></table></div>`
+        : `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>No files in this folder yet</h4></div>`}
+      <div id="dfd-upload-area" style="margin-top:10px;display:none"></div>
+    `, `${canDelete?`<button class="btn-secondary btn-sm" id="dfd-rename-btn">Rename</button><button class="btn-danger btn-sm" id="dfd-delete-btn">Delete</button>`:''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    if (window.lucide) lucide.createIcons({ nodes: [_panel] });
+    // ⚠ SCOPED TO `_panel`, NOT document — same closing-panel-lingers-300ms
+    // hazard as every other openPage flow in this file.
+    _panel.querySelectorAll('.dfd-view-btn').forEach(b=>b.addEventListener('click',()=>{
+      const f = folderFiles.find(x=>x.id===b.dataset.id); if (f) window.openFilePreview(f);
+    }));
+    _panel.querySelector('#dfd-upload-btn')?.addEventListener('click', () => {
+      const area = _panel.querySelector('#dfd-upload-area'); area.style.display='block';
+      Drive.renderUploadArea('dfd-upload-area', async (r, file) => {
+        const FV = firebase.firestore.FieldValue;
+        const upWho = window.userProfile?.displayName || currentUser.email || '';
+        await db.collection('hub_files').add({           // FULL WS38 Spec-1 shape + domain fields
+          name: (file?.name || r.name || 'File'), description:'', fileType:'File', kind:'file',
+          scope:'projects', department:'Design', folderId: folder.id,
+          projectId: folder.projectId || null, clientId: folder.clientId || null,
+          url: r.url, driveUrl: null, size: file?.size || null, contentType: file?.type || null,
+          source:'firebase', currentV: 1,
+          versions: [{ v:1, url:r.url, name:(file?.name||r.name||''), size:file?.size||null,
+            contentType:file?.type||null, note:'', by:currentUser.uid, byName:upWho, at:new Date().toISOString() }],
+          archived:false, deleted:false, deletedAt:null, deletedBy:null,
+          visibility:'company', sharedUserIds:[], editorUserIds:[], shares:[],
+          uploadedBy: currentUser.uid, uploaderName: upWho,
+          createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(),
+        });
+        Notifs.showToast('File added to the folder — it also appears in the Files hub','success');
+        window.Overlay.clearAll();
+        files = await FilesHub.loadFiles('projects').catch(()=>[]);
+        openDesignFolderDetail(folder);
+      }, { label:'Upload file', dept:'Design', subfolder:'Files' });   // WS38 storage-path contract: 2 segments, never deeper
+    });
+    _panel.querySelector('#dfd-rename-btn')?.addEventListener('click', async () => {
+      const name = await window.promptDialog({ title:'Rename Folder', value: folder.name||'', required:true });
+      if (name==null) return;
+      try {
+        await db.collection('hub_folders').doc(folder.id).update({ name: name.trim() });
+        folder.name = name.trim();
+        Notifs.showToast('Folder renamed','success');
+        closeModal();
+        renderDesignFolders(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Rename failed: '+(ex.message||ex.code),'error'); }
+    });
+    _panel.querySelector('#dfd-delete-btn')?.addEventListener('click', async () => {
+      if (isAutoFolder) { Notifs.showToast('This folder belongs to a project — it is managed automatically.','error'); return; }
+      if (folderFiles.length) { Notifs.showToast(`Move or delete the ${folderFiles.length} file(s) inside first — deleting a folder never deletes files.`,'error'); return; }
+      const ok = await confirmDialog({ message:`Delete folder "${folder.name||'Folder'}"? This can't be undone.`, danger:true, confirmLabel:'Delete' });
+      if (!ok) return;
+      try {
+        await db.collection('hub_folders').doc(folder.id).delete();
+        Notifs.showToast('Folder deleted','success');
+        closeModal();
+        renderDesignFolders(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
+    });
+  }
+
+  // ── List + chip-tab type filter (client-side — folders are already loaded) ──
+  let typeFilter = 'all';
+  const renderList = () => {
+    const listHost = container.querySelector('#df-list');
+    if (!listHost) return;
+    const shown = typeFilter==='all' ? folders : folders.filter(f=>f.folderType===typeFilter);
+    listHost.innerHTML = !shown.length
+      ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>No folders yet</h4></div>`
+      : `<div class="item-list">${shown.map(f=>{
+          const cnt = files.filter(x=>x.folderId===f.id && !x.deleted).length;
+          const typeBadge = f.folderType==='sales_order'
+            ? `<span class="badge badge-purple">${emojiIcon('🧾',13)} Sales Order</span>`
+            : `<span class="badge badge-blue">${emojiIcon('📁',13)} Project</span>`;
+          return `<div class="item-card" data-id="${f.id}" style="cursor:pointer">
+            <div class="item-top"><div class="item-title">${escHtml(f.name||'Folder')}</div>${typeBadge}</div>
+            <div class="item-meta"><span>${emojiIcon('📎',16)} ${cnt} file${cnt===1?'':'s'}</span>${f.createdByName?`<span>${emojiIcon('👤',16)} ${escHtml(f.createdByName)}</span>`:''}</div>
+          </div>`;
+        }).join('')}</div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [listHost] });
+    listHost.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>{
+      const f = shown.find(x=>x.id===card.dataset.id);
+      if (f) openDesignFolderDetail(f);
+    }));
+  };
+
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      ${window.chipTabs([{key:'all',label:'All'},{key:'sales_order',label:'Sales Orders'},{key:'project',label:'Projects'}],'all')}
+      ${canManage?`<button class="btn-primary btn-sm" id="df-new-btn">+ New Folder</button>`:''}
+    </div>
+    <div id="df-list"></div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
+  window.bindChipTabs(container.querySelector('.chip-tabs'), (key)=>{ typeFilter = key; renderList(); });
+  renderList();
+
+  container.querySelector('#df-new-btn')?.addEventListener('click', () => {
+    // ⚠ SCOPED TO `_panel`, NOT document — see the recurring note in this file.
+    const npPanel = openPage('New Folder', `
+      <div class="form-group"><label>Name</label><input id="df-name" placeholder="Folder name"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="df-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="project">Projects</option>
+          <option value="sales_order">Sales order</option>
+        </select>
+      </div>
+    `, `<button class="btn-primary" id="df-new-save">Create</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    npPanel.querySelector('#df-new-save').addEventListener('click', async () => {
+      const name = npPanel.querySelector('#df-name').value.trim();
+      if (!name) { Notifs.showToast('Enter a folder name','error'); return; }
+      const folderType = npPanel.querySelector('#df-type').value;
+      try {
+        await db.collection('hub_folders').add({
+          name, parentId:null, scope:'projects', department:'Design',
+          folderType, salesOrderId:null,
+          createdBy:currentUser.uid, createdByName:who,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal();
+        renderDesignFolders(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    });
+  });
 }

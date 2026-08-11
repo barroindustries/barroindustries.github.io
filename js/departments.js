@@ -196,14 +196,16 @@ window.DesignFolders = {
   },
   ensureClientFolder(clientId, clientName){
     return this._ensure(`client__${clientId}`,
-      { name: clientName || 'Client', parentId: null, scope:'projects', department:'Design', clientId });
+      { name: clientName || 'Client', parentId: null, scope:'projects', department:'Design', clientId, folderType:'project' });
   },
-  async ensureProjectFolder(p){
+  async ensureProjectFolder(p, opts){
+    opts = opts || {};
     const parentId = p.clientId
       ? await this.ensureClientFolder(p.clientId, p.client || 'Client') : null;
     return this._ensure(`proj__${p.id}`,
       { name: p.name || 'Project', parentId, scope:'projects', department:'Design',
-        projectId: p.id, clientId: p.clientId || null });
+        projectId: p.id, clientId: p.clientId || null,
+        folderType: opts.folderType || 'project', salesOrderId: opts.salesOrderId || null });
   }
 };
 
@@ -2006,22 +2008,26 @@ window.periodExclusionsFor = async function(month) {
   } catch (_) { return null; }                     // could not read — caller must stop
 };
 
-window.computePayRun = async function(month, { policy } = {}) {
-  // Payroll recall spec §C3 — read any existing run doc FIRST, before any
-  // other work. Two jobs: (1) fail fast if this month is past the editable
-  // window (verified/disbursing/disbursed) — the UI already pre-checks this
-  // (hr.js's Compute handler), but the engine itself must refuse a direct
-  // call too; (2) carry forward this month's saved per-line overrides and
-  // previously chosen pay policy so BOTH survive every recompute (a
-  // recompute replaces lines[] wholesale, but overrides/payPolicy must not
-  // silently reset).
-  const prevSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
-  const prev = (prevSnap && prevSnap.exists) ? prevSnap.data() : {};
-  if (prev.state === 'verified' || prev.state === 'disbursing' || prev.state === 'disbursed') {
-    throw new Error('Run is ' + prev.state + ' — President must Reopen first.');
+// window.buildPayRunLines — READ-ONLY line builder for a month, extracted
+// VERBATIM out of computePayRun below (PAYROLL-LIVE-SPEC-2026-08-11 §4.4, D2:
+// one pipeline, two callers). Same inputs, same maths, same skip reasons as
+// the writer: computePayRun calls this and then writes; the live view
+// (window.Payroll.preview, js/payroll.js) calls this and writes NOTHING.
+// `overrides`/`policy` are read from the existing pay_runs/{month} doc when
+// not passed — computePayRun already reads that doc for its own state gate
+// and passes them in so this does not read it twice; preview() calls this
+// bare, so it does its own (read-only) lookup here.
+window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
+  let runPolicy = policy;
+  let overridesEff = overrides;
+  if (overridesEff === undefined) {
+    const prevSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const prev = (prevSnap && prevSnap.exists) ? prevSnap.data() : {};
+    overridesEff = prev.overrides || {};
+    if (runPolicy == null) runPolicy = prev.payPolicy || 'flat';
   }
-  const overrides = prev.overrides || {};
-  const runPolicy = policy || prev.payPolicy || 'flat';
+  if (runPolicy == null) runPolicy = 'flat';
+  overridesEff = overridesEff || {};
 
   const usersSnap = await fetchUsersWithPayroll();
   const isExternalPartner = (u) => {
@@ -2044,8 +2050,10 @@ window.computePayRun = async function(month, { policy } = {}) {
   // on the person). Read BEFORE any line is built, and REFUSE on a failed read:
   // returning null here means "I could not find out who is excluded", which is
   // not the same as "nobody is excluded" even though both are falsy. Computing
-  // through a denial would pay someone this period says to skip — the exact
-  // silent-zero failure this app collapses into everywhere else.
+  // (or PREVIEWING) through a denial would pay/show someone this period says to
+  // skip — the exact silent-zero failure this app collapses into everywhere
+  // else. A projection over an unreadable exclusion list is as dishonest as a
+  // run over one, so this stays inside the builder for both callers.
   const periodExcluded = await window.periodExclusionsFor(month);
   if (periodExcluded === null) {
     throw new Error('Could not read this month\'s payroll exclusions — nothing was computed. Try again in a moment.');
@@ -2097,7 +2105,7 @@ window.computePayRun = async function(month, { policy } = {}) {
     // always computed above FIRST, regardless of any override — they feed
     // the override's audit-trail `original` snapshot (hr.js's Adjust modal)
     // and are exactly what "Reset to computed" restores.
-    const ovr = overrides[emp.id];
+    const ovr = overridesEff[emp.id];
     const empEff = ovr ? { ...emp, allowance: (ovr.allowance ?? emp.allowance), deductions: (ovr.otherDeductions ?? emp.deductions) } : emp;
     const kpiEff = ovr?.kpiScore ?? kpiScore;
     const attEff = ovr?.attScore ?? attScore;
@@ -2109,6 +2117,34 @@ window.computePayRun = async function(month, { policy } = {}) {
     line.phNum = emp.phNum || '';   line.pagibigNum = emp.pagibigNum || '';
     return line;
   }));
+
+  // The monthly path has no warnings array today — the live view still needs
+  // the key so it can concat it with the fold's own warnings uniformly.
+  return { lines, skipped, warnings: [], payPolicy: runPolicy };
+};
+
+window.computePayRun = async function(month, { policy } = {}) {
+  // Payroll recall spec §C3 — read any existing run doc FIRST, before any
+  // other work. Two jobs: (1) fail fast if this month is past the editable
+  // window (verified/disbursing/disbursed) — the UI already pre-checks this
+  // (hr.js's Compute handler), but the engine itself must refuse a direct
+  // call too; (2) carry forward this month's saved per-line overrides and
+  // previously chosen pay policy so BOTH survive every recompute (a
+  // recompute replaces lines[] wholesale, but overrides/payPolicy must not
+  // silently reset).
+  const prevSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+  const prev = (prevSnap && prevSnap.exists) ? prevSnap.data() : {};
+  if (prev.state === 'verified' || prev.state === 'disbursing' || prev.state === 'disbursed') {
+    throw new Error('Run is ' + prev.state + ' — President must Reopen first.');
+  }
+  const overrides = prev.overrides || {};
+  const runPolicy = policy || prev.payPolicy || 'flat';
+
+  // The read-only half — see window.buildPayRunLines above. Same inputs, same
+  // maths, same skip reasons the live view reads; this caller adds only the
+  // write below.
+  const built = await window.buildPayRunLines(month, { policy: runPolicy, overrides });
+  const { lines, skipped } = built;
 
   const totalNet = lines.reduce((s,l)=>s+l.finalPay, 0);
   const currentUser = window.currentUser;
@@ -3214,7 +3250,7 @@ window.ensureOrderTracking = async function(o){
   await tRef.set({
     orderId:o.id, projectId:o.projectId||null, orderNo:orderNo||('SO-'+o.id.slice(-6).toUpperCase()),
     clientName:o.clientName||'', company:window.quoteCompanyLabel(o.company), scope:o.project||'',
-    status:(o.sentToProduction?'production':'confirmed'), stageStamps:{ confirmed:dayStr },
+    status:(o.sentToProduction?'production':(o.sentToDesign?'design':'confirmed')), stageStamps:{ confirmed:dayStr },
     contractAmount:o.contractAmount||0, paid, balance:Math.max(0,(o.contractAmount||0)-paid),
     orderDate:dayStr, expectedDate:null,
     publicNote:'Thank you for your order! This page updates as your order moves through production and delivery.',
@@ -3298,7 +3334,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       </div>
     </div>
     <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule + what/how to build, etc."></textarea></div>
-    <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 8px">Target date, priority and notes must be filled in before this job can be sent to Production — set them now if you already know them, or you'll be asked for them at hand-off.</div>
+    <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 8px">Target date, priority and notes must be filled in before the job leaves Design for Production — set them now if you already know them, or Design will be asked for them at hand-off.</div>
     <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
     <div id="so-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -3436,7 +3472,8 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
           ? `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} auto-recorded to the ledger). Project ${proj.projectNo}. Verify the receipt.`
           : `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} received). Project ${proj.projectNo}. Record income + verify receipt.`,
         icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
-      try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
+      // Production is no longer notified at SO creation — it now hears about a job
+      // exactly once, at the Design→Production handoff (transferOrderToProduction).
       try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order', link:'projects-lifecycle' }); }catch(_){}
       Notifs.success('Sales order + project '+proj.projectNo+' created'+(autoPosted?' + sale recorded':''));
       if (typeof container!=='undefined' && container) {
@@ -3605,6 +3642,13 @@ window.deleteSalesOrder = async function(o, onDone) {
       await db.collection('job_projects').doc(o.projectId).delete().catch(() => {});
     }
 
+    // 4b) the auto-created Design project + its folder (files in hub_files are left
+    // in place — they remain visible in the Files hub, just unfoldered).
+    if (o.designProjectId) {
+      await db.collection('projects').doc(o.designProjectId).delete().catch(() => {});
+      await db.collection('hub_folders').doc('proj__' + o.designProjectId).delete().catch(() => {});
+    }
+
     // 5) the sales order LAST, through the established delete path (President →
     //    direct; anyone else → a request, though the guard above means only the
     //    President reaches here at all).
@@ -3612,7 +3656,8 @@ window.deleteSalesOrder = async function(o, onDone) {
 
     window.logAudit && window.logAudit('delete', 'sales_order', o.id, {
       client: o.clientName, contract: o.contractAmount,
-      ledgerReversed: !!ledgerRow, projectDeleted: !!o.projectId, trackingRevoked: !!o.trackingToken
+      ledgerReversed: !!ledgerRow, projectDeleted: !!o.projectId, trackingRevoked: !!o.trackingToken,
+      designDeleted: !!o.designProjectId
     });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('sales_orders'); dbCacheInvalidate('clients'); }
     Notifs.success('Sales order deleted.');
@@ -3639,7 +3684,7 @@ window.renderSalesOrders = async function(container){
   const totalContract = orders.reduce((s,o)=>s+(o.contractAmount||0),0);
   const totalRecorded = orders.filter(o=>o.status==='recorded').reduce((s,o)=>s+(o.recordedAmount||o.paymentReceived||0),0);
   c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon('🧾',20)} Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Record the sale &amp; payment, then hand off to Production</span></div>
+    <div class="page-header"><h2>${emojiIcon('🧾',20)} Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Record the sale &amp; payment, then hand off to Design</span></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Orders</div><div class="kpi-value">${orders.length}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">To Record</div><div class="kpi-value">${pending.length}</div></div>
@@ -3658,8 +3703,8 @@ window.renderSalesOrders = async function(container){
         <td class="tc-detail" data-label="Method" style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
         <td class="tc-detail" data-label="Receipt">${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
         <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(o.createdByName||'')}</td>
-        <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.autoRecorded?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px" title="Posted to the ledger automatically when the order was created">${emojiIcon('⚡',9)} auto</span>`:''}${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
-        <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}${(typeof isRealPresident==='function'&&isRealPresident())?` <button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`:''}</td>
+        <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.autoRecorded?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px" title="Posted to the ledger automatically when the order was created">${emojiIcon('⚡',9)} auto</span>`:''}${o.sentToDesign&&!o.sentToProduction?`<span class="badge badge-purple" style="font-size:9px;margin-left:4px">${emojiIcon('🎨',9)} in design</span>`:''}${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
+        <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(o.sentToProduction?`${emojiIcon('✓',16)}`:(o.sentToDesign?`<span title="With the Design team">${emojiIcon('🎨',16)}</span>`:`<button class="btn-secondary btn-sm so-design-btn" data-id="${o.id}">${emojiIcon('🎨',16)} To Design</button>`))}`:''}${(typeof isRealPresident==='function'&&isRealPresident())?` <button class="btn-danger btn-sm so-del-btn" data-id="${o.id}" title="Delete this sales order and everything it created">${emojiIcon('🗑',14)}</button>`:''}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}
     </div></div>`;
@@ -3687,9 +3732,9 @@ window.renderSalesOrders = async function(container){
     c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', ()=>{
       const o = orders.find(x=>x.id===b.dataset.id); if(o) openRecordSaleModal(o, container);
     }));
-    c.querySelectorAll('.so-prod-btn').forEach(b=>b.addEventListener('click', async ()=>{
+    c.querySelectorAll('.so-design-btn').forEach(b=>b.addEventListener('click', async ()=>{
       const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
-      await transferOrderToProduction(o); window.renderSalesOrders(container);
+      await window.transferOrderToDesign(o); window.renderSalesOrders(container);
     }));
   }
 };
@@ -3756,9 +3801,9 @@ async function openRecordSaleModal(o, container){
          convention's inline-flex so the whole row, not just the text, is tappable;
          gap/align-items/cursor are dropped because check-row supplies them. -->
     <label class="check-row" style="display:flex;font-size:13px;margin-top:4px">
-      <input type="checkbox" id="rs-prod" checked/> Transfer to Production now (start the job)
+      <input type="checkbox" id="rs-prod" checked/> Send to Design now (start drawings)
     </label>
-    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Posts income to the ledger (with VAT split), updates the project's collected balance, and notifies Production.</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Posts income to the ledger (with VAT split), updates the project's collected balance, and hands the job to the Design team for drawings.</div>
     <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="rs-save">Approve &amp; Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   window.wireBirOrButtons && window.wireBirOrButtons();
@@ -3786,7 +3831,7 @@ async function openRecordSaleModal(o, container){
     const entered=parseFloat($('rs-amount').value)||0;
     if(entered<0){ err.textContent='Amount cannot be negative.'; err.classList.remove('hidden'); return; }
     const method=$('rs-method').value, orRef=$('rs-ref').value.trim();
-    const toProd=$('rs-prod').checked;
+    const toDesign=$('rs-prod').checked;
     const who=userProfile?.displayName||currentUser.email;
     const vatTreatment=$('rs-vat').value;
     // `amount` = recorded total (the cash figure that hits the ledger + project balance)
@@ -3846,13 +3891,12 @@ async function openRecordSaleModal(o, container){
       // 2) mark the sales order recorded
       await db.collection('sales_orders').doc(o.id).update({ status:'recorded', recordedAmount:amount, recordedAt:firebase.firestore.FieldValue.serverTimestamp(), recordedBy:who, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null });
       window.logAudit&&window.logAudit('create','ledger',ledgerId,{source:'sales_order', amount, client:o.clientName});
-      // 4) optional handoff to Production — gated on the Sales→Production handoff
-      // fields (target date/priority/notes); transferOrderToProduction prompts for
-      // them inline if missing and returns false if the user cancels that prompt.
-      const sentToProd = toProd ? await transferOrderToProduction({ ...o, status:'recorded' }) : false;
+      // 4) optional handoff to Design — every recorded sale routes through Design
+      // first now; transferOrderToDesign auto-creates the design project.
+      const sentToDesign = toDesign ? await window.transferOrderToDesign({ ...o, status:'recorded' }) : false;
       closeModal();
-      Notifs.success(sentToProd ? 'Sale recorded + sent to Production'
-        : (toProd ? 'Sale recorded to ledger — production hand-off was not completed; use "To Production" to finish it.' : 'Sale recorded to ledger'));
+      Notifs.success(sentToDesign ? 'Sale recorded + sent to Design'
+        : (toDesign ? 'Sale recorded to ledger — the Design hand-off did not complete; use "To Design" on the order to finish it.' : 'Sale recorded to ledger'));
       window.renderSalesOrders(container);
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
@@ -3870,7 +3914,7 @@ function ensureProdHandoffFields(o){
     const hasAll = !!((o.targetDate||'').trim() && (o.notes||'').trim() && (o.priority||'').trim());
     if (hasAll) { resolve(true); return; }
     const _panel = openPage(`${emojiIcon('🏭',16)} Before sending to Production`, `
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Target date, priority and notes weren't all set on this order yet — Production needs them before the job can start.</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Target date, priority and notes weren't all set yet — Production needs them before the job can start.</div>
       <div class="form-row">
         <div class="form-group"><label>Target Date</label><input id="ph-date" type="date" value="${escHtml(o.targetDate||'')}"/></div>
         <div class="form-group"><label>Priority</label>
@@ -3895,7 +3939,7 @@ function ensureProdHandoffFields(o){
       const notes=$('ph-notes').value.trim();
       if(!targetDate || !priority || !notes){ err.textContent='Target date, priority and notes are all required before sending to Production.'; err.classList.remove('hidden'); return; }
       try{
-        await db.collection('sales_orders').doc(o.id).update({ targetDate, priority, notes });
+        if (o.id) await db.collection('sales_orders').doc(o.id).update({ targetDate, priority, notes });
         if (o.projectId) await db.collection('job_projects').doc(o.projectId).update({ targetDate, priority, notes });
         o.targetDate=targetDate; o.priority=priority; o.notes=notes;
         closeModal(); resolve(true);
@@ -3903,6 +3947,71 @@ function ensureProdHandoffFields(o){
     }));
   });
 }
+
+// Finance→Design handoff (owner's flow, 2026-08-11): every recorded sale goes to
+// Design first. Auto-creates the Design-board project (collection `projects`, NOT
+// job_projects), advances the job spine won→in_design, stamps the SO, syncs the
+// public tracker to 'design', notifies Design. Idempotent: re-running finds the
+// existing design project by salesOrderId instead of creating a twin.
+// Returns Promise<boolean> like transferOrderToProduction.
+window.transferOrderToDesign = async function(o){
+  const who = userProfile?.displayName || currentUser.email;
+  try{
+    // 1) idempotence — an existing design project for this SO wins
+    let designProjectId = o.designProjectId || null;
+    if (!designProjectId){
+      const ex = await db.collection('projects').where('salesOrderId','==',o.id).limit(1).get().catch(()=>({docs:[]}));
+      if (ex.docs.length) designProjectId = ex.docs[0].id;
+    }
+    // 2) resolve the job project number for the display name
+    let jobProjectNo = '';
+    if (o.projectId){ try{ const ps = await db.collection('job_projects').doc(o.projectId).get(); if (ps.exists) jobProjectNo = ps.data().projectNo || ''; }catch(_){} }
+    // 3) create the design project if missing (§3.1 shape)
+    if (!designProjectId){
+      const name = ((o.clientName||'Client')+' — '+(jobProjectNo||o.quoteNumber||'Order')).trim();
+      const ref = await db.collection('projects').add({
+        name, client:o.clientName||'', clientId:o.clientId||null,
+        source:'sales_order', salesOrderId:o.id,
+        jobProjectId:o.projectId||null, jobProjectNo:jobProjectNo||null,
+        startDate:(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)),
+        dueDate:o.targetDate||'', contractAmount:0, notes:'', status:'active',
+        needsDrawings:null, productionHandoffAt:null,
+        createdBy:currentUser.uid, createdByName:who,
+        createdAt:firebase.firestore.FieldValue.serverTimestamp()
+      });
+      designProjectId = ref.id;
+      // typed folder — the SO folder IS the project folder (deterministic proj__ id)
+      try { await window.DesignFolders.ensureProjectFolder(
+        { id:designProjectId, name, client:o.clientName||'', clientId:o.clientId||null },
+        { folderType:'sales_order', salesOrderId:o.id }); } catch(_){}
+    }
+    // 4) advance the job spine won → in_design (never drag a later stage backwards)
+    if (o.projectId){
+      const ps = await db.collection('job_projects').doc(o.projectId).get();
+      if (ps.exists){
+        const upd = { designProjectId, updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
+        if (ps.data().stage === 'won'){
+          upd.stage = 'in_design';
+          upd.timeline = firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Design (sale recorded)', by:who });
+        }
+        await db.collection('job_projects').doc(o.projectId).update(upd);
+      }
+    }
+    // 5) stamp the sales order
+    await db.collection('sales_orders').doc(o.id).update({ sentToDesign:true,
+      sentToDesignAt:firebase.firestore.FieldValue.serverTimestamp(), designProjectId });
+    // 6) public client tracker
+    if (o.trackingToken) window.syncOrderTracking(o.trackingToken, { status:'design' });
+    // 7) notify the Design department (§6.1)
+    try{ await Notifs.sendToDept('Design',{ title:'🎨 New order for design',
+      body:`${o.clientName||'Client'}${jobProjectNo?' ('+jobProjectNo+')':''} — sale recorded by Finance. Prepare the drawings, then send to Production.`,
+      icon:'🎨', type:'project_stage', link:'dept:Design' }, { fallbackToOwner:true }); }catch(_){}
+    window.logAudit && window.logAudit('update','sales_order',o.id,{ sentToDesign:true, designProjectId });
+    if (typeof dbCacheInvalidate==='function'){ dbCacheInvalidate('projects-unified'); dbCacheInvalidate('sales_orders'); }
+    o.sentToDesign = true; o.designProjectId = designProjectId;
+    return true;
+  }catch(ex){ Notifs.showToast('Transfer to Design failed: '+(ex.message||ex.code),'error'); return false; }
+};
 
 // Advance the linked project to In Production and notify the Production team.
 // Returns false (no-op) if the Sales→Production handoff fields are missing and
@@ -3915,14 +4024,16 @@ async function transferOrderToProduction(o){
     if(o.projectId){
       const ps=await db.collection('job_projects').doc(o.projectId).get();
       const stage=ps.exists?ps.data().stage:null;
-      if(ps.exists && ['won'].includes(stage)){
+      if(ps.exists && ['won','in_design'].includes(stage)){
         await db.collection('job_projects').doc(o.projectId).update({ stage:'in_production', updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
           timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Production (sale recorded)', by:who }) });
       }
     }
-    await db.collection('sales_orders').doc(o.id).update({ sentToProduction:true, sentToProductionAt:firebase.firestore.FieldValue.serverTimestamp() });
+    await db.collection('sales_orders').doc(o.id).update({ sentToProduction:true,
+      sentToProductionAt:firebase.firestore.FieldValue.serverTimestamp(),
+      designDoneAt:firebase.firestore.FieldValue.serverTimestamp(), designDoneBy:who });
     if(o.trackingToken) window.syncOrderTracking(o.trackingToken, { status:'production' });
-    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — sale recorded by Finance. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
+    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — design complete${o.noDrawingsNeeded?' (no drawings needed)':''}. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     window.logAudit&&window.logAudit('update','sales_order',o.id,{ sentToProduction:true });
     return true;
   }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); return false; }
@@ -4322,55 +4433,120 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   // Root collection, name computed at runtime — no backup registration needed:
   // scripts/monthly-backup.js discovers every root collection via db.listCollections().
   const collection = `budgets_${dept.toLowerCase().replace(/\s+/g,'_')}`;
-  // Allow: admins, finance, president, and members of this dept — except that a
-  // department assignment must never beat the Corporate Secretary's role
-  // decision (owner ruling 3). Without this guard, putting them in the Finance
-  // department would have handed them budgets_finance edit rights through the
-  // membership leg, which no role in the list above grants them.
-  const isDeptMember = (window.currentDepts||[]).includes(dept) && !deptBlockedForSecretary(dept);
-  const canEdit = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance'||isDeptMember;
-  // The shared ledger (actual spend) is finance/admin-only per Firestore rules.
-  // Dept members who aren't finance can still see + edit budget allocations, but
-  // not the spend figures — show those as "—" rather than a misleading ₱0.
-  const canSeeSpend = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
 
-  // Load budget lines + dept expenses from shared ledger
-  const [budgetSnap, ledgerSnap] = await Promise.all([
+  // DEPT-BUDGETS-SPEC-2026-08-11 §4 — permission matrix. The secretary guard is
+  // mandatory on every dept-membership gate (owner ruling 3: an assignment must
+  // never beat the role decision — the same reasoning as budgets_<dept> above).
+  const isDeptMember   = (window.currentDepts||[]).includes(dept) && !deptBlockedForSecretary(dept);
+  const canFinanceTier = ['president','owner','manager','finance'].includes(currentRole);
+  const canLogSpend    = isDeptMember || canFinanceTier;          // THE fix: members can log
+  const canEditLines   = canFinanceTier || currentRole==='manager' || isDeptMember;
+  const canSeeLedger   = canFinanceTier;                          // ledger query stays finance-tier
+
+  // Money-truth lives in dept_budget_releases/dept_spend_logs — NEVER derived
+  // from /ledger on the department side (members can't read /ledger, and must
+  // not). budgets_<dept> lines stay exactly what they were: planning memo.
+  const [budgetSnap, releaseSnap, spendSnap, reqSnap, ledgerSnap] = await Promise.all([
     db.collection(collection).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-    canSeeSpend
-      ? db.collection('ledger').where('dept','==',dept).limit(100).get().catch(()=>({docs:[]}))
-      : Promise.resolve({docs:[]})
+    db.collection('dept_budget_releases').where('dept','==',dept).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    db.collection('dept_spend_logs').where('dept','==',dept).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    db.collection('dept_budget_requests').where('dept','==',dept).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    canSeeLedger ? db.collection('ledger').where('dept','==',dept).limit(100).get().catch(()=>({docs:[]}))
+                 : Promise.resolve({docs:[]})
   ]);
 
   const items    = budgetSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const releases = releaseSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const spends   = spendSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const requests = reqSnap.docs.map(d=>({id:d.id,...d.data()}));
   const expenses = ledgerSnap.docs.map(d=>({id:d.id,...d.data()}))
     .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
-  // Compute spent per budget line from ledger entries
-  items.forEach(item => {
-    item.spent = expenses
-      .filter(e=>e.budgetLineId===item.id && ledgerKind(e)==='expense')
-      .reduce((s,e)=>s+(e.amount||0),0);
+  const liveSpends = spends.filter(s=>s.status==='pending'||s.status==='confirmed');
+  const activeReleases = releases.filter(r=>r.status==='active');
+  activeReleases.forEach(r => {
+    r._logged    = liveSpends.filter(s=>s.releaseId===r.id).reduce((s,x)=>s+(x.amount||0),0);
+    r._remaining = (r.amount||0) - r._logged;
   });
 
-  const totalBudget = items.reduce((s,i)=>s+(i.budget||0),0);
-  const totalSpent  = expenses.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
-  const totalIncome = expenses.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0);
+  const totalReleased   = activeReleases.reduce((s,r)=>s+(r.amount||0),0);
+  const totalLogged     = liveSpends.reduce((s,x)=>s+(x.amount||0),0);
+  const totalRemaining  = totalReleased - totalLogged;
+  const awaitingFinance = spends.filter(s=>s.status==='pending').length;
+
+  // Budget-line "Spent" — ledger-derived for Finance (covers legacy rows);
+  // dept_spend_logs (pending+confirmed) for members, instead of "—".
+  items.forEach(item => {
+    item.spent = canSeeLedger
+      ? expenses.filter(e=>e.budgetLineId===item.id && ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0)
+      : liveSpends.filter(s=>s.budgetLineId===item.id).reduce((s,x)=>s+(x.amount||0),0);
+  });
+
+  const relCard = (r) => {
+    const isFloat = r.type === 'float';
+    const notPosted = isFloat && r.status === 'active' && !r.ledgerRef;
+    const remaining = r.status === 'active' ? r._remaining : null;
+    const over = remaining != null && remaining < 0;
+    return `<div class="card" style="margin-bottom:10px">
+      <div class="card-body">
+        <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div>
+            <span class="badge ${isFloat?'badge-blue':'badge-orange'}">${isFloat?`${emojiIcon('💵',12)} Cash float`:`${emojiIcon('🧾',12)} Spending limit`}</span>
+            <span class="badge ${r.status==='active'?'badge-green':'badge-gray'}" style="margin-left:6px">${r.status==='active'?'Active':'Closed'}</span>
+            <div style="font-weight:700;margin-top:4px">${escHtml(r.title)}</div>
+            <div style="font-size:12px;color:var(--text-muted)">${isFloat?`Custodian: ${escHtml(r.custodianName||'—')} — holding company cash`:'Pay out of pocket, then log the receipt to get paid back.'}</div>
+          </div>
+          <div style="text-align:right">
+            <div>₱${fmt(r.amount)}</div>
+            <div style="font-size:11px;color:var(--text-muted)">Released ${escHtml(r.date||'')}</div>
+            ${remaining!=null?`<div style="font-weight:700;color:${over?'var(--danger)':'var(--success)'}">${over?`OVER BY ₱${fmt(Math.abs(remaining))}`:`Remaining ₱${fmt(remaining)}`}</div>`:''}
+          </div>
+        </div>
+        ${over?`<div style="margin-top:8px;padding:8px 12px;background:rgba(255,0,0,0.08);border-radius:8px;font-size:12px;color:var(--danger)">⚠ You are ₱${fmt(Math.abs(remaining))} over '${escHtml(r.title)}'. Everything still gets recorded — Finance has been flagged.</div>`:''}
+        ${notPosted?`<div style="margin-top:8px;padding:8px 12px;background:rgba(255,0,0,0.08);border-radius:8px;font-size:12px;color:var(--danger);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>${emojiIcon('⚠️',14)} Not yet posted — tap Repost</span>
+          ${canFinanceTier?`<button class="btn-danger btn-sm bud-repost-btn" data-id="${r.id}">Repost</button>`:''}
+        </div>`:''}
+        ${canFinanceTier && isFloat && r.status==='active'?`<div style="margin-top:8px;text-align:right"><button class="btn-secondary btn-sm bud-close-float-btn" data-id="${r.id}">Close float</button></div>`:''}
+      </div>
+    </div>`;
+  };
 
   container.innerHTML = `
+    ${window.sopPanel('How your department budget works', [
+      'Finance releases a budget to this department — either a cash float (someone here is holding company cash) or a spending limit (you pay first, then get paid back).',
+      'Every time you spend, log it here with the receipt. Your remaining balance updates immediately; the entry reaches the company books once Finance confirms it.',
+      'Going over budget is recorded, not hidden — the line turns red and Finance is flagged.',
+      'Need money for something? File a budget request with your supporting documents.'
+    ])}
+
     <div class="kpi-row" style="margin-bottom:14px">
-      <div class="kpi-card"><div class="kpi-label">Total Budget</div><div class="kpi-value">₱${fmt(totalBudget)}</div></div>
-      <div class="kpi-card red"><div class="kpi-label">Total Spent</div><div class="kpi-value">${canSeeSpend?'₱'+fmt(totalSpent):'—'}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Remaining</div><div class="kpi-value">${canSeeSpend?'₱'+fmt(totalBudget-totalSpent):'—'}</div></div>
-      ${canSeeSpend&&totalIncome>0?`<div class="kpi-card accent"><div class="kpi-label">Income</div><div class="kpi-value">₱${fmt(totalIncome)}</div></div>`:''}
+      <div class="kpi-card"><div class="kpi-label">Released</div><div class="kpi-value">₱${fmt(totalReleased)}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Spent (logged)</div><div class="kpi-value">₱${fmt(totalLogged)}</div></div>
+      <div class="kpi-card ${totalRemaining<0?'red':'green'}"><div class="kpi-label">Remaining</div><div class="kpi-value" style="${totalRemaining<0?'color:var(--danger)':''}">₱${fmt(totalRemaining)}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Awaiting Finance</div><div class="kpi-value">${awaitingFinance}</div></div>
     </div>
-    ${!canSeeSpend?`<div style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px;display:flex;align-items:center;gap:6px"><span>${emojiIcon('💡',16)}</span> Spend tracking is visible to Finance &amp; Management.</div>`:''}
-    ${(canEdit||canSeeSpend)?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px">
-      ${canEdit?`<button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>`:''}
-      ${canSeeSpend?`<button class="btn-primary btn-sm" id="log-expense-btn">${emojiIcon('📤',16)} Log Expense / Income</button>`:''}
+
+    ${(canEditLines||canLogSpend)?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px;flex-wrap:wrap">
+      ${canEditLines?`<button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>`:''}
+      ${canLogSpend?`<button class="btn-primary btn-sm" id="log-spend-btn">${emojiIcon('📤',16)} Log a Spend</button>`:''}
+      ${canLogSpend?`<button class="btn-secondary btn-sm" id="request-budget-btn">${emojiIcon('🙋',16)} Request a Budget</button>`:''}
     </div>`:''}
 
-    <!-- Budget allocations -->
+    <!-- Budget Releases -->
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header">
+        <h3>${emojiIcon('💰',20)} Budget Releases</h3>
+        ${canFinanceTier?`<button class="btn-primary btn-sm" id="release-budget-btn">${emojiIcon('➕',14)} Release Budget</button>`:''}
+      </div>
+      <div class="card-body">
+        ${!releases.length
+          ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('💰',44)}</div><p>No budget yet.</p><p style="font-size:12px;color:var(--text-muted)">${escHtml(dept)} hasn't been given a budget. You can request one.</p>${canLogSpend?`<button class="btn-secondary btn-sm" id="empty-request-budget-btn">${emojiIcon('🙋',16)} Request a Budget</button>`:''}</div>`
+          : releases.map(relCard).join('')}
+      </div>
+    </div>
+
+    <!-- Budget allocations (unchanged, except the Spent/Remaining/% columns) -->
     <div class="card" style="margin-bottom:14px">
       <div class="card-header"><h3>${emojiIcon('📊',20)} Budget Allocation</h3></div>
       <div class="card-body" style="padding:0">
@@ -4384,16 +4560,48 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
                 return `<tr>
                   <td data-label="Item" style="font-weight:600">${escHtml(i.name)}</td>
                   <td data-label="Allocated">₱${fmt(i.budget)}</td>
-                  <td data-label="Spent" style="color:var(--danger)">${canSeeSpend?'₱'+fmt(i.spent):'—'}</td>
-                  <td data-label="Remaining" style="color:${rem<0?'var(--danger)':'var(--success)'}">${canSeeSpend?'₱'+fmt(rem):'—'}</td>
+                  <td data-label="Spent" style="color:var(--danger)">₱${fmt(i.spent)}</td>
+                  <td data-label="Remaining" style="color:${rem<0?'var(--danger)':'var(--success)'}">₱${fmt(rem)}</td>
                   <td data-label="%">
-                    ${canSeeSpend?`<div style="display:flex;align-items:center;gap:6px;min-width:80px">
+                    <div style="display:flex;align-items:center;gap:6px;min-width:80px">
                       <div style="flex:1;height:6px;background:var(--surface2);border-radius:3px">
                         <div style="width:${pct}%;height:100%;border-radius:3px;background:${pct>=90?'var(--danger)':pct>=70?'var(--warning,#ff9f0a)':'var(--primary-light)'}"></div>
                       </div>
                       <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">${pct}%</span>
-                    </div>`:'<span style="font-size:11px;color:var(--text-muted)">—</span>'}
+                    </div>
                   </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table></div>
+          ${!canSeeLedger?`<div style="font-size:11px;color:var(--text-muted);padding:8px 14px 12px">Figures include spends still awaiting Finance confirmation.</div>`:''}`}
+      </div>
+    </div>
+
+    <!-- Spend Log -->
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>${emojiIcon('🧾',20)} Spend Log</h3></div>
+      <div class="card-body" style="padding:0">
+        ${!spends.length?`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><p>No spends logged yet.</p></div>`:
+          `<div class="table-wrap"><table class="data-table table-cards">
+            <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th>By</th><th>Proof</th><th></th></tr></thead>
+            <tbody>
+              ${spends.map(s=>{
+                const statusBadge = s.status==='pending'?`<span class="badge badge-warn">${emojiIcon('⏳',12)} With Finance</span>`
+                  : s.status==='confirmed'?`<span class="badge badge-green">✓ Confirmed</span>`
+                  : `<span class="badge badge-red">✕ Rejected</span>${s.rejectReason?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(s.rejectReason)}</div>`:''}`;
+                const flags = `${s.noReceipt?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🚩',10)} No receipt</span>`:''}${s.overspendAtLog?`<span class="badge badge-orange" style="font-size:9px;margin-left:4px">${emojiIcon('🔺',10)} Over budget</span>`:''}`;
+                const atts = (s.attachments||[]).map(a=>`<a href="${safeHttpUrl(a.url)}" target="_blank" rel="noopener" style="display:block;font-size:11px">${escHtml(a.name)}</a>`).join('') || '—';
+                const canAct = (s.status==='pending'||s.status==='rejected') && s.loggedBy===currentUser.uid;
+                const actions = !canAct ? '' : `${s.status==='rejected'?`<button class="btn-secondary btn-sm bud-edit-spend-btn" data-id="${s.id}">Edit &amp; resubmit</button>`:''}${s.status==='pending'?`<button class="btn-danger btn-sm bud-withdraw-btn" data-id="${s.id}">Withdraw</button>`:''}`;
+                return `<tr class="bud-spend-row">
+                  <td class="tc-avatar" style="font-size:12px">${escHtml(s.date||'—')}</td>
+                  <td class="tc-name" style="font-size:12px">${escHtml(s.description||'—')}${flags} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                  <td class="tc-net" style="font-weight:600">₱${fmt(s.amount)}</td>
+                  <td class="tc-detail" data-label="Status">${statusBadge}</td>
+                  <td class="tc-detail" data-label="By" style="font-size:11px;color:var(--text-muted)">${escHtml(s.loggedByName||'—')}</td>
+                  <td class="tc-detail" data-label="Proof" style="font-size:11px">${atts}</td>
+                  <td class="tc-actions">${actions}</td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -4401,8 +4609,34 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       </div>
     </div>
 
-    <!-- Expense log (synced with Finance Ledger) -->
-    <div class="card">
+    <!-- My Budget Requests -->
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>${emojiIcon('🙋',20)} My Budget Requests</h3></div>
+      <div class="card-body" style="padding:0">
+        ${!requests.length?`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('🙋',44)}</div><p>No requests yet.</p></div>`:
+          `<div class="table-wrap"><table class="data-table table-cards no-toggle">
+            <thead><tr><th>Title</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>
+              ${requests.map(r=>{
+                const badge = r.status==='pending'?`<span class="badge badge-warn">${emojiIcon('⏳',12)} Pending</span>`
+                  : r.status==='approved'?`<span class="badge badge-green">✓ Approved</span>`
+                  : r.status==='declined'?`<span class="badge badge-red">✕ Declined${r.reviewNote?` — ${escHtml(r.reviewNote)}`:''}</span>`
+                  : `<span class="badge badge-gray">Cancelled</span>`;
+                return `<tr>
+                  <td data-label="Title" style="font-weight:600">${escHtml(r.title)}</td>
+                  <td data-label="Amount">₱${fmt(r.amount)}</td>
+                  <td data-label="Status">${badge}</td>
+                  <td data-label="Date" style="font-size:11px;color:var(--text-muted)">${escHtml(r.date||'')}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table></div>`}
+      </div>
+    </div>
+
+    <!-- Finance-tier ledger-synced table (unchanged, Type-badge fix so float/
+         payable legs don't masquerade as Income — window.ledgerKind, config.js) -->
+    ${canSeeLedger?`<div class="card">
       <div class="card-header">
         <h3>${emojiIcon('🧾',20)} Expense / Income Log</h3>
         <span style="font-size:11px;color:var(--text-muted)">Synced with Finance Ledger</span>
@@ -4412,27 +4646,42 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
           `<div class="table-wrap"><table class="data-table table-cards">
             <thead><tr><th>Date</th><th>Description</th><th>Line Item</th><th>Type</th><th>Amount</th><th>By</th></tr></thead>
             <tbody>
-              ${expenses.map(e=>`<tr class="bud-exp-row">
-                <td class="tc-avatar" style="font-size:12px">${e.date||'—'}</td>
-                <td class="tc-name" style="font-size:12px">${escHtml(e.description||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
-                <td class="tc-detail" data-label="Line Item" style="font-size:11px;color:var(--text-muted)">${escHtml(e.budgetLineName||'—')}</td>
-                <td class="tc-detail" data-label="Type"><span class="badge ${e.type==='credit'?'badge-green':'badge-red'}">${e.type==='credit'?'Income':'Expense'}</span></td>
-                <td class="tc-net" style="color:${e.type==='credit'?'var(--success)':'var(--danger)'};font-weight:600">₱${fmt(e.amount)}</td>
-                <td class="tc-detail" data-label="By" style="font-size:11px;color:var(--text-muted)">${escHtml(e.addedByName||'—')}</td>
-              </tr>`).join('')}
+              ${expenses.map(e=>{
+                const kind = ledgerKind(e);
+                const typeBadge = kind==='expense'?`<span class="badge badge-red">Expense</span>`
+                  : kind==='income'?`<span class="badge badge-green">Income</span>`
+                  : kind==='asset'?`<span class="badge badge-gray">Float</span>`
+                  : kind==='liability'?`<span class="badge badge-gray">Payable</span>`
+                  : `<span class="badge badge-gray">${escHtml(kind)}</span>`;
+                return `<tr class="bud-exp-row">
+                  <td class="tc-avatar" style="font-size:12px">${e.date||'—'}</td>
+                  <td class="tc-name" style="font-size:12px">${escHtml(e.description||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                  <td class="tc-detail" data-label="Line Item" style="font-size:11px;color:var(--text-muted)">${escHtml(e.budgetLineName||'—')}</td>
+                  <td class="tc-detail" data-label="Type">${typeBadge}</td>
+                  <td class="tc-net" style="color:${kind==='income'?'var(--success)':kind==='expense'?'var(--danger)':'var(--text)'};font-weight:600">₱${fmt(e.amount)}</td>
+                  <td class="tc-detail" data-label="By" style="font-size:11px;color:var(--text-muted)">${escHtml(e.addedByName||'—')}</td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table></div>`}
       </div>
-    </div>
+    </div>`:''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+
   container.querySelectorAll('tr.bud-exp-row').forEach(tr => tr.addEventListener('click', (ev) => {
     if (ev.target.closest('button, a')) return;
     tr.classList.toggle('tc-expanded');
   }));
+  container.querySelectorAll('tr.bud-spend-row').forEach(tr => tr.addEventListener('click', (ev) => {
+    if (ev.target.closest('button, a')) return;
+    tr.classList.toggle('tc-expanded');
+  }));
 
-  // Add budget line
-  document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {
+  const reload = () => renderBudgeting(container, currentUser, currentRole, dept);
+
+  // Add budget line (unchanged)
+  container.querySelector('#add-budget-line-btn')?.addEventListener('click', () => {
     const _panel = openPage('Add Budget Line', `
       <div class="form-group"><label>Item Name</label><input id="bg-name" placeholder="e.g. Social Media Ads"/></div>
       <div class="form-group"><label>Allocated Budget (₱)</label><input id="bg-budget" type="number" step="0.01" min="0" inputmode="decimal"/></div>
@@ -4450,109 +4699,49 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         dept,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      closeModal(); renderBudgeting(container, currentUser, currentRole, dept);
+      closeModal(); reload();
     });
   });
 
-  // Log expense / income → writes to shared Finance ledger
-  document.getElementById('log-expense-btn')?.addEventListener('click', () => {
-    const lineOptions = items.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name)}">${escHtml(i.name)}</option>`).join('');
-    const _panel = openPage('Log Expense / Income', `
-      <div class="form-row">
-        <div class="form-group"><label>Date</label><input id="exp-date" type="date" value="${today()}"/></div>
-        <div class="form-group"><label>Type</label>
-          <select id="exp-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            <option value="debit">Expense (Debit)</option>
-            <option value="credit">Income (Credit)</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group"><label>Description</label><input id="exp-desc" placeholder="e.g. Facebook Ads payment"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="exp-amount" type="number" step="0.01" min="0" inputmode="decimal"/></div>
-        <div class="form-group"><label>Budget Line</label>
-          <select id="exp-line" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            <option value="">— None / General —</option>
-            ${lineOptions}
-          </select>
-        </div>
-      </div>
-      <div class="form-group"><label>Reference # (optional)</label><input id="exp-ref" placeholder="OR #, Invoice #…"/></div>
-      <div id="exp-vat-wrap" style="display:none">${window.vatFieldHTML ? window.vatFieldHTML('exp-vat','exempt') : ''}</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:10px;background:rgba(155,168,255,0.08);border-radius:8px;font-size:12px;color:var(--text-muted)">
-        ${emojiIcon('🔗',16)} This entry will also appear in Finance → Ledger
-      </div>
-    `, `<button class="btn-primary" id="save-exp-btn">Save & Sync to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-
-    // ⚠ SCOPED TO THIS PANEL, NOT document. openPage keeps a CLOSING page in the
-    // DOM for ~300ms; log a second entry inside that window and two panels carry
-    // the same ids, with document.getElementById() resolving into the DYING one.
-    // Money-critical: the ledger row would take the PREVIOUS entry's amount,
-    // description, date, type and budget line.
-    const $ = (id) => _panel.querySelector('#' + id);
-
-    // v12 WS39 — Input VAT only applies to a debit/expense entry.
-    const expUpdateVatVisibility = () => {
-      const wrap = $('exp-vat-wrap');
-      if (wrap) wrap.style.display = ($('exp-type').value==='debit') ? '' : 'none';
-    };
-    $('exp-type').addEventListener('change', expUpdateVatVisibility);
-    expUpdateVatVisibility();
-
-    $('save-exp-btn').addEventListener('click', async () => {
-      const amount = parseFloat($('exp-amount').value)||0;
-      const desc   = $('exp-desc').value.trim();
-      if (!desc) { Notifs.showToast('Enter a description','error'); return; }
-      if (!amount) { Notifs.showToast('Enter an amount','error'); return; }
-      const type = $('exp-type').value;
-      const lineId = $('exp-line').value;
-      const lineSel = $('exp-line');
-      const lineName = lineId ? lineSel.options[lineSel.selectedIndex].dataset.name : null;
-      const uName = userProfile?.displayName || currentUser.email;
-      const expDate = $('exp-date').value || today();
-      try { await window.assertPeriodOpen(expDate); } catch (e) { return; } // toast already shown
-      const category = dept + (type==='credit'?' Income':' Expense');
-
-      // Write to shared Finance ledger with dept tag
-      const _deptExpRow = {
-        date:          expDate,
-        type,
-        accountType:   type==='credit' ? 'income' : 'expense', account: category,
-        description:   desc,
-        amount,
-        category,
-        dept,
-        budgetLineId:  lineId || null,
-        budgetLineName:lineName || null,
-        refNumber:     $('exp-ref').value.trim() || null,
-        // v12 WS39 — input-VAT capture on dept budget-expense debit entries.
-        ...( type==='debit' && window.readVatField ? window.readVatField('exp-vat', amount) : {} ),
-        addedBy:       currentUser.uid,
-        addedByName:   uName,
-        source:        dept, // Finance can see which dept this came from
-        createdAt:     firebase.firestore.FieldValue.serverTimestamp()
-      };
-      await db.collection('ledger').add(_deptExpRow);
-      // v14 Wave 4 Batch F2 — this poster writes .add() directly (not through
-      // Ledger.post), so keep finance_rollup in sync here too (best-effort).
-      if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(_deptExpRow, +1);
-
-      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-
-      // Notify finance dept
-      await Notifs.sendToDept('Finance', {
-        title: `💸 ${dept} logged a ${type==='debit'?'expense':'income'}`,
-        body:  `${uName}: ${desc} — ₱${window.fmtN2(amount)}`,
-        icon:  type==='debit'?`${emojiIcon('📤',16)}`:`${emojiIcon('📥',16)}`,
-        type:  'finance_entry', link: 'dept:Finance'
-      }).catch(()=>{});
-
-      closeModal();
-      Notifs.success('Entry saved and synced to Finance!');
-      renderBudgeting(container, currentUser, currentRole, dept);
-    });
+  // §6.2/§6.3a/§7 — Log a Spend / Request a Budget / Release a Budget /
+  // Repost / Close float. These live in js/screens/dept-budgets.js (loaded
+  // after this file) and are called by window.* name at click time only —
+  // the standard runtime forward-reference convention (index.html).
+  container.querySelector('#log-spend-btn')?.addEventListener('click', () => {
+    window.openLogSpendForm(dept, activeReleases, items, reload);
   });
+  container.querySelector('#request-budget-btn')?.addEventListener('click', () => {
+    window.openBudgetRequestForm(dept, reload);
+  });
+  container.querySelector('#empty-request-budget-btn')?.addEventListener('click', () => {
+    window.openBudgetRequestForm(dept, reload);
+  });
+  container.querySelector('#release-budget-btn')?.addEventListener('click', () => {
+    window.openReleaseBudgetForm({ dept }, reload);
+  });
+  container.querySelectorAll('.bud-repost-btn').forEach(btn => onClickSafe(btn, async () => {
+    const r = releases.find(x=>x.id===btn.dataset.id);
+    if (r) await window.repostFloatRelease(r, reload);
+  }));
+  container.querySelectorAll('.bud-close-float-btn').forEach(btn => onClickSafe(btn, async () => {
+    const r = releases.find(x=>x.id===btn.dataset.id);
+    if (r) await window.openCloseFloatModal(r, reload);
+  }));
+  container.querySelectorAll('.bud-withdraw-btn').forEach(btn => btn.addEventListener('click', async (ev) => {
+    ev.stopPropagation();
+    const ok = await confirmDialog({ message:'Withdraw this spend?', danger:true });
+    if (!ok) return;
+    await db.collection('dept_spend_logs').doc(btn.dataset.id).delete();
+    Notifs.success('Withdrawn.');
+    reload();
+  }));
+  container.querySelectorAll('.bud-edit-spend-btn').forEach(btn => btn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const s = spends.find(x=>x.id===btn.dataset.id);
+    if (s) window.openEditSpendForm(s, activeReleases, items, reload);
+  }));
 }
+window.renderBudgeting = renderBudgeting;
 
 // ══════════════════════════════════════════════════
 //  FILES MODULE — shared helper

@@ -103,7 +103,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
-  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Tasks'];
+  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Budgeting','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
                   'Partner Quotes':'Partner', 'Partner Files':'Partner',
@@ -198,6 +198,10 @@ async function loadSalesContent(currentUser, currentRole, sub) {
 
     case 'SOP':
       renderSalesSOP(content);
+      break;
+
+    case 'Budgeting':
+      await window.renderBudgeting(content, currentUser, currentRole, 'Sales');
       break;
 
     case 'Tasks':
