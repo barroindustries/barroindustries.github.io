@@ -370,20 +370,49 @@ window.openScheduledRaises = async function() {
   }, { skeleton: 'table' });
 };
 
+// ── HR is a DEPARTMENT, so membership opens it ─────────────────────────────
+// PAYROLL-AUDIT-2026-08.md §1: every other department in this app honours
+// membership (canEditDept, js/departments.js:39-53) — HR was the one that did
+// not. Its gate was a bare role list, so a real person you put IN the HR
+// department could not open HR, while the Accountant had a direct sidebar link
+// to it (js/config.js:712). "You cannot fix coordination between two parties
+// when the system only recognises one of them."
+//
+// isHrPriv() = the oversight tier (isOpsPriv: president/manager/secretary/
+// finance) OR membership of the HR department, mirroring firestore.rules'
+// canHrView(). It is deliberately the READ gate for the HR hub and nothing
+// more: every card inside still carries its own tier, and the MONEY cards
+// (Payroll, Accounts & Logins, Employee Profiles) stay on isMoneyPriv() exactly
+// as before. A department dropdown must never hand out a tier — owner ruling 3,
+// 2026-08-08 — so membership buys the door, not the money behind it.
+window.isHrPriv = function(){
+  const ops = (typeof window.isOpsPriv === 'function')
+    ? window.isOpsPriv()
+    : ['president','owner','manager','secretary','finance'].includes(window.currentRole || '');
+  return ops || (window.currentDepts || []).includes('HR');
+};
+
 // ── Payroll Management ───────────────────────────
 // ── HR department hub ──────────────────────────────────────────────────
 // Brings the people-side of the company into one place: role/department
-// assignment, the monthly payroll run, weekly worker payslips, leave, and
-// attendance. Each card opens the existing screen (no duplicated logic).
-// Sensitive — management & finance only.
+// assignment, payroll, leave, and attendance. Each card opens the existing
+// screen (no duplicated logic).
 window.renderHR = async function(currentUser, currentRole){
   const c = deptContainer();
   const role = window.currentRole || currentRole || '';
-  if (!['president','manager','secretary','finance'].includes(role)) {
-    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>HR is management &amp; finance only</h4></div>`;
+  if (!window.isHrPriv()) {
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>HR is for the HR department, management &amp; finance</h4></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     return;
   }
+  // The oversight tier — the people the RULES let read other people's
+  // attendance and leave WRITES, as against an HR-department member who can
+  // read them. Cards whose screens would otherwise open onto a denied read are
+  // gated on this: "a denied read must never render as an empty roster", and
+  // an empty attendance sheet is indistinguishable from nobody having worked.
+  const opsTier = (typeof window.isOpsPriv === 'function')
+    ? window.isOpsPriv()
+    : ['president','owner','manager','secretary','finance'].includes(role);
   const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
   // 2026-08-09 — HR stays OPEN to the Corporate Secretary (People & Roles,
   // attendance, leave, ID cards, holidays, work sites: owner ruling 2), but
@@ -397,22 +426,38 @@ window.renderHR = async function(currentUser, currentRole){
     // date, sss number etc, their status like training, employed, or what, what
     // their job is". ONE roster covering BOTH teams; each row opens the same
     // profile screen (js/screens/employee-profile.js).
-    { icon:'🪪', title:'Employee Profiles', desc:'Employment date, status, job, IDs · rates, cash advance, raises & payroll history', go:()=>window.renderEmployeeProfiles && window.renderEmployeeProfiles() },
+    // Reads worker_profiles + payroll, both money-tier in firestore.rules, so
+    // it carries the same gate as Payroll: an HR-department member opening it
+    // would get a roster whose every pay column was denied and swallowed.
+    ...(canPayroll ? [{ icon:'🪪', title:'Employee Profiles', desc:'Employment date, status, job, IDs · rates, cash advance, raises & payroll history', go:()=>window.renderEmployeeProfiles && window.renderEmployeeProfiles() }] : []),
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
-    // One card, two tabs (owner: "Better if its just / Payroll / Then / Type a
-    // / Type b"). Opens the hub, which lands on Type A by default.
-    ...(canPayroll ? [{ icon:'💰', title:'Payroll',        desc:'Office Team monthly run (Compute → Verify → Disburse) + Operations Team weekly payslips', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') }] : []),
+    // ── THE HR DOOR TO PAYROLL ────────────────────────────────────────────
+    // This card used to be `window.renderFinance(…, 'Payroll')` — a redirect
+    // INTO Finance that repainted the header as "Finance & HR" and stacked two
+    // rows of Finance chips above your payroll. There was no HR payroll screen;
+    // there was Finance payroll with an HR-shaped door on it, which is the
+    // owner's "finding it at all" complaint (PAYROLL-REDESIGN-BRIEF.md).
+    // It now opens the SAME screen the Finance chip opens — see
+    // window.renderPayrollScreen below.
+    ...(canPayroll ? [{ icon:'💰', title:'Payroll',        desc:'One roster per period — both teams. Check the hours, then pay.', go:()=>window.renderPayrollScreen(currentUser, currentRole) }] : []),
     ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
-    { icon:'📍', title:'Work Sites',     desc:'Geofenced Time In/Out locations for Type-B (Production) self-service', go:()=>openWorkSitesPage(currentUser, currentRole) },
-    { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
-    { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
+    // The three screens an HR-DEPARTMENT member can now reach. They read fine
+    // (firestore.rules canHrView()), but every WRITE verb on them — approving
+    // leave, editing an attendance record, moving a geofence — is still the
+    // oversight tier, because an attendance edit moves a weekly worker's pay.
+    // Say so on the card rather than letting them find a dead button.
+    { icon:'📍', title:'Work Sites',     desc:`Geofenced Time In/Out locations for Type-B (Production) self-service${opsTier?'':' · view only'}`, go:()=>openWorkSitesPage(currentUser, currentRole) },
+    { icon:'🌴', title:'Leave',          desc:`Requests, approvals & balances${opsTier?'':' · view only'}`,             go:()=>window.renderLeavePage && window.renderLeavePage() },
+    { icon:'🕐', title:'Attendance',     desc:`Daily attendance & time-extension requests${opsTier?'':' · view only'}`, go:()=>navigateTo('attendance') },
   ];
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('👥',20)} Human Resources</h2></div>
     ${window.sopPanel('How HR works', [
       'People & Roles — set each person’s role, department(s) and employee class (Regular monthly vs Production weekly).',
-      'Payroll → Office Team — the monthly cycle for regular staff: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
-      'Payroll → Operations Team — generate weekly payslips for Production workers (hourly attendance, fixed weekly rate), plus their worker profiles and ID cards.',
+      // PAYROLL-REDESIGN-BRIEF.md — one payroll over both teams, described in
+      // the words that are on the screen. HR PREPARES, FINANCE PAYS.
+      'Payroll — one screen for both teams. Pick the period (a month for the Office Team, a Monday–Sunday week for the Operations Team) and everyone due in it is on one roster.',
+      'Payroll — HR checks the hours are right, which tells Finance it is their turn; Finance attaches each receipt and pays. Holding one person, a one-off amount and a correction after paying are all actions on that person’s row.',
       'Leave — employees request leave; finance/admin approve and balances update automatically.',
       'Attendance — review daily attendance and approve time-in extension requests.'
     ])}
@@ -430,6 +475,57 @@ window.renderHR = async function(currentUser, currentRole){
     b.addEventListener('mouseenter', ()=>{ b.style.borderColor='var(--primary-light)'; b.style.background='var(--surface2)'; });
     b.addEventListener('mouseleave', ()=>{ b.style.borderColor='var(--border)'; b.style.background='var(--surface)'; });
   });
+};
+
+// ── HR → Payroll: the SAME screen Finance opens ────────────────────────────
+// PAYROLL-REDESIGN-BRIEF.md, "finding it at all". The old HR Payroll card was
+//     go: () => window.renderFinance(currentUser, currentRole, 'Payroll')
+// — a redirect into the Finance department. It repainted the page header as
+// "Finance & HR" and put two rows of Finance chips (7 groups, then the
+// Payroll/Cash Advances/SSS sub-row) above the payroll you came for, so the HR
+// door did not lead to an HR screen and did not look like the one you left.
+//
+// This renders window.renderPayrollPage — the one payroll screen — into HR's
+// own container under HR's own header. js/screens/finance.js's 'Payroll' chip
+// renders the SAME function into the Finance content pane. Same screen, same
+// state, same words, whichever door you came through; nothing about payroll
+// varies by route, because HR and Finance are two halves of ONE run.
+//
+//   window.renderPayrollPage(container, currentUser, currentRole, opts)
+//     opts.from — 'hr' | 'finance'. Presentation only (back link/breadcrumb).
+//                 It must never change what is shown or what is permitted:
+//                 permissions come from the role, not from the door.
+//
+// The fallbacks are load-order belt-and-braces, degrading to the screen that
+// exists today rather than to a blank pane — the same rule payroll-weekly-ui.js
+// follows. renderPayrollHub is resolved by window.* name at CLICK time, never
+// at parse time.
+window.renderPayrollScreen = async function(currentUser, currentRole, opts){
+  const c = deptContainer();
+  if (!c) return;
+  const canPayroll = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : true;
+  if (!canPayroll) {
+    // Never an empty roster: a denied read here is a permission answer, and it
+    // has to read as one.
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Payroll is finance &amp; management only</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+    return;
+  }
+  c.innerHTML = `
+    <div class="page-header"><h2>${emojiIcon('💰',20)} Payroll</h2></div>
+    <div id="hr-payroll-pane">${window.skeletonHtml ? window.skeletonHtml('rows') : ''}</div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // Scoped to `c`, never document: openPage keeps a dying panel ~300ms and a
+  // global lookup finds ITS copy of this id (house rule).
+  const pane = c.querySelector('#hr-payroll-pane');
+  if (!pane) return;
+  if (typeof window.renderPayrollPage === 'function') {
+    await window.renderPayrollPage(pane, currentUser, currentRole, Object.assign({ from:'hr' }, opts || {}));
+  } else if (typeof window.renderPayrollHub === 'function') {
+    await window.renderPayrollHub(pane, currentUser, currentRole, 'A');
+  } else {
+    await renderPayrollManagement(pane, currentUser, currentRole);
+  }
 };
 
 // v14 Wave 4 Batch F4 — month-scoped THREE-WAY diff behind the same

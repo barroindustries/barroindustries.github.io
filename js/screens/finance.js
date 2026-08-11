@@ -278,7 +278,10 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
       'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
       'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow, Bank Reconciliation and Break-even.',
-      'Payroll is one screen with two tabs: Office Team (monthly — Compute → Verify → Disburse) and Operations Team (weekly payslips, profiles & ID cards). It opens on Office Team.',
+      // PAYROLL-REDESIGN-BRIEF.md — one payroll over both teams, and the words
+      // on the screen are the words used here. "Compute", "verify", "disburse",
+      // "delta" and "reconciliation" are not user-visible strings any more.
+      'Payroll is ONE screen for both teams: pick a period (a month for the Office Team, a Monday–Sunday week for the Operations Team) and everyone due in it is on one roster. HR checks the hours, Finance pays.',
       `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`,
       isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
     ].filter(Boolean))}
@@ -389,17 +392,34 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Cash Flow':     await window.renderCashFlowReport(content, currentUser, currentRole); break;
     case 'Bank Rec':      await window.renderBankRec(content, currentUser, currentRole); break;
     case 'Break-even':    await renderBreakevenTab(content, currentUser, currentRole); break;
-    // One Payroll screen; Type A (monthly) / Type B (weekly Production) are
-    // chip-tabs INSIDE it — see window.renderPayrollHub in js/screens/hr.js.
+    // ── THE ONE PAYROLL ENTRY POINT ───────────────────────────────────────
+    // PAYROLL-REDESIGN-BRIEF.md, the owner's fourth complaint ("finding it at
+    // all"): payroll sat under BOTH HR and Finance, and the two doors led to
+    // two different screens — HR's card was a redirect INTO Finance that
+    // repainted the header as "Finance & HR" and stacked two rows of Finance
+    // chips above your payroll.
+    //
+    // Both doors now call the SAME function. This chip and js/screens/hr.js's
+    // renderPayrollScreen (the HR card) each render window.renderPayrollPage
+    // into their own container; nothing about the screen differs by which door
+    // you came through, so "which screen do I use" stops being a question.
+    //
+    //   window.renderPayrollPage(container, currentUser, currentRole, opts)
+    //     opts.from — 'finance' | 'hr', for the screen's own back/breadcrumb
+    //                 use only. It must NOT change what is shown: HR prepares
+    //                 and Finance pays, but they read one run.
+    //
     // The `?:` is a load-order belt-and-braces, not a real branch: index.html
-    // loads js/screens/hr.js (:496) BEFORE js/screens/finance.js (:523) and
-    // both are `defer`, so the hub is always defined by the time any nav can
-    // fire. Falling back to the bare renderer keeps this file free of a hard
-    // dependency on that ordering if the script list is ever reshuffled.
+    // loads the unified payroll trio before this file and both are `defer`.
+    // Falling back to the previous hub keeps a load failure at "the screen I
+    // had yesterday" instead of a blank pane — the same degradation rule the
+    // weekly run uses.
     case 'Payroll':
-      await (window.renderPayrollHub
-        ? window.renderPayrollHub(content, currentUser, currentRole, 'A')
-        : renderPayrollManagement(content, currentUser, currentRole));
+      await (window.renderPayrollPage
+        ? window.renderPayrollPage(content, currentUser, currentRole, { from:'finance' })
+        : (window.renderPayrollHub
+            ? window.renderPayrollHub(content, currentUser, currentRole, 'A')
+            : renderPayrollManagement(content, currentUser, currentRole)));
       break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;

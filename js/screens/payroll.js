@@ -1,0 +1,1511 @@
+// ═══════════════════════════════════════════════════════════
+//  js/screens/payroll.js — THE payroll screen. One screen, both teams.
+//
+//  Built to PAYROLL-REDESIGN-BRIEF.md (the owner's rulings, verbatim) and the
+//  proposal in PAYROLL-AUDIT-2026-08.md §2. Where they differ, the brief wins.
+//
+//  WHAT THIS REPLACES. Two screens with two vocabularies: the monthly tab
+//  (renderPayrollManagement, js/screens/hr.js) and the weekly tab
+//  (renderWeeklyPayrollTab, js/screens/payroll-weekly-ui.js). The owner's
+//  keystone ruling is that there is ONE payroll; payClass picks the arithmetic
+//  for one line and nothing else differs. So there is one roster here, one
+//  period picker covering months AND weeks, and NO team tabs anywhere.
+//
+//  THE SHAPE OF THE SCREEN, in the order the eye meets it:
+//     1. what is waiting, in one sentence, with the money in it
+//     2. every period still owing, oldest first (a missed period cannot hide)
+//     3. the problems, in sentences, each with the person's name and a Fix
+//     4. the roster — one row per person, every figure visible
+//     5. ONE button, named for what it does, saying what it costs
+//
+//  TWO BUTTONS IN THE WHOLE FLOW, and you only ever see one of them:
+//     HR      "Hours are correct - send to Finance"   (state 'prepared')
+//     Finance "Pay everyone"                          (state 'checked')
+//  The first step — building the lines — is not a button at all. Opening a
+//  period that has not been started prepares it FOR you (see _pyMaybePrepare).
+//  The owner's rule was that the step count must go DOWN and that adding a step
+//  to solve a problem is forbidden; the reasons the old three steps existed (a
+//  frozen line, a review before money moves, a lock against a double press) all
+//  survive — they are things the system does, not chores handed to a person.
+//
+//  DATA COMES FROM window.Payroll AND NOTHING ELSE. This file opens no
+//  Firestore collection, and it does NO money arithmetic: every peso it prints
+//  is read off the frozen line. The only sums it performs are the roster
+//  totals, and those add up the very numbers the rows above them printed — the
+//  same rule the weekly screen follows — so a total can never contradict its
+//  own column. There is exactly one expression for a person's pay and it lives
+//  in js/money-core.js.
+//
+//  MOBILE IS A HARD REQUIREMENT, NOT A TIER (brief §"Mobile is a requirement").
+//  At 375px the roster is ONE CARD PER PERSON with every figure permanently
+//  visible. Not a <table>. Not .table-cards (that hides every .tc-detail cell
+//  behind a tap, and a hidden deduction IS hidden data). No ellipsis anywhere —
+//  a shortened peso amount is a wrong peso amount to whoever reads it. No
+//  horizontal scroll: nothing in this file's CSS declares overflow at all.
+//  (That last point is load-bearing beyond layout: js/app.js's memoised scroll
+//  walk documents that NO js file injects a <style> rule with an overflow
+//  declaration, and its scroller lint is built on that. Keep it true.)
+//
+//  VOCABULARY. The words compute, verify, disburse, delta, reconciliation,
+//  draft, run, Type A and Type B do not appear in one user-visible string in
+//  this file. The four states are shown verbatim as:
+//     'notstarted' -> "Not started"      'prepared' -> "Ready to check"
+//     'checked'    -> "Checked - waiting for payment"     'paid' -> "Paid"
+// ═══════════════════════════════════════════════════════════
+
+'use strict';
+
+// `var`, not `const`, for every FILE-SCOPE binding. A top-level `const` in a
+// classic script creates a global LEXICAL binding, and a second evaluation of
+// the same file — a duplicated <script> tag, a stale service-worker copy served
+// beside the fresh one — throws "Identifier has already been declared" and
+// takes the WHOLE file with it, i.e. the pay screen disappears. `var`
+// re-evaluates harmlessly. Every name here is PY_/_py-prefixed and was checked
+// unique across js/ and js/screens/.
+
+// How far back the picker reaches. Months and weeks are both in ONE list, so
+// the two windows are chosen to cover roughly the same stretch of calendar:
+// ~4 months of weeks, ~6 months of months (a missed month hides for longer than
+// a missed week does, because nobody is standing at the gate asking about it).
+var PY_WEEK_WINDOW  = 17;
+var PY_MONTH_WINDOW = 6;
+
+// The four states, in order, and the ONLY words the screen is allowed to show
+// for them. Copied verbatim from the contract — do not paraphrase these.
+var PY_STATES = ['notstarted', 'prepared', 'checked', 'paid'];
+var PY_STATE_WORDS = {
+  notstarted: 'Not started',
+  prepared:   'Ready to check',
+  checked:    'Checked - waiting for payment',
+  paid:       'Paid'
+};
+
+// Where the screen was left. Module-scope on purpose: the owner's complaint was
+// that every action bounced him back to today ("Stop losing your place",
+// audit §5). Re-entering payroll returns to the period you were working on.
+var PY_LAST_PERIOD = null;
+
+var PY_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// ── Local formatting/escaping shims ────────────────────────────────────────
+// Resolved at CALL time, never at parse time: this file is a plain <script>
+// like every other js/*.js and its position in index.html's fixed load order
+// must not become load-bearing for a currency format.
+var _pyEsc  = (s) => (window.escHtml ? window.escHtml(s) : String(s == null ? '' : s));
+var _pyN    = (n) => (window.fmtN2 ? window.fmtN2(n) : (Number(n) || 0).toFixed(2));
+// "-₱500.00", never "₱-500.00" — the sign belongs outside the symbol. A period
+// with an advance still on the books can genuinely go negative and that has to
+// be readable at a glance.
+var _pyPeso = (n) => ((Number(n) || 0) < 0 ? '-₱' : '₱') + _pyN(Math.abs(Number(n) || 0));
+var _pyHrs  = (n) => (Number(n) || 0).toFixed(2);
+var _pyIcon = (g, s) => (window.emojiIcon ? window.emojiIcon(g, s) : '');
+
+// A line's person id / name can arrive under several names depending on which
+// engine froze it (the weekly guard works on worker_profiles docs, the monthly
+// one on user docs). Resolve defensively rather than assume: a line whose id
+// cannot be read must still RENDER — it simply cannot be acted on, and the card
+// says so — because dropping a person off a pay roster is the one failure this
+// screen exists to prevent.
+var _pyId   = (o) => (o && (o.personId || o.workerId || o.uid || o.id || '')) || '';
+var _pyName = (o) => (o && (o.name || o.workerName || o.displayName || o.email || '')) || '';
+
+// First finite number among the candidates, else null. `null` means "this line
+// has no such figure", which is different from zero and is printed as "—".
+function _pyPick() {
+  for (let i = 0; i < arguments.length; i++) {
+    const v = arguments[i];
+    if (typeof v === 'number' && isFinite(v)) return v;
+  }
+  return null;
+}
+function _pySum() {
+  let any = false, t = 0;
+  for (let i = 0; i < arguments.length; i++) {
+    const v = arguments[i];
+    if (typeof v === 'number' && isFinite(v)) { any = true; t += v; }
+  }
+  return any ? t : null;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  READING A FROZEN LINE — NEVER RECOMPUTING ONE
+//  computePayLine (monthly) and computeWeeklyLine (weekly) freeze different
+//  field names for the same ideas, because they were written eighteen months
+//  apart. The owner's ruling is that payClass changes the ARITHMETIC and
+//  nothing downstream — so the difference is resolved HERE, once, into one
+//  display shape, and the rest of the screen never asks which team a person is
+//  on. Every branch below is a READ or a sum of already-frozen components; not
+//  one of them multiplies a rate by an hour.
+// ═══════════════════════════════════════════════════════════
+function _pyRead(l) {
+  l = l || {};
+  const stat = _pyPick(
+    (l.statutory && typeof l.statutory.total === 'number') ? l.statutory.total : undefined,
+    l.statutoryTotal,
+    _pySum(l.sss, l.philhealth, l.pagibig, l.tax)
+  );
+  // Earnings = what the work earned, BEFORE allowances. computeWeeklyLine's
+  // `gross` ALREADY contains allowanceTotal, so printing gross beside an
+  // allowances column double-counts allowances to the eye (the weekly screen
+  // was corrected for exactly this). Summed from the line's own frozen
+  // components; `base` is the monthly engine's equivalent.
+  const earnings = _pyPick(
+    l.earnings,
+    _pySum(l.regularPay, l.otPay, l.travelPay),
+    l.base
+  );
+  const oneOffs = Array.isArray(l.oneOffs) ? l.oneOffs : [];
+  const oneOffNet = oneOffs.length
+    ? oneOffs.reduce((a, o) => a + ((o && o.kind === 'deduction') ? -(+o.amount || 0) : (+o.amount || 0)), 0)
+    : null;
+  return {
+    id:   _pyId(l),
+    name: _pyName(l) || _pyId(l) || 'Unnamed person',
+    // The rate and where it came from. A person set up with only a daily rate
+    // resolves through resolveWorkerHourlyRate (dailyRate ÷ 8) — showing the
+    // source is what makes "why is this figure what it is" answerable without
+    // opening anyone's profile.
+    rate:       _pyPick(l.rate, l.hourlyRate),
+    rateSource: l.rateSource || '',
+    monthlySalary: _pyPick(l.salary, (l.payClass === 'production' ? undefined : l.base)),
+    daysWorked: _pyPick(l.daysWorked),
+    daysAbsent: _pyPick(l.daysAbsent),
+    daysOverridden: _pyPick(l.daysOverridden) || 0,
+    regHours:   _pyPick(l.regHours),
+    otHours:    _pyPick(l.otHours),
+    travelHours:_pyPick(l.travelHours),
+    earnings,
+    allowances: _pyPick(l.allowanceTotal, l.allowance),
+    oneOffNet,
+    oneOffs,
+    // otherDeductionsOnly, NOT otherDeductions: the weekly engine folds
+    // statutory INTO otherDeductions before the clamp and keeps the split whole
+    // on the line for exactly this reason. Printing the combined figure beside
+    // a government-deductions column counts statutory twice on screen.
+    otherDed:   _pyPick(l.otherDeductionsOnly, l.otherDeductions, l.deductions),
+    statutory:  stat,
+    cashAdv:    _pyPick(l.caDeduction, l.caPlanned),
+    caBalanceBefore: _pyPick(l.caBalanceBefore, l.caBalance),
+    caBalanceAfter:  _pyPick(l.caBalanceAfter),
+    caShortfall:     _pyPick(l.caShortfall),
+    takeHome:   _pyPick(l.takeHome, l.net, l.finalPay),
+    rows:       Array.isArray(l.rows) ? l.rows : [],
+    backfill:   l.backfill === true,
+    raw: l
+  };
+}
+
+// The columns, in order. A column is shown when ANY person in the period has a
+// figure for it, and then it is shown on EVERY card (as "—" where a person has
+// none) so the figures line up across cards on a wide screen. Take-home and
+// earnings are always shown: a roster that can omit the take-home column is not
+// a roster.
+var PY_COLS = [
+  { key: 'days',        label: 'Days',                 always: false },
+  { key: 'regHours',    label: 'Hours',                always: false },
+  { key: 'otHours',     label: 'Overtime',             always: false },
+  { key: 'travelHours', label: 'Travel hours',         always: false },
+  { key: 'earnings',    label: 'Earnings',             always: true  },
+  { key: 'allowances',  label: 'Allowances',           always: false },
+  { key: 'oneOffNet',   label: 'One-off amounts',      always: false },
+  { key: 'otherDed',    label: 'Other deductions',     always: false },
+  { key: 'statutory',   label: 'Government deductions',always: false },
+  { key: 'cashAdv',     label: 'Cash advance',         always: false },
+  { key: 'takeHome',    label: 'Take-home pay',        always: true  }
+];
+
+// Which columns this period actually needs. Deliberately NOT "every column
+// always": an office month has no travel hours, and a column of "—" asserts
+// something. But once a column is in, it is on every card — alignment is what
+// makes 30 cards readable, and a missing cell would slide the next figure into
+// the wrong column, which on a pay roster is a lie.
+function _pyColsFor(reads) {
+  const has = {};
+  reads.forEach(r => {
+    if (r.daysWorked != null || r.daysAbsent != null) has.days = true;
+    ['regHours', 'otHours', 'travelHours', 'earnings', 'allowances', 'oneOffNet',
+     'otherDed', 'statutory', 'cashAdv', 'takeHome'].forEach(k => {
+      if (r[k] != null && !(k === 'oneOffNet' && !r.oneOffs.length)) has[k] = true;
+    });
+  });
+  return PY_COLS.filter(c => c.always || has[c.key]);
+}
+
+// Sum of the printed components, for the totals card. Never a recomputation of
+// pay — it only ever adds up numbers the cards themselves printed.
+function _pyTotals(reads) {
+  const t = { people: reads.length };
+  PY_COLS.forEach(c => { t[c.key] = 0; });
+  t.daysWorked = 0; t.daysAbsent = 0;
+  reads.forEach(r => {
+    t.daysWorked += (+r.daysWorked || 0);
+    t.daysAbsent += (+r.daysAbsent || 0);
+    ['regHours', 'otHours', 'travelHours', 'earnings', 'allowances', 'oneOffNet',
+     'otherDed', 'statutory', 'cashAdv', 'takeHome'].forEach(k => { t[k] += (+r[k] || 0); });
+  });
+  return t;
+}
+
+// The reasons a person is not being paid, in words. NOBODY IS SILENTLY
+// DROPPED: every person the period does not pay appears on the roster, with
+// this sentence under their name. `danger` marks the ones that mean "we do not
+// know" rather than "we decided" — paying zero on an unread period is exactly
+// the silent-zero this design exists to prevent.
+function _pyNotPaidWords(reason) {
+  const r = String(reason || '');
+  if (r === 'removed')        return { short: 'Removed from the system',      note: 'Off the roster — put their profile back before they can be paid.', undoable: false };
+  if (r === 'paid-monthly')   return { short: 'Paid on the monthly cycle',    note: 'Already paid for this month on the monthly cycle — kept out of this period so nobody is paid twice.', undoable: false };
+  if (r === 'paid-weekly')    return { short: 'Paid on the weekly cycle',     note: 'Already paid for these days on the weekly cycle — kept out of this period so nobody is paid twice.', undoable: false };
+  if (r === 'no-rate')        return { short: 'No pay rate on file',          danger: true, note: 'No monthly salary, hourly or daily rate on this person\'s profile. Rather than pay ₱0.00, they are left out — put a rate on their profile and open this period again.', undoable: false };
+  if (r === 'missing')        return { short: 'Their record could not be read', danger: true, note: 'This person\'s profile could not be read for this period.', undoable: false };
+  if (r === 'not-in-payroll') return { short: 'Not included in payroll',      note: 'Their profile is set to be left out of payroll. That belongs to the PERSON, not to this period — change it on their profile if they should be paid.', undoable: false };
+  if (r === 'attendance-unreadable') return { short: 'Attendance could not be read', danger: true, note: 'Their punches for this period could not be read, so they were left out rather than paid zero. Open this period again before paying — do not pay around this.', undoable: false };
+  if (r.startsWith('held') || r.startsWith('excluded')) {
+    const why = r.replace(/^(held|excluded)/, '').replace(/^[:\s-]*/, '');
+    return {
+      short: 'On hold for this period' + (why ? ' — ' + why : ''),
+      // Said out loud because it is the opposite of what the old flag did, and
+      // the difference is money: a hold is period-scoped (owner ruling), so the
+      // next period starts with them back on the roster.
+      note: 'Held for this period only. Next period they are back on the roster and you decide again.',
+      undoable: true
+    };
+  }
+  return { short: r || 'Not paid this period', note: 'This person was not paid for this period.', undoable: !!r };
+}
+
+// Error state with a Retry. A DENIED READ MUST NEVER RENDER AS AN EMPTY
+// ROSTER: on a pay screen "no rows" and "you may not see the rows" look
+// identical, and one of them reads as "nobody is owed anything".
+function _pyError(el, err, retry, headline) {
+  if (!el) return;
+  const msg = (err && err.message) ? err.message : String(err);
+  el.innerHTML =
+    '<div class="empty-state">' +
+      '<div class="empty-icon">' + _pyIcon('⚠️', 44) + '</div>' +
+      '<h4>' + _pyEsc(headline || 'This period could not be read') + '</h4>' +
+      '<p>' + _pyEsc(msg) + '</p>' +
+      '<p style="font-size:12px;color:var(--text-muted);margin-top:6px">Nothing is shown rather than an empty roster — an empty roster here would read as “nobody is owed anything”.</p>' +
+      (retry ? '<button type="button" class="btn-secondary btn-sm py-retry-btn" style="margin-top:14px">Retry</button>' : '') +
+    '</div>';
+  if (retry) el.querySelector('.py-retry-btn')?.addEventListener('click', retry);
+  if (window.lucide && el.querySelector('[data-lucide]:not(svg)')) lucide.createIcons({ nodes: [el] });
+}
+
+// ── The stylesheet ─────────────────────────────────────────────────────────
+// Shipped inline with the screen rather than added to css/styles.css because
+// this file owns it and nothing else uses it. Two rules matter:
+//   • NOT ONE overflow DECLARATION. No horizontal scroll is a requirement, and
+//     js/app.js's scroll walk documents that no JS file injects one.
+//   • NOT ONE text-overflow/ellipsis DECLARATION, and `overflow-wrap:anywhere`
+//     on every value, so a long name or a big peso figure WRAPS instead of
+//     being cut. A shortened amount is a wrong amount.
+// The field grid is `repeat(auto-fit, minmax(126px, 1fr))`: at 375px that is
+// two columns of ~150px (a label and a peso figure fit with room), and on a
+// laptop it opens out to the full column count so figures line up across cards
+// — the table shape returns where the columns genuinely fit, without a <table>
+// and without a single hidden cell at any width in between.
+var PY_CSS = `
+/* EVERY card reserves the same 3px left border and only the COLOUR changes.
+   A flagged card that widened its own border by 2px would shift its figures
+   2px out of line with the card above it — and the whole reason this is a grid
+   of identical fields is so that thirty people's take-home pay reads down one
+   straight column. */
+#pay-root .py-card{border:1px solid var(--border);border-left:3px solid transparent;border-radius:12px;background:var(--surface);padding:12px 14px;margin-bottom:10px}
+#pay-root .py-card.py-flagged{border-left-color:var(--warning)}
+#pay-root .py-card.py-danger{border-left-color:var(--danger)}
+#pay-root .py-card.py-onhold{opacity:.72;border-style:dashed}
+/* Colour only — NOT border-width. Widening this card's border moved its
+   figures a pixel out of line with every person below it, which is the one
+   thing a totals row must never do. */
+#pay-root .py-card.py-totals{background:var(--s1);border-color:var(--text-muted)}
+#pay-root .py-who{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;margin-bottom:2px}
+#pay-root .py-who strong{font-size:15px;line-height:1.25;overflow-wrap:anywhere;min-width:0}
+#pay-root .py-sub{font-size:11px;color:var(--text-muted);line-height:1.5;overflow-wrap:anywhere;margin-bottom:10px}
+#pay-root .py-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(126px,1fr));gap:9px 12px}
+/* On a laptop the tracks narrow so all eleven figures sit on ONE line — the
+   table shape returning where the columns genuinely fit, without a <table> and
+   without a cell that hides. 104px still holds "₱38,596.50" at 14px with room;
+   anything longer wraps inside its own cell rather than being cut. */
+@media (min-width:1024px){#pay-root .py-fields{grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}}
+#pay-root .py-f{min-width:0}
+#pay-root .py-f-label{display:block;font-size:10px;line-height:1.4;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);overflow-wrap:anywhere}
+#pay-root .py-f-val{display:block;font-size:14px;line-height:1.4;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#pay-root .py-f-note{display:block;font-size:10px;line-height:1.4;color:var(--text-muted);overflow-wrap:anywhere}
+#pay-root .py-f-net .py-f-val{font-weight:700;font-size:16px}
+#pay-root .py-plus{color:var(--success)}
+#pay-root .py-minus{color:var(--danger)}
+#pay-root .py-nil{color:var(--text-muted)}
+#pay-root .py-rowacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}
+#pay-root .py-rowacts button{flex:0 1 auto}
+#pay-root .py-problem{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+#pay-root .py-problem:last-child{border-bottom:0}
+#pay-root .py-problem .py-ptext{flex:1 1 220px;min-width:0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+#pay-root .py-actbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+#pay-root .py-actbar .py-cost{flex:1 1 240px;min-width:0;font-size:12px;color:var(--text-muted);line-height:1.55;overflow-wrap:anywhere}
+#pay-root .py-bigbtn{font-size:15px;padding:12px 18px;min-height:48px}
+#pay-root .py-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+#pay-root .py-head select{flex:1 1 100%;min-width:0;max-width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px}
+@media (min-width:700px){#pay-root .py-head select{flex:0 1 480px}}
+#pay-root .py-headline{font-size:16px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}
+#pay-root .py-waiting-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
+#pay-root .py-waiting-row:last-child{border-bottom:0}
+#pay-root .py-waiting-row .py-wlabel{flex:1 1 190px;min-width:0;overflow-wrap:anywhere}
+#pay-root .py-oneoff{font-size:11px;color:var(--text-muted);line-height:1.5;overflow-wrap:anywhere;margin-top:6px}
+`;
+
+// ═══════════════════════════════════════════════════════════
+//  THE SCREEN
+// ═══════════════════════════════════════════════════════════
+window.renderPayrollPage = async function (container, currentUser, currentRole) {
+  const host = container || (typeof deptContainer === 'function' ? deptContainer() : null);
+  if (!host) return;
+
+  // The engine is a separate file loaded before this one. If it is absent, SAY
+  // SO. Painting a bare "nothing here" screen would be the silent-zero failure
+  // in its purest form.
+  if (!window.Payroll || typeof window.Payroll.load !== 'function') {
+    _pyError(host, new Error('The payroll engine (window.Payroll) did not load. Reload the app; if it keeps happening, the payroll script is missing from index.html.'),
+      () => window.renderPayrollPage(host, currentUser, currentRole), 'Payroll is unavailable');
+    return;
+  }
+
+  // ── RE-ENTRY GUARD — this is a MONEY bug if it is missing ────────────────
+  // This renderer awaits several reads and only then binds listeners. Entering
+  // twice while the first load is in flight leaves the first paint's handlers
+  // bound to the second paint's DOM — measured on the old monthly screen as ONE
+  // tap running the same money action TWICE. Mount once per host and route
+  // every later entry through the same latest-wins loader.
+  if (typeof host._payrollLoad === 'function' && host.querySelector('#pay-root')) {
+    return host._payrollLoad();
+  }
+
+  const role = currentRole || window.currentRole || '';
+  // WHO DOES WHAT (the owner's second ruling: HR prepares, Finance pays).
+  //   canPrepare — the oversight tier, which is where HR sits (isOpsPriv
+  //     mirrors firestore.rules' isOpsAdmin: president/manager/secretary/
+  //     finance). These are the people who own hours, rates and corrections.
+  //   canPay — the MONEY tier only (isMoneyPriv mirrors isMoneyAdmin:
+  //     president/manager/finance). Deliberately narrower: the rules will not
+  //     let a secretary write pay, and a button whose write is refused is worse
+  //     than no button.
+  const canPrepare = (typeof window.isOpsPriv === 'function') ? window.isOpsPriv()
+                   : ['president', 'owner', 'manager', 'secretary', 'finance'].includes(role);
+  const canPay     = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv()
+                   : ['president', 'owner', 'manager', 'finance'].includes(role);
+
+  // Manila, via the app's own helper — a raw toISOString() is UTC and picks the
+  // WRONG week for the first eight hours of every Manila day, which would open
+  // the screen on last period's roster every morning.
+  const todayIso   = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+  const thisWeekId = window.payWeekMondayOf ? window.payWeekMondayOf(todayIso) : todayIso;
+  const thisMonth  = todayIso.slice(0, 7);
+
+  host.innerHTML = '<style>' + PY_CSS + '</style><div id="pay-root">' + window.skeletonHtml('rows') + '</div>';
+  const root = host.querySelector('#pay-root');
+
+  // Warnings come back from prepare() and are not necessarily part of the
+  // stored record, so they are held here until the next prepare rather than
+  // lost on the reload that follows it. Keyed by period so switching periods
+  // never shows another period's warnings.
+  const warningsByPeriod = {};
+  // One automatic prepare attempt per period per visit. Without this a period
+  // that legitimately produces nothing (an empty roster, a refused read) would
+  // be prepared again on every paint, forever.
+  const prepareTried = {};
+
+  let selected = null;
+  let busy = false, pending = null;
+
+  // Latest-wins serialisation. A load requested while one is in flight is
+  // REMEMBERED, not started, so two paints can never own #pay-root at once.
+  const load = async (periodId) => {
+    const want = periodId || selected;
+    if (busy) { pending = want; return; }
+    busy = true;
+    try {
+      await paint(want);
+    } catch (e) {
+      // THROWN = a failed READ (the engine's contract: null means "not started",
+      // an exception means the read failed). Never an empty roster.
+      _pyError(root, e, () => load(want));
+    } finally {
+      busy = false;
+      if (pending !== null) { const next = pending; pending = null; await load(next); }
+    }
+  };
+  host._payrollLoad = load;
+
+  // ═════════════════════════════════════════════════════════
+  //  THE PERIOD LIST — months and weeks in ONE list, newest first
+  //  A month is "2026-08"; a week is the Monday, "2026-08-11". They sort
+  //  together on the day the period STARTS, so August 2026 sits just above the
+  //  week of 3 Aug and just below the week of 11 Aug — which is the order
+  //  somebody scanning for "what have I not paid" actually wants.
+  // ═════════════════════════════════════════════════════════
+  function _pyKind(periodId) {
+    if (typeof window.Payroll.kindOf === 'function') {
+      try { const k = window.Payroll.kindOf(periodId); if (k) return k; } catch (_) { /* shape fallback below */ }
+    }
+    return String(periodId || '').length > 7 ? 'week' : 'month';
+  }
+  function _pyLabel(periodId) {
+    if (typeof window.Payroll.label === 'function') {
+      try { const l = window.Payroll.label(periodId); if (l) return l; } catch (_) { /* never blank a picker option */ }
+    }
+    return String(periodId || '');
+  }
+  // A month sorts as its first day; a week already IS its first day. On a tie
+  // (the 1st falling on a Monday) the month comes first — it is the longer
+  // period and reads as the heading of the two.
+  function _pySortKey(periodId) {
+    return (_pyKind(periodId) === 'month' ? periodId + '-01' + '#0' : periodId + '#1');
+  }
+  function _pyPeriodList(extra) {
+    const set = {};
+    const add = (p) => { if (p && !set[p]) set[p] = true; };
+    try { (window.Payroll.recentPeriods('week',  PY_WEEK_WINDOW)  || []).forEach(add); } catch (_) {}
+    try { (window.Payroll.recentPeriods('month', PY_MONTH_WINDOW) || []).forEach(add); } catch (_) {}
+    add(thisWeekId); add(thisMonth);
+    (extra || []).forEach(add);
+    return Object.keys(set).sort((a, b) => (_pySortKey(a) < _pySortKey(b) ? 1 : -1));
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  PAINT — one function, whole screen, always from stored data
+  // ═════════════════════════════════════════════════════════
+  async function paint(periodId) {
+    root.innerHTML = window.skeletonHtml('rows');
+
+    // What is still owing, straight from the engine. This is also how a period
+    // OUTSIDE the picker's window stays reachable: a February week nobody paid
+    // must be selectable, or it hides for ever.
+    let owing = [];
+    let owingError = null;
+    if (typeof window.Payroll.unpaidPeriods === 'function') {
+      try { owing = (await window.Payroll.unpaidPeriods()) || []; }
+      catch (e) { owingError = e; owing = []; }
+    }
+    const owingIds = owing.map(o => (o && (o.periodId || o.id)) || '').filter(Boolean);
+
+    // WHICH PERIOD ARE WE LOOKING AT. In order of what the owner actually
+    // wants when he opens the screen:
+    //   1. the period he asked for (a picker change, an Open, a re-entry)
+    //   2. the OLDEST period with work waiting on somebody — that is the thing
+    //      that is late, and it is what the headline is for
+    //   3. otherwise the current week, which is where the crew's money lives
+    let want = periodId || PY_LAST_PERIOD;
+    if (!want) {
+      const waiting = owing
+        .filter(o => o && (o.state === 'prepared' || o.state === 'checked'))
+        .map(o => o.periodId || o.id)
+        .filter(Boolean)
+        .sort((a, b) => (_pySortKey(a) < _pySortKey(b) ? -1 : 1));
+      want = waiting[0] || thisWeekId;
+    }
+    selected = want;
+    PY_LAST_PERIOD = want;
+
+    const periods = _pyPeriodList(owingIds.concat([want]));
+
+    // THE SELECTED PERIOD is read on its own and is allowed to fail loudly —
+    // its failure is the error state with a Retry.
+    let period = await window.Payroll.load(selected);
+
+    // If it has not been started and this person may start it, START IT. This
+    // is the step that used to be a button called Compute. Nobody has to know
+    // it exists: you open a period and the figures are there.
+    if (canPrepare && !prepareTried[selected] && (!period || (period.state || 'notstarted') === 'notstarted')) {
+      prepareTried[selected] = true;
+      root.innerHTML = `<div class="empty-state"><div class="empty-icon">${_pyIcon('⏳', 40)}</div>
+        <h4>Working out the pay for ${_pyEsc(_pyLabel(selected))}…</h4>
+        <p>Reading the punches, the rates and the amounts on file.</p></div>`;
+      try {
+        const res = await window.Payroll.prepare(selected);
+        warningsByPeriod[selected] = (res && res.warnings) || [];
+        period = await window.Payroll.load(selected);
+      } catch (e) {
+        // NOT the error state: a period that cannot be built is a different
+        // thing from a period that cannot be READ, and the roster below still
+        // has something honest to say (usually "nobody is on the roster").
+        warningsByPeriod[selected] = [(e && e.message) ? e.message : String(e)];
+        try { period = await window.Payroll.load(selected); } catch (_) { period = null; }
+      }
+    }
+
+    // The rest of the picker's periods are read with allSettled, NOT all: one
+    // unreadable old period must not brick the whole screen, but it must not be
+    // silently dropped from "what is still owing" either — the ones that failed
+    // are named in a banner of their own.
+    const others = periods.filter(p => p !== selected);
+    const settled = await Promise.allSettled(others.map(p => window.Payroll.load(p)));
+    const byPeriod = {}; const unreadable = [];
+    byPeriod[selected] = period;
+    others.forEach((p, i) => {
+      if (settled[i].status === 'fulfilled') byPeriod[p] = settled[i].value || null;
+      else { byPeriod[p] = undefined; unreadable.push(p); }
+    });
+
+    const state   = _pyStateOf(period);
+    const lines   = (period && Array.isArray(period.lines)) ? period.lines : [];
+    const reads   = lines.map(_pyRead);
+    const cols    = _pyColsFor(reads);
+    const tot     = _pyTotals(reads);
+    const notPaid = _pyNotPaidList(period);
+    const problems = _pyProblems(period, reads, notPaid, selected);
+    const label   = _pyLabel(selected);
+
+    // Row actions live on the ROSTER ROW, never in a menu somewhere else — that
+    // is the owner's rule about flexibility not arriving as more surface area.
+    // Which ones are live depends only on the state:
+    //   'notstarted'/'prepared' — hold, adjust, add a one-off
+    //   'checked'               — nothing (the figures are locked; that is what
+    //                             "checked" means, and unlocking is a deliberate
+    //                             act with its own control)
+    //   'paid'                  — correct this person, and nothing else
+    const canEditRows   = canPrepare && (state === 'notstarted' || state === 'prepared');
+    const canCorrectRow = canPay && state === 'paid';
+
+    root.innerHTML = `
+      <div class="py-head">
+        <select id="py-period" aria-label="Pay period">${_pyPeriodOptions(periods, byPeriod, owing)}</select>
+        <!-- The title REPEATS the visible label. A title that only carries the
+             explanation becomes the button's accessible name and a screen
+             reader then announces something the sighted label does not say. -->
+        <button class="btn-secondary btn-sm" id="py-thisweek" title="This week — jump to the week that contains today">This week</button>
+      </div>
+
+      <div id="py-headline"></div>
+      <div id="py-unreadable"></div>
+      <div id="py-waiting" style="margin-bottom:14px"></div>
+      <!-- PROBLEMS BEFORE THE BUTTON, deliberately. The button is the thing
+           that costs money; anything the system is unsure about has to have
+           been read before the eye reaches it. The button sits above the
+           roster rather than below it only so that it is reachable without
+           scrolling past thirty people — the sentences it needs to be read
+           after are the ones directly above it. -->
+      <div id="py-problems" style="margin-bottom:14px"></div>
+      <div id="py-action" style="margin-bottom:14px"></div>
+      <div id="py-roster"></div>
+    `;
+
+    _pyPaintHeadline(root.querySelector('#py-headline'), period, state, label, tot, reads, notPaid);
+    _pyPaintUnreadable(root.querySelector('#py-unreadable'), unreadable, owingError);
+    _pyPaintWaiting(root.querySelector('#py-waiting'), owing, byPeriod);
+    _pyPaintAction(root.querySelector('#py-action'), { period, state, label, tot, reads, notPaid });
+    _pyPaintProblems(root.querySelector('#py-problems'), problems);
+    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label });
+
+    if (window.lucide) lucide.createIcons({ nodes: [root] });
+    _pyBind({ period, state, label, reads, notPaid, tot, canEditRows, canCorrectRow });
+  }
+
+  function _pyStateOf(period) {
+    const s = period && period.state;
+    return PY_STATES.includes(s) ? s : 'notstarted';
+  }
+
+  // ── The picker ───────────────────────────────────────────────────────────
+  // Every option carries its own state and total, so the answer to "what have I
+  // not paid" is in the list itself and not behind a click. A period that could
+  // not be read says so rather than silently reading as empty.
+  function _pyPeriodOptions(periods, byPeriod, owing) {
+    const owingBy = {};
+    (owing || []).forEach(o => { const id = o && (o.periodId || o.id); if (id) owingBy[id] = o; });
+    return periods.map(p => {
+      const rec = byPeriod[p];
+      let suffix;
+      if (rec === undefined) {
+        suffix = ' · could not be read';
+      } else {
+        // The state word is shown VERBATIM, never abbreviated, so an option is
+        // already near the width a select can display at 375px. The TOTAL is
+        // therefore not put inside the option — it lives in full immediately
+        // below, in the headline for the period on screen and in the
+        // "not yet paid" card for every period still owing. Measured, not
+        // guessed: a native select clips its own closed label with no way to
+        // opt out, and a clipped peso figure is a wrong peso figure.
+        suffix = ` · ${PY_STATE_WORDS[_pyStateOf(rec)]}`;
+      }
+      return `<option value="${_pyEsc(p)}"${p === selected ? ' selected' : ''}>${_pyEsc(_pyLabel(p))}${_pyEsc(suffix)}</option>`;
+    }).join('');
+  }
+
+  // ── One sentence: what is waiting, with the money in it ──────────────────
+  function _pyPaintHeadline(el, period, state, label, tot, reads, notPaid) {
+    if (!el) return;
+    const n = reads.length;
+    const people = `${n} ${n === 1 ? 'person' : 'people'}`;
+    const money  = _pyPeso(tot.takeHome);
+    const held   = notPaid.length ? ` ${notPaid.length} ${notPaid.length === 1 ? 'person is' : 'people are'} not being paid this period — the reasons are on the roster.` : '';
+    const backfilled = (period && period.backfill)
+      ? `<div class="py-sub" style="margin-top:6px">${_pyIcon('🗂', 14)} <strong>Entered by hand for a past period.</strong> These figures were typed in from records kept outside the app, not produced by a live payday.</div>` : '';
+    let text;
+    if (!period || state === 'notstarted') {
+      text = canPrepare
+        ? `${_pyEsc(label)} has not been started yet.`
+        : `${_pyEsc(label)} has not been started yet. HR starts it.`;
+    } else if (state === 'prepared') {
+      text = `${_pyEsc(label)} is ready to check — ${_pyEsc(people)}, ${_pyEsc(money)}.`;
+    } else if (state === 'checked') {
+      const by = (period.checkedByName || period.checkedBy || '');
+      text = `${_pyEsc(label)} is checked and waiting for payment — ${_pyEsc(people)}, ${_pyEsc(money)}.`
+           + (by ? ` <span style="font-weight:400;color:var(--text-muted)">Checked by ${_pyEsc(by)}.</span>` : '');
+    } else {
+      const at = period.paidAt ? (window.fmtManila ? window.fmtManila(period.paidAt) : '') : '';
+      const by = (period.paidByName || period.paidBy || '');
+      text = `${_pyEsc(label)} is paid — ${_pyEsc(people)}, ${_pyEsc(money)}.`
+           + `<span style="font-weight:400;color:var(--text-muted)">${at ? ' ' + _pyEsc(at) + '.' : ''}${by ? ' Paid by ' + _pyEsc(by) + '.' : ''}</span>`;
+    }
+    el.innerHTML = `<div class="card" style="margin-bottom:14px"><div class="card-body">
+        <div class="py-headline">${text}</div>
+        <div class="py-sub" style="margin-top:6px;margin-bottom:0">
+          <span class="badge ${state === 'paid' ? 'badge-green' : state === 'checked' ? 'badge-blue' : state === 'prepared' ? 'badge-amber' : 'badge-gray'}" style="font-size:10px">${_pyEsc(PY_STATE_WORDS[state])}</span>
+          ${held ? _pyEsc(held) : ''}
+        </div>
+        ${backfilled}
+      </div></div>`;
+  }
+
+  // A period in the list whose read FAILED. Named, never swallowed — the whole
+  // point of the list is that a missed period cannot hide, and "it would not
+  // load" is not the same as "there is nothing there".
+  function _pyPaintUnreadable(el, unreadable, owingError) {
+    if (!el) return;
+    if (!unreadable.length && !owingError) { el.innerHTML = ''; return; }
+    const bits = [];
+    if (owingError) bits.push('The list of periods still owing could not be read, so the card below may be incomplete.');
+    if (unreadable.length) bits.push(`${unreadable.length} period${unreadable.length === 1 ? '' : 's'} could not be read: ${unreadable.map(_pyLabel).join(', ')}. Their state and totals are unknown — they are not shown as paid.`);
+    el.innerHTML = `<div class="card" style="margin-bottom:14px;border-left:3px solid var(--danger)"><div class="card-body">
+      <div style="font-weight:700;font-size:13px;color:var(--danger);margin-bottom:4px">${_pyIcon('⚠️', 16)} Some periods could not be read</div>
+      <div style="font-size:12px;line-height:1.6">${_pyEsc(bits.join(' '))}</div>
+    </div></div>`;
+  }
+
+  // ── Everything still owing, oldest first, WITH ITS MONEY ─────────────────
+  // Fifty-two weeks and twelve months a year is how an unpaid period hides.
+  // This card is also where the period picker's totals live: the select above
+  // cannot carry a peso figure at 375px without the browser clipping it, so
+  // every period still owing states its own total here instead, wrapping, in
+  // full. The period on screen is in the list too — marked, not hidden — so
+  // this is one honest list of what is outstanding rather than a list with a
+  // hole in it exactly where you happen to be standing.
+  function _pyPaintWaiting(el, owing, byPeriod) {
+    if (!el) return;
+    const rows = (owing || [])
+      .map(o => ({ id: (o && (o.periodId || o.id)) || '', state: (o && o.state) || 'notstarted', total: (o && typeof o.total === 'number') ? o.total : null }))
+      .filter(o => o.id)
+      .sort((a, b) => (_pySortKey(a.id) < _pySortKey(b.id) ? -1 : 1));
+    if (!rows.length) {
+      el.innerHTML = `<div class="info-banner">${_pyIcon('✓', 16)} Nothing else is waiting to be paid.</div>`;
+      return;
+    }
+    const html = rows.map(o => {
+      const rec = byPeriod[o.id];
+      const t = (rec && Array.isArray(rec.lines)) ? _pyTotals(rec.lines.map(_pyRead)) : null;
+      const money = t && t.people ? `${t.people} ${t.people === 1 ? 'person' : 'people'} · ${_pyPeso(t.takeHome)}`
+                  : (o.total != null ? _pyPeso(o.total) : 'no roster yet');
+      const here = (o.id === selected);
+      return `<div class="py-waiting-row">
+        <div class="py-wlabel">
+          <strong>${_pyEsc(_pyLabel(o.id))}</strong>
+          <span class="badge ${o.state === 'checked' ? 'badge-blue' : o.state === 'prepared' ? 'badge-amber' : 'badge-gray'}" style="font-size:10px;margin-left:6px">${_pyEsc(PY_STATE_WORDS[o.state] || o.state)}</span>
+          <div class="py-sub" style="margin-bottom:0">${_pyEsc(money)}${here ? ' · on screen now' : ''}</div>
+        </div>
+        ${here ? '' : `<button class="btn-secondary btn-sm py-open" data-period="${_pyEsc(o.id)}">Open</button>`}
+      </div>`;
+    }).join('');
+    el.innerHTML = `<div class="card"><div class="card-header"><h3>${rows.length} period${rows.length === 1 ? '' : 's'} not yet paid</h3></div><div class="card-body">${html}</div></div>`;
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  THE ONE BUTTON
+  //  Two exist in the whole flow and you only ever see one. Each is named for
+  //  what it does and says what it costs BEFORE the press — the cost sentence
+  //  sits beside the button, not inside a confirmation nobody reads.
+  // ═════════════════════════════════════════════════════════
+  function _pyPaintAction(el, o) {
+    if (!el) return;
+    const { period, state, label, tot, reads, notPaid } = o;
+    const n = reads.length;
+    const people = `${n} ${n === 1 ? 'person' : 'people'}`;
+    let body = '';
+
+    if (state === 'notstarted') {
+      body = canPrepare
+        ? `<div class="py-cost">Nothing has been worked out for ${_pyEsc(label)} yet. Opening it builds the roster on its own — if this stays empty, nobody is on the roster for this period.</div>`
+        : `<div class="py-cost">${_pyEsc(label)} has not been started. HR starts it and tells Finance when the hours are right.</div>`;
+    } else if (state === 'prepared') {
+      if (canPrepare) {
+        body = `<button class="btn-primary py-bigbtn" id="py-check-btn">Hours are correct - send to Finance</button>
+          <div class="py-cost">${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}${notPaid.length ? `, and ${notPaid.length} not being paid` : ''}. Pressing this tells Finance the figures are ready and locks them so nobody can change an amount underneath them. You or the President can unlock it again.</div>`;
+      } else {
+        body = `<div class="py-cost">HR is still checking the hours for ${_pyEsc(label)}. You will be told when it is ready to pay.</div>`;
+      }
+    } else if (state === 'checked') {
+      if (canPay) {
+        body = `<button class="btn-primary py-bigbtn" id="py-pay-btn">Pay everyone</button>
+          <div class="py-cost">${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}. You attach each person's receipt on the next screen, then one press pays them, books it, takes each advance instalment and writes every payslip. <strong>It cannot be undone</strong> — afterwards a mistake is fixed one person at a time.</div>
+          <button class="btn-secondary btn-sm" id="py-reopen-btn">Send back to HR for changes</button>`;
+      } else {
+        body = `<div class="py-cost">${_pyEsc(label)} is checked and waiting for Finance to pay it. ${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}.</div>`;
+      }
+    } else {
+      body = `<div class="py-cost">${_pyEsc(label)} is paid and closed. To fix one person, use <strong>Correct this person</strong> on their row — it reverses only their part and reissues only their payslip.</div>`;
+    }
+
+    el.innerHTML = `<div class="card"><div class="card-body"><div class="py-actbar">${body}</div></div></div>`;
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  PROBLEMS FIRST, IN SENTENCES
+  //  "Ramon - no punch Tuesday", not a red dot on a cell. Every one of these is
+  //  read off the frozen line; not one of them recalculates a peso. Each row
+  //  carries the person's name and a Fix that opens THEIR figures.
+  // ═════════════════════════════════════════════════════════
+  function _pyProblems(period, reads, notPaid, periodId) {
+    const out = [];
+    const kind = _pyKind(periodId);
+    let days = [];
+    if (kind === 'week' && typeof window.payWeekDays === 'function') {
+      try { days = window.payWeekDays(periodId) || []; } catch (_) { days = []; }
+    }
+
+    // The people the system refused to pay because it does not KNOW something.
+    notPaid.forEach(p => {
+      if (p.words.danger) out.push({ severity: 'danger', id: p.id, text: `${p.name} - ${p.words.short.toLowerCase()}. ${p.words.note}` });
+    });
+
+    reads.forEach(r => {
+      // A day with no punch. This is the single most common event and the one
+      // the owner named: absent-unless-punched is the ruling, so an unpunched
+      // day is unpaid until somebody records a reason for it.
+      const missing = [];
+      r.rows.forEach((row, i) => {
+        if (row && row.absent === true && !(row.override || row.overridden)) {
+          missing.push(days[i] ? PY_DAY_NAMES[i] || days[i] : (PY_DAY_NAMES[i] || `day ${i + 1}`));
+        }
+      });
+      if (missing.length) {
+        out.push({
+          severity: 'warn', id: r.id,
+          text: `${r.name} - no punch ${missing.join(', ')}. ${missing.length === 1 ? 'That day is' : 'Those days are'} unpaid unless you record why ${missing.length === 1 ? 'it' : 'they'} should be paid.`
+        });
+      } else if (r.daysAbsent != null && r.daysAbsent > 0 && !r.rows.length) {
+        out.push({ severity: 'warn', id: r.id, text: `${r.name} - ${r.daysAbsent} day${r.daysAbsent === 1 ? '' : 's'} absent. ${r.daysAbsent === 1 ? 'It is' : 'They are'} unpaid unless you record why ${r.daysAbsent === 1 ? 'it' : 'they'} should be paid.` });
+      }
+      // Nothing to pay. Always worth a sentence: it is either right (they did
+      // not work) or it is the silent-zero this whole design exists to stop.
+      if (r.takeHome != null && r.takeHome <= 0) {
+        out.push({ severity: 'danger', id: r.id, text: `${r.name} - nothing to pay after deductions (${_pyPeso(r.takeHome)}). Check the figures before this period is paid.` });
+      }
+      // An advance on the books with nothing coming off it this period.
+      if (r.caBalanceBefore != null && r.caBalanceBefore > 0 && !(r.cashAdv > 0)) {
+        out.push({ severity: 'warn', id: r.id, text: `${r.name} - advance of ${_pyPeso(r.caBalanceBefore)} outstanding, nothing collected this period.` });
+      }
+      if (r.caShortfall != null && r.caShortfall > 0) {
+        out.push({ severity: 'warn', id: r.id, text: `${r.name} - ${_pyPeso(r.caShortfall)} of their advance could not be collected this period; it stays on their balance.` });
+      }
+      if (!r.id) {
+        out.push({ severity: 'danger', id: '', text: `${r.name} - their record carries no id, so their figures cannot be changed from here.` });
+      }
+    });
+
+    // Whatever the engine itself flagged, verbatim.
+    const w = warningsByPeriod[periodId] || (period && period.warnings) || [];
+    (Array.isArray(w) ? w : []).forEach(x => {
+      const text = (typeof x === 'string') ? x : (x && (x.message || x.text)) || '';
+      if (text) out.push({ severity: (x && x.severity === 'danger') ? 'danger' : 'warn', id: (x && x.personId) || '', text });
+    });
+
+    // Anything that did NOT complete when the money moved is a person who was
+    // not paid. It can never be a line item under "things to look at".
+    const fails = (period && Array.isArray(period.failures)) ? period.failures : [];
+    fails.forEach(f => {
+      out.push({ severity: 'danger', id: _pyId(f), text: `${_pyName(f) || 'Someone'} - ${(f && (f.message || f.kind)) || 'this did not complete'}${(f && f.amount != null) ? ` (${_pyPeso(f.amount)})` : ''}. This did NOT go out.` });
+    });
+
+    // "Fix this" is only offered where there is something to fix FROM HERE —
+    // i.e. the person has a line in this period. Somebody with no rate on file
+    // is fixed on their profile, and a button that opens an empty form and
+    // changes nothing is worse than no button: it reads as "handled".
+    const onRoster = {}; reads.forEach(r => { if (r.id) onRoster[r.id] = true; });
+    out.forEach(p => { p.fixable = !!(p.id && onRoster[p.id]); });
+
+    return out.sort((a, b) => (a.severity === b.severity) ? 0 : (a.severity === 'danger' ? -1 : 1));
+  }
+
+  function _pyPaintProblems(el, problems) {
+    if (!el) return;
+    if (!problems.length) { el.innerHTML = ''; return; }
+    const dangers = problems.filter(p => p.severity === 'danger').length;
+    const rows = problems.map((p, i) => `<div class="py-problem">
+        <div class="py-ptext" style="${p.severity === 'danger' ? 'color:var(--danger)' : ''}">${_pyEsc(p.text)}</div>
+        ${p.fixable ? `<button class="btn-secondary btn-sm py-fix" data-person="${_pyEsc(p.id)}" data-idx="${i}">Fix this</button>` : ''}
+      </div>`).join('');
+    el.innerHTML = `<div class="card" style="border-left:3px solid ${dangers ? 'var(--danger)' : 'var(--warning)'}">
+      <div class="card-header"><h3>${problems.length} thing${problems.length === 1 ? '' : 's'} to look at first</h3></div>
+      <div class="card-body">${rows}</div></div>`;
+  }
+
+  // Everyone the period is not paying, from wherever the engine recorded them.
+  // Held people and refused people are the same list on screen on purpose: a
+  // separate collapsed list is how somebody gets forgotten.
+  function _pyNotPaidList(period) {
+    if (!period) return [];
+    const seen = {}; const out = [];
+    const push = (id, name, reason) => {
+      const key = id || ('name:' + name);
+      if (seen[key]) return; seen[key] = true;
+      // A person on hold is not in `lines`, so their name may not be anywhere
+      // on the record. Show the id rather than nothing — but SAY that it is an
+      // id, because a row that looks like a name and is not one is how the
+      // wrong person gets put back into a period.
+      out.push({ id: id || '', name: name || id || 'Unnamed person', nameUnknown: !name && !!id, reason: reason || '', words: _pyNotPaidWords(reason) });
+    };
+    // Names come from whatever the period already carries, so nobody is shown a
+    // raw document id.
+    const nameById = {};
+    [].concat(period.lines || [], period.skipped || [], period.notPaid || []).forEach(r => {
+      const id = _pyId(r); if (id && _pyName(r)) nameById[id] = _pyName(r);
+    });
+    const held = period.held;
+    if (Array.isArray(held)) held.forEach(h => push(_pyId(h), _pyName(h) || nameById[_pyId(h)], 'held:' + ((h && (h.reason || h.why)) || '')));
+    else if (held && typeof held === 'object') Object.keys(held).forEach(k => {
+      const v = held[k];
+      if (v === null || v === false || v === undefined) return;
+      const why = (typeof v === 'string') ? v : ((v && (v.reason || v.why)) || '');
+      push(k, nameById[k], 'held:' + why);
+    });
+    [].concat(period.skipped || [], period.notPaid || []).forEach(s => push(_pyId(s), _pyName(s), (s && (s.reason || s.why)) || ''));
+    return out;
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  THE ROSTER — one card per person, every figure visible
+  //  Not a table. Not .table-cards. Nothing behind a tap. The cards carry an
+  //  identical set of fields in an identical order, so on a wide screen the
+  //  figures line up into columns on their own, and at 375px the same card
+  //  simply stacks into two columns of label/value with nothing removed.
+  //  Order: the people with something to look at, then everyone else, then the
+  //  people who are not being paid — with the reason in words, and a way back.
+  // ═════════════════════════════════════════════════════════
+  function _pyPaintRoster(el, ctx) {
+    if (!el) return;
+    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label } = ctx;
+
+    if (!period || (!reads.length && !notPaid.length)) {
+      el.innerHTML = `<div class="empty-state">
+        <div class="empty-icon">${_pyIcon('👥', 40)}</div>
+        <h4>Nobody is on the roster for ${_pyEsc(label)}</h4>
+        <p>${canPrepare
+          ? 'No one was found to pay for this period. Check that people have a rate and are marked as being paid, then open this period again.'
+          : 'No one has been worked out for this period yet.'}</p>
+      </div>`;
+      return;
+    }
+
+    // Flagged first — the owner's rule that rows the system is unsure about sit
+    // at the top. Flagged means: nothing to pay, an unpunched day, or an
+    // advance that did not collect. Same tests as the sentences above; the two
+    // must never disagree.
+    const flagged = (r) => (r.takeHome != null && r.takeHome <= 0)
+      || r.rows.some(row => row && row.absent === true && !(row.override || row.overridden))
+      || (r.caBalanceBefore != null && r.caBalanceBefore > 0 && !(r.cashAdv > 0))
+      || !r.id;
+    const ordered = reads.slice().sort((a, b) => {
+      const fa = flagged(a) ? 0 : 1, fb = flagged(b) ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      return String(a.name).localeCompare(String(b.name));
+    });
+
+    const cards = ordered.map(r => _pyPersonCard(r, cols, { canEditRows, canCorrectRow, flagged: flagged(r) })).join('');
+    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period) : '';
+    const notPaidCards = notPaid.map(p => _pyNotPaidCard(p, canEditRows)).join('');
+
+    el.innerHTML = totalsCard + cards + (notPaid.length
+      ? `<div style="font-size:12px;color:var(--text-muted);margin:16px 0 8px">${notPaid.length} not being paid for ${_pyEsc(label)}</div>` + notPaidCards
+      : '');
+  }
+
+  function _pyFieldHtml(col, r) {
+    const nil = '<span class="py-nil">—</span>';
+    let val = nil, note = '', cls = '';
+    if (col.key === 'days') {
+      if (r.daysWorked != null || r.daysAbsent != null) {
+        val = `${(+r.daysWorked || 0)} worked`;
+        if (r.daysAbsent) note = `${r.daysAbsent} absent`;
+      }
+    } else if (col.key === 'regHours' || col.key === 'otHours' || col.key === 'travelHours') {
+      if (r[col.key] != null) val = _pyHrs(r[col.key]);
+      if (col.key === 'travelHours' && (+r.travelHours || 0) > 0) note = 'paid at half rate';
+    } else if (col.key === 'takeHome') {
+      if (r.takeHome != null) { val = _pyPeso(r.takeHome); cls = (r.takeHome > 0) ? 'py-plus' : 'py-minus'; }
+    } else if (col.key === 'allowances') {
+      if (r.allowances != null) { val = (r.allowances ? '+' : '') + _pyPeso(r.allowances); cls = r.allowances ? 'py-plus' : ''; }
+    } else if (col.key === 'oneOffNet') {
+      if (r.oneOffNet != null) { val = (r.oneOffNet > 0 ? '+' : '') + _pyPeso(r.oneOffNet); cls = r.oneOffNet >= 0 ? 'py-plus' : 'py-minus'; }
+    } else if (col.key === 'otherDed' || col.key === 'statutory' || col.key === 'cashAdv') {
+      if (r[col.key] != null) { val = (r[col.key] ? '-' : '') + _pyPeso(r[col.key]); cls = r[col.key] ? 'py-minus' : ''; }
+      if (col.key === 'cashAdv' && r.caBalanceBefore != null && (+r.cashAdv || 0) > 0) {
+        note = `balance ${_pyPeso(r.caBalanceBefore)} → ${_pyPeso(r.caBalanceAfter != null ? r.caBalanceAfter : (r.caBalanceBefore - r.cashAdv))}`;
+      }
+    } else if (r[col.key] != null) {
+      val = _pyPeso(r[col.key]);
+    }
+    return `<div class="py-f${col.key === 'takeHome' ? ' py-f-net' : ''}">
+      <span class="py-f-label">${_pyEsc(col.label)}</span>
+      <span class="py-f-val ${cls}">${val}</span>
+      ${note ? `<span class="py-f-note">${_pyEsc(note)}</span>` : ''}
+    </div>`;
+  }
+
+  function _pyPersonCard(r, cols, o) {
+    const sub = [];
+    if (r.rate != null) sub.push(`${_pyPeso(r.rate)}/hr${r.rateSource ? ' · ' + r.rateSource : ''}`);
+    else if (r.monthlySalary != null) sub.push(`${_pyPeso(r.monthlySalary)} a month`);
+    if (r.daysOverridden) sub.push(`${r.daysOverridden} day${r.daysOverridden === 1 ? '' : 's'} paid on a recorded reason`);
+    if (!r.id) sub.push('no id on this record — it cannot be changed from here');
+    const oneOffLines = r.oneOffs.length
+      ? `<div class="py-oneoff">${r.oneOffs.map(x => `${_pyEsc(x.label || 'One-off')}: ${x.kind === 'deduction' ? '-' : '+'}${_pyEsc(_pyPeso(x.amount))}`).join(' · ')}</div>`
+      : '';
+    const acts = [];
+    if (o.canEditRows && r.id) {
+      acts.push(`<button class="btn-secondary btn-sm py-adjust" data-person="${_pyEsc(r.id)}">Adjust figures</button>`);
+      acts.push(`<button class="btn-secondary btn-sm py-oneoff-btn" data-person="${_pyEsc(r.id)}">Add a one-off amount</button>`);
+      acts.push(`<button class="btn-secondary btn-sm py-hold" data-person="${_pyEsc(r.id)}" data-name="${_pyEsc(r.name)}">Hold this period</button>`);
+    }
+    if (o.canCorrectRow && r.id) {
+      acts.push(`<button class="btn-secondary btn-sm py-correct" data-person="${_pyEsc(r.id)}" data-name="${_pyEsc(r.name)}">Correct this person</button>`);
+    }
+    return `<article class="py-card${o.flagged ? ' py-flagged' : ''}${(r.takeHome != null && r.takeHome <= 0) ? ' py-danger' : ''}">
+      <div class="py-who"><strong>${_pyEsc(r.name)}</strong>${r.backfill ? '<span class="badge badge-gray" style="font-size:10px">entered by hand</span>' : ''}</div>
+      ${sub.length ? `<div class="py-sub">${_pyEsc(sub.join(' · '))}</div>` : '<div class="py-sub"></div>'}
+      <div class="py-fields">${cols.map(c => _pyFieldHtml(c, r)).join('')}</div>
+      ${oneOffLines}
+      ${acts.length ? `<div class="py-rowacts">${acts.join('')}</div>` : ''}
+    </article>`;
+  }
+
+  // The total, as the FIRST card. On the old monthly screen this figure lived
+  // only on a preview and vanished the moment the figures were frozen — exactly
+  // when somebody wanted to check it. Here it is drawn on every paint from the
+  // cards' own numbers, so it survives by construction and can never contradict
+  // the column above it.
+  function _pyTotalsCard(tot, cols, people, notPaidCount, period) {
+    const stored = _pyPick(
+      period && period.totals && period.totals.takeHome,
+      period && period.totals && period.totals.net,
+      period && period.totals && period.totals.total
+    );
+    // If the stored total and the sum of the printed cards disagree, SAY SO
+    // rather than pick one. They are the same money by two routes; a divergence
+    // is a defect, not a rounding taste.
+    const drift = (stored != null && Math.abs(stored - tot.takeHome) > 0.005)
+      ? `<div class="py-sub" style="color:var(--danger);margin:8px 0 0">The saved total (${_pyEsc(_pyPeso(stored))}) does not match the people above (${_pyEsc(_pyPeso(tot.takeHome))}). Do not pay this period until it does.</div>` : '';
+    const fake = {
+      id: '', name: '', rows: [], oneOffs: [],
+      daysWorked: tot.daysWorked, daysAbsent: tot.daysAbsent,
+      regHours: tot.regHours, otHours: tot.otHours, travelHours: tot.travelHours,
+      earnings: tot.earnings, allowances: tot.allowances, oneOffNet: tot.oneOffNet,
+      otherDed: tot.otherDed, statutory: tot.statutory, cashAdv: tot.cashAdv,
+      caBalanceBefore: null, caBalanceAfter: null, takeHome: tot.takeHome
+    };
+    return `<article class="py-card py-totals">
+      <div class="py-who"><strong>Everyone — ${people} ${people === 1 ? 'person' : 'people'}</strong></div>
+      <div class="py-sub">this is what goes out${notPaidCount ? ` · ${notPaidCount} not being paid` : ''}</div>
+      <div class="py-fields">${cols.map(c => _pyFieldHtml(c, fake)).join('')}</div>
+      ${drift}
+    </article>`;
+  }
+
+  function _pyNotPaidCard(p, canEditRows) {
+    return `<article class="py-card py-onhold${p.words.danger ? ' py-danger' : ''}">
+      <div class="py-who"><strong>${_pyEsc(p.name)}</strong>
+        <span class="badge ${p.words.danger ? 'badge-red' : 'badge-gray'}" style="font-size:10px">${_pyEsc(p.words.short)}</span></div>
+      <div class="py-sub" style="margin-bottom:0${p.words.danger ? ';color:var(--danger)' : ''}">${_pyEsc(p.words.note)}${p.nameUnknown ? ' Their name is not on this period’s record — what is shown above is their reference.' : ''}</div>
+      ${(canEditRows && p.words.undoable && p.id) ? `<div class="py-rowacts"><button class="btn-secondary btn-sm py-unhold" data-person="${_pyEsc(p.id)}" data-name="${_pyEsc(p.name)}">Put back in this period</button></div>` : ''}
+    </article>`;
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  BINDINGS — every lookup scoped to `root`, never document.
+  //  openPage keeps a dying panel in the DOM for ~300ms, so a document-wide
+  //  getElementById can land on a screen nobody can see and write this
+  //  person's figures onto that one.
+  // ═════════════════════════════════════════════════════════
+  function _pyBind(ctx) {
+    const { period, state, label, reads, tot } = ctx;
+    const readById = {}; reads.forEach(r => { if (r.id) readById[r.id] = r; });
+
+    root.querySelector('#py-period')?.addEventListener('change', (e) => load(e.target.value));
+    root.querySelector('#py-thisweek')?.addEventListener('click', () => load(thisWeekId));
+    root.querySelectorAll('.py-open').forEach(b => b.addEventListener('click', () => load(b.dataset.period)));
+
+    // ── HR's half of the handoff ───────────────────────────────────────────
+    root.querySelector('#py-check-btn')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      const ok = await confirmDialog({
+        title: 'Send to Finance?',
+        message: `${label}: ${reads.length} ${reads.length === 1 ? 'person' : 'people'}, ${_pyPeso(tot.takeHome)}. Finance is told straight away, and the figures lock so nobody can change an amount underneath them. You or the President can unlock it again.`,
+        confirmLabel: 'Send to Finance'
+      });
+      if (!ok) return;
+      try {
+        await window.Payroll.markHoursCorrect(selected);
+        Notifs.success('Sent to Finance — they have been told.');
+      } catch (e) {
+        Notifs.showToast(e && e.message ? e.message : 'This could not be sent to Finance.', 'error');
+      }
+      load(selected);
+    }));
+
+    // ── Finance's half ─────────────────────────────────────────────────────
+    // busy() wraps the OPEN too: it reads the company account list first, and a
+    // button that looks inert invites a second press.
+    root.querySelector('#py-pay-btn')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      try { await openPayPanel(period, reads, tot, label); }
+      catch (e) { Notifs.showToast(e && e.message ? e.message : 'The payment screen could not be opened.', 'error'); }
+    }));
+
+    root.querySelector('#py-reopen-btn')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      const ok = await confirmDialog({
+        title: 'Send back to HR?',
+        message: `${label} goes back to HR so the figures can be changed. Nothing has been paid, and nothing is lost — HR sends it back to you when it is right.`,
+        confirmLabel: 'Send back to HR'
+      });
+      if (!ok) return;
+      try { await window.Payroll.reopen(selected); Notifs.success('Sent back to HR.'); }
+      catch (e) { Notifs.showToast(e && e.message ? e.message : 'This could not be sent back.', 'error'); }
+      load(selected);
+    }));
+
+    // ── The four things the owner asked for, each ON A ROW ─────────────────
+    root.querySelectorAll('.py-adjust').forEach(b => b.addEventListener('click', () =>
+      openAdjustPanel(period, readById[b.dataset.person], b.dataset.person, label)));
+
+    root.querySelectorAll('.py-fix').forEach(b => b.addEventListener('click', () =>
+      openAdjustPanel(period, readById[b.dataset.person], b.dataset.person, label)));
+
+    root.querySelectorAll('.py-oneoff-btn').forEach(b => b.addEventListener('click', () =>
+      openOneOffPanel(readById[b.dataset.person], b.dataset.person, label)));
+
+    root.querySelectorAll('.py-correct').forEach(b => b.addEventListener('click', () =>
+      openCorrectPanel(period, readById[b.dataset.person], b.dataset.person, label)));
+
+    root.querySelectorAll('.py-hold').forEach(b => b.addEventListener('click', () => window.busy(b, async () => {
+      const name = b.dataset.name || 'this person';
+      // A reason is the whole point of the record.
+      const reason = await window.promptDialog({
+        title: 'Hold this period',
+        message: `Why is ${name} not being paid for ${label}? This is recorded, and it applies to ${label} ONLY — next period they are back on the roster and you decide again.`,
+        placeholder: 'e.g. did not work / already paid separately / on unpaid leave',
+        confirmLabel: 'Hold for this period',
+        required: true
+      });
+      if (reason === null) return;
+      if (!String(reason).trim()) { Notifs.showToast('A reason is needed.', 'error'); return; }
+      try {
+        await window.Payroll.setHeld(selected, b.dataset.person, String(reason).trim());
+        await _pyRefreshFigures();
+        Notifs.success(`${name} is on hold for ${label}.`);
+      } catch (e) { Notifs.showToast(e && e.message ? e.message : 'The hold could not be saved.', 'error'); }
+      load(selected);
+    })));
+
+    root.querySelectorAll('.py-unhold').forEach(b => b.addEventListener('click', () => window.busy(b, async () => {
+      const name = b.dataset.name || 'this person';
+      if (!(await confirmDialog({ message: `Put ${name} back into ${label}?` }))) return;
+      try {
+        await window.Payroll.setHeld(selected, b.dataset.person, null);
+        await _pyRefreshFigures();
+        Notifs.success(`${name} is back in ${label}.`);
+      } catch (e) { Notifs.showToast(e && e.message ? e.message : 'The hold could not be lifted.', 'error'); }
+      load(selected);
+    })));
+  }
+
+  // After anything that changes an input, the figures are rebuilt for you.
+  // This is deliberately NOT a button: the owner's rule is that the step count
+  // goes down, and "now press the other button to make your change count" is
+  // exactly the ceremony the old screens had. Only ever runs while the period
+  // is still open — a checked or paid period is frozen on purpose.
+  async function _pyRefreshFigures() {
+    try {
+      const p = await window.Payroll.load(selected);
+      const st = _pyStateOf(p);
+      if (st === 'notstarted' || st === 'prepared') {
+        const res = await window.Payroll.prepare(selected);
+        warningsByPeriod[selected] = (res && res.warnings) || [];
+      }
+    } catch (_) {
+      // Saved either way. The next paint reads the stored figures and the
+      // problems list says whatever is still wrong — swallowing this is safe
+      // precisely because nothing here is the source of a number.
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  ADJUST ONE PERSON'S FIGURES
+  //  The owner's "change one person without touching everyone else". Amounts
+  //  that live nowhere but here — the allowance, the standing deduction, the
+  //  advance instalment — plus, on a weekly period, the per-day reason that
+  //  turns an unpunched day into a paid one.
+  // ═════════════════════════════════════════════════════════
+  function openAdjustPanel(period, r, personId, label) {
+    if (!personId) { Notifs.showToast('This record carries no id, so its figures cannot be changed from here.', 'error'); return; }
+    const name = (r && r.name) || personId;
+    const kind = _pyKind(selected);
+    const adj  = ((period && period.adjustments) || {})[personId] || {};
+    const savedOvr = adj.overrides || {};
+    let days = [];
+    if (kind === 'week' && typeof window.payWeekDays === 'function') {
+      try { days = window.payWeekDays(selected) || []; } catch (_) { days = []; }
+    }
+    const lineRows = (r && r.rows) || [];
+
+    const dayRowsHtml = days.map((iso, i) => {
+      const row = lineRows[i] || {};
+      const o   = savedOvr[iso] || {};
+      const punched = _pyHrs(row.hours) + ' hrs' + ((+row.otHours || 0) ? ` + ${_pyHrs(row.otHours)} overtime` : '');
+      const absent  = row.absent === true;
+      return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:2px">${_pyEsc(PY_DAY_NAMES[i] || '')} <span style="font-weight:400;color:var(--text-muted);font-size:11px">${_pyEsc(iso)}</span></div>
+        <div style="font-size:11px;margin-bottom:8px;color:${absent ? 'var(--danger)' : 'var(--text-muted)'}">${absent ? 'no punch — not paid' : _pyEsc(punched)}</div>
+        <div class="form-row">
+          <div class="form-group"><label>Hours to pay</label><input id="pya-h-${i}" type="number" step="0.25" min="0" inputmode="decimal" value="${o.hours != null ? _pyEsc(o.hours) : ''}" placeholder="—"/></div>
+          <div class="form-group"><label>Overtime hours</label><input id="pya-ot-${i}" type="number" step="0.25" min="0" inputmode="decimal" value="${o.otHours != null ? _pyEsc(o.otHours) : ''}" placeholder="—"/></div>
+        </div>
+        <div class="form-group"><label>Why is this day being paid? (needed)</label><input id="pya-r-${i}" type="text" value="${_pyEsc(o.reason || '')}" placeholder="e.g. worked, phone died / on site, no gate"/></div>
+      </div>`;
+    }).join('');
+
+    // The keys sent to setAdjustment are the ones the underlying engines
+    // already store, per period kind. They are listed in ONE place so a rename
+    // is one edit, and they are named in the handoff notes for this build.
+    const moneyFields = (kind === 'week')
+      ? [['rentAllowance',   'Allowance (₱)',          adj.rentAllowance],
+         ['otherDeductions', 'Other deductions (₱)',   adj.otherDeductions],
+         ['caDeduction',     'Advance instalment (₱)', adj.caDeduction],
+         ['travelHours',     'Travel hours',           adj.travelHours]]
+      : [['allowance',       'Allowance (₱)',          adj.allowance],
+         ['otherDeductions', 'Other deductions (₱)',   adj.otherDeductions],
+         ['caPlanned',       'Advance instalment (₱)', adj.caPlanned]];
+
+    const panel = openPage(`${_pyEsc(name)} — ${_pyEsc(label)}`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        These apply to <strong>${_pyEsc(label)}</strong> only, and to ${_pyEsc(name)} only. Everyone else is untouched.
+        The figures are worked out again as soon as you save.
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Amounts for this period</div>
+        <div class="form-row">
+          ${moneyFields.map(([k, lab, v]) => `<div class="form-group"><label>${_pyEsc(lab)}</label>
+            <input id="pya-${_pyEsc(k)}" type="number" step="0.01" min="0" inputmode="decimal" value="${v != null ? _pyEsc(v) : ''}" placeholder="0.00"/></div>`).join('')}
+        </div>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:6px">
+          An advance instalment is capped so take-home pay can never go below zero; anything not collected stays on the balance.
+          ${kind === 'week' ? 'Travel hours are paid at half the hourly rate.' : ''}
+        </div>
+      </div>
+      ${days.length ? `<div style="background:var(--surface2);border-radius:10px;padding:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Days</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+          No clock-in means the day is not paid. You can pay it anyway — but only with a reason written down, because money moving with nobody accountable for it is how this goes wrong.
+        </div>
+        ${dayRowsHtml}
+      </div>` : ''}
+    `, `<button class="btn-primary" id="pya-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    // ⚠ SCOPED TO THIS PANEL, NOT document. Two panels can carry the same ids
+    // at once inside openPage's ~300ms teardown; a document-wide lookup reads
+    // the PREVIOUS person's fields and writes them onto THIS person.
+    const $ = (id) => panel.querySelector('#' + id);
+    // ⚠ AN UNTOUCHED BOX IS NEVER SENT — this is a MONEY rule, not tidiness.
+    // Some of these amounts can also come from the person's own profile rather
+    // than from this period. If a blank box were sent as an explicit 0, opening
+    // somebody's figures and pressing Save without typing anything would write
+    // a zero over their standing allowance and quietly cut their pay. So a key
+    // is sent only when the box was TOUCHED, or when this period already held a
+    // value for it — in which case clearing the box IS meant as zero, and has
+    // to be sent as one, or an amount could be typed in and never taken back
+    // out. Both halves of that are money bugs; this is the one rule that avoids
+    // both.
+    const initial = {};
+    moneyFields.forEach(([k, , v]) => { initial[k] = (v != null) ? String(v) : ''; });
+    const readMoney = (k, hadStored) => {
+      const cur = $('pya-' + k)?.value;
+      if (cur == null) return undefined;                       // not in this form
+      if (String(cur) === initial[k] && !hadStored) return undefined;  // untouched and never set
+      const n = parseFloat(cur);
+      return Number.isFinite(n) ? n : (String(cur).trim() === '' ? 0 : undefined);
+    };
+    // ⚠ THE DAY GRID READS DIFFERENTLY FROM THE MONEY BOXES, and the difference
+    // is not cosmetic. For an amount, an emptied box means "make it zero". For
+    // a DAY, an empty box means "I am not touching this day" — there is no such
+    // thing as paying a day zero hours, that is just the day being absent.
+    // Reading a blank day as an explicit 0 made every one
+    // of the seven days look like an override of zero hours, so saving anything
+    // at all was refused with "Monday needs a reason" — caught by measurement,
+    // not by reading. Blank here means null, and null means untouched.
+    const dayNum = (id) => {
+      const v = $(id)?.value;
+      if (v == null || String(v).trim() === '') return null;
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    $('pya-save')?.addEventListener('click', () => window.busy($('pya-save'), async () => {
+      const overrides = {};
+      for (let i = 0; i < days.length; i++) {
+        const h  = dayNum(`pya-h-${i}`);
+        const ot = dayNum(`pya-ot-${i}`);
+        const rs = ($(`pya-r-${i}`)?.value || '').trim();
+        if (h === null && ot === null) continue;       // this day was not touched
+        if (!rs) {
+          // The engine refuses a reason-less override and treats the day as
+          // unpaid instead of quietly paying it. Collecting the reason here is
+          // what makes paying the day work at all.
+          Notifs.showToast(`${PY_DAY_NAMES[i] || days[i]} needs a reason before it can be paid.`, 'error');
+          return;
+        }
+        overrides[days[i]] = { hours: h || 0, otHours: ot || 0, reason: rs };
+      }
+      const patch = {};
+      moneyFields.forEach(([k, , stored]) => { const v = readMoney(k, stored != null); if (v !== undefined) patch[k] = v; });
+      if (days.length) patch.overrides = overrides;
+      try {
+        await window.Payroll.setAdjustment(selected, personId, patch);
+        await _pyRefreshFigures();
+        closeModal();
+        Notifs.success('Saved — the figures have been worked out again.');
+        load(selected);
+      } catch (e) {
+        Notifs.showToast(e && e.message ? e.message : 'This could not be saved.', 'error');
+      }
+    }));
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  A ONE-OFF AMOUNT
+  //  A bonus, 13th month, a penalty, a special allowance. Named, on the
+  //  payslip, and it never becomes part of anybody's standing figures. Today's
+  //  only route is inflating another field with a note, which produces a
+  //  payslip whose lines do not add up.
+  // ═════════════════════════════════════════════════════════
+  function openOneOffPanel(r, personId, label) {
+    if (!personId) { Notifs.showToast('This record carries no id, so nothing can be added to it from here.', 'error'); return; }
+    const name = (r && r.name) || personId;
+    const existing = (r && r.oneOffs) || [];
+    const panel = openPage(`One-off amount — ${_pyEsc(name)}`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        A single named amount for <strong>${_pyEsc(label)}</strong> only. It shows on ${_pyEsc(name)}'s payslip under the name you give it, and it does not carry into any other period.
+      </div>
+      ${existing.length ? `<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Already added this period</div>
+        ${existing.map(x => `<div style="font-size:13px;line-height:1.7">${_pyEsc(x.label || 'One-off')} — <strong class="${x.kind === 'deduction' ? 'py-minus' : 'py-plus'}">${x.kind === 'deduction' ? '-' : '+'}${_pyEsc(_pyPeso(x.amount))}</strong></div>`).join('')}
+      </div>` : ''}
+      <div class="form-group"><label>What is it?</label>
+        <input id="pyo-label" type="text" placeholder="e.g. 13th month, performance bonus, lost tool"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Amount (₱)</label>
+          <input id="pyo-amount" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00"/></div>
+        <div class="form-group"><label>Added or taken off?</label>
+          <select id="pyo-kind" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);width:100%">
+            <option value="earning">Added to their pay</option>
+            <option value="deduction">Taken off their pay</option>
+          </select></div>
+      </div>
+    `, `<button class="btn-primary" id="pyo-save">Add it</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    const $ = (id) => panel.querySelector('#' + id);
+    $('pyo-save')?.addEventListener('click', () => window.busy($('pyo-save'), async () => {
+      const lbl = ($('pyo-label')?.value || '').trim();
+      const amt = parseFloat($('pyo-amount')?.value);
+      const knd = $('pyo-kind')?.value === 'deduction' ? 'deduction' : 'earning';
+      if (!lbl) { Notifs.showToast('Give it a name so it can be read on the payslip.', 'error'); return; }
+      if (!Number.isFinite(amt) || amt <= 0) { Notifs.showToast('Enter an amount above zero.', 'error'); return; }
+      try {
+        await window.Payroll.addOneOff(selected, personId, { label: lbl, amount: amt, kind: knd });
+        await _pyRefreshFigures();
+        closeModal();
+        Notifs.success(`${lbl} added for ${name}.`);
+        load(selected);
+      } catch (e) {
+        Notifs.showToast(e && e.message ? e.message : 'This could not be added.', 'error');
+      }
+    }));
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  CORRECT ONE PERSON AFTER THEY HAVE BEEN PAID
+  //  The owner's "fix something after paying". It reverses that person's part
+  //  of the books, reissues that person's payslip, and leaves everyone else
+  //  exactly as they were. A reason is required because a correction after the
+  //  money moved is the one thing somebody will be asked about a year later.
+  // ═════════════════════════════════════════════════════════
+  function openCorrectPanel(period, r, personId, label) {
+    if (!personId) { Notifs.showToast('This record carries no id, so it cannot be corrected from here.', 'error'); return; }
+    const name = (r && r.name) || personId;
+    const kind = _pyKind(selected);
+    const fields = (kind === 'week')
+      ? [['rentAllowance',   'Allowance (₱)',          r && r.allowances],
+         ['otherDeductions', 'Other deductions (₱)',   r && r.otherDed],
+         ['caDeduction',     'Advance instalment (₱)', r && r.cashAdv],
+         ['travelHours',     'Travel hours',           r && r.travelHours]]
+      : [['allowance',       'Allowance (₱)',          r && r.allowances],
+         ['otherDeductions', 'Other deductions (₱)',   r && r.otherDed],
+         ['caPlanned',       'Advance instalment (₱)', r && r.cashAdv]];
+
+    const panel = openPage(`Correct ${_pyEsc(name)} — ${_pyEsc(label)}`, `
+      <div class="info-banner" style="margin-bottom:12px">
+        ${_pyEsc(name)} was paid ${_pyEsc(_pyPeso(r && r.takeHome))} for ${_pyEsc(label)}.
+        Saving a correction undoes that person's entry in the books, puts the new one in its place and reissues their payslip. <strong>Nobody else is touched.</strong>
+      </div>
+      <div class="form-row">
+        ${fields.map(([k, lab, v]) => `<div class="form-group"><label>${_pyEsc(lab)}</label>
+          <input id="pyc-${_pyEsc(k)}" type="number" step="0.01" min="0" inputmode="decimal" value="${v != null ? _pyEsc(v) : ''}" placeholder="0.00"/></div>`).join('')}
+      </div>
+      <div class="form-group"><label>Why is this being corrected? (needed)</label>
+        <input id="pyc-reason" type="text" placeholder="e.g. Tuesday was worked, missed on the first payment"/></div>
+      <div style="font-size:11px;color:var(--text-muted)">
+        The difference between what was paid and what is right is settled with ${_pyEsc(name)} outside the app — this fixes the record, the books and the payslip.
+      </div>
+    `, `<button class="btn-danger" id="pyc-save">Save the correction</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    const $ = (id) => panel.querySelector('#' + id);
+    $('pyc-save')?.addEventListener('click', () => window.busy($('pyc-save'), async () => {
+      const reason = ($('pyc-reason')?.value || '').trim();
+      if (!reason) { Notifs.showToast('A reason is needed for a change made after payment.', 'error'); return; }
+      // Only what actually CHANGED is sent. A correction that restated every
+      // figure would rewrite fields nobody touched, and after payment that is
+      // the difference between fixing one number and re-cutting the whole
+      // payslip from a form somebody skimmed.
+      const patch = { reason };
+      let changed = 0;
+      fields.forEach(([k, , was]) => {
+        const v = $('pyc-' + k)?.value;
+        if (v == null) return;
+        if (String(v) === (was != null ? String(was) : '')) return;
+        const n = parseFloat(v);
+        if (Number.isFinite(n)) { patch[k] = n; changed++; }
+        else if (String(v).trim() === '') { patch[k] = 0; changed++; }
+      });
+      if (!changed) { Notifs.showToast('Nothing has been changed yet — change a figure before saving.', 'error'); return; }
+      const ok = await confirmDialog({
+        title: 'Correct this person?',
+        message: `${name} only. Their entry in the books is undone and replaced, and their payslip is reissued. Everyone else on ${label} stays exactly as they are.`,
+        confirmLabel: 'Correct this person', danger: true
+      });
+      if (!ok) return;
+      try {
+        await window.Payroll.correctAfterPay(selected, personId, patch);
+        closeModal();
+        Notifs.success(`${name} corrected — their payslip has been reissued.`);
+        load(selected);
+      } catch (e) {
+        Notifs.showToast(e && e.message ? e.message : 'The correction could not be saved.', 'error');
+      }
+    }));
+  }
+
+  // ═════════════════════════════════════════════════════════
+  //  PAY EVERYONE — one press, one receipt PER PERSON
+  //  The receipts are collected here rather than after the fact because each
+  //  person's payslip carries their own proof of payment (owner ruling). The
+  //  same test the engine enforces is applied here too, so the refusal names
+  //  the people while the upload boxes are still on screen.
+  // ═════════════════════════════════════════════════════════
+  async function openPayPanel(period, reads, tot, label) {
+    const receipts = {};                       // { personId: {url, name} }
+    const needReceipt = reads.filter(r => (+r.takeHome || 0) > 0 && r.id);
+    const noId = reads.filter(r => !r.id);
+    let bankOpts = '';
+    try { bankOpts = window.BankAccounts ? await window.BankAccounts.optionsHTML() : ''; } catch (_) { bankOpts = ''; }
+
+    const rowsHtml = reads.map((r, i) => `<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <strong style="min-width:0;overflow-wrap:anywhere">${_pyEsc(r.name)}</strong>
+          <strong class="py-plus">${_pyEsc(_pyPeso(r.takeHome))}</strong>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px;overflow-wrap:anywhere">${
+          [r.regHours != null ? _pyHrs(r.regHours) + ' hrs' : null,
+           (+r.otHours || 0) ? _pyHrs(r.otHours) + ' overtime' : null,
+           (+r.cashAdv || 0) ? 'advance -' + _pyPeso(r.cashAdv) : null].filter(Boolean).map(_pyEsc).join(' · ')
+        }</div>
+        <div id="py-rcpt-${i}"></div>
+      </div>`).join('');
+
+    const panel = openPage(`Pay ${_pyEsc(label)}`, `
+      <p style="font-size:13px;margin-bottom:12px">
+        <strong>${_pyEsc(_pyPeso(tot.takeHome))}</strong> to ${reads.length} ${reads.length === 1 ? 'person' : 'people'}.
+        One press books it, takes each advance instalment, writes every payslip and records the money leaving. <strong>This cannot be undone.</strong>
+      </p>
+      ${noId.length ? `<div class="info-banner" style="margin-bottom:12px;border-left:3px solid var(--danger)">${noId.length} record${noId.length === 1 ? '' : 's'} carry no id and cannot be given a receipt here: ${_pyEsc(noId.map(r => r.name).join(', '))}.</div>` : ''}
+      ${bankOpts ? `<div class="form-group"><label>Paid from (company account)</label>
+        <select id="py-bankacct" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>` : ''}
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        Attach each person's own transfer receipt below — one each, printed on that person's payslip. Everyone with money going out needs one.
+      </div>
+      <div id="py-rcpt-count" style="font-size:12px;font-weight:700;margin-bottom:10px">0 of ${needReceipt.length} receipts attached</div>
+      ${rowsHtml}
+    `, `<button class="btn-danger" id="py-pay-go">Pay everyone</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    const $ = (id) => panel.querySelector('#' + id);
+    const refreshCount = () => {
+      const el = $('py-rcpt-count');
+      if (!el) return;
+      const n = needReceipt.filter(r => receipts[r.id] && receipts[r.id].url).length;
+      el.textContent = `${n} of ${needReceipt.length} receipts attached`;
+      el.style.color = (n >= needReceipt.length) ? 'var(--success)' : 'var(--warning)';
+    };
+    refreshCount();
+
+    // Drive.renderUploadArea takes an id STRING and resolves it through
+    // window.liveEl, which skips a dying panel — so the chooser mounts into the
+    // visible form. The ids are indexed rather than built from a person id,
+    // which can contain characters that are not valid in a selector.
+    reads.forEach((r, i) => {
+      if (!r.id || !window.Drive || !window.Drive.renderUploadArea) return;
+      window.Drive.renderUploadArea(`py-rcpt-${i}`, (res) => {
+        const url = (window.Drive.resolveUrl ? window.Drive.resolveUrl(res) : (res && (res.url || res.link))) || '';
+        receipts[r.id] = { url, name: (res && res.name) || 'receipt' };
+        refreshCount();
+      }, { label: 'Attach transfer receipt', dept: 'Finance', subfolder: 'payslips', accept: 'image/*,application/pdf' });
+    });
+
+    $('py-pay-go')?.addEventListener('click', () => window.busy($('py-pay-go'), async () => {
+      const missing = needReceipt.filter(r => !(receipts[r.id] && receipts[r.id].url));
+      if (missing.length) {
+        // Deliberately NOT an "attach later / pay anyway": the engine refuses
+        // the payment regardless, and a confirmation that leads to a refusal
+        // teaches people to click through confirmations.
+        await confirmDialog({
+          title: 'A receipt is missing',
+          message: `${missing.length} ${missing.length === 1 ? 'person has' : 'people have'} no transfer receipt yet: ${missing.map(r => r.name).join(', ')}. Each payslip carries its own proof of payment, so this cannot go out until every one is attached.`,
+          confirmLabel: 'OK', cancelLabel: 'Close'
+        });
+        return;
+      }
+      const ok = await confirmDialog({
+        title: 'Pay everyone?',
+        message: `${label}: ${reads.length} ${reads.length === 1 ? 'person' : 'people'}, ${_pyPeso(tot.takeHome)}. This cannot be undone. Afterwards a mistake is fixed one person at a time from their row.`,
+        confirmLabel: 'Pay everyone', danger: true
+      });
+      if (!ok) return;
+      const acct = (window.BankAccounts && $('py-bankacct'))
+        ? await window.BankAccounts.pick($('py-bankacct').value).catch(() => null)
+        : null;
+      try {
+        const res = await window.Payroll.pay(selected, receipts, acct ? { bankAccount: acct } : undefined);
+        closeModal();
+        const paid = (res && res.paid != null) ? res.paid : reads.length;
+        Notifs.success(`Paid — ${paid} ${paid === 1 ? 'person' : 'people'}.`);
+      } catch (e) {
+        Notifs.showToast(e && e.message ? e.message : 'The payment did not go through.', 'error');
+      }
+      load(selected);
+    }));
+  }
+
+  await load(null);
+};

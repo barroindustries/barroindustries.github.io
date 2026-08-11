@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.144 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.145 · Barro Industries</div>
   </div>
 </div>
 
@@ -590,6 +590,45 @@
      Workers screen instead of a blank pane). -->
 <script defer src="js/payroll-weekly.js"></script>
 <script defer src="js/screens/payroll-weekly-ui.js"></script>
+<!-- ═══ UNIFIED PAYROLL (PAYROLL-REDESIGN-BRIEF.md, owner ruling 2026-08-10) ══
+     "unify it as well, treat disbursement of office and operations the same,
+     the difference is just the system of computing their pay." ONE run concept
+     over both teams; payClass picks a COMPUTE STRATEGY for a line and nothing
+     else. Split engine-then-screen, the same shape as the weekly pair above:
+
+       js/payroll.js                    window.Payroll — the Firestore/state
+                                        layer over BOTH pay_runs/{YYYY-MM} and
+                                        pay_weeks/{YYYY-MM-DD}: load / prepare /
+                                        setHeld / setAdjustment / addOneOff /
+                                        markHoursCorrect / pay / reopen /
+                                        correctAfterPay. Touches no DOM.
+       js/screens/payroll.js            window.renderPayrollPage — THE payroll
+                                        screen. Both the Finance chip and the HR
+                                        card land here (js/screens/finance.js
+                                        loadFinanceContent case 'Payroll',
+                                        js/screens/hr.js renderPayrollScreen);
+                                        it calls ONLY the window.Payroll API.
+       js/screens/payroll-backfill.js   entering periods that were paid before
+                                        the system existed, on the same screen.
+
+     LOAD ORDER IS LOAD-BEARING and this position is the whole of it: AFTER
+     js/money-core.js (computePayLine / computeWeeklyLine / resolveWorkerHourly
+     Rate / payWeekMondayOf are the entire pay maths and are called by window.*
+     name), AFTER js/departments.js (escHtml, canEditDept, isMoneyPriv, the
+     Manila bizDate helpers, and the computePayRun / disbursePayRun engines this
+     wraps rather than duplicates), and AFTER js/payroll-weekly.js (window.
+     WeeklyRun, the other engine it wraps). Placed after js/screens/hr.js too,
+     so the screen can reach forward into that file's payslip builders the same
+     way payroll-weekly-ui.js does — at CLICK time only, never at parse time.
+     Both js/screens/finance.js and js/screens/hr.js resolve renderPayrollPage
+     by window.* name at NAV time and fall back to the old hub if it is absent,
+     so a load failure degrades to the previous screen instead of a blank pane.
+
+     Every entry here must also be in sw.js's PRECACHE list — scripts/ci-
+     invariants.sh CHECK 2 fails the build otherwise. -->
+<script defer src="js/payroll.js"></script>
+<script defer src="js/screens/payroll.js"></script>
+<script defer src="js/screens/payroll-backfill.js"></script>
 <!-- v14 Wave 7 Pass 4 — Production + Purchasing + Projects (job_projects
      lifecycle) screens, split verbatim out of departments.js (a single
      contiguous tail cut — PROD_STAGES/QC/Delivery Receipt through

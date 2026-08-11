@@ -2127,8 +2127,18 @@ window.disbursePayRun = async function(month, opts = {}) {
   // Fail fast, before any write — firestore.rules only rejects the FINAL
   // state-flip to 'disbursed' for a non-president, which would otherwise let
   // the CA deductions/ledger posts below succeed first (a partial disburse).
-  if (typeof isRealPresident === 'function' && !isRealPresident()) {
-    Notifs.showToast('Only the President can disburse payroll.','error'); return;
+  // OWNER RULING 2026-08-10: Finance may release a checked period — for BOTH
+  // teams, because "treat disbursement of office and operations the same".
+  // This was President-only while firestore.rules had ALREADY been widened to
+  // the money tier, and while the weekly run let Finance release. So the monthly
+  // half of "one press, both teams" was untrue: Finance pressed Pay and got
+  // "Only the President can disburse payroll" from a check the server no longer
+  // agreed with. Now matched to the rule it is enforced by.
+  const _mayRelease = (typeof window.isMoneyPriv === 'function')
+    ? window.isMoneyPriv()
+    : (typeof isRealPresident === 'function' && isRealPresident());
+  if (!_mayRelease) {
+    Notifs.showToast('Only Finance or the President can release payroll.','error'); return;
   }
   // D10 hard block (v14 Wave 4 Batch F4) — disbursing actually moves money
   // using SSS/PhilHealth/Pag-IBIG/withholding figures baked into the frozen

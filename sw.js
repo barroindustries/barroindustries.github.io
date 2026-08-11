@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.144';
+const CACHE_VER = 'bi-ops-v14.0.145';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -67,6 +67,12 @@ const PRECACHE = [
   // statically referenced there, so ci-invariants.sh CHECK 2 requires both here.
   '/js/payroll-weekly.js',
   '/js/screens/payroll-weekly-ui.js',
+  // UNIFIED PAYROLL (PAYROLL-REDESIGN-BRIEF.md) — engine, screen, backfill.
+  // Statically referenced by index.html in this order, right after the weekly
+  // pair above, so ci-invariants.sh CHECK 2 requires all three here.
+  '/js/payroll.js',
+  '/js/screens/payroll.js',
+  '/js/screens/payroll-backfill.js',
   // PAYSLIP-OVERHAUL-SPEC.md §4 — lazy-loaded (NOT in index.html's static
   // script list — see hr.js's _ensureHtml2Canvas/_ensurePdfLite), but still
   // precached so Save-as-JPEG/Print-Save-PDF work offline once cached.

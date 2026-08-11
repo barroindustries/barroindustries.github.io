@@ -125,6 +125,38 @@ service cloud.firestore {
     }
     function canProduction() { return isAdmin() || isProductionDept(); }
 
+    // ── Member of the HR DEPARTMENT ─────────────────────────────────────────
+    // PAYROLL-AUDIT-2026-08.md §1: HR is a DEPARTMENT, but every HR screen was
+    // gated on ROLE (`['president','manager','secretary','finance']`), so a real
+    // person assigned to HR could not open HR — while the Accountant had a
+    // direct sidebar link to it. Every other department in the app honours
+    // membership (canEditDept, js/departments.js:39-53); HR was the one that
+    // did not.
+    //
+    // Same null-safe shape as isFinanceDept()/isDesignDept() above, and the
+    // same 'partner' exclusion the rest of the file applies to dept-derived
+    // access: an external partner account must never pick up an internal tier
+    // from a department string.
+    function isHrDept() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.get('role', null) != 'partner'
+        && (u.get('department', '') == 'HR' || u.get('departments', []).hasAny(['HR']));
+    }
+    // READ-ONLY sight of the HR surface (attendance, leave) for an HR-department
+    // member, on top of the existing oversight tier.
+    //
+    // ⚠ DELIBERATELY READ-ONLY, and this is the whole judgement in it. Owner
+    // ruling 3 (2026-08-08, see isFinanceDept above) is that "one dropdown in
+    // People & Roles" must never hand out a tier — and an attendance WRITE is
+    // not a neutral HR fact here: the weekly run computes hours from punch
+    // records, so whoever can edit attendance can move somebody's pay. So
+    // membership buys SIGHT of the HR surface (which is what makes an HR screen
+    // work at all instead of rendering as a denied-read empty list — the house
+    // hazard "a denied read must never render as an empty roster"), and every
+    // WRITE verb below stays exactly where it was, on isOpsAdmin().
+    // Widening that to HR-dept members is an owner decision, not a build one.
+    function canHrView() { return isOpsAdmin() || isHrDept(); }
+
     // Generic department membership (null-safe), and "admin OR member of dept D".
     // Used by the per-department document collections (work plans, marketing plans,
     // gov bidding buckets, IT assets/software, etc.).
@@ -637,11 +669,14 @@ service cloud.firestore {
     // validation — an employee could set attendanceScore:1.0 for any date via
     // devtools, and payroll/EOM read that score directly. `records` is the only
     // subcollection under attendance/{uid} today (verified).
+    // canHrView() = isOpsAdmin() || HR-department member (see the helper's own
+    // comment). READ only — the write verb below is untouched and stays on
+    // isOpsAdmin(), because an attendance edit moves a weekly worker's pay.
     match /attendance/{uid} {
-      allow read: if isAuth() && (isOwner(uid) || isOpsAdmin());
+      allow read: if isAuth() && (isOwner(uid) || canHrView());
     }
     match /attendance/{uid}/records/{date} {
-      allow read: if isAuth() && (isOwner(uid) || isOpsAdmin());
+      allow read: if isAuth() && (isOwner(uid) || canHrView());
       // Admins: unrestricted (the Present/Half/Absent edit path, stamps editedBy).
       allow write: if isAuth() && isOpsAdmin();
       // Owner self check-in / notification-driven auto-upgrade: score capped to
@@ -692,11 +727,13 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/worker_profiles/$(workerId))
         && get(/databases/$(database)/documents/worker_profiles/$(workerId)).data.get('linkedUid','') == request.auth.uid;
     }
+    // canHrView() adds the HR DEPARTMENT to the read side only; the admin write
+    // path below is still isOpsAdmin(). See the helper.
     match /attendance_worker/{workerId} {
-      allow read: if isAuth() && (isOpsAdmin() || isLinkedWorkerUid(workerId));
+      allow read: if isAuth() && (canHrView() || isLinkedWorkerUid(workerId));
     }
     match /attendance_worker/{workerId}/records/{date} {
-      allow read: if isAuth() && (isOpsAdmin() || isLinkedWorkerUid(workerId));
+      allow read: if isAuth() && (canHrView() || isLinkedWorkerUid(workerId));
       // v14 re-audit hardening (self-service write only — isOpsAdmin()
       // stays unrestricted for the HR/kiosk admin path):
       //  • date field (when present) must match the docId — stops a
@@ -1375,49 +1412,196 @@ service cloud.firestore {
       allow delete: if false;   // a superseded year stays, for the audit trail
     }
 
+    // ══ ONE PAYROLL, TWO PERIOD SHAPES (PAYROLL-REDESIGN-BRIEF.md) ══════════
+    // The owner's keystone ruling — "unify it as well, treat disbursement of
+    // office and operations the same, the difference is just the system of
+    // computing their pay" — puts ONE screen, ONE release and ONE verb set in
+    // front of both collections.
+    //
+    // THE STORAGE DELIBERATELY DOES NOT MIGRATE. pay_runs/{YYYY-MM} and
+    // pay_weeks/{YYYY-MM-DD, a MONDAY} stay exactly where they are, so no paid
+    // history moves and no id is rewritten. What unifies is the vocabulary and
+    // the verbs — which is why the two blocks below are now deliberately the
+    // SAME RULE TWICE, clause for clause. That duplication is the point: the
+    // audit traced today's defects (the double-post guard live on one side and
+    // dead on the other, an exclusion re-checked before one release and not the
+    // other) to the two blocks having drifted. Any future change to one of them
+    // is wrong unless it is made to both.
+    //
+    // THE STATE VOCABULARY. The screens now say "Not started / Ready to check /
+    // Checked - waiting for payment / Paid", and window.Payroll speaks those
+    // words. The STORED strings are unchanged: draft / computed / verified /
+    // disbursed, plus the `disbursing` transaction lock. payState() folds the
+    // new spelling onto the stored one so a writer using either vocabulary is
+    // judged by the same machine. It cannot be used to skip a step: every
+    // clause below canonicalises BOTH sides before comparing, so 'checked' is
+    // 'verified' in the guard exactly as it is in the UI.
+    function payState(s) {
+      return s == 'notstarted' ? 'draft'
+           : s == 'prepared'   ? 'computed'
+           : s == 'checked'    ? 'verified'
+           : s == 'paid'       ? 'disbursed'
+           : s;
+    }
+
     match /pay_weeks/{weekId} {
+      function stPrev()  { return payState(resource.data.get('state','draft')); }
+      function stNext()  { return payState(request.resource.data.get('state','draft')); }
+      function touched() { return request.resource.data.diff(resource.data).affectedKeys(); }
+      // The backfill marker may only ever be SET by the backfill path, and can
+      // never be added to, or cleared from, a record by any other verb —
+      // otherwise a hand-entered week could be laundered into looking like a
+      // real run, or a real run relabelled as history. The brief: "a backfilled
+      // record is marked as backfilled, permanently and visibly."
+      function markerHeld() {
+        return request.resource.data.get('backfill', false) == resource.data.get('backfill', false);
+      }
+      // backfillLedger is THE HAZARD DECISION, recorded on the record itself:
+      // 'posted'  — these wages were never in the books; the backfill posted them.
+      // 'notPosted'/'skipped' — they were already recorded outside the system,
+      //             so posting again would count the expense twice.
+      // The system cannot infer this (it depends on what was done outside it),
+      // so the rule only insists that an answer is present and attributable.
+      function backfillMarked() {
+        return request.resource.data.get('backfill', false) == true
+          && request.resource.data.get('backfilledBy','') == request.auth.uid
+          && request.resource.data.get('backfillLedger','') in ['posted','notPosted','skipped']
+          && payState(request.resource.data.get('state','draft')) == 'disbursed';
+      }
+
       allow read: if isAuth() && isMoneyAdmin();
-      allow create: if isAuth() && isMoneyAdmin() &&
-        request.resource.data.get('state','draft') in ['draft','computed'];
+
+      // A backfilled period is created ALREADY PAID — that is what backfilling
+      // is — so it is the one way into 'disbursed' that does not walk the state
+      // machine, and it is admitted only carrying its marker.
+      // `create` fires ONLY when the document does not exist, and that is what
+      // enforces the brief's "it cannot be entered for a period that already has
+      // a real run": any period anyone has touched is an update, not a create.
+      allow create: if isAuth() && isMoneyAdmin() && (
+        payState(request.resource.data.get('state','draft')) in ['draft','computed']
+        || backfillMarked()
+      );
+
       allow update: if isAuth() && (
-        // Period-scoped exclusion — same shape and same reasoning as pay_runs.
-        // The state must not move, and a disbursed week is frozen: once money
-        // has moved, who was on that payroll is history, not a setting.
-        ( isMoneyAdmin() &&
-          resource.data.get('state','draft') in ['draft','computed','verified'] &&
-          request.resource.data.get('state','draft') == resource.data.get('state','draft') &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy']) )
+        // ── BACKFILL over an untouched draft ────────────────────────────────
+        // The only clause allowed to SET the marker. A draft is a period
+        // somebody opened and never prepared — no lines, no money — so it is
+        // still history's to claim. Anything further along (computed/verified/
+        // disbursed) is a real run and stays unclaimable.
+        ( isMoneyAdmin() && stPrev() == 'draft' && backfillMarked() )
         ||
-        // compute / re-compute / verify
-        ( isMoneyAdmin() &&
-          resource.data.get('state','draft') in ['draft','computed'] &&
-          request.resource.data.get('state','') in ['computed','verified'] )
-        ||
-        // OWNER RULING 2026-08-10: Finance may release a verified week.
-        // The transactional lock (verified -> disbursing -> disbursed) is the
-        // same two-step the monthly run uses, so a second press cannot re-enter
-        // a run already in flight.
-        ( isMoneyAdmin() && (
-            ( resource.data.get('state','')=='verified'   && request.resource.data.get('state','')=='disbursing' ) ||
-            ( resource.data.get('state','')=='disbursing' && request.resource.data.get('state','')=='disbursed' )
-        ))
-        ||
-        // Reopening a week, and unsticking a half-finished disburse, stay
-        // President-only — those are the paths that can un-say something.
-        ( isPresident() && (
-            ( resource.data.get('state','')=='verified'   && request.resource.data.get('state','')=='computed' ) ||
-            ( resource.data.get('state','')=='disbursing' && request.resource.data.get('state','')=='computed' )
+        ( markerHeld() && (
+          // ── PERIOD-SCOPED HOLD ────────────────────────────────────────────
+          // "Hold or adjust one person", scoped to THIS period only. The state
+          // must not move, and a paid week is frozen: once money has moved, who
+          // was on that payroll is history, not a setting.
+          ( isMoneyAdmin() &&
+            stPrev() in ['draft','computed','verified'] &&
+            stNext() == stPrev() &&
+            touched().hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy',
+                               'holdReasons','heldReasons','state']) )
+          ||
+          // ── RECEIPTS, SAVED AS THEY ARE ATTACHED ──────────────────────────
+          // A transfer receipt is EVIDENCE, not money: it changes no figure and
+          // cannot move the state. Letting it be saved on a checked run is what
+          // makes "a dropped call costs nothing" true — before this, thirty
+          // receipts lived only in a modal's memory until the release.
+          ( isMoneyAdmin() &&
+            stPrev() in ['computed','verified'] &&
+            stNext() == stPrev() &&
+            touched().hasOnly(['receipts','receiptsUpdatedAt','receiptsUpdatedBy','state']) )
+          ||
+          // ── PER-LINE ADJUSTMENTS AND ONE-OFF AMOUNTS ──────────────────────
+          // The owner's "one-off amounts" (a bonus, 13th month, a penalty) and
+          // per-line edits, as actions on a roster row. Only up to CHECKED:
+          // after HR says the hours are right the figures lock, and the way
+          // back is the President's reopen below. This clause exists for the
+          // draft->draft case; on a prepared run the prepare clause already
+          // covers a re-prepare.
+          ( isMoneyAdmin() &&
+            stPrev() in ['draft','computed'] &&
+            stNext() == stPrev() &&
+            touched().hasOnly(['adjustments','oneOffs','lines','totals','warnings',
+                               'adjustedAt','adjustedBy','preparedAt','preparedBy','state']) )
+          ||
+          // prepare / re-prepare / check  (was: compute / re-compute / verify)
+          ( isMoneyAdmin() &&
+            stPrev() in ['draft','computed'] &&
+            stNext() in ['computed','verified'] )
+          ||
+          // ── RELEASE ───────────────────────────────────────────────────────
+          // OWNER RULING 2026-08-10: Finance may release a verified week. The
+          // transactional lock (verified -> disbursing -> disbursed) is the
+          // two-step that stops a second press re-entering a run already in
+          // flight.
+          ( isMoneyAdmin() && (
+              ( stPrev()=='verified'   && stNext()=='disbursing' ) ||
+              ( stPrev()=='disbursing' && stNext()=='disbursed' )
+          ))
+          ||
+          // ── REOPEN — PRESIDENT ONLY ───────────────────────────────────────
+          // Reopening, and unsticking a half-finished release, stay President-
+          // only: those are the paths that can un-say something. (The FUNCTION
+          // behind this was hardcoded to pay_runs and could never touch a week —
+          // js/departments.js reopenPayRun — so the rule was reachable only in
+          // principle. window.Payroll.reopen fixes that half; the rule was
+          // already correct and is unchanged.)
+          ( isPresident() && (
+              ( stPrev()=='verified'   && stNext()=='computed' ) ||
+              ( stPrev()=='disbursing' && stNext()=='computed' )
+          ))
+          ||
+          // ── CORRECTION AFTER PAYMENT ──────────────────────────────────────
+          // The owner's "fix something after paying". DISBURSED-IS-FROZEN IS
+          // NOT WEAKENED: lines, totals, receipts and every figure that was paid
+          // stay immutable forever, and the state cannot move. All this admits
+          // is an APPEND to a `corrections` record — which is what lets
+          // Payroll.correctAfterPay reverse one person's ledger legs and reissue
+          // their payslip while leaving everyone else's paid record untouched.
+          // Attributable, because a correction that nobody signed is how a paid
+          // run quietly stops matching the books.
+          ( isMoneyAdmin() &&
+            stPrev() == 'disbursed' && stNext() == 'disbursed' &&
+            touched().hasOnly(['corrections','correctionRefs','correctedAt','correctedBy','state']) &&
+            request.resource.data.get('correctedBy','') == request.auth.uid )
         ))
       );
       allow delete: if isAuth() && isPresident();
     }
 
+    // THE SAME RULE AS pay_weeks ABOVE, clause for clause — read that block's
+    // header for the reasoning behind every one of them, and change the two
+    // together or not at all. The ONE difference that used to exist here (the
+    // monthly release was President-only, the weekly one Finance) is gone by the
+    // keystone ruling: "treat disbursement of office and operations the same".
     match /pay_runs/{month} {
+      function stPrev()  { return payState(resource.data.get('state','draft')); }
+      function stNext()  { return payState(request.resource.data.get('state','draft')); }
+      function touched() { return request.resource.data.diff(resource.data).affectedKeys(); }
+      function markerHeld() {
+        return request.resource.data.get('backfill', false) == resource.data.get('backfill', false);
+      }
+      function backfillMarked() {
+        return request.resource.data.get('backfill', false) == true
+          && request.resource.data.get('backfilledBy','') == request.auth.uid
+          && request.resource.data.get('backfillLedger','') in ['posted','notPosted','skipped']
+          && payState(request.resource.data.get('state','draft')) == 'disbursed';
+      }
+
       allow read: if isAuth() && isMoneyAdmin();
-      allow create: if isAuth() && isMoneyAdmin() &&
-        request.resource.data.get('state','draft') in ['draft','computed'];
+      // A backfilled month is created ALREADY PAID; `create` only fires when the
+      // month does not exist, which is what stops a backfill landing on top of a
+      // real run. See pay_weeks.
+      allow create: if isAuth() && isMoneyAdmin() && (
+        payState(request.resource.data.get('state','draft')) in ['draft','computed']
+        || backfillMarked()
+      );
       allow update: if isAuth() && (
+        // Backfill over an untouched draft — the only clause that may SET the
+        // marker, and only from 'draft'.
+        ( isMoneyAdmin() && stPrev() == 'draft' && backfillMarked() )
+        ||
+        ( markerHeld() && (
         // ── PERIOD-SCOPED PAYROLL EXCLUSION (owner ruling 2026-08-10) ────────
         // "removing of certain members on payroll is strictly applied on that
         // payroll period only unless said member is removed from system."
@@ -1437,32 +1621,62 @@ service cloud.firestore {
         // lifecycle or edit a computed line. A DISBURSED month is frozen: once
         // money has moved, who was on that payroll is history, not a setting.
         ( isMoneyAdmin() &&
-          resource.data.get('state','draft') in ['draft','computed','verified'] &&
-          request.resource.data.get('state','draft') == resource.data.get('state','draft') &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy']) )
+          stPrev() in ['draft','computed','verified'] &&
+          stNext() == stPrev() &&
+          touched().hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy',
+                             'holdReasons','heldReasons','state']) )
         ||
+        // Receipts, saved as they are attached — evidence, never a figure.
+        // (The monthly run demanded no proof of payment at all; one receipt per
+        // person is now the same rule on both sides.)
         ( isMoneyAdmin() &&
-          resource.data.get('state','draft') in ['draft','computed'] &&
-          request.resource.data.get('state','') in ['computed','verified'] )
+          stPrev() in ['computed','verified'] &&
+          stNext() == stPrev() &&
+          touched().hasOnly(['receipts','receiptsUpdatedAt','receiptsUpdatedBy','state']) )
+        ||
+        // Per-line adjustments and one-off amounts, up to CHECKED only.
+        ( isMoneyAdmin() &&
+          stPrev() in ['draft','computed'] &&
+          stNext() == stPrev() &&
+          touched().hasOnly(['adjustments','oneOffs','lines','totals','warnings',
+                             'adjustedAt','adjustedBy','preparedAt','preparedBy','state']) )
+        ||
+        // prepare / re-prepare / check
+        ( isMoneyAdmin() &&
+          stPrev() in ['draft','computed'] &&
+          stNext() in ['computed','verified'] )
+        ||
+        // ── RELEASE ─────────────────────────────────────────────────────────
+        // ⚠ THIS IS THE ONE WIDENING IN THIS PASS. It used to be isPresident().
+        // The keystone ruling is that a month and a week are the same job, and
+        // the weekly rule already reads "Finance may release" (owner ruling
+        // 2026-08-10) — two different answers to one question is exactly the
+        // duplication that produced today's defects. The genuinely irreversible
+        // paths (reopen, delete) stay President-only on BOTH sides, and the
+        // verified -> disbursing -> disbursed lock is unchanged, so a second
+        // press still cannot re-enter a run already in flight.
+        ( isMoneyAdmin() && (
+            // verify → disbursing (transactional lock acquisition — Part E Phase 11)
+            ( stPrev()=='verified'   && stNext()=='disbursing' ) ||
+            // disbursing → disbursed (lock release on success)
+            ( stPrev()=='disbursing' && stNext()=='disbursed' )
+        ))
         ||
         ( isPresident() && (
-            // verify → disbursing (transactional lock acquisition — Part E Phase 11)
-            ( resource.data.get('state','')=='verified' &&
-              request.resource.data.get('state','')=='disbursing' ) ||
-            // disbursing → disbursed (lock release on success)
-            ( resource.data.get('state','')=='disbursing' &&
-              request.resource.data.get('state','')=='disbursed' ) ||
             // president reopen: verified → computed
-            ( resource.data.get('state','')=='verified' &&
-              request.resource.data.get('state','')=='computed' ) ||
+            ( stPrev()=='verified'   && stNext()=='computed' ) ||
             // president manual unlock after investigating a stuck/partial
             // disburse: disbursing → computed (Part E Phase 11)
-            ( resource.data.get('state','')=='disbursing' &&
-              request.resource.data.get('state','')=='computed' ) ||
-            // president may also perform the finance-tier transitions
-            ( resource.data.get('state','draft') in ['draft','computed'] &&
-              request.resource.data.get('state','') in ['computed','verified'] )
+            ( stPrev()=='disbursing' && stNext()=='computed' )
+        ))
+        ||
+        // Correction after payment — an APPEND to `corrections` only. Every
+        // figure that was paid stays frozen and the state cannot move; see the
+        // pay_weeks block for the full reasoning.
+        ( isMoneyAdmin() &&
+          stPrev() == 'disbursed' && stNext() == 'disbursed' &&
+          touched().hasOnly(['corrections','correctionRefs','correctedAt','correctedBy','state']) &&
+          request.resource.data.get('correctedBy','') == request.auth.uid )
         ))
       );
       allow delete: if isAuth() && isPresident();
@@ -2915,8 +3129,10 @@ service cloud.firestore {
     // Employees file their own request (pending only) and read their own;
     // finance/admin read all + approve/reject; only the president deletes.
     match /leave_requests/{docId} {
+      // canHrView() = isOpsAdmin() || HR-department member. READ only: the
+      // approve/reject verb (the `update` clause below) is still isOpsAdmin().
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isOpsAdmin()
+        resource.data.userId == request.auth.uid || canHrView()
       );
       // Shape-validate days/userName on every create; an employee may only file
       // their OWN request as pending. Finance/admin may file on anyone's behalf.
