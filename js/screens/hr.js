@@ -890,10 +890,19 @@ function _kpiMonthBreakdown(userTasks, month) {
 // along with the listeners bindChipTabs attached to it — is never in the blast
 // radius. The pane element is created once here and never replaced, so the
 // closures that captured it stay valid across every self-refresh.
-window.renderPayrollHub = async function(container, currentUser, currentRole, tab) {
+// `opts.sub` — 'workers' | 'run', Operations Team (tab B) only. Added so a
+// CALLER can land straight on the worker roster instead of the pay run. The
+// unified payroll screen (js/screens/payroll.js) is the reason this exists:
+// it replaced both payroll doors, and with them the only nav route to
+// renderFinanceHRProfiles — which owns the ONLY control in the app that puts a
+// worker's Status back to Active. Six workers were sitting on "Removed from
+// the system — put their profile back before they can be paid" with nowhere in
+// the app to put them back. Ignored for tab A, which has no sub-views.
+window.renderPayrollHub = async function(container, currentUser, currentRole, tab, opts) {
   const host = container || (typeof deptContainer === 'function' ? deptContainer() : null);
   if (!host) return;
   const active = (tab === 'B') ? 'B' : 'A';   // anything else (incl. undefined) ⇒ Type A
+  const wantSub = (opts && opts.sub === 'workers') ? 'workers' : null;
 
   // ── RE-ENTRY GUARD — this is a MONEY bug if it is missing. ────────────────
   // The tab row is made inert during a load (below), which stops a second load
@@ -914,6 +923,10 @@ window.renderPayrollHub = async function(container, currentUser, currentRole, ta
   // So: mount ONCE per host, and route every later entry through the same
   // loader, which serialises (latest-wins) instead of starting a second render.
   if (typeof host._payrollHubLoad === 'function' && host.querySelector('#payroll-hub-pane')) {
+    // An already-mounted hub owns `subB` inside its closure, so a re-entry that
+    // asks for the roster has to say so THROUGH the closure — setting it here
+    // would set a different variable and the pane would paint the pay run.
+    if (wantSub && typeof host._payrollHubSetSub === 'function') host._payrollHubSetSub(wantSub);
     return host._payrollHubLoad(active);
   }
 
@@ -935,7 +948,7 @@ window.renderPayrollHub = async function(container, currentUser, currentRole, ta
   // renderFinanceHRProfiles binds ~8 handlers by GLOBAL document.getElementById
   // (hrp-add-btn, hrp-sync-dir-btn, …), which is only safe while exactly one
   // copy of that markup is in the document. The pane is that one copy.
-  let subB = 'run';
+  let subB = wantSub || 'run';
   host.innerHTML = `
     <div class="payroll-hub-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       ${window.chipTabs([
@@ -1024,6 +1037,11 @@ window.renderPayrollHub = async function(container, currentUser, currentRole, ta
     }
   };
   host._payrollHubLoad = loadTab;                 // the re-entry guard above routes through this
+  // The only way a re-entry can choose a sub-view: `subB` lives in this
+  // closure, so a caller outside it cannot set it directly. Paints the toggle
+  // straight away so the button's label matches the view that is about to load
+  // even if the read that follows is slow.
+  host._payrollHubSetSub = (s) => { subB = (s === 'workers') ? 'workers' : 'run'; paintSubBtn('B'); };
   // Sub-view toggle. Routed through loadTab so it inherits the SAME
   // latest-wins serialisation as a chip click — flipping run↔workers while a
   // render is in flight can never leave two renderers painting one pane.

@@ -742,7 +742,16 @@ window.Chat = (() => {
     let tries = 0;
     const attempt = () => {
       tries++;
-      const uid = (window.currentUser && currentUser.uid) || '';
+      // BOTH halves read window.currentUser. app.js's `currentUser` is a
+      // `let` at file scope — a lexical global that is NOT window.currentUser
+      // (app.js mirrors it onto window at login, so the two are separate
+      // bindings that merely agree most of the time). Guarding on one and
+      // dereferencing the other means any moment they disagree — a login that
+      // set the mirror before the local, a logout that cleared one first —
+      // throws an uncaught TypeError out of a setTimeout, where nothing
+      // catches it. Verified: they are genuinely different bindings
+      // (window.currentUser === currentUser is false on a fresh load).
+      const uid = (window.currentUser && window.currentUser.uid) || '';
       const navReady = document.querySelector('.bottom-nav-item[data-page="chat"]') ||
                         document.querySelector('.nav-item[data-page="chat"]');
       if (uid && navReady) {
