@@ -251,9 +251,25 @@ function _pyTotals(reads) {
 // this sentence under their name. `danger` marks the ones that mean "we do not
 // know" rather than "we decided" — paying zero on an unread period is exactly
 // the silent-zero this design exists to prevent.
-function _pyNotPaidWords(reason) {
+// `kind` ('week' | 'month') is needed by exactly one reason — 'removed' — but
+// it matters there: the two teams are put back in DIFFERENT places, and a
+// sentence that names the wrong one is worse than the vague one it replaced.
+// An Operations worker is off the roster because worker_profiles.status is
+// 'inactive' (the worker roster's Edit form sets it back); an Office employee
+// is off it because users.removed is true, which is People & Roles → Reinstate
+// and is nowhere near a payroll screen.
+function _pyNotPaidWords(reason, kind) {
   const r = String(reason || '');
-  if (r === 'removed')        return { short: 'Removed from the system',      note: 'Off the roster — put their profile back before they can be paid.', undoable: false };
+  // "Put their profile back" named no place to do it, and the place had no
+  // door: the unified screen replaced both payroll routes and with them the
+  // only nav path to the worker roster, which owns the one control that sets
+  // Status back to Active. The sentence now names the destination and the head
+  // row carries the button that opens it.
+  if (r === 'removed')        return { short: 'Removed from the system',
+    note: (kind === 'week')
+      ? 'Off the roster. Open the Operations Team roster (the button beside the period), press Edit on this person and set Status back to Active — then open this period again.'
+      : 'Off the roster. They were removed from the system in People & Roles — reinstate them there, then open this period again.',
+    undoable: false };
   if (r === 'paid-monthly')   return { short: 'Paid on the monthly cycle',    note: 'Already paid for this month on the monthly cycle — kept out of this period so nobody is paid twice.', undoable: false };
   if (r === 'paid-weekly')    return { short: 'Paid on the weekly cycle',     note: 'Already paid for these days on the weekly cycle — kept out of this period so nobody is paid twice.', undoable: false };
   if (r === 'no-rate')        return { short: 'No pay rate on file',          danger: true, note: 'No monthly salary, hourly or daily rate on this person\'s profile. Rather than pay ₱0.00, they are left out — put a rate on their profile and open this period again.', undoable: false };
@@ -347,6 +363,10 @@ var PY_CSS = `
 #pay-root .py-head{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
 #pay-root .py-head select{flex:1 1 100%;min-width:0;max-width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px}
 @media (min-width:700px){#pay-root .py-head select{flex:0 1 480px}}
+/* Whose roster this period pays. Deliberately quiet — it is a fact about the
+   period, not a control, and it must not read as a tab you could press. No
+   overflow/ellipsis declaration, like everything else in this file. */
+#pay-root .py-team-tag{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);overflow-wrap:anywhere}
 #pay-root .py-headline{font-size:16px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}
 #pay-root .py-waiting-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)}
 #pay-root .py-waiting-row:last-child{border-bottom:0}
@@ -455,6 +475,19 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     }
     return String(periodId || '');
   }
+  // WHICH TEAM A PERIOD PAYS. The keystone ruling removed the team TABS — there
+  // is one payroll and one roster — but it never merged the two populations,
+  // and the screen had stopped saying which one you were looking at. A month
+  // reads the Office Team (users + payroll/{uid}, window.computePayRun); a
+  // Monday–Sunday week reads the Operations Team (worker_profiles,
+  // window.WeeklyRun). That separation is in the engines, not in the UI, so
+  // naming it here costs nothing and is not a tab: it is a label on the period
+  // you already chose, and it is what tells you WHOSE roster you are reading
+  // before you read a name on it.
+  function _pyTeam(periodId) {
+    return _pyKind(periodId) === 'week' ? 'Operations Team' : 'Office Team';
+  }
+
   // A month sorts as its first day; a week already IS its first day. On a tie
   // (the 1st falling on a Monday) the month comes first — it is the longer
   // period and reads as the heading of the two.
@@ -551,7 +584,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const reads   = lines.map(_pyRead);
     const cols    = _pyColsFor(reads);
     const tot     = _pyTotals(reads);
-    const notPaid = _pyNotPaidList(period);
+    const notPaid = _pyNotPaidList(period, _pyKind(selected));
     const problems = _pyProblems(period, reads, notPaid, selected);
     const label   = _pyLabel(selected);
 
@@ -569,10 +602,23 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     root.innerHTML = `
       <div class="py-head">
         <select id="py-period" aria-label="Pay period">${_pyPeriodOptions(periods, byPeriod, owing)}</select>
+        <!-- WHOSE ROSTER THIS IS. Directly under the period because it is a
+             FACT ABOUT THE PERIOD you just chose, not a choice of its own —
+             a month pays the Office Team, a Monday–Sunday week pays the
+             Operations Team, and that has always been true in the engines.
+             Styled as plain uppercase text, never a pill or a chip: this
+             screen has no team tabs by ruling, and anything that looks
+             pressable here would read as one. -->
+        <span class="py-team-tag">${_pyEsc(_pyTeam(selected))}</span>
         <!-- The title REPEATS the visible label. A title that only carries the
              explanation becomes the button's accessible name and a screen
              reader then announces something the sighted label does not say. -->
         <button class="btn-secondary btn-sm" id="py-thisweek" title="This week — jump to the week that contains today">This week</button>
+        <!-- The door back to the profiles this roster is built FROM — where a
+             rate is set, and where somebody taken off the roster is put back on
+             it. Offered only to the people who may edit those profiles; for
+             anyone else it would open onto a denied read. -->
+        ${canPrepare ? `<button class="btn-secondary btn-sm" id="py-roster-btn" title="Open the ${_pyEsc(_pyTeam(selected))} roster — rates, profiles, and putting someone back on the roster">${_pyEsc(_pyTeam(selected))} roster</button>` : ''}
       </div>
 
       <div id="py-headline"></div>
@@ -851,7 +897,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // Everyone the period is not paying, from wherever the engine recorded them.
   // Held people and refused people are the same list on screen on purpose: a
   // separate collapsed list is how somebody gets forgotten.
-  function _pyNotPaidList(period) {
+  function _pyNotPaidList(period, kind) {
     if (!period) return [];
     const seen = {}; const out = [];
     const push = (id, name, reason) => {
@@ -861,7 +907,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       // on the record. Show the id rather than nothing — but SAY that it is an
       // id, because a row that looks like a name and is not one is how the
       // wrong person gets put back into a period.
-      out.push({ id: id || '', name: name || id || 'Unnamed person', nameUnknown: !name && !!id, reason: reason || '', words: _pyNotPaidWords(reason) });
+      out.push({ id: id || '', name: name || id || 'Unnamed person', nameUnknown: !name && !!id, reason: reason || '', words: _pyNotPaidWords(reason, kind) });
     };
     // Names come from whatever the period already carries, so nobody is shown a
     // raw document id.
@@ -1040,6 +1086,37 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
 
     root.querySelector('#py-period')?.addEventListener('change', (e) => load(e.target.value));
     root.querySelector('#py-thisweek')?.addEventListener('click', () => load(thisWeekId));
+
+    // ── THE DOOR TO THE ROSTER THIS PERIOD IS BUILT FROM ──────────────────
+    // Leaves the payroll screen rather than opening an overlay, and it has to:
+    // renderFinanceHRProfiles binds ~8 handlers by GLOBAL document.getElementById
+    // (hrp-sync-dir-btn, hrp-batch-id-btn, …), which is only safe while exactly
+    // ONE copy of that markup is in the document. An openPage overlay on top of
+    // this screen would be a second one, and openPage keeps a dying panel ~300ms
+    // on top of that. This is the same call js/screens/hr.js's payslip editor
+    // already makes for the same reason.
+    //
+    // Resolved by window.* name at CLICK time, never at parse time — the hub
+    // lives in a different file and a load failure must degrade to a toast,
+    // never to a dead button that looks live.
+    root.querySelector('#py-roster-btn')?.addEventListener('click', () => {
+      const kind = _pyKind(selected);
+      // Into the container THIS screen was handed, never deptContainer(): via
+      // the Finance door `host` is #fin-content and deptContainer() is the whole
+      // Finance page, so painting the hub there would take the Finance chip rows
+      // with it. Replacing host's contents also drops #pay-root, which is half
+      // of the re-entry guard above, so coming back to payroll re-mounts clean.
+      const c = host;
+      if (!c || typeof window.renderPayrollHub !== 'function') {
+        Notifs.showToast('The team roster could not be opened. Reload the app and try again.', 'error');
+        return;
+      }
+      // Week → Operations Team, opened ON the worker roster (not the pay run):
+      // that roster's Edit form is the only control in the app that sets a
+      // worker's Status back to Active. Month → Office Team.
+      window.renderPayrollHub(c, currentUser, currentRole, kind === 'week' ? 'B' : 'A',
+        kind === 'week' ? { sub: 'workers' } : undefined);
+    });
     root.querySelectorAll('.py-open').forEach(b => b.addEventListener('click', () => load(b.dataset.period)));
 
     // ── HR's half of the handoff ───────────────────────────────────────────
