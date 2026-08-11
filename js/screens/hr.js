@@ -11,14 +11,17 @@
    window.openScheduledRaises — the RaiseFlow lifecycle SERVICE they call
    stays in departments.js, see below), the HR hub card launcher
    (window.renderHR), the payroll reconciliation screen (buildThreeWayRecon/
-   threeWayReconTableHTML/openPayrollReconciliation), the Payroll hub
-   (window.renderPayrollHub — the Office Team / Operations Team chip-tab wrapper (the
-   payClass values stay 'regular'/'production'; only the LABELS were renamed) that is now
-   the single entry point for BOTH payroll screens; see its own header block),
-   Payroll Management
-   (renderPayrollManagement, incl. its nested loadPayrollTable/
-   loadPayRunStrip and Payroll History table), and the HR Profiles +
-   Worker Payslip suite (nextWorkerIdNumber/syncWorkerDirectory/
+   threeWayReconTableHTML/openPayrollReconciliation),
+   window.renderPayrollScreen (renders window.renderPayrollPage —
+   js/screens/payroll.js, the ONE unified payroll screen for both teams — into
+   HR's own container; window.renderWorkersScreen is its sibling door onto
+   renderFinanceHRProfiles below), Payroll Management (renderPayrollManagement,
+   incl. its nested loadPayrollTable/loadPayRunStrip and Payroll History
+   table — PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 7: unreachable dead code now
+   that renderPayrollPage has replaced it as the money screen; kept on disk
+   pending the Edit-Payroll-modal extraction described at its own header, not
+   wired into any nav), and the HR Profiles + Worker Payslip suite
+   (nextWorkerIdNumber/syncWorkerDirectory/
    ensureWorkerVerifyToken/openWorkerIDModal/batchPrintWorkerIDs/
    renderFinanceHRProfiles/openHRProfileForm/openWorkerKioskModal/
    PAYSLIP_STAGES/payslipStageBadge/openPayslipHistory/openPayslipEdit/
@@ -27,6 +30,13 @@
    window.toPayslipModel/window.thirteenthMonthFor/window.payslipYtdMonthly/
    window.payslipYtdWeekly/window.buildPayslipHTML/window.renderPayslipPage/
    window.downloadPayslipJPEG).
+
+   RETIRED (PAYROLL-LIVE-SPEC-2026-08-11 §8, 2026-08-12): window.renderPayrollHub
+   (the Office Team / Operations Team chip-tab wrapper) and
+   js/screens/payroll-weekly-ui.js (window.renderWeeklyPayrollTab) — both
+   superseded by the single window.renderPayrollPage screen. The hub's Workers
+   sub-view (renderFinanceHRProfiles) now has its own door,
+   window.renderWorkersScreen, wired from the HR hub card "Workers & Clock".
 
    Wave 7 Pass 3 conversion (spec point 2) — window.renderPayslipPage was a
    raw #page-content swap that predated the page-stack (openPage/Overlay).
@@ -80,23 +90,27 @@
        (click handlers, navigateTo() dispatch, promise callbacks) — never at
        parse time — so it is safe for departments.js's shared helpers to
        still be undefined at the moment THIS file's top-level code runs,
-       and equally safe for departments.js's renderApprovals/
-       renderPayrollManagement-callers (loadFinanceContent's switch, which
-       loads BEFORE this file but only calls into it later, at runtime) to
-       reference this file's globals.
+       and equally safe for departments.js's renderApprovals and
+       finance.js's loadFinanceContent switch (both load BEFORE this file but
+       only call into it later, at runtime, e.g. renderFinanceHRProfiles) to
+       reference this file's globals. PAYROLL-LIVE-SPEC-2026-08-11 §8 —
+       loadFinanceContent's 'Payroll' case no longer calls
+       renderPayrollManagement at all; it calls window.renderPayrollPage
+       (js/screens/payroll.js) directly.
      - window.renderHR is the entry point called from js/app.js's
        navigateTo() switch (case 'HR'). window.renderPayslipPage /
        window.toPayslipModel / window.payslipYtdMonthly are also called
        directly from js/app.js (personal-finance "my-payslip-btn" and the
        worker-profile panel's #wp-payslip-btn — see the conversion note
-       above). departments.js's loadFinanceContent calls
-       renderPayrollManagement / renderFinanceHRProfiles as bare global
-       identifiers (both are plain `function` declarations, not
+       above). finance.js's loadFinanceContent calls renderFinanceHRProfiles
+       as a bare global identifier (a plain `function` declaration, not
        window.*-prefixed, exactly like tasks.js/sales.js's bare-identifier
        precedent — a top-level function declaration in any deferred
        classic script becomes a `window` property, so the bare-identifier
-       call in departments.js resolves fine regardless of which file
-       actually declares it).
+       call in finance.js resolves fine regardless of which file actually
+       declares it). renderPayrollManagement has no such caller any more —
+       PAYROLL-LIVE-SPEC-2026-08-11 §8 retired every route into it; see the
+       header note above and its own header comment (~928).
      - PAYSLIP_STAGES is a plain top-level `const` (script-scoped, NOT a
        window property in a browser — same caveat design.js/tasks.js
        document for their own top-level consts). It must stay in THIS file
@@ -444,6 +458,12 @@ window.renderHR = async function(currentUser, currentRole){
     // It now opens the SAME screen the Finance chip opens — see
     // window.renderPayrollScreen below.
     ...(canPayroll ? [{ icon:'💰', title:'Payroll',        desc:'One roster per period — both teams. Check the hours, then pay.', go:()=>window.renderPayrollScreen(currentUser, currentRole) }] : []),
+    // PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 1 — the retired payroll hub's
+    // Workers sub-view (renderFinanceHRProfiles: worker profiles, the Clock
+    // kiosk, ID cards, raise history, batch ID print, the per-worker Payslip
+    // button) needed its own door once the hub's Type A/Type B toggle went
+    // away. Nothing in that screen was deleted; it just moved here.
+    ...(canPayroll ? [{ icon:'👷', title:'Workers & Clock', desc:'Operations Team profiles, the punch kiosk, ID cards & one-worker payslips', go:()=>window.renderWorkersScreen(currentUser, currentRole) }] : []),
     ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
     // The three screens an HR-DEPARTMENT member can now reach. They read fine
     // (firestore.rules canHrView()), but every WRITE verb on them — approving
@@ -500,10 +520,11 @@ window.renderHR = async function(currentUser, currentRole){
 //                 It must never change what is shown or what is permitted:
 //                 permissions come from the role, not from the door.
 //
-// The fallbacks are load-order belt-and-braces, degrading to the screen that
-// exists today rather than to a blank pane — the same rule payroll-weekly-ui.js
-// follows. renderPayrollHub is resolved by window.* name at CLICK time, never
-// at parse time.
+// PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 4 — the old renderPayrollHub/
+// renderPayrollManagement fallbacks (belt-and-braces for a load-order
+// failure) are retired along with the hub itself. A missing
+// window.renderPayrollPage now paints a plain "did not load, reload" message
+// instead of falling back to a screen that no longer exists.
 window.renderPayrollScreen = async function(currentUser, currentRole, opts){
   const c = deptContainer();
   if (!c) return;
@@ -525,11 +546,44 @@ window.renderPayrollScreen = async function(currentUser, currentRole, opts){
   if (!pane) return;
   if (typeof window.renderPayrollPage === 'function') {
     await window.renderPayrollPage(pane, currentUser, currentRole, Object.assign({ from:'hr' }, opts || {}));
-  } else if (typeof window.renderPayrollHub === 'function') {
-    await window.renderPayrollHub(pane, currentUser, currentRole, 'A');
   } else {
-    await renderPayrollManagement(pane, currentUser, currentRole);
+    // PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 4 — the retired renderPayrollHub/
+    // renderPayrollManagement fallbacks are gone. A missing renderPayrollPage
+    // now means the engine script failed to load, never a silent blank pane.
+    pane.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Payroll did not load</h4><p>Reload the app and try again.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [pane] });
   }
+};
+
+// ── HR → Workers & Clock: the retired payroll hub's Workers sub-view ──────
+// PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 1. renderFinanceHRProfiles (worker
+// profiles, the Clock kiosk, ID cards, raise history, batch ID print, and the
+// per-worker Payslip button → openPayslipGenerator) used to be reachable only
+// through window.renderPayrollHub's Operations Team tab's "Workers" toggle.
+// Now that renderPayrollPage owns the pay FIGURES for both teams, this is its
+// own door — the owner still needs the one-worker generator for off-cycle pay
+// (final pay, an advance, a partial week) and for correcting a single line.
+// Same shape as window.renderPayrollScreen just above.
+window.renderWorkersScreen = async function(currentUser, currentRole){
+  const c = deptContainer();
+  if (!c) return;
+  const canPayroll = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : true;
+  if (!canPayroll) {
+    // Never an empty roster: a denied read here is a permission answer, and it
+    // has to read as one.
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Workers &amp; Clock is finance &amp; management only</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+    return;
+  }
+  c.innerHTML = `
+    <div class="page-header"><h2>${emojiIcon('👷',20)} Workers &amp; Clock</h2></div>
+    <div id="hr-workers-pane">${window.skeletonHtml ? window.skeletonHtml('rows') : ''}</div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // Scoped to `c`, never document: openPage keeps a dying panel ~300ms and a
+  // global lookup finds ITS copy of this id (house rule).
+  const pane = c.querySelector('#hr-workers-pane');
+  if (!pane) return;
+  await renderFinanceHRProfiles(pane, currentUser, currentRole);
 };
 
 // v14 Wave 4 Batch F4 — month-scoped THREE-WAY diff behind the same
@@ -862,188 +916,38 @@ function _kpiMonthBreakdown(userTasks, month) {
   return { doneInM, inScopeCount };
 }
 
-// ── Payroll hub — one screen, two chip-tabs (owner request, 2026-08-06) ───
-// "Better if its just / Payroll / Then / Type a / Type b", and — asked which
-// should open first — "Open on type a".
-//
-// The two payroll screens used to be two separate subtabs under two different
-// names: HR called them "Payroll" + "Worker Payslips", Finance called the same
-// pair "Payroll" + "HR Profiles". They are now ONE screen with two chip-tabs,
-// reusing the Type A / Type B vocabulary the app already uses in the Employee
-// Type selector:
-//     Type A = regular staff, paid MONTHLY  (Compute → Verify → Disburse)
-//     Type B = Production workers, paid WEEKLY (payslips, profiles, ID cards)
-//
-// This is a NAVIGATION wrapper ONLY. renderPayrollManagement and
-// renderFinanceHRProfiles keep their exact signatures and are otherwise
-// untouched — no payroll/statutory math, no Firestore query or write, and no
-// rules are involved in this change.
-//
-// LAYOUT CONTRACT (load-bearing — do NOT flatten the pane into `host`):
-//     host                             ← the container the caller passed
-//     ├─ .chip-tabs.payroll-hub-tabs   ← the tab bar, owned by this function
-//     └─ #payroll-hub-pane             ← the SUB-container handed to the two
-//                                        renderers
-// Both renderers own their container outright: renderPayrollManagement opens
-// with `container.innerHTML = skeletonHtml('rows')`, and renderFinanceHRProfiles
-// re-renders ITSELF on ~6 actions (add/edit/delete profile, ID modal, raise —
-// see the `()=>renderFinanceHRProfiles(container,currentUser,currentRole)`
-// callbacks below) using the SAME container it was handed. Giving them the
-// PANE instead of `host` is exactly what makes those self-refreshes safe: they
-// may rebuild #payroll-hub-pane as often as they like and the SIBLING tab bar —
-// along with the listeners bindChipTabs attached to it — is never in the blast
-// radius. The pane element is created once here and never replaced, so the
-// closures that captured it stay valid across every self-refresh.
-window.renderPayrollHub = async function(container, currentUser, currentRole, tab) {
-  const host = container || (typeof deptContainer === 'function' ? deptContainer() : null);
-  if (!host) return;
-  const active = (tab === 'B') ? 'B' : 'A';   // anything else (incl. undefined) ⇒ Type A
+// PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 6 (2026-08-12) — window.renderPayrollHub
+// (the Office Team / Operations Team chip-tab wrapper) is retired. It is
+// superseded by js/screens/payroll.js's window.renderPayrollPage, called
+// directly by window.renderPayrollScreen (above) and by finance.js's
+// loadFinanceContent 'Payroll' case. Its Workers sub-view
+// (renderFinanceHRProfiles) now has its own door, window.renderWorkersScreen
+// (above). Its Operations Team 'run' sub-view (window.renderWeeklyPayrollTab,
+// js/screens/payroll-weekly-ui.js, also retired) is superseded the same way —
+// window.Payroll (js/payroll.js) now calls window.WeeklyRun directly.
 
-  // ── RE-ENTRY GUARD — this is a MONEY bug if it is missing. ────────────────
-  // The tab row is made inert during a load (below), which stops a second load
-  // starting from a tab CLICK. It does nothing about re-entering this function,
-  // and loadFinanceContent(…, 'Payroll') enters it on every Finance chip click.
-  //
-  // Why re-entry is not merely wasteful: both renderers write with
-  // `container.innerHTML` but then bind with GLOBAL document.getElementById —
-  // hr.js's pr-month-sel / gen-payroll-btn / payroll-tbody / print-payroll-btn,
-  // and Type B's hrp-add-btn / hrp-sync-dir-btn. If a rebuild swaps the pane
-  // while a render is still awaiting its Firestore reads, that render paints
-  // into the DETACHED pane and then binds its handlers onto the LIVE one.
-  // Measured: entering twice while the first load is in flight left TWO click
-  // handlers on Compute, so one tap ran computePayRun TWICE. The reverse
-  // completion order threw (getElementById → null) and painted the error into
-  // the detached pane, where it is invisible and its retry is unreachable.
-  //
-  // So: mount ONCE per host, and route every later entry through the same
-  // loader, which serialises (latest-wins) instead of starting a second render.
-  if (typeof host._payrollHubLoad === 'function' && host.querySelector('#payroll-hub-pane')) {
-    return host._payrollHubLoad(active);
-  }
-
-  // OPERATIONS TEAM (tab B) now has TWO sub-views (weekly run 2026-08-11):
-  //   'run'     → window.renderWeeklyPayrollTab — the Monday–Sunday pay run,
-  //               one press pays the week.
-  //   'workers' → renderFinanceHRProfiles — the roster this tab used to BE:
-  //               worker profiles, ID cards, the Clock kiosk, raise history,
-  //               batch ID print, and the per-worker "Payslip" button that
-  //               opens openPayslipGenerator. NOTHING here was deleted — the
-  //               owner still needs the one-worker generator for off-cycle pay
-  //               (final pay, an advance, a partial week) and for correcting a
-  //               single line, so it keeps its own door.
-  // The toggle lives in the HOST row, a SIBLING of #payroll-hub-pane, for the
-  // same reason the chip tabs do: both sub-view renderers own the pane
-  // outright and rebuild it on every self-refresh, so a control painted INSIDE
-  // the pane would be destroyed (with its listener) by the next refresh. It is
-  // also why the sub-view is a pane swap rather than an openPage overlay —
-  // renderFinanceHRProfiles binds ~8 handlers by GLOBAL document.getElementById
-  // (hrp-add-btn, hrp-sync-dir-btn, …), which is only safe while exactly one
-  // copy of that markup is in the document. The pane is that one copy.
-  let subB = 'run';
-  host.innerHTML = `
-    <div class="payroll-hub-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${window.chipTabs([
-        { key:'A', label:'Office Team' },
-        { key:'B', label:'Operations Team' }
-      ], active, { cls:'payroll-hub-tabs' })}
-      <button type="button" class="btn-secondary btn-sm" id="payroll-hub-sub-btn"
-              style="margin-left:auto;display:none"></button>
-    </div>
-    <div id="payroll-hub-pane">${window.skeletonHtml('rows')}</div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [host] });
-  // Scoped to `host`, never document — openPage keeps a dying panel ~300ms and
-  // a global lookup finds ITS copy of these ids (house rule; 811 lookups were
-  // fixed for exactly this last week).
-  const tabsRow = host.querySelector('.payroll-hub-tabs');
-  const pane    = host.querySelector('#payroll-hub-pane');
-  const subBtn  = host.querySelector('#payroll-hub-sub-btn');
-
-  // Both renderers paint their own skeleton on their very first line, so a
-  // switch never leaves stale content on screen and no extra skeleton is
-  // needed here. What IS worth guarding is OVERLAP: each renderer awaits
-  // several Firestore reads and only then binds listeners via
-  // document.getElementById(...), so two loads in flight at once would leave
-  // the first one's bindings hunting for the second one's DOM. The tab row is
-  // therefore made inert for the duration of a load (same shape as
-  // window.busy's button lock), and re-enabled in a `finally` so a failed read
-  // can never strand the tabs.
-  // Latest-wins serialisation. A load requested while one is in flight is
-  // REMEMBERED, not started — the running render keeps sole ownership of the
-  // pane (and therefore of the global ids it will bind), and the newest
-  // requested tab renders once it finishes. Two renders can never overlap, so
-  // the double-bind above is structurally impossible rather than merely
-  // unlikely. `pending` holds only the newest request; rapid taps collapse.
-  let busy = false, pending = null;
-  const setActiveChip = (key) => {
-    if (!tabsRow) return;
-    tabsRow.querySelectorAll('.chip-tab').forEach(b => {
-      b.classList.toggle('active', b.dataset.chip === key);
-    });
-  };
-  // The weekly run is a SEPARATE FILE loaded after this one (js/payroll-weekly.js
-  // + js/screens/payroll-weekly-ui.js — see index.html). Resolved by window.*
-  // name at CLICK/LOAD time, never at parse time, so if either file fails to
-  // load the Operations tab degrades to the roster it has always shown rather
-  // than to a blank pane — and the toggle that would lead nowhere is hidden.
-  const hasWeeklyRun = () => typeof window.renderWeeklyPayrollTab === 'function';
-  const paintSubBtn = (key) => {
-    if (!subBtn) return;
-    const show = (key === 'B') && hasWeeklyRun();
-    subBtn.style.display = show ? '' : 'none';
-    if (show) subBtn.textContent = (subB === 'run') ? 'Workers' : '← Pay Run';
-  };
-  const loadTab = async (key) => {
-    const want = (key === 'B') ? 'B' : 'A';
-    if (busy) { pending = want; return; }        // newest wins; the in-flight render finishes untouched
-    busy = true;
-    setActiveChip(want);                          // programmatic entries must move the chip too —
-                                                  // bindChipTabs only toggles it on a real click
-    paintSubBtn(want);
-    if (tabsRow) { tabsRow.style.pointerEvents = 'none'; tabsRow.style.opacity = '0.6'; }
-    if (subBtn)  { subBtn.disabled = true; }
-    try {
-      if (want === 'B') {
-        // openWorkers is handed to the weekly screen so it can offer its OWN
-        // route to the roster (a link in an empty state, "no rate — fix this
-        // worker", etc.) without owning the toggle or the pane lifecycle.
-        if (subB === 'run' && hasWeeklyRun()) {
-          await window.renderWeeklyPayrollTab(pane, currentUser, currentRole, {
-            openWorkers: () => { subB = 'workers'; loadTab('B'); }
-          });
-        } else {
-          await renderFinanceHRProfiles(pane, currentUser, currentRole);
-        }
-      } else {
-        await renderPayrollManagement(pane, currentUser, currentRole);
-      }
-    } catch (e) {
-      _hrPanelError(pane, e, () => loadTab(want));
-    } finally {
-      busy = false;
-      if (tabsRow) { tabsRow.style.pointerEvents = ''; tabsRow.style.opacity = ''; }
-      if (subBtn)  { subBtn.disabled = false; }
-      paintSubBtn(want);                          // hasWeeklyRun() may only have become true mid-load
-      if (pending !== null) { const next = pending; pending = null; await loadTab(next); }
-    }
-  };
-  host._payrollHubLoad = loadTab;                 // the re-entry guard above routes through this
-  // Sub-view toggle. Routed through loadTab so it inherits the SAME
-  // latest-wins serialisation as a chip click — flipping run↔workers while a
-  // render is in flight can never leave two renderers painting one pane.
-  if (subBtn) subBtn.addEventListener('click', () => {
-    subB = (subB === 'run') ? 'workers' : 'run';
-    paintSubBtn('B');
-    loadTab('B');
-  });
-
-  // Scoped to the tab bar element itself (the finance.js precedent), never to
-  // `host` — otherwise a chip rendered by a sub-screen inside the pane would
-  // get swept up by the same querySelectorAll.
-  window.bindChipTabs(tabsRow, (key) => { loadTab(key); });
-  await loadTab(active);
-};
-
+// ── DEAD CODE, kept on disk (PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 7) ───────
+// renderPayrollManagement has ZERO callers left anywhere in the app (grepped
+// 2026-08-12: only this declaration and comments referencing it remain) —
+// window.renderPayrollScreen and finance.js's loadFinanceContent both call
+// window.renderPayrollPage (js/screens/payroll.js) unconditionally now, with
+// no fallback to this function. It is NOT deleted yet because its nested
+// loadPayrollTable (below) contains the "Edit Payroll — {name}" standing-pay
+// editor (~1908, the .edit-emp-pay-btn click handler) — the owner's only
+// office-side editor for allowance/deductions/statutory overrides/CA
+// installment choice — which §8 Step 7 requires extracting VERBATIM into a
+// top-level window.openEditPayrollModal(emp, currentUser, currentRole,
+// onSaved) BEFORE this function can safely be deleted. That extraction was
+// deferred by this pass: the editor closes over loadPayrollTable's `month`
+// param and the `employees`/`_planByUser`/`runData` arrays built earlier in
+// this function, and calls back into loadPayrollTable(month) to refresh the
+// roster after saving — tracing and re-parameterising all of that without
+// risking a regression in money-writing code (statutory-config audit
+// logging, cash-advance override writes) is its own careful pass, exactly as
+// §8's own escape hatch anticipates ("if Step 7's closure-tracing turns out
+// hairier than a day's work, ship Steps 1–6 ... and raise Step 7 as its own
+// follow-up"). Do not delete this function until that extraction lands and
+// js/screens/employee-profile.js has its own "Edit pay record" door to it.
 async function renderPayrollManagement(container, currentUser, currentRole) {
   // 8-point #3 (Wave 7 Pass 3) — this screen had no loading state at all
   // before this pass: the container sat on whatever the previous Finance
@@ -4049,7 +3953,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         if (!ps) return;
         const model = window.toPayslipModel(ps, 'weekly');
         model.ytd = await window.payslipYtdWeekly(ps.workerId, (ps.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-        window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B'));
+        window.renderPayslipPage(model, () => window.renderWorkersScreen(currentUser, currentRole));
       });
     });
     root.querySelectorAll('.ps-advance-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -5056,7 +4960,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     const model = window.toPayslipModel(d, 'weekly');
     model.official = false; // never yet saved — a draft/projection by construction
     model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-    window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B'));
+    window.renderPayslipPage(model, () => window.renderWorkersScreen(currentUser, currentRole));
   });
 
   // DOUBLE-SUBMIT / DOUBLE-DEDUCT FIX (v14 HR remediation) — `psSaving` is an
@@ -5153,7 +5057,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       Notifs.success('Payslip saved as draft! Verify and file it from Payslip History.');
       const model = window.toPayslipModel({...d, id: ref.id}, 'weekly');
       model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
-      setTimeout(() => window.renderPayslipPage(model, () => window.renderPayrollHub(deptContainer(), currentUser, currentRole, 'B')), 400);
+      setTimeout(() => window.renderPayslipPage(model, () => window.renderWorkersScreen(currentUser, currentRole)), 400);
       // psSaving intentionally left true / button left disabled — closeModal()
       // just tore this panel's DOM down, so there is nothing left to re-submit.
     } catch (err) {
@@ -5929,10 +5833,10 @@ window.openPayslipEditPanel = async function(model, backFn) {
   panel.querySelector('#pe-money-link')?.addEventListener('click', () => {
     Notifs.showToast('Opening Payroll — pay figures are edited there, never on the payslip itself.');
     if (moneyLinkTarget === 'weekly') {
-      // Weekly = Type B. Route through the hub so the tab bar comes back with
-      // the screen (the old call rendered a bare, tab-less Worker Profiles).
-      if (typeof window.renderPayrollHub === 'function') window.renderPayrollHub(deptContainer(), window.currentUser, window.currentRole, 'B');
-      else navigateTo('dept:HR');
+      // PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 2 — the retired hub used to be
+      // the only route back with a tab bar attached. Pay figures for BOTH
+      // teams now live on the one payroll screen, so land there directly.
+      window.renderPayrollScreen(window.currentUser, window.currentRole);
     } else if (typeof window.renderFinance === 'function') {
       window.renderFinance(window.currentUser, window.currentRole, 'Payroll');
     } else {

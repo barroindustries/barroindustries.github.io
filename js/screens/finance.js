@@ -50,9 +50,12 @@
      map), window.renderFinance, renderFinanceNav, openFinanceToolsPage
      (president-only maintenance page), window.runRebuildRollups (thin
      confirm+toast wrapper over window.Ledger.rebuildRollups),
-     loadFinanceContent (the 17-case subtab dispatcher — untouched,
-     still calls renderPayrollManagement/renderFinanceHRProfiles
-     (js/screens/hr.js), renderPurchaseRequests (js/screens/
+     loadFinanceContent (the 17-case subtab dispatcher — PAYROLL-LIVE-SPEC-
+     2026-08-11 §8: 'Payroll' now calls window.renderPayrollPage
+     (js/screens/payroll.js) directly, and 'HR Profiles' calls
+     renderFinanceHRProfiles (js/screens/hr.js) directly; both retired their
+     renderPayrollHub/renderPayrollManagement fallback. Still calls
+     renderPurchaseRequests (js/screens/
      production.js), renderSalesOrders (departments.js, deliberately
      shared with Sales — see sales.js's header), window.renderBIRTab/
      renderBalanceSheet/renderCashFlowReport/renderBankRec (js/bir.js),
@@ -243,8 +246,10 @@ const FINANCE_GROUPS = [
   { key:'Reports',               label:'Reports',               members:['Reports','Balance Sheet','Cash Flow','Bank Rec','Break-even'] },
   // 2026-08-06 owner request ("Better if its just / Payroll / Then / Type a /
   // Type b"): 'Payroll' and 'HR Profiles' were the SAME pair of screens under
-  // two chips. They are now one chip — window.renderPayrollHub (js/screens/
-  // hr.js) with Type A / Type B tabs inside. 'HR Profiles' is gone from the
+  // two chips. They are now one chip — window.renderPayrollPage (js/screens/
+  // payroll.js), PAYROLL-LIVE-SPEC-2026-08-11's unified screen for both
+  // teams (its own predecessor, the renderPayrollHub chip-tab wrapper, is
+  // retired — see §8). 'HR Profiles' is gone from the
   // chip row but is NOT gone as a route: see FINANCE_LEGACY_KEYS below.
   { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','Cash Advances','SSS / Gov'] },
   { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
@@ -416,15 +421,18 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     //
     // The `?:` is a load-order belt-and-braces, not a real branch: index.html
     // loads the unified payroll trio before this file and both are `defer`.
-    // Falling back to the previous hub keeps a load failure at "the screen I
-    // had yesterday" instead of a blank pane — the same degradation rule the
-    // weekly run uses.
+    // PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 3 — the previous hub/management
+    // fallback chain is retired along with those screens. A missing
+    // window.renderPayrollPage now means the engine script failed to load;
+    // say so in plain words rather than degrading to a screen that no
+    // longer exists.
     case 'Payroll':
-      await (window.renderPayrollPage
-        ? window.renderPayrollPage(content, currentUser, currentRole, { from:'finance' })
-        : (window.renderPayrollHub
-            ? window.renderPayrollHub(content, currentUser, currentRole, 'A')
-            : renderPayrollManagement(content, currentUser, currentRole)));
+      if (window.renderPayrollPage) {
+        await window.renderPayrollPage(content, currentUser, currentRole, { from:'finance' });
+      } else {
+        content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Payroll did not load</h4><p>Reload the app and try again.</p></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [content] });
+      }
       break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;
@@ -449,12 +457,11 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       break;
     // Back-compat route only — 'HR Profiles' no longer has a chip (see
     // FINANCE_LEGACY_KEYS above), but stored deep links still carry the key.
-    // Land them on Type B, the tab that now holds exactly this screen, rather
-    // than on a destination that no longer exists in the nav.
+    // PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 3 — the retired hub used to route
+    // this to its own Type B tab; renderFinanceHRProfiles is the screen that
+    // was always underneath, so land deep links there directly.
     case 'HR Profiles':
-      await (window.renderPayrollHub
-        ? window.renderPayrollHub(content, currentUser, currentRole, 'B')
-        : renderFinanceHRProfiles(content, currentUser, currentRole));
+      await renderFinanceHRProfiles(content, currentUser, currentRole);
       break;
     case 'Cash Advances':
       await renderFinanceCA(content, currentUser, currentRole);

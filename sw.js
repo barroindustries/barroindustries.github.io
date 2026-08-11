@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.148';
+const CACHE_VER = 'bi-ops-v14.0.149';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -63,10 +63,12 @@ const PRECACHE = [
   '/js/screens/ventures.js',
   '/js/screens/hr.js',
   '/js/screens/employee-profile.js',
-  // Weekly pay run — engine then screen, matching index.html's order. Both are
-  // statically referenced there, so ci-invariants.sh CHECK 2 requires both here.
+  // Weekly pay run engine — matching index.html's order. Statically
+  // referenced there, so ci-invariants.sh CHECK 2 requires it here.
+  // PAYROLL-LIVE-SPEC-2026-08-11 §8 (2026-08-12) — its screen,
+  // js/screens/payroll-weekly-ui.js, is retired (superseded by
+  // js/screens/payroll.js) and removed from here and from index.html.
   '/js/payroll-weekly.js',
-  '/js/screens/payroll-weekly-ui.js',
   // UNIFIED PAYROLL (PAYROLL-REDESIGN-BRIEF.md) — engine, screen, backfill.
   // Statically referenced by index.html in this order, right after the weekly
   // pair above, so ci-invariants.sh CHECK 2 requires all three here.

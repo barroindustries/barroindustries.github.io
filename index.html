@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.148 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.149 · Barro Industries</div>
   </div>
 </div>
 
@@ -548,16 +548,19 @@
      loads after this file) reaches forward into window.renderVentures the
      same way. -->
 <script defer src="js/screens/ventures.js"></script>
-<!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll management +
-     reconciliation, HR profiles, worker payslips), split verbatim out of
+<!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll reconciliation,
+     HR profiles, worker payslips), split verbatim out of
      departments.js. Must load after departments.js: calls its shared
      helpers (canEditDept, deptContainer, isFinancePriv, fetchUsersWithPayroll,
      etc.) and money SERVICES that stayed behind (window.computePayRun/
      disbursePayRun/reopenPayRun, window.RaiseFlow, window.CashAdvance/Ledger/
      BankAccounts) by window.*/bare-global name at runtime only, never at
-     parse time; departments.js's loadFinanceContent (Payroll/HR Profiles
-     tabs) reaches forward into this file's renderPayrollManagement/
-     renderFinanceHRProfiles the same way. -->
+     parse time; finance.js's loadFinanceContent ('HR Profiles' tab) reaches
+     forward into this file's renderFinanceHRProfiles the same way.
+     PAYROLL-LIVE-SPEC-2026-08-11 §8 (2026-08-12) — this file's
+     renderPayrollHub is retired (superseded by js/screens/payroll.js's
+     window.renderPayrollPage, loaded later); renderFinanceHRProfiles is
+     unaffected and now also has its own door, window.renderWorkersScreen. -->
 <script defer src="js/screens/hr.js"></script>
 <!-- Employee Profile (owner request 2026-08-09) — ONE per-person profile screen
      shared by the Office Team and the Operations Team, composing users +
@@ -567,29 +570,27 @@
      same forward-reference convention every other js/screens/*.js file uses. -->
 <script defer src="js/screens/employee-profile.js"></script>
 <!-- WEEKLY PAY RUN (owner ruling 2026-08-10) — one press pays the Operations
-     Team for a Monday–Sunday week. Split in two on purpose, engine then screen:
+     Team for a Monday–Sunday week.
 
        js/payroll-weekly.js          window.WeeklyRun — the Firestore/state
                                      layer (load/compute/setExcluded/
                                      setAdjustment/verify/disburse over
                                      pay_weeks/{weekId}). Touches no DOM.
-       js/screens/payroll-weekly-ui.js  window.renderWeeklyPayrollTab — the
-                                     screen. Calls ONLY the WeeklyRun API.
 
-     Both must load AFTER js/money-core.js (computeWeeklyLine /
+     Must load AFTER js/money-core.js (computeWeeklyLine /
      resolveWorkerHourlyRate / weeklyRunSkipReason / payWeekMondayOf are the
      whole of the pay maths and the engine calls them by window.* name) and
      AFTER js/departments.js (the Manila helpers bizDate/bizDow, escHtml,
-     canEditDept, isMoneyPriv). Placed after hr.js as well because the UI
-     reaches forward into that file's openPayslipGenerator /
-     openWorkerKioskModal / renderPayslipPage for the off-cycle and
-     single-line-correction paths — at CLICK time only, never at parse time,
-     the same forward-reference convention as every other js/screens/*.js file.
-     hr.js's renderPayrollHub reaches forward into renderWeeklyPayrollTab the
-     same way (guarded by typeof, so a load-order surprise degrades to the old
-     Workers screen instead of a blank pane). -->
+     canEditDept, isMoneyPriv).
+
+     PAYROLL-LIVE-SPEC-2026-08-11 §8 (2026-08-12) — js/screens/
+     payroll-weekly-ui.js (window.renderWeeklyPayrollTab, the standalone
+     weekly SCREEN this engine used to feed) is retired: window.Payroll
+     (js/payroll.js, loaded below) now calls window.WeeklyRun.buildLines/
+     compute/setExcluded/setAdjustment/verify/disburse directly, and
+     js/screens/payroll.js is the one screen for both teams. This engine
+     file is unchanged and still load-bearing — do not delete it. -->
 <script defer src="js/payroll-weekly.js"></script>
-<script defer src="js/screens/payroll-weekly-ui.js"></script>
 <!-- ═══ UNIFIED PAYROLL (PAYROLL-REDESIGN-BRIEF.md, owner ruling 2026-08-10) ══
      "unify it as well, treat disbursement of office and operations the same,
      the difference is just the system of computing their pay." ONE run concept
@@ -618,11 +619,14 @@
      Manila bizDate helpers, and the computePayRun / disbursePayRun engines this
      wraps rather than duplicates), and AFTER js/payroll-weekly.js (window.
      WeeklyRun, the other engine it wraps). Placed after js/screens/hr.js too,
-     so the screen can reach forward into that file's payslip builders the same
-     way payroll-weekly-ui.js does — at CLICK time only, never at parse time.
+     so the screen can reach forward into that file's payslip builders — at
+     CLICK time only, never at parse time, the same forward-reference
+     convention every other js/screens/*.js file uses.
      Both js/screens/finance.js and js/screens/hr.js resolve renderPayrollPage
-     by window.* name at NAV time and fall back to the old hub if it is absent,
-     so a load failure degrades to the previous screen instead of a blank pane.
+     by window.* name at NAV time. PAYROLL-LIVE-SPEC-2026-08-11 §8 retired the
+     old hub/weekly-screen fallback both used to degrade to: a missing
+     renderPayrollPage is a load failure now, and paints a plain "did not
+     load" message rather than falling back to a screen that no longer exists.
 
      Every entry here must also be in sw.js's PRECACHE list — scripts/ci-
      invariants.sh CHECK 2 fails the build otherwise. -->
