@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.150';
+window.APP_VERSION = '14.0.151';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -329,6 +329,44 @@ window.DEPARTMENTS = {
     subtabs: ['Overview', 'Deals', 'Tasks', 'Quotes', 'Quote Builder', 'Activity'],
     navOrder: 12, isPartnerDept: true
   }
+};
+
+// ── window.isExternalPartnerUser(u) — is this person OUTSIDE Barro? ────────
+// Owner ruling (2026-08-12): "dont include brilliant steel or partners on the
+// payroll or hr". They are another company's people; they draw no Barro wage
+// and do not belong on an HR roster.
+//
+// THE ONE COPY. This predicate previously existed TWICE, hand-duplicated in
+// js/departments.js (buildPayRunLines) and js/screens/hr.js (the HR roster) —
+// two copies of a rule that decides who gets paid, guaranteed to drift. Both
+// now delegate here. Anywhere else that lists staff should call this too.
+//
+// EXTERNAL-NESS IS READ OFF `DEPARTMENTS`, never hardcoded by name: Brilliant
+// Steel carries isSeparate, Partners carries isPartnerDept. A future external
+// department is therefore excluded the moment it is declared, instead of
+// silently landing on the payroll until someone remembers this function.
+//
+// ⚠ `every`, NOT `some`, and this is the money-safe direction. Someone is
+// external only when EVERY department they belong to is external. A genuine
+// Barro employee who is ALSO assigned to Brilliant Steel to coordinate the
+// partnership keeps their wage — the failure of wrongly excluding a real
+// employee is silent non-payment, which is far worse than a partner appearing
+// on a roster where a human can see and hold them. (This also fixes the old
+// `depts.length === 1` test, which let a Brilliant-Steel-plus-Partners person
+// through on a technicality.)
+window.isExternalPartnerUser = function(u) {
+  if (!u) return false;
+  if (u.role === 'partner') return true;
+  // A user titled "Partner" whose role is still 'employee'/'agent' — the exact
+  // case the original role-only filter let through.
+  if (typeof u.title === 'string' && u.title.trim().toLowerCase() === 'partner') return true;
+  const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
+  if (!depts.length) return false;          // no department is not evidence of being external
+  const meta = window.DEPARTMENTS || {};
+  return depts.every(function(d) {
+    const m = meta[d];
+    return !!(m && (m.isSeparate || m.isPartnerDept));
+  });
 };
 
 // ── v12 WS42 Phase 21 — BI icon-tile system ──────────────────────────────

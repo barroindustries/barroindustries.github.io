@@ -2030,12 +2030,11 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
   overridesEff = overridesEff || {};
 
   const usersSnap = await fetchUsersWithPayroll();
-  const isExternalPartner = (u) => {
-    if (u.role === 'partner') return true;
-    if (typeof u.title === 'string' && u.title.trim().toLowerCase() === 'partner') return true;
-    const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
-    return depts.length === 1 && depts[0] === 'Brilliant Steel';
-  };
+  // ONE definition, in js/config.js — this was a hand-duplicated copy of the
+  // HR roster's identical predicate, i.e. two copies of a rule that decides
+  // who gets paid. Now also covers the Partners department, which neither copy
+  // did (owner ruling 2026-08-12: no Brilliant Steel or Partners on payroll).
+  const isExternalPartner = (u) => window.isExternalPartnerUser(u);
   const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
 
   // A regular-payroll uid can ALSO be paid weekly via a worker_profiles doc

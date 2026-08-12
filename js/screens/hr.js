@@ -979,12 +979,11 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   // payroll. A partner can present as role 'partner', a Brilliant-Steel-only
   // member (the partner company), OR a user titled "Partner" whose role is still
   // 'employee'/'agent' (which is why the old role-only filter let them through).
-  const isExternalPartner = (u) => {
-    if (u.role === 'partner') return true;
-    if (typeof u.title === 'string' && u.title.trim().toLowerCase() === 'partner') return true;
-    const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
-    return depts.length === 1 && depts[0] === 'Brilliant Steel';
-  };
+  // ONE definition, in js/config.js (window.isExternalPartnerUser) — the twin
+  // of this predicate lived in js/departments.js's buildPayRunLines and the two
+  // were kept in step by hand. Now also covers the Partners department (owner
+  // ruling 2026-08-12: no Brilliant Steel or Partners on payroll or HR).
+  const isExternalPartner = (u) => window.isExternalPartnerUser(u);
   const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
   // ── THE DOUBLE-PAY GUARD, roster side ───────────────────────────
   // A person can be paid weekly by TWO independent facts, and the engine
