@@ -27,10 +27,23 @@
 //
 //  THE SHAPE OF THE SCREEN, in the order the eye meets it:
 //     1. what is waiting, in one sentence, with the money in it
-//     2. every period still owing, oldest first (a missed period cannot hide)
-//     3. the problems, in sentences, each with the person's name and a Fix
-//     4. the roster — one row per person, every figure visible
-//     5. ONE button, named for what it does, saying what it costs
+//     2. every period THIS TEAM still owes, oldest first (a missed period
+//        cannot hide) — the OTHER team's own unpaid periods get one quiet
+//        line, never mixed into this list (clutter/segregation fix,
+//        2026-08-12: "not segregated for office and operations" outranks the
+//        earlier "cross-team so a missed period cannot hide" reasoning; see
+//        _pyPaintWaiting)
+//     3. the problems, in sentences, each with the person's name and a Fix —
+//        several people sharing the identical problem collapse into ONE
+//        sentence naming all of them, not one row apiece (_pyGroupProblems)
+//     4. the roster — one card per person, every figure visible, including
+//        "Who else should be here?" in its own header (folded in, not a
+//        floating block)
+//     5. ONE button, named for what it does, saying what it costs in ONE
+//        short sentence — after the roster, not before it (2026-08-12; this
+//        used to sit above the roster so it stayed reachable without
+//        scrolling past thirty cards, but the owner's decluttering ruling
+//        ("cluttered messy unorganized") outranks that convenience)
 //
 //  TWO BUTTONS IN THE WHOLE FLOW, and you only ever see one of them:
 //     HR      "Hours are correct - send to Finance"   (state 'prepared')
@@ -272,6 +285,13 @@ function _pyColsFor(reads) {
     PY_SUMMABLE_KEYS.concat(['attScore', 'kpiScore']).forEach(k => {
       if (r[k] != null && !(k === 'oneOffNet' && !r.oneOffs.length)) has[k] = true;
     });
+    // Findability fix (2026-08-12 — "cant find where to apply ca deduction"):
+    // an outstanding cash advance must be VISIBLE even for a person whose
+    // instalment this period is still 0/unset. Otherwise the column only
+    // reliably reads as "in use" once somebody has already typed a non-zero
+    // number into it, which is exactly backwards — the whole point is to show
+    // there IS a balance to collect, so the field gets found and used.
+    if (r.caBalanceBefore != null && r.caBalanceBefore > 0) has.cashAdv = true;
   });
   return PY_COLS.filter(c => c.always || has[c.key]);
 }
@@ -710,25 +730,32 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       <div id="py-headline"></div>
       <div id="py-unreadable"></div>
       <div id="py-waiting" style="margin-bottom:14px"></div>
-      <div id="py-whoelse" style="margin-bottom:14px"></div>
-      <!-- PROBLEMS BEFORE THE BUTTON, deliberately. The button is the thing
-           that costs money; anything the system is unsure about has to have
-           been read before the eye reaches it. The button sits above the
-           roster rather than below it only so that it is reachable without
-           scrolling past thirty people — the sentences it needs to be read
-           after are the ones directly above it. -->
+      <!-- ORDER (clutter fix, 2026-08-12 — owner: "cluttered messy unorganized").
+           What is waiting -> problems, if any -> the roster -> the one action.
+           The button used to sit ABOVE the roster so it stayed reachable
+           without scrolling past thirty people; the owner's decluttering
+           ruling outranks that convenience, so it now sits after the roster,
+           where the eye actually finishes. "Who else should be here?" no
+           longer gets its own floating block — it lives in the roster's own
+           header (see _pyTotalsCard) so it reads as part of the roster,
+           not an island between cards. -->
       <div id="py-problems" style="margin-bottom:14px"></div>
-      <div id="py-action" style="margin-bottom:14px"></div>
       <div id="py-roster"></div>
+      <div id="py-action" style="margin-top:14px"></div>
     `;
+
+    // "Who else should be here?" (D11) folded into the roster's own header
+    // (_pyTotalsCard) instead of a standalone floating block — same visibility
+    // rule _pyPaintWhoElse always used (canPrepare, a period exists, not paid).
+    const whoElseHtml = (canPrepare && period && state !== 'paid')
+      ? '<button type="button" class="btn-secondary btn-sm" id="py-whoelse-btn">Who else should be here?</button>' : '';
 
     _pyPaintHeadline(root.querySelector('#py-headline'), period, state, label, tot, reads, notPaid, { isLive, todayIso, periodEnd, kind });
     _pyPaintUnreadable(root.querySelector('#py-unreadable'), unreadable, owingError);
-    _pyPaintWaiting(root.querySelector('#py-waiting'), owing, byPeriod);
-    _pyPaintWhoElse(root.querySelector('#py-whoelse'), period, state, canPrepare, label);
-    _pyPaintAction(root.querySelector('#py-action'), { period, state, label, tot, reads, notPaid, isLive, periodEnd, kind });
+    _pyPaintWaiting(root.querySelector('#py-waiting'), owing, byPeriod, activeTeam);
     _pyPaintProblems(root.querySelector('#py-problems'), problems);
-    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso });
+    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml });
+    _pyPaintAction(root.querySelector('#py-action'), { period, state, label, tot, reads, notPaid, isLive, periodEnd, kind });
 
     if (window.lucide) lucide.createIcons({ nodes: [root] });
     _pyBind({ period, state, label, reads, notPaid, tot, canEditRows, canCorrectRow, isLive, periodEnd, kind, activeTeam });
@@ -850,22 +877,43 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     </div></div>`;
   }
 
-  // ── Everything still owing, oldest first, WITH ITS MONEY ─────────────────
-  // Fifty-two weeks and twelve months a year is how an unpaid period hides.
+  // ── Everything still owing FOR THIS TEAM, oldest first, WITH ITS MONEY ───
+  // Fifty-two weeks and twelve months a year is how an unpaid period hides —
+  // that reason survives — but the owner's segregation ruling (2026-08-12:
+  // "cluttered messy unorganized not segregated for office and operations")
+  // outranks it: Office months and Operations weeks must never interleave in
+  // one list. So this card is now filtered to the ACTIVE TAB's team, via the
+  // same PC.teamOf/_pyTeam this screen already uses to sort periods into
+  // tabs. A period on the OTHER team can still not silently hide — instead of
+  // mixing into the list, it gets one quiet line ("Operations Team also has N
+  // periods not yet paid") that switches tabs, so a missed period is still
+  // reachable without ever showing two teams' rows side by side.
+  //
   // This card is also where the period picker's totals live: the select above
   // cannot carry a peso figure at 375px without the browser clipping it, so
   // every period still owing states its own total here instead, wrapping, in
   // full. The period on screen is in the list too — marked, not hidden — so
-  // this is one honest list of what is outstanding rather than a list with a
-  // hole in it exactly where you happen to be standing.
-  function _pyPaintWaiting(el, owing, byPeriod) {
+  // this is one honest list of what is outstanding for THIS team rather than
+  // a list with a hole in it exactly where you happen to be standing.
+  function _pyPaintWaiting(el, owing, byPeriod, activeTeam) {
     if (!el) return;
-    const rows = (owing || [])
+    const all = (owing || [])
       .map(o => ({ id: (o && (o.periodId || o.id)) || '', state: (o && o.state) || 'notstarted', total: (o && typeof o.total === 'number') ? o.total : null }))
-      .filter(o => o.id)
+      .filter(o => o.id);
+    const rows = all
+      .filter(o => _pyTeam(o.id) === activeTeam)
       .sort((a, b) => (_pySortKey(a.id) < _pySortKey(b.id) ? -1 : 1));
+
+    // The other team's count, named but never listed here — one line, not a
+    // list, and it is the ONLY place the other team is mentioned on this tab.
+    const otherTeam = activeTeam === 'operations' ? 'office' : 'operations';
+    const otherCount = all.filter(o => _pyTeam(o.id) === otherTeam).length;
+    const otherLink = otherCount
+      ? `<button type="button" class="btn-link btn-sm py-otherteam-link" style="margin-top:8px">${_pyEsc(PY_TEAM_LABEL[otherTeam])} also has ${otherCount} period${otherCount === 1 ? '' : 's'} not yet paid</button>`
+      : '';
+
     if (!rows.length) {
-      el.innerHTML = `<div class="info-banner">${_pyIcon('✓', 16)} Nothing else is waiting to be paid.</div>`;
+      el.innerHTML = `<div class="info-banner">${_pyIcon('✓', 16)} Nothing else is waiting to be paid for ${_pyEsc(PY_TEAM_LABEL[activeTeam])}.</div>${otherLink}`;
       return;
     }
     const html = rows.map(o => {
@@ -874,19 +922,19 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       const money = t && t.people ? `${t.people} ${t.people === 1 ? 'person' : 'people'} · ${_pyPeso(t.takeHome)}`
                   : (o.total != null ? _pyPeso(o.total) : 'no roster yet');
       const here = (o.id === selected);
-      // Cross-team, unfiltered on BOTH tabs (D8) — each row names its own
-      // team so a period owing on the OTHER tab can never hide.
-      const team = PY_TEAM_LABEL[_pyTeam(o.id)] || '';
+      // No team prefix here — the list is already filtered to ONE team, and
+      // the tab above already says which. Repeating it on every row is
+      // exactly the redundant clutter the owner flagged.
       return `<div class="py-waiting-row">
         <div class="py-wlabel">
           <strong>${_pyEsc(_pyLabel(o.id))}</strong>
           <span class="badge ${o.state === 'checked' ? 'badge-blue' : o.state === 'prepared' ? 'badge-amber' : 'badge-gray'}" style="font-size:10px;margin-left:6px">${_pyEsc(PY_STATE_WORDS[o.state] || o.state)}</span>
-          <div class="py-sub" style="margin-bottom:0">${_pyEsc(team)} · ${_pyEsc(money)}${here ? ' · on screen now' : ''}</div>
+          <div class="py-sub" style="margin-bottom:0">${_pyEsc(money)}${here ? ' · on screen now' : ''}</div>
         </div>
         ${here ? '' : `<button class="btn-secondary btn-sm py-open" data-period="${_pyEsc(o.id)}">Open</button>`}
       </div>`;
     }).join('');
-    el.innerHTML = `<div class="card"><div class="card-header"><h3>${rows.length} period${rows.length === 1 ? '' : 's'} not yet paid</h3></div><div class="card-body">${html}</div></div>`;
+    el.innerHTML = `<div class="card"><div class="card-header"><h3>${rows.length} period${rows.length === 1 ? '' : 's'} not yet paid</h3></div><div class="card-body">${html}${otherLink}</div></div>`;
   }
 
   // ═════════════════════════════════════════════════════════
@@ -897,13 +945,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   //  payroll, removed) — never an in-place edit, because the payroll screen
   //  does not touch a person's record (owner: "these records cannot be
   //  edited in the payroll tab already").
+  //
+  //  The button itself is no longer painted as its own floating block — the
+  //  owner's clutter ruling (2026-08-12) folded it into the roster's own
+  //  header, built in paint() as `whoElseHtml` and rendered inside
+  //  _pyTotalsCard (or the roster's empty-state, when there are no paid
+  //  lines). The visibility rule is unchanged: canPrepare, a period exists,
+  //  not yet paid. The panel it opens (_pyOpenWhoElsePanel, below) is bound
+  //  in _pyBind alongside every other roster-level control.
   // ═════════════════════════════════════════════════════════
-  function _pyPaintWhoElse(el, period, state, canPrepareFlag, label) {
-    if (!el) return;
-    if (!canPrepareFlag || !period || state === 'paid') { el.innerHTML = ''; return; }
-    el.innerHTML = `<button type="button" class="btn-secondary btn-sm" id="py-whoelse-btn">Who else should be here?</button>`;
-    el.querySelector('#py-whoelse-btn')?.addEventListener('click', () => _pyOpenWhoElsePanel(period, label));
-  }
 
   function _pyOpenWhoElsePanel(period, label) {
     const list = _pyNotPaidList(period);
@@ -943,6 +993,34 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     _pyBindHrRecordBtns(panel);
   }
 
+  // A grouped problem's single "Fix this" (clutter fix, 2026-08-12): several
+  // people share the exact same problem sentence, so the collapsed row shows
+  // ONE button rather than one per person. It opens each person's own figures
+  // individually — the fix itself is still per-person (an unpunched day, a
+  // shortfall, a zero) and nothing here changes that; only the doorway to it
+  // is shared. Selecting a name here stacks openAdjustPanel on top, exactly
+  // the same panel a lone "Fix this" opens directly.
+  function _pyOpenGroupFixPanel(period, readById, ids, label) {
+    const rowsHtml = ids.map(id => {
+      const r = readById[id];
+      const name = (r && r.name) || id;
+      return `<div class="py-waiting-row">
+        <div class="py-wlabel"><strong>${_pyEsc(name)}</strong></div>
+        <button class="btn-secondary btn-sm py-groupfix-open" data-person="${_pyEsc(id)}">Fix this</button>
+      </div>`;
+    }).join('');
+    const panel = openPage(`Fix — ${_pyEsc(label)}`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+        Everyone with this same problem for ${_pyEsc(label)}. Fix each one on their own — the others are untouched.
+      </div>
+      ${rowsHtml}
+    `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    panel.querySelectorAll('.py-groupfix-open').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.person;
+      openAdjustPanel(period, readById[id], id, label);
+    }));
+  }
+
   // ═════════════════════════════════════════════════════════
   //  THE ONE BUTTON
   //  Two exist in the whole flow and you only ever see one. Each is named for
@@ -974,27 +1052,32 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       return;
     }
 
+    // Cost sentences cut to ONE short line each (clutter fix, 2026-08-12 —
+    // owner: "cluttered messy unorganized"). The money and the counts stay;
+    // the lecture about who else can unlock it, or exactly which steps happen
+    // in what order, does not — the row actions and the panel it opens still
+    // say all of that at the point it actually matters.
     if (state === 'notstarted') {
       body = canPrepare
-        ? `<div class="py-cost">Nothing has been worked out for ${_pyEsc(label)} yet. Opening it builds the roster on its own — if this stays empty, nobody is on the roster for this period.</div>`
-        : `<div class="py-cost">${_pyEsc(label)} has not been started. HR starts it and tells Finance when the hours are right.</div>`;
+        ? `<div class="py-cost">${_pyEsc(label)} has not been started — opening it builds the roster automatically.</div>`
+        : `<div class="py-cost">${_pyEsc(label)} has not been started. HR starts it.</div>`;
     } else if (state === 'prepared') {
       if (canPrepare) {
         body = `<button class="btn-primary py-bigbtn" id="py-check-btn">Hours are correct - send to Finance</button>
-          <div class="py-cost">${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}${notPaid.length ? `, and ${notPaid.length} not being paid` : ''}. Pressing this tells Finance the figures are ready and locks them so nobody can change an amount underneath them. You or the President can unlock it again.</div>`;
+          <div class="py-cost">${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}${notPaid.length ? `, ${notPaid.length} not being paid` : ''}. Locks the figures and sends them to Finance.</div>`;
       } else {
-        body = `<div class="py-cost">HR is still checking the hours for ${_pyEsc(label)}. You will be told when it is ready to pay.</div>`;
+        body = `<div class="py-cost">HR is still checking ${_pyEsc(label)}.</div>`;
       }
     } else if (state === 'checked') {
       if (canPay) {
         body = `<button class="btn-primary py-bigbtn" id="py-pay-btn">Pay everyone</button>
-          <div class="py-cost">${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}. You attach each person's receipt on the next screen, then one press pays them, books it, takes each advance instalment and writes every payslip. <strong>It cannot be undone</strong> — afterwards a mistake is fixed one person at a time.</div>
+          <div class="py-cost">${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}. <strong>Cannot be undone</strong> — attach receipts on the next screen.</div>
           <button class="btn-secondary btn-sm" id="py-reopen-btn">Send back to HR for changes</button>`;
       } else {
-        body = `<div class="py-cost">${_pyEsc(label)} is checked and waiting for Finance to pay it. ${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}.</div>`;
+        body = `<div class="py-cost">${_pyEsc(label)} is checked, waiting for Finance. ${_pyEsc(people)}, ${_pyEsc(_pyPeso(tot.takeHome))}.</div>`;
       }
     } else {
-      body = `<div class="py-cost">${_pyEsc(label)} is paid and closed. To fix one person, use <strong>Correct this person</strong> on their row — it reverses only their part and reissues only their payslip.</div>`;
+      body = `<div class="py-cost">${_pyEsc(label)} is paid and closed. Use <strong>Correct this person</strong> on a row to fix one person.</div>`;
     }
 
     el.innerHTML = `<div class="card"><div class="card-body"><div class="py-actbar">${body}</div></div></div>`;
@@ -1018,7 +1101,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
 
     // The people the system refused to pay because it does not KNOW something.
     notPaid.forEach(p => {
-      if (p.words.danger) out.push({ severity: 'danger', id: p.id, text: `${p.name} - ${p.words.short.toLowerCase()}. ${p.words.note}` });
+      if (p.words.danger) out.push({ severity: 'danger', id: p.id, name: p.name, text: `${p.name} - ${p.words.short.toLowerCase()}. ${p.words.note}` });
     });
 
     reads.forEach(r => {
@@ -1040,30 +1123,57 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       });
       if (missing.length) {
         out.push({
-          severity: 'warn', id: r.id,
+          severity: 'warn', id: r.id, name: r.name,
           text: `${r.name} - no punch ${missing.join(', ')}. ${missing.length === 1 ? 'That day is' : 'Those days are'} unpaid unless you record why ${missing.length === 1 ? 'it' : 'they'} should be paid.`
         });
       } else if (r.daysAbsent != null && r.daysAbsent > 0 && !r.rows.length) {
-        out.push({ severity: 'warn', id: r.id, text: `${r.name} - ${r.daysAbsent} day${r.daysAbsent === 1 ? '' : 's'} absent. ${r.daysAbsent === 1 ? 'It is' : 'They are'} unpaid unless you record why ${r.daysAbsent === 1 ? 'it' : 'they'} should be paid.` });
+        out.push({ severity: 'warn', id: r.id, name: r.name, text: `${r.name} - ${r.daysAbsent} day${r.daysAbsent === 1 ? '' : 's'} absent. ${r.daysAbsent === 1 ? 'It is' : 'They are'} unpaid unless you record why ${r.daysAbsent === 1 ? 'it' : 'they'} should be paid.` });
       }
-      // Nothing to pay. Always worth a sentence: it is either right (they did
-      // not work) or it is the silent-zero this whole design exists to stop.
+      // Nothing to pay. Always worth a sentence — but WHICH sentence depends on
+      // WHY, and the two causes are not the same fix (2026-08-12 diagnosis: the
+      // old wording named "deductions" for everyone, but weeklyRunSkipReason
+      // already refuses anyone with no rate on file (returns 'no-rate' and they
+      // never appear as a zero line) — so a zero here is never a rate problem.
+      // In practice it is almost always a week with no clock-ins at all: every
+      // day reads absent, gross is 0, and "check the figures" sends someone
+      // looking at deductions that were never the cause.
+      //   - r.rows present and every day of it unworked  -> the hours are
+      //     missing, not the deductions. Point at recording the days/an
+      //     override, because that is the actual fix.
+      //   - real earnings this period (gross > 0) but still net <= 0 -> the
+      //     deductions genuinely consumed it; the original wording is correct.
+      //   - neither is knowable from this line (e.g. a monthly/office line,
+      //     which carries no per-day rows) -> say what IS known instead of
+      //     guessing: the earnings and deduction totals, verbatim.
       if (r.takeHome != null && r.takeHome <= 0) {
-        out.push({ severity: 'danger', id: r.id, text: `${r.name} - nothing to pay after deductions (${_pyPeso(r.takeHome)}). Check the figures before this period is paid.` });
+        const hasRows = Array.isArray(r.rows) && r.rows.length > 0;
+        const noPunches = hasRows && (r.daysWorked || 0) === 0 && (r.daysAbsent || 0) > 0;
+        const grossKnown = _pySum(r.earnings, r.allowances);
+        if (noPunches) {
+          out.push({ severity: 'danger', id: r.id, name: r.name, text: `${r.name} - no clock-ins for this period, so there is nothing to pay (${_pyPeso(r.takeHome)}). Record the days worked, or override a day with a reason, before this period is paid.` });
+        } else if (grossKnown != null && grossKnown > 0) {
+          out.push({ severity: 'danger', id: r.id, name: r.name, text: `${r.name} - nothing to pay after deductions (${_pyPeso(r.takeHome)}). Check the figures before this period is paid.` });
+        } else {
+          const dedKnown = _pySum(r.otherDed, r.statutory, r.cashAdv);
+          out.push({ severity: 'danger', id: r.id, name: r.name, text: `${r.name} - nothing to pay (${_pyPeso(r.takeHome)}). Earnings ${grossKnown != null ? _pyPeso(grossKnown) : 'unknown'}, deductions ${dedKnown != null ? _pyPeso(dedKnown) : 'unknown'} — check before this period is paid.` });
+        }
       }
-      // An advance on the books with nothing coming off it this period.
+      // A cash advance on the books with nothing coming off it this period.
       if (r.caBalanceBefore != null && r.caBalanceBefore > 0 && !(r.cashAdv > 0)) {
-        out.push({ severity: 'warn', id: r.id, text: `${r.name} - advance of ${_pyPeso(r.caBalanceBefore)} outstanding, nothing collected this period.` });
+        out.push({ severity: 'warn', id: r.id, name: r.name, text: `${r.name} - cash advance of ${_pyPeso(r.caBalanceBefore)} outstanding, nothing collected this period.` });
       }
       if (r.caShortfall != null && r.caShortfall > 0) {
-        out.push({ severity: 'warn', id: r.id, text: `${r.name} - ${_pyPeso(r.caShortfall)} of their advance could not be collected this period; it stays on their balance.` });
+        out.push({ severity: 'warn', id: r.id, name: r.name, text: `${r.name} - ${_pyPeso(r.caShortfall)} of their cash advance could not be collected this period; it stays on their balance.` });
       }
       if (!r.id) {
-        out.push({ severity: 'danger', id: '', text: `${r.name} - their record carries no id, so their figures cannot be changed from here.` });
+        out.push({ severity: 'danger', id: '', name: r.name, text: `${r.name} - their record carries no id, so their figures cannot be changed from here.` });
       }
     });
 
-    // Whatever the engine itself flagged, verbatim.
+    // Whatever the engine itself flagged, verbatim. No `name` field — these
+    // come as free-form strings the engine already wrote, not the
+    // `${name} - ...` shape the grouping below relies on, so each stays its
+    // own row rather than being mis-grouped against unrelated text.
     const w = warningsByPeriod[periodId] || (period && period.warnings) || [];
     (Array.isArray(w) ? w : []).forEach(x => {
       const text = (typeof x === 'string') ? x : (x && (x.message || x.text)) || '';
@@ -1074,7 +1184,8 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // not paid. It can never be a line item under "things to look at".
     const fails = (period && Array.isArray(period.failures)) ? period.failures : [];
     fails.forEach(f => {
-      out.push({ severity: 'danger', id: _pyId(f), text: `${_pyName(f) || 'Someone'} - ${(f && (f.message || f.kind)) || 'this did not complete'}${(f && f.amount != null) ? ` (${_pyPeso(f.amount)})` : ''}. This did NOT go out.` });
+      const fname = _pyName(f) || 'Someone';
+      out.push({ severity: 'danger', id: _pyId(f), name: fname, text: `${fname} - ${(f && (f.message || f.kind)) || 'this did not complete'}${(f && f.amount != null) ? ` (${_pyPeso(f.amount)})` : ''}. This did NOT go out.` });
     });
 
     // "Fix this" is only offered where there is something to fix FROM HERE —
@@ -1087,16 +1198,64 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     return out.sort((a, b) => (a.severity === b.severity) ? 0 : (a.severity === 'danger' ? -1 : 1));
   }
 
+  // "Ramon and three others" not "Ramon", then "Dina", then "Boy", then
+  // "Elena" said four times. Every problem here was built as `${name} -
+  // ${rest}`; when two or more people share the EXACT same `rest` (same
+  // severity, same sentence after the name), the owner's clutter ruling
+  // (2026-08-12) says once with all the names, not once per person. A row
+  // that cannot be reduced to that shape — an engine warning string with no
+  // `name` field, say — stays exactly as it was, standing alone.
+  function _pyGroupProblems(problems) {
+    const groups = [];
+    const bySuffix = {};
+    problems.forEach(p => {
+      const prefix = p.name ? p.name + ' - ' : null;
+      const rest = (prefix && p.text.indexOf(prefix) === 0) ? p.text.slice(prefix.length) : null;
+      if (rest == null) { groups.push({ severity: p.severity, single: p }); return; }
+      const key = p.severity + '|' + rest;
+      let g = bySuffix[key];
+      if (!g) { g = { severity: p.severity, rest, names: [], fixableIds: [] }; bySuffix[key] = g; groups.push(g); }
+      g.names.push(p.name);
+      if (p.fixable && p.id) g.fixableIds.push(p.id);
+    });
+    return groups;
+  }
+
+  // "A", "A and B", "A, B and C" — plain-text names only; the caller escapes
+  // the assembled sentence once, the same way every other sentence in this
+  // file is built (raw string, then one _pyEsc at the point it is printed).
+  function _pyJoinNames(names) {
+    if (names.length <= 1) return names[0] || '';
+    if (names.length === 2) return names[0] + ' and ' + names[1];
+    return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+
   function _pyPaintProblems(el, problems) {
     if (!el) return;
     if (!problems.length) { el.innerHTML = ''; return; }
-    const dangers = problems.filter(p => p.severity === 'danger').length;
-    const rows = problems.map((p, i) => `<div class="py-problem">
-        <div class="py-ptext" style="${p.severity === 'danger' ? 'color:var(--danger)' : ''}">${_pyEsc(p.text)}</div>
-        ${p.fixable ? `<button class="btn-secondary btn-sm py-fix" data-person="${_pyEsc(p.id)}" data-idx="${i}">Fix this</button>` : ''}
-      </div>`).join('');
+    const groups = _pyGroupProblems(problems);
+    const dangers = groups.filter(g => g.severity === 'danger').length;
+    const rows = groups.map(g => {
+      if (g.single) {
+        return `<div class="py-problem">
+          <div class="py-ptext" style="${g.severity === 'danger' ? 'color:var(--danger)' : ''}">${_pyEsc(g.single.text)}</div>
+          ${g.single.fixable ? `<button class="btn-secondary btn-sm py-fix" data-person="${_pyEsc(g.single.id)}">Fix this</button>` : ''}
+        </div>`;
+      }
+      const text = `${_pyJoinNames(g.names)} - ${g.rest}`;
+      let fixBtn = '';
+      if (g.fixableIds.length === 1) {
+        fixBtn = `<button class="btn-secondary btn-sm py-fix" data-person="${_pyEsc(g.fixableIds[0])}">Fix this</button>`;
+      } else if (g.fixableIds.length > 1) {
+        fixBtn = `<button class="btn-secondary btn-sm py-fix-group" data-persons="${_pyEsc(g.fixableIds.join(','))}">Fix this</button>`;
+      }
+      return `<div class="py-problem">
+        <div class="py-ptext" style="${g.severity === 'danger' ? 'color:var(--danger)' : ''}">${_pyEsc(text)}</div>
+        ${fixBtn}
+      </div>`;
+    }).join('');
     el.innerHTML = `<div class="card" style="border-left:3px solid ${dangers ? 'var(--danger)' : 'var(--warning)'}">
-      <div class="card-header"><h3>${problems.length} thing${problems.length === 1 ? '' : 's'} to look at first</h3></div>
+      <div class="card-header"><h3>${groups.length} thing${groups.length === 1 ? '' : 's'} to look at first</h3></div>
       <div class="card-body">${rows}</div></div>`;
   }
 
@@ -1144,7 +1303,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // ═════════════════════════════════════════════════════════
   function _pyPaintRoster(el, ctx) {
     if (!el) return;
-    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso } = ctx;
+    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml } = ctx;
 
     if (!period || (!reads.length && !notPaid.length)) {
       el.innerHTML = `<div class="empty-state">
@@ -1153,6 +1312,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
         <p>${canPrepare
           ? 'No one was found to pay for this period. Check that people have a rate and are marked as being paid, then open this period again.'
           : 'No one has been worked out for this period yet.'}</p>
+        ${whoElseHtml ? `<div style="margin-top:10px">${whoElseHtml}</div>` : ''}
       </div>`;
       return;
     }
@@ -1178,10 +1338,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     });
 
     const cards = ordered.map(r => _pyPersonCard(r, cols, { canEditRows, canCorrectRow, flagged: flagged(r), isLive })).join('');
-    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period, isLive) : '';
+    // "Who else should be here?" lives in the roster's OWN header now
+    // (clutter fix, 2026-08-12) — inside the totals card when there is one,
+    // or its own thin header bar when every line is held/skipped and there is
+    // no totals card to carry it (reads.length === 0 but notPaid.length > 0).
+    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period, isLive, whoElseHtml) : '';
+    const noTotalsHeader = (!reads.length && whoElseHtml) ? `<div class="py-waiting-row" style="border-bottom:0">${whoElseHtml}</div>` : '';
     const notPaidCards = notPaid.map(p => _pyNotPaidCard(p, canEditRows)).join('');
 
-    el.innerHTML = totalsCard + cards + (notPaid.length
+    el.innerHTML = noTotalsHeader + totalsCard + cards + (notPaid.length
       ? `<div style="font-size:12px;color:var(--text-muted);margin:16px 0 8px">${notPaid.length} not being paid for ${_pyEsc(label)}</div>` + notPaidCards
       : '');
   }
@@ -1222,9 +1387,22 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     } else if (col.key === 'oneOffNet') {
       if (r.oneOffNet != null) { val = (r.oneOffNet > 0 ? '+' : '') + _pyPeso(r.oneOffNet); cls = r.oneOffNet >= 0 ? 'py-plus' : 'py-minus'; }
     } else if (col.key === 'otherDed' || col.key === 'statutory' || col.key === 'cashAdv') {
-      if (r[col.key] != null) { val = (r[col.key] ? '-' : '') + _pyPeso(r[col.key]); cls = r[col.key] ? 'py-minus' : ''; }
-      if (col.key === 'cashAdv' && r.caBalanceBefore != null && (+r.cashAdv || 0) > 0) {
-        note = `balance ${_pyPeso(r.caBalanceBefore)} → ${_pyPeso(r.caBalanceAfter != null ? r.caBalanceAfter : (r.caBalanceBefore - r.cashAdv))}`;
+      // Findability fix (2026-08-12): a person with an outstanding cash
+      // advance but nothing meaningfully collected THIS period must still
+      // show that plainly, not "₱0.00" with no note. computeWeeklyLine/
+      // computePayLine always freeze caDeduction/caPlanned as a NUMBER
+      // (0 when nothing was set — never null), so the "is anything being
+      // collected" test has to be the same one _pyProblems already uses
+      // (!(r.cashAdv > 0)), not a null check — a null check here would never
+      // fire against a real frozen line and silently miss every case.
+      if (col.key === 'cashAdv' && r.caBalanceBefore != null && r.caBalanceBefore > 0 && !(r.cashAdv > 0)) {
+        val = _pyPeso(0);
+        note = `owes ${_pyPeso(r.caBalanceBefore)} — nothing collected yet. Set it under "Adjust figures".`;
+      } else if (r[col.key] != null) {
+        val = (r[col.key] ? '-' : '') + _pyPeso(r[col.key]); cls = r[col.key] ? 'py-minus' : '';
+        if (col.key === 'cashAdv' && r.caBalanceBefore != null && (+r.cashAdv || 0) > 0) {
+          note = `balance ${_pyPeso(r.caBalanceBefore)} → ${_pyPeso(r.caBalanceAfter != null ? r.caBalanceAfter : (r.caBalanceBefore - r.cashAdv))}`;
+        }
       }
     } else if (r[col.key] != null) {
       val = _pyPeso(r[col.key]);
@@ -1295,7 +1473,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // when somebody wanted to check it. Here it is drawn on every paint from the
   // cards' own numbers, so it survives by construction and can never contradict
   // the column above it.
-  function _pyTotalsCard(tot, cols, people, notPaidCount, period, isLive) {
+  function _pyTotalsCard(tot, cols, people, notPaidCount, period, isLive, whoElseHtml) {
     const stored = _pyPick(
       period && period.totals && period.totals.takeHome,
       period && period.totals && period.totals.net,
@@ -1322,8 +1500,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // "this is what goes out") — §6.3, the same distinction the live banner
     // makes, restated at the point the eye actually lands on a peso figure.
     const totalsSub = isLive ? 'so far — not what will be paid' : 'this is what goes out';
+    // "Who else should be here?" (D11) sits in THIS card's header, not as its
+    // own floating block (clutter fix, 2026-08-12) — this is the roster's
+    // first card, so its header reads as the roster's own header.
     return `<article class="py-card py-totals">
-      <div class="py-who"><strong>Everyone — ${people} ${people === 1 ? 'person' : 'people'}</strong></div>
+      <div class="py-who" style="justify-content:space-between">
+        <strong>Everyone — ${people} ${people === 1 ? 'person' : 'people'}</strong>
+        ${whoElseHtml || ''}
+      </div>
       <div class="py-sub">${totalsSub}${notPaidCount ? ` · ${notPaidCount} not being paid` : ''}</div>
       <div class="py-fields">${cols.map(c => _pyFieldHtml(c, fake, isLive)).join('')}</div>
       ${drift}
@@ -1360,6 +1544,18 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // (or default) period; re-entry restores both the tab and its period.
     const tabsRow = root.querySelector('.py-team-tabs');
     if (tabsRow) window.bindChipTabs(tabsRow, (key) => load(_pyDefaultForTeam(key)));
+
+    // ── The other team's quiet cross-tab link (segregation fix, 2026-08-12) —
+    // "Operations Team also has N periods not yet paid" switches straight to
+    // that team's own last-open (or default) period, same as a tab click.
+    root.querySelector('.py-otherteam-link')?.addEventListener('click', () => {
+      const otherTeam = activeTeam === 'operations' ? 'office' : 'operations';
+      load(_pyDefaultForTeam(otherTeam));
+    });
+
+    // ── "Who else should be here?" (D11) — now folded into the roster's own
+    // header instead of a floating block of its own (clutter fix, 2026-08-12).
+    root.querySelector('#py-whoelse-btn')?.addEventListener('click', () => _pyOpenWhoElsePanel(period, label));
 
     // ── Refresh figures (live mode only) — every row action already ends in
     // load(selected), which in live mode re-projects; this is the same thing
@@ -1437,6 +1633,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     root.querySelectorAll('.py-fix').forEach(b => b.addEventListener('click', () =>
       openAdjustPanel(period, readById[b.dataset.person], b.dataset.person, label)));
 
+    // A collapsed problem shared by several people (clutter fix, 2026-08-12) —
+    // one button, opens a list so each of them can still be fixed on their
+    // own. See _pyOpenGroupFixPanel above.
+    root.querySelectorAll('.py-fix-group').forEach(b => b.addEventListener('click', () => {
+      const ids = (b.dataset.persons || '').split(',').filter(Boolean);
+      _pyOpenGroupFixPanel(period, readById, ids, label);
+    }));
+
     root.querySelectorAll('.py-oneoff-btn').forEach(b => b.addEventListener('click', () =>
       openOneOffPanel(readById[b.dataset.person], b.dataset.person, label)));
 
@@ -1509,8 +1713,18 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   //  ADJUST ONE PERSON'S FIGURES
   //  The owner's "change one person without touching everyone else". Amounts
   //  that live nowhere but here — the allowance, the standing deduction, the
-  //  advance instalment — plus, on a weekly period, the per-day reason that
-  //  turns an unpunched day into a paid one.
+  //  cash advance instalment — plus, on a weekly period, the per-day reason
+  //  that turns an unpunched day into a paid one.
+  //
+  //  Findability fix (2026-08-12 — "cant find where to apply ca deduction").
+  //  The field existed all along but was labelled "Advance instalment", never
+  //  the words the owner actually used ("CA deduction"/"cash advance"), and
+  //  it carried no hint that a balance was even outstanding. Renamed to say
+  //  "cash advance" plainly, and — the bigger half of the fix — the roster
+  //  ROW now shows the outstanding balance and this period's collection
+  //  without opening this panel at all (see _pyFieldHtml's cashAdv branch and
+  //  _pyColsFor). This panel is where you SET the instalment; it should no
+  //  longer be the only place you learn one is owed.
   // ═════════════════════════════════════════════════════════
   function openAdjustPanel(period, r, personId, label) {
     if (!personId) { Notifs.showToast('This record carries no id, so its figures cannot be changed from here.', 'error'); return; }
@@ -1551,14 +1765,18 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // The keys sent to setAdjustment are the ones the underlying engines
     // already store, per period kind. They are listed in ONE place so a rename
     // is one edit, and they are named in the handoff notes for this build.
+    // The label names the thing the owner actually calls it — "cash advance"
+    // — while still saying plainly that this box is THIS PERIOD's instalment,
+    // never the whole balance (that balance is shown separately, below).
+    const caLabel = 'Cash advance — this period\'s instalment (₱)';
     const moneyFields = (kind === 'week')
       ? [['rentAllowance',   'Allowance (₱)',          adj.rentAllowance],
          ['otherDeductions', 'Other deductions (₱)',   adj.otherDeductions],
-         ['caDeduction',     'Advance instalment (₱)', adj.caDeduction],
+         ['caDeduction',     caLabel,                  adj.caDeduction],
          ['travelHours',     'Travel hours',           adj.travelHours]]
       : [['allowance',       'Allowance (₱)',          adj.allowance],
          ['otherDeductions', 'Other deductions (₱)',   adj.otherDeductions],
-         ['caPlanned',       'Advance instalment (₱)', adj.caPlanned]];
+         ['caPlanned',       caLabel,                  adj.caPlanned]];
 
     const hrBtn = _pyHrRecordBtn('margin-top:6px');
     const panel = openPage(`${_pyEsc(name)} — ${_pyEsc(label)}`, `
@@ -1573,12 +1791,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       </div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Amounts for this period</div>
+        ${(r && r.caBalanceBefore != null && r.caBalanceBefore > 0)
+          ? `<div style="font-size:12px;margin-bottom:10px">${_pyEsc(name)} owes <strong>${_pyEsc(_pyPeso(r.caBalanceBefore))}</strong> in cash advances. Set what to collect this period below.</div>`
+          : ''}
         <div class="form-row">
           ${moneyFields.map(([k, lab, v]) => `<div class="form-group"><label>${_pyEsc(lab)}</label>
             <input id="pya-${_pyEsc(k)}" type="number" step="0.01" min="0" inputmode="decimal" value="${v != null ? _pyEsc(v) : ''}" placeholder="0.00"/></div>`).join('')}
         </div>
         <div style="font-size:10px;color:var(--text-muted);margin-top:6px">
-          An advance instalment is capped so take-home pay can never go below zero; anything not collected stays on the balance.
+          A cash advance instalment is capped so take-home pay can never go below zero; anything not collected stays on the balance.
           ${kind === 'week' ? 'Travel hours are paid at half the hourly rate.' : ''}
         </div>
       </div>
@@ -1723,14 +1944,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     if (!personId) { Notifs.showToast('This record carries no id, so it cannot be corrected from here.', 'error'); return; }
     const name = (r && r.name) || personId;
     const kind = _pyKind(selected);
+    const caLabel = 'Cash advance — this period\'s instalment (₱)';
     const fields = (kind === 'week')
       ? [['rentAllowance',   'Allowance (₱)',          r && r.allowances],
          ['otherDeductions', 'Other deductions (₱)',   r && r.otherDed],
-         ['caDeduction',     'Advance instalment (₱)', r && r.cashAdv],
+         ['caDeduction',     caLabel,                  r && r.cashAdv],
          ['travelHours',     'Travel hours',           r && r.travelHours]]
       : [['allowance',       'Allowance (₱)',          r && r.allowances],
          ['otherDeductions', 'Other deductions (₱)',   r && r.otherDed],
-         ['caPlanned',       'Advance instalment (₱)', r && r.cashAdv]];
+         ['caPlanned',       caLabel,                  r && r.cashAdv]];
 
     const panel = openPage(`Correct ${_pyEsc(name)} — ${_pyEsc(label)}`, `
       <div class="info-banner" style="margin-bottom:12px">
@@ -1806,7 +2028,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
         <div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px;overflow-wrap:anywhere">${
           [r.regHours != null ? _pyHrs(r.regHours) + ' hrs' : null,
            (+r.otHours || 0) ? _pyHrs(r.otHours) + ' overtime' : null,
-           (+r.cashAdv || 0) ? 'advance -' + _pyPeso(r.cashAdv) : null].filter(Boolean).map(_pyEsc).join(' · ')
+           (+r.cashAdv || 0) ? 'cash advance -' + _pyPeso(r.cashAdv) : null].filter(Boolean).map(_pyEsc).join(' · ')
         }</div>
         <div id="py-rcpt-${i}"></div>
       </div>`).join('');
@@ -1814,7 +2036,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const panel = openPage(`Pay ${_pyEsc(label)}`, `
       <p style="font-size:13px;margin-bottom:12px">
         <strong>${_pyEsc(_pyPeso(tot.takeHome))}</strong> to ${reads.length} ${reads.length === 1 ? 'person' : 'people'}.
-        One press books it, takes each advance instalment, writes every payslip and records the money leaving. <strong>This cannot be undone.</strong>
+        One press books it, takes each cash advance instalment, writes every payslip and records the money leaving. <strong>This cannot be undone.</strong>
       </p>
       ${noId.length ? `<div class="info-banner" style="margin-bottom:12px;border-left:3px solid var(--danger)">${noId.length} record${noId.length === 1 ? '' : 's'} carry no id and cannot be given a receipt here: ${_pyEsc(noId.map(r => r.name).join(', '))}.</div>` : ''}
       ${bankOpts ? `<div class="form-group"><label>Paid from (company account)</label>
