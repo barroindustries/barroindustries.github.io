@@ -130,6 +130,7 @@ window.Meetings = (function () {
 
     if (m.id) {
       await db.collection(COLL).doc(m.id).set(body, { merge: true });
+      if (window.dbCacheInvalidate) window.dbCacheInvalidate('cal-meetings');
       return m.id;
     }
     body.organizerUid  = me;
@@ -138,6 +139,7 @@ window.Meetings = (function () {
     body.rsvp          = { [me]: 'yes' };   // organising IS accepting
     body.createdAt     = firebase.firestore.FieldValue.serverTimestamp();
     const ref = await db.collection(COLL).add(body);
+    if (window.dbCacheInvalidate) window.dbCacheInvalidate('cal-meetings');
     notifyInvited(Object.assign({ id: ref.id }, body), invitees.filter(u => u !== me));
     // Owner, 2026-08-10: "notify on chat if theres a meeting scheduled".
     // A meeting created FROM a thread posts its card into that thread straight
@@ -187,6 +189,7 @@ window.Meetings = (function () {
     const me = uid();
     if (!me) return;
     await db.collection(COLL).doc(id).update({ ['rsvp.' + me]: answer });
+    if (window.dbCacheInvalidate) window.dbCacheInvalidate('cal-meetings');
   }
 
   async function cancel(id) {
@@ -194,6 +197,7 @@ window.Meetings = (function () {
       status: 'cancelled',
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
+    if (window.dbCacheInvalidate) window.dbCacheInvalidate('cal-meetings');
   }
 
   /* ── .ics export (RFC 5545) ────────────────────────────────────────────
@@ -297,6 +301,7 @@ window.Meetings = (function () {
       <div class="page-header"><h2>${h.ico('📅', 20)} Calendar</h2></div>
       ${window.sopPanel ? window.sopPanel('How the calendar works', [
         'Meetings you organise or are invited to appear here — the President, a Manager and the Corporate Secretary see the whole company.',
+        'Philippine holidays, your task due dates and your approved leave show up alongside meetings — the small calendar on your dashboard shows the same things.',
         'Tap a day to see that day in full, RSVP, or open a meeting.',
         'Add to phone calendar hands you a calendar file — open it and your phone adds the meeting to its own calendar app.',
         'Everyone invited gets an invite notification now and a reminder on the morning of the meeting.',
@@ -307,26 +312,86 @@ window.Meetings = (function () {
     await paint(c);
   };
 
+  // COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2.8 — kind → CSS modifier + legend
+  // swatch class. Meeting/follow-up keep their existing default look
+  // (.cal-chip-fu already existed); the rest are new.
+  const KIND_CHIP_CLASS   = { holiday: 'cal-chip-hol', task: 'cal-chip-task', leave: 'cal-chip-leave', bidding: 'cal-chip-bid', delivery: 'cal-chip-del' };
+  const KIND_LEGEND_CLASS = { holiday: 'cal-legend-dot-hol', meeting: 'cal-legend-dot-meet', task: 'cal-legend-dot-task', leave: 'cal-legend-dot-leave', bidding: 'cal-legend-dot-bid', delivery: 'cal-legend-dot-del' };
+
+  function _hasProjectsDept() {
+    try { return !!(window.NAV_REGISTRY && window.NAV_REGISTRY.predicates && window.NAV_REGISTRY.predicates.hasProjectsDept()); }
+    catch (_) { return false; }
+  }
+  function _isAdminTier() {
+    try { return !!(typeof window.isAdminPriv === 'function' && window.isAdminPriv()); }
+    catch (_) { return false; }
+  }
+
+  // Which kinds THIS viewer can ever receive, in display order — drives the
+  // legend row (§2.8 item 4): no Bid swatch outside D7's audience, no
+  // Delivery swatch outside D8's audience.
+  function _visibleLegendKinds() {
+    const kinds = [
+      { key: 'holiday', label: 'Holiday' },
+      { key: 'meeting', label: 'Meeting' },
+      { key: 'task',    label: 'Due' },
+      { key: 'leave',   label: 'Leave' }
+    ];
+    const inGovDept  = (window.currentDepts || []).includes('Government Biddings');
+    const inProjDept = (window.currentDepts || []).some(d => ['Production', 'Sales', 'Design'].includes(d));
+    const admin = _isAdminTier();
+    if (inGovDept  || admin) kinds.push({ key: 'bidding',  label: 'Bid' });
+    if (inProjDept || admin) kinds.push({ key: 'delivery', label: 'Delivery' });
+    return kinds;
+  }
+
+  function _legendHtml(h) {
+    const kinds = _visibleLegendKinds();
+    return `<div class="cal-legend">${kinds.map(k =>
+      `<span class="cal-legend-swatch"><i class="cal-legend-dot ${KIND_LEGEND_CLASS[k.key] || ''}"></i>${h.esc(k.label)}</span>`
+    ).join('')}</div>`;
+  }
+
+  // One chip for one merged-feed item — meeting/follow-up keep the EXACT
+  // markup that existed before this spec (time-only on phone, title returns
+  // ≥769px); every other kind is a plain coloured chip, always visible,
+  // ellipsis-truncated by the existing .cal-chip base rule so it can never
+  // overflow the 375px column.
+  function _chipHtml(h, it) {
+    if (it.kind === 'meeting' || it.kind === 'followup') {
+      const m = it;
+      return `<span class="cal-chip${m._followUp ? ' cal-chip-fu' : ''}" title="${h.esc((m._followUp ? 'Follow-up — ' : h.hhmm(m.startAt) + ' ') + (m.title || ''))}"><span class="cal-chip-t">${m._followUp ? '↩' : h.esc(h.hhmm(m.startAt))}</span><span class="cal-chip-n">&nbsp;${h.esc(String(m.title || '').slice(0, 24))}</span></span>`;
+    }
+    const cls = KIND_CHIP_CLASS[it.kind] || '';
+    return `<span class="cal-chip ${cls}" title="${h.esc(it.title)}">${h.esc(String(it.title || '').slice(0, 20))}</span>`;
+  }
+
   async function paint(root) {
     const h = H(), host = root.querySelector('#cal-host');
     if (!host) return;
-    let err = null;
-    try { _cache = await window.Meetings.loadMonth(_mk); }
-    catch (e) { err = e; _cache = []; }
+    let feed;
+    try { feed = await window.CalendarFeed.loadMonth(_mk); }
+    catch (_) {
+      feed = { monthKey: _mk, days: {}, denied: { meetings: true, tasks: true, leave: true, biddings: true, deliveries: true } };
+    }
     if (!host.isConnected) return;
 
-    // Bucket by Manila day ONCE, so the grid never re-derives a day from a
-    // Timestamp inside the render loop.
+    // Reconstruct `_cache` (raw meeting docs, unchanged shape, now tagged
+    // `.kind`) from the feed's meeting/followup entries so openMeetingView's
+    // RSVP flow and this file's own statusOf/rsvpBadge keep working exactly
+    // as before — everything else in byDay is a plain Entry object.
+    _cache = [];
     const byDay = {};
-    _cache.forEach(m => {
-      if (m.status === 'cancelled') return;
-      const d = h.dayOf(m.startAt); if (!d) return;
-      (byDay[d] = byDay[d] || []).push(m);
-      // A follow-up date is a second, distinct chip on its own day.
-      if (m.followUpAt) {
-        const f = h.dayOf(m.followUpAt);
-        if (f) (byDay[f] = byDay[f] || []).push(Object.assign({}, m, { _followUp: true }));
-      }
+    Object.keys(feed.days || {}).forEach(iso => {
+      (feed.days[iso] || []).forEach(e => {
+        if (e.kind === 'meeting' || e.kind === 'followup') {
+          const m = Object.assign({}, e.raw || {}, { kind: e.kind, _followUp: e.kind === 'followup' });
+          _cache.push(m);
+          (byDay[iso] = byDay[iso] || []).push(m);
+        } else {
+          (byDay[iso] = byDay[iso] || []).push(e);
+        }
+      });
     });
 
     const first = h.monthStartIso(_mk), last = h.monthEndIso(_mk);
@@ -342,16 +407,17 @@ window.Meetings = (function () {
       const shown = items.slice(0, 3);
       cells.push(`
         <button type="button" class="cal-cell${iso === todayIso ? ' cal-today' : ''}${items.length ? ' cal-has' : ''}"
-                data-day="${iso}" aria-label="${h.esc(iso)}${items.length ? ', ' + items.length + ' meeting' + (items.length > 1 ? 's' : '') : ''}">
+                data-day="${iso}" aria-label="${h.esc(iso)}${items.length ? ', ' + items.length + ' item' + (items.length > 1 ? 's' : '') : ''}">
           <span class="cal-num">${d}</span>
-          ${shown.map(m => `<span class="cal-chip${m._followUp ? ' cal-chip-fu' : ''}" title="${h.esc((m._followUp ? 'Follow-up — ' : h.hhmm(m.startAt) + ' ') + (m.title || ''))}"><span class="cal-chip-t">${m._followUp ? '↩' : h.esc(h.hhmm(m.startAt))}</span><span class="cal-chip-n">&nbsp;${h.esc(String(m.title || '').slice(0, 24))}</span></span>`).join('')}
+          ${shown.map(it => _chipHtml(h, it)).join('')}
           ${items.length > 3 ? `<span class="cal-more">+${items.length - 3} more</span>` : ''}
         </button>`);
     }
 
     const total = Object.keys(byDay).reduce((n, k) => n + byDay[k].length, 0);
+    const err = !!(feed.denied && feed.denied.meetings);
     host.innerHTML = `
-      ${err ? `<div class="alert-banner" style="cursor:default;margin-bottom:12px"><span>${h.ico('⚠', 16)} The calendar could not be read${err && err.code === 'permission-denied' ? ' — your role may not open it' : ''}. Nothing is shown rather than an empty month, which would look like "no meetings".</span></div>` : ''}
+      ${err ? `<div class="alert-banner" style="cursor:default;margin-bottom:12px"><span>${h.ico('⚠', 16)} The calendar could not be read — your role may not open it. Nothing is shown rather than an empty month, which would look like "no meetings".</span></div>` : ''}
       <div class="cal-bar">
         <button class="btn-secondary" id="cal-prev" aria-label="Previous month">‹</button>
         <div class="cal-title">${h.esc(h.monthLabel(_mk))}</div>
@@ -359,12 +425,13 @@ window.Meetings = (function () {
         <button class="btn-secondary" id="cal-today">Today</button>
         <button class="btn-primary" id="cal-new">${h.ico('➕', 14)} New meeting</button>
       </div>
+      ${_legendHtml(h)}
       <div class="cal-dow">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<span>${d}</span>`).join('')}</div>
       <div class="cal-grid">${cells.join('')}</div>
       ${!err && !total ? `<div class="empty-state" style="margin-top:14px"><div class="empty-icon">${h.ico('📅', 40)}</div>
-        <h4>No meetings this month</h4>
+        <h4>Nothing on the calendar this month</h4>
         <p style="color:var(--text-muted);font-size:13px;max-width:34ch;margin:6px auto 0">
-          Meetings you organise or are invited to show up here, with an invite notification, a reminder on the morning, and a calendar file for your phone.</p></div>` : ''}`;
+          Meetings, holidays, task due dates and your approved leave all show up here.</p></div>` : ''}`;
 
     // Panel-scoped lookups only. An unscoped document.getElementById is this
     // app's single largest defect class — a dying page still holds the same id
@@ -384,12 +451,13 @@ window.Meetings = (function () {
     return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
   }
 
-  /* ── Day agenda — its own window (the mobile window model) ───────────── */
-  function openDayAgenda(iso, items, onChange) {
-    const h = H(), me = h.uid();
-    const label = h.dayDate(iso).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', day: 'numeric', month: 'long' });
-    const panel = window.openPage(`${h.ico('📅', 16)} ${h.esc(label)}`,
-      items.length ? items.map(m => `
+  // One read-only agenda card for one merged-feed item. Meeting/follow-up
+  // keep the exact card + RSVP badge that existed before this spec; every
+  // other kind is new, read-only, per §2.8 item 3.
+  function _dayAgendaCard(h, it, me) {
+    if (it.kind === 'meeting' || it.kind === 'followup') {
+      const m = it;
+      return `
         <div class="card" style="margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
             <div style="flex:1;min-width:0">
@@ -405,13 +473,83 @@ window.Meetings = (function () {
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
             <button class="btn-secondary" data-open="${h.esc(m.id)}">Open</button>
           </div>
-        </div>`).join('')
+        </div>`;
+    }
+    if (it.kind === 'holiday') {
+      const special = String(it.title || '').slice(-10) === ' (special)';
+      return `
+        <div class="card" style="margin-bottom:10px">
+          <div style="font-weight:800">${h.esc(it.title)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${special ? 'Special non-working day' : 'Regular holiday'}</div>
+        </div>`;
+    }
+    if (it.kind === 'task') {
+      return `
+        <div class="card" style="margin-bottom:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800">${h.esc(it.title)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Due today</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn-secondary" data-open-task="${h.esc(it.id || '')}">Open</button>
+          </div>
+        </div>`;
+    }
+    if (it.kind === 'leave') {
+      return `
+        <div class="card" style="margin-bottom:10px">
+          <div style="font-weight:800">${h.esc(it.title)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Your approved leave</div>
+        </div>`;
+    }
+    if (it.kind === 'bidding') {
+      return `
+        <div class="card" style="margin-bottom:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800">${h.esc(it.title)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Bids close today</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+            <button class="btn-secondary" data-open-bid="${h.esc(it.id || '')}">Open</button>
+          </div>
+        </div>`;
+    }
+    if (it.kind === 'delivery') {
+      const canOpen = _hasProjectsDept();
+      return `
+        <div class="card" style="margin-bottom:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:800">${h.esc(it.title)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Target delivery date</div>
+          </div>
+          ${canOpen ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px"><button class="btn-secondary" data-open-delivery="${h.esc(it.id || '')}">Open</button></div>` : ''}
+        </div>`;
+    }
+    return '';
+  }
+
+  /* ── Day agenda — its own window (the mobile window model) ───────────── */
+  function openDayAgenda(iso, items, onChange) {
+    const h = H(), me = h.uid();
+    const label = h.dayDate(iso).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', day: 'numeric', month: 'long' });
+    const panel = window.openPage(`${h.ico('📅', 16)} ${h.esc(label)}`,
+      items.length ? items.map(it => _dayAgendaCard(h, it, me)).join('')
         : `<div class="empty-state"><div class="empty-icon">${h.ico('📅', 36)}</div><h4>Nothing scheduled</h4></div>`,
       `<button class="btn-primary" id="day-new">${h.ico('➕', 14)} New meeting</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
     panel.querySelector('#day-new')?.addEventListener('click', () => openMeetingEditor(null, { day: iso }, onChange));
     panel.querySelectorAll('[data-open]').forEach(b =>
       b.addEventListener('click', () => openMeetingView(b.getAttribute('data-open'), onChange)));
+    panel.querySelectorAll('[data-open-task]').forEach(b =>
+      b.addEventListener('click', () => {
+        const id = b.getAttribute('data-open-task');
+        if (window.openTaskDetail) window.openTaskDetail(id, window.currentUser, window.currentRole);
+        else if (window.navigateTo) window.navigateTo('tasks');
+      }));
+    panel.querySelectorAll('[data-open-bid]').forEach(b =>
+      b.addEventListener('click', () => window.navigateTo && window.navigateTo('dept:Government Biddings')));
+    panel.querySelectorAll('[data-open-delivery]').forEach(b =>
+      b.addEventListener('click', () => window.navigateTo && window.navigateTo('projects-lifecycle')));
     if (window.lucide) lucide.createIcons({ nodes: [panel] });
   }
 

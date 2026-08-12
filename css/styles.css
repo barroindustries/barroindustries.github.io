@@ -682,6 +682,31 @@ html.theme-astral .login-title {
 .co-value-name { font-size: var(--fs-md); font-weight: 700; margin-bottom: 4px; }
 .co-value-desc { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.6; }
 
+/* COMPANY-AND-CALENDAR-SPEC-2026-08-12 §1.4/§1B — percentages-only health
+   tiles + Year in Review tiles. Reuses the .co-value-card visual language
+   (same surface/border/radius) rather than a new layout system; 2 columns
+   at 375px per spec, auto-fit above. */
+.co-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 480px) { .co-stat-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+.co-stat-card { background: var(--s2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 14px; text-align: left; }
+.co-stat-value { font-size: var(--fs-3xl); font-weight: 800; color: var(--text); line-height: 1.1; }
+.co-stat-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); margin-top: 4px; }
+.co-stat-sub { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; }
+
+/* "What We're Working On" — projects list, mobile-first single column, no
+   money anywhere in this block for any viewer. */
+.co-proj-list { display: flex; flex-direction: column; gap: 8px; }
+.co-proj-row { background: var(--s2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; }
+.co-proj-name { font-size: var(--fs-md); font-weight: 700; color: var(--text); margin-bottom: 6px; overflow-wrap: break-word; }
+.co-proj-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.co-proj-target { font-size: var(--fs-xs); color: var(--text-muted); }
+.co-proj-more { font-size: var(--fs-xs); color: var(--text-muted); text-align: center; padding: 4px 0; }
+
+/* Year in Review — growth line under Revenue/Projects finished tiles. */
+.yr-growth-up { font-size: var(--fs-xs); color: var(--success); font-weight: 700; margin-top: 4px; }
+.yr-growth-down { font-size: var(--fs-xs); color: var(--danger); font-weight: 700; margin-top: 4px; }
+.yr-year-chips { margin-bottom: 12px; }
+
 /* Doc cards (memos) */
 .co-doc-card {
   display: flex; align-items: flex-start; gap: 12px;
@@ -732,6 +757,8 @@ html.light .co-hero { background: linear-gradient(135deg, #1D1D1F 0%, #111113 60
 html.light .co-section { background: #fff; border-color: rgba(0,0,0,0.08); }
 html.light .co-biz-card { background: #f7f7f9; border-color: rgba(0,0,0,0.07); }
 html.light .co-value-card { background: #f7f7f9; border-color: rgba(0,0,0,0.07); }
+html.light .co-stat-card { background: #f7f7f9; border-color: rgba(0,0,0,0.07); }
+html.light .co-proj-row { background: #f7f7f9; border-color: rgba(0,0,0,0.07); }
 html.light .co-doc-card { background: #fff; border-color: rgba(0,0,0,0.08); }
 html.light .co-doc-card:hover { background: #f7f7f9; }
 html.light .co-dl-row { background: #fff; border-color: rgba(0,0,0,0.08); }
@@ -8222,6 +8249,38 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .cal-chip { font-size:11px; padding:2px 5px; }
   .cal-more { font-size:11px; }
 }
+
+/* COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2.9 — one merged calendar reader now
+   feeds this grid (holidays/task deadlines/leave/bidding deadlines/delivery
+   dates alongside meetings), so non-meeting chips get their own kind colour:
+   a left border + the file's existing "-soft" tint pattern, always visible
+   (unlike meeting chips, which hide their title <769px — these carry no time
+   to show instead, so hiding the whole chip on a phone would leave an empty
+   coloured bar; the base .cal-chip ellipsis rule truncates instead). */
+.cal-chip-hol   { border-left:3px solid var(--gold);    background:rgba(255,214,10,0.12); }
+.cal-chip-task  { border-left:3px solid var(--danger);  background:var(--danger-soft); }
+.cal-chip-leave { border-left:3px solid var(--success); background:var(--success-soft); }
+.cal-chip-bid   { border-left:3px solid #7e57c2;        background:rgba(126,87,194,0.14); }
+.cal-chip-del   { border-left:3px solid #FF9F0A;        background:rgba(255,159,10,0.14); }
+
+/* Legend row between .cal-bar and .cal-dow — only the kinds THIS viewer can
+   ever receive are rendered (js/meetings.js _visibleLegendKinds). Wraps at
+   375px, never scrolls sideways. */
+.cal-legend { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; }
+.cal-legend-swatch { display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--text-muted); }
+.cal-legend-dot { width:8px; height:8px; border-radius:50%; display:inline-block; flex-shrink:0; }
+.cal-legend-dot-hol   { background:var(--gold); }
+.cal-legend-dot-meet  { background:var(--info); }
+.cal-legend-dot-task  { background:var(--danger); }
+.cal-legend-dot-leave { background:var(--success); }
+.cal-legend-dot-bid   { background:#7e57c2; }
+.cal-legend-dot-del   { background:#FF9F0A; }
+
+/* Dashboard mini calendar dots (renderMiniCal, js/screens/dashboards.js) —
+   up to 3 per day, one per distinct kind, priority order holiday > meeting/
+   follow-up > task > leave > bidding > delivery. */
+.minical-dots { position:absolute; bottom:3px; left:50%; transform:translateX(-50%); display:flex; gap:2px; }
+.minical-dot { width:4px; height:4px; border-radius:50%; display:inline-block; }
 
 /* ══════════════════════════════════════════════════════════════════════
    PAYSLIP GENERATOR — the live-total bar (js/screens/hr.js)

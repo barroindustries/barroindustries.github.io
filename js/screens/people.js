@@ -2213,6 +2213,12 @@ async function openPresidentCashAdvanceModal(users) {
     { id:'unpaid',    label:'Unpaid Leave',    icon:'📅', drawsBalance:false, paid:false },
   ];
   const leaveType = id => LEAVE_TYPES.find(t=>t.id===id) || LEAVE_TYPES[0];
+  // COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2.3.4 — leaveType() lives inside
+  // this IIFE, so it is NOT reachable from js/calendar-feed.js (which needs
+  // the same leave-type labels for the calendar's leave chips/dots). Expose
+  // it once, same precedent as window.JOB_STAGES in production.js, rather
+  // than duplicating the LEAVE_TYPES table elsewhere.
+  window.leaveType = leaveType;
   // 8-point #8 (Wave 7 Pass 7) — one sopPanel step list, shown on both
   // renderLeaveEmployee and renderLeaveAdmin (same pattern tasks.js uses for
   // its two chip-tab sub-renders: one shared array, rendered wherever the

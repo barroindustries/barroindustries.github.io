@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.156';
+window.APP_VERSION = '14.0.157';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -970,6 +970,11 @@ window.fetchUsersWithPayroll = async function() {
     // mutation already calls dbCacheInvalidate('ca-pending'), so piggybacking
     // here keeps the in-memory store tidy without a new call site.
     'ca-pending': { alsoKeys: ['ca-approved-all'], prefixes: ['ca-deduct-requests-'] },
+    // COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2.6 — one meeting write must
+    // invalidate every cached MONTH for every viewer's calendar in one call,
+    // since a meeting created 'now' can land on someone else's calendar too
+    // (oversight tier) and cache keys are month+uid-scoped.
+    'cal-meetings': { prefixes: ['cal-meetings-'] },
   };
   window.dbCacheInvalidate = function(key) {
     if (!key) {

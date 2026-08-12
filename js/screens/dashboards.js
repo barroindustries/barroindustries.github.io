@@ -3894,6 +3894,7 @@ async function renderCompany() {
     <div class="page-header"><h2>${emojiIcon('🏢',20)} Company</h2></div>
     ${window.chipTabs([
       {key:'overview',label:'Overview'},
+      {key:'year',label:'Year in Review'},
       {key:'memos',label:'Memos'},
       {key:'policies',label:'Policies'},
       {key:'downloads',label:'Downloads'},
@@ -3906,6 +3907,7 @@ async function renderCompany() {
   function switchCompanyTab(tab) {
     const ct = document.getElementById('company-tab-content');
     if (tab==='overview')        renderCompanyOverview(ct, canAdd);
+    else if (tab==='year')       renderCompanyYearReview(ct);
     else if (tab==='memos')      renderCompanyMemos(ct, canManageMemos());
     else if (tab==='policies')   renderCompanyPolicies(ct, canAdd);
     else if (tab==='downloads')  renderCompanyDownloads(ct, canAdd);
@@ -4033,6 +4035,19 @@ async function renderCompanyOverview(ct, canAdd) {
         Driven by a lean, capable team and a culture of accountability, Barro Industries OPC operates with the discipline
         of a company that builds for the long run — not just the next quarter.
       </p>
+    </div>
+
+    <!-- How We're Doing (company health — percentages only, owner ruling §1.2/§1.4) -->
+    <div class="co-section">
+      <h3 class="co-section-title">How We're Doing</h3>
+      <p class="co-body" style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:-6px;margin-bottom:14px">A live look at the company's momentum, straight from the projects board.</p>
+      <div id="co-health-host">${window.skeletonHtml ? window.skeletonHtml('rows') : ''}</div>
+    </div>
+
+    <!-- What We're Working On (projects — no money, no quote numbers) -->
+    <div class="co-section">
+      <h3 class="co-section-title">What We're Working On</h3>
+      <div id="co-projects-host">${window.skeletonHtml ? window.skeletonHtml('rows') : ''}</div>
     </div>
 
     <!-- Trademark -->
@@ -4175,6 +4190,553 @@ async function renderCompanyOverview(ct, canAdd) {
     });
   }
   if (window.lucide) lucide.createIcons({ nodes: [ct] });
+  // §1.3 — both new sections render their skeleton above synchronously; fill
+  // them in asynchronously so the page's existing static content never waits
+  // on Firestore.
+  _fillCompanyHealth(ct);
+}
+
+// ── Company Overview: "How We're Doing" + "What We're Working On" ────────
+// COMPANY-AND-CALENDAR-SPEC-2026-08-12 §1.2–§1.4. Owner ruling (2026-08-12,
+// binding): the year-round Company page shows NO peso figures to anyone and
+// the health section is PERCENTAGES ONLY — no exceptions for finance/admin.
+// The job_projects schema split was offered and DECLINED by the owner
+// ("Nvm, just show comapny health, only percentages") — do not re-raise it.
+// One data load (2 cached collection reads) feeds both hosts; a failed/denied
+// job_projects read (partner deep-link, offline) hides BOTH sections — a
+// failed users read hides only the Team members tile.
+async function _fillCompanyHealth(ct) {
+  const healthHost = ct.querySelector('#co-health-host');
+  const projHost = ct.querySelector('#co-projects-host');
+  if (!healthHost && !projHost) return;
+
+  let projSnap;
+  try {
+    // SHARED cache key with Part 2's delivery-date calendar source
+    // (js/calendar-feed.js) — one read pays for both features within the TTL.
+    projSnap = await dbCachedGet('job_projects', () => db.collection('job_projects').get(), 300000);
+  } catch (_) {
+    const healthSec = healthHost && healthHost.closest('.co-section');
+    const projSec = projHost && projHost.closest('.co-section');
+    if (healthSec) healthSec.style.display = 'none';
+    if (projSec) projSec.style.display = 'none';
+    return;
+  }
+  const projects = (projSnap.docs || []).map(d => d.data());
+
+  // Team members — a failed/denied users read hides only this ONE tile.
+  let teamSize = null;
+  try {
+    const usersSnap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
+    // Mirrors window.renderTeamTab's own non-partner-viewer exclusion
+    // (js/screens/people.js) exactly, so the Company page and the Team page
+    // never disagree on headcount: BS-department-ONLY staff are excluded;
+    // partner-role users are NOT excluded (renderTeamTab shows them to every
+    // internal viewer too).
+    teamSize = (usersSnap.docs || []).map(d => d.data()).filter(u => {
+      const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
+      return !(depts.length === 1 && depts[0] === 'Brilliant Steel');
+    }).length;
+  } catch (_) { teamSize = null; }
+
+  if (healthHost) healthHost.innerHTML = _companyHealthHtml(projects, teamSize);
+  if (projHost) {
+    projHost.innerHTML = _companyProjectsHtml(projects);
+    if (window.lucide) lucide.createIcons({ nodes: [projHost] });
+  }
+}
+
+// Percentages-only health tiles. §1.4's reconstruction audit: no tile here is
+// a peso amount and no tile is a percentage OF a peso amount — the only
+// absolute in the set is `teamSize` (headcount, already public on the Team
+// page), so no combination of tiles can ever be multiplied back into a peso
+// figure. NEVER add a percentage whose base is a peso amount (e.g. "collected
+// X% of contract value") — that one tile would let any visible count leak a
+// total.
+function _companyHealthHtml(projects, teamSize) {
+  const todayStr = (typeof bizDate === 'function') ? bizDate() : new Date().toISOString().slice(0, 10);
+  const nowMonth = todayStr.slice(0, 7);
+  const NOT_ACTIVE = ['completed', 'paid', 'cancelled'];
+  const active = projects.filter(p => !NOT_ACTIVE.includes(p.stage));
+  const inProduction = active.filter(p => ['in_production', 'for_delivery'].includes(p.stage));
+  const withTarget = active.filter(p => !!p.targetDate);
+  const onSchedule = withTarget.filter(p => p.targetDate >= todayStr);
+  const finished = projects.filter(p => ['completed', 'paid'].includes(p.stage));
+  const takenOn = projects.filter(p => p.stage !== 'cancelled');
+
+  function manilaYm(ts) {
+    try {
+      const d = ts && ts.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+      if (!d || isNaN(d)) return null;
+      return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }).slice(0, 7);
+    } catch (_) { return null; }
+  }
+  const monthCounts = {};
+  projects.forEach(p => { const ym = manilaYm(p.createdAt); if (ym) monthCounts[ym] = (monthCounts[ym] || 0) + 1; });
+  const newThisMonth = monthCounts[nowMonth] || 0;
+  const priorCounts = [];
+  for (let i = 1; i <= 3; i++) {
+    const d = new Date(nowMonth + '-01T00:00:00+08:00');
+    d.setMonth(d.getMonth() - i);
+    const ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    priorCounts.push(monthCounts[ym] || 0);
+  }
+  const newPrior3Avg = priorCounts.reduce((a, b) => a + b, 0) / 3;
+
+  const tiles = [];
+  if (withTarget.length >= 3) {
+    tiles.push({ label: 'On schedule', value: Math.round(onSchedule.length / withTarget.length * 100) + '%', sub: 'of projects with a target date' });
+  }
+  if (active.length >= 3) {
+    tiles.push({ label: 'In production', value: Math.round(inProduction.length / active.length * 100) + '%', sub: "of what's on the board" });
+  }
+  if (takenOn.length >= 5) {
+    tiles.push({ label: 'Seen through', value: Math.round(finished.length / takenOn.length * 100) + '%', sub: "of everything we've taken on" });
+  }
+  if (newPrior3Avg >= 1) {
+    const pct = Math.round((newThisMonth - newPrior3Avg) / newPrior3Avg * 100);
+    tiles.push({ label: 'Momentum', value: (pct > 0 ? '+' : '') + pct + '%', sub: 'new projects vs recent months' });
+  }
+
+  const teamTile = (teamSize != null) ? { label: 'Team members', value: String(teamSize), sub: '' } : null;
+
+  if (tiles.length < 2) {
+    return `
+      <p class="co-body" style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:12px">Not enough on the board yet to show trends — check back soon.</p>
+      <div class="co-stat-grid">${teamTile ? _statTileHtml(teamTile) : ''}</div>`;
+  }
+  return `<div class="co-stat-grid">${tiles.map(_statTileHtml).join('')}${teamTile ? _statTileHtml(teamTile) : ''}</div>`;
+}
+
+function _statTileHtml(t) {
+  return `<div class="co-stat-card">
+    <div class="co-stat-value">${escHtml(t.value)}</div>
+    <div class="co-stat-label">${escHtml(t.label)}</div>
+    ${t.sub ? `<div class="co-stat-sub">${escHtml(t.sub)}</div>` : ''}
+  </div>`;
+}
+
+// "What We're Working On" — active projects, no amounts/quote numbers/margins
+// for ANY viewer. Per-project money stays on the Projects screen.
+function _companyProjectsHtml(projects) {
+  const NOT_ACTIVE = ['completed', 'paid', 'cancelled'];
+  const active = projects.filter(p => !NOT_ACTIVE.includes(p.stage)).sort((a, b) => {
+    const at = a.createdAt && a.createdAt.toMillis ? a.createdAt.toMillis() : 0;
+    const bt = b.createdAt && b.createdAt.toMillis ? b.createdAt.toMillis() : 0;
+    return bt - at;
+  });
+  if (!active.length) {
+    return `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋', 36)}</div><h4>Nothing on the board yet</h4><p style="color:var(--text-muted);font-size:13px">New projects appear here the moment a deal is won.</p></div>`;
+  }
+  const shown = active.slice(0, 6);
+  const more = active.length - shown.length;
+  // D3 default: SHOW client names in `p.name` (matches the shipped Production
+  // handoff precedent, isProductionOnlyViewer — js/screens/production.js).
+  const stagesTable = window.JOB_STAGES || [];
+  function stageOf(id) {
+    return (typeof window.jobStage === 'function') ? window.jobStage(id)
+      : (stagesTable.find(s => s.id === id) || { label: id || '—', color: 'var(--text-muted)' });
+  }
+  const canLink = (typeof window.NAV_REGISTRY === 'object' && window.NAV_REGISTRY.predicates.hasProjectsDept())
+    || isPresident() || currentRole === 'manager' || currentRole === 'secretary';
+  return `
+    <div class="co-proj-list">
+      ${shown.map(p => {
+        const st = stageOf(p.stage);
+        return `<div class="co-proj-row">
+          <div class="co-proj-name">${escHtml(p.name || 'Untitled project')}</div>
+          <div class="co-proj-meta">
+            <span class="badge" style="background:${st.color}22;color:${st.color}">${escHtml(st.label || p.stage || '')}</span>
+            ${p.targetDate ? `<span class="co-proj-target">Target: ${escHtml(new Date(p.targetDate).toLocaleDateString('en-PH'))}</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+      ${more > 0 ? `<div class="co-proj-more">…and ${more} more on the board</div>` : ''}
+    </div>
+    ${canLink ? `<div style="margin-top:12px"><a class="btn-link" style="cursor:pointer;font-weight:600;color:var(--primary)" onclick="navigateTo('projects-lifecycle')">Open the projects board →</a></div>` : ''}
+  `;
+}
+
+// ── Company: Year in Review (PART 1B) ─────────────────────────────────────
+// COMPANY-AND-CALENDAR-SPEC-2026-08-12 §1B. President-published, once-a-year
+// record — a doc's existence IS publication (no status field). Nothing
+// appears from a clock tick; before publish every viewer sees the
+// not-yet-published empty state. This is the ONE deliberate place an
+// ordinary employee sees company money — Half 1 is identical for every
+// viewer, Half 2 ("Your part in it") is gated by construction to the
+// signed-in viewer's own uid: no other person's panel is ever fetched.
+// Individual pay data (salary/rate/payslip/allowance/deduction) is BANNED
+// from this record and this render path — a hard boundary, not a default.
+async function renderCompanyYearReview(ct) {
+  ct.innerHTML = window.skeletonHtml ? window.skeletonHtml('rows') : '<p>Loading…</p>';
+  let snap;
+  try {
+    snap = await dbCachedGet('year-review', () => db.collection('company_year_review').get(), 300000);
+  } catch (_) {
+    _renderYearReviewEmpty(ct);
+    return;
+  }
+  const docs = (snap.docs || []).map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.year || 0) - (a.year || 0));
+  if (!docs.length) { _renderYearReviewEmpty(ct); return; }
+
+  function paintYear(y) {
+    const rec = docs.find(d => d.year === y) || docs[0];
+    ct.innerHTML = _yearReviewHtml(docs, rec, {});
+    if (window.lucide) lucide.createIcons({ nodes: [ct] });
+    _wireYearReview(ct, docs, rec, paintYear);
+  }
+  paintYear(docs[0].year);
+}
+
+function _renderYearReviewEmpty(ct) {
+  const pres = isPresident();
+  const curY = window.bizYear ? window.bizYear() : new Date().getFullYear();
+  const defaultY = curY - 1;
+  const years = [];
+  for (let y = curY; y >= curY - 7; y--) years.push(y);
+  ct.innerHTML = `
+    <div class="empty-state" style="padding:32px 16px">
+      <div class="empty-icon">${emojiIcon('🎖', 44)}</div>
+      <h4>The Year in Review isn't out yet</h4>
+      <p style="color:var(--text-muted);font-size:13px;max-width:38ch;margin:8px auto 0">
+        When the year closes, the President publishes how the company did — and you'll see your own part in it right here.
+      </p>
+      ${pres ? `
+      <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:16px;flex-wrap:wrap">
+        <select id="yr-year-pick" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+          ${years.map(y => `<option value="${y}" ${y === defaultY ? 'selected' : ''}>${y}</option>`).join('')}
+        </select>
+        <button class="btn-primary" id="yr-publish-btn">Publish ${defaultY}</button>
+      </div>` : ''}
+    </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [ct] });
+  if (!pres) return;
+  const sel = ct.querySelector('#yr-year-pick');
+  const btn = ct.querySelector('#yr-publish-btn');
+  sel?.addEventListener('change', () => { if (btn) btn.textContent = 'Publish ' + sel.value; });
+  btn?.addEventListener('click', () => {
+    const y = parseInt(sel.value, 10);
+    _openYearReviewPublish(y, null, () => renderCompanyYearReview(ct));
+  });
+}
+
+// Year options for the President's year-select, current year down 9, plus
+// any already-published year outside that window — marks published years so
+// re-selecting one opens the CORRECT/TAKE-DOWN flow instead of a fresh one.
+function _yearAdminOptions(docs, selectedDefault) {
+  const curY = window.bizYear ? window.bizYear() : new Date().getFullYear();
+  const published = new Set(docs.map(d => d.year));
+  const years = [];
+  for (let y = curY; y >= curY - 9; y--) years.push(y);
+  docs.forEach(d => { if (!years.includes(d.year)) years.push(d.year); });
+  years.sort((a, b) => b - a);
+  return years.map(y => `<option value="${y}" ${y === selectedDefault ? 'selected' : ''}>${y}${published.has(y) ? ' (published)' : ''}</option>`).join('');
+}
+
+function _yearReviewHtml(docs, rec, opts) {
+  opts = opts || {};
+  const pres = isPresident();
+  const h = rec.headline || {};
+  const prior = rec.prior || {};
+  const publishedDate = (rec.publishedAt && rec.publishedAt.toDate)
+    ? rec.publishedAt.toDate().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+
+  const TILES = [
+    { key: 'revenue', label: 'Revenue', money: true },
+    { key: 'projectsFinished', label: 'Projects finished' },
+    { key: 'projectsStarted', label: 'Projects started' },
+    { key: 'clientsServed', label: 'Clients served' },
+    { key: 'quotesWon', label: 'Quotes won' },
+    { key: 'teamSize', label: 'Team members' },
+  ];
+  const tilesHtml = TILES.filter(t => h[t.key] != null).map(t => {
+    const val = t.money ? ('₱' + fmt(h[t.key])) : String(h[t.key]);
+    let growth = '';
+    if ((t.key === 'revenue' || t.key === 'projectsFinished') && prior[t.key] != null && prior[t.key] > 0) {
+      const pct = (h[t.key] - prior[t.key]) / prior[t.key] * 100;
+      growth = `<div class="${pct >= 0 ? 'yr-growth-up' : 'yr-growth-down'}">${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% vs ${rec.year - 1}</div>`;
+    }
+    return `<div class="co-stat-card"><div class="co-stat-value">${escHtml(val)}</div><div class="co-stat-label">${escHtml(t.label)}</div>${growth}</div>`;
+  }).join('');
+
+  const yearChips = (!opts.previewOnly && docs.length > 1)
+    ? `<div class="chip-tabs yr-year-chips">${docs.map(d => `<button type="button" class="chip-tab${d.year === rec.year ? ' active' : ''}" data-yr="${d.year}">${d.year}</button>`).join('')}</div>`
+    : '';
+
+  return `
+    <div class="co-section">
+      ${yearChips}
+      <h3 class="co-section-title" style="text-transform:none;font-size:var(--fs-4xl);letter-spacing:0;color:var(--text)">${rec.year} — Year in Review</h3>
+      <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-bottom:14px">Published ${escHtml(publishedDate)}</div>
+      ${rec.note ? `<div class="co-body" style="white-space:pre-wrap;margin-bottom:14px">${escHtml(rec.note)}</div>` : ''}
+      ${tilesHtml ? `<div class="co-stat-grid">${tilesHtml}</div>` : `<div class="empty-state"><p>Nothing to show for this year.</p></div>`}
+      ${(!opts.previewOnly && pres) ? `
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.04em">President tools</label>
+        <select id="yr-admin-year-pick" style="padding:6px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+          ${_yearAdminOptions(docs, rec.year)}
+        </select>
+        <button class="btn-secondary btn-sm" id="yr-admin-btn">Open</button>
+      </div>` : ''}
+    </div>
+    ${!opts.previewOnly ? `<div class="co-section" id="yr-half2-host">${window.skeletonHtml ? window.skeletonHtml('rows') : ''}</div>` : ''}
+  `;
+}
+
+function _wireYearReview(ct, docs, rec, paintYear) {
+  ct.querySelectorAll('.yr-year-chips [data-yr]').forEach(b =>
+    b.addEventListener('click', () => paintYear(parseInt(b.dataset.yr, 10))));
+  ct.querySelector('#yr-admin-btn')?.addEventListener('click', () => {
+    const sel = ct.querySelector('#yr-admin-year-pick');
+    const y = parseInt(sel.value, 10);
+    const existing = docs.find(d => d.year === y) || null;
+    _openYearReviewPublish(y, existing, () => { dbCacheInvalidate('year-review'); renderCompanyYearReview(ct); });
+  });
+  const half2Host = ct.querySelector('#yr-half2-host');
+  if (half2Host) _fillYearReviewHalf2(half2Host, rec.year);
+}
+
+// Half 2 — "Your part in it". Every query below is scoped to currentUser.uid;
+// no other user's panel is ever fetched or rendered, so one person can never
+// see another's contribution here. Gated on the year being published (this
+// function only runs from inside a published year's render); computed live
+// from the viewer's own records — no per-person snapshot fan-out.
+async function _fillYearReviewHalf2(host, year) {
+  const uid = currentUser && currentUser.uid;
+  if (!uid) { host.innerHTML = ''; return; }
+  const tiles = [];
+
+  // Tasks finished — reuses the SAME cached snapshot the calendar/mini-cal
+  // read (tasks-cal-{uid}), which holds ALL of the viewer's own assigned
+  // tasks, not just open ones. completedAt is stamped when a task crosses
+  // into DONE_STATUSES (js/screens/tasks.js) — verified before shipping.
+  try {
+    const fetcher = () => db.collection('tasks').where('assignedTo', 'array-contains', uid).get()
+      .catch(() => db.collection('tasks').where('assignedTo', '==', uid).get());
+    const snap = await dbCachedGet('tasks-cal-' + uid, fetcher, 30000);
+    const DONE = ['done', 'approved', 'archived'];
+    const count = (snap.docs || []).filter(d => {
+      const t = d.data();
+      if (!DONE.includes(t.status)) return false;
+      let y = null;
+      if (t.completedAt && t.completedAt.toDate) y = t.completedAt.toDate().getFullYear();
+      else if (t.dueDate) y = parseInt(String(t.dueDate).slice(0, 4), 10);
+      return y === year;
+    }).length;
+    tiles.push({ label: 'Tasks finished', value: String(count) });
+  } catch (_) { /* omit tile */ }
+
+  // Deals you brought in — a COUNT, never a peso sum; shown only when > 0
+  // (a zero would read as a reproach to non-sales staff). Shares the
+  // 'job_projects' cache key with Part 1 / the calendar feed.
+  try {
+    const snap = await dbCachedGet('job_projects', () => db.collection('job_projects').get(), 300000);
+    const count = (snap.docs || []).filter(d => {
+      const p = d.data();
+      if (p.createdBy !== uid) return false;
+      const ts = p.createdAt;
+      const d2 = ts && ts.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+      return d2 && !isNaN(d2) && d2.getFullYear() === year;
+    }).length;
+    if (count > 0) tiles.push({ label: 'Deals you brought in', value: String(count) });
+  } catch (_) { /* omit tile */ }
+
+  // "Projects you're on" — SKIPPED. job_projects carries no reliable
+  // membership/assignee uid field (only createdBy and partnerUid); timeline[]
+  // entries carry a display NAME, not a uid, which is not a safe match. Per
+  // spec §1B.5, omit rather than fuzzy-match names.
+
+  // Days present — own attendance/{uid}/records range query, no composite
+  // index needed (equality is the doc(uid) path itself, range is on the
+  // document id). window.attRecKind (js/config.js) is the shared "present"
+  // definition every attendance UI in this app already agrees on.
+  try {
+    const y1 = year + '-01-01', y2 = year + '-12-31';
+    const fetcher = () => db.collection('attendance').doc(uid).collection('records')
+      .where(firebase.firestore.FieldPath.documentId(), '>=', y1)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', y2).get();
+    const snap = await dbCachedGet('yr-att-' + uid + '-' + year, fetcher, 300000);
+    const count = (snap.docs || []).filter(d => (typeof window.attRecKind === 'function') && window.attRecKind(d.data()) === 'present').length;
+    tiles.push({ label: 'Days present', value: String(count) });
+  } catch (_) { /* omit tile — no full-collection scan fallback, per spec */ }
+
+  // With the company since — window.userProfile is already the viewer's OWN
+  // users doc, loaded at login; no extra read.
+  try {
+    const sd = window.userProfile && window.userProfile.startDate;
+    if (sd) {
+      const d = new Date(sd + 'T12:00:00');
+      if (!isNaN(d)) {
+        tiles.push({ label: 'With the company since', value: 'Since ' + d.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }), text: true });
+      }
+    }
+  } catch (_) { /* omit tile */ }
+
+  if (!tiles.length) { host.innerHTML = ''; return; }
+
+  host.innerHTML = `
+    <h3 class="co-section-title">Your part in ${escHtml(String(year))}</h3>
+    <div class="co-stat-grid">${tiles.map(t => `<div class="co-stat-card"><div class="co-stat-value"${t.text ? ' style="font-size:16px"' : ''}>${escHtml(t.value)}</div><div class="co-stat-label">${escHtml(t.label)}</div></div>`).join('')}</div>
+    <p style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:12px">These are your own numbers — every teammate sees their own here, next to the same company figures.</p>
+  `;
+}
+
+// President-only publish/correct/take-down flow (§1B.4). `existingDoc` null =
+// fresh publish (prefilled from live app data); non-null = correcting an
+// already-published year (prefilled from the STORED doc, never recomputed).
+async function _openYearReviewPublish(year, existingDoc, onDone) {
+  let prefill;
+  if (existingDoc) {
+    const eh = existingDoc.headline || {}, ep = existingDoc.prior || {};
+    prefill = {
+      revenue: eh.revenue ?? null, projectsFinished: eh.projectsFinished ?? null,
+      projectsStarted: eh.projectsStarted ?? null, clientsServed: eh.clientsServed ?? null,
+      quotesWon: eh.quotesWon ?? null, teamSize: eh.teamSize ?? null,
+      priorRevenue: ep.revenue ?? null, priorProjectsFinished: ep.projectsFinished ?? null,
+      note: existingDoc.note || ''
+    };
+  } else {
+    let projects = [];
+    try {
+      const snap = await dbCachedGet('job_projects', () => db.collection('job_projects').get(), 300000);
+      projects = (snap.docs || []).map(d => d.data());
+    } catch (_) { /* leave blank — the President fills by hand */ }
+    const inYear = projects.filter(p => {
+      const ts = p.createdAt; const d = ts && ts.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+      return d && !isNaN(d) && d.getFullYear() === year;
+    });
+    const revenue = inYear.reduce((s, p) => s + (Number(p.contractAmount) || 0), 0);
+    const projectsStarted = inYear.length;
+    const quotesWon = inYear.length;
+    const projectsFinished = inYear.filter(p => ['completed', 'paid'].includes(p.stage)).length;
+    const clientSet = new Set(inYear.map(p => (window.clientNameKey ? window.clientNameKey(p.clientName || '') : String(p.clientName || '').toLowerCase())).filter(Boolean));
+    const clientsServed = clientSet.size;
+    let teamSize = null;
+    try {
+      const usnap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
+      teamSize = (usnap.docs || []).map(d => d.data()).filter(u => {
+        const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
+        return !(depts.length === 1 && depts[0] === 'Brilliant Steel');
+      }).length;
+    } catch (_) { /* leave blank */ }
+    let priorRevenue = null, priorProjectsFinished = null;
+    try {
+      const prevSnap = await db.collection('company_year_review').doc(String(year - 1)).get();
+      if (prevSnap.exists) {
+        const pd = prevSnap.data(); const ph = pd.headline || {};
+        priorRevenue = ph.revenue ?? null; priorProjectsFinished = ph.projectsFinished ?? null;
+      }
+    } catch (_) { /* leave blank */ }
+    prefill = { revenue, projectsFinished, projectsStarted, clientsServed, quotesWon, teamSize, priorRevenue, priorProjectsFinished, note: '' };
+  }
+
+  const FIELDS = [
+    { key: 'revenue', label: 'Revenue (₱)' },
+    { key: 'projectsFinished', label: 'Projects finished', estimate: !existingDoc },
+    { key: 'projectsStarted', label: 'Projects started' },
+    { key: 'clientsServed', label: 'Clients served' },
+    { key: 'quotesWon', label: 'Quotes won' },
+    { key: 'teamSize', label: 'Team members' },
+  ];
+
+  const footerHtml = existingDoc
+    ? `<button class="btn-primary" id="yr-save-btn">Publish</button><button class="btn-danger" id="yr-takedown-btn">Take down</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`
+    : `<button class="btn-primary" id="yr-save-btn">Publish</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`;
+  const panel = window.openPage(`Publish ${year} Year in Review`, '', footerHtml);
+  const body = panel.querySelector('.page-panel-body');
+
+  function readForm() {
+    const num = (id) => {
+      const v = body.querySelector('#' + id)?.value;
+      return (v === '' || v == null) ? null : Number(v);
+    };
+    return {
+      revenue: num('yr-f-revenue'), projectsFinished: num('yr-f-projectsFinished'),
+      projectsStarted: num('yr-f-projectsStarted'), clientsServed: num('yr-f-clientsServed'),
+      quotesWon: num('yr-f-quotesWon'), teamSize: num('yr-f-teamSize'),
+      priorRevenue: num('yr-f-priorRevenue'), priorProjectsFinished: num('yr-f-priorProjectsFinished'),
+      note: body.querySelector('#yr-f-note')?.value || ''
+    };
+  }
+
+  function renderPreview() {
+    const f = readForm();
+    const fakeRec = {
+      year, publishedAt: existingDoc ? existingDoc.publishedAt : null,
+      headline: { revenue: f.revenue, projectsFinished: f.projectsFinished, projectsStarted: f.projectsStarted, clientsServed: f.clientsServed, quotesWon: f.quotesWon, teamSize: f.teamSize },
+      prior: { revenue: f.priorRevenue, projectsFinished: f.priorProjectsFinished },
+      note: f.note
+    };
+    const previewEl = body.querySelector('#yr-preview');
+    if (!previewEl) return;
+    previewEl.innerHTML = `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:8px">Preview — what employees will see</div>` +
+      _yearReviewHtml([fakeRec], fakeRec, { previewOnly: true });
+  }
+
+  body.innerHTML = `
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">Every field is pre-filled from app data — edit anything before publishing. Clear a field to leave that tile off the page.</p>
+    ${FIELDS.map(f => `
+      <div class="form-group">
+        <label for="yr-f-${f.key}">${escHtml(f.label)}${f.estimate ? ' <span style="font-weight:400;color:var(--text-muted)">(as of today — please confirm)</span>' : ''}</label>
+        <input id="yr-f-${f.key}" type="number" inputmode="decimal" value="${prefill[f.key] != null ? prefill[f.key] : ''}"/>
+      </div>`).join('')}
+    <div class="form-group"><label for="yr-f-priorRevenue">Last year's revenue (₱, for the growth line)</label>
+      <input id="yr-f-priorRevenue" type="number" inputmode="decimal" value="${prefill.priorRevenue != null ? prefill.priorRevenue : ''}"/></div>
+    <div class="form-group"><label for="yr-f-priorProjectsFinished">Last year's projects finished (for the growth line)</label>
+      <input id="yr-f-priorProjectsFinished" type="number" inputmode="decimal" value="${prefill.priorProjectsFinished != null ? prefill.priorProjectsFinished : ''}"/></div>
+    <div class="form-group"><label for="yr-f-note">A message for the year (optional)</label>
+      <textarea id="yr-f-note" rows="4">${escHtml(prefill.note || '')}</textarea></div>
+    <div id="yr-preview" style="margin-top:18px"></div>
+  `;
+  renderPreview();
+  body.querySelectorAll('input,textarea').forEach(el => el.addEventListener('input', renderPreview));
+
+  panel.querySelector('#yr-save-btn').addEventListener('click', async () => {
+    const btn = panel.querySelector('#yr-save-btn');
+    await window.busy(btn, async () => {
+      const f = readForm();
+      const payload = {
+        year: year,
+        publishedAt: existingDoc ? existingDoc.publishedAt : firebase.firestore.FieldValue.serverTimestamp(),
+        publishedBy: existingDoc ? existingDoc.publishedBy : currentUser.uid,
+        publishedByName: existingDoc ? existingDoc.publishedByName : ((window.userProfile && userProfile.displayName) || currentUser.email || ''),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        headline: {
+          revenue: f.revenue, projectsFinished: f.projectsFinished, projectsStarted: f.projectsStarted,
+          clientsServed: f.clientsServed, quotesWon: f.quotesWon, teamSize: f.teamSize
+        },
+        prior: { revenue: f.priorRevenue, projectsFinished: f.priorProjectsFinished },
+        note: f.note || ''
+      };
+      try {
+        await db.collection('company_year_review').doc(String(year)).set(payload);
+        dbCacheInvalidate('year-review');
+        Notifs.showToast(existingDoc ? 'Year in Review updated.' : 'Year in Review published.', 'success');
+        window.closeModal && closeModal();
+        onDone && onDone();
+      } catch (e) {
+        Notifs.showToast((e && e.code === 'permission-denied') ? 'You are not allowed to publish this.' : 'Could not publish.', 'error');
+      }
+    });
+  });
+
+  panel.querySelector('#yr-takedown-btn')?.addEventListener('click', async () => {
+    const ok = window.confirmDialog ? await window.confirmDialog({
+      title: 'Take down this Year in Review?',
+      message: `Take down the ${year} Year in Review? Employees will no longer see it.`,
+      confirmLabel: 'Take down', cancelLabel: 'Keep it', danger: true
+    }) : confirm(`Take down the ${year} Year in Review? Employees will no longer see it.`);
+    if (!ok) return;
+    try {
+      await db.collection('company_year_review').doc(String(year)).delete();
+      dbCacheInvalidate('year-review');
+      Notifs.showToast('Year in Review taken down.', 'success');
+      window.closeModal && closeModal();
+      onDone && onDone();
+    } catch (_) { Notifs.showToast('Could not take it down.', 'error'); }
+  });
+
+  if (window.lucide) lucide.createIcons({ nodes: [panel] });
 }
 
 // ── Who may write a memo ──────────────────────────
@@ -6327,50 +6889,85 @@ function openEditEmployeeModal(u) {
 }
 
 // ── Mini Calendar ─────────────────────────────────
+// COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2.7 — reads window.CalendarFeed, the
+// SAME single source the drawer Calendar page reads, so a meeting/holiday/
+// leave/bidding/delivery entry now shows here too. Keeps the #mini-cal host
+// contract, _calMonthOffset month nav, Manila month anchoring, and the
+// "today" highlight exactly as before. Falls back to the old tasks-only path
+// if CalendarFeed is unavailable (a stale service worker mid-rollout) so the
+// dashboard can never blank.
 let _calMonthOffset = 0;
+const MINI_KIND_ORDER = ['holiday', 'meeting', 'followup', 'task', 'leave', 'bidding', 'delivery'];
+const MINI_KIND_COLOR = { holiday: 'var(--gold)', meeting: 'var(--info)', followup: 'var(--info)', task: 'var(--danger)', leave: 'var(--success)', bidding: '#7e57c2', delivery: '#FF9F0A' };
+const MINI_KIND_EMOJI = { holiday: '🎉', meeting: '📅', followup: '↩', task: '⏰', leave: '🌴', bidding: '🏛', delivery: '📦' };
+
 async function renderMiniCal() {
-  const el=document.getElementById('mini-cal'); if(!el) return;
-  // Open tasks with due dates → event dots on the calendar (only the current user's tasks)
-  let tasks=[];
-  const uid=currentUser&&currentUser.uid;
-  if(uid){
-    try {
-      const fetcher=()=>db.collection('tasks').where('assignedTo','array-contains',uid).get()
-        .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
-      const snap=await (typeof dbCachedGet==='function' ? dbCachedGet('tasks-cal-'+uid,fetcher,30000) : fetcher());
-      tasks=snap.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.dueDate && !['done','approved','archived'].includes(t.status));
-    } catch(_) {}
-  }
-  const todayStr=(typeof bizDate==='function'?bizDate():new Date().toISOString().slice(0,10));
+  const el = document.getElementById('mini-cal'); if (!el) return;
+  const uid = currentUser && currentUser.uid;
+  const todayStr = (typeof bizDate === 'function' ? bizDate() : new Date().toISOString().slice(0, 10));
   // Anchor the calendar to the Manila current month (+ user nav offset), so the
   // grid doesn't jump a month near the UTC midnight boundary.
-  const base=new Date(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, 1); base.setMonth(base.getMonth()+_calMonthOffset);
-  const year=base.getFullYear(), month=base.getMonth();
-  const firstDay=new Date(year,month,1).getDay(); const days=new Date(year,month+1,0).getDate();
-  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const pad=n=>String(n).padStart(2,'0');
-  const ym=`${year}-${pad(month+1)}`;
-  const byDay={};
-  tasks.forEach(t=>{ if((t.dueDate||'').slice(0,7)===ym){ const d=parseInt(t.dueDate.slice(8,10),10); (byDay[d]=byDay[d]||[]).push(t); } });
-  el.innerHTML=`
+  const base = new Date(+todayStr.slice(0, 4), +todayStr.slice(5, 7) - 1, 1); base.setMonth(base.getMonth() + _calMonthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  const pad = n => String(n).padStart(2, '0');
+  const ym = `${year}-${pad(month + 1)}`;
+
+  const byDay = {};
+  let usedFeed = false;
+  if (uid && typeof window.CalendarFeed !== 'undefined' && window.CalendarFeed) {
+    try {
+      const feed = await window.CalendarFeed.loadMonth(ym);
+      Object.keys(feed.days || {}).forEach(iso => {
+        if (iso.slice(0, 7) !== ym) return;
+        byDay[parseInt(iso.slice(8, 10), 10)] = feed.days[iso];
+      });
+      usedFeed = true;
+    } catch (_) { /* fall through to the tasks-only path below */ }
+  }
+  if (!usedFeed && uid) {
+    try {
+      const fetcher = () => db.collection('tasks').where('assignedTo', 'array-contains', uid).get()
+        .catch(() => db.collection('tasks').where('assignedTo', '==', uid).get());
+      const snap = await (typeof dbCachedGet === 'function' ? dbCachedGet('tasks-cal-' + uid, fetcher, 30000) : fetcher());
+      const tasks = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(t => t.dueDate && !['done', 'approved', 'archived'].includes(t.status));
+      tasks.forEach(t => {
+        if ((t.dueDate || '').slice(0, 7) !== ym) return;
+        const d = parseInt(t.dueDate.slice(8, 10), 10);
+        (byDay[d] = byDay[d] || []).push({ kind: 'task', date: t.dueDate.slice(0, 10), title: String(t.title || 'Task'), time: null, id: t.id, raw: t });
+      });
+    } catch (_) { /* dashboard renders an empty-but-working calendar */ }
+  }
+
+  const firstDay = new Date(year, month, 1).getDay(); const days = new Date(year, month + 1, 0).getDate();
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  el.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:700;font-size:14px">
       <button class="cal-nav" data-dir="-1" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;line-height:1;padding:2px 10px;border-radius:8px">‹</button>
       <span>${months[month]} ${year}</span>
       <button class="cal-nav" data-dir="1" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;line-height:1;padding:2px 10px;border-radius:8px">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">
-      ${['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>`<div style="font-size:10px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
+      ${['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => `<div style="font-size:10px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
       ${Array(firstDay).fill('<div></div>').join('')}
-      ${Array.from({length:days},(_,i)=>{const day=i+1;const ds=`${ym}-${pad(day)}`;const isToday=ds===todayStr;const cnt=(byDay[day]||[]).length;
-        return `<div class="cal-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:var(--white,#fff);font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<span style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:${isToday?'var(--white,#fff)':'var(--danger)'}"></span>`:''}</div>`;}).join('')}
+      ${Array.from({ length: days }, (_, i) => {
+        const day = i + 1; const ds = `${ym}-${pad(day)}`; const isToday = ds === todayStr;
+        const items = byDay[day] || [];
+        const kinds = [];
+        MINI_KIND_ORDER.forEach(k => { if (kinds.length < 3 && !kinds.includes(k) && items.some(it => it.kind === k)) kinds.push(k); });
+        const isHoliday = items.some(it => it.kind === 'holiday');
+        const dotsHtml = kinds.length ? `<span class="minical-dots">${kinds.map(k => `<span class="minical-dot" style="background:${isToday ? 'var(--white,#fff)' : (MINI_KIND_COLOR[k] || 'var(--text-muted)')}"></span>`).join('')}</span>` : '';
+        const numColor = (!isToday && isHoliday) ? ';color:var(--gold);font-weight:700' : '';
+        return `<div class="cal-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${items.length ? 'pointer' : 'default'};${isToday ? 'background:var(--primary);color:var(--white,#fff);font-weight:700' : items.length ? 'background:var(--surface2)' : ''}${numColor}">${day}${dotsHtml}</div>`;
+      }).join('')}
     </div>
     <div id="cal-day-detail" style="margin-top:10px;font-size:12px;color:var(--text-muted);min-height:16px"></div>`;
-  el.querySelectorAll('.cal-nav').forEach(b=>b.addEventListener('click',()=>{ _calMonthOffset+=parseInt(b.dataset.dir,10); renderMiniCal(); }));
-  el.querySelectorAll('.cal-day').forEach(c=>c.addEventListener('click',()=>{
-    const day=parseInt(c.dataset.date.slice(8,10),10); const dayTasks=byDay[day]||[];
-    const det=document.getElementById('cal-day-detail'); if(!det) return;
-    det.innerHTML = dayTasks.length
-      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">${emojiIcon('📅',16)} ${c.dataset.date} — ${dayTasks.length} due</div>${dayTasks.slice(0,4).map(t=>`<div>• ${escHtml(t.title)}</div>`).join('')}<a style="color:var(--primary);cursor:pointer;font-weight:600" onclick="navigateTo('tasks')">View all tasks →</a>`
+
+  el.querySelectorAll('.cal-nav').forEach(b => b.addEventListener('click', () => { _calMonthOffset += parseInt(b.dataset.dir, 10); renderMiniCal(); }));
+  el.querySelectorAll('.cal-day').forEach(c => c.addEventListener('click', () => {
+    const day = parseInt(c.dataset.date.slice(8, 10), 10); const dayItems = (byDay[day] || []).slice(0, 5);
+    const det = el.querySelector('#cal-day-detail'); if (!det) return;
+    det.innerHTML = dayItems.length
+      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">${emojiIcon('📅', 16)} ${escHtml(c.dataset.date)}</div>${dayItems.map(it => `<div>${MINI_KIND_EMOJI[it.kind] || '•'} ${escHtml(it.title)}${it.time ? ' · ' + escHtml(it.time) : ''}</div>`).join('')}<a style="color:var(--primary);cursor:pointer;font-weight:600" onclick="navigateTo('calendar')">Open calendar →</a>`
       : '';
     if (window.lucide) lucide.createIcons({ nodes: [det] });
   }));

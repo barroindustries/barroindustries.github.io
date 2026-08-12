@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.156 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.157 · Barro Industries</div>
   </div>
 </div>
 
@@ -490,6 +490,11 @@
      RUN time. Everything it touches is a runtime reference, never parse-time,
      so this position is about intent, not a hard parse dependency. -->
 <script defer src="js/meetings.js"></script>
+<!-- COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2 — window.CalendarFeed, the ONE
+     calendar data source for both the dashboard mini calendar and the drawer
+     Calendar page. Must load right after meetings.js: it consumes
+     window.Meetings._h (the Manila date helpers) at call time. -->
+<script defer src="js/calendar-feed.js"></script>
 <!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
      before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
 <script defer src="js/svc-approvals.js"></script>

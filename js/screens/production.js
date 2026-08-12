@@ -411,6 +411,12 @@ const JOB_STAGES = [
   { id:'cancelled',     label:'Cancelled',     icon:'✖️', color:'#ef5350', dept:'Sales' },
 ];
 function jobStage(id){ return JOB_STAGES.find(s=>s.id===id) || JOB_STAGES[0]; }
+// COMPANY-AND-CALENDAR-SPEC-2026-08-12 §1.4 — JOB_STAGES is a top-level
+// `const` in this classic script, so it is NOT on window and is unreachable
+// from dashboards.js (which loads after this file). Expose it once here
+// rather than duplicating the table on the Company "What We're Working On"
+// projects list.
+window.JOB_STAGES = JOB_STAGES;
 const _isFinAdmin = () => ['president','owner','manager','finance'].includes(window.currentRole) || (window.currentDepts||[]).includes('Finance');
 
 // Sales→Production handoff (owner's rule, 2026-08) — Production staff see WHAT to

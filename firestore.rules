@@ -3725,5 +3725,17 @@ service cloud.firestore {
       allow update, delete: if isAuth() && !isPartner()
         && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
     }
+
+    // ── Year in Review (owner ruling 2026-08-12: end-of-year figures every
+    // employee may see; money included ON PURPOSE — this doc, once published,
+    // is the deliberate disclosure). A doc's existence IS publication: it is
+    // created only by the President's publish step, so read may be blanket
+    // internal. Employees must NEVER be able to write it. Partner excluded —
+    // internal disclosure. NO per-person pay data may ever be added to this
+    // doc shape (see COMPANY-AND-CALENDAR-SPEC-2026-08-12.md §1B.3).
+    match /company_year_review/{year} {
+      allow read:   if isAuth() && !isPartner();
+      allow create, update, delete: if isAuth() && isPresident();
+    }
   }
 }
