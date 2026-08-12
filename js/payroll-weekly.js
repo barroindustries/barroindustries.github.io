@@ -537,6 +537,12 @@ if (typeof window === 'undefined') {
       const isLastPayWeek = WRC.isLastPayWeekOfMonth(weekId);
       const warnings = [];
 
+      // STATUTORY-BY-STATUS-SPEC-2026-08-12 — the same President-gated
+      // switch the monthly engine reads (js/departments.js buildPayRunLines),
+      // read once for the whole week. Same refusal stance: a failed read
+      // throws rather than guessing on or off.
+      const statusRule = await window.statutoryStatusRuleOn();
+
       // Worker roster. A failed read aborts — an empty roster would read as
       // "nobody works here this week" and produce a ₱0 run that looks finished.
       const wpSnap = await _db().collection('worker_profiles').get();
@@ -626,6 +632,13 @@ if (typeof window === 'undefined') {
           if (f.source === 'punch' && f.punchedHours > WRC.OT_THRESHOLD_HOURS) otDoubleCountDays++;
         });
 
+        // STATUTORY-BY-STATUS-SPEC-2026-08-12 — pure derivation only; NEVER
+        // fed into resolveStatutoryWeekly below (see that call's own
+        // comment). A worker with no statConfig already deducts nothing
+        // today, so a derived 'exempt' is numerically a no-op here — this
+        // integration adds words/flags only, never a peso.
+        const plan = window.statutoryStatusPlan(p, statusRule.on, { engine: 'week' });
+
         // STATUTORY — monthly obligation, collected on the month's last pay
         // week only, and only for a configured worker. The month's gross has to
         // include the weeks already paid, so the bracket is keyed on the real
@@ -682,6 +695,15 @@ if (typeof window === 'undefined') {
         line.flags = built.flags;
         line.tinNum = p.tinNum || ''; line.ssNum = p.ssNum || '';
         line.phNum = p.phNum || ''; line.pagibigNum = p.pagibigNum || '';
+        // Frozen traceability words (spec §7.1) — same three fields the
+        // monthly engine freezes, so js/payroll.js's ONE normalised line can
+        // read them identically from either engine.
+        line.employmentStatus = plan.status;
+        line.statutoryBasis = plan.words;
+        line.statusFlag = plan.flag;
+        if (plan.flag) {
+          warnings.push(warn('statutory-status-' + plan.flag.kind, `${line.name}: ${plan.flag.words}`, { workerId: p.id }));
+        }
 
         if (line.caShortfall > 0.01) {
           warnings.push(warn('ca-clamped', `${line.name}'s cash-advance instalment was clamped by ₱${line.caShortfall.toFixed(2)} so the week could not pay a negative net. The balance comes down by what was actually collected.`, { workerId: p.id }));

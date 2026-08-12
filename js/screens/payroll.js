@@ -227,6 +227,11 @@ function _pyRead(l) {
     attScore:   _pyPick(l.detail && l.detail.attendanceScore, l.attScore),
     policy:     (l.detail && l.detail.policy) || l.policy || 'flat',
     perfFactor: _pyPick(l.perfFactor, l.detail && l.detail.perfFactor),
+    // STATUTORY-BY-STATUS-SPEC-2026-08-12 — passed through from the
+    // normalised line untouched; nothing here is recomputed.
+    employmentStatus: (l.detail && l.detail.employmentStatus) || l.employmentStatus || '',
+    statutoryBasis:   (l.detail && l.detail.statutoryBasis) || l.statutoryBasis || '',
+    statusFlag: l.statusFlag || null,
     raw: l
   };
 }
@@ -1168,6 +1173,22 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       if (!r.id) {
         out.push({ severity: 'danger', id: '', name: r.name, text: `${r.name} - their record carries no id, so their figures cannot be changed from here.` });
       }
+      // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.3 — read straight off the
+      // frozen line (never recomputed), so this shows on a stored/paid
+      // period exactly as it does on a live one. Only present when the
+      // switch is on (§5.2 suppresses flags while it is off), which is why
+      // this never appears on the pre-adoption report itself.
+      // A colon (not " - ") deliberately keeps this OUT of the name-grouping
+      // above: unlike "Adjust figures", each person's Fix here must open
+      // THEIR OWN HR record, never a shared multi-person panel.
+      if (r.statusFlag) {
+        out.push({
+          severity: 'warn', id: r.id, name: r.name,
+          text: `${r.name}: ${r.statusFlag.words}`,
+          fixable: false,
+          hrFix: { uid: kind === 'week' ? '' : r.id, workerId: kind === 'week' ? r.id : '', name: r.name }
+        });
+      }
     });
 
     // Whatever the engine itself flagged, verbatim. No `name` field — these
@@ -1237,9 +1258,18 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const dangers = groups.filter(g => g.severity === 'danger').length;
     const rows = groups.map(g => {
       if (g.single) {
+        // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.4 — a status flag's Fix
+        // opens the person's HR record (openEmployeeProfile), NEVER the
+        // Adjust-figures panel: employment status is edited in HR only.
+        // Checked BEFORE g.single.fixable — the generic `out.forEach` below
+        // sets fixable purely off roster membership, so an hrFix entry would
+        // otherwise also read as fixable and get the wrong button.
+        const fixBtnHtml = g.single.hrFix
+          ? `<button class="btn-secondary btn-sm py-fix-hr" data-uid="${_pyEsc(g.single.hrFix.uid)}" data-workerid="${_pyEsc(g.single.hrFix.workerId)}" data-name="${_pyEsc(g.single.hrFix.name)}">Fix this</button>`
+          : (g.single.fixable ? `<button class="btn-secondary btn-sm py-fix" data-person="${_pyEsc(g.single.id)}">Fix this</button>` : '');
         return `<div class="py-problem">
           <div class="py-ptext" style="${g.severity === 'danger' ? 'color:var(--danger)' : ''}">${_pyEsc(g.single.text)}</div>
-          ${g.single.fixable ? `<button class="btn-secondary btn-sm py-fix" data-person="${_pyEsc(g.single.id)}">Fix this</button>` : ''}
+          ${fixBtnHtml}
         </div>`;
       }
       const text = `${_pyJoinNames(g.names)} - ${g.rest}`;
@@ -1447,6 +1477,10 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // payroll screen writes only period-scoped inputs, never standing pay.
     const hrBtn = _pyHrRecordBtn();
     const hrLine = '<div class="py-oneoff">Pay records are kept in HR.</div>';
+    // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.3 — the reason government
+    // deductions were or weren't taken, read straight off the frozen line.
+    // No new button: the HR link (hrBtn) already sits right below this.
+    const statusLine = r.statutoryBasis ? `<div class="py-oneoff">${_pyEsc(r.statutoryBasis)}</div>` : '';
     const acts = [];
     if (o.canEditRows && r.id) {
       acts.push(`<button class="btn-secondary btn-sm py-adjust" data-person="${_pyEsc(r.id)}">Adjust figures</button>`);
@@ -1463,6 +1497,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       <div class="py-fields">${cols.map(c => _pyFieldHtml(c, r, o.isLive)).join('')}</div>
       ${oneOffLines}
       ${perfLine}
+      ${statusLine}
       ${hrLine}
       ${acts.length ? `<div class="py-rowacts">${acts.join('')}</div>` : ''}
     </article>`;
@@ -1632,6 +1667,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
 
     root.querySelectorAll('.py-fix').forEach(b => b.addEventListener('click', () =>
       openAdjustPanel(period, readById[b.dataset.person], b.dataset.person, label)));
+
+    // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.4 — a status flag's Fix opens
+    // the person's HR record, never a payroll editor (employment status is
+    // HR-owned; the payroll screen only ever links out to it).
+    root.querySelectorAll('.py-fix-hr').forEach(b => b.addEventListener('click', () => {
+      if (typeof window.openEmployeeProfile !== 'function') { Notifs.showToast('The HR records screen could not be opened.', 'error'); return; }
+      window.openEmployeeProfile({ uid: b.dataset.uid || undefined, workerId: b.dataset.workerid || undefined, name: b.dataset.name });
+    }));
 
     // A collapsed problem shared by several people (clutter fix, 2026-08-12) —
     // one button, opens a list so each of them can still be fixed on their

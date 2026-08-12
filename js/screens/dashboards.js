@@ -2517,6 +2517,13 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         const _pu = users.find(x => x.id === uid) || {};
         const _stat = {};
         if (_pu.statConfig) _stat.statConfig = _pu.statConfig;
+        // STATUTORY-BY-STATUS-SPEC-2026-08-12 — carried the same way as
+        // statConfig above, so the payslip button below can run this
+        // employee through statutoryStatusPlan before projecting: without
+        // it, a Training/Probationary employee with the switch on would
+        // show full table deductions here — a projection the real pay
+        // period would never produce.
+        _stat.employmentStatus = _pu.employmentStatus || '';
         // Only 'fixed' needs its typed amount carried. 'exempt' and 'auto'
         // ignore emp[k] entirely, and a key with NO mode falls to the legacy
         // `emp[k] || table` branch — where an ABSENT amount is exactly what the
@@ -3403,7 +3410,22 @@ function openWorkerProfilePanel(uid, name, preloaded) {
       ['sss','philhealth','pagibig','tax'].forEach(k => {
         if (preloaded && preloaded[k] != null) _statFields[k] = preloaded[k];
       });
-      const line = window.computePayLine({ id: uid, displayName: name, salary: preloaded?.salary||0, allowance: preloaded?.allowance||0, deductions: preloaded?.deductions||0, ..._statFields }, { month, policy:'flat' });
+      // STATUTORY-BY-STATUS-SPEC-2026-08-12 — lockstep secondary surface
+      // (spec §8 item 9): when the switch is on, this hand-made preview must
+      // not contradict what the real pay period would do. Best-effort only —
+      // this is a human-editable draft payslip, not money in flight, so a
+      // failed switch read falls back to today's behaviour rather than
+      // blocking the panel from opening.
+      let _statFieldsEff = _statFields;
+      try {
+        const _statusRule = await window.statutoryStatusRuleOn();
+        const _plan = window.statutoryStatusPlan(
+          { statConfig: _statFields.statConfig, employmentStatus: preloaded?.employmentStatus || '', sss: _statFields.sss, philhealth: _statFields.philhealth, pagibig: _statFields.pagibig, tax: _statFields.tax },
+          _statusRule.on, { engine: 'month' }
+        );
+        if (_plan.active) _statFieldsEff = { ..._statFields, statConfig: _plan.statConfig };
+      } catch (_) { /* preview only — keep today's figures rather than block the payslip */ }
+      const line = window.computePayLine({ id: uid, displayName: name, salary: preloaded?.salary||0, allowance: preloaded?.allowance||0, deductions: preloaded?.deductions||0, ..._statFieldsEff }, { month, policy:'flat' });
       model = window.toPayslipModel({...line, uid:uid, month}, 'monthly');
       model.official = false;
     }

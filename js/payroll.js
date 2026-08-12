@@ -517,9 +517,14 @@ if (typeof window === 'undefined') {
           statutoryApplied: !!(st && st.applied), statutoryConfigured: !!(st && st.configured),
           days: Array.isArray(l.rows) ? l.rows : [],
           jobTitle: l.jobTitle || '', department: l.department || '',
-          linkedUid: l.linkedUid || null
+          linkedUid: l.linkedUid || null,
+          // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.3 — frozen onto the line
+          // by WRC.buildLines; passed through untouched, never recomputed.
+          employmentStatus: l.employmentStatus || '',
+          statutoryBasis: l.statutoryBasis || ''
         }
       };
+      row.statusFlag = l.statusFlag || null;
     } else {
       const statutory = {
         sss: r2(l.sss), philhealth: r2(l.philhealth),
@@ -555,9 +560,14 @@ if (typeof window === 'undefined') {
           cashAdvanceBefore: r2(l.caBalance),
           overridden: !!l.overridden,
           overrideNote: (l.overrideMeta && l.overrideMeta.note) || '',
-          linkedUid: String(l.uid || '')
+          linkedUid: String(l.uid || ''),
+          // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.3 — frozen onto the line
+          // by buildPayRunLines; passed through untouched, never recomputed.
+          employmentStatus: l.employmentStatus || '',
+          statutoryBasis: l.statutoryBasis || ''
         }
       };
+      row.statusFlag = l.statusFlag || null;
     }
 
     row.held = !!heldReason;
@@ -603,6 +613,9 @@ if (typeof window === 'undefined') {
     out.push(money('PhilHealth', 'deduction', row.statutory.philhealth));
     out.push(money('Pag-IBIG', 'deduction', row.statutory.pagibig));
     out.push(money('Withholding tax', 'deduction', row.statutory.tax));
+    // STATUTORY-BY-STATUS-SPEC-2026-08-12 §7.3 — the reason beside the
+    // numbers, automatically, on the phone card that already shows them.
+    if (row.detail.statutoryBasis) out.push(info('Government deductions', row.detail.statutoryBasis));
     out.push(money('Other deductions', 'deduction', row.deductions));
     out.push(money('Cash advance', 'deduction', row.cashAdvance));
     out.push(money('Take-home pay', 'total', row.net));

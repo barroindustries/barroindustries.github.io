@@ -2058,6 +2058,15 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     throw new Error('Could not read this month\'s payroll exclusions — nothing was computed. Try again in a moment.');
   }
 
+  // STATUTORY-BY-STATUS-SPEC-2026-08-12 — the President-gated switch that
+  // decides whether employment status can exempt SSS/PhilHealth/Pag-IBIG.
+  // Read fresh (no dbCachedGet — a payroll-deciding switch must never be a
+  // stale cache read) and THROW on a failed read, same refusal stance as the
+  // exclusions read just above: guessing "off" would silently restore
+  // deductions for someone the report showed as exempt; guessing "on" would
+  // apply a rule nobody confirmed.
+  const statusRule = await window.statutoryStatusRuleOn();
+
   const skipped = [];
   const employees = [];
   for (const u of allStaff) {
@@ -2108,18 +2117,39 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     const empEff = ovr ? { ...emp, allowance: (ovr.allowance ?? emp.allowance), deductions: (ovr.otherDeductions ?? emp.deductions) } : emp;
     const kpiEff = ovr?.kpiScore ?? kpiScore;
     const attEff = ovr?.attScore ?? attScore;
-    let line = window.computePayLine(empEff, { month, policy: runPolicy, kpiScore: kpiEff, attScore: attEff, caPlan: planResult.plan, caBalance: planResult.caBalance });
+    // STATUTORY-BY-STATUS-SPEC-2026-08-12 — a pure derivation ABOVE
+    // computePayLine/resolveStatutoryEE (both frozen, never edited by this
+    // spec). When inactive, empForPay === empEff, byte-identical to today.
+    const plan = window.statutoryStatusPlan(empEff, statusRule.on, { engine: 'month' });
+    const empForPay = plan.active ? { ...empEff, statConfig: plan.statConfig } : empEff;
+    let line = window.computePayLine(empForPay, { month, policy: runPolicy, kpiScore: kpiEff, attScore: attEff, caPlan: planResult.plan, caBalance: planResult.caBalance });
     if (ovr) line = window.applyPayLineOverride(line, ovr);
     // v12 WS39 — freeze statutory IDs onto the computed line (do NOT touch
     // computePayLine itself, WS20's frozen math). Read live from payroll/{uid}.
     line.tinNum = emp.tinNum || ''; line.ssNum = emp.ssNum || '';
     line.phNum = emp.phNum || '';   line.pagibigNum = emp.pagibigNum || '';
+    // Frozen traceability words (spec §7.1) — describe what the maths
+    // actually did, survive on stored lines, never recomputed against a
+    // later status edit.
+    line.employmentStatus = plan.status;
+    line.statutoryBasis = plan.words;
+    line.statusFlag = plan.flag;
     return line;
   }));
 
-  // The monthly path has no warnings array today — the live view still needs
-  // the key so it can concat it with the fold's own warnings uniformly.
-  return { lines, skipped, warnings: [], payPolicy: runPolicy };
+  // Push each flagged line's words (name-prefixed) into the returned
+  // warnings array so the live view surfaces them exactly like every other
+  // engine-raised warning — the stored path needs nothing extra, since the
+  // screen derives its problems from the frozen line fields above.
+  const statusWarnings = lines
+    .filter(l => l.statusFlag)
+    .map(l => `${l.name}: ${l.statusFlag.words}`);
+
+  // The monthly path had no warnings array before this spec — the live view
+  // still needs the key so it can concat it with the weekly fold's own
+  // warnings uniformly. Now carries only the status-rule's own flags: when
+  // the switch is off (or nobody is flagged), this is [] exactly as before.
+  return { lines, skipped, warnings: statusWarnings, payPolicy: runPolicy };
 };
 
 window.computePayRun = async function(month, { policy } = {}) {
