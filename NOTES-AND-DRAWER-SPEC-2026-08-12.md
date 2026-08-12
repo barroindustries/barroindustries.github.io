@@ -27,6 +27,8 @@ Rules of engagement for this spec:
 - Target drawer order: **Dashboard, Chats, Notes, Tasks, Announcements, Team, Company, Tools (Calendar + Files), My Profile, Attendance, My Finance.**
 - Per-user department entries: *"Yes add the departmental entries"* (2026-08-12). This is an **owner ruling, not a default** — the `{ deptLoop:true }` block STAYS in `sidebar.staff`. Do not remove it on the grounds that his original list omitted it; he was asked and confirmed it.
 - Notes, asked what it should be: *"Own notes that they can also share"* — private by default, shareable.
+- Notes privacy (2026-08-12, asked directly whether the president may read employees' private notes): **"No — private means private."** This is a RULING, not a default: a note nobody has been shared on is readable by its author alone, enforced in `firestore.rules`, not merely hidden in the UI.
+- Notes sharing (2026-08-12): *"named people, owner decided if they may edit or view only or comment"* — recipients are named individuals (department-wide sharing is thereby ruled OUT, not deferred), and the note's owner assigns each recipient one of three levels: **view**, **comment**, or **edit**.
 - Standing history on this drawer (see the comment blocks above `NAV_REGISTRY.sidebar.admin` and `.staff` in `js/config.js`): it was cut from 23 items to eleven on 2026-08-10 ("theres way too mauch happening…", "lessen the icons there… priority only"). Section headings are **plain labels, never folding** (folding was tried and removed the same day). **A group of one means the group is wrong** — "Tools" with exactly two members is acceptable; never ship a one-member group.
 
 Decisions already made upstream — implement, do not reopen:
@@ -209,16 +211,17 @@ Chosen over a two-level "Company | Departmental ▸ picker" because:
 
 ## 5. PART C — NOTES (new feature)
 
-Owner ruling: *"Own notes that they can also share."* The smallest honest reading: **a note is private to its author unless the author shares it with named co-workers; a recipient can read it, not edit it.**
+Owner rulings: *"Own notes that they can also share"*, *"No — private means private"* (president may NOT read private notes), and *"named people, owner decided if they may edit or view only or comment."* So: **a note is private to its author unless the author shares it with named co-workers, and the owner assigns each recipient a level — view, comment, or edit.**
 
 ### 5.0 Scope decisions (with reasons — reopen only with the owner)
 
 | Decision | Choice | Why |
 |---|---|---|
-| Share target | **Named individuals only** (`sharedWith: [uid]`) | Person-picking already has a pattern (chat DM picker, Team directory). Department-wide sharing duplicates what Announcements/department feeds already are, and a dept-share read rule needs an extra `get()` per read. Flag: "share with a whole department" = owner decision, v1.1. |
-| Recipient rights | **Read-only** | "Also share" ≠ "co-edit". Collaborative editing without transactions/merge in a vanilla-JS app is a corruption factory. Flag: shared editing = owner decision. |
-| Admin/president visibility | **NONE for private notes, NONE for shared notes** | A private note unreadable by anyone else *including admins and the president* is the whole point of "own notes". If an oversight role should reach *shared* notes, that is an **owner decision to be asked, not granted** — the rules below deliberately contain no `isAdmin()`/`isPresident()` clause. |
-| Partners | Cannot create notes (`!isPartner()` on create); can read one only if explicitly shared with them | Employee-facing feature; matches the posts pattern. |
+| Share target | **Named individuals only** (`sharedUids`/`sharedLevels`) | OWNER RULING ("named people…"). Department-wide sharing is ruled out, not deferred. Person-picking already has a pattern (chat DM picker, Team directory). |
+| Recipient rights | **Per-recipient level: `view` \| `comment` \| `edit`, assigned by the owner alone** | OWNER RULING (verbatim above). View reads; comment reads + writes comments; edit reads + rewrites title/body. Nobody but the owner touches sharing, levels, or delete. |
+| Admin/president visibility | **NONE — for private AND shared notes. This is a REQUIREMENT, not an open flag.** | OWNER RULING (2026-08-12, asked directly): **"No — private means private."** Enforced in `firestore.rules` — the block below deliberately contains no `isAdmin()`/`isPresident()` clause, and none may be added later "helpfully": people write honestly in a notepad they trust, and one they suspect is readable is worthless — they will use their phone's notes app instead, which is strictly worse for the company. Oversight of what the business actually runs on (tasks, announcements, files, chat) is unaffected. |
+| Concurrent edits | **Last-write-wins, ADMITTED in the UI** | Two `edit` recipients will eventually save over each other. The honest minimum: every save stamps `updatedByName`, the note shows "Updated by X · HH:MM", and the editor warns before overwriting a save that landed while you were typing (§5.4). No silent loss. |
+| Partners | Cannot create notes (`!isPartner()` on create); can read/participate only if explicitly shared with them | Employee-facing feature; matches the posts pattern. |
 | Attachments | **NO in v1** | Two hard blockers: (a) `storage.rules` is scoped by Auth custom claims (role/dept — see memory `storage-custom-claims`) and cannot express a per-note ACL, so a "private" note's file would be readable beyond the share list — violating the privacy ruling at the storage layer; (b) the nightly Drive mirror (`window.Drive` → GitHub Action) copies uploads into a company Drive folder, republishing private notes to ops. Ship text-only; attachments = owner decision + a storage design of their own. |
 | Offline/PWA | Whatever Firestore's IndexedDB persistence gives for free; nothing bespoke | Out of scope per brief. |
 | Collection name | `notes` | Verified free: firestore.rules has `strategy_notes` (different collection) and `notes` only as a *field* name on meetings/finance docs; no `match /notes` exists; no `files_*`/`budgets_*` prefix collision. Client code has no `collection('notes')` call today. |
@@ -226,69 +229,172 @@ Owner ruling: *"Own notes that they can also share."* The smallest honest readin
 ### 5.1 Data model — `notes/{noteId}` (auto-id)
 
 ```
-ownerUid   string   auth uid of the author. Immutable after create.
-ownerName  string   display name snapshot (for recipients' list rows without a users lookup).
-title      string   1..200 chars, plain text.
-body       string   0..20000 chars, plain text (newlines preserved; NO markdown/HTML).
-sharedWith array    uids this note is shared with. [] = private. Max 50.
-createdAt  timestamp  serverTimestamp() at create.
-updatedAt  timestamp  serverTimestamp() at create and every update. Sort key.
+ownerUid      string    auth uid of the author. Immutable after create.
+ownerName     string    display name snapshot (for recipients' list rows without a users lookup).
+title         string    1..200 chars, plain text.
+body          string    0..20000 chars, plain text (newlines preserved; NO markdown/HTML).
+sharedUids    array     SCALAR uid array. [] = private. Max 50. THE access gate:
+                        the only sharing field rules membership-test and the only
+                        one an array-contains query can use.
+sharedLevels  map       { uid: 'view' | 'comment' | 'edit' } — the owner-assigned
+                        permission per recipient.
+updatedByName string    display name of whoever last saved title/body (the
+                        last-write-wins stamp, §5.4).
+createdAt     timestamp serverTimestamp() at create.
+updatedAt     timestamp serverTimestamp() at create and every update. Sort key.
 ```
 
-No subcollections. No other fields — the rules `hasOnly` list is the schema police; adding a field later means touching rules + this spec.
+**Why TWO sharing fields:** rules cannot search an array of objects, and `array-contains` needs scalars — so a single `[{uid, level}]` array can carry neither the query nor the membership test. `sharedUids` is queryable/testable; `sharedLevels` carries the level.
+
+**Consistency invariant (privacy-critical — a stale entry in one field must never out-grant the other):**
+1. *Write-time, enforced by rules:* every create and every owner update must satisfy `sharedUids.toSet() == sharedLevels.keys().toSet()` and `sharedLevels.values().hasOnly(['view','comment','edit'])`. A write with a uid in one field but not the other, or an invented level, is **denied** — the invariant can never be broken through the API. The edit-recipient update tier cannot touch either field at all (`affectedKeys().hasOnly` in §5.2), so it cannot break it either.
+2. *Read-time, fail-safe direction:* **access is decided by `sharedUids` membership ONLY**; `sharedLevels` is consulted only *after* `sharedUids` admits the uid, via `.get(uid, 'view')` — defaulting to the WEAKEST level. So even if the invariant were somehow violated (console write by the owner bypassing the client): a uid present in `sharedLevels` but not `sharedUids` has NO access at all, and a uid in `sharedUids` with no level entry degrades to view-only. Neither direction of staleness can grant more than the other field allows.
+3. *Client-side:* the share panel changes both fields in **one** `update()` call with fully recomputed values (never `arrayUnion` on one field alone) — the post-state the rules validate is atomic.
+
+Subcollection: `notes/{noteId}/comments/{commentId}` (§5.2a). No other fields — the rules `hasOnly` lists are the schema police; adding a field later means touching rules + this spec.
 
 ### 5.2 `firestore.rules` — exact block
 
-Insert as a sibling of the other top-level matches (suggested: right after the `match /posts/{postId}` block so the two feed-adjacent features sit together). Remember the repo rulings baked in below: rules do not cascade or prefix-match (this is one flat collection — fine), and absent-field reads THROW, hence `.get(field, default)` everywhere.
+Insert as a sibling of the other top-level matches (suggested: right after the `match /posts/{postId}` block so the two feed-adjacent features sit together). Repo rulings baked in below: rules do not cascade to subcollections (hence the explicit nested `comments` match) and never prefix-match; absent-field reads THROW, hence `.get(field, default)` everywhere.
 
 ```
     // ── Personal Notes (2026-08-12) — "Own notes that they can also share" ──
-    // Private by default; the OWNER may share with named users (sharedWith).
-    // DELIBERATELY NO isAdmin()/isPresident() clause anywhere in this block:
-    // a note is readable by its owner and its named recipients, full stop.
-    // Oversight access (even to shared notes) is an OWNER DECISION that was
-    // not granted — do not add it here in passing.
-    // List provability: the two client queries pin the disjuncts statically —
-    // where('ownerUid','==',uid) proves the first, and
-    // where('sharedWith','array-contains',uid) proves the second.
+    // OWNER RULING (2026-08-12, asked directly whether the president may read
+    // employees' private notes): "No — private means private." A note nobody
+    // has been shared on is readable by its AUTHOR ALONE, enforced HERE, not
+    // hidden in the UI. There is DELIBERATELY no isAdmin()/isPresident()
+    // clause anywhere in this block — do not add one "helpfully": people
+    // write honestly in a notepad they trust, and one they suspect is
+    // readable is worthless — they'll use their phone's notes app instead,
+    // which is strictly worse for the company. Oversight of what the business
+    // actually runs on (tasks, announcements, files, chat) is unaffected.
+    //
+    // Sharing (same ruling: "named people, owner decided if they may edit or
+    // view only or comment"): named individuals; the OWNER assigns each one
+    // view | comment | edit. Two fields carry that (rules can't search an
+    // array of objects, and array-contains needs scalars):
+    //   sharedUids   — scalar uid array. THE access gate: the only field the
+    //                  membership tests and array-contains queries use.
+    //   sharedLevels — { uid: level }. Consulted only AFTER sharedUids admits
+    //                  the uid; a missing entry degrades to 'view' (weakest).
+    // Every owner write must keep the two exactly consistent (the toSet()
+    // equality below), so a stale entry in one can never out-grant the other.
+    //
+    // List provability: the two client queries pin the read disjuncts
+    // statically — where('ownerUid','==',uid) proves the first,
+    // where('sharedUids','array-contains',uid) proves the second.
+    function noteIsOwner(note)  { return note.data.get('ownerUid', '') == request.auth.uid; }
+    function noteIsShared(note) { return request.auth.uid in note.data.get('sharedUids', []); }
+    function noteLevel(note) {
+      return note.data.get('sharedLevels', {}).get(request.auth.uid, 'view');
+    }
     match /notes/{noteId} {
-      allow read: if isAuth() && (
-           resource.data.get('ownerUid', '') == request.auth.uid
-        || request.auth.uid in resource.data.get('sharedWith', []) );
+      allow read: if isAuth() && ( noteIsOwner(resource) || noteIsShared(resource) );
 
       allow create: if isAuth() && !isPartner()
         && request.resource.data.get('ownerUid', '') == request.auth.uid
         && request.resource.data.keys().hasOnly(
-             ['ownerUid','ownerName','title','body','sharedWith','createdAt','updatedAt'])
+             ['ownerUid','ownerName','title','body','sharedUids','sharedLevels',
+              'updatedByName','createdAt','updatedAt'])
         && request.resource.data.get('title', '') is string
         && request.resource.data.get('title', '').size() >= 1
         && request.resource.data.get('title', '').size() <= 200
         && request.resource.data.get('body', '') is string
         && request.resource.data.get('body', '').size() <= 20000
-        && request.resource.data.get('sharedWith', []) is list
-        && request.resource.data.get('sharedWith', []).size() <= 50;
+        && request.resource.data.get('sharedUids', []) is list
+        && request.resource.data.get('sharedUids', []).size() <= 50
+        && request.resource.data.get('sharedUids', []).toSet()
+             == request.resource.data.get('sharedLevels', {}).keys().toSet()
+        && request.resource.data.get('sharedLevels', {}).values()
+             .hasOnly(['view', 'comment', 'edit']);
 
-      // Owner-only, owner immutable, same schema + size caps as create.
-      // Recipients are read-only in v1 (shared editing = owner decision).
-      allow update: if isAuth()
-        && resource.data.get('ownerUid', '') == request.auth.uid
-        && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
-        && request.resource.data.keys().hasOnly(
-             ['ownerUid','ownerName','title','body','sharedWith','createdAt','updatedAt'])
-        && request.resource.data.get('title', '') is string
-        && request.resource.data.get('title', '').size() >= 1
-        && request.resource.data.get('title', '').size() <= 200
-        && request.resource.data.get('body', '') is string
-        && request.resource.data.get('body', '').size() <= 20000
-        && request.resource.data.get('sharedWith', []) is list
-        && request.resource.data.get('sharedWith', []).size() <= 50;
+      // TWO update tiers. Only the OWNER may change sharing, levels, or
+      // ownership; an 'edit' recipient may rewrite the TEXT and nothing else —
+      // the affectedKeys().hasOnly() below denies outright any editor write
+      // that touches ownerUid/sharedUids/sharedLevels, so a recipient can
+      // never re-share the note, escalate their own level, or lock the owner
+      // out. 'view' and 'comment' recipients match neither tier: denied.
+      allow update: if isAuth() && (
+        // ── owner: full control; schema + consistency re-proven every write
+        ( noteIsOwner(resource)
+          && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+          && request.resource.data.keys().hasOnly(
+               ['ownerUid','ownerName','title','body','sharedUids','sharedLevels',
+                'updatedByName','createdAt','updatedAt'])
+          && request.resource.data.get('title', '') is string
+          && request.resource.data.get('title', '').size() >= 1
+          && request.resource.data.get('title', '').size() <= 200
+          && request.resource.data.get('body', '') is string
+          && request.resource.data.get('body', '').size() <= 20000
+          && request.resource.data.get('sharedUids', []) is list
+          && request.resource.data.get('sharedUids', []).size() <= 50
+          && request.resource.data.get('sharedUids', []).toSet()
+               == request.resource.data.get('sharedLevels', {}).keys().toSet()
+          && request.resource.data.get('sharedLevels', {}).values()
+               .hasOnly(['view', 'comment', 'edit']) )
+        ||
+        // ── edit-level recipient: title/body (+ the LWW stamp) only
+        ( noteIsShared(resource)
+          && noteLevel(resource) == 'edit'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['title', 'body', 'updatedAt', 'updatedByName'])
+          && request.resource.data.get('title', '') is string
+          && request.resource.data.get('title', '').size() >= 1
+          && request.resource.data.get('title', '').size() <= 200
+          && request.resource.data.get('body', '') is string
+          && request.resource.data.get('body', '').size() <= 20000 )
+      );
 
-      allow delete: if isAuth()
-        && resource.data.get('ownerUid', '') == request.auth.uid;
+      allow delete: if isAuth() && noteIsOwner(resource);
+
+      // ── §5.2a Comments — SUBCOLLECTION, so it needs its OWN match: rules
+      // NEVER cascade. Access rides entirely on the parent note's
+      // sharedUids/sharedLevels, re-read via one get() per operation.
+      // 'view' recipients can READ comments but not post; 'comment' and
+      // 'edit' can post; only a comment's author or the NOTE owner deletes.
+      // Comments are immutable (no update verb): delete + repost to fix.
+      match /comments/{commentId} {
+        function parentNote() {
+          return get(/databases/$(database)/documents/notes/$(noteId));
+        }
+        // Anyone who can read the note can read its comments — president
+        // and admins included ONLY if the note is shared with them, exactly
+        // like the note itself.
+        allow read: if isAuth() && (
+             parentNote().data.get('ownerUid', '') == request.auth.uid
+          || request.auth.uid in parentNote().data.get('sharedUids', []) );
+
+        allow create: if isAuth()
+          && request.resource.data.get('authorUid', '') == request.auth.uid
+          && request.resource.data.keys().hasOnly(
+               ['authorUid', 'authorName', 'text', 'createdAt'])
+          && request.resource.data.get('text', '') is string
+          && request.resource.data.get('text', '').size() >= 1
+          && request.resource.data.get('text', '').size() <= 2000
+          && ( parentNote().data.get('ownerUid', '') == request.auth.uid
+               || ( request.auth.uid in parentNote().data.get('sharedUids', [])
+                    && parentNote().data.get('sharedLevels', {})
+                         .get(request.auth.uid, 'view') in ['comment', 'edit'] ) );
+
+        allow delete: if isAuth() && (
+             resource.data.get('authorUid', '') == request.auth.uid
+          || parentNote().data.get('ownerUid', '') == request.auth.uid );
+      }
     }
 ```
 
-Notes for the implementer: helper names used (`isAuth`, `isPartner`) exist at the top of firestore.rules. Notes are not finance documents — the `financeDelete` president-approval flow does NOT apply; owner-delete is correct here.
+Notes for the implementer: helper names used (`isAuth`, `isPartner`) exist at the top of firestore.rules; the three `note*` helper functions are new — place them immediately above the `match /notes` block (rules allows function declarations at the documents-match level; `parentNote()` is declared inside the comments match, which is also legal). `Map.get(key, default)`, `Map.keys()`/`.values()`, `List.toSet()`, set `==`, and `List.hasOnly()` are all standard rules-language members. Notes are not finance documents — the `financeDelete` president-approval flow does NOT apply; owner-delete is correct here.
+
+Comment doc shape — `notes/{noteId}/comments/{commentId}` (auto-id):
+
+```
+authorUid  string     the commenter. Immutable (comments have no update verb).
+authorName string     display name snapshot.
+text       string     1..2000 chars, plain text.
+createdAt  timestamp  serverTimestamp(). Sort key (ascending).
+```
+
+Kept deliberately minimal: a flat comment list, not a thread — replies/reactions/edit-in-place would each need more rules surface on the most privacy-sensitive collection in the app, and nothing in the ruling asks for them.
 
 ### 5.3 `firestore.indexes.json` — exact entries
 
@@ -307,17 +413,19 @@ Append to the `indexes` array (both client queries in §5.4 need one):
       "collectionGroup": "notes",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "sharedWith", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "sharedUids", "arrayConfig": "CONTAINS" },
         { "fieldPath": "updatedAt",  "order": "DESCENDING" }
       ]
     }
 ```
 
+Comments need NO index entry: the only query is `notes/{id}/comments.orderBy('createdAt','asc')` within one parent — a single-field auto-index covers it.
+
 Deploy with the rules: `firebase deploy --only firestore`.
 
 ### 5.4 The screen — `js/screens/notes.js` (NEW)
 
-**⚠ XSS: this is the highest-XSS-risk feature in the app.** Notes are free text typed by any employee and rendered into `innerHTML` in lists, panels, toasts and share rows. EVERY interpolation of `title`, `body`, `ownerName`, or a picked user's name goes through `escHtml()` (js/modules.js) — no exceptions, including toast strings and `data-` attributes. Body newlines: render as `escHtml(body).replace(/\n/g,'<br>')` — escape FIRST, then insert `<br>`. Never `emojiIcon()` into plain-text sinks (toasts/notification titles) — plain emoji characters only (memory: emojiIcon plain-text sinks).
+**⚠ XSS: this is the highest-XSS-risk feature in the app — and comments make it TWO free-text sinks.** Notes AND comments are free text typed by one employee and rendered into `innerHTML` in another employee's session (lists, panels, comment rows, toasts, share rows). EVERY interpolation of `title`, `body`, `ownerName`, `authorName`, comment `text`, or a picked user's name goes through `escHtml()` (js/modules.js) — no exceptions, including toast strings and `data-` attributes. Newlines in body/comment text: render as `escHtml(text).replace(/\n/g,'<br>')` — escape FIRST, then insert `<br>`. Never `emojiIcon()` into plain-text sinks (toasts/notification titles) — plain emoji characters only (memory: emojiIcon plain-text sinks).
 
 **File conventions (hard constraints):**
 - Classic script. `'use strict';` then ONE IIFE `(function(){ ... })();` exposing exactly one global: `window.renderNotesPage`. No top-level `const`/`let` outside the IIFE; inside, use `var`/`function` freely. Name-collision check done at spec time: `renderNotesPage` is unused across `js/` and `js/screens/` (`renderNotesFor` in dashboards.js is a strategy-notes local — unrelated); keep every other helper INSIDE the IIFE so no further global names are minted.
@@ -341,64 +449,125 @@ window.renderNotesPage = async function() { ... }   // the ONLY export
 loadList(tab)      // skeleton via window.skeletonHtml('rows') while fetching
   mine:   db.collection('notes').where('ownerUid','==',currentUser.uid)
             .orderBy('updatedAt','desc').limit(100).get()
-  shared: db.collection('notes').where('sharedWith','array-contains',currentUser.uid)
+  shared: db.collection('notes').where('sharedUids','array-contains',currentUser.uid)
             .orderBy('updatedAt','desc').limit(100).get()
   // Fresh queries each time, NOT dbCachedGet — private data, cheap query,
   // and a stale cache after save/share is worse than the read.
 
 noteCardHtml(n, tab)
   – card row: escaped title (bold), snippet = escHtml(first ~120 chars of body),
-    updated stamp; owned+shared notes show a badge
-    `<span class="badge badge-gray"><i data-lucide="users"></i> Shared · N</span>`;
-    tab==='shared' rows show `Shared by {escHtml(ownerName)}` instead.
+    updated stamp (+ 'by {escHtml(updatedByName)}' when present);
+    owned+shared notes show a badge
+    `<span class="badge badge-gray"><i data-lucide="users"></i> Shared · N</span>`
+    (N = sharedUids.length); tab==='shared' rows show
+    `Shared by {escHtml(ownerName)} · {level label}` instead.
   – whole card tappable → openNote(id, tab)
+
+myLevel(n)         // ONE helper, used by every capability test in the UI
+  owner → 'owner'; else n.sharedLevels?.[uid] || 'view'
+  // mirrors the rules' fail-safe: missing level entry degrades to view.
+  // The UI is convenience only — firestore.rules is the boundary.
+
+Level labels (exact copy, used everywhere a level shows):
+  view → 'View only'   comment → 'Can comment'   edit → 'Can edit'
 
 openNote(id, tab)  // fetch fresh doc; permission-denied → toast 'This note is no
                    // longer shared with you.' and reload list
   – var panel = openPage(escHtml(n.title), viewHtml, footerHtml)
   – view: body rendered escaped with <br> newlines; meta line
-    'Updated {stamp}' (+ 'Shared by {owner}' when not mine)
-  – owner footer:  [Edit] [Share] [Delete]   (Delete = btn-danger)
-  – recipient footer: none (read-only)
-  – Delete: confirmDialog({title:'Delete note?', message:'"{escaped title}" will
-    be deleted permanently. Anyone it was shared with loses access.',
-    danger:true}) → doc.delete() → toast 'Note deleted' → close panel, loadList
+    'Updated {stamp}' (+ ' by {escHtml(updatedByName)}' when present).
+    Recipient additionally sees, directly under the title:
+    'Shared by {escHtml(ownerName)}' + a level badge with the label above —
+    at a glance, what they may do with it.
+    Owner additionally sees a 'Shared with' row: one chip per recipient,
+    '{escHtml(name)} · {level label}' (tapping it opens openShare).
+  – COMMENTS section under the body (all viewers):
+    heading 'Comments', then notes/{id}/comments.orderBy('createdAt','asc')
+    .get() rendered as rows: escaped authorName (bold), stamp, escaped text
+    with <br> newlines, and an ✕ delete icon shown only when
+    (comment.authorUid === uid) || (viewer is note owner).
+    ✕ → confirmDialog({title:'Delete comment?', danger:true}) → delete →
+    re-render the comment list (panel-scoped).
+    Below the list, an input row `<input id="nts-comment-input">` + 'Post'
+    button — rendered ONLY when myLevel is owner/comment/edit ('View only'
+    sees the list but no input). Post via busy(): trim, 1..2000 chars,
+    { authorUid, authorName, text, createdAt: serverTimestamp() }, then
+    Notifs.send to the note OWNER (skip when commenter IS the owner):
+    plain-text title 'New comment on your note', body
+    '{authorName} commented on "{title}"', payload page:'notes'.
+  – footer by capability:
+      owner            → [Edit] [Share] [Delete]   (Delete = btn-danger)
+      edit recipient   → [Edit]
+      comment / view   → none (comment input above is their write surface)
+  – Delete (owner only): confirmDialog({title:'Delete note?', message:
+    '"{escaped title}" will be deleted permanently. Anyone it was shared with
+    loses access.', danger:true}) → doc.delete() → toast 'Note deleted' →
+    close panel, loadList
+    // Client also best-effort deletes the comments subcollection docs it can
+    // list (batched). Any stragglers are unreachable anyway: every comment
+    // verb re-reads the parent note, and with the parent gone, parentNote()
+    // throws → denied. Say this in a code comment; do not build a Cloud
+    // Function for it.
 
-openEditor(existing|null)
+openEditor(existing|null)   // reachable by the OWNER and by 'edit' recipients
   – var panel = openPage(existing ? 'Edit Note' : 'New Note',
       `<input id="nts-title" class="form-input" maxlength="200"
               placeholder="Title" value="{escaped}">
        <textarea id="nts-body" class="form-input" rows="12" maxlength="20000"
               placeholder="Write your note…">{escaped}</textarea>`,
       `<button class="btn-primary" id="nts-save-btn">Save</button>`)
+  – when opening an existing note, remember the updatedAt it was opened at
+    (closure var, millis).
   – save via busy(): trim; empty title → toast 'Give the note a title.' (error), abort
+  – CONCURRENT-EDIT GUARD (honest last-write-wins — two 'edit' recipients WILL
+    eventually collide; we admit it instead of silently losing writing):
+    before writing, re-get the doc once; if its updatedAt is newer than the
+    opened-at stamp → confirmDialog({ title:'Overwrite newer changes?',
+    message:'{escHtml(updatedByName)} saved this note at {HH:MM} while you were
+    editing. Saving now will replace their version.', okLabel:'Save anyway',
+    danger:true }) — cancel keeps the editor open with the user's text intact.
+    This is the specced minimum; no merge, no locking.
   – create: { ownerUid, ownerName: currentUser.displayName || currentUser.email,
-              title, body, sharedWith: [],
+              title, body, sharedUids: [], sharedLevels: {},
+              updatedByName: currentUser.displayName || currentUser.email,
               createdAt: firebase.firestore.FieldValue.serverTimestamp(),
               updatedAt: firebase.firestore.FieldValue.serverTimestamp() }
   – edit:   update({ title, body,
+              updatedByName: currentUser.displayName || currentUser.email,
               updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+    // identical update for owner and edit-recipient — it touches exactly the
+    // four keys the rules' editor tier allows, and the owner tier allows a
+    // superset. Never let a recipient's save path touch sharing fields.
   – toast 'Note saved' → close panel (Overlay.dismissTop()) → loadList(currentTab)
 
-openShare(note)
+openShare(note)    // OWNER ONLY — one obvious action per person, not a matrix
   – var panel = openPage('Share Note', shareHtml, '')
   – people source: dbCachedGet('users', () => db.collection('users').get(), 30000)
     (the cached fetcher is fine here — it's the same directory the Team tab uses);
-    filter out partners, the current user, and uids already in sharedWith;
+    filter out partners, the current user, and uids already in sharedUids;
     render a searchable list (simple <input> filter over rendered rows — reuse
     the team-directory row pattern, panel-scoped).
-  – current recipients listed with an ✕ each.
-  – add:    update({ sharedWith: FieldValue.arrayUnion(uid),
-                     updatedAt: serverTimestamp() })
-            then Notifs.send(uid, { title: 'Note shared with you',
-              body: '{ownerName} shared "{title}"', ... }) — PLAIN TEXT title/body
-            (escHtml is for HTML sinks; notification text must carry no markup
-             and no emojiIcon() output), payload page:'notes' so the deep link
-            lands on the Notes screen.
-  – remove: update({ sharedWith: FieldValue.arrayRemove(uid),
-                     updatedAt: serverTimestamp() })
-  – Recipients cannot remove themselves in v1 (the update rule is owner-only);
-    do not render a 'Leave' control on shared-with-me notes.
+  – CURRENT RECIPIENTS listed first: each row = escaped name, a level
+    `<select>` with options View only / Can comment / Can edit (current level
+    selected), and an ✕ to remove. Changing the select saves immediately;
+    no separate 'apply' step.
+  – tapping a person in the picker ADDS them at 'view' (weakest default) and
+    moves them into the recipients list, where the select sits right there to
+    raise the level — one action to share, one optional tweak.
+  – EVERY share mutation (add / remove / level change) is ONE update() that
+    recomputes BOTH fields from the panel's in-memory state:
+      update({ sharedUids: [...uids], sharedLevels: {...uidToLevel},
+               updatedAt: serverTimestamp() })
+    — never arrayUnion/arrayRemove on sharedUids alone: the rules' toSet()
+    equality would reject the half-write, and half-writes are exactly the
+    stale-entry privacy hole §5.1 exists to prevent.
+  – on ADD, notify the recipient: Notifs.send(uid, { title:'Note shared with
+    you', body:'{ownerName} shared "{title}" — {level label}', ... }) —
+    PLAIN TEXT title/body (no markup, no emojiIcon() output), payload
+    page:'notes' so the deep link lands on the Notes screen. Level changes
+    and removals notify nobody (quiet corrections).
+  – Recipients cannot remove themselves in v1 (sharing fields are owner-only
+    in rules); do not render a 'Leave' control on shared-with-me notes.
 
 Empty states (exact copy):
   – My Notes:        icon 🗒️  'No notes yet' / 'Your notes are private until you share them.'
@@ -436,16 +605,20 @@ Empty states (exact copy):
 | New-announcement modal dept option | General | **Company** (value stays `General`) |
 | My Finance (employee view) | — | **Cash Advances** button under "Current Month Payslip" |
 | Notes screen | — | copy exactly as §5.4 (header, tabs, buttons, empty states, toasts, confirm) |
+| Notes permission labels | — | **View only** / **Can comment** / **Can edit** (share-panel selects, recipient badge, share notification) |
+| Notes meta line | — | 'Updated {stamp} by {name}' · recipient badge 'Shared by {name}' |
+| Notes comments | — | 'Comments' heading; 'Post' button; confirm 'Delete comment?'; overwrite warning 'Overwrite newer changes?' / 'Save anyway' |
 
 ---
 
 ## 7. Flagged for the OWNER (do not guess; ship v1 without them)
 
-1. **Oversight access to shared notes** — currently NOBODY but owner + recipients can read any note, president included. If he wants president/secretary visibility into *shared* notes, that is a rules change to make deliberately.
-2. **Share with a whole department** (v1 is named-people only).
-3. **Shared editing** (v1 recipients are read-only) and **recipient self-removal** from a share.
-4. **Attachments on notes** — blocked on a storage-ACL design (§5.0); do not route through `window.Drive` as-is (nightly mirror would republish private notes to the company Drive).
-5. Renaming "Posts" wording inside dashboard quick actions (contended file — deferred, §4.2.8).
+RESOLVED since the first draft — no longer open, now requirements: president/admin access to notes (**ruled NO**, §5.0/§5.2 — "private means private"), department-wide sharing (**ruled OUT** — "named people"), and shared editing (**ruled** — per-recipient view/comment/edit levels, §5.2).
+
+Still open:
+1. **Recipient self-removal** ("leave a note shared with me") — sharing fields are owner-only in rules, so v1 has no Leave control; a recipient who wants out must ask the owner.
+2. **Attachments on notes** — blocked on a storage-ACL design (§5.0); do not route through `window.Drive` as-is (nightly mirror would republish private notes to the company Drive).
+3. Renaming "Posts" wording inside dashboard quick actions (contended file — deferred, §4.2.8).
 
 ---
 
@@ -460,11 +633,16 @@ Empty states (exact copy):
 7. Bottom nav (employee): 4 visible icons + More; More sheet lists My Finance, Notes, Profile with full labels un-truncated; chat unread badge still paints on the visible Chats tab.
 8. Announcements screen: header "Announcements"; chips read Company | <depts> | (Pending Approval for pres/manager only); Company tab lists exactly the posts the old General tab listed (same query, verified by count against Firestore console); posting to "Company" writes `dept:'General'`.
 9. Partner login: Announcements shows only the Partners tab, as before.
-10. Notes CRUD as owner: create (appears top of My Notes, `createdAt`/`updatedAt` are server timestamps), edit (moves to top), delete (confirm dialog → gone).
-11. Share flow: share to user B → B gets an in-app notification whose tap lands on Notes; note appears under B's "Shared with Me" with "Shared by …"; B sees NO Edit/Share/Delete controls; B's direct `db.collection('notes').doc(id).update(...)` from the console is `permission-denied`.
-12. Privacy negatives (run in the browser console as each principal): with a PRIVATE note id from user A — user B `get()` → `permission-denied`; **president** `get()` → `permission-denied`; president `db.collection('notes').get()` (unscoped list) → `permission-denied`. Unshare B from a shared note → B's next `get()` denied and the note leaves B's list on reload.
-13. XSS: create a note titled `<img src=x onerror=alert(1)>` with body `<script>alert(2)</script>` — renders as literal text in the list card, the open panel, the share panel, and the delete-confirm message; no dialog fires anywhere; sharing it produces a notification with literal text.
-14. Rapid-close race: open a note panel, hit back, immediately open another — no console errors from stale-panel lookups (all lookups are `panel.querySelector`).
-15. Icons: with `localStorage['bi-dev']='1'`, navigating Notes and the new drawer logs no `[icon-integrity]` warnings (i.e. `sticky-note` etc. all hydrate).
-16. Deep links unchanged: an old cash-advance notification (`page:'cash-advances'`) still opens the Cash Advance screen; My Finance → Cash Advances button does the same.
-17. After commit: `APP_VERSION` was bumped by the hook, `CACHE_VER` matches it, and a hard-refreshed device shows the new version banner before any "it didn't work" debugging (memory: deploy delivery pipeline).
+10. Notes CRUD as owner: create (appears top of My Notes, `createdAt`/`updatedAt` are server timestamps, `sharedUids:[]`/`sharedLevels:{}` present), edit (moves to top, `updatedByName` stamps), delete (confirm dialog → gone, and its comments become unreadable: a recipient's `comments` read after parent delete is denied).
+11. Share at **View only**: share to user B → B gets a notification reading "… — View only" whose tap lands on Notes; note appears under B's "Shared with Me" with "Shared by …" + "View only" badge; B sees comments but NO comment input and NO Edit/Share/Delete; from B's console, a body `update()` AND a comment `add()` are both `permission-denied`.
+12. Raise B to **Can comment** (owner's share panel select): B's reopened note now shows the comment input; B posts a comment (owner receives "New comment on your note"); B's console body `update()` still `permission-denied`.
+13. Raise B to **Can edit**: B gets an [Edit] button and successfully saves title/body (card shows "by B"); from B's console, each of these is `permission-denied`: an update touching `sharedLevels` (self-escalation), one touching `sharedUids` (re-share), one touching `ownerUid`, and a `delete()`.
+14. Consistency invariant negatives (owner's console): an update writing `sharedUids` without the matching `sharedLevels` key (half-write), one writing a `sharedLevels` entry whose uid is not in `sharedUids`, and one with level `'admin'` — all three `permission-denied`.
+15. Privacy negatives — the ruling "private means private" (console, each principal): with a PRIVATE note id from user A — user B `get()` → `permission-denied`; **president** `get()` → `permission-denied`; president on a SHARED-to-others note `get()` → `permission-denied`; president `db.collection('notes').get()` (unscoped list) AND a `comments` read under A's note → `permission-denied`. Unshare B → B's next `get()` denied and the note leaves B's list on reload.
+16. Comment moderation: comment author deletes their own comment; note owner deletes anyone's; a `comment`-level recipient's console delete of someone ELSE's comment → `permission-denied`; comment `update()` by anyone (author included) → `permission-denied` (immutable).
+17. Concurrent edit is admitted, not silent: open the same note as owner and as an edit-recipient, save as owner, then save as recipient — the recipient gets "Overwrite newer changes?" naming the owner; cancel preserves the recipient's draft text in the editor; "Save anyway" wins and the note shows "Updated … by {recipient}".
+18. XSS (both sinks): a note titled `<img src=x onerror=alert(1)>` with body `<script>alert(2)</script>`, AND a comment with the same payloads — all render as literal text in the list card, the open panel, comment rows, the share panel, and confirm dialogs; no dialog fires anywhere; the share/comment notifications carry literal text.
+19. Rapid-close race: open a note panel, hit back, immediately open another — no console errors from stale-panel lookups (all lookups are `panel.querySelector`).
+20. Icons: with `localStorage['bi-dev']='1'`, navigating Notes and the new drawer logs no `[icon-integrity]` warnings (i.e. `sticky-note` etc. all hydrate).
+21. Deep links unchanged: an old cash-advance notification (`page:'cash-advances'`) still opens the Cash Advance screen; My Finance → Cash Advances button does the same.
+22. After commit: `APP_VERSION` was bumped by the hook, `CACHE_VER` matches it, and a hard-refreshed device shows the new version banner before any "it didn't work" debugging (memory: deploy delivery pipeline).

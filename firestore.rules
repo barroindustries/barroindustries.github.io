@@ -611,6 +611,130 @@ service cloud.firestore {
       allow delete: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
     }
 
+    // ── Personal Notes (2026-08-12) — "Own notes that they can also share" ──
+    // OWNER RULING (2026-08-12, asked directly whether the president may read
+    // employees' private notes): "No — private means private." A note nobody
+    // has been shared on is readable by its AUTHOR ALONE, enforced HERE, not
+    // hidden in the UI. There is DELIBERATELY no isAdmin()/isPresident()
+    // clause anywhere in this block — do not add one "helpfully": people
+    // write honestly in a notepad they trust, and one they suspect is
+    // readable is worthless — they'll use their phone's notes app instead,
+    // which is strictly worse for the company. Oversight of what the business
+    // actually runs on (tasks, announcements, files, chat) is unaffected.
+    //
+    // Sharing (same ruling: "named people, owner decided if they may edit or
+    // view only or comment"): named individuals; the OWNER assigns each one
+    // view | comment | edit. Two fields carry that (rules can't search an
+    // array of objects, and array-contains needs scalars):
+    //   sharedUids   — scalar uid array. THE access gate: the only field the
+    //                  membership tests and array-contains queries use.
+    //   sharedLevels — { uid: level }. Consulted only AFTER sharedUids admits
+    //                  the uid; a missing entry degrades to 'view' (weakest).
+    // Every owner write must keep the two exactly consistent (the toSet()
+    // equality below), so a stale entry in one can never out-grant the other.
+    //
+    // List provability: the two client queries pin the read disjuncts
+    // statically — where('ownerUid','==',uid) proves the first,
+    // where('sharedUids','array-contains',uid) proves the second.
+    function noteIsOwner(note)  { return note.data.get('ownerUid', '') == request.auth.uid; }
+    function noteIsShared(note) { return request.auth.uid in note.data.get('sharedUids', []); }
+    function noteLevel(note) {
+      return note.data.get('sharedLevels', {}).get(request.auth.uid, 'view');
+    }
+    match /notes/{noteId} {
+      allow read: if isAuth() && ( noteIsOwner(resource) || noteIsShared(resource) );
+
+      allow create: if isAuth() && !isPartner()
+        && request.resource.data.get('ownerUid', '') == request.auth.uid
+        && request.resource.data.keys().hasOnly(
+             ['ownerUid','ownerName','title','body','sharedUids','sharedLevels',
+              'updatedByName','createdAt','updatedAt'])
+        && request.resource.data.get('title', '') is string
+        && request.resource.data.get('title', '').size() >= 1
+        && request.resource.data.get('title', '').size() <= 200
+        && request.resource.data.get('body', '') is string
+        && request.resource.data.get('body', '').size() <= 20000
+        && request.resource.data.get('sharedUids', []) is list
+        && request.resource.data.get('sharedUids', []).size() <= 50
+        && request.resource.data.get('sharedUids', []).toSet()
+             == request.resource.data.get('sharedLevels', {}).keys().toSet()
+        && request.resource.data.get('sharedLevels', {}).values()
+             .hasOnly(['view', 'comment', 'edit']);
+
+      // TWO update tiers. Only the OWNER may change sharing, levels, or
+      // ownership; an 'edit' recipient may rewrite the TEXT and nothing else —
+      // the affectedKeys().hasOnly() below denies outright any editor write
+      // that touches ownerUid/sharedUids/sharedLevels, so a recipient can
+      // never re-share the note, escalate their own level, or lock the owner
+      // out. 'view' and 'comment' recipients match neither tier: denied.
+      allow update: if isAuth() && (
+        // ── owner: full control; schema + consistency re-proven every write
+        ( noteIsOwner(resource)
+          && request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '')
+          && request.resource.data.keys().hasOnly(
+               ['ownerUid','ownerName','title','body','sharedUids','sharedLevels',
+                'updatedByName','createdAt','updatedAt'])
+          && request.resource.data.get('title', '') is string
+          && request.resource.data.get('title', '').size() >= 1
+          && request.resource.data.get('title', '').size() <= 200
+          && request.resource.data.get('body', '') is string
+          && request.resource.data.get('body', '').size() <= 20000
+          && request.resource.data.get('sharedUids', []) is list
+          && request.resource.data.get('sharedUids', []).size() <= 50
+          && request.resource.data.get('sharedUids', []).toSet()
+               == request.resource.data.get('sharedLevels', {}).keys().toSet()
+          && request.resource.data.get('sharedLevels', {}).values()
+               .hasOnly(['view', 'comment', 'edit']) )
+        ||
+        // ── edit-level recipient: title/body (+ the LWW stamp) only
+        ( noteIsShared(resource)
+          && noteLevel(resource) == 'edit'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['title', 'body', 'updatedAt', 'updatedByName'])
+          && request.resource.data.get('title', '') is string
+          && request.resource.data.get('title', '').size() >= 1
+          && request.resource.data.get('title', '').size() <= 200
+          && request.resource.data.get('body', '') is string
+          && request.resource.data.get('body', '').size() <= 20000 )
+      );
+
+      allow delete: if isAuth() && noteIsOwner(resource);
+
+      // ── §5.2a Comments — SUBCOLLECTION, so it needs its OWN match: rules
+      // NEVER cascade. Access rides entirely on the parent note's
+      // sharedUids/sharedLevels, re-read via one get() per operation.
+      // 'view' recipients can READ comments but not post; 'comment' and
+      // 'edit' can post; only a comment's author or the NOTE owner deletes.
+      // Comments are immutable (no update verb): delete + repost to fix.
+      match /comments/{commentId} {
+        function parentNote() {
+          return get(/databases/$(database)/documents/notes/$(noteId));
+        }
+        // Anyone who can read the note can read its comments — president
+        // and admins included ONLY if the note is shared with them, exactly
+        // like the note itself.
+        allow read: if isAuth() && (
+             parentNote().data.get('ownerUid', '') == request.auth.uid
+          || request.auth.uid in parentNote().data.get('sharedUids', []) );
+
+        allow create: if isAuth()
+          && request.resource.data.get('authorUid', '') == request.auth.uid
+          && request.resource.data.keys().hasOnly(
+               ['authorUid', 'authorName', 'text', 'createdAt'])
+          && request.resource.data.get('text', '') is string
+          && request.resource.data.get('text', '').size() >= 1
+          && request.resource.data.get('text', '').size() <= 2000
+          && ( parentNote().data.get('ownerUid', '') == request.auth.uid
+               || ( request.auth.uid in parentNote().data.get('sharedUids', [])
+                    && parentNote().data.get('sharedLevels', {})
+                         .get(request.auth.uid, 'view') in ['comment', 'edit'] ) );
+
+        allow delete: if isAuth() && (
+             resource.data.get('authorUid', '') == request.auth.uid
+          || parentNote().data.get('ownerUid', '') == request.auth.uid );
+      }
+    }
+
     // ── Notifications — anyone signed in can deliver a notification
     // into another user's inbox (Notifs.send/sendToDept/sendToAll/sendToOwner
     // all write cross-user by design); only the inbox owner can read it or
@@ -3030,6 +3154,23 @@ service cloud.firestore {
       // 2026-08-09 (owner ruling 2, "they lose … worker pay rates"): the READ is
       // money-tier now as well. The linkedUid self-read branch is untouched.
       allow create, update: if isAuth() && isMoneyAdmin();
+      // Owner ruling 2026-08-12: "hr should be able to reinstate those
+      // offboarded". An Operations worker with no login is offboarded by
+      // status:'inactive' alone, so putting them back is a status write — but
+      // this same doc holds dailyRate/hourlyRate/foodAllowance/allowances/
+      // caBalance, and the tier above was deliberately narrowed precisely so a
+      // non-money role could not set pay rates.
+      //
+      // So this leg is scoped to the reinstate FIELDS, never to the document:
+      // hasOnly() means an HR write that also carries a rate change is denied
+      // outright rather than partially applied, and pinning the value to
+      // 'active' stops this becoming an offboarding path. Offboarding stays
+      // money-admin, matching the setUserDisabled Cloud Function where HR gets
+      // the reinstate direction only.
+      allow update: if isAuth() && inDept('HR')
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'reinstatedAt', 'reinstatedBy'])
+        && request.resource.data.status == 'active';
       allow delete: if isAuth() && isPresident();
     }
     // ── Worker directory (public-safe roster projection, v12 WS28) ──

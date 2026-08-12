@@ -792,6 +792,23 @@ async function _epTabHistory(tb, ctx) {
    Secretary this list is the Office Team only, and it SAYS so instead of
    quietly showing half the company.
    ═══════════════════════════════════════════════════════════════════════ */
+
+// Who may put an offboarded person back. Owner ruling 2026-08-12: "hr should
+// be able to reinstate those offboarded".
+//
+// This is deliberately the SAME expression as renderTeamTab's canManageAccounts
+// (js/screens/people.js) — president/manager by ROLE, or membership of the HR
+// DEPARTMENT. HR already held this permission there; what it lacked was a door,
+// because HR → Accounts & Logins is gated on `canAccounts` (role only), so a
+// person actually assigned to HR could not reach the one screen that had the
+// button. Duplicating the rule here rather than inventing a looser one keeps a
+// single answer to "who may reinstate"; if it ever moves, move both.
+function _epCanReinstate() {
+  const role = window.currentRole;
+  return ['president', 'manager'].includes(role)
+    || (Array.isArray(window.currentDepts) && window.currentDepts.includes('HR'));
+}
+
 window.renderEmployeeProfiles = function () {
   const panel = window.openPage(
     `${_epIcon('🪪', 16)} Employee Profiles`,
@@ -818,8 +835,15 @@ async function _epLoadRoster(panel, body) {
   // row's payClass is then missing BY PERMISSION, not because it is unset.
   const payrollDenied = !!(usersRes.value && usersRes.value.payrollDenied);
 
+  // Owner ruling 2026-08-12: "dont include brilliant steel or partners on the
+  // payroll or hr". This is an HR screen, so the same predicate the payroll
+  // roster and the HR roster use applies here — it was filtering `role !==
+  // 'partner'` ALONE, which let a Brilliant-Steel-only member with an
+  // 'employee' role onto an HR list (observed: one on the owner's screen).
   const users = (usersRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }))
-    .filter(u => u.role !== 'partner');
+    .filter(u => (typeof window.isExternalPartnerUser === 'function')
+      ? !window.isExternalPartnerUser(u)
+      : u.role !== 'partner');
   const wps = (wpRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }));
   const linked = new Set(wps.filter(w => w.linkedUid).map(w => w.linkedUid));
   const wpByUid = {};
@@ -878,7 +902,16 @@ async function _epLoadRoster(panel, body) {
               ? `<span class="badge ${r.isOps ? 'badge-orange' : 'badge-blue'}">${r.isOps ? 'Operations' : 'Office'}</span>`
               : `<span class="badge badge-gray" title="Pay records and the Operations worker register are both closed to your role.">Withheld</span>`}</td>
             <td data-label="Since" style="font-size:12px;white-space:nowrap">${_epEsc(r.startDate || '—')}</td>
-            <td data-label=""><button class="btn-secondary btn-sm ep-open" data-i="${i}" style="min-height:34px">Profile</button></td>
+            <td data-label=""><button class="btn-secondary btn-sm ep-open" data-i="${i}" style="min-height:34px">Profile</button>${
+              // Owner ruling 2026-08-12: "hr should be able to reinstate those
+              // offboarded". The badge was shown here with no way to undo it —
+              // the only Reinstate lived on the Team screen, whose door
+              // (HR → Accounts & Logins) was role-gated away from the very
+              // people asked to do this. Same gate as renderTeamTab's own
+              // canManageAccounts so there is ONE answer to "who may reinstate".
+              (r.removed && _epCanReinstate())
+                ? ` <button class="btn-success btn-sm ep-reinstate" data-i="${i}" style="min-height:34px">Reinstate</button>` : ''
+            }</td>
           </tr>`;
         }).join('') : `<tr><td colspan="7"><div class="empty-state" style="padding:26px"><p style="font-size:12px">${usersRes.ok ? 'Nobody on file.' : 'The staff list could not be loaded.'}</p></div></td></tr>`}
         </tbody>
@@ -902,6 +935,57 @@ async function _epLoadRoster(panel, body) {
     const r = rows[+btn.dataset.i];
     if (r) window.openEmployeeProfile({ uid: r.uid, workerId: r.workerId, name: r.name });
   }));
+
+  // ── Reinstate an offboarded person ──────────────────────────────────────
+  // TWO DIFFERENT RECORDS wear the same "Offboarded" badge on this list and
+  // they are un-done in completely different ways. Getting this wrong is
+  // silent: the toast says reinstated and the person still cannot work.
+  //
+  //   Office Team / anyone with a login  -> users/{uid}.removed
+  //     Routed through the setUserDisabled Cloud Function, NEVER a direct doc
+  //     write. The function re-enables the Firebase Auth account itself; a
+  //     client-side flag flip would leave the Auth account disabled, so the
+  //     roster would say active while the person still could not sign in.
+  //     (The remove direction has the mirror-image reason — it revokes refresh
+  //     tokens so a live 10-day session cannot outlive the removal.)
+  //
+  //   Operations staff with no login     -> worker_profiles/{id}.status
+  //     There is no Auth account to enable; 'inactive' is the whole of their
+  //     offboarding, so the repair is the status field and nothing else.
+  body.querySelectorAll('.ep-reinstate').forEach(btn => btn.addEventListener('click', () => window.busy(btn, async () => {
+    const r = rows[+btn.dataset.i];
+    if (!r) return;
+    const ok = await window.confirmDialog({
+      title: 'Reinstate ' + r.name + '?',
+      message: r.uid
+        ? _epEsc(r.name) + ' will be able to sign in again immediately, and will be back on the payroll roster for periods that have not been paid yet. Nothing about their past pay changes.'
+        : _epEsc(r.name) + ' will be back on the Operations roster and can be clocked in again. Nothing about their past pay changes.',
+      html: true,
+      confirmLabel: 'Reinstate'
+    });
+    if (!ok) return;
+    try {
+      if (r.uid) {
+        await firebase.functions().httpsCallable('setUserDisabled')({ targetUid: r.uid, disabled: false });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
+      } else if (r.workerId) {
+        await db.collection('worker_profiles').doc(r.workerId).update({
+          status: 'active',
+          reinstatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          reinstatedBy: (window.currentUser && window.currentUser.uid) || null
+        });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('worker_profiles');
+      } else {
+        Notifs.showToast('This record carries no id, so it cannot be reinstated from here.', 'error');
+        return;
+      }
+      window.logAudit && window.logAudit('reinstate', r.uid ? 'user' : 'worker_profile', r.uid || r.workerId, { name: r.name });
+      Notifs.success(r.name + ' reinstated.');
+      window.renderEmployeeProfiles();          // repaint so the badge and the button clear
+    } catch (err) {
+      Notifs.showToast('Could not reinstate: ' + (err.message || err.code || err), 'error');
+    }
+  })));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

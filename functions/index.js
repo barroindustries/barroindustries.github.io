@@ -516,15 +516,37 @@ exports.setUserDisabled = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
   }
-  // Caller role verified server-side (never trusted from the client).
-  const callerSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
-  const callerRole = callerSnap.exists ? callerSnap.data().role : null;
-  if (!['president', 'manager'].includes(callerRole)) {
-    throw new functions.https.HttpsError('permission-denied', 'Not authorized to offboard accounts.');
-  }
-
+  // Parsed BEFORE the authorization gate: which DIRECTION is being asked for
+  // is part of who is allowed to ask (see the HR carve-out below).
   const targetUid = (data && typeof data.targetUid === 'string') ? data.targetUid.trim() : '';
   const disabled  = !!(data && data.disabled);
+
+  // Caller role AND departments verified server-side (never trusted from the
+  // client). Departments matter here because HR is a DEPARTMENT, not a role.
+  const callerSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
+  const callerData = callerSnap.exists ? (callerSnap.data() || {}) : {};
+  const callerRole = callerSnap.exists ? callerData.role : null;
+  const callerDepts = Array.isArray(callerData.departments)
+    ? callerData.departments
+    : (callerData.department ? [callerData.department] : []);
+  const callerIsHR = callerDepts.indexOf('HR') !== -1;
+  const isAdminTier = ['president', 'manager'].includes(callerRole);
+
+  // Owner ruling 2026-08-12: "hr should be able to reinstate those offboarded".
+  // HR gets the REINSTATE direction ONLY (disabled === false). Offboarding
+  // stays with the President and Managers, deliberately: the two directions
+  // are not symmetric risks. Reinstating restores an account the company
+  // already decided to create, and a mistake is visible and instantly
+  // reversible. Offboarding locks a person out of their livelihood and revokes
+  // their live sessions — that is the direction that would be abused, and
+  // widening it was not asked for.
+  if (!isAdminTier && !(callerIsHR && disabled === false)) {
+    throw new functions.https.HttpsError('permission-denied',
+      callerIsHR
+        ? 'HR can reinstate an account, but only the President or a Manager can offboard one.'
+        : 'Not authorized to offboard accounts.');
+  }
+
   if (!targetUid) {
     throw new functions.https.HttpsError('invalid-argument', 'targetUid is required.');
   }
@@ -543,8 +565,15 @@ exports.setUserDisabled = functions.https.onCall(async (data, context) => {
   }
   // A manager can offboard regular employees but NOT lateral admin/finance
   // peers — only the President may offboard an admin/finance-tier account.
+  // This applies to HR's new reinstate leg too, and deliberately so: putting an
+  // admin/finance account back is a privilege restoration, and HR is not the
+  // tier that decides who holds finance or management access. The wording
+  // follows the direction actually being attempted, because "cannot offboard"
+  // on a Reinstate press reads as a bug.
   if (callerRole !== 'president' && ['manager', 'secretary', 'finance'].includes(targetRole)) {
-    throw new functions.https.HttpsError('permission-denied', 'Only the President can offboard admin/finance-tier accounts.');
+    throw new functions.https.HttpsError('permission-denied', disabled
+      ? 'Only the President can offboard admin/finance-tier accounts.'
+      : 'Only the President can reinstate an admin/finance-tier account.');
   }
 
   // 1. Authoritative auth lock (idempotent). Tolerate a user doc with no

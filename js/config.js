@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.154';
+window.APP_VERSION = '14.0.155';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -610,7 +610,10 @@ window.NAV_REGISTRY = {
 
   sidebarUniversal: [
     { key:'dashboard', icon:'home',            label:'Dashboard', page:'dashboard' },
-    { key:'chat',       icon:'message-circle', label:'Chat',      page:'chat'      }
+    // Relabelled 'Chat' → 'Chats' 2026-08-12 (owner's own drawer wording).
+    // sidebarUniversal is prepended to EVERY variant, so admins/partners also
+    // get 'Chats' now — deliberate, one label one place, not a per-variant fork.
+    { key:'chat',       icon:'message-circle', label:'Chats',     page:'chat'      }
   ],
 
   sidebar: {
@@ -690,7 +693,7 @@ window.NAV_REGISTRY = {
     genericPartner: [
       { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
       { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
-      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts' },
+      { key:'posts',    icon:'megaphone',    label:'Announcements', page:'posts' },
       { key:'qb',       icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' },
       { key:'quotes',   icon:'file-text',    label:'Quotations',    page:'bs-quotations' },
       { key:'team',     icon:'users',        label:'Team',          page:'team-directory', section:true, sectionLabel:'Directory' },
@@ -699,7 +702,7 @@ window.NAV_REGISTRY = {
     // ── External Partner role (Brilliant Steel) ──
     partnerBS: [
       { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
-      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts' },
+      { key:'posts',    icon:'megaphone',    label:'Announcements', page:'posts' },
       { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
       { key:'qb',       icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' },
       { key:'quotes',   icon:'file-text',    label:'Quotations',    page:'bs-quotations' },
@@ -715,35 +718,51 @@ window.NAV_REGISTRY = {
       { key:'clients',  icon:'book-open',  label:'Client Data',   page:'bs-clients' },
       { key:'files',    icon:'folder',     label:'Files',         page:'bs-files' }
     ],
-    // ── Employee / Agent / Finance ──
     // ── Employee / Agent / Accountant ──
-    // Grouped 2026-08-10 alongside the admin drawer. Same disease, milder: an
-    // ungrouped run of six, then one "Management" grab-bag of eight that
-    // included Calendar, Files, Projects and Sales Orders — none of which are
-    // management. Group headings survive a member being filtered out by
-    // `when` (see getSidebarItems), so the conditional Operations entries
-    // cannot drag the rest of their group under someone else's label.
+    // REBUILT 2026-08-12 to the owner's own list, in his order:
+    //   "Dashboard / Chats / Notes / Tasks / Announcements … Team above
+    //    Company and tools these are calendar and files … My Profile /
+    //    Attendance / My Finance"
+    // Dashboard + Chats come from sidebarUniversal, so this array starts at
+    // Notes. Group headings are PLAIN LABELS (owner, 2026-08-10 — folding was
+    // tried and removed the same day). A group of one means the group is wrong.
+    //
+    // { deptLoop:true } — OWNER RULING 2026-08-12: "Yes add the departmental
+    // entries." Not a default someone may trim later; he was asked whether the
+    // per-user department rows belong here and said yes. They expand to one
+    // row per department the signed-in user is in (plus Finance for the
+    // Accountant — _pushDeptNavItems, js/app.js), under their own
+    // 'My Departments' heading which that function stamps on the first row.
+    //
+    // Cash Advance has NO row here anymore — it folds into My Finance
+    // (renderPersonalFinance carries the entry point; the cash-advances page
+    // itself is unchanged and still routed for deep links / notifications).
     staff: [
-      // ── Every day (no header)
-      { key:'tasks',    icon:'check-square',  label:'My Tasks',      page:'tasks' },
-      { key:'calendar', icon:'calendar-days', label:'Calendar',      page:'calendar' },
+      // ── Every day (no header — the reasons the drawer gets opened)
+      { key:'notes',    icon:'sticky-note',  label:'Notes',         page:'notes' },
+      { key:'tasks',    icon:'check-square', label:'Tasks',         page:'tasks' },
+      { key:'posts',    icon:'megaphone',    label:'Announcements', page:'posts' },
 
-      // ── Their own departments, generated per user
+      // ── Their own departments, generated per user (heading comes from
+      //    _pushDeptNavItems: 'My Departments')
       { deptLoop:true },
 
       // ── Company-wide
-      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts', section:true, sectionLabel:'Company' },
+      { key:'team',     icon:'users',        label:'Team',          page:'team-directory', section:true, sectionLabel:'Company' },
       { key:'company',  icon:'building-2',   label:'Company',       page:'company' },
-      { key:'files',    icon:'folder',       label:'Files',         page:'files' },
 
-      // ── Their own employment
-      { key:'cash',     icon:'banknote',     label:'Cash Advance',  page:'cash-advances', section:true, sectionLabel:'Me' },
-      { key:'attendance',icon:'calendar',    label:'Attendance',    page:'attendance' },
-      { key:'team',     icon:'users',        label:'Team',          page:'team-directory' },
+      // ── Tools (owner named this group and both members)
+      { key:'calendar', icon:'calendar-days', label:'Calendar',     page:'calendar', section:true, sectionLabel:'Tools' },
+      { key:'files',    icon:'folder',        label:'Files',        page:'files' },
+
+      // ── Me
+      { key:'profile',    icon:'circle-user', label:'My Profile',   page:'my-profile', section:true, sectionLabel:'Me' },
+      { key:'attendance', icon:'calendar',    label:'Attendance',   page:'attendance' },
+      { key:'my-finance', icon:'wallet',      label:'My Finance',   page:'personal-finance' },
 
       // ── Operational screens, each shown only to the departments that use
-      // them. The Accountant reaches HR here (owner: "Allow accountant access
-      // to hr") — renderHR already admitted the role, there was simply no way in.
+      // them. UNCHANGED from the 2026-08-10 list. The Accountant reaches HR
+      // here (owner: "Allow accountant access to hr").
       { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', section:true, sectionLabel:'Operations', when:'hasProjectsDept' },
       { key:'sales-orders',icon:'receipt',     label:'Sales Orders', page:'sales-orders',  when:'hasSalesOrdersDept' },
       { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory',     when:'hasProductionDept' },
@@ -757,8 +776,8 @@ window.NAV_REGISTRY = {
     admin: [
       { icon:'home',           label:'Home',    page:'dashboard'       },
       { icon:'check-square',   label:'Tasks',   page:'tasks'           },
-      { icon:'megaphone',      label:'Posts',   page:'posts'           },
-      { icon:'message-circle', label:'Chat',    page:'chat'            },
+      { icon:'megaphone',      label:'Announcements', page:'posts'    },
+      { icon:'message-circle', label:'Chats',   page:'chat'            },
       { icon:'users',          label:'Team',    page:'team-directory'  },
       { icon:'shield-check',   label:'Approve', page:'approvals'       },
       // Mirrors the two sidebar entries added above. On mobile the bar itself
@@ -775,7 +794,7 @@ window.NAV_REGISTRY = {
     genericPartner: [
       { icon:'home',           label:'Home',     page:'dashboard'        },
       { icon:'briefcase',      label:'Projects', page:'partner-projects' },
-      { icon:'message-circle', label:'Chat',     page:'chat'             },
+      { icon:'message-circle', label:'Chats',    page:'chat'             },
       { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
       { icon:'check-square',   label:'Tasks',    page:'tasks'            },
       { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
@@ -784,7 +803,7 @@ window.NAV_REGISTRY = {
     partnerBS: [
       { icon:'home',           label:'Home',     page:'dashboard'        },
       { icon:'briefcase',      label:'Projects', page:'partner-projects' },
-      { icon:'message-circle', label:'Chat',     page:'chat'             },
+      { icon:'message-circle', label:'Chats',    page:'chat'             },
       { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
       { icon:'file-text',      label:'Summary',  page:'bs-quotations'    },
       { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
@@ -793,20 +812,24 @@ window.NAV_REGISTRY = {
     bsOnly: [
       { icon:'home',           label:'Home',     page:'dashboard'        },
       { icon:'briefcase',      label:'Projects', page:'partner-projects' },
-      { icon:'message-circle', label:'Chat',     page:'chat'             },
+      { icon:'message-circle', label:'Chats',    page:'chat'             },
       { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
       { icon:'file-text',      label:'Summary',  page:'bs-quotations'    },
       { icon:'book-open',      label:'Clients',  page:'bs-clients'       },
       { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
     ],
-    // Bottom Nav — Employee
+    // Bottom Nav — Employee. Visible four: Home, Tasks, Announcements, Chats
+    // (same muscle-memory slots as the old Home/Tasks/Posts/Chat). 'Cash' is
+    // gone — Cash Advance folds into My Finance (renderPersonalFinance);
+    // Finance, Notes and Profile ride in the More sheet.
     staff: [
-      { icon:'home',           label:'Home',    page:'dashboard'      },
-      { icon:'check-square',   label:'Tasks',   page:'tasks'          },
-      { icon:'megaphone',      label:'Posts',   page:'posts'          },
-      { icon:'message-circle', label:'Chat',    page:'chat'           },
-      { icon:'banknote',       label:'Cash',    page:'cash-advances'  },
-      { icon:'circle-user',    label:'Profile', page:'my-profile'     }
+      { icon:'home',           label:'Home',          page:'dashboard'        },
+      { icon:'check-square',   label:'Tasks',         page:'tasks'            },
+      { icon:'megaphone',      label:'Announcements', page:'posts'            },
+      { icon:'message-circle', label:'Chats',         page:'chat'             },
+      { icon:'wallet',         label:'My Finance',    page:'personal-finance' },
+      { icon:'sticky-note',    label:'Notes',         page:'notes'            },
+      { icon:'circle-user',    label:'Profile',       page:'my-profile'       }
     ],
     // Bottom Nav — Type-B (Production, weekly self-service worker; js/app.js
     // isTypeBWorker()/_navVariant()). Deliberately minimal: their "Home"
@@ -817,7 +840,7 @@ window.NAV_REGISTRY = {
     // threshold (_bottomNavSplit, js/app.js).
     workerB: [
       { icon:'home',           label:'Home',    page:'dashboard'   },
-      { icon:'message-circle', label:'Chat',    page:'chat'        },
+      { icon:'message-circle', label:'Chats',   page:'chat'        },
       { icon:'circle-user',    label:'Profile', page:'my-profile'  }
     ]
   }

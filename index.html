@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.154 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.155 · Barro Industries</div>
   </div>
 </div>
 
@@ -738,6 +738,10 @@
      Inventory (renderInventory/renderStock/renderMovements) stayed behind
      in modules.js; see js/screens/people.js's header for why. -->
 <script defer src="js/screens/people.js"></script>
+<!-- NOTES-AND-DRAWER-SPEC-2026-08-12 §5.5 — Notes screen. Loads right after
+     people.js: only calls window globals defined earlier (config.js, app.js
+     openPage, modules.js escHtml) at runtime, never at parse time. -->
+<script defer src="js/screens/notes.js"></script>
 <!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
      System Health, Audit Log, Product Database, SOPs, Personal Finance +
      the KPI/attendance-score cluster, Progress Reports, Company, Departments,

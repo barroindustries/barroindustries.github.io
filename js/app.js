@@ -2740,6 +2740,7 @@ function navigateTo(page, opts) {
     case 'sops':             renderSOPs(); break;
     // ── New modules ──
     case 'posts':            window.renderPosts?.(); break;
+    case 'notes':            window.renderNotesPage?.(); break;
     case 'memos':            window.renderMemosPage?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'chat':             window.renderChatPage?.(); break;

@@ -80,7 +80,7 @@ window.renderPosts = async function() {
 
   if (partner) {
     c.innerHTML = `
-      <div class="page-header"><h2>${emojiIcon('📣',20)} Posts</h2></div>
+      <div class="page-header"><h2>${emojiIcon('📣',20)} Announcements</h2></div>
       ${window.chipTabs([{key:'Partners', label:'Partners'}], 'Partners', {cls:'posts-tabs'})}
       <div id="posts-content"></div>
     `;
@@ -109,7 +109,10 @@ window.renderPosts = async function() {
       : (currentDepts || []))
     .filter(d => !_blockedDepts.includes(d));
   const postTabs = [
-    {key:'General', label:'General'},
+    // Key stays 'General' — loadPosts('General') queries where('dept','==','General')
+    // and the stored field value must not change; only the visible label moves
+    // to the owner's wording, "Company" (this tab IS the old General feed).
+    {key:'General', label:'Company'},
     // Set, not a plain-object seen-map: a department name that collides with an
     // Object.prototype key would silently drop its own tab.
     ...[...new Set(_reachableDepts)].map(d => ({key:d, label:d})),
@@ -117,8 +120,8 @@ window.renderPosts = async function() {
   ];
   c.innerHTML = `
     <div class="page-header">
-      <h2>${emojiIcon('📣',20)} Posts</h2>
-      <button class="btn-primary btn-sm" id="new-post-btn">+ ${canPost ? 'New Post' : 'Submit Post'}</button>
+      <h2>${emojiIcon('📣',20)} Announcements</h2>
+      <button class="btn-primary btn-sm" id="new-post-btn">+ ${canPost ? 'New Announcement' : 'Submit Announcement'}</button>
     </div>
     ${window.chipTabs(postTabs, 'General', {cls:'posts-tabs'})}
     <div id="posts-content"></div>
@@ -309,21 +312,21 @@ window.wirePostCardCommon = function(container) {
 //   • a post deleted after the chip was sent         → !snap.exists
 //   • offline / transient                            → throws
 window.openPostById = async function(postId) {
-  if (!postId) { Notifs.showToast('That post is no longer available', 'error'); return; }
+  if (!postId) { Notifs.showToast('That announcement is no longer available', 'error'); return; }
   let snap = null;
   try {
     snap = await db.collection('posts').doc(postId).get();
   } catch (_) {
-    Notifs.showToast('That post is no longer available', 'error');
+    Notifs.showToast('That announcement is no longer available', 'error');
     return;
   }
-  if (!snap || !snap.exists) { Notifs.showToast('That post is no longer available', 'error'); return; }
+  if (!snap || !snap.exists) { Notifs.showToast('That announcement is no longer available', 'error'); return; }
   const p = { id: snap.id, ...snap.data() };
   // Read-only detail view. canApprove/isOwn are deliberately false: every
   // button they would add (Approve/Reject/Edit/Delete/Pin) ends in a
   // `loadPosts(dept)` feed re-render that has no meaning here. share is false
   // too — you reached this card FROM a share.
-  const panel = window.openPage('Post', `<div id="post-detail-body">${window.postCardHtml(p, { canApprove: false, isOwn: false, share: false })}</div>`);
+  const panel = window.openPage('Announcement', `<div id="post-detail-body">${window.postCardHtml(p, { canApprove: false, isOwn: false, share: false })}</div>`);
   if (!panel) return;
   const host = panel.querySelector('#post-detail-body');
   if (!host) return;
@@ -347,7 +350,7 @@ window.openPostById = async function(postId) {
 // is collapsing whitespace, so a multi-line post body becomes one clean chip
 // line instead of a ragged block.
 function postShareLabel(p) {
-  return String(p.title || p.content || 'Post').replace(/\s+/g, ' ').trim().slice(0, 140) || 'Post';
+  return String(p.title || p.content || 'Announcement').replace(/\s+/g, ' ').trim().slice(0, 140) || 'Announcement';
 }
 
 // Re-audit 2026-08-03: this always queried .limit(30) with no cursor/"load more" —
@@ -374,7 +377,7 @@ async function loadPosts(dept, pageSize) {
     const hasMore = snap.docs.length > pageSize;
     const posts = snap.docs.slice(0, pageSize).map(d => ({id:d.id,...d.data()}));
     if (!posts.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📭',44)}</div><h4>No posts yet</h4></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📭',44)}</div><h4>No announcements yet</h4></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [container] });
       return;
     }
@@ -401,7 +404,7 @@ async function loadPosts(dept, pageSize) {
       // Only a PUBLISHED post is shareable — a pending/rejected draft must not
       // be broadcast into chat before it clears approval.
       share: !viewerIsPartner && p.status === 'published'
-    })).join('') + (hasMore ? `<div style="text-align:center;padding:14px"><button class="btn-secondary btn-sm" id="posts-load-more-btn">${emojiIcon('⬇',16)} Load older posts</button></div>` : '');
+    })).join('') + (hasMore ? `<div style="text-align:center;padding:14px"><button class="btn-secondary btn-sm" id="posts-load-more-btn">${emojiIcon('⬇',16)} Load older announcements</button></div>` : '');
     if (window.lucide) lucide.createIcons({nodes:[container]});
     document.getElementById('posts-load-more-btn')?.addEventListener('click', () => loadPosts(dept, pageSize + 30));
 
@@ -426,21 +429,21 @@ async function loadPosts(dept, pageSize) {
     container.querySelectorAll('.post-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = e.target.dataset.id;
       const postSnap = await db.collection('posts').doc(id).get();
-      if (!postSnap.exists) { Notifs.showToast('Post no longer exists.', 'error'); loadPosts(dept); return; }
+      if (!postSnap.exists) { Notifs.showToast('Announcement no longer exists.', 'error'); loadPosts(dept); return; }
       const post = postSnap.data();
       await db.collection('posts').doc(id).update({status:'published'});
-      await Notifs.send(post.authorId, {title:'Post Approved', body:`Your post "${post.title||post.content?.slice(0,30)}" was approved!`, icon:'✅', type:'post'});
-      Notifs.success('Post approved!');
+      await Notifs.send(post.authorId, {title:'Announcement Approved', body:`Your announcement "${post.title||post.content?.slice(0,30)}" was approved!`, icon:'✅', type:'post'});
+      Notifs.success('Announcement approved!');
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = e.target.dataset.id;
       await db.collection('posts').doc(id).update({status:'rejected'});
-      Notifs.error('Post rejected.');
+      Notifs.error('Announcement rejected.');
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
-      if (!(await confirmDialog({ message: 'Delete this post?', danger: true }))) return;
+      if (!(await confirmDialog({ message: 'Delete this announcement?', danger: true }))) return;
       await db.collection('posts').doc(e.target.dataset.id).delete();
       Notifs.success('Deleted.');
       loadPosts(dept);
@@ -448,18 +451,18 @@ async function loadPosts(dept, pageSize) {
     container.querySelectorAll('.post-pin-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = e.currentTarget.dataset.id;
       const snap = await db.collection('posts').doc(id).get().catch(()=>null);
-      if (!snap || !snap.exists) { Notifs.showToast('Post no longer exists.','error'); loadPosts(dept); return; }
+      if (!snap || !snap.exists) { Notifs.showToast('Announcement no longer exists.','error'); loadPosts(dept); return; }
       await db.collection('posts').doc(id).update({pinned: !snap.data().pinned});
       loadPosts(dept);
     }));
-    // Edit post
+    // Edit announcement
     container.querySelectorAll('.post-edit-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id      = btn.dataset.id;
       const post    = postMap.get(id) || {};
       const oldTitle   = post.title || '';
       const oldContent = post.content || '';
-      const _panel = openPage(`${emojiIcon('✎',16)} Edit Post`, `
-        <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" placeholder="Post title…"/></div>
+      const _panel = openPage(`${emojiIcon('✎',16)} Edit Announcement`, `
+        <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" placeholder="Announcement title…"/></div>
         <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
       `, `<button class="btn-primary" id="save-post-edit-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       // ⚠ SCOPED TO THIS PANEL, NOT document.
@@ -480,7 +483,7 @@ async function loadPosts(dept, pageSize) {
           editedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         closeModal();
-        Notifs.success('Post updated!');
+        Notifs.success('Announcement updated!');
         loadPosts(dept);
       });
     }));
@@ -509,12 +512,12 @@ function openNewPostModal(publishDirectly) {
     ? (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT'])
     : [];
   const _postDepts = Object.keys(window.DEPARTMENTS || {}).filter(d => !_postDeptBlocked.includes(d));
-  const _panel = openPage(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
-    <div class="form-group"><label>Title (optional)</label><input id="post-title" placeholder="Post title…"/></div>
+  const _panel = openPage(publishDirectly ? 'New Announcement' : 'Submit Announcement for Approval', `
+    <div class="form-group"><label>Title (optional)</label><input id="post-title" placeholder="Announcement title…"/></div>
     <div class="form-group"><label>Content</label><textarea id="post-content" rows="5" placeholder="Write your message…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
     <div class="form-group"><label>Department</label>
       <select id="post-dept" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-        <option value="General">General (All Staff)</option>
+        <option value="General">Company (All Staff)</option>
         ${_postDepts.map(d=>`<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('')}
       </select>
     </div>
@@ -551,12 +554,14 @@ function openNewPostModal(publishDirectly) {
       createdAt:   firebase.firestore.FieldValue.serverTimestamp()
     });
     if (status === 'published') {
-      await Notifs.sendToAll({title:`📣 New Post`, body:`${userProfile.displayName||'Someone'} posted: ${_panel.querySelector('#post-title').value.trim()||content.slice(0,40)}`, icon:'📣', type:'post'});
+      // type stays 'post' — that's the doc-shape/routing value _navigateFromNotif
+      // and NOTIF_TYPE_META key on (js/notifications.js); only the display text moves.
+      await Notifs.sendToAll({title:`📣 New Announcement`, body:`${userProfile.displayName||'Someone'} posted: ${_panel.querySelector('#post-title').value.trim()||content.slice(0,40)}`, icon:'📣', type:'post'});
     } else {
-      await Notifs.sendToOwner({title:'New Post Awaiting Approval', body:`${userProfile.displayName} submitted a post for review.`, icon:'📋', type:'post_approval'});
+      await Notifs.sendToOwner({title:'New Announcement Awaiting Approval', body:`${userProfile.displayName} submitted an announcement for review.`, icon:'📋', type:'post_approval'});
     }
     closeModal();
-    Notifs.success(status==='published' ? 'Post published!' : 'Submitted for approval!');
+    Notifs.success(status==='published' ? 'Announcement published!' : 'Submitted for approval!');
     window.renderPosts();
   });
 }

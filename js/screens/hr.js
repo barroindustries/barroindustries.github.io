@@ -427,7 +427,16 @@ window.renderHR = async function(currentUser, currentRole){
   const opsTier = (typeof window.isOpsPriv === 'function')
     ? window.isOpsPriv()
     : ['president','owner','manager','secretary','finance'].includes(role);
-  const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
+  // renderTeam gate parity — and parity means the WHOLE expression, which
+  // includes HR-department membership (renderTeamTab's canManageAccounts,
+  // js/screens/people.js). This read `['president','manager'].includes(role)`
+  // alone, so a person actually assigned to the HR department had the
+  // permission on the Team screen but no door to it from HR — the role-vs-
+  // department split this file's own header warns about. Surfaced 2026-08-12
+  // by the owner asking that HR be able to reinstate offboarded staff: they
+  // already could, and simply could not get there.
+  const canAccounts = ['president','manager'].includes(role)
+    || (Array.isArray(window.currentDepts) && window.currentDepts.includes('HR'));
   // 2026-08-09 — HR stays OPEN to the Corporate Secretary (People & Roles,
   // attendance, leave, ID cards, holidays, work sites: owner ruling 2), but
   // Payroll does NOT: firestore.rules now denies them payroll/payslips/pay_runs/

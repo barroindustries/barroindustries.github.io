@@ -18,6 +18,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-p", "3842", "."],
       "port": 3842
+    },
+    {
+      "name": "app-3843",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "3843", "."],
+      "port": 3843
     }
   ]
 }

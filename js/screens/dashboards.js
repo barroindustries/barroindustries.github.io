@@ -2825,6 +2825,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           <div style="font-size:13px;color:var(--text);white-space:pre-wrap">${escHtml(frozenThisMonth.hrNote.text)}</div>
         </div>` : ''}
         <button class="btn-secondary" style="margin-top:14px;width:100%" id="my-payslip-btn">Current Month Payslip</button>
+        <!-- NOTES-AND-DRAWER-SPEC-2026-08-12 §3.4 — Cash Advance's drawer/bottom-nav
+             row folds into My Finance; this is the entry point. cash-advances page,
+             route, and renderCashAdvancePage are all unchanged (deep links/notifications
+             keep working) — presentation move only. -->
+        <button class="btn-secondary" style="margin-top:8px;width:100%" id="my-cash-adv-btn">${emojiIcon('💵',16)} Cash Advances</button>
       </div>
     </div>
 
@@ -3055,6 +3060,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     model.ytd = await window.payslipYtdMonthly(uid, year);
     window.renderPayslipPage(model, ()=>navigateTo('personal-finance'));
   });
+
+  // NOTES-AND-DRAWER-SPEC-2026-08-12 §3.4 — Cash Advance's entry point, folded
+  // into My Finance. Scoped to `c` (this function's own container — may be an
+  // opts.host panel, not #page-content), never document.getElementById.
+  c.querySelector('#my-cash-adv-btn')?.addEventListener('click', () => navigateTo('cash-advances'));
 
   // CA Deduction Override — employee requests how much to deduct this payroll
   // v12 WS22 decision 9 — this used to write directly to payroll_ca_overrides,
