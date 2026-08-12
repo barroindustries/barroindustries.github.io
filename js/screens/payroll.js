@@ -701,7 +701,17 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       const elapsed = periodDates.filter(d => d <= todayIso).length;
       reads.forEach(r => { r._elapsedTotal = elapsed; });
     }
-    const problems = _pyProblems(period, reads, notPaid, selected, { isLive, todayIso, periodDates });
+    // TASK-BASED-PAY-SPEC-2026-08-12 §8.4 — the minimum-wage floor, fetched
+    // once per paint (not per line, not per card) and only for month periods
+    // — the Operations Team is hourly and has no floor gate (§8.4/§14 Q3).
+    let wageFloorMonthly = null, wageFloorReadFailed = false;
+    if (kind !== 'week') {
+      try {
+        const _wfSnap = await db.collection('settings').doc('payrollWageFloor').get();
+        wageFloorMonthly = (_wfSnap && _wfSnap.exists) ? (_wfSnap.data() || {}).monthlyFloor : null;
+      } catch (_) { wageFloorReadFailed = true; }
+    }
+    const problems = _pyProblems(period, reads, notPaid, selected, { isLive, todayIso, periodDates, wageFloorMonthly, wageFloorReadFailed });
     const label   = _pyLabel(selected);
 
     // Row actions live on the ROSTER ROW, never in a menu somewhere else — that
@@ -1189,7 +1199,42 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
           hrFix: { uid: kind === 'week' ? '' : r.id, workerId: kind === 'week' ? r.id : '', name: r.name }
         });
       }
+      // TASK-BASED-PAY-SPEC-2026-08-12 §8.4 — the minimum-wage floor, warned
+      // here (release itself is blocked in window.disbursePayRun). Month
+      // periods only — Operations is hourly and has no floor gate (§8.4/§14
+      // Q3). r.raw is the frozen computePayLine line (_pyRead keeps it).
+      if (kind !== 'week' && liveOpts.wageFloorMonthly != null && r.raw && typeof window.wageFloorCheck === 'function') {
+        const _chk = window.wageFloorCheck(r.raw, liveOpts.wageFloorMonthly);
+        if (_chk.checked && !_chk.ok) {
+          out.push({
+            severity: 'danger', id: r.id, name: r.name,
+            text: `${r.name}'s pay this month works out below the saved minimum wage (${_pyPeso(_chk.earned)} against ${_pyPeso(liveOpts.wageFloorMonthly)}). It cannot be released until this is looked at.`
+          });
+        }
+      }
+      // TASK-BASED-PAY-SPEC-2026-08-12 §9.4 — the double-penalty tripwire.
+      // Absence must be penalised by the multiplier ONLY (§0 — no day-count
+      // absence deduction anywhere); this names the hazard so a human
+      // decides, it never blocks. Withheld deductions (bonds, canteen) are
+      // unrelated and stay silent — only unearnedDeductions counts.
+      if (kind !== 'week' && r.raw && r.raw.policy === 'taskbased' && (+r.raw.unearnedDeductions || 0) > 0) {
+        out.push({
+          severity: 'warn', id: r.id, name: r.name,
+          text: `${r.name} has ${_pyPeso(r.raw.unearnedDeductions)} of pay marked as not earned (absence or tardiness) while task-based pay already follows their results — check the same days are not being deducted twice.`
+        });
+      }
     });
+
+    // TASK-BASED-PAY-SPEC-2026-08-12 §8.4 — one note per paint, not per
+    // person: either the floor could not be read at all, or it is on but no
+    // floor is saved yet while task-based pay is actually running.
+    if (kind !== 'week') {
+      if (liveOpts.wageFloorReadFailed) {
+        out.push({ severity: 'warn', id: '', text: 'Could not check pay against the saved minimum wage — try again in a moment.' });
+      } else if (liveOpts.wageFloorMonthly == null && reads.some(r => r.raw && r.raw.policy === 'taskbased')) {
+        out.push({ severity: 'warn', id: '', text: 'Task-based pay is on, but no minimum wage amount is saved — add it on the Gov Rates screen so pay can be checked against it.' });
+      }
+    }
 
     // Whatever the engine itself flagged, verbatim. No `name` field — these
     // come as free-form strings the engine already wrote, not the
@@ -1472,6 +1517,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const perfLine = (r.policy === 'performance' && r.perfFactor != null)
       ? `<div class="py-oneoff">Allowance scaled to ${Math.round(r.perfFactor * 100)}%: KPI ${r.kpiScore != null ? Math.round(r.kpiScore * 100) : '—'}% × 0.7 + attendance ${r.attScore != null ? Math.round(r.attScore * 100) : '—'}% × 0.3.</div>`
       : '';
+    // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — the ONE traceability sentence,
+    // read straight off the frozen line (r.raw), never recomputed here. No
+    // new button — this is additive text only, same house rule perfLine
+    // above already follows.
+    const taskBasedLine = (r.raw && typeof window.payBasisSentence === 'function' && (() => {
+      const s = window.payBasisSentence(r.raw);
+      return s ? `<div class="py-oneoff">${_pyEsc(s)}</div>` : '';
+    })()) || '';
     // "Pay records are kept in HR" (§6.5) — permanently visible text, never
     // behind a tap, plus the one door out. Read-only here on purpose: the
     // payroll screen writes only period-scoped inputs, never standing pay.
@@ -1497,6 +1550,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       <div class="py-fields">${cols.map(c => _pyFieldHtml(c, r, o.isLive)).join('')}</div>
       ${oneOffLines}
       ${perfLine}
+      ${taskBasedLine}
       ${statusLine}
       ${hrLine}
       ${acts.length ? `<div class="py-rowacts">${acts.join('')}</div>` : ''}

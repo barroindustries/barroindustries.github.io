@@ -5354,8 +5354,19 @@ window.toPayslipModel = function(source, kind) {
       // pre-disburse or the salary_history mirror's own hrNote field post-
       // disburse — see openEmployeeNoteModal / disbursePayRun.
       hrNote: source.hrNote || null,
+      // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — preMultiplierNet/netBeforeCA
+      // copied through when present on the source row (a frozen pay_runs
+      // line or the salary_history mirror, both of which carry them under
+      // 'taskbased' — money-core.js §2.4 / departments.js's disbursePayRun
+      // mirror), so buildPayslipHTML's sentence can render without a second
+      // computation. null on every other policy, same as the source itself.
       performance: (source.kpiScore!=null||source.perfFactor!=null)
-        ? { kpi:source.kpiScore||0, att:source.attScore||0, perfFactor:source.perfFactor??1, policy:source.policy||'flat' } : null,
+        ? { kpi:source.kpiScore||0, att:source.attScore||0, perfFactor:source.perfFactor??1, policy:source.policy||'flat',
+            preMultiplierNet: source.preMultiplierNet ?? null,
+            // A raw pay_runs line carries `netBeforeCA`; the salary_history
+            // mirror carries the SAME figure under `netPay` (disbursePayRun's
+            // mirror write: `netPay: line.netBeforeCA`) — both read here.
+            netBeforeCA: source.netBeforeCA ?? source.netPay ?? null } : null,
       timeLog:null,
       signatures:[{label:'Prepared by',name:'',title:'Finance'},{label:'Verified by',name:'',title:'HR'},{label:'Approved by',name:(window.BRAND&&window.BRAND.legal.signatory.name)||'',title:'President'}],
       proofUrl:''
@@ -5508,13 +5519,24 @@ window.buildPayslipHTML = function(model) {
     signatures: m.signatures, suppressRegistration: true,
     footerNote: 'System-generated payslip · ' + escHtml(m.docNumber)
   }) : null;
+  // TASK-BASED-PAY-SPEC-2026-08-12 §9.1/§9.2 — the ONE traceability sentence,
+  // read straight off the model's own frozen fields (never recomputed here).
+  // '' for every policy except 'taskbased' (payBasisSentence's own contract).
+  const _psBasisSentence = (m.performance && typeof window.payBasisSentence === 'function')
+    ? window.payBasisSentence({
+        policy: m.performance.policy, perfFactor: m.performance.perfFactor,
+        kpiScore: m.performance.kpi, attScore: m.performance.att,
+        preMultiplierNet: m.performance.preMultiplierNet, netBeforeCA: m.performance.netBeforeCA
+      })
+    : '';
   const perf = m.performance ? `
     <div class="ps-sec-h">Performance</div>
     <table class="ps-t">
       <tr><td>Task KPI (70%)</td><td class="num">${Math.round(m.performance.kpi*100)}%</td></tr>
       <tr><td>Attendance (30%)</td><td class="num">${Math.round(m.performance.att*100)}%</td></tr>
       <tr class="ps-sub"><td>Performance factor (policy: ${escHtml(m.performance.policy)})</td><td class="num">${m.performance.perfFactor.toFixed(2)}×</td></tr>
-    </table>` : '';
+    </table>
+    ${_psBasisSentence ? `<div style="font-size:10.5px;color:#555;margin-top:4px;line-height:1.4">${escHtml(_psBasisSentence)}</div>` : ''}` : '';
   // v14 HR remediation P2 — provenance column (source: kiosk-verified/kiosk-
   // manual/manual, set by openPayslipGenerator's Load Kiosk Hours flow).
   // Display-only and additive: older saved payslips have no r.source at all,

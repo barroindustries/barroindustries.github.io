@@ -2564,16 +2564,38 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // screen already fetches the identical assignedTo-array-contains query for
   // its own task list rendering, so without this the same query ran twice
   // per page view. Numbers produced are unchanged (same math, same inputs).
-  const [att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap] = await Promise.all([
+  const [att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap, policySnap] = await Promise.all([
     getAttendanceScore(currentUser.uid),
     db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
     db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
     db.collection('kpi_evals').doc(currentUser.uid).get().catch(()=>null),
     db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
       .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()).catch(()=>({docs:[]})),
-    db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null)
+    db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null),
+    // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — the active office pay policy,
+    // read FRESH (no dbCachedGet — a pay-deciding switch must never be a stale
+    // cache read). A sentinel object on failure so this one read can't reject
+    // the whole batch; distinguished from "doc absent" below.
+    db.collection('settings').doc('payrollOfficePolicy').get().catch(() => ({ __ppFailed: true }))
   ]);
   const kpi = await getKpiScore(currentUser.uid, myTasksSnap.docs.map(d=>d.data()), kpiTargetSnap);
+
+  // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — resolve the active policy
+  // ONCE per render. A failed read (or a stored value outside the §6.1
+  // whitelist) must NOT guess either direction — a wrong number is worse
+  // than a missing one, so the projection is disabled instead (see
+  // projUnavailable below), never silently shown under a guessed policy.
+  let activePolicy = 'flat', policySettingsFailed = false;
+  if (policySnap && policySnap.__ppFailed) {
+    policySettingsFailed = true;
+  } else if (policySnap && policySnap.exists) {
+    const storedPolicy = (policySnap.data() || {}).policy;
+    if (storedPolicy != null && window.PAY_POLICY_VALUES && window.PAY_POLICY_VALUES.indexOf(storedPolicy) === -1) {
+      policySettingsFailed = true;
+    } else if (storedPolicy) {
+      activePolicy = storedPolicy;
+    }
+  }
 
   const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
     const ta = a.createdAt?.toMillis?.() || 0;
@@ -2622,19 +2644,46 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const isFinalMonth    = !!frozenThisMonth;
   const dispKpi = isFinalMonth ? (frozenThisMonth.kpiScore ?? kpi) : kpi;
   const dispAtt = isFinalMonth ? (frozenThisMonth.attScore ?? att) : att;
-  const multiplier = isFinalMonth ? (frozenThisMonth.perfFactor ?? (dispKpi*0.7+dispAtt*0.3)) : (kpi*0.7+att*0.3);
-  const projLine = (!isFinalMonth && window.computePayLine)
-    ? window.computePayLine({ ...u, id: currentUser.uid }, { month: currentMonth, policy: 'flat', kpiScore: kpi, attScore: att, caPlan: [], caBalance: totalAdvance })
+  // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — a failed/corrupted policy
+  // read disables the live projection entirely (never a guessed number).
+  const projUnavailable = !isFinalMonth && policySettingsFailed;
+  const projLine = (!isFinalMonth && !projUnavailable && window.computePayLine)
+    ? window.computePayLine({ ...u, id: currentUser.uid }, { month: currentMonth, policy: activePolicy, kpiScore: kpi, attScore: att, caPlan: [], caBalance: totalAdvance })
     : null;
+  // §10 step 3 — the displayed factor is ALWAYS read off a line (frozen or
+  // live), never a third computation. The `dispKpi*0.7+dispAtt*0.3` fallback
+  // is kept ONLY for a legacy frozen row with no perfFactor field at all.
+  const multiplier = isFinalMonth
+    ? (frozenThisMonth.perfFactor ?? (dispKpi*0.7+dispAtt*0.3))
+    : (projLine ? projLine.perfFactor : (kpi*0.7+att*0.3));
   // netBeforeCA / netPay — pre-CA, so the existing "Cash Advance Balance" line
   // further down isn't double-subtracted.
-  const computedMonth = isFinalMonth ? (frozenThisMonth.netPay ?? frozenThisMonth.finalPay ?? 0) : (projLine ? projLine.netBeforeCA : net*multiplier);
-  const earnedSoFar   = isFinalMonth ? computedMonth : computedMonth * (daysElapsed / daysInMonth); // a disbursed month is fully earned, no proration
+  // §10 step 2 — ALWAYS projLine.netBeforeCA, never a second expression; the
+  // old `net*multiplier` fallback is DELETED entirely (the drift this section
+  // exists to kill — computePayLine is guaranteed loaded by script order).
+  const computedMonth = isFinalMonth
+    ? (frozenThisMonth.netPay ?? frozenThisMonth.finalPay ?? 0)
+    : (projUnavailable ? null : (projLine ? projLine.netBeforeCA : 0));
+  const earnedSoFar = isFinalMonth
+    ? computedMonth
+    : (projUnavailable ? null : computedMonth * (daysElapsed / daysInMonth)); // a disbursed month is fully earned, no proration
+  // §9.1/§9.2 — the ONE traceability sentence, read off the same line the
+  // figure above came from (never re-derived). frozenThisMonth carries the
+  // additive salary_history mirror fields (§9.2); netBeforeCA there is the
+  // stored netPay/finalPay, matching what disbursePayRun actually froze.
+  const payBasisLine = isFinalMonth
+    ? { policy: frozenThisMonth.policy, perfFactor: frozenThisMonth.perfFactor,
+        kpiScore: frozenThisMonth.kpiScore, attScore: frozenThisMonth.attScore,
+        preMultiplierNet: frozenThisMonth.preMultiplierNet,
+        netBeforeCA: frozenThisMonth.netPay ?? frozenThisMonth.finalPay }
+    : projLine;
+  const payBasisSentenceText = (typeof window.payBasisSentence === 'function' && payBasisLine)
+    ? window.payBasisSentence(payBasisLine) : '';
 
   // YTD = completed months from salary history + current month earned so far
   const thisYear  = String(bzYear);
   const ytdHistory= salaryHistory.filter(h=>h.month?.startsWith(thisYear));
-  const ytdPay    = ytdHistory.reduce((s,h)=>s+(h.finalPay||h.netPay||0),0) + earnedSoFar;
+  const ytdPay    = ytdHistory.reduce((s,h)=>s+(h.finalPay||h.netPay||0),0) + (earnedSoFar || 0);
 
   const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
   const kpiColor  = dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
@@ -2665,7 +2714,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     <div class="kpi-row">
       <div class="kpi-card green">
         <div class="kpi-label">Earned So Far</div>
-        <div class="kpi-value" style="font-size:15px">₱${formatNum(earnedSoFar)}</div>
+        <div class="kpi-value" style="font-size:15px">${earnedSoFar==null?'—':'₱'+formatNum(earnedSoFar)}</div>
         <div class="kpi-sub">${daysElapsed} of ${daysInMonth} days · YTD ₱${formatNum(ytdPay)}</div>
       </div>
       <div class="kpi-card">
@@ -2678,10 +2727,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="kpi-value" style="color:${attColor}">${Math.round(dispAtt*100)}%</div>
         <div class="kpi-sub">${daysElapsed} days elapsed</div>
       </div>
-      <div class="kpi-card ${computedMonth<net*0.9?'red':'green'}">
+      <div class="kpi-card ${computedMonth==null?'':(computedMonth<net*0.9?'red':'green')}">
         <div class="kpi-label">${isFinalMonth?'Final — Disbursed':'Projected Full Month'}</div>
-        <div class="kpi-value" style="font-size:14px">₱${formatNum(computedMonth)}</div>
-        <div class="kpi-sub">Base ₱${formatNum(net)}</div>
+        <div class="kpi-value" style="font-size:14px">${computedMonth==null?'—':'₱'+formatNum(computedMonth)}</div>
+        <div class="kpi-sub">${projUnavailable ? 'The projection is unavailable right now — try again in a moment.' : 'Base ₱'+formatNum(net)}</div>
       </div>
     </div>
 
@@ -2752,6 +2801,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           <span>${multiplier.toFixed(2)}×</span>
         </div>
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
+        ${projUnavailable ? `
+        <div class="payslip-row"><span style="color:var(--text-muted)">The projection is unavailable right now — try again in a moment.</span></div>` : `
         <div class="payslip-row">
           <span>${isFinalMonth?'Final Pay — Disbursed':`Projected Full Month (₱${formatNum(net)} × ${multiplier.toFixed(2)})`}</span>
           <strong>₱${formatNum(computedMonth)}</strong>
@@ -2765,7 +2816,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         </div>
         <div class="payslip-row" style="font-size:16px;font-weight:800;margin-top:8px;padding-top:8px;border-top:2px solid var(--border)">
           <span>Take-Home So Far</span><span style="color:var(--success)">₱${formatNum(Math.max(0,earnedSoFar-totalAdvance))}</span>
-        </div>
+        </div>`}
+        ${payBasisSentenceText ? `
+        <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.5">${escHtml(payBasisSentenceText)}</div>` : ''}
         ${isFinalMonth && frozenThisMonth.hrNote && frozenThisMonth.hrNote.text ? `
         <div style="margin-top:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">${emojiIcon('📝',14)} Note from HR</div>
@@ -2983,8 +3036,17 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       model = window.toPayslipModel({...shSnap.data(), uid, month}, 'monthly');
       model.official = true;
     } else {
+      // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 6 — the SAME resolved
+      // activePolicy from step 1, never a hardcoded 'flat'. If that read
+      // failed, this unofficial branch is disabled with the same words
+      // rather than printing a flat payslip that may not match the real
+      // policy (a wrong number is worse than no payslip here).
+      if (projUnavailable) {
+        Notifs.showToast('The projection is unavailable right now — try again in a moment.', 'error');
+        return;
+      }
       const line = window.computePayLine
-        ? window.computePayLine(userProfile, {month, projection:true, policy:'flat'})
+        ? window.computePayLine(userProfile, {month, projection:true, policy:activePolicy})
         : {uid, month, base:userProfile.salary||0, allowance:userProfile.allowance||0, name:userProfile.displayName};
       model = window.toPayslipModel({...line, uid, month}, 'monthly');
       model.official = false;

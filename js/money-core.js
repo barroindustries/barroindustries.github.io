@@ -138,12 +138,39 @@ window.computePayLine = function(emp, ctx) {
   const caPlanned = caPlan.reduce((s,p)=>s+(p.amount||0), 0);
   const caBalance = ctx.caBalance != null ? ctx.caBalance : caPlanned;
 
+  // TASK-BASED-PAY-SPEC-2026-08-12 — the THIRD permitted edit to this frozen
+  // function (after §A4's statutory year and the statutory-config resolver
+  // above). Structural, not a fallback: 'taskbased' meeting a production
+  // (weekly-paid) worker THROWS rather than silently computing 'flat' — a
+  // silent fallback is exactly how a wrong pay model goes unnoticed for
+  // months. Owner ruling 2026-08-12, verbatim: "thats for office, take note.
+  // operation is done through attendance only by geo tracked timing in." The
+  // weekly engine (computeWeeklyLine, below) never sees a policy at all —
+  // this throw is the monthly-side half of that boundary.
+  if (policy === 'taskbased' && emp.payClass === 'production') {
+    throw new Error((emp.displayName || emp.email || 'This person') +
+      ' is paid weekly on the Operations Team — task-based pay applies to the Office Team only. Nothing was worked out for them.');
+  }
+
   // policy 'flat'        = exactly Path A today (unification changes no one's pay).
   // policy 'performance' = allowance scales by perfFactor; BASE WAGE is never
   // docked (PH labor-safe) — inert until the President flips payPolicy on a run.
-  const netBeforeCA = policy === 'performance'
-    ? (base - statutoryTotal - otherDeductions + allowance*perfFactor)
-    : (gross - statutoryTotal - otherDeductions);
+  // policy 'taskbased'   = the owner's real formula (2026-08-12 ruling): the
+  // WHOLE after-deduction remainder scales by perfFactor — net × (0.7·KPI +
+  // 0.3·attendance). Deliberately AFTER statutory/otherDeductions are
+  // subtracted (never before): government deductions above are computed on
+  // the nominal `gross` and are NEVER themselves scaled by any policy branch
+  // — the multiplier only ever touches the employee's take-home remainder,
+  // never money owed to a third party (SSS/PhilHealth/Pag-IBIG/withholding,
+  // or a withheld bond/canteen deduction). `_round2` is used here exactly as
+  // it already is above (function hoisting — see that comment) because the
+  // 0.7/0.3 blend is an irrational-in-binary float on purpose (§2.5 of the
+  // spec) and must not be pre-rounded before this multiply.
+  const netBeforeCA = policy === 'taskbased'
+    ? _round2((gross - statutoryTotal - otherDeductions) * perfFactor)
+    : policy === 'performance'
+      ? (base - statutoryTotal - otherDeductions + allowance*perfFactor)
+      : (gross - statutoryTotal - otherDeductions);
   const finalPay = netBeforeCA - caPlanned;
   // The TRUE economic cost of this line (what disbursePayRun's ledger debit
   // legs must balance against) — equals nominal `gross` under 'flat', but
@@ -161,7 +188,15 @@ window.computePayLine = function(emp, ctx) {
     sss, philhealth, pagibig, tax, er,
     kpiScore, attScore, perfFactor, policy,
     caBalance, caPlanned, caPlan,
-    gross, effectiveGross, statutoryTotal, netBeforeCA, finalPay
+    gross, effectiveGross, statutoryTotal, netBeforeCA, finalPay,
+    // TASK-BASED-PAY-SPEC-2026-08-12 §2.4 — CONDITIONAL key, taskbased only.
+    // The existing pinned tests deepEqual the FULL return object for 'flat'
+    // and 'performance'; an unconditional key here would fail every one of
+    // them. Frozen (not reconstructed via netBeforeCA/perfFactor, which fails
+    // at factor 0 and reintroduces float dust) so the traceability sentence
+    // (js/pay-policy.js's payBasisSentence) always has the pre-multiplier
+    // figure exactly as it was at the moment pay was worked out.
+    ...(policy === 'taskbased' ? { preMultiplierNet: gross - statutoryTotal - otherDeductions } : {})
   };
 };
 

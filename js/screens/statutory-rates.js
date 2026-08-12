@@ -118,6 +118,7 @@ window.renderStatutoryRatesTab = async function (container, currentUser, current
     </div>` : ''}
 
     <div id="sr-status-section" style="margin-top:18px"></div>
+    <div id="sr-taskbased-section" style="margin-top:18px"></div>
   `;
 
   // ── withholding rows ──
@@ -142,6 +143,14 @@ window.renderStatutoryRatesTab = async function (container, currentUser, current
   // anyone adopts the rule.
   const statusHost = c.querySelector('#sr-status-section');
   if (statusHost) window.renderStatutoryStatusSection(statusHost, canWrite, currentUser);
+
+  // TASK-BASED-PAY-SPEC-2026-08-12 §7 — the report + minimum-wage floor +
+  // switch. Order per §11.3: rates form -> status section (above) -> this
+  // section. Neither depends on the other's state. A separate top-level
+  // function (below) so it can repaint ITSELF after the floor is saved or the
+  // switch is toggled, without re-running the rates form's own reads/writes.
+  const taskBasedHost = c.querySelector('#sr-taskbased-section');
+  if (taskBasedHost) window.renderTaskBasedPaySection(taskBasedHost, currentUser, currentRole);
 
   if (!canWrite) return;
 
@@ -402,5 +411,230 @@ window.renderStatutoryStatusSection = async function (container, canWrite, curre
         Notifs.showToast('Could not save: ' + (e.message || e.code || e), 'error');
       }
     }));
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TASK-BASED-PAY-SPEC-2026-08-12 §7 — Office Team task-based pay: the
+   explanation, the minimum-wage floor, the two-build preview, and the
+   President-gated switch.
+
+   The owner's formula (§0/§2): net × (0.7·task results + 0.3·on-time morning
+   check-ins). Nothing here writes payroll directly — the only writes in this
+   whole section are settings/payrollOfficePolicy (the switch) and
+   settings/payrollWageFloor (the floor), both already President-write /
+   staff-read under the existing settings/{docId} rule (zero rules changes).
+   Every peso below is built through window.buildPayRunLines with an EXPLICIT
+   policy argument — which bypasses the settings rung (§6.2) — so this is a
+   preview regardless of the stored switch value, and it can never show a
+   number the real engine wouldn't (never a second copy of the math).
+   ═══════════════════════════════════════════════════════════════════════ */
+window.renderTaskBasedPaySection = async function (container, currentUser, currentRole) {
+  if (!container) return;
+  // §7 visibility — same tier that sees the payroll screen. A Finance user
+  // sees state read-only (canWrite below); anyone else sees nothing at all,
+  // since the preview shows every office person's actual pay.
+  const canSee = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : false;
+  if (!canSee) { container.innerHTML = ''; return; }
+
+  const esc = (v) => (window.escHtml ? window.escHtml(v == null ? '' : v) : String(v == null ? '' : v));
+  const ico = (g, s) => (window.emojiIcon ? window.emojiIcon(g, s || 16) : '');
+  const peso = (v) => (window.fmtPeso ? window.fmtPeso(v) : ('₱' + (Number(v) || 0).toFixed(2)));
+  const canWrite = (typeof isRealPresident === 'function') ? isRealPresident() : false;
+
+  container.innerHTML = window.skeletonHtml ? window.skeletonHtml('rows') : '<p>Loading…</p>';
+
+  // ── the switch's stored state ──────────────────────────────────────────
+  let switchDoc = null, switchReadFailed = false;
+  try {
+    const d = await db.collection('settings').doc('payrollOfficePolicy').get();
+    switchDoc = d.exists ? d.data() : null;
+  } catch (_) { switchReadFailed = true; }
+  if (!container.isConnected) return;
+  // §6.1 whitelist — a corrupted stored value reads as "off" for THIS
+  // display purpose only (the real engine THROWS on it instead of guessing —
+  // this report is not the place to guess either, so it is shown as its own
+  // flag rather than silently treated as either state).
+  const storedPolicy = switchDoc && switchDoc.policy;
+  const policyUnknown = storedPolicy != null && window.PAY_POLICY_VALUES && window.PAY_POLICY_VALUES.indexOf(storedPolicy) === -1;
+  const switchOn = storedPolicy === 'taskbased';
+
+  // ── the minimum-wage floor (§8.2) ───────────────────────────────────────
+  let floorDoc = null, floorReadFailed = false;
+  try {
+    const d = await db.collection('settings').doc('payrollWageFloor').get();
+    floorDoc = d.exists ? d.data() : null;
+  } catch (_) { floorReadFailed = true; }
+  if (!container.isConnected) return;
+  const floorMonthly = (floorDoc && Number(floorDoc.monthlyFloor) > 0) ? Number(floorDoc.monthlyFloor) : null;
+
+  // ── the preview — current Manila month, BOTH builds through the real engine ──
+  const month = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const monthLabel = window.fmtMonthLabel ? window.fmtMonthLabel(month) : month;
+  let rows = [], previewFailed = false;
+  if (typeof window.buildPayRunLines === 'function') {
+    try {
+      const [nowBuilt, nextBuilt] = await Promise.all([
+        window.buildPayRunLines(month, { policy: 'flat' }),
+        window.buildPayRunLines(month, { policy: 'taskbased' })
+      ]);
+      const nextByUid = {};
+      (nextBuilt.lines || []).forEach(l => { nextByUid[l.uid] = l; });
+      rows = (nowBuilt.lines || []).map(l => {
+        const n = nextByUid[l.uid] || l;
+        const chk = (floorMonthly != null && typeof window.wageFloorCheck === 'function')
+          ? window.wageFloorCheck(n, floorMonthly) : { checked: false, ok: true };
+        return {
+          uid: l.uid, name: l.name,
+          nowPay: l.finalPay, nextPay: n.finalPay,
+          perfFactor: n.perfFactor, kpiScore: n.kpiScore, attScore: n.attScore,
+          below: chk.checked && !chk.ok
+        };
+      });
+    } catch (_) { previewFailed = true; }
+  } else {
+    previewFailed = true;
+  }
+  if (!container.isConnected) return;
+  const totalNow  = rows.reduce((s, r) => s + (r.nowPay  || 0), 0);
+  const totalNext = rows.reduce((s, r) => s + (r.nextPay || 0), 0);
+
+  const year = (window.bizYear ? window.bizYear() : new Date().getFullYear());
+  const tableVerified = ((window.STATUTORY && window.STATUTORY[String(year)]) || {}).verified === true;
+
+  const stateLine = switchOn
+    ? `<div class="py-sub" style="margin:6px 0 10px">On since ${esc(switchDoc.changedAtLabel || '—')} — turned on by ${esc(switchDoc.changedByName || '—')}.</div>`
+    : `<div class="py-sub" style="margin:6px 0 10px">Off — nothing below has changed anyone's pay yet.</div>`;
+
+  const floorCardHtml = `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Minimum wage</h3></div>
+      ${floorMonthly != null
+        ? `<div class="py-sub" style="margin-bottom:6px">Saved: <strong>${esc(peso(floorMonthly))}</strong> a month. Source: ${esc((floorDoc && floorDoc.source) || '—')}${floorDoc && floorDoc.setAtLabel ? ' · set ' + esc(floorDoc.setAtLabel) + (floorDoc.setByName ? ' by ' + esc(floorDoc.setByName) : '') : ''}.</div>`
+        : `<div class="py-sub" style="margin-bottom:6px;color:var(--warning)">Not set — pay is not being checked against a minimum.</div>`}
+      ${floorReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:8px"><span>${ico('⚠', 16)} The saved minimum wage could not be read — what is shown may be out of date.</span></div>` : ''}
+      ${canWrite ? `
+      <div class="form-group">
+        <label for="sr-tb-floor">Minimum monthly pay (₱)</label>
+        <input id="sr-tb-floor" type="number" step="any" min="0" value="${esc(floorMonthly != null ? floorMonthly : '')}"/>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:3px">Enter the minimum monthly pay that applies to your office staff under the current wage order. The app does not know this number — it changes by region and by wage order, so it must come from you or your accountant.</p>
+      </div>
+      <div class="form-group">
+        <label for="sr-tb-floor-source">Where this came from <span style="color:var(--danger)">*</span></label>
+        <input id="sr-tb-floor-source" placeholder="e.g. Wage Order No. RB-IV-A-20" value="${esc((floorDoc && floorDoc.source) || '')}"/>
+      </div>
+      <button class="btn-secondary btn-sm" id="sr-tb-floor-save">${ico('💾', 14)} Save minimum wage</button>
+      ` : `<p style="font-size:11px;color:var(--text-muted)">${ico('🔒', 12)} Only the President can set this.</p>`}
+    </div>`;
+
+  const totalsHtml = rows.length
+    ? `<div class="py-problem"><div class="py-ptext"><strong>Whole month now ${esc(peso(totalNow))} → ${esc(peso(totalNext))}</strong> — ${rows.length} ${rows.length === 1 ? 'person' : 'people'}.</div></div>`
+    : '';
+  const previewRowsHtml = previewFailed
+    ? `<div class="alert-banner" style="cursor:default"><span>${ico('⚠', 16)} The preview could not be built right now — reload before deciding anything from this.</span></div>`
+    : (!rows.length
+      ? `<div class="py-sub">Nobody is on the Office Team's month yet.</div>`
+      : rows.map(r => `
+        <div class="py-problem">
+          <div class="py-ptext"><strong>${esc(r.name)}</strong> — Pay now ${esc(peso(r.nowPay))} → ${esc(peso(r.nextPay))}
+            ${r.below ? `<span class="badge badge-red" style="font-size:10px">Below the saved minimum wage</span>` : ''}<br/>
+            <span style="color:var(--text-muted)">${Math.round((r.perfFactor || 0) * 100)}% — task results ${Math.round((r.kpiScore || 0) * 100)}%, on-time check-ins ${Math.round((r.attScore || 0) * 100)}%</span>
+          </div>
+        </div>`).join(''));
+
+  // Disabled on EITHER failure — a switch read failure means we do not
+  // actually know today's state (switchOn above would be a guess), and a
+  // preview failure means the confirm dialog would restate numbers nobody
+  // can trust. Never let the President flip a switch this screen can't
+  // honestly describe right now.
+  const toggleDisabled = previewFailed || switchReadFailed;
+  const toggleBtnHtml = canWrite
+    ? `<button class="btn-primary btn-sm" id="sr-tb-toggle"${toggleDisabled ? ' disabled' : ''}>${switchOn ? 'Go back to fixed pay' : 'Use task-based pay'}</button>${toggleDisabled ? '<p style="font-size:11px;color:var(--text-muted);margin-top:4px">Reload before using this — what is shown above may not be accurate right now.</p>' : ''}`
+    : `<span class="badge ${switchOn ? 'badge-green' : 'badge-gray'}" style="font-size:11px">${switchOn ? 'On' : 'Off'}</span>
+       <p style="font-size:11px;color:var(--text-muted);margin-top:4px">${ico('🔒', 12)} Only the President can turn this on or off.</p>`;
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Task-based pay — Office Team</h3></div>
+      <p style="font-size:13px;line-height:1.5">When this is on, an office person's monthly pay follows their results: take-home pay is worked out as usual (salary plus allowance, minus government deductions and other deductions), then multiplied by a percentage — 70% from task results and 30% from on-time morning check-ins. A check-in counts as on time when the person has timed in and read every notification before 9:00 AM. Government deductions are never reduced — they stay at the full amounts and are paid to the agencies in full. The Operations Team is not affected: their pay follows geo-tracked clock-ins and hours only.</p>
+      ${switchReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} Could not read the pay method setting — what's shown below may not reflect whether task-based pay is actually on or off right now. Reload before deciding anything from this.</span></div>` : ''}
+      ${policyUnknown ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} The pay method setting holds a value the app does not know ("${esc(storedPolicy)}") — fix it here before relying on this report.</span></div>` : ''}
+      ${stateLine}
+      ${!tableVerified ? `<p style="font-size:11px;color:var(--text-muted);margin-top:4px">${ico('⚠', 12)} Amounts use this year's placeholder rates, which are not confirmed yet — see the rates form above.</p>` : ''}
+    </div>
+
+    ${floorCardHtml}
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Pay for ${esc(monthLabel)} — now vs. task-based</h3></div>
+      <div class="card-body" style="padding-top:0">
+        ${floorMonthly == null && !previewFailed ? `<div class="py-sub" style="margin-bottom:8px">No minimum wage amount is saved yet — the figures above are not being checked against one.</div>` : ''}
+        ${totalsHtml}
+        ${previewRowsHtml}
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Switch</h3></div>
+      <div class="card-body" style="padding-top:0">
+        ${toggleBtnHtml}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Weighting is 70% task results, 30% on-time check-ins — the owner's decision, 2026-08-12. A person who finishes every task but checks in late loses up to about 15% of the month's pay.</p>
+      </div>
+    </div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
+
+  if (canWrite) {
+    const floorSaveBtn = container.querySelector('#sr-tb-floor-save');
+    if (floorSaveBtn) {
+      floorSaveBtn.addEventListener('click', () => window.busy(floorSaveBtn, async () => {
+        const amtEl = container.querySelector('#sr-tb-floor');
+        const srcEl = container.querySelector('#sr-tb-floor-source');
+        const amt = parseFloat(amtEl ? amtEl.value : '');
+        const src = (srcEl ? srcEl.value : '').trim();
+        if (!Number.isFinite(amt) || amt <= 0) { Notifs.showToast('Enter a minimum monthly pay amount greater than zero.', 'error'); return; }
+        if (!src) { Notifs.showToast('Say where this minimum wage came from — it is recorded alongside the amount.', 'error'); return; }
+        try {
+          await db.collection('settings').doc('payrollWageFloor').set({
+            monthlyFloor: amt, source: src,
+            setBy: (currentUser && currentUser.uid) || '',
+            setByName: (window.userProfile && window.userProfile.displayName) || '',
+            setAtLabel: (window.bizDate ? window.bizDate() : ''),
+            setAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          window.logAudit && window.logAudit('update', 'settings', 'payrollWageFloor', { monthlyFloor: amt });
+          Notifs.success('Minimum wage saved.');
+          window.renderTaskBasedPaySection(container, currentUser, currentRole);
+        } catch (e) {
+          Notifs.showToast('Could not save: ' + (e.message || e.code || e), 'error');
+        }
+      }));
+    }
+
+    const toggleBtn = container.querySelector('#sr-tb-toggle');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => window.busy(toggleBtn, async () => {
+        const turningOn = !switchOn;
+        const nextPolicy = turningOn ? 'taskbased' : 'flat';
+        const msg = turningOn
+          ? `Office pay for ${monthLabel} would go from ${peso(totalNow)} to ${peso(totalNext)} for ${rows.length} people. This takes effect the next time a month's figures are worked out — months already paid are not touched. Turn it on?`
+          : `Office pay for ${monthLabel} would go from ${peso(totalNext)} back to ${peso(totalNow)} for ${rows.length} people. This takes effect the next time a month's figures are worked out — months already paid are not touched. Turn it off?`;
+        if (!(await window.confirmDialog({ message: msg, confirmLabel: turningOn ? 'Use task-based pay' : 'Go back to fixed pay', cancelLabel: 'Cancel' }))) return;
+        try {
+          await db.collection('settings').doc('payrollOfficePolicy').set({
+            policy: nextPolicy,
+            changedBy: (currentUser && currentUser.uid) || '',
+            changedByName: (window.userProfile && window.userProfile.displayName) || '',
+            changedAtLabel: (window.bizDate ? window.bizDate() : ''),
+            changedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          window.logAudit && window.logAudit('update', 'settings', 'payrollOfficePolicy', { policy: nextPolicy });
+          Notifs.success(turningOn ? 'Task-based pay is on for the Office Team.' : 'Office Team pay is back to fixed.');
+          window.renderTaskBasedPaySection(container, currentUser, currentRole);
+        } catch (e) {
+          Notifs.showToast('Could not save: ' + (e.message || e.code || e), 'error');
+        }
+      }));
+    }
   }
 };

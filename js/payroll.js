@@ -453,6 +453,11 @@ if (typeof window === 'undefined') {
     if (l.policy === 'performance' && +l.perfFactor < 1) {
       parts.push('allowance scaled to ' + Math.round((+l.perfFactor || 0) * 100) + '% on KPI and attendance');
     }
+    // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — short roster words; the full
+    // sentence (with the pesos) lives in the breakdown via payBasisSentence.
+    if (l.policy === 'taskbased') {
+      parts.push('paid at ' + Math.round((+l.perfFactor || 0) * 100) + '% on task results and on-time check-ins');
+    }
     return parts.join(', ');
   };
 
@@ -554,6 +559,15 @@ if (typeof window === 'undefined') {
           // — CALLED, never edited): the owner's "where did the number come
           // from" for a performance-policy allowance (PAYROLL-LIVE-SPEC §6.4).
           perfFactor: l.perfFactor == null ? null : r2(l.perfFactor),
+          // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — absent (null) on 'flat'/
+          // 'performance' lines (the key itself is absent on the source line,
+          // §2.4), present only under 'taskbased'. netBeforeCA alongside it so
+          // payBasisSentence's "usual take-home × F% = result" arithmetic is
+          // reconstructable here without a second computation — finalPay/net
+          // (below) is AFTER cash-advance, which would double-count the CA
+          // row the breakdown already lists separately.
+          preMultiplierNet: l.preMultiplierNet == null ? null : r2(l.preMultiplierNet),
+          netBeforeCA: l.netBeforeCA == null ? null : r2(l.netBeforeCA),
           withheldDeductions: r2(l.withheldDeductions != null ? l.withheldDeductions : l.otherDeductions),
           unearnedDeductions: r2(l.unearnedDeductions),
           employerShare: l.er || null,
@@ -606,7 +620,21 @@ if (typeof window === 'undefined') {
       out.push(money('Salary', 'earning', row.earnings));
       out.push(money('Allowance', 'earning', row.allowances));
       if (d.kpiScore != null) out.push(info('KPI score', String(Math.round(d.kpiScore * 100)) + '%'));
-      if (d.attendanceScore != null) out.push(info('Attendance score', String(Math.round(d.attendanceScore * 100)) + '%'));
+      // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — relabelled from 'Attendance
+      // score'. That label is exactly the "days worked" misreading §1 of the
+      // spec warns about: this score is punctuality/notification-read, not
+      // presence. Display-label change only — no stored field renamed.
+      if (d.attendanceScore != null) out.push(info('On-time check-ins', String(Math.round(d.attendanceScore * 100)) + '%'));
+      // TASK-BASED-PAY-SPEC-2026-08-12 §9.1/§9.2 — the ONE traceability
+      // sentence, fed straight off the frozen line's own fields (never
+      // recomputed here). Empty string for 'flat'/'performance' — no row.
+      if (d.policy === 'taskbased' && typeof window.payBasisSentence === 'function') {
+        const sentence = window.payBasisSentence({
+          policy: d.policy, perfFactor: d.perfFactor, kpiScore: d.kpiScore, attScore: d.attendanceScore,
+          preMultiplierNet: d.preMultiplierNet, netBeforeCA: d.netBeforeCA
+        });
+        if (sentence) out.push(info('How this was worked out', sentence));
+      }
     }
     row.oneOffs.forEach((o) => out.push(money(o.label, o.kind, o.amount)));
     out.push(money('SSS', 'deduction', row.statutory.sss));

@@ -2024,9 +2024,30 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     const prevSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
     const prev = (prevSnap && prevSnap.exists) ? prevSnap.data() : {};
     overridesEff = prev.overrides || {};
-    if (runPolicy == null) runPolicy = prev.payPolicy || 'flat';
+    if (runPolicy == null) runPolicy = prev.payPolicy || null;
   }
-  if (runPolicy == null) runPolicy = 'flat';
+  // TASK-BASED-PAY-SPEC-2026-08-12 §6.2 — the precedence chain's third rung:
+  //   explicit `policy` argument -> pay_runs/{month}.payPolicy -> this settings
+  //   doc -> 'flat'.
+  // Read ONLY when the first two rungs came back empty (i.e. a month never
+  // prepared before) — fresh, no dbCachedGet, because a pay-deciding switch
+  // must never be answered from a stale cache. A failed read THROWS rather
+  // than guessing (same refusal stance as periodExcluded just below): guessing
+  // 'flat' here could silently withhold task-based pay nobody actually
+  // switched off; guessing 'taskbased' could apply a policy nobody confirmed.
+  if (runPolicy == null) {
+    let settingsSnap;
+    try {
+      settingsSnap = await db.collection('settings').doc('payrollOfficePolicy').get();
+    } catch (err) {
+      throw new Error('Could not read the pay method setting — nothing was worked out. Try again in a moment.');
+    }
+    const storedPolicy = (settingsSnap && settingsSnap.exists) ? (settingsSnap.data() || {}).policy : null;
+    if (storedPolicy != null && window.PAY_POLICY_VALUES && window.PAY_POLICY_VALUES.indexOf(storedPolicy) === -1) {
+      throw new Error('The pay method setting holds a value the app does not know — nothing was worked out. Fix it on the Gov Rates screen.');
+    }
+    runPolicy = storedPolicy || 'flat';
+  }
   overridesEff = overridesEff || {};
 
   const usersSnap = await fetchUsersWithPayroll();
@@ -2167,7 +2188,11 @@ window.computePayRun = async function(month, { policy } = {}) {
     throw new Error('Run is ' + prev.state + ' — President must Reopen first.');
   }
   const overrides = prev.overrides || {};
-  const runPolicy = policy || prev.payPolicy || 'flat';
+  // TASK-BASED-PAY-SPEC-2026-08-12 §6.2 — defer to the builder's own
+  // precedence chain (explicit arg -> pay_runs.payPolicy -> settings doc ->
+  // 'flat') instead of pre-resolving 'flat' here, which would make the
+  // settings rung permanently unreachable on the write path.
+  const runPolicy = policy || prev.payPolicy || null;
 
   // The read-only half — see window.buildPayRunLines above. Same inputs, same
   // maths, same skip reasons the live view reads; this caller adds only the
@@ -2178,7 +2203,10 @@ window.computePayRun = async function(month, { policy } = {}) {
   const totalNet = lines.reduce((s,l)=>s+l.finalPay, 0);
   const currentUser = window.currentUser;
   await db.collection('pay_runs').doc(month).set({
-    month, state:'computed', payPolicy: runPolicy,
+    // built.payPolicy is the RESOLVED policy (never the possibly-null local
+    // above) — writing the local would persist `null` on a brand-new month
+    // resolved off the settings doc, losing which policy actually ran.
+    month, state:'computed', payPolicy: built.payPolicy,
     employeeCount: lines.length, totalNet, lines, skipped,
     computedBy: currentUser?.uid, computedByName: window.userProfile?.displayName || currentUser?.email,
     computedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2297,6 +2325,36 @@ window.disbursePayRun = async function(month, opts = {}) {
   // Checked once, before any write — a closed month can't be disbursed (v12 WS12).
   await window.assertPeriodOpen(month + '-01');
 
+  // TASK-BASED-PAY-SPEC-2026-08-12 §8.4 — the minimum-wage floor, beside the
+  // statutory-verified refusal above. Read fresh (no dbCachedGet — same
+  // refusal stance as every other pay-deciding read in this function): a
+  // failed read throws rather than proceeding on an unknown floor. When the
+  // floor is NOT configured, this is inert BY DESIGN (§8.1 — the owner was
+  // told loudly on the Gov Rates screen and in the roster warnings; the app
+  // never invents the number). Policy-agnostic on purpose (§8.3/§14 Q4) — a
+  // 'flat' salary below the floor is caught here too, not only a scaled one.
+  let _wageFloorDoc;
+  try {
+    _wageFloorDoc = await db.collection('settings').doc('payrollWageFloor').get();
+  } catch (err) {
+    Notifs.showToast('Could not read the saved minimum wage — nothing was paid. Try again in a moment.', 'error');
+    return;
+  }
+  const _floorMonthly = (_wageFloorDoc && _wageFloorDoc.exists) ? (_wageFloorDoc.data() || {}).monthlyFloor : null;
+  if (_floorMonthly != null && typeof window.wageFloorCheck === 'function') {
+    const _below = lines
+      .map(l => ({ l, chk: window.wageFloorCheck(l, _floorMonthly) }))
+      .filter(x => x.chk.checked && !x.chk.ok);
+    if (_below.length) {
+      const _names = _below.map(x => `${x.l.name} ${window.fmtPeso ? window.fmtPeso(x.chk.earned) : ('₱' + x.chk.earned)}`).join(', ');
+      Notifs.showToast(
+        `${_below.length} people are below the saved minimum wage of ${window.fmtPeso ? window.fmtPeso(_floorMonthly) : ('₱' + _floorMonthly)} for the month: ${_names}. Adjust their pay from their row, or correct the saved minimum on the Gov Rates screen. Nothing was paid.`,
+        'error'
+      );
+      return;
+    }
+  }
+
   const currentUser = window.currentUser;
   const monthLabel  = window.fmtMonthLabel(month);
 
@@ -2316,6 +2374,11 @@ window.disbursePayRun = async function(month, opts = {}) {
       sss: line.sss, philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax,
       philHealth: line.philhealth, pagIbig: line.pagibig, // legacy mixed-case mirror (transition — v12 WS21 decision 6)
       er: line.er, kpiScore: line.kpiScore, attScore: line.attScore, perfFactor: line.perfFactor,
+      // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — additive field on an unpinned
+      // doc shape; ?? null on every other policy (the key is absent on the
+      // source line for 'flat'/'performance', §2.4), so payBasisSentence's
+      // "no `preMultiplierNet`" fallback branch renders correctly for those.
+      preMultiplierNet: line.preMultiplierNet ?? null,
       policy: line.policy, runMonth: month,
       caDeducted: line.caPlanned, netPay: line.netBeforeCA, finalPay: line.finalPay,
       // v12 WS39 — mirror the frozen statutory IDs so a historical salary_history

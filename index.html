@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.153 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.154 · Barro Industries</div>
   </div>
 </div>
 
@@ -500,6 +500,11 @@
      of departments.js so it's independently unit-tested (tests/money.test.mjs).
      Must load before departments.js, which calls these via window.*. -->
 <script defer src="js/money-core.js"></script>
+<!-- TASK-BASED-PAY-SPEC-2026-08-12 — pure helpers ABOVE the frozen money-core.js
+     (wageFloorCheck, payBasisSentence, the PAY_POLICY_VALUES whitelist). Must
+     load before js/payroll.js/js/departments.js/js/screens/* (its consumers) —
+     load order is load-bearing in this app (see CLAUDE.md). -->
+<script defer src="js/pay-policy.js"></script>
 <!-- STATUTORY-BY-STATUS-SPEC-2026-08-12 — pure derivation layer ABOVE the
      frozen money-core.js resolvers (resolveStatutoryEE / resolveStatutoryWeekly);
      turns employmentStatus into an effective statConfig. Must load before
