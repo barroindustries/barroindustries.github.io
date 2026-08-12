@@ -1352,6 +1352,16 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-item[data-page="sales-orders"] .nav-icon      { background: linear-gradient(135deg,#FF9F0A,#FF2D78); box-shadow: 0 2px 8px rgba(255,159,10,0.32); }
 .nav-item[data-page="product-database"] .nav-icon  { background: linear-gradient(135deg,#30D158,#32ADE6); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
 .nav-item[data-page="audit-log"] .nav-icon         { background: linear-gradient(135deg,#8E8E93,#636366); box-shadow: 0 2px 8px rgba(99,99,102,0.32); }
+/* 2026-08-12, owner again: "make it a note always to add a color to new icons
+   on the drawer" — the SECOND time this has been reported (see the 2026-08-10
+   note above). Four were grey this round: notes and my-profile (added today),
+   plus partner-projects and bk-quote-builder, which had never had one.
+   Teal and violet were picked because every other warm/blue/green slot in this
+   block is already taken and a near-duplicate reads as a mistake. */
+.nav-item[data-page="notes"] .nav-icon             { background: linear-gradient(135deg,#00C7BE,#40CFFF); box-shadow: 0 2px 8px rgba(0,199,190,0.32); }
+.nav-item[data-page="my-profile"] .nav-icon        { background: linear-gradient(135deg,#AF52DE,#8B5CF6); box-shadow: 0 2px 8px rgba(175,82,222,0.32); }
+.nav-item[data-page="partner-projects"] .nav-icon  { background: linear-gradient(135deg,#5856D6,#32ADE6); box-shadow: 0 2px 8px rgba(88,86,214,0.32); }
+.nav-item[data-page="bk-quote-builder"] .nav-icon  { background: linear-gradient(135deg,#0A84FF,#32ADE6); box-shadow: 0 2px 8px rgba(10,132,255,0.35); }
 
 /* Dept pages use data-page="dept:X" — give all a gradient background */
 .nav-item[data-page^="dept:"] .nav-icon { background: linear-gradient(135deg,#FF9F0A,#FF6B6B); box-shadow: 0 2px 8px rgba(255,159,10,0.30); }

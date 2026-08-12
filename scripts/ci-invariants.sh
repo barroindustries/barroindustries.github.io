@@ -256,6 +256,31 @@ else
 fi
 
 echo
+echo "=== [6/6] DRAWER ICONS: every NAV_REGISTRY page has a colour rule ==="
+# Owner reported grey drawer icons TWICE (2026-08-10, 2026-08-12). The cause is
+# structural: the nav entry lives in js/config.js and its colour in
+# css/styles.css, nothing links them, and a missing rule does not break — it
+# just renders a flat grey tile that looks unfinished. A comment did not stop
+# it recurring, so this is the check that does.
+# dept:* pages are exempt: they colour from window.DEPARTMENTS[dept].gradient.
+icon_hits=$(node -e "
+const fs=require('fs');
+const cfg=fs.readFileSync('js/config.js','utf8');
+const css=fs.readFileSync('css/styles.css','utf8');
+const pages=[...new Set([...cfg.matchAll(/page:\s*'([^']+)'/g)].map(m=>m[1]))]
+  .filter(p=>!p.startsWith('dept:'));
+const styled=new Set([...css.matchAll(/\.nav-item\[data-page=\"([^\"]+)\"\]/g)].map(m=>m[1]));
+pages.filter(p=>!styled.has(p)).forEach(p=>console.log(p));
+")
+if [ -n "$icon_hits" ]; then
+  echo "FAIL: these NAV_REGISTRY pages render a grey tile — add a .nav-item[data-page=\"…\"] .nav-icon gradient in css/styles.css:"
+  echo "$icon_hits" | sed 's/^/  /'
+  overall_fail=1
+else
+  echo "PASS: every drawer entry has an icon colour"
+fi
+
+echo
 if [ "$overall_fail" -ne 0 ]; then
   echo "=== invariants: FAILED ==="
   exit 1

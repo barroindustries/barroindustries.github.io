@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.155';
+window.APP_VERSION = '14.0.156';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -590,6 +590,24 @@ window.LeaveAccrual = {
 // variant is one of: 'admin' | 'genericPartner' | 'partnerBS' | 'bsOnly' | 'staff'
 // (mirrors the exact if/else-if order both getSidebarItems and the old
 // _primaryNavItems already checked in).
+// ⚠ ADDING AN ENTRY HERE IS TWO EDITS, NOT ONE.
+//
+// Owner, 2026-08-12: "make it a note always to add a color to new icons on the
+// drawer" — the SECOND time he has reported this (2026-08-10: "some icons dont
+// have colors at the app drawer"). It keeps happening because the entry and its
+// colour live in different files and nothing links them.
+//
+//   1. the item below, and
+//   2. a `.nav-item[data-page="<page>"] .nav-icon` gradient in css/styles.css
+//      (search "Icons that were rendering as a flat grey tile"), plus a
+//      `.bottom-nav-item[data-page="<page>"] .bn-icon svg { stroke: … }` rule
+//      if the entry also appears in `bottom` below.
+//
+// A page with no rule falls through to the base .nav-icon background
+// (rgba(255,255,255,0.07)) and renders as a flat grey tile — it does not break,
+// it just looks unfinished next to its neighbours, which is why it ships
+// unnoticed every time. `dept:*` entries are exempt: they take their colour
+// from window.DEPARTMENTS[dept].gradient at render time (js/app.js).
 window.NAV_REGISTRY = {
   predicates: {
     isPresident:        () => typeof isPresident === 'function' && isPresident(),
