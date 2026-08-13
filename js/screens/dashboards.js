@@ -1153,8 +1153,12 @@ window.bindAttendanceCard = function(rootEl, st, onChange) {
         autoFull
       }, { merge: true });
     } catch (err) {
+      // The exact rule that refused is surfaced, not paraphrased — an employee
+      // reporting "it says X" is how the next one of these gets diagnosed
+      // without guessing. (2026-08-13: office staff reported a refusal toast
+      // and the generic wording named a cause the client already prevents.)
       Notifs.showToast(err?.code === 'permission-denied'
-        ? 'Time In was rejected — today\'s record is admin-managed or your account lacks permission. Ask an admin to record your attendance.'
+        ? 'Time In was refused by the server. Please screenshot this and send it to your manager: permission-denied on attendance/' + currentUser.uid + '/records/' + todayStr
         : 'Time In failed to save: ' + (err?.message || err), 'error');
       return;
     }

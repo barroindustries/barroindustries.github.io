@@ -93,6 +93,29 @@ function _epRow(label, value, opts) {
     </div>`;
 }
 
+// ── Office Team statutory-config helpers (OFFICE-STATUTORY-PARITY-2026-08-13) ─
+// Mirrors js/screens/hr.js's Operations worker-profile editor (_hrpScOf /
+// _wpModeOf) so both teams share one vocabulary. `pay` here is the RAW
+// payroll/{uid} doc (js/screens/employee-profile.js's ctx.pay) — never the
+// merged-with-users object window.resolveStatutoryEE reads at pay-computation
+// time, but they hold the identical statConfig/sss/philhealth/pagibig/tax
+// fields, so reading it directly here is safe.
+// Anything that is not one of the three real modes (an absent statConfig, an
+// absent key, or garbage) reads as 'default' — exactly what
+// window.resolveStatutoryEE (js/money-core.js, frozen) treats as "typed
+// amount wins, else the monthly table" — TODAY's behaviour for every existing
+// Office employee, none of whom have a statConfig on file yet.
+function _epStatModeOf(pay, k) {
+  return (pay && pay.statConfig && ['auto', 'fixed', 'exempt'].includes(pay.statConfig[k])) ? pay.statConfig[k] : 'default';
+}
+function _epStatSummary(pay, k) {
+  const mode = _epStatModeOf(pay, k);
+  if (mode === 'auto')   return 'Auto — monthly table';
+  if (mode === 'fixed')  return 'Fixed — ₱' + _epFmt(pay ? pay[k] : 0);
+  if (mode === 'exempt') return 'Exempt — not deducted';
+  return 'Default — unchanged';
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    THE NORMALISING READ-ADAPTER
    The two teams use DIFFERENT field names for four of five identity fields:
@@ -577,6 +600,20 @@ async function _epTabPay(tb, ctx) {
       </div>
     </div>
 
+    ${!P.isOps ? `
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>Government deductions</h3>
+        <button class="btn-secondary btn-sm" id="ep-stat-edit-btn">${_epIcon('✎', 14)} Edit</button>
+      </div>
+      <div class="card-body" style="padding:4px 16px 12px">
+        ${_epRow('SSS', _epStatSummary(pay, 'sss'))}
+        ${_epRow('PhilHealth', _epStatSummary(pay, 'philhealth'))}
+        ${_epRow('Pag-IBIG', _epStatSummary(pay, 'pagibig'))}
+        ${_epRow('Tax', _epStatSummary(pay, 'tax'))}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Leaving everything on Default changes nothing for this person. Exempt stops both the employee share and the employer share — they are simply left off that agency's remittance.</p>
+      </div>
+    </div>` : ''}
+
     ${pending.length ? `<div class="card" style="margin-bottom:14px">
       <div class="card-header"><h3>Scheduled / awaiting approval</h3></div>
       <div class="card-body" style="padding:0">${raiseTable(pending, '')}</div>
@@ -608,6 +645,129 @@ async function _epTabPay(tb, ctx) {
           fieldLabel: 'Base Salary', targetField: 'salary', current: pay ? pay.salary : 0 };
     openSalaryRaiseModal(desc, window.currentUser, () => window.openEmployeeProfile({ uid, workerId, name: P.name }));
   });
+  tb.querySelector('#ep-stat-edit-btn')?.addEventListener('click', () => _epOpenStatutoryEditor(ctx));
+}
+
+/* ── Government-deductions editor (OFFICE-STATUTORY-PARITY-2026-08-13) ───
+   Office Team parity for js/screens/hr.js's Operations worker-profile
+   statutory editor (hrp-stat-*). Writes ONLY statConfig + the four flat ₱
+   fields onto payroll/{uid} — never salary/allowance/deductions/payClass, so
+   this stays a single-purpose door, not a second way to change pay. Same
+   money-tier gate as the rest of this tab (canMoney, mirrored server-side by
+   firestore.rules' payroll match block: isMoneyAdmin() = president/manager/
+   finance, identical to js/departments.js's isMoneyPriv()) — no rules change
+   needed; see the build report.
+   'default' is written as FieldValue.delete() per key, never the string
+   'default' — an absent key is what window.resolveStatutoryEE's legacy
+   branch requires to reproduce today's figures byte-for-byte. Saving with
+   every select left on Default therefore deletes at most already-absent
+   keys: a no-op write, not a behaviour change.
+   ─────────────────────────────────────────────────────────────────────── */
+var _EP_STAT_FIELDS = [
+  ['sss',        'SSS'],
+  ['philhealth', 'PhilHealth'],
+  ['pagibig',    'Pag-IBIG'],
+  ['tax',        'Tax']
+];
+function _epOpenStatutoryEditor(ctx) {
+  const { P, uid, workerId, pay } = ctx;
+  if (!uid) {
+    Notifs.showToast('This person has no payroll record to edit yet.', 'error');
+    return;
+  }
+  const rowHtml = ([k, label]) => {
+    const mode = _epStatModeOf(pay, k);
+    const amt  = pay ? (pay[k] || 0) : 0;
+    return `
+    <div class="form-row">
+      <div class="form-group"><label>${_epEsc(label)}</label>
+        <select id="epstat-${k}-mode">
+          <option value="default" ${mode === 'default' ? 'selected' : ''}>Default — typed amount wins, else the table</option>
+          <option value="auto"    ${mode === 'auto'    ? 'selected' : ''}>Auto — monthly table</option>
+          <option value="fixed"   ${mode === 'fixed'   ? 'selected' : ''}>Fixed monthly ₱</option>
+          <option value="exempt"  ${mode === 'exempt'  ? 'selected' : ''}>Exempt — confirmed not due</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Fixed ₱ (if Fixed/Default)</label><input id="epstat-${k}-amt" type="number" inputmode="decimal" value="${_epEsc(String(amt))}"/></div>
+    </div>`;
+  };
+
+  const panel = window.openPage(`${_epIcon('🏛', 16)} Government Deductions — ${_epEsc(P.name)}`, `
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+      <strong>Default</strong> — a typed ₱ amount wins if set, otherwise the monthly table amount is deducted (today's behaviour, unchanged).
+      <strong>Auto</strong> — always the table amount for the run month.
+      <strong>Fixed</strong> — always the typed ₱ amount, even ₱0.
+      <strong>Exempt</strong> — the contribution is not deducted and no employer share is due; the person is simply not on that agency's remittance.
+    </div>
+    ${_EP_STAT_FIELDS.map(rowHtml).join('')}
+  `, `<button class="btn-primary" id="epstat-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  // Panel-scoped — never document.getElementById (see CLAUDE.md; this app's
+  // largest defect class is a stale-panel global lookup).
+  const _epStatSyncInputs = () => {
+    _EP_STAT_FIELDS.forEach(([k]) => {
+      const sel = panel.querySelector('#epstat-' + k + '-mode');
+      const inp = panel.querySelector('#epstat-' + k + '-amt');
+      if (!sel || !inp) return;
+      const inert = (sel.value === 'auto' || sel.value === 'exempt');
+      inp.disabled = inert;
+      inp.style.opacity = inert ? '0.55' : '';
+      inp.title = sel.value === 'exempt' ? 'Exempt — not deducted; this amount is ignored'
+                : sel.value === 'auto'   ? 'Auto — the statutory table amount is used; this amount is ignored'
+                : '';
+    });
+  };
+  _EP_STAT_FIELDS.forEach(([k]) => panel.querySelector('#epstat-' + k + '-mode')?.addEventListener('change', _epStatSyncInputs));
+  _epStatSyncInputs();
+
+  panel.querySelector('#epstat-save-btn')?.addEventListener('click', () => window.busy(panel.querySelector('#epstat-save-btn'), async () => {
+    const modeOf = (k) => {
+      const v = panel.querySelector('#epstat-' + k + '-mode')?.value;
+      return (v === 'auto' || v === 'fixed' || v === 'exempt') ? v : 'default';
+    };
+    const modes = {};
+    _EP_STAT_FIELDS.forEach(([k]) => { modes[k] = modeOf(k); });
+
+    try {
+      await db.collection('payroll').doc(uid).set({
+        // 'default' -> FieldValue.delete(), never the string — an absent key
+        // is what makes the frozen resolver take its legacy branch.
+        statConfig: (() => {
+          const m = {};
+          _EP_STAT_FIELDS.forEach(([k]) => { m[k] = modes[k] === 'default' ? firebase.firestore.FieldValue.delete() : modes[k]; });
+          return m;
+        })(),
+        sss:        parseFloat(panel.querySelector('#epstat-sss-amt')?.value) || 0,
+        philhealth: parseFloat(panel.querySelector('#epstat-philhealth-amt')?.value) || 0,
+        pagibig:    parseFloat(panel.querySelector('#epstat-pagibig-amt')?.value) || 0,
+        tax:        parseFloat(panel.querySelector('#epstat-tax-amt')?.value) || 0,
+      }, { merge: true });
+
+      // Audit the MODE change only — silent when nothing changed, which is
+      // every save left entirely on Default (mirrors hr.js's identical block
+      // for the Operations worker-profile editor).
+      const before = (pay && pay.statConfig) || {};
+      const after  = {};
+      _EP_STAT_FIELDS.forEach(([k]) => { if (modes[k] !== 'default') after[k] = modes[k]; });
+      const norm = (o) => _EP_STAT_FIELDS.map(([k]) => `${k}:${o[k] || 'default'}`).join(',');
+      if (norm(before) !== norm(after)) {
+        window.logAudit && window.logAudit('statutory-config', 'payroll', uid, { before, after });
+      }
+
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users'); // 'users' carries merged payroll — see fetchUsersWithPayroll, js/config.js
+      Notifs.success('Government deductions saved.');
+      if (typeof closeModal === 'function') closeModal();
+      // Re-open cleanly against the freshly written doc — same repaint
+      // pattern as _epOpenEditor/the Raise flow callback just above: a save
+      // that leaves the tab showing the OLD summary reads as "it didn't save".
+      window.openEmployeeProfile({ uid, workerId, name: P.name });
+      _epRefreshRosterIfOpen();
+    } catch (e) {
+      Notifs.showToast(e && e.code === 'permission-denied'
+        ? 'Saving was refused — you do not have permission to change pay records.'
+        : 'Could not save: ' + ((e && e.message) || e), 'error');
+    }
+  }));
 }
 
 /* ── TAB 3 — CASH ADVANCE (read-only) ─────────────────────────────────

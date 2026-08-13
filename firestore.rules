@@ -980,8 +980,26 @@ service cloud.firestore {
       allow read: if isAuth() && (!isPartner() || request.auth.uid in resource.data.get('assignedTo', []));
       // Admins create any task. Design-dept members may create Design tasks only
       // (so designers can delegate project work) — scoped strictly to department=='Design'.
+      // Owner ruling 2026-08-13 ("employees say they cant make new tasks"):
+      // an employee may create a task in a department they actually belong to,
+      // or one assigned to themselves. Before this the rule was admin-only
+      // (plus Design-in-Design) while js/screens/tasks.js rendered "+ New Task"
+      // UNCONDITIONALLY on the employee screen — so every employee saw the
+      // button, filled in the form, and had the write refused. It had never
+      // worked for them.
+      //
+      // Scoped deliberately: `inDept()` means nobody can file work into a
+      // department they have nothing to do with, and createdBy is pinned to
+      // the caller so a task cannot be created under someone else's name.
+      // Partners stay out entirely — they read only tasks assigned to them
+      // (see the read rule above) and have never been able to create.
       allow create: if isAuth() && (
-        isAdmin() || (isDesignDept() && request.resource.data.get('department', '') == 'Design')
+        isAdmin()
+        || (isDesignDept() && request.resource.data.get('department', '') == 'Design')
+        || ( !isPartner()
+             && request.resource.data.get('createdBy', '') == request.auth.uid
+             && ( inDept(request.resource.data.get('department', ''))
+                  || request.auth.uid in request.resource.data.get('assignedTo', []) ) )
       );
       // Assignees update their own tasks; admins AND finance manage any task
       // (status, reassignment, follow-up requests). Uses isOpsAdmin() so the
