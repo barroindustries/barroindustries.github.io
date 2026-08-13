@@ -2705,6 +2705,71 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     : projLine;
   const payBasisSentenceText = (!noPayRecordWords && typeof window.payBasisSentence === 'function' && payBasisLine)
     ? window.payBasisSentence(payBasisLine) : '';
+
+  // PAYROLL-CARD-WORKING-SPEC-2026-08-13 — the owner's July 2026 report on
+  // the payroll roster ("wheres the ca deduction" / "computation as well how
+  // it came to that final take home" / "the formula") applies here too: this
+  // screen worked out "Performance Multiplier" / "Projected Full Month" /
+  // "Cash Advance Balance" independently of what computePayLine actually
+  // froze, instead of reading the frozen figures back — which is exactly the
+  // drift that let a card describe arithmetic it was not doing (see
+  // js/pay-policy.js's payDerivationSteps header for the full account, and
+  // js/screens/payroll.js's roster card for the other surface of this same
+  // fix). window.payDerivationSteps is the ONE shared derivation, called from
+  // both places, so the two can never show two different workings for the
+  // same month again.
+  //
+  // A DISBURSED month reads the real frozen figures off salary_history (the
+  // owner-readable mirror departments.js's disbursePayRun writes — caDeducted
+  // is the ACTUAL cash-advance instalment that period took, not the live
+  // outstanding balance the "Cash Advance Balance" row above already shows).
+  // A still-running month reads the same live computePayLine call
+  // (`projLine`) the "Projected Full Month" figure above already comes from —
+  // never a second computation, so this can never disagree with it. Its
+  // caPlan is deliberately `[]` (see projLine's own call above), so a live
+  // projection's cash-advance step is always ₱0 — a known simplification of
+  // the existing projection, not something this block changes.
+  const workingTakeHome = isFinalMonth ? (Number(frozenThisMonth.finalPay) || 0) : (projLine ? projLine.finalPay : null);
+  const workingDerivation = (!noPayRecordWords && !projUnavailable && workingTakeHome != null && typeof window.payDerivationSteps === 'function')
+    ? window.payDerivationSteps({
+        earnings: isFinalMonth ? (Number(frozenThisMonth.salary) || 0) : (projLine ? projLine.base : 0),
+        allowances: isFinalMonth ? (Number(frozenThisMonth.allowance) || 0) : (projLine ? projLine.allowance : 0),
+        oneOffNet: 0,
+        statutoryTotal: isFinalMonth
+          ? ((Number(frozenThisMonth.sss) || 0) + (Number(frozenThisMonth.philhealth) || 0) + (Number(frozenThisMonth.pagibig) || 0) + (Number(frozenThisMonth.tax) || 0))
+          : (projLine ? projLine.statutoryTotal : 0),
+        otherDeductions: isFinalMonth ? (Number(frozenThisMonth.deductions) || 0) : (projLine ? projLine.otherDeductions : 0),
+        policy: isFinalMonth ? (frozenThisMonth.policy || 'flat') : (projLine ? projLine.policy : 'flat'),
+        perfFactor: isFinalMonth ? frozenThisMonth.perfFactor : (projLine ? projLine.perfFactor : null),
+        cashAdvance: isFinalMonth ? (Number(frozenThisMonth.caDeducted) || 0) : (projLine ? (Number(projLine.caPlanned) || 0) : 0),
+        overridden: isFinalMonth ? !!frozenThisMonth.overridden : false,
+        overrideNote: isFinalMonth ? (frozenThisMonth.overrideNote || '') : '',
+        takeHome: workingTakeHome
+      })
+    : null;
+  const workingHtml = (() => {
+    if (!workingDerivation) return '';
+    const rowHtml = (s) => {
+      if (s.sign === '×') {
+        return `<div class="payslip-row"><span>${escHtml(s.label)}</span></div>` +
+          (s.note ? `<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 4px">${escHtml(s.note)}</div>` : '');
+      }
+      const color = s.sign === '+' ? 'var(--success)' : s.sign === '-' ? 'var(--danger)' : (s.kind === 'total' ? '' : 'var(--text)');
+      const prefix = (s.sign === '+' || s.sign === '-') ? s.sign : '';
+      return `<div class="payslip-row"${s.kind === 'total' ? ' style="font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:8px"' : ''}>
+        <span>${escHtml(s.label)}</span><span style="${color ? 'color:' + color : ''}">${prefix}₱${formatNum(s.amount)}</span>
+      </div>${s.note ? `<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 4px">${escHtml(s.note)}</div>` : ''}`;
+    };
+    const guard = workingDerivation.reconciled ? '' : `
+      <div style="margin-top:10px;padding:10px 14px;background:rgba(220,38,38,.12);border:1px solid var(--danger);border-radius:8px;color:var(--danger);font-size:12px;font-weight:600;line-height:1.5">
+        These figures do not add up to the take-home shown — ₱${formatNum(Math.abs(workingDerivation.residue))} is unexplained. This must be understood before this period is released.
+      </div>`;
+    return `
+      <div style="height:1px;background:var(--border);margin:12px 0"></div>
+      <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">How this take-home was worked out</div>
+      ${workingDerivation.steps.map(rowHtml).join('')}
+      ${guard}`;
+  })();
   // §A — the label above must describe the SAME calculation as the value
   // beside it. Only under 'taskbased' does a single "base × multiplier"
   // expression actually produce computedMonth (money-core.js's netBeforeCA);
@@ -2859,6 +2924,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         </div>`}
         ${payBasisSentenceText ? `
         <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.5">${escHtml(payBasisSentenceText)}</div>` : ''}`}
+        ${workingHtml}
         ${isFinalMonth && frozenThisMonth.hrNote && frozenThisMonth.hrNote.text ? `
         <div style="margin-top:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">${emojiIcon('📝',14)} Note from HR</div>

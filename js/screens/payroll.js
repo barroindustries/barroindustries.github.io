@@ -207,7 +207,14 @@ function _pyRead(l) {
     otHours:    _pyPick(l.otHours),
     travelHours:_pyPick(l.travelHours),
     earnings,
-    allowances: _pyPick(l.allowanceTotal, l.allowance),
+    // PAYROLL-CARD-WORKING-SPEC-2026-08-13 — `l.allowances` (plural) added:
+    // PC.normalizeLine (js/payroll.js) is where this figure actually lives on
+    // the shape this function receives (period.lines is ALWAYS its output —
+    // see js/payroll.js's Payroll.load). The two singular candidates before it
+    // are raw-engine-shape leftovers, kept for defensive compatibility only —
+    // neither has matched a real read since PC.normalizeLine started renaming
+    // this field, which is why Allowances silently read "—" for everyone.
+    allowances: _pyPick(l.allowanceTotal, l.allowance, l.allowances),
     oneOffNet,
     oneOffs,
     // otherDeductionsOnly, NOT otherDeductions: the weekly engine folds
@@ -229,19 +236,36 @@ function _pyRead(l) {
     // owner's phrasing. Labelled explicitly rather than reordered: reordering
     // would change what people are paid (~₱316 on his own example), and that is
     // his ruling to make, not a layout decision.
-    preMultiplierNet: _pyPick(l.preMultiplierNet),
-    perfFactor: _pyPick(l.perfFactor),
-    cashAdv:    _pyPick(l.caDeduction, l.caPlanned),
-    caBalanceBefore: _pyPick(l.caBalanceBefore, l.caBalance),
-    caBalanceAfter:  _pyPick(l.caBalanceAfter),
+    // THE ROOT CAUSE OF "wheres the ca deduction" (owner, July 2026 report).
+    // Every candidate below the FIRST one on each of these four lines is a
+    // raw-computePayLine field name (caPlanned, caBalanceBefore/caBalance,
+    // preMultiplierNet at top level) that PC.normalizeLine no longer produces
+    // at that path — it renames caPlanned -> cashAdvance and relocates the
+    // balance/pre-multiplier figures under detail.*. Because this function
+    // never checked the NEW names, a real cash-advance instalment and a real
+    // performance-factor step could both fire inside computePayLine and still
+    // print as nothing on the card — the money moved correctly; only its
+    // explanation went missing. See js/pay-policy.js's payDerivationSteps
+    // header for the fuller account.
+    preMultiplierNet: _pyPick(l.preMultiplierNet, l.detail && l.detail.preMultiplierNet),
+    netBeforeCA: _pyPick(l.netBeforeCA, l.detail && l.detail.netBeforeCA),
+    cashAdv:    _pyPick(l.caDeduction, l.caPlanned, l.cashAdvance),
+    caBalanceBefore: _pyPick(l.caBalanceBefore, l.caBalance, l.detail && l.detail.cashAdvanceBefore),
+    caBalanceAfter:  _pyPick(l.caBalanceAfter, l.detail && l.detail.cashAdvanceAfter),
     caShortfall:     _pyPick(l.caShortfall),
     // THE AGREED TERMS (owner, 2026-08-13: "also show the terms and how much
     // should be deducted"). Already frozen onto the line by computePayRun —
     // CashAdvance.planFor builds one entry per outstanding advance carrying
-    // { caId, amount, installmentNo, terms, monthlyPayment } — and never read
-    // by this screen until now, so the person setting an instalment had to
-    // remember the repayment plan or go and look it up.
-    caPlan:     Array.isArray(l.caPlan) ? l.caPlan : [],
+    // { caId, amount, installmentNo, terms, monthlyPayment }. Same drift as
+    // above: PC.normalizeLine dropped this at the top level, so it now lives
+    // at detail.caPlan (added alongside this fix — see js/payroll.js).
+    caPlan:     Array.isArray(l.caPlan) ? l.caPlan : (Array.isArray(l.detail && l.detail.caPlan) ? l.detail.caPlan : []),
+    // A manual per-line override (money-core.js's applyPayLineOverride) was
+    // previously invisible on this card — there was no field for it at all,
+    // not even a broken one. PC.normalizeLine already carries the flag at
+    // detail.overridden/detail.overrideNote; this is the first read of it.
+    overridden: !!(l.overridden || (l.detail && l.detail.overridden)),
+    overrideNote: (l.overrideMeta && l.overrideMeta.note) || (l.detail && l.detail.overrideNote) || '',
     takeHome:   _pyPick(l.takeHome, l.net, l.finalPay),
     rows:       Array.isArray(l.rows) ? l.rows : [],
     backfill:   l.backfill === true,
@@ -469,6 +493,23 @@ var PY_CSS = `
 #pay-root .py-waiting-row:last-child{border-bottom:0}
 #pay-root .py-waiting-row .py-wlabel{flex:1 1 190px;min-width:0;overflow-wrap:anywhere}
 #pay-root .py-oneoff{font-size:11px;color:var(--text-muted);line-height:1.5;overflow-wrap:anywhere;margin-top:6px}
+/* PAYROLL-CARD-WORKING-SPEC-2026-08-13 — the visible working, plus the
+   reconciliation guard. Same "no overflow, no ellipsis, wrap instead of cut"
+   rule as the field grid above: a shortened peso figure here is a wrong
+   figure, and this block exists specifically so nobody has to trust a
+   take-home they cannot see the arithmetic for. */
+#pay-root .py-work{margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--s2,var(--surface2))}
+#pay-root .py-work-head{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:8px}
+#pay-root .py-work-row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 10px;font-size:13px;line-height:1.5;padding:3px 0}
+#pay-root .py-work-row span:first-child{flex:1 1 160px;min-width:0;overflow-wrap:anywhere}
+#pay-root .py-work-row span:last-child{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#pay-root .py-work-factor{font-weight:600;padding-top:7px;border-top:1px dashed var(--border);margin-top:5px}
+#pay-root .py-work-note{font-size:11px;color:var(--text-muted);line-height:1.4;margin:-1px 0 4px;overflow-wrap:anywhere}
+#pay-root .py-work-total{font-weight:700;font-size:14px;border-top:1px solid var(--border);margin-top:6px;padding-top:8px}
+/* The guard. Colour ONLY signals "unexplained" — it is never the only cue,
+   the words say the same thing, so this still reads correctly for anyone who
+   cannot rely on colour. */
+#pay-root .py-work-warn{margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(220,38,38,.12);border:1px solid var(--danger);color:var(--danger);font-size:12px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}
 `;
 
 // ═══════════════════════════════════════════════════════════
@@ -1673,6 +1714,46 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     }));
   }
 
+  // PAYROLL-CARD-WORKING-SPEC-2026-08-13 — the owner, on July 2026: "wheres
+  // the ca deduction" / "computation as well how it came to that final take
+  // home" / "the formula". This renders window.payDerivationSteps
+  // (js/pay-policy.js) — the ONE shared derivation, also called from
+  // js/screens/dashboards.js's renderPersonalFinance — as a plain,
+  // line-by-line ledger ending in the reconciliation guard: if the printed
+  // steps do not add up to the take-home shown, that is said OUT LOUD, in
+  // red, rather than left for someone to notice on their own.
+  function _pyWorkingHtml(r) {
+    if (typeof window.payDerivationSteps !== 'function' || r.takeHome == null) return '';
+    const d = window.payDerivationSteps({
+      earnings: r.earnings, allowances: r.allowances, oneOffNet: r.oneOffNet,
+      statutoryTotal: r.statutory, otherDeductions: r.otherDed,
+      policy: r.policy, perfFactor: r.perfFactor, cashAdvance: r.cashAdv,
+      overridden: r.overridden, overrideNote: r.overrideNote, takeHome: r.takeHome
+    });
+    const rows = d.steps.map(s => {
+      if (s.sign === '×') {
+        return `<div class="py-work-row py-work-factor"><span>${_pyEsc(s.label)}</span></div>` +
+          (s.note ? `<div class="py-work-note">${_pyEsc(s.note)}</div>` : '');
+      }
+      const cls = s.sign === '+' ? 'py-plus' : s.sign === '-' ? 'py-minus' : '';
+      const prefix = (s.sign === '+' || s.sign === '-') ? s.sign : '';
+      return `<div class="py-work-row${s.kind === 'total' ? ' py-work-total' : ''}">
+        <span>${_pyEsc(s.label)}</span><span class="${cls}">${prefix}${_pyEsc(_pyPeso(s.amount))}</span>
+      </div>${s.note ? `<div class="py-work-note">${_pyEsc(s.note)}</div>` : ''}`;
+    }).join('');
+    // THE GUARD. Never silent: named amount, plain words, and what to do
+    // about it before money moves any further.
+    const guard = d.reconciled ? '' : `<div class="py-work-warn">
+        These figures do not add up to the take-home shown — ${_pyEsc(_pyPeso(Math.abs(d.residue)))} is unexplained.
+        This must be understood before this period is released.
+      </div>`;
+    return `<div class="py-work">
+      <div class="py-work-head">How this take-home was worked out</div>
+      ${rows}
+      ${guard}
+    </div>`;
+  }
+
   function _pyPersonCard(r, cols, o) {
     const sub = [];
     if (r.rate != null) sub.push(`${_pyPeso(r.rate)}/hr${r.rateSource ? ' · ' + _pyRateSourceWords(r.rateSource) : ''}`);
@@ -1689,11 +1770,23 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       ? `<div class="py-oneoff">Allowance scaled to ${Math.round(r.perfFactor * 100)}%: KPI ${r.kpiScore != null ? Math.round(r.kpiScore * 100) : '—'}% × 0.7 + attendance ${r.attScore != null ? Math.round(r.attScore * 100) : '—'}% × 0.3.</div>`
       : '';
     // TASK-BASED-PAY-SPEC-2026-08-12 §9.2 — the ONE traceability sentence,
-    // read straight off the frozen line (r.raw), never recomputed here. No
-    // new button — this is additive text only, same house rule perfLine
-    // above already follows.
-    const taskBasedLine = (r.raw && typeof window.payBasisSentence === 'function' && (() => {
-      const s = window.payBasisSentence(r.raw);
+    // read straight off the fields _pyRead already resolved above (never
+    // recomputed here). No new button — this is additive text only, same
+    // house rule perfLine above already follows.
+    //
+    // PAYROLL-CARD-WORKING-SPEC-2026-08-13 — this used to pass r.raw (the
+    // normalised PC row) straight to payBasisSentence, which reads
+    // `.policy`/`.perfFactor`/`.preMultiplierNet` at the TOP LEVEL. None of
+    // those live at the top level of a normalised row (they are under
+    // r.raw.detail), so this sentence silently rendered '' for every real
+    // task-based line — the same field-name drift documented on _pyRead
+    // above, hitting a second call site. Built from r's already-resolved
+    // fields instead, which read correctly regardless of shape.
+    const taskBasedLine = (typeof window.payBasisSentence === 'function' && (() => {
+      const s = window.payBasisSentence({
+        policy: r.policy, perfFactor: r.perfFactor, kpiScore: r.kpiScore, attScore: r.attScore,
+        preMultiplierNet: r.preMultiplierNet, netBeforeCA: r.netBeforeCA
+      });
       return s ? `<div class="py-oneoff">${_pyEsc(s)}</div>` : '';
     })()) || '';
     // "Pay records are kept in HR" (§6.5) — permanently visible text, never
@@ -1719,6 +1812,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       <div class="py-who"><strong>${_pyEsc(r.name)}</strong>${r.backfill ? '<span class="badge badge-gray" style="font-size:10px">entered by hand</span>' : ''}</div>
       ${sub.length ? `<div class="py-sub">${_pyEsc(sub.join(' · '))}</div>` : '<div class="py-sub"></div>'}
       <div class="py-fields">${cols.map(c => _pyFieldHtml(c, r, o.isLive)).join('')}</div>
+      ${_pyWorkingHtml(r)}
       ${oneOffLines}
       ${perfLine}
       ${taskBasedLine}

@@ -254,6 +254,149 @@ window.kpiMonthBreakdown = function (userTasks, month) {
   return { doneInM: doneInM, inScopeCount: inScopeCount };
 };
 
+// ═══════════════════════════════════════════════════════════
+// PAYROLL-CARD-WORKING-SPEC-2026-08-13 — the owner's report on July 2026:
+// "wheres the ca deduction" / "computation as well how it came to that final
+// take home" / "the formula". His roster showed BOTH deduction columns at
+// ₱0.00 while take-home sat thousands of pesos below earnings — real money
+// moving with nothing on the card explaining it.
+//
+// ROOT CAUSE (confirmed by reading the code, not guessed): js/screens/
+// payroll.js's _pyRead was written against computePayLine's RAW field names
+// (caPlanned, caBalanceBefore, preMultiplierNet, allowance…) from before the
+// "unified payroll" pass introduced PC.normalizeLine (js/payroll.js). That
+// pass renamed/relocated several of those fields on the shape _pyRead
+// actually receives (period.lines is ALWAYS PC.normalizeLine's output —
+// see js/payroll.js's Payroll.load) — caPlanned -> cashAdvance,
+// caBalanceBefore -> detail.cashAdvanceBefore, preMultiplierNet ->
+// detail.preMultiplierNet, allowance -> allowances (plural) — but _pyRead's
+// pick-lists were only partly updated (kpiScore/attScore/perfFactor/policy
+// got a detail.* fallback; cashAdv/preMultiplierNet/allowances/caPlan/
+// overridden did not). The CA and the performance-multiplier are both REAL
+// steps computePayLine already applies (money-core.js's finalPay =
+// netBeforeCA - caPlanned, and netBeforeCA itself scaled by perfFactor under
+// 'taskbased') — the money moved correctly; only the CARD'S EXPLANATION of it
+// went missing. _pyRead has been fixed to read the actual shape (see that
+// file). This function is the second half of the fix: showing the working
+// out loud, line by line, with a guard that can never again let a take-home
+// print without the steps beneath it accounting for every peso of it.
+//
+// window.payDerivationSteps(input) — pure; no DOM, no Firestore. Takes a
+// small canonical shape (NOT a raw engine line and NOT a PC.normalizeLine
+// row directly — each of the two call sites maps its own already-existing
+// data into this, which is the one place that mapping has to happen):
+//   { earnings, allowances, oneOffNet, statutoryTotal, otherDeductions,
+//     policy, perfFactor, cashAdvance, overridden, overrideNote, takeHome }
+// Every field is optional except `takeHome`; a missing number reads as 0.
+//
+// ORDER IS THE ENGINE'S OWN, not a friendlier rearrangement (money-core.js's
+// computePayLine header + the TASK-BASED-PAY-SPEC's §3 truth table):
+//   1. Earnings, Allowances, one-off amounts added in
+//   2. Government deductions, then Other deductions taken off
+//      (netBeforeCA = gross - statutoryTotal - otherDeductions)
+//   3. ONLY under 'taskbased' — the WHOLE remainder × the performance factor
+//      (never government deductions, never a withheld deduction — see
+//      money-core.js's own comment on why the multiplier only ever touches
+//      the employee's take-home remainder)
+//   4. Cash advance instalment taken off (finalPay = netBeforeCA - caPlanned)
+//   5. A manual override, IF ONE EXISTS — see the guard below
+//   6. Take-home pay
+//
+// THE GUARD (the part that matters most). `running` is the sum of every step
+// printed above; `takeHome` is the figure actually shown as this person's
+// pay. When a genuine per-line override moved finalPay, money-core.js's
+// applyPayLineOverride shifts finalPay/netBeforeCA/effectiveGross by ONE
+// coherent delta — so a real override closes this exact gap, and is shown as
+// its own labelled "Manual adjustment" line (with its reason, or a plain
+// statement that no reason was recorded — an adjustment nobody can see is
+// indistinguishable from a bug, so it is never left unlabelled). If nothing
+// on the line explains a gap, `reconciled` comes back false and the caller
+// MUST show the residue in red — a card whose own numbers cannot account for
+// its take-home is exactly how a deduction disappears without anyone noticing.
+window.payDerivationSteps = function (input) {
+  var d = input || {};
+  var n = function (v) { return (typeof v === 'number' && isFinite(v)) ? v : 0; };
+  var earnings        = n(d.earnings);
+  var allowances       = n(d.allowances);
+  var oneOffNet        = n(d.oneOffNet);
+  var statutoryTotal   = n(d.statutoryTotal);
+  var otherDeductions  = n(d.otherDeductions);
+  var policy           = d.policy || 'flat';
+  var perfFactor       = (typeof d.perfFactor === 'number' && isFinite(d.perfFactor)) ? d.perfFactor : null;
+  var cashAdvance      = n(d.cashAdvance);
+  var overridden       = !!d.overridden;
+  var overrideNote     = d.overrideNote || '';
+  var takeHome         = n(d.takeHome);
+
+  var steps = [];
+  var running = earnings;
+  steps.push({ label: 'Earnings', amount: _ppRound2(earnings), sign: '+', kind: 'earning' });
+
+  if (allowances) {
+    running += allowances;
+    steps.push({ label: 'Allowances', amount: _ppRound2(allowances), sign: '+', kind: 'earning' });
+  }
+  if (oneOffNet) {
+    running += oneOffNet;
+    steps.push({
+      label: 'One-off amounts', amount: _ppRound2(Math.abs(oneOffNet)),
+      sign: oneOffNet >= 0 ? '+' : '-', kind: oneOffNet >= 0 ? 'earning' : 'deduction'
+    });
+  }
+
+  running -= statutoryTotal;
+  steps.push({ label: 'Government deductions', amount: _ppRound2(statutoryTotal), sign: '-', kind: 'deduction' });
+
+  running -= otherDeductions;
+  steps.push({ label: 'Other deductions', amount: _ppRound2(otherDeductions), sign: '-', kind: 'deduction' });
+
+  running = _ppRound2(running);
+
+  // Only 'taskbased' scales the whole after-deduction remainder (money-core.js
+  // ≈169). 'performance' scales the allowance alone by a different expression
+  // and is documented there as unreachable in production today; 'flat' scales
+  // nothing. Neither gets a multiply step here — any gap either would leave is
+  // caught by the guard below rather than guessed at.
+  if (policy === 'taskbased' && perfFactor != null) {
+    var beforeFactor = running;
+    running = _ppRound2(running * perfFactor);
+    steps.push({
+      label: 'Performance factor × ' + Math.round(perfFactor * 100) + '%',
+      amount: null, sign: '×', kind: 'factor',
+      note: _ppPeso(beforeFactor) + ' × ' + Math.round(perfFactor * 100) + '% = ' + _ppPeso(running)
+    });
+  }
+
+  if (cashAdvance) {
+    running = _ppRound2(running - cashAdvance);
+    steps.push({ label: 'Cash advance instalment', amount: _ppRound2(cashAdvance), sign: '-', kind: 'deduction' });
+  }
+
+  var residue = _ppRound2(takeHome - running);
+  var reconciled = Math.abs(residue) < 0.005;
+
+  if (!reconciled && overridden) {
+    steps.push({
+      label: 'Manual adjustment', amount: _ppRound2(Math.abs(residue)),
+      sign: residue >= 0 ? '+' : '-', kind: 'override',
+      note: overrideNote ? overrideNote : 'No reason was recorded for this adjustment.'
+    });
+    running = _ppRound2(running + residue);
+    residue = _ppRound2(takeHome - running);
+    reconciled = Math.abs(residue) < 0.005;
+  }
+
+  steps.push({ label: 'Take-home pay', amount: _ppRound2(takeHome), sign: '=', kind: 'total' });
+
+  return {
+    steps: steps,
+    computed: running,
+    takeHome: _ppRound2(takeHome),
+    residue: residue,
+    reconciled: reconciled
+  };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     wageFloorCheck: window.wageFloorCheck,
@@ -263,6 +406,7 @@ if (typeof module !== 'undefined' && module.exports) {
     accruedTakeHomeSoFar: window.accruedTakeHomeSoFar,
     workDaysForMonth: window.workDaysForMonth,
     presentDaysFromScore: window.presentDaysFromScore,
-    kpiMonthBreakdown: window.kpiMonthBreakdown
+    kpiMonthBreakdown: window.kpiMonthBreakdown,
+    payDerivationSteps: window.payDerivationSteps
   };
 }

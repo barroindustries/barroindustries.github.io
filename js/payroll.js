@@ -519,6 +519,7 @@ if (typeof window === 'undefined') {
           regularPay: r2(l.regularPay), otPay: r2(l.otPay), travelPay: r2(l.travelPay),
           allowanceParts: Object.assign({ meal: 0, transport: 0, rent: 0 }, l.allowances || {}),
           cashAdvanceBefore: r2(l.caBalanceBefore), cashAdvanceAfter: r2(l.caBalanceAfter),
+          caPlan: [],
           statutoryApplied: !!(st && st.applied), statutoryConfigured: !!(st && st.configured),
           days: Array.isArray(l.rows) ? l.rows : [],
           jobTitle: l.jobTitle || '', department: l.department || '',
@@ -572,6 +573,14 @@ if (typeof window === 'undefined') {
           unearnedDeductions: r2(l.unearnedDeductions),
           employerShare: l.er || null,
           cashAdvanceBefore: r2(l.caBalance),
+          // PAYROLL-CARD-WORKING-SPEC-2026-08-13 — carried forward so the
+          // "agreed terms" panel and the derivation builder (js/pay-policy.js's
+          // payDerivationSteps) can read the SAME instalment plan
+          // computePayLine froze (money-core.js's `caPlan`), instead of the
+          // panel's live CashAdvance.planFor() re-query being the only route
+          // to it. Office/monthly only — computeWeeklyLine has no plan concept
+          // (see the 'week' branch's own detail.caPlan: [], added alongside).
+          caPlan: Array.isArray(l.caPlan) ? l.caPlan : [],
           overridden: !!l.overridden,
           overrideNote: (l.overrideMeta && l.overrideMeta.note) || '',
           linkedUid: String(l.uid || ''),
