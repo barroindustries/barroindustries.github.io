@@ -1954,7 +1954,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
              cannot tell "owes nothing" from "we did not look", and this is the
              box where you decide how much of someone's pay to withhold. Say
              which it is, in all three cases. */''}
-        <div style="font-size:12px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+        <div id="pya-ca-info" style="font-size:12px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
           ${(r && r.caBalanceBefore != null && r.caBalanceBefore > 0)
             ? `${_pyEsc(name)} owes <strong>${_pyEsc(_pyPeso(r.caBalanceBefore))}</strong> in cash advances. Set what to collect this period below.`
             : (r && r.caBalanceBefore != null)
@@ -2005,6 +2005,55 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // the PREVIOUS person's fields and writes them onto THIS person.
     const $ = (id) => panel.querySelector('#' + id);
     _pyBindHrRecordBtns(panel);
+
+    // ── THE FROZEN LINE DOES NOT ALWAYS CARRY THE BALANCE ────────────────────
+    // Owner, 2026-08-13, on Jia Lopez / June 2026: the panel said the balance
+    // "could not be read". True, but useless — a period frozen before
+    // computePayRun started storing caBalance simply has no such field, and
+    // saying so is not an answer when the figure is one read away.
+    //
+    // So: when the line has no balance, ASK. CashAdvance.planFor(uid, month)
+    // returns the outstanding total AND the same per-advance terms the frozen
+    // path shows, so the panel ends up saying the same thing either way.
+    //
+    // This is TODAY's balance, not the balance as at that period, and it is
+    // labelled as such — for a period being worked out now that is the figure
+    // you want anyway, and pretending a live read is a historical one would be
+    // the more dangerous of the two.
+    if (r && r.caBalanceBefore == null && personId && kind !== 'week'
+        && window.CashAdvance && typeof window.CashAdvance.planFor === 'function') {
+      (async () => {
+        let res = null;
+        try { res = await window.CashAdvance.planFor(personId, selected); } catch (_) { res = null; }
+        // The panel can be dismissed inside the await; painting a corpse is
+        // the 300ms teardown bug this file guards against everywhere else.
+        if (!panel.isConnected) return;
+        const host = $('pya-ca-info');
+        if (!host || !res) return;
+        const bal = Number(res.caBalance) || 0;
+        if (bal <= 0) {
+          host.innerHTML = `${_pyEsc(name)} has <strong>no outstanding cash advance</strong> right now.`;
+          return;
+        }
+        const rows = (res.plan || []).map((p) => {
+          const no = (p && p.installmentNo != null) ? p.installmentNo : null;
+          const of = (p && p.terms != null) ? p.terms : null;
+          const per = (p && p.monthlyPayment != null) ? p.monthlyPayment : null;
+          return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
+            <span>${no != null && of != null ? 'Instalment ' + _pyEsc(String(no)) + ' of ' + _pyEsc(String(of)) : 'Instalment'}${per != null ? ' · ' + _pyEsc(_pyPeso(per)) + ' agreed each period' : ''}</span>
+            <strong style="white-space:nowrap">${_pyEsc(_pyPeso(p && p.amount))} due</strong>
+          </div>`;
+        }).join('');
+        host.innerHTML = `${_pyEsc(name)} owes <strong>${_pyEsc(_pyPeso(bal))}</strong> in cash advances
+          <span style="color:var(--text-muted)">(as it stands today — this period was worked out before the balance was being recorded on the line).</span>
+          ${rows ? `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">What was agreed</div>
+            ${rows}
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Leave the box below empty to collect exactly what was agreed.</div>
+          </div>` : ''}`;
+      })();
+    }
+
     // ⚠ AN UNTOUCHED BOX IS NEVER SENT — this is a MONEY rule, not tidiness.
     // Some of these amounts can also come from the person's own profile rather
     // than from this period. If a blank box were sent as an explicit 0, opening
