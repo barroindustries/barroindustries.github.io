@@ -119,6 +119,7 @@ window.renderStatutoryRatesTab = async function (container, currentUser, current
 
     <div id="sr-status-section" style="margin-top:18px"></div>
     <div id="sr-taskbased-section" style="margin-top:18px"></div>
+    <div id="sr-legalbasis-section" style="margin-top:18px"></div>
   `;
 
   // ── withholding rows ──
@@ -151,6 +152,13 @@ window.renderStatutoryRatesTab = async function (container, currentUser, current
   // switch is toggled, without re-running the rates form's own reads/writes.
   const taskBasedHost = c.querySelector('#sr-taskbased-section');
   if (taskBasedHost) window.renderTaskBasedPaySection(taskBasedHost, currentUser, currentRole);
+
+  // PAY-EXPLANATION-SPEC-2026-08-13 §"cite a law" — the citation editor, right
+  // beside the task-based pay controls it explains, per the owner's placement
+  // instruction. Independent of both sections above (reads/writes its own
+  // settings doc), so it repaints itself without touching either.
+  const legalBasisHost = c.querySelector('#sr-legalbasis-section');
+  if (legalBasisHost) window.renderPayLegalBasisSection(legalBasisHost, currentUser, currentRole);
 
   if (!canWrite) return;
 
@@ -637,4 +645,144 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
       }));
     }
   }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PAY-EXPLANATION-SPEC-2026-08-13 — "cite a law". The owner asked for a
+   legal citation behind the Office Team's task-based pay explanation and
+   the Operations Team's hours/overtime explanation shown on My Finance
+   (js/screens/dashboards.js's renderPersonalFinance).
+
+   ⚠ THIS FILE INVENTS NO LAW. No Philippine statute, article number, DOLE
+   issuance or case is written anywhere in this app's code — see
+   js/pay-policy.js's payLegalBasisLine header for the full reasoning. This
+   screen only stores and displays back exactly what a human typed here.
+
+   Stored PER TEAM, not one citation for both: settings/payrollLegalBasis =
+   { office: {citation, source, enteredBy, enteredByName, enteredAtLabel,
+   enteredAt}, ops: {...same shape} }. The Office Team's task-based-pay basis
+   and the Operations Team's hours/overtime basis are not necessarily the
+   same law — collapsing them into one field would be this app asserting an
+   equivalence it has no authority to assert. (If the owner later decides one
+   citation genuinely covers both teams, he can type the same text into both
+   fields — the storage shape does not force two DIFFERENT citations, only
+   keeps them independently editable.)
+
+   PRESIDENT-ONLY WRITE (settings/{docId} in firestore.rules — same rule
+   payrollWageFloor and payrollOfficePolicy already use; no rules change
+   needed). Staff-read, same as every other settings doc.
+
+   FREE TEXT FROM AN ADMIN, READ BY EVERY EMPLOYEE — an XSS sink. Every
+   render of citation/source below runs through esc().
+   ═══════════════════════════════════════════════════════════════════════ */
+window.renderPayLegalBasisSection = async function (container, currentUser, currentRole) {
+  if (!container) return;
+  const esc = (v) => (window.escHtml ? window.escHtml(v == null ? '' : v) : String(v == null ? '' : v));
+  const ico = (g, s) => (window.emojiIcon ? window.emojiIcon(g, s || 16) : '');
+  const canWrite = (typeof isRealPresident === 'function') ? isRealPresident() : false;
+
+  container.innerHTML = window.skeletonHtml ? window.skeletonHtml('rows') : '<p>Loading…</p>';
+
+  let doc = null, readFailed = false;
+  try {
+    const d = await db.collection('settings').doc('payrollLegalBasis').get();
+    doc = d.exists ? d.data() : null;
+  } catch (_) { readFailed = true; }
+  if (!container.isConnected) return;
+
+  const TEAMS = [
+    { key: 'office', label: 'Office Team', sub: 'Task-based pay — this is the basis shown on My Finance for anyone on the Office Team.' },
+    { key: 'ops',    label: 'Operations Team', sub: 'Hours, overtime and travel pay — this is the basis shown on My Finance for anyone on the Operations Team.' }
+  ];
+
+  const teamCard = (t) => {
+    const entry = (doc && doc[t.key]) || {};
+    const hasCitation = !!(entry.citation && String(entry.citation).trim());
+    return `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>${esc(t.label)}</h3></div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${esc(t.sub)}</p>
+      ${hasCitation
+        ? `<div class="alert-banner" style="cursor:default;background:rgba(47,158,68,.10);border-color:var(--success);margin-bottom:10px">
+             <span>${ico('✅', 16)} <strong>Citation on file.</strong> Entered by ${esc(entry.enteredByName || entry.enteredBy || '—')}${entry.enteredAtLabel ? ' on ' + esc(entry.enteredAtLabel) : ''}.</span>
+           </div>`
+        : `<div class="alert-banner" style="cursor:default;margin-bottom:10px">
+             <span>${ico('⚠', 16)} Nothing entered yet. Until this is filled in, My Finance explains the pay model in plain language only — no law is cited.</span>
+           </div>`}
+      ${canWrite ? `
+      <div class="form-group">
+        <label for="sr-lb-${t.key}-cite">Legal basis <span style="color:var(--danger)">*</span></label>
+        <textarea id="sr-lb-${t.key}-cite" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="e.g. the specific article, section or issuance you are relying on">${esc(entry.citation || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label for="sr-lb-${t.key}-src">Source</label>
+        <input id="sr-lb-${t.key}-src" placeholder="e.g. where this reading came from — counsel, an issuance, a circular" value="${esc(entry.source || '')}"/>
+      </div>
+      <label class="check-row"><input type="checkbox" id="sr-lb-${t.key}-attest"/><span>I confirm this is accurate and is Barro Industries' stated legal basis for the ${esc(t.label)}'s pay model.</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn-secondary btn-sm" id="sr-lb-${t.key}-save">${ico('💾', 14)} Save</button>
+        ${hasCitation ? `<button class="btn-secondary btn-sm" id="sr-lb-${t.key}-clear" style="color:var(--danger)">${ico('🗑️', 14)} Clear</button>` : ''}
+      </div>` : ''}
+    </div>`;
+  };
+
+  container.innerHTML = `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Legal basis for pay — My Finance</h3></div>
+      <p style="font-size:13px;line-height:1.5">The pay-model explanation each employee sees on their own My Finance page can cite the specific law it is based on. Nothing is ever invented here or anywhere in this app — until you enter a citation for a team below, the explanation shown to that team stays in plain language with no legal claim.</p>
+      ${readFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} The saved citations could not be read — what is shown below may be out of date. Reload before relying on this.</span></div>` : ''}
+      ${!canWrite ? `<div class="alert-banner" style="cursor:default"><span>${ico('🔒', 16)} Only the President can enter or change a legal citation — this becomes the employer's stated position to staff. You can read it here.</span></div>` : ''}
+    </div>
+    ${TEAMS.map(teamCard).join('')}
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
+
+  if (!canWrite) return;
+
+  TEAMS.forEach((t) => {
+    const saveBtn = container.querySelector(`#sr-lb-${t.key}-save`);
+    if (saveBtn) {
+      saveBtn.addEventListener('click', () => window.busy(saveBtn, async () => {
+        const citeEl = container.querySelector(`#sr-lb-${t.key}-cite`);
+        const srcEl  = container.querySelector(`#sr-lb-${t.key}-src`);
+        const attestEl = container.querySelector(`#sr-lb-${t.key}-attest`);
+        const citation = (citeEl ? citeEl.value : '').trim();
+        const source   = (srcEl ? srcEl.value : '').trim();
+        if (!citation) { Notifs.showToast('Enter the legal basis before saving.', 'error'); return; }
+        if (!attestEl || !attestEl.checked) { Notifs.showToast('Tick the confirmation before this is shown to staff as a legal basis.', 'error'); return; }
+        try {
+          const patch = {};
+          patch[t.key] = {
+            citation, source,
+            enteredBy: (currentUser && currentUser.uid) || '',
+            enteredByName: (window.userProfile && window.userProfile.displayName) || '',
+            enteredAtLabel: (window.bizDate ? window.bizDate() : ''),
+            enteredAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          await db.collection('settings').doc('payrollLegalBasis').set(patch, { merge: true });
+          window.logAudit && window.logAudit('update', 'settings', 'payrollLegalBasis', { team: t.key });
+          Notifs.success(`Legal basis saved for the ${t.label}.`);
+          window.renderPayLegalBasisSection(container, currentUser, currentRole);
+        } catch (e) {
+          Notifs.showToast('Could not save: ' + (e.message || e.code || e), 'error');
+        }
+      }));
+    }
+    const clearBtn = container.querySelector(`#sr-lb-${t.key}-clear`);
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => window.busy(clearBtn, async () => {
+        if (!(await window.confirmDialog({ message: `Remove the saved legal citation for the ${t.label}? Their My Finance explanation goes back to plain language only.`, danger: true }))) return;
+        try {
+          const patch = {};
+          patch[t.key] = firebase.firestore.FieldValue.delete();
+          await db.collection('settings').doc('payrollLegalBasis').set(patch, { merge: true });
+          window.logAudit && window.logAudit('update', 'settings', 'payrollLegalBasis', { team: t.key, cleared: true });
+          Notifs.success(`Legal citation cleared for the ${t.label}.`);
+          window.renderPayLegalBasisSection(container, currentUser, currentRole);
+        } catch (e) {
+          Notifs.showToast('Could not clear: ' + (e.message || e.code || e), 'error');
+        }
+      }));
+    }
+  });
 };

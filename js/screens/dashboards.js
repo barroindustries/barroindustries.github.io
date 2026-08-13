@@ -2552,6 +2552,21 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // Employee sees their own
   const u = userProfile;
   const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
+  // PAY-EXPLANATION-SPEC-2026-08-13 — "which team is this person on", the
+  // SAME test the rest of the app already uses (js/screens/employee-profile.js's
+  // _epCompose: `isOps = p.payClass === 'production'`), not a new one invented
+  // here. `u` is `userProfile`, already merged with the person's OWN
+  // payroll/{uid} doc (js/app.js), so `u.payClass` is the same field that
+  // doc carries. An absent payClass reads as Office (`'regular'` is the
+  // documented default the rest of the app already applies — see that same
+  // file's comment), which is a DEFAULT, not a guess about an unrecognised
+  // value: only a payClass that is neither 'production' nor 'regular'/absent
+  // (a corrupted or typo'd value) falls into "team unknown" — that person
+  // gets their own figures with no pay-model explanation at all, rather than
+  // being told the wrong one (owner's ruling, 2026-08-13).
+  const isOpsTeam    = u.payClass === 'production';
+  const isOfficeTeam = u.payClass === 'regular' || u.payClass == null || u.payClass === '';
+  const payTeamKnown = isOpsTeam || isOfficeTeam;
   // Manila business-calendar Y/M/D — pay-period & day logic must NOT use the
   // device-local clock (off-by-one near the UTC midnight boundary corrupts payroll).
   const _bz = bizDate();                       // "YYYY-MM-DD" Manila
@@ -2568,7 +2583,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // screen already fetches the identical assignedTo-array-contains query for
   // its own task list rendering, so without this the same query ran twice
   // per page view. Numbers produced are unchanged (same math, same inputs).
-  const [att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap, policySnap] = await Promise.all([
+  const [att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap, policySnap, legalBasisSnap] = await Promise.all([
     getAttendanceScore(currentUser.uid),
     db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
     db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
@@ -2580,7 +2595,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     // read FRESH (no dbCachedGet — a pay-deciding switch must never be a stale
     // cache read). A sentinel object on failure so this one read can't reject
     // the whole batch; distinguished from "doc absent" below.
-    db.collection('settings').doc('payrollOfficePolicy').get().catch(() => ({ __ppFailed: true }))
+    db.collection('settings').doc('payrollOfficePolicy').get().catch(() => ({ __ppFailed: true })),
+    // PAY-EXPLANATION-SPEC-2026-08-13 — the owner-entered legal citation (see
+    // js/pay-policy.js's payLegalBasisLine header). A failed read just means
+    // no citation renders this load — never a guess at what it says.
+    db.collection('settings').doc('payrollLegalBasis').get().catch(() => null)
   ]);
   const kpi = await getKpiScore(currentUser.uid, myTasksSnap.docs.map(d=>d.data()), kpiTargetSnap);
 
@@ -2600,6 +2619,17 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       activePolicy = storedPolicy;
     }
   }
+
+  // PAY-EXPLANATION-SPEC-2026-08-13 — the owner-entered legal citation for
+  // THIS person's team, per js/pay-policy.js's payLegalBasisLine ('' when
+  // nothing has been entered for that team, or the read failed, or the
+  // team is unknown — every one of those cases renders no legal claim).
+  const legalBasisDoc  = (legalBasisSnap && legalBasisSnap.exists) ? (legalBasisSnap.data() || {}) : {};
+  const legalBasisTeam = isOpsTeam ? 'ops' : (isOfficeTeam ? 'office' : null);
+  const legalBasisText = (legalBasisTeam && typeof window.payLegalBasisLine === 'function')
+    ? window.payLegalBasisLine(legalBasisDoc[legalBasisTeam]) : '';
+  const legalBasisAdminNote = (!legalBasisText && legalBasisTeam &&
+    (typeof window.isMoneyPriv === 'function') && window.isMoneyPriv());
 
   const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
     const ta = a.createdAt?.toMillis?.() || 0;
@@ -2730,15 +2760,38 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // projection's cash-advance step is always ₱0 — a known simplification of
   // the existing projection, not something this block changes.
   const workingTakeHome = isFinalMonth ? (Number(frozenThisMonth.finalPay) || 0) : (projLine ? projLine.finalPay : null);
+  // PAY-EXPLANATION-PARITY-2026-08-13 — a frozen month's one-off amounts
+  // (see the salary_history write in js/departments.js's disbursePayRun,
+  // which now mirrors line.oneOffEarnings/oneOffDeductions onto this same
+  // doc). Absent on a month disbursed before that field existed -> both
+  // read as 0, byte-identical to today's behaviour for those old rows.
+  //
+  // WHY BOTH NUMBERS ARE NEEDED HERE, NOT JUST THEIR NET: `frozenThisMonth.
+  // deductions` is `otherDeductions` AFTER a one-off deduction was already
+  // folded in (money-core's fold order — see js/payroll.js's PC.applyOneOffs),
+  // while `frozenThisMonth.salary` (`line.base`) is NEVER touched by a
+  // one-off EARNING fold. Passing the folded `deductions` straight through
+  // while adding a separate one-off step would count a one-off deduction
+  // TWICE and made the guard fire in the wrong direction. Subtracting the
+  // one-off deduction back out of the deductions step here — exactly what
+  // js/screens/payroll.js's PC.normalizeLine already does for Finance's own
+  // card (`deductions: otherDeductions - oneOffDeductions`) — is what keeps
+  // the two surfaces' derivations identical. Only the STEPS shown here are
+  // adjusted; frozenThisMonth.deductions itself (read elsewhere on this page,
+  // e.g. Salary History's own Deductions column) is never touched.
+  const _oneOffEarn = isFinalMonth ? (Number(frozenThisMonth.oneOffEarnings) || 0) : 0;
+  const _oneOffDed  = isFinalMonth ? (Number(frozenThisMonth.oneOffDeductions) || 0) : 0;
   const workingDerivation = (!noPayRecordWords && !projUnavailable && workingTakeHome != null && typeof window.payDerivationSteps === 'function')
     ? window.payDerivationSteps({
         earnings: isFinalMonth ? (Number(frozenThisMonth.salary) || 0) : (projLine ? projLine.base : 0),
         allowances: isFinalMonth ? (Number(frozenThisMonth.allowance) || 0) : (projLine ? projLine.allowance : 0),
-        oneOffNet: 0,
+        oneOffNet: _oneOffEarn - _oneOffDed,
         statutoryTotal: isFinalMonth
           ? ((Number(frozenThisMonth.sss) || 0) + (Number(frozenThisMonth.philhealth) || 0) + (Number(frozenThisMonth.pagibig) || 0) + (Number(frozenThisMonth.tax) || 0))
           : (projLine ? projLine.statutoryTotal : 0),
-        otherDeductions: isFinalMonth ? (Number(frozenThisMonth.deductions) || 0) : (projLine ? projLine.otherDeductions : 0),
+        otherDeductions: isFinalMonth
+          ? Math.max(0, (Number(frozenThisMonth.deductions) || 0) - _oneOffDed)
+          : (projLine ? projLine.otherDeductions : 0),
         policy: isFinalMonth ? (frozenThisMonth.policy || 'flat') : (projLine ? projLine.policy : 'flat'),
         perfFactor: isFinalMonth ? frozenThisMonth.perfFactor : (projLine ? projLine.perfFactor : null),
         cashAdvance: isFinalMonth ? (Number(frozenThisMonth.caDeducted) || 0) : (projLine ? (Number(projLine.caPlanned) || 0) : 0),
@@ -2786,6 +2839,79 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
   const kpiColor  = dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
   const attColor  = dispAtt>=0.85?'var(--success)':dispAtt>=0.6?'var(--warning)':'var(--danger)';
+
+  // PAY-EXPLANATION-SPEC-2026-08-13 — "How your pay is worked out". The
+  // owner's ask, verbatim: "on the 'my finance' of each employee show this:
+  // No work, No pay ... explain properly that they are task based, and there
+  // is a proper computation of kpi and attendance since we do not follow a
+  // 9 to 5. cite a law" — with the later ruling that the whole task-based/
+  // no-work-no-pay explanation is OFFICE TEAM ONLY. The Operations Team's
+  // pay has no KPI term at all (computePayLine THROWS if the task-based
+  // policy ever meets a production worker — that guard is deliberate and is
+  // not touched here); they are paid for geo-tracked hours, so they get a
+  // DIFFERENT explanation that never mentions KPI, tasks or a performance
+  // factor. A person whose payClass matches neither team (payTeamKnown ===
+  // false — a corrupted/unrecognised value) gets no model explanation at
+  // all, never a guess at which one applies to them.
+  //
+  // Every number quoted below is read off a variable this screen ALREADY
+  // computed for the cards above (dispKpi/dispAtt/multiplier/taskPct/
+  // doneTasks/myTasks) — nothing here is a second, independent calculation
+  // that could ever disagree with what the rest of the page shows.
+  //
+  // THE LEGAL CITATION. Per the owner's instruction, this app asserts NO
+  // statute, article, DOLE issuance or case — see js/pay-policy.js's
+  // payLegalBasisLine header for why. `legalBasisText` is '' unless the
+  // President has entered one for this exact team on the Gov Rates screen
+  // (js/screens/statutory-rates.js's renderPayLegalBasisSection); until then
+  // a money-privileged viewer sees a plain "not entered yet" note and a
+  // plain employee sees nothing about law at all — no placeholder, no
+  // inference, nothing a reader could mistake for a verified citation.
+  const payExplainHtml = (() => {
+    if (!payTeamKnown) return '';
+    const K = Math.round(dispKpi * 100);
+    const A = Math.round(dispAtt * 100);
+    const F = Math.round((multiplier || 0) * 100);
+    const legalRow = legalBasisText
+      ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);line-height:1.6"><strong style="color:var(--text)">Legal basis:</strong> ${escHtml(legalBasisText)}</div>`
+      : (legalBasisAdminNote
+        ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted)">${emojiIcon('🔒',12)} No legal citation has been entered for this pay model yet — only the President can add one, on Finance → Taxes &amp; BIR → Gov Rates.</div>`
+        : '');
+    if (isOpsTeam) {
+      return `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>How your pay is worked out</h3></div>
+        <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
+          <p style="margin:0 0 10px">You are paid for the hours you actually worked. Your time in and time out are recorded by punching in and out at your work site, and each punch checks that you were actually there.</p>
+          <p style="margin:0 0 10px">Hours beyond your regular day are paid as overtime, at your plain hourly rate. Travel time is paid at half your rate.</p>
+          <p style="margin:0">If a week's pay looks wrong, ask HR or Finance for your payslip — they work from the same punches and the same rates shown on your record.</p>
+          ${legalRow}
+        </div>
+      </div>`;
+    }
+    // Office Team. Two separate reasons the factor can be inert today — no
+    // pay record on file, or the switch simply being off — and the words
+    // must name the actual one (noPayRecordWords is already shown elsewhere
+    // on this page; conflating it with "the switch is off" here would tell
+    // someone with no salary on file the wrong reason for the same fact).
+    const factorLine = noPayRecordWords
+      ? `You do not have a pay record set up yet, so this does not apply to your pay right now. Once one is set up, here is where your task KPI and attendance currently stand: task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30%, for a performance factor of ${F}% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%).`
+      : multiplierDrivesPay
+        ? `This month, your performance factor is <strong>${F}%</strong> — task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%). Your take-home pay above, after government and other deductions, is multiplied by this factor.`
+        : `Task-based pay is not switched on for the Office Team right now, so this does not change your pay yet — everyone is paid the full amount regardless of it. If it is switched on, here is where you currently stand: task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30%, for a performance factor of ${F}% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%).`;
+    return `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>How your pay is worked out</h3></div>
+        <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
+          <p style="margin:0 0 10px"><strong>No work, no pay.</strong> Your role on the Office Team is task-based, not a fixed 9-to-5 schedule — pay follows what you deliver, not hours spent at a desk.</p>
+          <p style="margin:0 0 10px">${factorLine}</p>
+          <p style="margin:0 0 10px">Task KPI comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${myTasks.length} this month), plus any deliverable score your manager sets. Attendance comes from the Attendance screen — your on-time morning check-ins, counted as on time when you time in and read your notifications before 9:00 AM.</p>
+          <p style="margin:0 0 10px">Finishing your assigned tasks raises your task KPI. Timing in and reading your notifications before 9:00 AM raises your attendance score.</p>
+          <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
+          ${legalRow}
+        </div>
+      </div>`;
+  })();
 
   c.innerHTML = `
     <div class="page-header">
@@ -2872,6 +2998,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         </div>
       </div>
     </div>
+
+    <!-- How your pay is worked out -->
+    ${payExplainHtml}
 
     <!-- Payroll Breakdown -->
     <div class="card" style="margin-bottom:16px">

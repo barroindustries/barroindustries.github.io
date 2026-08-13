@@ -397,6 +397,49 @@ window.payDerivationSteps = function (input) {
   };
 };
 
+// ═══════════════════════════════════════════════════════════
+// PAY-EXPLANATION-LEGAL-BASIS-2026-08-13 — the owner asked to "cite a law".
+// THIS FILE INVENTS NOTHING: no Philippine statute, article number, DOLE
+// issuance or case is ever asserted here or anywhere else in this app. The
+// citation is a stored, OWNER-ENTERED field — settings/payrollLegalBasis,
+// written only by the President from js/screens/statutory-rates.js's
+// renderPayLegalBasisSection (same President-write/staff-read pattern as
+// settings/payrollWageFloor) — never guessed, paraphrased or defaulted by
+// code. A wrong or misremembered citation shown to staff as justification for
+// a pay figure is worse than no citation at all, and it is the employer's
+// legal position to state, not the software's.
+//
+// Stored PER TEAM (office / ops), not one citation for both — the Office
+// Team's task-based-pay basis and the Operations Team's hours/overtime basis
+// are not necessarily the same law, and conflating them would be an assertion
+// this app has no authority to make. See js/screens/dashboards.js's
+// renderPersonalFinance for the read side: no citation of any kind renders
+// for an employee until their team's entry exists.
+//
+// window.payLegalBasisLine(entry) — pure formatter, no DOM, no escaping (the
+// caller runs escHtml() on the result — this is free text an admin typed and
+// every employee reads, so it is treated as an XSS sink at every render site,
+// never here). `entry` is ONE team's stored object:
+//   { citation, source, enteredByName, enteredAtLabel }
+// Returns '' when there is no citation text to show, so a caller can render
+// conditionally (or show its own "not entered yet" note) without a second
+// blank-check.
+window.payLegalBasisLine = function (entry) {
+  var e = entry || {};
+  var citation = String(e.citation || '').trim();
+  if (!citation) return '';
+  var source = String(e.source || '').trim();
+  var who = String(e.enteredByName || '').trim();
+  var when = String(e.enteredAtLabel || '').trim();
+  var line = citation;
+  if (source) line += ' — ' + source;
+  var attest = [];
+  if (who) attest.push('entered by ' + who);
+  if (when) attest.push('on ' + when);
+  if (attest.length) line += ' (' + attest.join(' ') + ')';
+  return line;
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     wageFloorCheck: window.wageFloorCheck,
@@ -407,6 +450,7 @@ if (typeof module !== 'undefined' && module.exports) {
     workDaysForMonth: window.workDaysForMonth,
     presentDaysFromScore: window.presentDaysFromScore,
     kpiMonthBreakdown: window.kpiMonthBreakdown,
-    payDerivationSteps: window.payDerivationSteps
+    payDerivationSteps: window.payDerivationSteps,
+    payLegalBasisLine: window.payLegalBasisLine
   };
 }

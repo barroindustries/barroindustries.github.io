@@ -2383,6 +2383,31 @@ window.disbursePayRun = async function(month, opts = {}) {
     shBatch.set(shRef, {
       userId: line.uid, userName: line.name, month,
       salary: line.base, allowance: line.allowance, deductions: line.otherDeductions,
+      // PAY-EXPLANATION-PARITY-2026-08-13 — additive, display-only mirror of
+      // this line's one-off amounts (js/payroll.js's PC.applyOneOffs already
+      // froze these onto `line` when the period was folded). Never read by
+      // any money computation and never touches `deductions`/`finalPay`
+      // above, which stay exactly as they were before this field existed.
+      //
+      // WHY THIS WAS MISSING MATTERS: `deductions` here is `otherDeductions`
+      // AFTER a one-off deduction is folded in (money-core order), but
+      // `salary` (`line.base`) is NEVER touched by a one-off EARNING fold —
+      // only `gross`/`netBeforeCA`/`finalPay`/`effectiveGross` are. Without
+      // these two fields, js/screens/dashboards.js's renderPersonalFinance
+      // had no way to tell a frozen month's "How this take-home was worked
+      // out" ledger that a one-off earning (e.g. a bonus) had been added —
+      // its steps summed to less than finalPay by exactly that amount, and
+      // the reconciliation guard fired a false "these figures do not add up"
+      // warning on a perfectly correct payslip. js/screens/payroll.js's own
+      // roster card never had this bug: PC.normalizeLine already carries
+      // `oneOffs`/`oneOffEarnings`/`oneOffDeductions` on the LIVE pay_runs
+      // line it reads from, which salary_history (the disbursed, employee-
+      // readable mirror) never mirrored. This closes that gap for every
+      // month disbursed from here on; a month frozen before this change
+      // simply has no one-off figures to show (reads as 0, unchanged from
+      // today — never a guess at what an old bonus was).
+      oneOffEarnings: line.oneOffEarnings || 0,
+      oneOffDeductions: line.oneOffDeductions || 0,
       // The withheld/unearned split this line was booked with, frozen alongside
       // everything else so a payslip reprint or a later audit can tell which
       // half of "Other Deductions" became a payable and which never was an
