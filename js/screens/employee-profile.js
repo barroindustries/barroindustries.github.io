@@ -495,6 +495,10 @@ function _epOpenEditor(ctx, statuses) {
       if (typeof closeModal === 'function') closeModal();
       // Re-open cleanly against the freshly written docs.
       window.openEmployeeProfile({ uid, workerId, name: P.name });
+      // …and put the ROSTER behind this back in step. Without it the list keeps
+      // showing the value it loaded before the edit, and closing back to it
+      // reads exactly like the save having been thrown away.
+      _epRefreshRosterIfOpen();
     } catch (e) {
       saveBtn.disabled = false; saveBtn.textContent = 'Save';
       Notifs.showToast(e && e.code === 'permission-denied'
@@ -809,6 +813,16 @@ function _epCanReinstate() {
     || (Array.isArray(window.currentDepts) && window.currentDepts.includes('HR'));
 }
 
+// The open roster, remembered so a save made in a panel ON TOP of it can put
+// the list back in step. Owner, 2026-08-13: "when im changing their employment
+// type, it does not save". It did save — every time. The editor writes, toasts,
+// and reopens the PROFILE against the fresh doc, so the value was right there.
+// But the ROSTER underneath was painted once, reads Firestore directly (no
+// cache to invalidate), and was never repainted — so closing back to the list
+// showed the old value, which is indistinguishable from the save having failed.
+// `var`, not `const`: file-scope binding in a classic script (see the header).
+var _epRosterPanel = null;
+
 window.renderEmployeeProfiles = function () {
   const panel = window.openPage(
     `${_epIcon('🪪', 16)} Employee Profiles`,
@@ -816,9 +830,21 @@ window.renderEmployeeProfiles = function () {
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`
   );
   const body = panel.querySelector('.page-panel-body');
+  _epRosterPanel = panel;
   _epLoadRoster(panel, body);
   return panel;
 };
+
+// Repaint the roster if one is still open. Cheap and safe: no-ops when the list
+// was never opened or has since been dismissed, and _epLoadRoster already
+// bails on a detached panel, so a race with a closing list cannot paint a
+// corpse.
+function _epRefreshRosterIfOpen() {
+  const p = _epRosterPanel;
+  if (!p || !p.isConnected) return;
+  const body = p.querySelector('.page-panel-body');
+  if (body) _epLoadRoster(p, body);
+}
 
 async function _epLoadRoster(panel, body) {
   const [usersRes, wpRes] = await Promise.all([
@@ -981,7 +1007,11 @@ async function _epLoadRoster(panel, body) {
       }
       window.logAudit && window.logAudit('reinstate', r.uid ? 'user' : 'worker_profile', r.uid || r.workerId, { name: r.name });
       Notifs.success(r.name + ' reinstated.');
-      window.renderEmployeeProfiles();          // repaint so the badge and the button clear
+      // Repaint IN PLACE so the badge and the button clear. Not
+      // renderEmployeeProfiles() — that opens a SECOND roster on top of the
+      // one you are standing on, and closing it drops you back onto the stale
+      // first copy still showing "Offboarded".
+      _epRefreshRosterIfOpen();
     } catch (err) {
       Notifs.showToast('Could not reinstate: ' + (err.message || err.code || err), 'error');
     }
