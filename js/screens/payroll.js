@@ -1940,9 +1940,20 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       </div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Amounts for this period</div>
-        ${(r && r.caBalanceBefore != null && r.caBalanceBefore > 0)
-          ? `<div style="font-size:12px;margin-bottom:10px">${_pyEsc(name)} owes <strong>${_pyEsc(_pyPeso(r.caBalanceBefore))}</strong> in cash advances. Set what to collect this period below.</div>`
-          : ''}
+        ${/* THE BALANCE IS ALWAYS STATED (owner, 2026-08-13: "exisitng ca should
+             be visible here"). It used to be printed only when it was above
+             zero, so a person with nothing outstanding and a person whose
+             balance had not been read looked IDENTICAL — a blank space. You
+             cannot tell "owes nothing" from "we did not look", and this is the
+             box where you decide how much of someone's pay to withhold. Say
+             which it is, in all three cases. */''}
+        <div style="font-size:12px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+          ${(r && r.caBalanceBefore != null && r.caBalanceBefore > 0)
+            ? `${_pyEsc(name)} owes <strong>${_pyEsc(_pyPeso(r.caBalanceBefore))}</strong> in cash advances. Set what to collect this period below.`
+            : (r && r.caBalanceBefore != null)
+              ? `${_pyEsc(name)} has <strong>no outstanding cash advance</strong>.`
+              : `<span style="color:var(--text-muted)">${_pyEsc(name)}'s cash advance balance could not be read for this period, so it is not shown — collect an instalment only if you know the balance from their record.</span>`}
+        </div>
         <div class="form-row">
           ${moneyFields.map(([k, lab, v]) => `<div class="form-group"><label>${_pyEsc(lab)}</label>
             <input id="pya-${_pyEsc(k)}" type="number" step="0.01" min="0" inputmode="decimal" value="${v != null ? _pyEsc(v) : ''}" placeholder="0.00"/></div>`).join('')}
@@ -2107,6 +2118,18 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       <div class="info-banner" style="margin-bottom:12px">
         ${_pyEsc(name)} was paid ${_pyEsc(_pyPeso(r && r.takeHome))} for ${_pyEsc(label)}.
         Saving a correction undoes that person's entry in the books, puts the new one in its place and reissues their payslip. <strong>Nobody else is touched.</strong>
+      </div>
+      ${/* Same rule as the Adjust panel: the balance is ALWAYS stated, because
+           the alternative is a blank space that reads identically whether the
+           person owes nothing or the figure could not be read. This panel
+           changes money that has ALREADY been paid, so it matters more here,
+           not less. Note the balance shown is the one frozen at pay time. */''}
+      <div style="font-size:12px;margin-bottom:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px">
+        ${(r && r.caBalanceBefore != null && r.caBalanceBefore > 0)
+          ? `${_pyEsc(name)} owed <strong>${_pyEsc(_pyPeso(r.caBalanceBefore))}</strong> in cash advances when this was paid${(+r.cashAdv || 0) > 0 ? `, and ${_pyEsc(_pyPeso(r.cashAdv))} was collected` : `, and nothing was collected`}.`
+          : (r && r.caBalanceBefore != null)
+            ? `${_pyEsc(name)} had <strong>no outstanding cash advance</strong> when this was paid.`
+            : `<span style="color:var(--text-muted)">${_pyEsc(name)}'s cash advance balance was not recorded on this payment, so it is not shown here.</span>`}
       </div>
       <div class="form-row">
         ${fields.map(([k, lab, v]) => `<div class="form-group"><label>${_pyEsc(lab)}</label>
