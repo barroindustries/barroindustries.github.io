@@ -740,6 +740,20 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
              reader then announces something the sighted label does not say. -->
         <button class="btn-secondary btn-sm" id="py-thisweek" title="${activeTeam === 'operations' ? 'This week' : 'This month'} — jump to the ${activeTeam === 'operations' ? 'week' : 'month'} that contains today">${activeTeam === 'operations' ? 'This week' : 'This month'}</button>
         ${isLive ? '<button class="btn-secondary btn-sm" id="py-refresh-figures" title="Re-read the punches, attendance and records as they stand right now">Refresh figures</button>' : ''}
+        <!-- THE STUCK-AT-ZERO TRAP (owner, 2026-08-13: July showed "Ready to
+             check — 0 people, ₱0.00" and asked why). An ENDED period is worked
+             out ONCE, automatically, on the first open — but that auto-step
+             only fires while the state is still 'notstarted'. If the roster
+             was wrong at that moment (nobody had a rate yet, nobody was marked
+             as paid monthly), the period froze at nobody, and there was no
+             control anywhere to work it out again: "Refresh figures" is
+             painted only for a period that is still running. So a period could
+             sit at zero for ever while the records underneath it were fixed —
+             and the only enabled button was the one that sends that zero to
+             Finance. The ENGINE always allowed this (PC.canPrepare admits
+             'prepared'); the door was simply missing. -->
+        ${(!isLive && canPrepare && state === 'prepared')
+          ? '<button class="btn-secondary btn-sm" id="py-rework" title="Read the rates, records and punches again as they stand now, and rebuild this period from them">Work these out again</button>' : ''}
       </div>
 
       <div id="py-headline"></div>
@@ -1651,6 +1665,23 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // as a plain, named button for someone who just wants the latest numbers
     // without changing anything.
     root.querySelector('#py-refresh-figures')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      load(selected);
+    }));
+
+    // Rebuild an ENDED period from the records as they stand now — the way out
+    // of the stuck-at-zero trap described at the button. Safe to press at any
+    // time before the hours are sent to Finance: Payroll.prepare moves nothing
+    // and pays nobody, and its own state gate refuses once the period has been
+    // checked or paid. Held-back people and one-off amounts survive, because
+    // both live on the PERIOD rather than on the rebuilt lines.
+    root.querySelector('#py-rework')?.addEventListener('click', (ev) => window.busy(ev.currentTarget, async () => {
+      try {
+        const res = await window.Payroll.prepare(selected);
+        warningsByPeriod[selected] = (res && res.warnings) || [];
+        Notifs.success('Worked out again from the records as they stand now.');
+      } catch (e) {
+        Notifs.showToast(e.message || String(e), 'error');
+      }
       load(selected);
     }));
 
