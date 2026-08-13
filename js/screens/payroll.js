@@ -214,6 +214,21 @@ function _pyRead(l) {
     // a government-deductions column counts statutory twice on screen.
     otherDed:   _pyPick(l.otherDeductionsOnly, l.otherDeductions, l.deductions),
     statutory:  stat,
+    // Owner, 2026-08-13: "show gross after computation the net after
+    // deductions" — the working was invisible, so a smaller take-home looked
+    // arbitrary. Present on task-based lines only, because only there is there
+    // a step between the deductions and the net.
+    //
+    // ⚠ NAMED FOR WHAT IT ACTUALLY IS. The engine DEDUCTS FIRST and applies the
+    // factor to the remainder — netBeforeCA = (gross − statutory − other) ×
+    // perfFactor — deliberately, so the multiplier never scales money owed to
+    // SSS or to a bond holder. So this figure is the amount AFTER deductions
+    // and BEFORE the performance factor, which is the opposite order to the
+    // owner's phrasing. Labelled explicitly rather than reordered: reordering
+    // would change what people are paid (~₱316 on his own example), and that is
+    // his ruling to make, not a layout decision.
+    preMultiplierNet: _pyPick(l.preMultiplierNet),
+    perfFactor: _pyPick(l.perfFactor),
     cashAdv:    _pyPick(l.caDeduction, l.caPlanned),
     caBalanceBefore: _pyPick(l.caBalanceBefore, l.caBalance),
     caBalanceAfter:  _pyPick(l.caBalanceAfter),
@@ -276,6 +291,11 @@ var PY_COLS = [
   { key: 'oneOffNet',   label: 'One-off amounts',      always: false },
   { key: 'otherDed',    label: 'Other deductions',     always: false },
   { key: 'statutory',   label: 'Government deductions',always: false },
+  // The step BETWEEN the deductions and the net, shown only when there is one
+  // (task-based lines). Label says the order out loud — this is after the
+  // deductions have come off and before the performance factor is applied, not
+  // the other way round. See the note on preMultiplierNet in _pyRead.
+  { key: 'preMultiplierNet', label: 'After deductions', always: false },
   { key: 'cashAdv',     label: 'Cash advance',         always: false },
   { key: 'takeHome',    label: 'Take-home pay',        always: true  }
 ];
@@ -283,7 +303,7 @@ var PY_COLS = [
 // Column keys that are MONEY, HOURS or COUNTS — the ones a totals row can
 // honestly sum. attScore/kpiScore are percentages and never appear here.
 var PY_SUMMABLE_KEYS = ['regHours', 'otHours', 'travelHours', 'earnings', 'allowances',
-  'oneOffNet', 'otherDed', 'statutory', 'cashAdv', 'takeHome'];
+  'oneOffNet', 'otherDed', 'statutory', 'preMultiplierNet', 'cashAdv', 'takeHome'];
 
 // Which columns this period actually needs. Deliberately NOT "every column
 // always": an office month has no travel hours, and a column of "—" asserts
@@ -304,6 +324,10 @@ function _pyColsFor(reads) {
     // number into it, which is exactly backwards — the whole point is to show
     // there IS a balance to collect, so the field gets found and used.
     if (r.caBalanceBefore != null && r.caBalanceBefore > 0) has.cashAdv = true;
+    // (preMultiplierNet switches its own column on through PY_SUMMABLE_KEYS
+    // above — it is null on flat lines, where the after-deductions figure and
+    // the net are the same number and a second column would assert a step that
+    // did not happen.)
   });
   return PY_COLS.filter(c => c.always || has[c.key]);
 }
@@ -1621,6 +1645,11 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       regHours: tot.regHours, otHours: tot.otHours, travelHours: tot.travelHours,
       earnings: tot.earnings, allowances: tot.allowances, oneOffNet: tot.oneOffNet,
       otherDed: tot.otherDed, statutory: tot.statutory, cashAdv: tot.cashAdv,
+      // Carried so the totals row has a cell wherever the people above have a
+      // column. A blank here would slide every later figure one column left on
+      // the totals line — the misalignment this file's column rule exists to
+      // prevent, and on a pay roster that is a lie rather than a cosmetic slip.
+      preMultiplierNet: tot.preMultiplierNet,
       caBalanceBefore: null, caBalanceAfter: null, takeHome: tot.takeHome,
       // Percentages do not aggregate into a roster total — showing a sum or a
       // silent average here would assert a figure nobody asked for, so the
