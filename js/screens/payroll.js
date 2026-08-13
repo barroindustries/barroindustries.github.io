@@ -218,6 +218,13 @@ function _pyRead(l) {
     caBalanceBefore: _pyPick(l.caBalanceBefore, l.caBalance),
     caBalanceAfter:  _pyPick(l.caBalanceAfter),
     caShortfall:     _pyPick(l.caShortfall),
+    // THE AGREED TERMS (owner, 2026-08-13: "also show the terms and how much
+    // should be deducted"). Already frozen onto the line by computePayRun —
+    // CashAdvance.planFor builds one entry per outstanding advance carrying
+    // { caId, amount, installmentNo, terms, monthlyPayment } — and never read
+    // by this screen until now, so the person setting an instalment had to
+    // remember the repayment plan or go and look it up.
+    caPlan:     Array.isArray(l.caPlan) ? l.caPlan : [],
     takeHome:   _pyPick(l.takeHome, l.net, l.finalPay),
     rows:       Array.isArray(l.rows) ? l.rows : [],
     backfill:   l.backfill === true,
@@ -1953,6 +1960,27 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
             : (r && r.caBalanceBefore != null)
               ? `${_pyEsc(name)} has <strong>no outstanding cash advance</strong>.`
               : `<span style="color:var(--text-muted)">${_pyEsc(name)}'s cash advance balance could not be read for this period, so it is not shown — collect an instalment only if you know the balance from their record.</span>`}
+          ${/* THE AGREED TERMS, per advance (owner: "also show the terms and how
+               much should be deducted"). CashAdvance.planFor already worked all
+               of this out and froze it onto the line; without it, whoever sets
+               the instalment has to remember the repayment plan or go and look
+               it up on another screen, and the box sits there blank either way. */''}
+          ${(r && r.caPlan && r.caPlan.length) ? `
+            <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+              <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">What was agreed</div>
+              ${r.caPlan.map((p) => {
+                const no = (p && p.installmentNo != null) ? p.installmentNo : null;
+                const of = (p && p.terms != null) ? p.terms : null;
+                const per = (p && p.monthlyPayment != null) ? p.monthlyPayment : null;
+                return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0">
+                  <span>${no != null && of != null ? 'Instalment ' + _pyEsc(String(no)) + ' of ' + _pyEsc(String(of)) : 'Instalment'}${per != null ? ' · ' + _pyEsc(_pyPeso(per)) + ' agreed each period' : ''}</span>
+                  <strong style="white-space:nowrap">${_pyEsc(_pyPeso(p && p.amount))} due now</strong>
+                </div>`;
+              }).join('')}
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+                Leave the box below empty to collect exactly what was agreed. Type an amount only to collect something different this period — the rest stays on the balance.
+              </div>
+            </div>` : ''}
         </div>
         <div class="form-row">
           ${moneyFields.map(([k, lab, v]) => `<div class="form-group"><label>${_pyEsc(lab)}</label>
