@@ -1395,12 +1395,33 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml } = ctx;
 
     if (!period || (!reads.length && !notPaid.length)) {
+      // AN EMPTY ROSTER MUST EXPLAIN ITSELF (owner, 2026-08-13: opened July,
+      // saw nobody, asked "why", and after the retry button was added still
+      // had no answer). The reasons were already computed and stored — every
+      // skipped person carries one — but they sat behind the "Who else should
+      // be here?" tap, so the screen told you to go and check something
+      // instead of telling you what was already known. "Check that people have
+      // a rate" is advice; "Jia Lopez — no pay rate on file" is the answer.
+      const skipped = (period && Array.isArray(period.skipped)) ? period.skipped : [];
+      const rows = skipped.map((s) => {
+        const w = _pyNotPaidWords(s && (s.reason || s.why));
+        const nm = _pyName(s) || (s && (s.workerId || s.uid)) || 'Someone';
+        return `<div style="display:flex;gap:10px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="font-weight:700;min-width:0;flex:1">${_pyEsc(nm)}</div>
+          <div style="font-size:12px;color:${w.danger ? 'var(--danger)' : 'var(--text-muted)'};text-align:right;flex:2">${_pyEsc(w.short)}</div>
+        </div>`;
+      }).join('');
       el.innerHTML = `<div class="empty-state">
         <div class="empty-icon">${_pyIcon('👥', 40)}</div>
         <h4>Nobody is on the roster for ${_pyEsc(label)}</h4>
-        <p>${canPrepare
-          ? 'No one was found to pay for this period. Check that people have a rate and are marked as being paid, then open this period again.'
-          : 'No one has been worked out for this period yet.'}</p>
+        <p>${skipped.length
+          ? (skipped.length === 1 ? 'One person was left out, and this is why:' : _pyEsc(String(skipped.length)) + ' people were left out, and this is why:')
+          : (canPrepare
+              ? 'Nobody was found to pay for this period, and nothing was recorded about why — which usually means the pay records had not been set up yet when this period was first worked out. Fix the records, then press "Work these out again" above.'
+              : 'No one has been worked out for this period yet.')}</p>
+        ${rows ? `<div style="max-width:560px;margin:12px auto 0;text-align:left">${rows}</div>` : ''}
+        ${skipped.length && canPrepare
+          ? '<p style="font-size:12px;margin-top:12px">Put that right on their record, then press <strong>Work these out again</strong> at the top of this screen.</p>' : ''}
         ${whoElseHtml ? `<div style="margin-top:10px">${whoElseHtml}</div>` : ''}
       </div>`;
       return;
