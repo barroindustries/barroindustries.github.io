@@ -334,7 +334,12 @@ async function _epLoad(panel, body, ids) {
     if (window.lucide) lucide.createIcons({ nodes: [body] });
     const tb = body.querySelector('#ep-tab-body');
     if (!tb) return;
-    const ctx = { panel, uid, workerId, user, pay, wp, P, canMoney, canHrEdit, canSenior, moneyDenied, reload: render };
+    const ctx = {
+      panel, uid, workerId, user, pay, wp, P, canMoney, canHrEdit, canSenior, moneyDenied, reload: render,
+      // Lets a tab jump the user to another tab (e.g. Employment's Government
+      // numbers pointer -> Pay & Raises' Government card) without re-fetching.
+      gotoTab: (key) => { active = key; render(); }
+    };
     if (active === 'employment')   _epTabEmployment(tb, ctx);
     else if (active === 'pay')     _epTabPay(tb, ctx);
     else if (active === 'ca')      _epTabCashAdvance(tb, ctx);
@@ -381,7 +386,10 @@ function _epTabEmployment(tb, ctx) {
         ${_epRow('PhilHealth number', P.phNum)}
         ${_epRow('Pag-IBIG MID', P.pagibigNum)}
         ${_epRow('TIN', P.tinNum)}
-        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Government numbers live with the pay record. Edit them from ${P.isOps ? 'HR → Operations Team → this worker' : 'Payroll → Edit Payroll'}, which is where the payslip and BIR alphalist read them from.</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Government numbers live with the pay record. Edit them from ${P.isOps
+          ? 'HR → Operations Team → this worker'
+          : 'the Pay &amp; Raises tab, in the Government card below'}, which is where the payslip and BIR alphalist read them from.
+          ${!P.isOps ? `<button class="btn-secondary btn-sm" id="ep-goto-gov-btn" style="margin-top:8px">Go to Pay &amp; Raises → Government</button>` : ''}</p>
       </div>
     </div>` : _epWithheldCard('Government numbers',
         'SSS, PhilHealth, Pag-IBIG and TIN are stored with the pay record, which is limited to the President, a Manager and the Accountant. They are withheld here rather than shown blank.')}
@@ -393,6 +401,12 @@ function _epTabEmployment(tb, ctx) {
 
   const editBtn = tb.querySelector('#ep-edit-btn');
   if (editBtn) editBtn.addEventListener('click', () => _epOpenEditor(ctx, statuses));
+  // The pointer above is not a dead end — jump straight to the tab that
+  // actually edits these numbers (DEFECT-1/2-2026-08-13: Edit Payroll, the
+  // screen this sentence used to name, was retired and has no caller left).
+  tb.querySelector('#ep-goto-gov-btn')?.addEventListener('click', () => {
+    if (typeof ctx.gotoTab === 'function') ctx.gotoTab('pay');
+  });
 }
 
 /* ── The HR editor ─────────────────────────────────────────────────────
@@ -601,16 +615,20 @@ async function _epTabPay(tb, ctx) {
     </div>
 
     ${!P.isOps ? `
-    <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>Government deductions</h3>
+    <div class="card" style="margin-bottom:14px" id="ep-gov-card">
+      <div class="card-header"><h3>Government</h3>
         <button class="btn-secondary btn-sm" id="ep-stat-edit-btn">${_epIcon('✎', 14)} Edit</button>
       </div>
       <div class="card-body" style="padding:4px 16px 12px">
-        ${_epRow('SSS', _epStatSummary(pay, 'sss'))}
-        ${_epRow('PhilHealth', _epStatSummary(pay, 'philhealth'))}
-        ${_epRow('Pag-IBIG', _epStatSummary(pay, 'pagibig'))}
-        ${_epRow('Tax', _epStatSummary(pay, 'tax'))}
-        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Leaving everything on Default changes nothing for this person. Exempt stops both the employee share and the employer share — they are simply left off that agency's remittance.</p>
+        ${_epRow('SSS number', P.ssNum)}
+        ${_epRow('PhilHealth number', P.phNum)}
+        ${_epRow('Pag-IBIG MID', P.pagibigNum)}
+        ${_epRow('TIN', P.tinNum)}
+        ${_epRow('SSS deduction', _epStatSummary(pay, 'sss'))}
+        ${_epRow('PhilHealth deduction', _epStatSummary(pay, 'philhealth'))}
+        ${_epRow('Pag-IBIG deduction', _epStatSummary(pay, 'pagibig'))}
+        ${_epRow('Tax deduction', _epStatSummary(pay, 'tax'))}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Numbers and deduction modes are one subject — this is where both are edited, in one Save. Leaving every mode on Default changes nothing for this person. Exempt stops both the employee share and the employer share — they are simply left off that agency's remittance.</p>
       </div>
     </div>` : ''}
 
@@ -645,23 +663,39 @@ async function _epTabPay(tb, ctx) {
           fieldLabel: 'Base Salary', targetField: 'salary', current: pay ? pay.salary : 0 };
     openSalaryRaiseModal(desc, window.currentUser, () => window.openEmployeeProfile({ uid, workerId, name: P.name }));
   });
-  tb.querySelector('#ep-stat-edit-btn')?.addEventListener('click', () => _epOpenStatutoryEditor(ctx));
+  tb.querySelector('#ep-stat-edit-btn')?.addEventListener('click', () => _epOpenGovernmentEditor(ctx));
 }
 
-/* ── Government-deductions editor (OFFICE-STATUTORY-PARITY-2026-08-13) ───
+/* ── Government editor — numbers + deduction modes, ONE panel, ONE Save ──
+   (DEFECT-2-CONSOLIDATION-2026-08-13, superseding OFFICE-STATUTORY-PARITY-
+   2026-08-13, which built the modes half of this alone.)
+
+   Before this: the four government NUMBERS lived on the Employment tab
+   (read-only, pointing at the now-retired Edit Payroll screen — DEFECT 1),
+   and the four deduction MODES lived here on Pay & Raises, added earlier
+   the same day. Same subject, same document (payroll/{uid}), two unrelated
+   tabs. Consolidated: this is now the one surface that edits both, and the
+   Employment tab's card links here rather than duplicating an editor.
+
    Office Team parity for js/screens/hr.js's Operations worker-profile
-   statutory editor (hrp-stat-*). Writes ONLY statConfig + the four flat ₱
-   fields onto payroll/{uid} — never salary/allowance/deductions/payClass, so
-   this stays a single-purpose door, not a second way to change pay. Same
-   money-tier gate as the rest of this tab (canMoney, mirrored server-side by
-   firestore.rules' payroll match block: isMoneyAdmin() = president/manager/
-   finance, identical to js/departments.js's isMoneyPriv()) — no rules change
-   needed; see the build report.
+   editor (_hrpScOf / hrp-stat-*, openHRProfileForm) still holds for the
+   MODES half; the NUMBERS half already shared one vocabulary
+   (tinNum/ssNum/phNum/pagibigNum) across both teams — see _epCompose's
+   header comment. Writes ONLY the four gov numbers + statConfig + the four
+   flat ₱ fields onto payroll/{uid} — never salary/allowance/deductions/
+   payClass, so this stays a single-purpose door, not a second way to change
+   pay. Same money-tier gate as the rest of this tab (canMoney, mirrored
+   server-side by firestore.rules' payroll match block: isMoneyAdmin() =
+   president/manager/finance, identical to js/departments.js's
+   isMoneyPriv()) — verified, no rules change needed; see the build report.
+
    'default' is written as FieldValue.delete() per key, never the string
    'default' — an absent key is what window.resolveStatutoryEE's legacy
    branch requires to reproduce today's figures byte-for-byte. Saving with
    every select left on Default therefore deletes at most already-absent
-   keys: a no-op write, not a behaviour change.
+   keys: a no-op write to statConfig, not a behaviour change. (The gov-number
+   text fields are a SEPARATE concern — free text, always written as typed,
+   same as the payslip identity-backfill panel in hr.js.)
    ─────────────────────────────────────────────────────────────────────── */
 var _EP_STAT_FIELDS = [
   ['sss',        'SSS'],
@@ -669,13 +703,27 @@ var _EP_STAT_FIELDS = [
   ['pagibig',    'Pag-IBIG'],
   ['tax',        'Tax']
 ];
-function _epOpenStatutoryEditor(ctx) {
+var _EP_GOV_NUM_FIELDS = [
+  ['tinNum',     'TIN',               '000-000-000-000'],
+  ['ssNum',      'SSS number',        '00-0000000-0'],
+  ['phNum',      'PhilHealth number', ''],
+  ['pagibigNum', 'Pag-IBIG MID',      '']
+];
+function _epOpenGovernmentEditor(ctx) {
   const { P, uid, workerId, pay } = ctx;
   if (!uid) {
     Notifs.showToast('This person has no payroll record to edit yet.', 'error');
     return;
   }
-  const rowHtml = ([k, label]) => {
+  // Prefilled from the RAW payroll/{uid} doc, not P's cross-team fallback —
+  // this panel edits ONE document, so it must show exactly what is on it,
+  // not a value borrowed from a worker_profiles copy for someone in both
+  // populations (see the WARNING at the foot of this file).
+  const numRowHtml = ([k, label, ph]) => `
+    <div class="form-group"><label>${_epEsc(label)}</label>
+      <input id="epgov-${k}" value="${_epEsc(pay ? (pay[k] || '') : '')}" ${ph ? `placeholder="${_epEsc(ph)}"` : ''}/>
+    </div>`;
+  const modeRowHtml = ([k, label]) => {
     const mode = _epStatModeOf(pay, k);
     const amt  = pay ? (pay[k] || 0) : 0;
     return `
@@ -692,14 +740,19 @@ function _epOpenStatutoryEditor(ctx) {
     </div>`;
   };
 
-  const panel = window.openPage(`${_epIcon('🏛', 16)} Government Deductions — ${_epEsc(P.name)}`, `
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
-      <strong>Default</strong> — a typed ₱ amount wins if set, otherwise the monthly table amount is deducted (today's behaviour, unchanged).
-      <strong>Auto</strong> — always the table amount for the run month.
-      <strong>Fixed</strong> — always the typed ₱ amount, even ₱0.
-      <strong>Exempt</strong> — the contribution is not deducted and no employer share is due; the person is simply not on that agency's remittance.
+  const panel = window.openPage(`${_epIcon('🏛', 16)} Government — ${_epEsc(P.name)}`, `
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Government numbers</div>
+    ${_EP_GOV_NUM_FIELDS.map(numRowHtml).join('')}
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">Deductions</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+        <strong>Default</strong> — a typed ₱ amount wins if set, otherwise the monthly table amount is deducted (today's behaviour, unchanged).
+        <strong>Auto</strong> — always the table amount for the run month.
+        <strong>Fixed</strong> — always the typed ₱ amount, even ₱0.
+        <strong>Exempt</strong> — the contribution is not deducted and no employer share is due; the person is simply not on that agency's remittance.
+      </div>
+      ${_EP_STAT_FIELDS.map(modeRowHtml).join('')}
     </div>
-    ${_EP_STAT_FIELDS.map(rowHtml).join('')}
   `, `<button class="btn-primary" id="epstat-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   // Panel-scoped — never document.getElementById (see CLAUDE.md; this app's
@@ -727,9 +780,14 @@ function _epOpenStatutoryEditor(ctx) {
     };
     const modes = {};
     _EP_STAT_FIELDS.forEach(([k]) => { modes[k] = modeOf(k); });
+    const nums = {};
+    _EP_GOV_NUM_FIELDS.forEach(([k]) => { nums[k] = (panel.querySelector('#epgov-' + k)?.value || '').trim(); });
 
     try {
+      // ONE merge write — numbers and modes together, so there is one Save
+      // for one subject rather than two doors into the same document.
       await db.collection('payroll').doc(uid).set({
+        ...nums,
         // 'default' -> FieldValue.delete(), never the string — an absent key
         // is what makes the frozen resolver take its legacy branch.
         statConfig: (() => {
@@ -745,7 +803,8 @@ function _epOpenStatutoryEditor(ctx) {
 
       // Audit the MODE change only — silent when nothing changed, which is
       // every save left entirely on Default (mirrors hr.js's identical block
-      // for the Operations worker-profile editor).
+      // for the Operations worker-profile editor). Government numbers are
+      // personal data — never logged here, matching the rest of this file.
       const before = (pay && pay.statConfig) || {};
       const after  = {};
       _EP_STAT_FIELDS.forEach(([k]) => { if (modes[k] !== 'default') after[k] = modes[k]; });
@@ -755,7 +814,7 @@ function _epOpenStatutoryEditor(ctx) {
       }
 
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users'); // 'users' carries merged payroll — see fetchUsersWithPayroll, js/config.js
-      Notifs.success('Government deductions saved.');
+      Notifs.success('Government details saved.');
       if (typeof closeModal === 'function') closeModal();
       // Re-open cleanly against the freshly written doc — same repaint
       // pattern as _epOpenEditor/the Raise flow callback just above: a save
@@ -781,14 +840,35 @@ function _epOpenStatutoryEditor(ctx) {
                        is shown, labelled for what it is.
    caBalance is deliberately NOT editable here: on the HR worker form it is a
    raw number input whose save overwrites the ledger with no audit row.
+
+   DEFECT-3-2026-08-13 — what was here before this change: the outstanding
+   BALANCE (both ledgers) and a raw Advances/Repayments table, but none of
+   the AGREED TERMS (instalment N of M, the ₱ agreed each period, what's due)
+   that the pay screen's Adjust panel (js/screens/payroll.js, "What was
+   agreed") already shows next to the CA box on every pay run. Same facts,
+   two screens, one missing them. Fixed by calling the same
+   window.CashAdvance.planFor(uid, month) the Adjust panel's live-balance
+   fallback calls (js/screens/payroll.js ~L2015-2054) and rendering it with
+   the identical wording — one vocabulary in both places, not a second one
+   invented here. Read-only, same as the rest of this tab: planFor is a pure
+   read, this screen calls no CashAdvance.deduct/create/update.
    ───────────────────────────────────────────────────────────────────── */
 async function _epTabCashAdvance(tb, ctx) {
   const { P, uid, workerId, wp, canMoney, panel } = ctx;
   tb.innerHTML = window.skeletonHtml ? window.skeletonHtml('rows') : '';
 
-  const caRes = uid
-    ? await _epRead(db.collection('cash_advances').where('userId', '==', uid).get(), { docs: [] })
-    : { ok: true, value: { docs: [] } };
+  // Today's month, Manila time — planFor's `plan` is a live read, not tied to
+  // any one pay period, so "today" is the only month that makes sense here
+  // (see the Adjust panel's own live-fetch fallback, same reasoning).
+  const _epCaMonth = window.bizDate ? window.bizDate().slice(0, 7) : new Date().toISOString().slice(0, 7);
+  const [caRes, planRes] = await Promise.all([
+    uid
+      ? _epRead(db.collection('cash_advances').where('userId', '==', uid).get(), { docs: [] })
+      : Promise.resolve({ ok: true, value: { docs: [] } }),
+    (uid && window.CashAdvance && typeof window.CashAdvance.planFor === 'function')
+      ? _epRead(window.CashAdvance.planFor(uid, _epCaMonth), null)
+      : Promise.resolve({ ok: true, value: null })
+  ]);
   let slipRes = { ok: true, value: { docs: [] } };
   if (P.isOps && workerId && canMoney) {
     slipRes = await _epRead(
@@ -799,8 +879,16 @@ async function _epTabCashAdvance(tb, ctx) {
 
   const cas = (caRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
-  const outstanding = cas.filter(a => a.status === 'approved' && (a.balance || 0) > 0)
-    .reduce((s, a) => s + (a.balance || 0), 0);
+  const plan = (planRes.ok && planRes.value) ? planRes.value : null;
+  // planFor's caBalance IS the same sum this used to compute inline
+  // (approved cash_advances, positive balance) — reading it FROM planFor
+  // rather than recomputing it is what makes this "one vocabulary": the
+  // Adjust panel and this tab now derive the balance from the identical
+  // function call. Falls back to the inline sum only when planFor could not
+  // run at all (no uid, or window.CashAdvance not yet loaded).
+  const outstanding = plan
+    ? (plan.caBalance || 0)
+    : cas.filter(a => a.status === 'approved' && (a.balance || 0) > 0).reduce((s, a) => s + (a.balance || 0), 0);
 
   const payments = [];
   cas.forEach(a => (Array.isArray(a.payments) ? a.payments : []).forEach(p => payments.push({ ...p, caId: a.id })));
@@ -808,6 +896,24 @@ async function _epTabCashAdvance(tb, ctx) {
 
   const slips = (slipRes.value.docs || []).map(d => d.data())
     .filter(s => (s.deductions?.other?.cashAdvance || 0) > 0);
+
+  // "What was agreed" — same wording as js/screens/payroll.js's Adjust panel
+  // (both the frozen-line block and its live-fetch fallback use this exact
+  // phrasing; do not let the two drift into two vocabularies again).
+  const agreedHtml = (plan && plan.plan && plan.plan.length) ? `
+    <div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">What was agreed</div>
+      ${plan.plan.map(p => {
+        const no  = (p && p.installmentNo != null) ? p.installmentNo : null;
+        const of  = (p && p.terms != null) ? p.terms : null;
+        const per = (p && p.monthlyPayment != null) ? p.monthlyPayment : null;
+        return `<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:12px">
+          <span>${no != null && of != null ? 'Instalment ' + _epEsc(String(no)) + ' of ' + _epEsc(String(of)) : 'Instalment'}${per != null ? ' · ₱' + _epFmt(per) + ' agreed each period' : ''}</span>
+          <strong style="white-space:nowrap">₱${_epFmt(p && p.amount)} due</strong>
+        </div>`;
+      }).join('')}
+      <div style="font-size:10px;color:var(--text-muted);margin-top:6px">As it stands today (${_epEsc(_epCaMonth)}) — not tied to any one pay period.</div>
+    </div>` : '';
 
   tb.innerHTML = `
     <div class="card" style="margin-bottom:14px">
@@ -821,6 +927,7 @@ async function _epTabCashAdvance(tb, ctx) {
               ? _epRow('Operations Team balance (on the worker record)', wp ? '₱' + _epFmt(wp.caBalance) : '—')
               : _epRow('Operations Team balance (on the worker record)', 'Not shown — outside your access'))
           : ''}
+        ${agreedHtml}
         <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Read-only. Advances are created, approved and repaid through Cash Advances; the balance is maintained by the pay run.</p>
       </div>
     </div>
@@ -973,6 +1080,63 @@ function _epCanReinstate() {
     || (Array.isArray(window.currentDepts) && window.currentDepts.includes('HR'));
 }
 
+/* ── Roster ordering (owner ruling 2026-08-13: "organize office and
+   operation then rank, employee type etc") ─────────────────────────────
+   Office and Operations must never be mixed in a list — the same standing
+   ruling that put team tabs on the payroll screen (js/screens/payroll.js).
+   The roster was one flat A-Z list; grouped below, in this order:
+
+     1. TEAM        — Office, then Operations, then "team not shown" (the
+                       Corporate Secretary edge case where neither the pay
+                       record nor the Operations register could be read —
+                       see payClassKnown in _epCompose above). A group, not a
+                       silent Office/Operations guess.
+     2. OFFBOARDED   — sinks to the BOTTOM of its team, unconditionally. They
+                       stay in the list (never hidden), just last within
+                       their group, so an ~20-person roster reads active
+                       staff first.
+     3. RANK         — derived from `role`; there is no `rank` field in this
+                       schema. INTERPRETED, not a stored fact — flag this to
+                       the owner rather than treating it as settled. Order:
+                       president/owner, then manager, then secretary/finance,
+                       then employee/agent. Change it in ONE place, here.
+     4. STATUS       — regular, probationary, training, not-set, then
+                       resigned/terminated (window.EMPLOYMENT_STATUSES,
+                       js/config.js, is the source of the valid values).
+     5. NAME         — A-Z, the existing tiebreaker.
+
+   SECTION HEADINGS, not chipTabs: this is a SEARCH list (see the #ep-search
+   listener below), and a tab would hide the other team's rows the moment
+   someone typed a name that happens to work in both teams — a regression a
+   plain scrolling heading does not have. Search still spans every row
+   regardless of section.
+   ─────────────────────────────────────────────────────────────────────── */
+var _EP_ROLE_RANK = { president: 0, owner: 0, manager: 1, secretary: 2, finance: 2, employee: 3, agent: 3 };
+// Ops workers with no login carry no `role` at all (worker_profiles has no
+// such field) — they fall through to the `?? 3` default below, i.e. rank
+// alongside Employee/Agent, since a person with no login is rank-and-file
+// by construction, not an unranked outlier.
+var _EP_STATUS_RANK = { regular: 0, probationary: 1, training: 2, '': 3, resigned: 4, terminated: 4 };
+function _epRosterGroupOf(r) {
+  return !r.payClassKnown ? 'withheld' : (r.isOps ? 'ops' : 'office');
+}
+var _EP_ROSTER_GROUP_ORDER = { office: 0, ops: 1, withheld: 2 };
+var _EP_ROSTER_GROUP_LABEL = { office: 'Office Team', ops: 'Operations Team', withheld: 'Team not shown' };
+function _epRosterSort(rows) {
+  rows.sort((a, b) => {
+    const g = _EP_ROSTER_GROUP_ORDER[_epRosterGroupOf(a)] - _EP_ROSTER_GROUP_ORDER[_epRosterGroupOf(b)];
+    if (g) return g;
+    const off = (a.removed ? 1 : 0) - (b.removed ? 1 : 0);
+    if (off) return off;
+    const rr = (_EP_ROLE_RANK[a.role] ?? 3) - (_EP_ROLE_RANK[b.role] ?? 3);
+    if (rr) return rr;
+    const sr = (_EP_STATUS_RANK[a.status] ?? 3) - (_EP_STATUS_RANK[b.status] ?? 3);
+    if (sr) return sr;
+    return a.name.localeCompare(b.name);
+  });
+  return rows;
+}
+
 // The open roster, remembered so a save made in a panel ON TOP of it can put
 // the list back in step. Owner, 2026-08-13: "when im changing their employment
 // type, it does not save". It did save — every time. The editor writes, toasts,
@@ -1049,11 +1213,12 @@ async function _epLoadRoster(panel, body) {
       id: u.employeeId || (w ? w.idNumber : '') || '',
       status: u.employmentStatus || (w ? w.employmentStatus : '') || '',
       startDate: u.startDate || (w ? (w.startDate || w.issuedOn) : '') || '',
-      isOps, removed: u.removed === true
+      isOps, removed: u.removed === true, role: u.role || ''
     };
   }).concat(
     // Operations staff with NO login at all — the majority today. They are only
-    // reachable by worker_profiles docId, never by uid.
+    // reachable by worker_profiles docId, never by uid. No `role` field exists
+    // on worker_profiles — see _EP_ROLE_RANK's fallback just above.
     wps.filter(w => !w.linkedUid || !users.some(u => u.id === w.linkedUid)).map(w => ({
       uid: '', workerId: w.id,
       name: w.name || '(unnamed)',
@@ -1062,9 +1227,10 @@ async function _epLoadRoster(panel, body) {
       id: w.idNumber || '',
       status: w.employmentStatus || '',
       startDate: w.startDate || w.issuedOn || '',
-      isOps: true, payClassKnown: true, removed: w.status === 'inactive'
+      isOps: true, payClassKnown: true, removed: w.status === 'inactive', role: ''
     }))
-  ).sort((a, b) => a.name.localeCompare(b.name));
+  );
+  _epRosterSort(rows);
 
   const canMoney = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : true;
 
@@ -1079,7 +1245,15 @@ async function _epLoadRoster(panel, body) {
         <thead><tr><th>Name</th><th>Job title</th><th>Department</th><th>Status</th><th>Team</th><th>Since</th><th></th></tr></thead>
         <tbody>${rows.length ? rows.map((r, i) => {
           const st = window.employmentStatusMeta ? window.employmentStatusMeta(r.status) : { label: r.status || '—', badge: 'badge-gray' };
-          return `<tr data-i="${i}" data-hay="${_epEsc((r.name + ' ' + r.title + ' ' + r.dept + ' ' + r.id).toLowerCase())}">
+          const grp = _epRosterGroupOf(r);
+          // A plain heading, not a tab — see the ordering comment above
+          // _epCanReinstate. Emitted once, right before the first row of a
+          // new group; rows are already grouped by _epRosterSort so this is
+          // just "did the group change since the previous row".
+          const headerHtml = (i === 0 || _epRosterGroupOf(rows[i - 1]) !== grp)
+            ? `<tr data-group-header="${grp}"><td colspan="7" style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);padding:14px 4px 6px;border-top:none">${_epEsc(_EP_ROSTER_GROUP_LABEL[grp])}</td></tr>`
+            : '';
+          return headerHtml + `<tr data-i="${i}" data-group="${grp}" data-hay="${_epEsc((r.name + ' ' + r.title + ' ' + r.dept + ' ' + r.id).toLowerCase())}">
             <td data-label="Name" style="font-weight:700">${_epEsc(r.name)}${r.removed ? ' <span class="badge badge-red">Offboarded</span>' : ''}</td>
             <td data-label="Job title" style="font-size:12px">${_epEsc(r.title || '—')}</td>
             <td data-label="Department" style="font-size:12px">${_epEsc(r.dept || '—')}</td>
@@ -1110,10 +1284,20 @@ async function _epLoadRoster(panel, body) {
   const search = body.querySelector('#ep-search');
   const tbody = body.querySelector('#ep-roster tbody');
   if (search && tbody) {
+    // Spans the WHOLE list, both teams — grouping is a display order, not a
+    // search scope. A group heading with nothing left under it hides too, so
+    // filtering to one name never leaves a dangling "Operations Team" label
+    // over zero rows.
     search.addEventListener('input', () => {
       const q = search.value.trim().toLowerCase();
+      const groupHasVisible = {};
       tbody.querySelectorAll('tr[data-hay]').forEach(tr => {
-        tr.style.display = (!q || tr.dataset.hay.includes(q)) ? '' : 'none';
+        const show = !q || tr.dataset.hay.includes(q);
+        tr.style.display = show ? '' : 'none';
+        if (show) groupHasVisible[tr.dataset.group] = true;
+      });
+      tbody.querySelectorAll('tr[data-group-header]').forEach(tr => {
+        tr.style.display = groupHasVisible[tr.dataset.groupHeader] ? '' : 'none';
       });
     });
   }
