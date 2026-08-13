@@ -2651,6 +2651,18 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — a failed/corrupted policy
   // read disables the live projection entirely (never a guessed number).
   const projUnavailable = !isFinalMonth && policySettingsFailed;
+  // PAYROLL-SYNC-FIX-2026-08-13 — a person with no salary on file must never
+  // be told they earned a negative wage this month. Before this, base ₱0.00
+  // ran straight through computePayLine, and a placeholder statutory
+  // deduction alone turned "Earned So Far" negative. Mirrors the real pay
+  // run's own refusal to pay against a missing rate (js/screens/payroll.js's
+  // _pyNotPaidWords) via the shared sentence in js/pay-policy.js's
+  // noPayRateWords, so both surfaces explain "nothing set up yet" the same
+  // way. Scoped to the LIVE projection only — a frozen/disbursed month is
+  // real money that already moved and is never suppressed here.
+  const noPayRecordWords = (!isFinalMonth && !projUnavailable && (Number(u.salary) || 0) <= 0 && typeof window.noPayRateWords === 'function')
+    ? window.noPayRateWords('employee') : null;
+  const projBlocked = projUnavailable || !!noPayRecordWords;
   const projLine = (!isFinalMonth && !projUnavailable && window.computePayLine)
     ? window.computePayLine({ ...u, id: currentUser.uid }, { month: currentMonth, policy: activePolicy, kpiScore: kpi, attScore: att, caPlan: [], caBalance: totalAdvance })
     : null;
@@ -2667,10 +2679,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // exists to kill — computePayLine is guaranteed loaded by script order).
   const computedMonth = isFinalMonth
     ? (frozenThisMonth.netPay ?? frozenThisMonth.finalPay ?? 0)
-    : (projUnavailable ? null : (projLine ? projLine.netBeforeCA : 0));
+    : (projBlocked ? null : (projLine ? projLine.netBeforeCA : 0));
   const earnedSoFar = isFinalMonth
     ? computedMonth
-    : (projUnavailable ? null : computedMonth * (daysElapsed / daysInMonth)); // a disbursed month is fully earned, no proration
+    : (projBlocked ? null : computedMonth * (daysElapsed / daysInMonth)); // a disbursed month is fully earned, no proration
   // §9.1/§9.2 — the ONE traceability sentence, read off the same line the
   // figure above came from (never re-derived). frozenThisMonth carries the
   // additive salary_history mirror fields (§9.2); netBeforeCA there is the
@@ -2681,8 +2693,15 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         preMultiplierNet: frozenThisMonth.preMultiplierNet,
         netBeforeCA: frozenThisMonth.netPay ?? frozenThisMonth.finalPay }
     : projLine;
-  const payBasisSentenceText = (typeof window.payBasisSentence === 'function' && payBasisLine)
+  const payBasisSentenceText = (!noPayRecordWords && typeof window.payBasisSentence === 'function' && payBasisLine)
     ? window.payBasisSentence(payBasisLine) : '';
+  // §A — the label above must describe the SAME calculation as the value
+  // beside it. Only under 'taskbased' does a single "base × multiplier"
+  // expression actually produce computedMonth (money-core.js's netBeforeCA);
+  // under 'flat' (the default) nothing is multiplied at all, so showing a
+  // "Combined Multiplier" as though it drove the figure is exactly the
+  // two-screens-two-numbers problem this fix exists to end.
+  const multiplierDrivesPay = !noPayRecordWords && payBasisLine && payBasisLine.policy === 'taskbased';
 
   // YTD = completed months from salary history + current month earned so far
   const thisYear  = String(bzYear);
@@ -2734,7 +2753,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       <div class="kpi-card ${computedMonth==null?'':(computedMonth<net*0.9?'red':'green')}">
         <div class="kpi-label">${isFinalMonth?'Final — Disbursed':'Projected Full Month'}</div>
         <div class="kpi-value" style="font-size:14px">${computedMonth==null?'—':'₱'+formatNum(computedMonth)}</div>
-        <div class="kpi-sub">${projUnavailable ? 'The projection is unavailable right now — try again in a moment.' : 'Base ₱'+formatNum(net)}</div>
+        <div class="kpi-sub">${noPayRecordWords ? escHtml(noPayRecordWords.short) : projUnavailable ? 'The projection is unavailable right now — try again in a moment.' : 'Base ₱'+formatNum(net)}</div>
       </div>
     </div>
 
@@ -2786,29 +2805,36 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
           Days covered: ${daysElapsed} of ${daysInMonth} days this month
         </div>
+        ${noPayRecordWords ? `
+        <div class="payslip-row"><span style="color:var(--text-muted)">${escHtml(noPayRecordWords.note)}</span></div>` : `
         <div class="payslip-row"><span>Base Salary</span><strong>₱${formatNum(u.salary)}</strong></div>
         <div class="payslip-row"><span>Allowances</span><span style="color:var(--success)">+₱${formatNum(u.allowance)}</span></div>
         <div class="payslip-row"><span>Deductions</span><span style="color:var(--danger)">-₱${formatNum(u.deductions)}</span></div>
         <div class="payslip-row"><span>Net Pay (Full Month)</span><strong>₱${formatNum(net)}</strong></div>
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
-        <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier'}</div>
+        <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${multiplierDrivesPay ? (isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier') : 'Performance Snapshot — informational, does not affect pay'}</div>
         <div class="payslip-row">
-          <span>Task KPI (70%) — ${taskPct}% completion</span>
-          <span style="color:${kpiColor}">${(dispKpi*0.7).toFixed(2)}×</span>
+          <span>Task KPI${multiplierDrivesPay?' (70%)':''} — ${taskPct}% completion</span>
+          <span style="color:${kpiColor}">${multiplierDrivesPay ? (dispKpi*0.7).toFixed(2)+'×' : Math.round(dispKpi*100)+'%'}</span>
         </div>
         <div class="payslip-row">
-          <span>Attendance (30%) — ${Math.round(dispAtt*100)}% rate (${daysElapsed} days)</span>
-          <span style="color:${attColor}">${(dispAtt*0.3).toFixed(2)}×</span>
+          <span>Attendance${multiplierDrivesPay?' (30%)':''} — ${Math.round(dispAtt*100)}% rate (${daysElapsed} days)</span>
+          <span style="color:${attColor}">${multiplierDrivesPay ? (dispAtt*0.3).toFixed(2)+'×' : Math.round(dispAtt*100)+'%'}</span>
         </div>
+        ${multiplierDrivesPay ? `
         <div class="payslip-row" style="font-weight:700">
           <span>Combined Multiplier</span>
           <span>${multiplier.toFixed(2)}×</span>
-        </div>
+        </div>` : ''}
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
         ${projUnavailable ? `
         <div class="payslip-row"><span style="color:var(--text-muted)">The projection is unavailable right now — try again in a moment.</span></div>` : `
         <div class="payslip-row">
-          <span>${isFinalMonth?'Final Pay — Disbursed':`Projected Full Month (₱${formatNum(net)} × ${multiplier.toFixed(2)})`}</span>
+          <span>${isFinalMonth
+              ? 'Final Pay — Disbursed'
+              : (multiplierDrivesPay && payBasisLine && payBasisLine.preMultiplierNet != null)
+                ? `Projected Full Month (₱${formatNum(payBasisLine.preMultiplierNet)} × ${multiplier.toFixed(2)})`
+                : 'Projected Full Month'}</span>
           <strong>₱${formatNum(computedMonth)}</strong>
         </div>
         <div class="payslip-row">
@@ -2822,7 +2848,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           <span>Take-Home So Far</span><span style="color:var(--success)">₱${formatNum(Math.max(0,earnedSoFar-totalAdvance))}</span>
         </div>`}
         ${payBasisSentenceText ? `
-        <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.5">${escHtml(payBasisSentenceText)}</div>` : ''}
+        <div style="margin-top:10px;font-size:11px;color:var(--text-muted);line-height:1.5">${escHtml(payBasisSentenceText)}</div>` : ''}`}
         ${isFinalMonth && frozenThisMonth.hrNote && frozenThisMonth.hrNote.text ? `
         <div style="margin-top:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">${emojiIcon('📝',14)} Note from HR</div>
@@ -3052,6 +3078,13 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       // policy (a wrong number is worse than no payslip here).
       if (projUnavailable) {
         Notifs.showToast('The projection is unavailable right now — try again in a moment.', 'error');
+        return;
+      }
+      // PAYROLL-SYNC-FIX-2026-08-13 — same guard as the Payroll Breakdown
+      // card above: no salary on file means there is nothing honest to put
+      // on an unofficial payslip.
+      if (noPayRecordWords) {
+        Notifs.showToast(noPayRecordWords.note, 'error');
         return;
       }
       const line = window.computePayLine

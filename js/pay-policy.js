@@ -106,10 +106,40 @@ window.payBasisSentence = function (line) {
     '%) counted at 30%. Check-ins count as on time when every notification is read before 9:00 AM.';
 };
 
+// PAYROLL-SYNC-FIX-2026-08-13 — the ONE explanation for "nobody has set this
+// person's pay up yet", said the same way wherever it appears. Before this,
+// the payroll screen already refused to pay ₱0.00 against a missing rate and
+// said so in words (js/screens/payroll.js's _pyNotPaidWords, reason
+// 'no-rate' — production/weekly workers with no hourly or daily rate on their
+// worker profile); the employee's own Personal Finance screen had no such
+// guard at all and instead ran gross-minus-statutory into a negative (base
+// ₱0.00 minus a placeholder statutory deduction prints "Earned So Far
+// -₱229.17" — a wage nobody was ever owed). This is the office-monthly analog
+// of that same diagnosis — a missing salary, not a missing hourly/daily rate
+// — so it is a sibling of 'no-rate', not the identical reason code (the two
+// engines gate on different fields), but the SENTENCE is shared so both
+// surfaces say the same thing about "nothing is set up yet".
+//
+// `audience` swaps only the actionable half of the sentence — who does
+// something about it differs by surface — the diagnostic half never changes.
+//   'employee' (default) — the person looking at their own pay; they cannot
+//                           edit their own salary, so the action is to ask HR.
+//   'hr'                  — Finance/HR looking at someone else's line; they
+//                           can open the profile and fix it directly.
+window.noPayRateWords = function (audience) {
+  var forHr = audience === 'hr';
+  return {
+    short: 'No pay record set up yet',
+    note: 'No monthly salary is on file yet — rather than show ₱0.00 (or a negative number after deductions), nothing is projected. ' +
+      (forHr ? 'Set a salary on their profile, then open this again.' : 'Ask HR to set up your pay record.')
+  };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     wageFloorCheck: window.wageFloorCheck,
     payBasisSentence: window.payBasisSentence,
+    noPayRateWords: window.noPayRateWords,
     PAY_POLICY_VALUES: window.PAY_POLICY_VALUES
   };
 }
