@@ -128,6 +128,8 @@ var _pyN    = (n) => (window.fmtN2 ? window.fmtN2(n) : (Number(n) || 0).toFixed(
 // be readable at a glance.
 var _pyPeso = (n) => ((Number(n) || 0) < 0 ? '-₱' : '₱') + _pyN(Math.abs(Number(n) || 0));
 var _pyHrs  = (n) => (Number(n) || 0).toFixed(2);
+// A day count — "3" or "2.5" (a half-day paid-leave record), never "3.00".
+var _pyCount = (n) => { const v = Number(n) || 0; return Number.isInteger(v) ? String(v) : v.toFixed(1); };
 var _pyIcon = (g, s) => (window.emojiIcon ? window.emojiIcon(g, s) : '');
 
 // A line's person id / name can arrive under several names depending on which
@@ -247,6 +249,11 @@ function _pyRead(l) {
     // already frozen onto the line by computePayLine, never recomputed here.
     kpiScore:   _pyPick(l.detail && l.detail.kpiScore, l.kpiScore),
     attScore:   _pyPick(l.detail && l.detail.attendanceScore, l.attScore),
+    // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — item 2, "KPI with its working
+    // shown". Frozen by js/departments.js's buildPayRunLines (additive; never
+    // read by any money computation). Absent on a period prepared before this
+    // change — the KPI column degrades to the plain percentage it always was.
+    kpiBreakdown: (l.kpiBreakdown && typeof l.kpiBreakdown === 'object') ? l.kpiBreakdown : null,
     policy:     (l.detail && l.detail.policy) || l.policy || 'flat',
     perfFactor: _pyPick(l.perfFactor, l.detail && l.detail.perfFactor),
     // STATUTORY-BY-STATUS-SPEC-2026-08-12 — passed through from the
@@ -323,7 +330,12 @@ function _pyColsFor(reads) {
     // reliably reads as "in use" once somebody has already typed a non-zero
     // number into it, which is exactly backwards — the whole point is to show
     // there IS a balance to collect, so the field gets found and used.
-    if (r.caBalanceBefore != null && r.caBalanceBefore > 0) has.cashAdv = true;
+    // item 4 (owner: "other deduction should show the ca deducted") — also
+    // shown whenever an instalment is actually being collected THIS period,
+    // even on the rare line whose balance itself could not be read. A real
+    // deduction must never be invisible just because a different figure
+    // (the balance) failed to load.
+    if ((r.caBalanceBefore != null && r.caBalanceBefore > 0) || (+r.cashAdv || 0) > 0) has.cashAdv = true;
     // (preMultiplierNet switches its own column on through PY_SUMMABLE_KEYS
     // above — it is null on flat lines, where the after-deductions figure and
     // the net are the same number and a second column would assert a step that
@@ -732,6 +744,46 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       const elapsed = periodDates.filter(d => d <= todayIso).length;
       reads.forEach(r => { r._elapsedTotal = elapsed; });
     }
+    // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — Office/month periods only. Weekly
+    // (Operations) take-home is already built from actual punches recorded
+    // to date (a day with no punch pays 0 the moment it happens), so it never
+    // showed a full period's pay early — the owner's "not full already"
+    // complaint (and the F3 reversal it triggers, see js/pay-policy.js's
+    // header) was specifically about the OFFICE figure, and that is where
+    // this is scoped. window.workDaysForMonth is the ONE denominator source —
+    // the same one item 1's attendance count reads below, so a person's
+    // "X of Y workdays" and their accrued take-home can never disagree about
+    // how far into the month it is.
+    const monthWorkDays = (kind !== 'week') ? window.workDaysForMonth(selected, todayIso) : null;
+    if (monthWorkDays) {
+      reads.forEach(r => {
+        // item 1 — "attendance as a count, not just a rate". Decomposes the
+        // already-frozen attScore into the days it was built from (see
+        // window.presentDaysFromScore's own comment for why this is not a
+        // second measurement).
+        if (r.attScore != null) {
+          r._attCount = {
+            present: window.presentDaysFromScore(r.attScore, monthWorkDays.elapsedWorkDays),
+            elapsedWorkDays: monthWorkDays.elapsedWorkDays,
+            totalWorkDays: monthWorkDays.totalWorkDays
+          };
+        }
+        // item 5 — THE accrual. Live only: a closed period shows its exact
+        // frozen take-home, never a fraction of it. window.accruedTakeHomeSoFar
+        // is the SAME expression js/screens/dashboards.js's renderPersonalFinance
+        // calls for this exact person — one helper, both surfaces.
+        if (isLive && r.takeHome != null) {
+          r._accrued = window.accruedTakeHomeSoFar(r.takeHome, monthWorkDays.elapsedWorkDays, monthWorkDays.totalWorkDays);
+        }
+      });
+    }
+    // The totals card sums the very figures the rows above it printed (this
+    // file's own rule — see the header). Once a row prints an ACCRUED
+    // take-home instead of the full one, the totals row's take-home must sum
+    // THOSE numbers too, or the total would contradict its own column.
+    const accruedTotal = (isLive && kind !== 'week' && monthWorkDays)
+      ? reads.reduce((s, r) => s + (r._accrued ? r._accrued.accrued : (+r.takeHome || 0)), 0)
+      : null;
     // TASK-BASED-PAY-SPEC-2026-08-12 §8.4 — the minimum-wage floor, fetched
     // once per paint (not per line, not per card) and only for month periods
     // — the Operations Team is hourly and has no floor gate (§8.4/§14 Q3).
@@ -814,7 +866,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     _pyPaintUnreadable(root.querySelector('#py-unreadable'), unreadable, owingError);
     _pyPaintWaiting(root.querySelector('#py-waiting'), owing, byPeriod, activeTeam);
     _pyPaintProblems(root.querySelector('#py-problems'), problems);
-    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml });
+    _pyPaintRoster(root.querySelector('#py-roster'), { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml, accruedTotal });
     _pyPaintAction(root.querySelector('#py-action'), { period, state, label, tot, reads, notPaid, isLive, periodEnd, kind });
 
     if (window.lucide) lucide.createIcons({ nodes: [root] });
@@ -881,8 +933,15 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       // stored state underneath that would otherwise say "Ready to check".
       const asOf = (period && period.asOf) || liveOpts.todayIso || '';
       const kindWord = (liveOpts.kind === 'week') ? 'week' : 'month';
+      // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — REVERSES PAYROLL-LIVE-SPEC-
+      // 2026-08-11's F3 (which showed the full monthly salary here and
+      // flagged the day-counted fraction as undecided). The owner's later,
+      // explicit ruling wins: "it cant be full already becayse that month is
+      // not yet done". Do NOT restore the old "shows in full" wording — the
+      // take-home column below is now the ACCRUED figure (window.
+      // accruedTakeHomeSoFar, js/pay-policy.js), not the projected full month.
       const officeSub = (liveOpts.kind !== 'week')
-        ? `<div class="py-sub" style="margin-top:6px">The monthly salary shows in full — it does not build up day by day. Attendance and KPI are measured up to today.</div>`
+        ? `<div class="py-sub" style="margin-top:6px">Take-home builds up day by day as the month goes — it is not the full month's pay yet. Attendance and KPI are measured up to today.</div>`
         : '';
       el.innerHTML = `<div class="card py-live-banner" style="margin-bottom:14px"><div class="card-body">
           <div class="py-headline">${_pyEsc(label)} is still going — figures so far, as of ${_pyEsc(asOf)}.</div>
@@ -1423,7 +1482,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // ═════════════════════════════════════════════════════════
   function _pyPaintRoster(el, ctx) {
     if (!el) return;
-    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml } = ctx;
+    const { period, state, reads, cols, tot, notPaid, canEditRows, canCorrectRow, label, isLive, periodDates, todayIso, whoElseHtml, accruedTotal } = ctx;
 
     if (!period || (!reads.length && !notPaid.length)) {
       // AN EMPTY ROSTER MUST EXPLAIN ITSELF (owner, 2026-08-13: opened July,
@@ -1483,7 +1542,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // (clutter fix, 2026-08-12) — inside the totals card when there is one,
     // or its own thin header bar when every line is held/skipped and there is
     // no totals card to carry it (reads.length === 0 but notPaid.length > 0).
-    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period, isLive, whoElseHtml) : '';
+    const totalsCard = reads.length ? _pyTotalsCard(tot, cols, reads.length, notPaid.length, period, isLive, whoElseHtml, accruedTotal) : '';
     const noTotalsHeader = (!reads.length && whoElseHtml) ? `<div class="py-waiting-row" style="border-bottom:0">${whoElseHtml}</div>` : '';
     const notPaidCards = notPaid.map(p => _pyNotPaidCard(p, canEditRows)).join('');
 
@@ -1514,15 +1573,61 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       if (col.key === 'travelHours' && (+r.travelHours || 0) > 0) note = 'paid at half rate';
       // Provenance (§6.4) — always-visible text, never behind a tap.
       if (col.key === 'regHours' && r[col.key] != null) note = note ? note : 'from the punch clock';
-    } else if (col.key === 'attScore' || col.key === 'kpiScore') {
-      if (r[col.key] != null) {
-        val = Math.round((+r[col.key] || 0) * 100) + '%';
-        note = (col.key === 'attScore')
-          ? 'days present ÷ workdays so far, from the Attendance screen'
+    } else if (col.key === 'attScore') {
+      // item 1 (owner: "attendance should be --/(number of workdays in the
+      // month)") — a count, not a bare percentage. r._attCount is set in
+      // paint() from window.presentDaysFromScore, against the same workday
+      // denominator item 5's accrual uses.
+      if (r._attCount) {
+        const ac = r._attCount;
+        // Not gated on isLive: a period checked/paid EARLY (F1, Finance
+        // approval) mid-calendar-month still has attScore computed against
+        // the elapsed-to-date denominator — this must match whichever
+        // denominator getAttendanceScore(uid, month) actually used, live or
+        // not, or the "present" figure derived from it would divide against
+        // the wrong total.
+        if (ac.elapsedWorkDays < ac.totalWorkDays) {
+          // Both denominators are meaningful mid-month — say which is which,
+          // rather than leave it to be guessed.
+          val = `${_pyCount(ac.present)} of ${ac.elapsedWorkDays} so far`;
+          note = `${ac.totalWorkDays} workdays this month`;
+        } else {
+          val = `${_pyCount(ac.present)} / ${ac.totalWorkDays} days`;
+          note = 'from the Attendance screen';
+        }
+      } else if (r.attScore != null) {
+        // No workday denominator available (e.g. window.workDaysForMonth's
+        // dependencies not loaded) — fall back to the percentage rather than
+        // show nothing.
+        val = Math.round((+r.attScore || 0) * 100) + '%';
+        note = 'days present ÷ workdays so far, from the Attendance screen';
+      }
+    } else if (col.key === 'kpiScore') {
+      if (r.kpiScore != null) {
+        val = Math.round((+r.kpiScore || 0) * 100) + '%';
+        // item 2 (owner: "kpi shows the detailed computation") — the working,
+        // not just the blended result. r.kpiBreakdown is frozen by
+        // js/departments.js's buildPayRunLines (absent on a period prepared
+        // before this change, in which case this falls back to the old,
+        // undetailed note).
+        const kb = r.kpiBreakdown;
+        note = (kb && kb.inScopeCount != null)
+          ? `${kb.doneInM} of ${kb.inScopeCount} in-scope tasks done` +
+            (kb.deliverableScore != null ? ` · deliverables ${Math.round(kb.deliverableScore)}%` : '') +
+            ' (70% tasks, 30% deliverables)'
           : 'tasks finished this period + deliverables score';
       }
     } else if (col.key === 'takeHome') {
-      if (r.takeHome != null) { val = _pyPeso(r.takeHome); cls = (r.takeHome > 0) ? 'py-plus' : 'py-minus'; }
+      // item 5, THE reversal (see js/pay-policy.js's header on
+      // window.accruedTakeHomeSoFar). Live + Office/month only: the ACCRUED
+      // figure, never the full month's pay while the month is still running.
+      if (isLive && r._accrued) {
+        val = _pyPeso(r._accrued.accrued);
+        cls = (r._accrued.accrued > 0) ? 'py-plus' : 'py-minus';
+        note = 'so far — not what will be paid';
+      } else if (r.takeHome != null) {
+        val = _pyPeso(r.takeHome); cls = (r.takeHome > 0) ? 'py-plus' : 'py-minus';
+      }
     } else if (col.key === 'allowances') {
       if (r.allowances != null) { val = (r.allowances ? '+' : '') + _pyPeso(r.allowances); cls = r.allowances ? 'py-plus' : ''; }
     } else if (col.key === 'oneOffNet') {
@@ -1628,7 +1733,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   // when somebody wanted to check it. Here it is drawn on every paint from the
   // cards' own numbers, so it survives by construction and can never contradict
   // the column above it.
-  function _pyTotalsCard(tot, cols, people, notPaidCount, period, isLive, whoElseHtml) {
+  function _pyTotalsCard(tot, cols, people, notPaidCount, period, isLive, whoElseHtml, accruedTotal) {
     const stored = _pyPick(
       period && period.totals && period.totals.takeHome,
       period && period.totals && period.totals.net,
@@ -1636,9 +1741,17 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     );
     // If the stored total and the sum of the printed cards disagree, SAY SO
     // rather than pick one. They are the same money by two routes; a divergence
-    // is a defect, not a rounding taste.
+    // is a defect, not a rounding taste. Compared against the FULL total
+    // (tot.takeHome), never the accrued one — the stored/live total is never
+    // itself accrued, so comparing it to an accrued figure would manufacture
+    // a false "drift" every single day a period is running.
     const drift = (stored != null && Math.abs(stored - tot.takeHome) > 0.005)
       ? `<div class="py-sub" style="color:var(--danger);margin:8px 0 0">The saved total (${_pyEsc(_pyPeso(stored))}) does not match the people above (${_pyEsc(_pyPeso(tot.takeHome))}). Do not pay this period until it does.</div>` : '';
+    // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — once a person's row prints their
+    // ACCRUED take-home (item 5), the totals row must sum those same accrued
+    // figures, never the full-month total, or the total would contradict its
+    // own column (this file's own rule — see the header).
+    const takeHomeForTotals = (accruedTotal != null) ? accruedTotal : tot.takeHome;
     const fake = {
       id: '', name: '', rows: [], oneOffs: [],
       daysWorked: tot.daysWorked, daysAbsent: tot.daysAbsent,
@@ -1650,7 +1763,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       // the totals line — the misalignment this file's column rule exists to
       // prevent, and on a pay roster that is a lie rather than a cosmetic slip.
       preMultiplierNet: tot.preMultiplierNet,
-      caBalanceBefore: null, caBalanceAfter: null, takeHome: tot.takeHome,
+      caBalanceBefore: null, caBalanceAfter: null, takeHome: takeHomeForTotals,
       // Percentages do not aggregate into a roster total — showing a sum or a
       // silent average here would assert a figure nobody asked for, so the
       // totals row states plainly that there is none.

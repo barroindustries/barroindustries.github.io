@@ -135,11 +135,134 @@ window.noPayRateWords = function (audience) {
   };
 };
 
+// ═══════════════════════════════════════════════════════════
+// PAYROLL-ROSTER-ACCRUAL-2026-08-13 — the owner's live ruling, verbatim:
+// "take home so far should show the true value of standing on the day of
+// that month. it cant be full already becayse that month is not yet done".
+//
+// THIS REVERSES PAYROLL-LIVE-SPEC-2026-08-11's F3, which chose full-month-
+// with-KPI over a day-counted fraction for the Office ("so far") figure.
+// That choice is now overruled by the owner's later, explicit instruction.
+// Do NOT restore F3's "shows in full — does not build up day by day"
+// behaviour from the spec; this ruling supersedes it.
+//
+// window.accruedTakeHomeSoFar is the ONE expression for "how much of a
+// still-running month's pay has actually accrued", called from BOTH
+// js/screens/payroll.js (the roster card) and js/screens/dashboards.js
+// (renderPersonalFinance) so the two surfaces can never show two different
+// numbers for the same person on the same day. It matches the fraction
+// dashboards.js's Personal Finance screen already used before this pass
+// (elapsed WORKDAYS ÷ this month's total workdays, via the shared
+// window.countWorkDays — Sundays and PH holidays excluded, same denominator
+// item 1's attendance count uses) — this pass gives that expression a name
+// and a second caller instead of inventing a different fraction.
+//
+// DISPLAY ONLY. Never called by computePayLine, computePayRun or any write
+// path — the frozen/paid figure a period freezes at prepare()/disburse is
+// untouched by this function and by every caller of it. See the flag on the
+// period-end gap this creates, in this same header block below.
+//
+// KNOWN GAP (report to the owner, do not silently fix): at period end the
+// FROZEN payable is NOT day-proportioned — money-core.js's computePayLine
+// pays the full nominal salary regardless of how many days were actually
+// present (base wage is deliberately never docked — see computePayLine's
+// own "BASE WAGE is never docked (PH labor-safe)" comment). So a person
+// absent most of a month will be paid MORE at period end than their
+// "so far" trajectory implied all month. This function does not and must
+// not change that — pro-rating the FROZEN payable would be a pay policy
+// change, not a display fix, and is the owner's call to make.
+window.accruedTakeHomeSoFar = function (fullTakeHome, elapsedWorkDays, totalWorkDaysInMonth) {
+  var total = Number(totalWorkDaysInMonth) || 0;
+  var full = Number(fullTakeHome) || 0;
+  if (!(total > 0)) {
+    // No denominator to prorate against (e.g. a malformed period) — show the
+    // full figure rather than divide by zero or invent a fraction.
+    return { accrued: full, fraction: 1, elapsedWorkDays: Number(elapsedWorkDays) || 0, totalWorkDays: total };
+  }
+  var elapsed = Math.max(0, Math.min(Number(elapsedWorkDays) || 0, total));
+  var fraction = elapsed / total;
+  return { accrued: _ppRound2(full * fraction), fraction: fraction, elapsedWorkDays: elapsed, totalWorkDays: total };
+};
+
+// window.workDaysForMonth('YYYY-MM', todayIso) — the ONE place both surfaces
+// get "workdays elapsed" / "workdays this month" from, so the accrual
+// fraction above and item 1's attendance count are always measured against
+// the identical denominator. Thin wrapper over window.monthBounds
+// (money-core.js, pure) and window.countWorkDays (js/screens/dashboards.js
+// — a plain top-level `function`, so it is a window global at call time
+// despite loading after this file; every caller here runs long after all
+// deferred scripts have parsed, same as every other cross-file window.*
+// call in this app). Returns null if either dependency hasn't loaded yet,
+// so a caller can fall back rather than throw.
+window.workDaysForMonth = function (month, todayIso) {
+  if (typeof window.monthBounds !== 'function' || typeof window.countWorkDays !== 'function') return null;
+  var m = String(month || '');
+  var b = window.monthBounds(m, todayIso);
+  var y = parseInt(m.slice(0, 4), 10);
+  var mIdx = parseInt(m.slice(5, 7), 10) - 1;
+  if (!Number.isFinite(y) || !Number.isFinite(mIdx)) return null;
+  return {
+    elapsedWorkDays: window.countWorkDays(y, mIdx, b.upToDay),
+    totalWorkDays:   window.countWorkDays(y, mIdx, b.daysInMonth),
+    upToDay: b.upToDay, daysInMonth: b.daysInMonth, isCurrent: b.isCurrent, isFuture: b.isFuture
+  };
+};
+
+// window.presentDaysFromScore(attScoreFraction, elapsedWorkDays) — item 1,
+// "attendance as a count, not just a rate". getAttendanceScore
+// (dashboards.js) computes attScore = min(1, presentSum/elapsedWorkDays) and
+// discards presentSum; this inverts that SAME definition (presentSum =
+// attScore × elapsedWorkDays) rather than re-querying attendance records a
+// second time per roster card. Not a second measurement — it decomposes the
+// one score already frozen on the line into the numerator/denominator that
+// produced it. May be fractional (a half-day paid-leave record scores 0.5),
+// which is correct and shown as-is, e.g. "2.5 / 22 days".
+window.presentDaysFromScore = function (attScoreFraction, elapsedWorkDays) {
+  if (typeof attScoreFraction !== 'number' || !isFinite(attScoreFraction)) return null;
+  var elapsed = Math.max(0, Number(elapsedWorkDays) || 0);
+  return _ppRound2(Math.max(0, attScoreFraction) * elapsed);
+};
+
+// window.kpiMonthBreakdown(userTasks, month) — item 2, "KPI with its working
+// shown". window.computeKpiForMonth (money-core.js, FROZEN) returns only the
+// final blended score (taskScore×0.7 + delivScore×0.3) and discards the raw
+// "X of Y tasks" numerator/denominator. This is a byte-identical MIRROR of
+// its in/out-of-scope loop (same t.assignedTo / taskDoneMonth /
+// taskCreatedMonth rules — see money-core.js's own header comment for the
+// scope table), kept only so the breakdown can be DISPLAYED. It is never
+// called by any pay computation and can never drift the kpiScore that
+// actually reaches computePayLine — that number is always
+// computeKpiForMonth's own return value, untouched.
+//
+// Originally written as a private copy inside js/screens/hr.js's Edit
+// Payroll screen (_kpiMonthBreakdown, 2026-08-12); promoted here so the
+// Payroll roster and Personal Finance can share the identical breakdown
+// instead of a third hand-copied loop.
+window.kpiMonthBreakdown = function (userTasks, month) {
+  var tasks = Array.isArray(userTasks) ? userTasks : [];
+  var doneInM = 0, inScopeCount = 0;
+  for (var i = 0; i < tasks.length; i++) {
+    var t = tasks[i];
+    var dm = window.taskDoneMonth ? window.taskDoneMonth(t) : null;
+    var cm = (window.taskCreatedMonth ? window.taskCreatedMonth(t) : '') || '';
+    if (cm > month) continue; // didn't exist yet -> out of scope entirely
+    if (dm === month || dm === '') { inScopeCount++; doneInM++; }
+    else if (dm === null) { inScopeCount++; }
+    else if (dm > month) { inScopeCount++; }
+    // else: dm !== null && dm < month -> finished before M -> out of scope
+  }
+  return { doneInM: doneInM, inScopeCount: inScopeCount };
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     wageFloorCheck: window.wageFloorCheck,
     payBasisSentence: window.payBasisSentence,
     noPayRateWords: window.noPayRateWords,
-    PAY_POLICY_VALUES: window.PAY_POLICY_VALUES
+    PAY_POLICY_VALUES: window.PAY_POLICY_VALUES,
+    accruedTakeHomeSoFar: window.accruedTakeHomeSoFar,
+    workDaysForMonth: window.workDaysForMonth,
+    presentDaysFromScore: window.presentDaysFromScore,
+    kpiMonthBreakdown: window.kpiMonthBreakdown
   };
 }

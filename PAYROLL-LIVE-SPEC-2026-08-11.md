@@ -161,6 +161,18 @@ genuinely accrued: `computeWeeklyLine` over the punches that exist pays only
 hours actually worked. *Judgement call:* inventing pro-rating here would be a
 new money policy nobody ruled on; labelling beats guessing.
 
+> **⚠ SUPERSEDED 2026-08-13 (PAYROLL-ROSTER-ACCRUAL) — DO NOT RESTORE THIS
+> BEHAVIOUR.** The owner's later, explicit ruling reverses D9's DISPLAY
+> choice: "take home so far should show the true value of standing on the
+> day of that month. it cant be full already becayse that month is not yet
+> done". The Office live/roster take-home is now a DISPLAY-ONLY accrued
+> figure (elapsed workdays ÷ this month's total, via `window.
+> accruedTakeHomeSoFar`, js/pay-policy.js), never the full-month projection
+> this D9 entry describes. This is display only — `computePayLine` still
+> pays the full monthly salary at period end, exactly as this entry says;
+> that FROZEN payable is unchanged and NOT pro-rated. See js/screens/
+> payroll.js and js/screens/dashboards.js for the live implementation.
+
 **D10 — Future days are "not yet", never "absent".** `computeWeeklyLine`
 marks a day with no punches absent; mid-week that would show Thursday–Sunday
 as "no clock-in", which is alarming and false. Display-only fix in the
@@ -779,6 +791,8 @@ each kind on screen, live AND closed:
   fraction. If he expected a pro-rated peso figure, that is the pro-rating
   policy the handoff already lists as undecided — needs his ruling, and would
   be an ADDITIVE money-core function with pinned tests, in a separate build.
+  **⚠ RULED 2026-08-13 — he did want the pro-rated figure. See D9's
+  SUPERSEDED note above; do not treat this as still-open.**
 
 ---
 

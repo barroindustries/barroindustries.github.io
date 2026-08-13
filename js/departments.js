@@ -2117,6 +2117,17 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     const kpiTargetD = kpiTargetsMap[emp.id] || {};
     const kpiScore = window.computeKpiForMonth(userTasks, month,
         kpiTargetD.deliverableScore, window.taskDoneMonth, window.taskCreatedMonth);
+    // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — additive DISPLAY metadata only.
+    // window.kpiMonthBreakdown (js/pay-policy.js) mirrors computeKpiForMonth's
+    // own in/out-of-scope loop to hand back the raw "doneInM of inScopeCount"
+    // tasks the blended kpiScore above was built from, so the Payroll roster
+    // can show its working ("tasks finished vs assigned") instead of a bare
+    // percentage. kpiScore itself — computed above, on the frozen call — is
+    // the ONLY number that ever reaches computePayLine; this breakdown is
+    // never read by any money computation.
+    const kpiBreak = window.kpiMonthBreakdown
+      ? window.kpiMonthBreakdown(userTasks, month)
+      : { doneInM: null, inScopeCount: null };
     // v14 perf fix: these two reads are independent of each other (neither's
     // input depends on the other's output) — was two SEQUENTIAL awaits per
     // employee (on top of the whole employee list already running
@@ -2155,6 +2166,13 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     line.employmentStatus = plan.status;
     line.statutoryBasis = plan.words;
     line.statusFlag = plan.flag;
+    // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — the KPI working, frozen alongside
+    // the other traceability fields above. Additive only; does not touch any
+    // figure computePayLine returned.
+    line.kpiBreakdown = {
+      doneInM: kpiBreak.doneInM, inScopeCount: kpiBreak.inScopeCount,
+      deliverableScore: (typeof kpiTargetD.deliverableScore === 'number') ? kpiTargetD.deliverableScore : null
+    };
     return line;
   }));
 

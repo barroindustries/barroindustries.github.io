@@ -902,27 +902,19 @@ async function openPayrollReconciliation() {
 // money-core.js's window.computeKpiForMonth returns only the FINAL blended
 // score (taskScore*0.7 + delivScore*0.3) — it doesn't hand back the raw
 // "X of Y tasks" numerator/denominator the owner wants shown on the Edit
-// Payroll screen. This mirrors computeKpiForMonth's exact in/out-of-scope
-// loop (same t.assignedTo / taskDoneMonth / taskCreatedMonth rules — see
-// money-core.js's header comment for the scope table) purely so that
-// breakdown can be displayed; it is NEVER called by any pay computation.
-// computeKpiForMonth itself remains the one and only source of the kpiScore
-// that ever reaches computePayLine/pay, so this can't drift the two numbers
-// apart from what's shown — the loop bodies are kept byte-identical on
-// purpose.
+// Payroll screen. computeKpiForMonth itself remains the one and only source
+// of the kpiScore that ever reaches computePayLine/pay, so this can't drift
+// the two numbers apart from what's shown.
+//
+// PAYROLL-ROSTER-ACCRUAL-2026-08-13 — promoted to js/pay-policy.js's
+// window.kpiMonthBreakdown (loaded before this file) so the Payroll roster
+// and Personal Finance can show the identical breakdown instead of a third
+// hand-copied loop. This wrapper is kept only so every existing call site in
+// this file stays unchanged.
 function _kpiMonthBreakdown(userTasks, month) {
-  const tasks = Array.isArray(userTasks) ? userTasks : [];
-  let doneInM = 0, inScopeCount = 0;
-  for (const t of tasks) {
-    const dm = window.taskDoneMonth ? window.taskDoneMonth(t) : null;
-    const cm = (window.taskCreatedMonth ? window.taskCreatedMonth(t) : '') || '';
-    if (cm > month) continue; // didn't exist yet -> out of scope entirely
-    if (dm === month || dm === '') { inScopeCount++; doneInM++; }
-    else if (dm === null) { inScopeCount++; }
-    else if (dm > month) { inScopeCount++; }
-    // else: dm !== null && dm < month -> finished before M -> out of scope
-  }
-  return { doneInM, inScopeCount };
+  return window.kpiMonthBreakdown
+    ? window.kpiMonthBreakdown(userTasks, month)
+    : { doneInM: 0, inScopeCount: 0 };
 }
 
 // PAYROLL-LIVE-SPEC-2026-08-11 §8 Step 6 (2026-08-12) — window.renderPayrollHub

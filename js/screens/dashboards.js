@@ -2680,9 +2680,19 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const computedMonth = isFinalMonth
     ? (frozenThisMonth.netPay ?? frozenThisMonth.finalPay ?? 0)
     : (projBlocked ? null : (projLine ? projLine.netBeforeCA : 0));
+  // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — window.accruedTakeHomeSoFar
+  // (js/pay-policy.js) is the ONE expression for this figure, called from
+  // BOTH here and js/screens/payroll.js's roster card, so the two surfaces
+  // can never disagree about the same person's "so far" pay on the same
+  // day. This file already carried this exact elapsed-workdays ÷ total-
+  // workdays fraction inline before this pass (PAYROLL-SYNC-FIX-2026-08-13);
+  // the roster card did not, and has now been brought into line with it —
+  // see that helper's header for the full reasoning and the F3 reversal.
   const earnedSoFar = isFinalMonth
     ? computedMonth
-    : (projBlocked ? null : computedMonth * (daysElapsed / daysInMonth)); // a disbursed month is fully earned, no proration
+    : (projBlocked ? null : (typeof window.accruedTakeHomeSoFar === 'function'
+        ? window.accruedTakeHomeSoFar(computedMonth, daysElapsed, daysInMonth).accrued
+        : computedMonth * (daysElapsed / daysInMonth))); // a disbursed month is fully earned, no proration
   // §9.1/§9.2 — the ONE traceability sentence, read off the same line the
   // figure above came from (never re-derived). frozenThisMonth carries the
   // additive salary_history mirror fields (§9.2); netBeforeCA there is the

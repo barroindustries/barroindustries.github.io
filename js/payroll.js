@@ -584,6 +584,17 @@ if (typeof window === 'undefined') {
       row.statusFlag = l.statusFlag || null;
     }
 
+    // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — frozen onto the OFFICE line by
+    // js/departments.js's buildPayRunLines (additive; never fed back into
+    // kpiScore/net/finalPay above). Set on BOTH teams' rows (null for
+    // Operations, which has no KPI) so office/ops keep "identically-named
+    // fields" — the contract this file's own tests pin (see
+    // tests/payroll-unified.test.mjs, "ONE normalised line").
+    row.kpiBreakdown = (kind !== 'week' && l.kpiBreakdown && typeof l.kpiBreakdown === 'object')
+      ? { doneInM: l.kpiBreakdown.doneInM, inScopeCount: l.kpiBreakdown.inScopeCount,
+          deliverableScore: l.kpiBreakdown.deliverableScore }
+      : null;
+
     row.held = !!heldReason;
     row.heldReason = heldReason;
     row.negativeNet = row.net < 0;
