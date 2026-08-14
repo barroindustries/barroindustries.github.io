@@ -37,7 +37,21 @@ if (typeof window === 'undefined') {
 // outside this list means the boundary-read THROWS rather than guessing —
 // see js/departments.js's buildPayRunLines and js/screens/dashboards.js's
 // Personal Finance renderer, the two readers of that settings doc.
-window.PAY_POLICY_VALUES = ['flat', 'taskbased'];
+// 'performance' added 2026-08-14. The base-and-incentive split (Gov Rates →
+// Base and incentive) restructures an Office package into a protected base
+// plus an incentive, and 'performance' is the ONLY policy that scales the
+// incentive while leaving the base whole — money-core's own comment on that
+// branch reads "BASE WAGE is never docked (PH labor-safe)". Without it here
+// the split is inert: the settings boundary would refuse the value, the run
+// would stay on 'flat', and base + incentive would simply pay the original
+// package back. Owner ruling: "the excess of 10k is incentive subject to kpi
+// and attendance".
+//
+// Widening this list is deliberately its own step. Everything else about the
+// split is preview-and-apply on pay RECORDS; this is the line that decides
+// which arithmetic a live run uses, so it is changed knowingly and its pinned
+// test updated with it, rather than slipped in alongside a UI build.
+window.PAY_POLICY_VALUES = ['flat', 'taskbased', 'performance'];
 
 // §8.3 — the pure minimum-wage check. NEVER invents the floor: an
 // absent/non-positive floorMonthly means the check is INERT (checked:false),

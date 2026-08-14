@@ -119,6 +119,7 @@ window.renderStatutoryRatesTab = async function (container, currentUser, current
 
     <div id="sr-status-section" style="margin-top:18px"></div>
     <div id="sr-taskbased-section" style="margin-top:18px"></div>
+    <div id="sr-officesplit-section" style="margin-top:18px"></div>
     <div id="sr-legalbasis-section" style="margin-top:18px"></div>
   `;
 
@@ -152,6 +153,14 @@ window.renderStatutoryRatesTab = async function (container, currentUser, current
   // switch is toggled, without re-running the rates form's own reads/writes.
   const taskBasedHost = c.querySelector('#sr-taskbased-section');
   if (taskBasedHost) window.renderTaskBasedPaySection(taskBasedHost, currentUser, currentRole);
+
+  // OFFICE-SPLIT-SPEC-2026-08-14 — "base and incentive": beside the
+  // task-based pay controls per the owner's placement instruction (same
+  // reasoning as the legal-basis section below — independent of everything
+  // else on this screen, so it repaints itself without touching any other
+  // section's reads/writes).
+  const officeSplitHost = c.querySelector('#sr-officesplit-section');
+  if (officeSplitHost) window.renderOfficeSplitSection(officeSplitHost, currentUser, currentRole);
 
   // PAY-EXPLANATION-SPEC-2026-08-13 §"cite a law" — the citation editor, right
   // beside the task-based pay controls it explains, per the owner's placement
@@ -785,4 +794,454 @@ window.renderPayLegalBasisSection = async function (container, currentUser, curr
       }));
     }
   });
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   OFFICE-SPLIT-SPEC-2026-08-14 — "Base and incentive": restructure Office
+   Team pay into a protected base plus a performance-linked incentive.
+
+   THE OWNER'S DECISION (2026-08-14, verbatim): "ok lets do 10k base for
+   everyone" … "fix it, the excess of 10k is incentive subject to kpi and
+   attendance". For each Office Team person: base = ₱10,000 (configurable
+   below), incentive = current package − base, and only the incentive is
+   scaled by performance. Nobody's total package changes today — what
+   changes is which part of it is at risk, and only once the owner
+   separately turns performance-based pay on (he has not; see below).
+
+   WHY THIS SHAPE. Reducing a person's STATED SALARY for performance is a
+   deduction from wages. Paying an INCENTIVE that was not fully earned is
+   not. Same money, different legal footing — so the split has to happen
+   before any scaling, not be simulated after the fact. js/money-core.js's
+   `computePayLine` already has exactly this shape under policy:'performance'
+   — `base − statutory − otherDeductions + allowance×perfFactor`, with a
+   standing comment there that "BASE WAGE is never docked (PH labor-safe)".
+   This section calls that frozen function directly (never a second copy of
+   the arithmetic) with an EXPLICIT policy argument, so every preview number
+   below is guaranteed identical to what the real engine would produce.
+
+   THE FIELD DECISION. The incentive is carried in the EXISTING `allowance`
+   field on payroll/{uid} — 'performance' already scales exactly that field,
+   it is tested and pinned, and it needs NO change to money-core.js. Every
+   Office person's allowance is ₱0 today (the roster's Allowances column
+   doesn't render it), so Apply below overwrites nothing that was already
+   there.
+   ⚠ FLAG: a genuine allowance added later (transport, meal, etc.) would
+   land in this SAME field and would therefore ALSO be scaled by
+   performance once that policy is ever turned on. If the owner needs a
+   non-scaling allowance alongside the incentive, that needs its own field —
+   a separate build, not this one.
+
+   NOTHING IS ACTIVATED BY THIS SCREEN. Apply below writes only `salary` and
+   `allowance` on payroll/{uid} — never settings/payrollOfficePolicy. Under
+   the 'flat' policy every payroll run still uses today (base+allowance,
+   unscaled), the split is a no-op in pesos: 10,000 + 4,500 pays exactly what
+   14,500 + 0 paid.
+
+   ⚠ UPDATED 2026-08-14 — the note that used to sit here said 'performance'
+   was not a legal settings value, so applying the split could never change a
+   real run. That WAS true and it made the whole feature inert: the owner
+   would have restructured every pay record and seen not one peso move.
+   window.PAY_POLICY_VALUES now carries 'performance' (js/pay-policy.js,
+   pinned by tests/taskbased-pay.test.mjs), and the switch below stores it.
+   Applying the split still changes nothing on its own — the switch is a
+   separate, deliberate second action, exactly as with task-based pay.
+
+   IDEMPOTENT + REVERSIBLE. payroll/{uid}.officeSplit.originalSalary/
+   originalAllowance are captured ONCE, on the first Apply, and never
+   overwritten by a later Apply — so applying twice reproduces the same
+   ₱10,000 + ₱4,500 instead of compounding into ₱10,000 + ₱0 (package =
+   salary+allowance is itself a fixed point of the split, but the recorded
+   original is what makes a genuine UNDO possible — see the Undo button,
+   which restores originalSalary/originalAllowance and clears the flag).
+
+   GUARDS.
+     • Operations Team excluded entirely — this section's roster comes from
+       window.buildPayRunLines, whose own skip list already removes anyone
+       with payClass === 'production' (js/departments.js's
+       monthlyRunSkipReason) before a single line is built.
+     • Package at or below the base -> base = package, incentive = 0 (never
+       negative) — Math.min/Math.max below.
+     • No salary on file -> named, not defaulted to ₱10,000. Checked on the
+       raw payroll/{uid} doc, not on the derived package.
+     • A proposed base below the stored minimum wage (settings/
+       payrollWageFloor) is flagged per person; absent a stored floor, the
+       screen says so rather than implying the base is safe (reuses
+       window.wageFloorCheck, same as the task-based section above).
+
+   PRESIDENT-GATED. canSee = isMoneyPriv() (same tier that can see the
+   task-based section above — a Finance user can read this, an ordinary
+   employee sees nothing). canWrite = isRealPresident() for both Apply and
+   Undo — this rewrites real people's pay records. payroll/{uid} is already
+   isMoneyAdmin() (president/manager/finance) for create/update in
+   firestore.rules; isRealPresident() is a strict subset, so no rules change
+   is needed and none is made here.
+   ═══════════════════════════════════════════════════════════════════════ */
+window.OFFICE_SPLIT_DEFAULT_BASE = 10000; // the owner's number, 2026-08-14 — editable in the UI, never hand-edited elsewhere
+
+window.renderOfficeSplitSection = async function (container, currentUser, currentRole) {
+  if (!container) return;
+  const canSee = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv() : false;
+  if (!canSee) { container.innerHTML = ''; return; }
+
+  const esc = (v) => (window.escHtml ? window.escHtml(v == null ? '' : v) : String(v == null ? '' : v));
+  const ico = (g, s) => (window.emojiIcon ? window.emojiIcon(g, s || 16) : '');
+  const peso = (v) => (window.fmtPeso ? window.fmtPeso(v) : ('₱' + (Number(v) || 0).toFixed(2)));
+  const canWrite = (typeof isRealPresident === 'function') ? isRealPresident() : false;
+
+  container.innerHTML = window.skeletonHtml ? window.skeletonHtml('rows') : '<p>Loading…</p>';
+
+  const month = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const monthLabel = window.fmtMonthLabel ? window.fmtMonthLabel(month) : month;
+
+  // ── the roster + this month's real KPI/attendance/cash-advance figures,
+  // through the SAME builder every other pay screen uses (never a second
+  // copy of who's on payroll or how their score is worked out) ───────────
+  let flatBuilt = null, previewFailed = false;
+  try { flatBuilt = await window.buildPayRunLines(month, { policy: 'flat' }); }
+  catch (_) { previewFailed = true; }
+  if (!container.isConnected) return;
+
+  let usersRes = null, rosterFailed = false;
+  try { usersRes = await window.fetchUsersWithPayroll(); }
+  catch (_) { rosterFailed = true; }
+  if (!container.isConnected) return;
+  const payrollDenied = !!(usersRes && usersRes.payrollDenied);
+
+  let statusRule = { on: false }, statusReadFailed = false;
+  try { statusRule = await window.statutoryStatusRuleOn(); }
+  catch (_) { statusReadFailed = true; }
+  if (!container.isConnected) return;
+
+  let floorDoc = null, floorReadFailed = false;
+  try {
+    const d = await db.collection('settings').doc('payrollWageFloor').get();
+    floorDoc = d.exists ? d.data() : null;
+  } catch (_) { floorReadFailed = true; }
+  if (!container.isConnected) return;
+  const floorMonthly = (floorDoc && Number(floorDoc.monthlyFloor) > 0) ? Number(floorDoc.monthlyFloor) : null;
+
+  // Is the incentive actually being paid on performance right now? Read the
+  // SAME settings doc buildPayRunLines reads, so this section can never claim
+  // a state the pay run disagrees with. A failed read is reported as unknown
+  // rather than assumed off — telling somebody the incentive is not scaling
+  // when it is would be the worse of the two errors.
+  let splitPolicyOn = false, policyReadFailed = false;
+  try {
+    const pd = await db.collection('settings').doc('payrollOfficePolicy').get();
+    splitPolicyOn = !!(pd.exists && pd.data() && pd.data().policy === 'performance');
+  } catch (_) { policyReadFailed = true; }
+  if (!container.isConnected) return;
+
+  const hardFail = previewFailed || rosterFailed || payrollDenied;
+
+  // ── Office roster: non-partner, not removed, not Operations Team ───────
+  // window.isExternalPartnerUser is the SAME predicate buildPayRunLines
+  // itself uses to keep external partners off payroll entirely (js/config.js).
+  const officeRaw = hardFail ? [] : usersRes.docs.map(d => ({ id: d.id, ...d.data() }))
+    .filter(u => !window.isExternalPartnerUser(u) && u.removed !== true && u.payClass !== 'production');
+
+  const flatByUid = {};
+  (flatBuilt && flatBuilt.lines ? flatBuilt.lines : []).forEach(l => { flatByUid[l.uid] = l; });
+
+  // People on the Office roster but NOT on this month's payable list —
+  // named with their real reason (buildPayRunLines' own skip list), not
+  // silently dropped. payClass==='production' never appears here (already
+  // filtered out of officeRaw above), so this is purely the period-scoped
+  // and worker-profile-linked cases.
+  const officeIds = new Set(officeRaw.map(u => u.id));
+  const otherSkipped = (flatBuilt && flatBuilt.skipped ? flatBuilt.skipped : [])
+    .filter(s => officeIds.has(s.uid));
+
+  const alreadySplit = officeRaw.filter(u => u.officeSplit && u.officeSplit.active === true);
+
+  // ── pure preview math — kpiScore/attScore/caPlan/caBalance are ALREADY
+  // resolved for real by the 'flat' build above; only the base/incentive
+  // split and the 'performance' call are done here, per person, per the
+  // currently-typed base amount. Never touches Firestore. ─────────────────
+  function computeRows(baseAmount) {
+    const rows = [], noSalary = [];
+    officeRaw.forEach((u) => {
+      const flatLine = flatByUid[u.id];
+      if (!flatLine) return; // counted in otherSkipped above
+      if (!(Number(u.salary) > 0)) { noSalary.push(u.displayName || u.email || u.id); return; }
+
+      const pkg = +(((flatLine.base || 0) + (flatLine.allowance || 0))).toFixed(2);
+      const proposedBase = Math.min(Math.max(0, baseAmount), pkg);
+      const proposedIncentive = Math.max(0, +(pkg - proposedBase).toFixed(2));
+
+      // Same statConfig resolution buildPayRunLines applies before calling
+      // computePayLine (STATUTORY-BY-STATUS-SPEC) — the split changes the
+      // salary/allowance MIX, not the person's employment status, so this
+      // has to be replicated for the preview's statutory figure to be
+      // trustworthy rather than guessed.
+      const plan = window.statutoryStatusPlan(u, statusRule.on, { engine: 'month' });
+      const empForPay = plan.active ? { ...u, statConfig: plan.statConfig } : u;
+      const synth = { ...empForPay, salary: proposedBase, allowance: proposedIncentive };
+
+      let proposedLine;
+      try {
+        proposedLine = window.computePayLine(synth, {
+          month, policy: 'performance',
+          kpiScore: flatLine.kpiScore, attScore: flatLine.attScore,
+          caPlan: flatLine.caPlan, caBalance: flatLine.caBalance
+        });
+      } catch (_) { return; } // 'performance' never throws for a non-production person — defensive only
+
+      const floorChk = window.wageFloorCheck
+        ? window.wageFloorCheck({ effectiveGross: proposedBase }, floorMonthly)
+        : { checked: false, ok: true };
+
+      rows.push({
+        uid: u.id, name: flatLine.name || u.displayName || u.email || u.id,
+        package: pkg, proposedBase, proposedIncentive,
+        kpiScore: flatLine.kpiScore, attScore: flatLine.attScore, perfFactor: proposedLine.perfFactor,
+        nowPay: flatLine.finalPay, proposedPay: proposedLine.finalPay,
+        belowFloor: floorChk.checked && !floorChk.ok,
+        alreadySplit: !!(u.officeSplit && u.officeSplit.active === true)
+      });
+    });
+    rows.sort((a, b) => a.name.localeCompare(b.name));
+    return { rows, noSalary };
+  }
+
+  const stateHtml = `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Base and incentive — Office Team</h3></div>
+      <p style="font-size:13px;line-height:1.5">Splits each Office Team person's pay into a protected base and a performance-linked incentive. The base is never reduced for performance — it is a wage, the same as today. The incentive is the rest of their current package; it is only scaled by KPI and attendance once performance-based pay is separately turned on. Nobody's total package changes by applying this. The Operations Team is not shown here — their pay follows geo-tracked hours only, with no KPI to link an incentive to.</p>
+      ${hardFail ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} ${payrollDenied ? 'Office pay figures: not shown to you.' : 'This month’s figures could not be read right now.'} Reload before deciding anything from this.</span></div>` : ''}
+      ${statusReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} Could not read the employment-status payroll setting — the figures below may not reflect it. Reload before relying on this.</span></div>` : ''}
+      ${floorReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} The saved minimum wage could not be read — the floor check below may be out of date.</span></div>` : ''}
+      ${!hardFail && floorMonthly == null ? `<p style="font-size:11px;color:var(--text-muted)">${ico('⚠', 12)} No minimum wage amount is saved (see the task-based pay section above) — proposed base amounts below are not being checked against one.</p>` : ''}
+    </div>
+
+    ${canWrite ? `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Base amount</h3></div>
+      <div class="form-group">
+        <label for="os-base">Protected base (₱ per month)</label>
+        <input id="os-base" type="number" step="any" min="0" value="${esc(window.OFFICE_SPLIT_DEFAULT_BASE)}"${hardFail ? ' disabled' : ''}/>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:3px">Defaults to ₱10,000, the owner's figure — change it and the preview below updates. Nobody is affected until Apply is pressed below.</p>
+      </div>
+    </div>` : ''}
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Preview for ${esc(monthLabel)}</h3></div>
+      <div class="card-body" style="padding-top:0" id="os-preview-body"></div>
+    </div>
+
+    ${canWrite && !hardFail ? `
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Apply</h3></div>
+      <div class="card-body" style="padding-top:0">
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Writes each person's protected base and incentive to their pay record. Their total package stays the same today — this only changes which part is at risk once performance-based pay is turned on. Each person is applied one at a time; if one fails, the rest are still applied and the failure is named below, nothing is left half-done.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn-primary btn-sm" id="os-apply">${ico('✅', 14)} Apply the split</button>
+          ${alreadySplit.length ? `<button class="btn-secondary btn-sm" id="os-undo" style="color:var(--danger)">${ico('↩️', 14)} Undo (${alreadySplit.length})</button>` : ''}
+        </div>
+        ${/* THE SECOND, SEPARATE ACTION. Applying the split moves nothing on
+             its own — under 'flat' a base of 10,000 plus an incentive of
+             4,500 pays exactly what 14,500 paid. This is the switch that
+             makes the incentive actually scale with KPI and attendance, and
+             it is deliberately its own decision with its own confirmation,
+             the same shape as the task-based switch above. */''}
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:12px;font-weight:700;margin-bottom:4px">Pay the incentive on performance</div>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+            ${splitPolicyOn
+              ? 'On. Each person\'s protected base is paid in full; the incentive above it is multiplied by their performance factor (KPI 70%, attendance 30%). Turning this off pays every package in full again.'
+              : 'Off. Everyone is paid their full package regardless of KPI or attendance. Turning this on pays the base in full and scales only the incentive — it does not touch anybody\'s base wage.'}
+          </p>
+          <button class="btn-${splitPolicyOn ? 'secondary' : 'primary'} btn-sm" id="os-policy">
+            ${splitPolicyOn ? 'Stop paying the incentive on performance' : 'Pay the incentive on performance'}
+          </button>
+          ${floorMonthly == null ? `<div style="font-size:11px;color:var(--danger);margin-top:8px">No minimum wage amount is saved yet, so nothing is checking these figures against one. Save it above first.</div>` : ''}
+        </div>
+        <div id="os-result" style="margin-top:10px"></div>
+      </div>
+    </div>` : (!canWrite ? `<div class="card" style="margin-bottom:12px"><div class="card-body"><p style="font-size:11px;color:var(--text-muted)">${ico('🔒', 12)} Only the President can apply or undo this — it rewrites real pay records.</p></div></div>` : '')}
+  `;
+
+  container.innerHTML = stateHtml;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
+  if (hardFail) return;
+
+  const previewBody = container.querySelector('#os-preview-body');
+  const baseInput = container.querySelector('#os-base');
+
+  const rowHtml = (r) => `
+    <div class="py-problem">
+      <div class="py-ptext"><strong>${esc(r.name)}</strong> — package ${esc(peso(r.package))}${r.alreadySplit ? ` <span class="badge badge-green" style="font-size:10px">Already applied</span>` : ''}${r.belowFloor ? ` <span class="badge badge-red" style="font-size:10px">Base below the saved minimum wage</span>` : ''}<br/>
+        Base ${esc(peso(r.proposedBase))} + incentive ${esc(peso(r.proposedIncentive))}<br/>
+        <span style="color:var(--text-muted)">KPI ${Math.round((r.kpiScore || 0) * 100)}% · attendance ${Math.round((r.attScore || 0) * 100)}% · factor ${Math.round((r.perfFactor || 0) * 100)}%</span><br/>
+        Pay now ${esc(peso(r.nowPay))} → pay under the split ${esc(peso(r.proposedPay))}
+      </div>
+    </div>`;
+
+  let currentRows = [];
+  function paint() {
+    const raw = parseFloat(baseInput ? baseInput.value : '');
+    const baseAmount = Number.isFinite(raw) && raw >= 0 ? raw : window.OFFICE_SPLIT_DEFAULT_BASE;
+    const { rows, noSalary } = computeRows(baseAmount);
+    currentRows = rows;
+
+    const totalPackage = rows.reduce((s, r) => s + r.package, 0);
+    const totalNow = rows.reduce((s, r) => s + r.nowPay, 0);
+    const totalProposed = rows.reduce((s, r) => s + r.proposedPay, 0);
+
+    const totalsHtml = rows.length
+      ? `<div class="py-problem"><div class="py-ptext"><strong>Whole Office Team — package ${esc(peso(totalPackage))}, pay now ${esc(peso(totalNow))} → pay under the split ${esc(peso(totalProposed))}</strong> — ${rows.length} ${rows.length === 1 ? 'person' : 'people'}.</div></div>`
+      : '';
+
+    const noSalaryHtml = noSalary.length
+      ? `<div class="alert-banner" style="cursor:default;margin-bottom:8px"><span>${ico('⚠', 16)} No salary on file — skipped, not given a base: ${esc(noSalary.join(', '))}.</span></div>`
+      : '';
+
+    const otherSkippedHtml = otherSkipped.length
+      ? `<p style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${otherSkipped.length} on the Office roster ${otherSkipped.length === 1 ? 'is' : 'are'} not on this month's payable list, so ${otherSkipped.length === 1 ? 'is' : 'are'} not shown below: ${esc(otherSkipped.map(s => s.name + ' (' + s.reason + ')').join(', '))}.</p>`
+      : '';
+
+    previewBody.innerHTML = noSalaryHtml + otherSkippedHtml + totalsHtml +
+      (rows.length ? rows.map(rowHtml).join('') : `<div class="py-sub">Nobody to show for ${esc(monthLabel)}.</div>`);
+
+    if (window.lucide) lucide.createIcons({ nodes: [previewBody] });
+    return { rows, baseAmount };
+  }
+
+  paint();
+  if (baseInput) baseInput.addEventListener('input', paint);
+
+  if (!canWrite) return;
+
+  const resultHost = container.querySelector('#os-result');
+  const renderResult = (title, ok, failed) => {
+    if (!resultHost) return;
+    resultHost.innerHTML = `
+      <div class="py-problem"><div class="py-ptext"><strong>${esc(title)}</strong><br/>
+      ${ok.length ? `${ico('✅', 14)} ${ok.length} ${ok.length === 1 ? 'person' : 'people'}: ${esc(ok.join(', '))}` : 'Nobody was applied.'}
+      ${failed.length ? `<br/>${ico('⚠', 14)} ${failed.length} failed — left untouched: ${esc(failed.map(f => f.name + ' — ' + f.reason).join('; '))}` : ''}
+      </div></div>`;
+  };
+
+  const applyBtn = container.querySelector('#os-apply');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => window.busy(applyBtn, async () => {
+      const { rows, baseAmount } = paint(); // always apply exactly what's on screen right now
+      if (!rows.length) { Notifs.showToast('Nothing to apply — the preview is empty.', 'error'); return; }
+      const msg = `Apply the base/incentive split to ${rows.length} ${rows.length === 1 ? 'person' : 'people'}? Each person's protected base becomes ${peso(baseAmount)}; the rest becomes an incentive that only scales with performance once that pay method is separately turned on. Nobody's total package changes today.`;
+      if (!(await window.confirmDialog({ message: msg, confirmLabel: 'Apply the split', cancelLabel: 'Cancel' }))) return;
+
+      const rawByUid = {};
+      officeRaw.forEach(u => { rawByUid[u.id] = u; });
+
+      const ok = [], failed = [];
+      for (const r of rows) {
+        try {
+          const existing = rawByUid[r.uid] || {};
+          const already = existing.officeSplit && existing.officeSplit.active === true;
+          // Captured ONCE — a second Apply must not overwrite the true
+          // original with an already-split figure (see file header, "IDEMPOTENT + REVERSIBLE").
+          const originalSalary = already ? existing.officeSplit.originalSalary : (existing.salary || 0);
+          const originalAllowance = already ? existing.officeSplit.originalAllowance : (existing.allowance || 0);
+          await db.collection('payroll').doc(r.uid).set({
+            salary: r.proposedBase,
+            allowance: r.proposedIncentive,
+            officeSplit: {
+              active: true, baseAmount,
+              originalSalary, originalAllowance,
+              appliedBy: (currentUser && currentUser.uid) || '',
+              appliedByName: (window.userProfile && window.userProfile.displayName) || '',
+              appliedAtLabel: (window.bizDate ? window.bizDate() : ''),
+              appliedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }
+          }, { merge: true });
+          window.logAudit && window.logAudit('update', 'payroll', r.uid, { officeSplit: true, baseAmount, incentive: r.proposedIncentive });
+          ok.push(r.name);
+        } catch (e) {
+          failed.push({ name: r.name, reason: e.message || e.code || String(e) });
+        }
+      }
+      renderResult('Applied', ok, failed);
+      if (ok.length) Notifs.success(`Base/incentive split applied to ${ok.length} ${ok.length === 1 ? 'person' : 'people'}.`);
+      if (failed.length) Notifs.showToast(`${failed.length} could not be applied — see the list below. Nothing else was touched.`, 'error');
+      window.renderOfficeSplitSection(container, currentUser, currentRole);
+    }));
+  }
+
+  // ── The switch that makes the incentive actually scale ──────────────────
+  // Separate from Apply on purpose. Apply restructures pay RECORDS and moves
+  // nothing; this changes which arithmetic a live pay run uses. Same shape as
+  // the task-based switch: President-only, confirmed, and it names the
+  // consequence in pesos rather than saying "are you sure".
+  const policyBtn = container.querySelector('#os-policy');
+  if (policyBtn) {
+    policyBtn.addEventListener('click', () => window.busy(policyBtn, async () => {
+      const turningOn = !splitPolicyOn;
+      // Re-read what is on screen RIGHT NOW, exactly as Apply does — a closure
+      // captured at bind time would quote figures from before the base amount
+      // was last edited, and this dialog's numbers are the whole basis for the
+      // decision being made.
+      const { rows } = paint();
+      if (turningOn && !rows.length) {
+        Notifs.showToast('Nobody has a base and incentive set up yet — apply the split first.', 'error'); return;
+      }
+      const totalNow = rows.reduce((s, r) => s + (Number(r.nowPay) || 0), 0);
+      const totalNew = rows.reduce((s, r) => s + (Number(r.proposedPay) || 0), 0);
+      const msg = turningOn
+        ? `Pay the incentive on performance from now on?\n\nOn this month's figures that is ${peso(totalNew)} across ${rows.length} ${rows.length === 1 ? 'person' : 'people'}, instead of ${peso(totalNow)}. Each person's protected base is paid in full either way — only the incentive above it moves.${floorMonthly == null ? '\n\nNo minimum wage amount is saved, so nothing is checking these figures against one.' : ''}`
+        : `Stop paying the incentive on performance?\n\nEveryone goes back to their full package — ${peso(totalNow)} across ${rows.length} ${rows.length === 1 ? 'person' : 'people'} on this month's figures.`;
+      if (!(await window.confirmDialog({
+        message: msg, confirmLabel: turningOn ? 'Pay on performance' : 'Pay in full', cancelLabel: 'Cancel', danger: turningOn
+      }))) return;
+      try {
+        await db.collection('settings').doc('payrollOfficePolicy').set({
+          policy: turningOn ? 'performance' : 'flat',
+          setBy: (window.currentUser && currentUser.uid) || null,
+          setByName: (window.userProfile && userProfile.displayName) || null,
+          setAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        window.logAudit && window.logAudit('update', 'settings', 'payrollOfficePolicy',
+          { policy: turningOn ? 'performance' : 'flat' });
+        Notifs.success(turningOn ? 'The incentive now scales with performance.' : 'Everyone is paid their full package again.');
+      } catch (e) {
+        Notifs.showToast('Could not change this: ' + ((e && e.message) || e), 'error'); return;
+      }
+      window.renderOfficeSplitSection(container, currentUser, currentRole);
+    }));
+  }
+
+  const undoBtn = container.querySelector('#os-undo');
+  if (undoBtn) {
+    undoBtn.addEventListener('click', () => window.busy(undoBtn, async () => {
+      if (!alreadySplit.length) { Notifs.showToast('Nobody currently has the split applied.', 'error'); return; }
+      const msg = `Undo the base/incentive split for ${alreadySplit.length} ${alreadySplit.length === 1 ? 'person' : 'people'}? Each person's salary and allowance return to what they were before the split was first applied.`;
+      if (!(await window.confirmDialog({ message: msg, confirmLabel: 'Undo the split', cancelLabel: 'Cancel', danger: true }))) return;
+
+      const ok = [], failed = [];
+      for (const u of alreadySplit) {
+        try {
+          await db.collection('payroll').doc(u.id).set({
+            salary: u.officeSplit.originalSalary || 0,
+            allowance: u.officeSplit.originalAllowance || 0,
+            officeSplit: {
+              active: false,
+              originalSalary: u.officeSplit.originalSalary || 0,
+              originalAllowance: u.officeSplit.originalAllowance || 0,
+              undoneBy: (currentUser && currentUser.uid) || '',
+              undoneByName: (window.userProfile && window.userProfile.displayName) || '',
+              undoneAtLabel: (window.bizDate ? window.bizDate() : ''),
+              undoneAt: firebase.firestore.FieldValue.serverTimestamp()
+            }
+          }, { merge: true });
+          window.logAudit && window.logAudit('update', 'payroll', u.id, { officeSplit: false });
+          ok.push(u.displayName || u.email || u.id);
+        } catch (e) {
+          failed.push({ name: u.displayName || u.email || u.id, reason: e.message || e.code || String(e) });
+        }
+      }
+      renderResult('Undone', ok, failed);
+      if (ok.length) Notifs.success(`Base/incentive split undone for ${ok.length} ${ok.length === 1 ? 'person' : 'people'}.`);
+      if (failed.length) Notifs.showToast(`${failed.length} could not be undone — see the list below. Nothing else was touched.`, 'error');
+      window.renderOfficeSplitSection(container, currentUser, currentRole);
+    }));
+  }
 };

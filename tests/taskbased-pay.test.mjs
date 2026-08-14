@@ -206,7 +206,31 @@ describe('window.payBasisSentence — js/pay-policy.js §9.1', () => {
 });
 
 describe('window.PAY_POLICY_VALUES — the §6.1 whitelist', () => {
-  it('is exactly the two known policy strings', () => {
-    assert.deepEqual(PAY_POLICY_VALUES, ['flat', 'taskbased']);
+  it('is exactly the three known policy strings', () => {
+    // 'performance' joined the list 2026-08-14 for the base-and-incentive
+    // split — it is the only branch that scales an incentive while leaving
+    // the base wage whole. Pinned so a fourth value cannot appear without
+    // someone deciding to add it here.
+    assert.deepEqual(PAY_POLICY_VALUES, ['flat', 'taskbased', 'performance']);
+  });
+
+  it("'performance' scales ONLY the incentive — the base wage is never docked", () => {
+    // The whole reason the split exists. Same package (10,000 + 4,500) under
+    // both policies: 'flat' pays it whole, 'performance' pays the base whole
+    // and scales only the 4,500. If this ever starts docking `base`, the
+    // structure the owner was advised to adopt has quietly become the one he
+    // was advised against.
+    const split = { ...JIA, salary: 10000, allowance: 4500 };
+    const ctx = { month: '2026-07', kpiScore: 0.36, attScore: 3 / 27, caPlan: [], caBalance: 0 };
+    const flat = computePayLine(split, { ...ctx, policy: 'flat' });
+    const perf = computePayLine(split, { ...ctx, policy: 'performance' });
+    const factor = perf.perfFactor;
+    // flat pays base + allowance in full, less statutory
+    assert.equal(flat.netBeforeCA, 10000 + 4500 - flat.statutoryTotal);
+    // performance pays base in full, less statutory, plus the SCALED incentive
+    assert.equal(perf.netBeforeCA, 10000 - perf.statutoryTotal + 4500 * factor);
+    // and the base itself is untouched either way
+    assert.equal(flat.base, 10000);
+    assert.equal(perf.base, 10000);
   });
 });
