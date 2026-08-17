@@ -1182,15 +1182,21 @@ function printJobOrder(p, orders){
   thead{display:table-header-group}
   th{background:#1E3A5F;color:#fff;font-size:6pt;font-weight:700;text-transform:uppercase;
     letter-spacing:.3px;padding:3px 2px;text-align:center;line-height:1.25;border:1px solid #1E3A5F}
-  /* THE NINE STAGE HEADINGS RUN VERTICALLY. Fourteen columns on A4 portrait
-     leaves a stage column ~25px wide; "COMPLETE" laid horizontally in that
-     space either clips or drops below the size at which a person can read it
-     while ticking. Rotating removes the width constraint altogether — the
-     labels stay whole words at 6pt, and Description gets 42% of the sheet back
-     instead of 31%. This is what shop-floor travellers do. */
-  th.rot{padding:0;height:62px;vertical-align:bottom}
-  th.rot span{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;
-    white-space:nowrap;padding:5px 0 7px;letter-spacing:.4px}
+  /* The nine stage headings are FLAT, two stacked words, exactly as the sheet
+     in use has them. They are set at 4.2pt because that is what makes the
+     longest of them — COMPLETE, 8 characters — fit a 4.8% column of a 188mm
+     A4 body (~34px against ~31px of glyph).
+     NOTE FOR ANYONE "FIXING" THIS: at the ~52% the on-screen preview scales
+     the sheet to, 4.2pt renders around 2.8 device pixels and the letters visibly
+     merge. That is the preview, not the sheet — print or Save as PDF renders at
+     true size and the words are whole. Do not grow this type off the screenshot;
+     measure th.clientWidth against the label span's scrollWidth instead, both of
+     which are unscaled layout values. */
+  th.stg{padding:3px 1px;font-size:4.2pt;letter-spacing:0;line-height:1.3}
+  th.stg span{display:inline-block;white-space:nowrap}
+  /* INITIALS is 8 characters too — same treatment, one size up because its
+     column is wider. At the base 6pt it ran into DATE. */
+  th.wr2{padding:3px 1px;font-size:5pt;letter-spacing:0}
   th.desc{text-align:left;padding-left:5px;font-size:6pt;letter-spacing:.3px}
   td{border:1px solid #C9D2DE;padding:2px 3px;font-size:8pt;vertical-align:top}
   td.c{text-align:center}
@@ -1253,13 +1259,13 @@ ${_lh ? _lh.printCSS : ''}`;
 
   <h4 class="sec">Production checklist — tick each stage as completed</h4>
   <table>
-    <colgroup><col style="width:3.5%"><col style="width:42%"><col style="width:6%">
-      ${JO_STAGE_COLS.map(() => '<col style="width:3.6%">').join('')}
-      <col style="width:8%"><col style="width:8%"></colgroup>
+    <colgroup><col style="width:3%"><col style="width:36%"><col style="width:5.5%">
+      ${JO_STAGE_COLS.map(() => '<col style="width:4.8%">').join('')}
+      <col style="width:6%"><col style="width:6.3%"></colgroup>
     <thead><tr>
       <th>#</th><th class="desc">Item / Specification &amp; Notes</th><th>Qty</th>
-      ${JO_STAGE_COLS.map(c => `<th class="rot"><span>${e(c.l1)}${c.l2 ? ' ' + e(c.l2) : ''}</span></th>`).join('')}
-      <th>Initials</th><th>Date</th>
+      ${JO_STAGE_COLS.map(c => `<th class="stg"><span>${e(c.l1)}${c.l2 ? '<br>' + e(c.l2) : ''}</span></th>`).join('')}
+      <th class="wr2"><span>Initials</span></th><th class="wr2"><span>Date</span></th>
     </tr></thead>
     <tbody>${itemRows.join('')}</tbody>
   </table>
