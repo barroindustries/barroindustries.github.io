@@ -4961,6 +4961,14 @@ window.addEventListener('message', async (e) => {
         subtotal:       payload.subtotal || 0,
         total:          payload.total || 0,
         grandTotal:     payload.grandTotal || 0,
+        // Options quote (quote-builder-v2): when optionsMode is true the quote
+        // offers alternatives the client picks ONE of, so total/grandTotal are
+        // the nominated option's figures, not a quote-wide sum. `options` is
+        // the per-option breakdown. Both are on this allowlist deliberately —
+        // it is exhaustive, anything absent is dropped on the way to Firestore.
+        optionsMode:    payload.optionsMode || false,
+        options:        payload.options || null,
+        optionsBasis:   payload.optionsBasis || '',
         vatIncluded:    payload.vatIncluded || false,
         vatAmount:      payload.vatAmount || 0,
         discountPct:    payload.discountPct || 0,
@@ -5034,6 +5042,11 @@ window.addEventListener('message', async (e) => {
       subtotal:       payload.subtotal || 0,
       total:          payload.total || 0,
       grandTotal:     payload.grandTotal || 0,
+      // See the QUOTE_UPDATE handler above — an options quote's total is the
+      // nominated option's, and `options` carries the alternatives.
+      optionsMode:    payload.optionsMode || false,
+      options:        payload.options || null,
+      optionsBasis:   payload.optionsBasis || '',
       vatIncluded:    payload.vatIncluded || false,
       vatAmount:      payload.vatAmount || 0,
       discountPct:    payload.discountPct || 0,

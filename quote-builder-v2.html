@@ -259,6 +259,20 @@ tr:hover td{background:#fafbff;}
 .totals-tbl tr.discount td{color:var(--red);}
 .totals-tbl tr.commission td{color:var(--purple);font-size:12px;}
 .totals-tbl td:last-child{text-align:right;}
+/* OPTIONS QUOTE — each section is priced on its own and there is no grand
+   total, so the client can be shown Option A / Option B and pick one. */
+.totals-tbl tr.opt-head td{padding:12px 11px 3px;font-weight:700;font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue);border-top:1px solid var(--gray-mid);}
+.totals-tbl tr.opt-head:first-child td{border-top:none;padding-top:2px;}
+.totals-tbl tr.opt-note td{font-size:10px;color:var(--gray-dark);font-weight:400;font-style:italic;
+  text-align:right;padding-top:9px;line-height:1.45;white-space:normal;}
+/* Section heading is renamed in place — that is how a custom category is made. */
+.cat-label-edit{outline:none;cursor:text;}
+.cat-label-edit:focus{background:#fff;box-shadow:0 0 0 2px var(--mid-blue);border-radius:3px;}
+.cat-tools{float:right;font-weight:400;text-transform:none;letter-spacing:0;}
+.cat-tools button{background:none;border:none;cursor:pointer;color:var(--mid-blue);
+  font-size:11px;line-height:1;padding:1px 4px;border-radius:4px;}
+.cat-tools button:hover{background:#fff;}
 
 /* ── PRICING CONTROLS ── */
 .pricing-controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
@@ -641,6 +655,8 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   .totals-tbl{min-width:0;width:48%;margin-left:auto;page-break-inside:avoid;break-inside:avoid;}
   .totals-tbl td{font-size:9pt;padding:2.5px 8px;}
   .totals-tbl tr.grand td{font-size:10.5pt;}
+  .totals-tbl tr.opt-head td{font-size:8pt;padding:6px 8px 1px;}
+  .totals-tbl tr.opt-note td{font-size:7.5pt;padding-top:5px;}
   .pay-tbl td,.pay-tbl th{font-size:8pt;padding:2.5px 6px;}
   .pay-note{font-size:7.5pt;}
   .terms-grid{gap:5px 14px;}
@@ -1119,6 +1135,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <div class="search-dropdown" id="searchDropdown"></div>
     </div>
     <button class="btn btn-outline" style="background:var(--dark-blue);white-space:nowrap;" onclick="addCustomItem()">➕ Custom item</button>
+    <button class="btn btn-outline" style="background:var(--mid-blue);white-space:nowrap;" onclick="addSection()" title="Start a new named section — e.g. Option A / Option B">＋ Section</button>
   </div>
 
   <!-- Calculator panel (shown after selecting product) -->
@@ -1225,8 +1242,13 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <option value="10">10%</option>
       </select>
       <input type="number" id="commissionAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="renderTotals()">
-      <span class="pc-hint">computed from grand total</span>
+      <span class="pc-hint">computed on the quote total — on an options quote, on each option's own total</span>
     </div>
+    <div class="pc-row">
+      <label class="pc-check"><input type="checkbox" id="optionsMode" onchange="onOptionsModeChange()"> Options quote — price each section separately, no grand total</label>
+      <span class="pc-hint">for Option A / Option B quotes the client picks from</span>
+    </div>
+    <div class="pc-row" id="optionsBasisWrap" style="display:none;"></div>
   </div>
 
   <!-- Totals -->
@@ -2317,7 +2339,7 @@ function qqRenderStep2(body){
       <div class="qq-card-price">${p.formulaType==='fixed'?'':'from '}${formatPeso(p.basePrice)}</div>
     </button>`).join('')}</div>`
     : `<div class="empty-state" style="padding:24px;text-align:center;color:var(--gray-dark)">No products in this category.</div>`;
-  const badge = items.length ? `<div class="qq-badge">🧺 ${items.length} item(s) · ${items.reduce((s,i)=>s+(Number(i.qty)||0),0)} unit(s) · ${formatPeso(computeTotals().grand)}</div>` : '';
+  const badge = items.length ? `<div class="qq-badge">🧺 ${items.length} item(s) · ${items.reduce((s,i)=>s+(Number(i.qty)||0),0)} unit(s) · ${formatPeso(basisTotals().grand)}</div>` : '';
   body.innerHTML = recentRow + chips + grid + badge;
 }
 function qqFilterCat(cat){ currentCatFilter=cat; qqRender(); }
@@ -3069,6 +3091,122 @@ function addCustomItem(){
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  SECTIONS (custom categories)
+//  The items table groups by item.category. Renaming a group heading in place
+//  is how a custom category is created: the group detaches from the product
+//  database taxonomy (its id becomes sec_N) and the label is stored on the
+//  ITEMS themselves (item.catLabel). That is deliberate — items already ride
+//  every state path there is (localStorage bkqb_items, editableState, quote
+//  templates, #quote= share links, the filed payload), so custom section names
+//  round-trip through all of them with no new persistence plumbing.
+//  Every item in a group carries the label, so moving one item out can never
+//  orphan the remaining group's name.
+// ═══════════════════════════════════════════════════════════════════
+function isCustomSection(k){ return /^sec_\d+$/.test(String(k||'')); }
+function nextSectionId(){ let n=1; while(items.some(i=>i.category==='sec_'+n)) n++; return 'sec_'+n; }
+function dbCategory(catId){ return (DB.categories||[]).find(c=>c.id===catId)||null; }
+function sectionItems(catId){ return items.filter(i=>i.category===catId); }
+function sectionLabel(catId){
+  const named=items.find(i=>i.category===catId&&i.catLabel);
+  if(named) return named.catLabel;
+  const c=dbCategory(catId);
+  return c?c.label:String(catId||'Uncategorised');
+}
+// A renamed section drops the database emoji — "🔥 Option A" reads wrong.
+function sectionIcon(catId){
+  if(items.some(i=>i.category===catId&&i.catLabel)) return '';
+  const c=dbCategory(catId);
+  return (c&&c.icon)?c.icon:'';
+}
+// Render order. LEGACY (no custom section anywhere): product-database order,
+// byte-identical to before this feature. Once the preparer makes a custom
+// section, order follows the items array instead — which they control
+// directly — so Option A prints above Option B.
+function sectionKeys(){
+  const seen=[], has={};
+  items.forEach(i=>{ const k=i.category||'miscellaneous'; if(!has[k]){ has[k]=1; seen.push(k); } });
+  if(seen.some(isCustomSection)) return seen;
+  const order=DB.categories?DB.categories.map(c=>c.id):[];
+  return [...order.filter(k=>has[k]),...seen.filter(k=>!order.includes(k))];
+}
+
+function editCatLabel(catId,el){
+  const label=el.innerText.replace(/\s+/g,' ').trim();
+  const grp=sectionItems(catId);
+  if(!grp.length){ renderItems(); return; }
+  if(!label||label===sectionLabel(catId)){ renderItems(); return; }   // blank/no-op → restore
+  // Renaming a database group detaches it into its own section, so a product
+  // added later from that category starts a fresh group rather than silently
+  // landing inside "Option A".
+  const newId=dbCategory(catId)?nextSectionId():catId;
+  grp.forEach(i=>{ i.category=newId; i.catLabel=label; });
+  saveToStorage(); renderItems(); flashItemSaved();
+}
+
+function addSection(){
+  const raw=prompt('Name this section — e.g. "Option A — Full Kitchen Package":','');
+  if(raw===null) return;
+  const label=raw.trim();
+  if(!label){ showToast('Section name is required.','error'); return; }
+  items.push({id:'CUSTOM',category:nextSectionId(),catLabel:label,name:'New item',dims:'',
+    specs:[],specEdit:'',qty:1,unit:'pc',unitPrice:0,amount:0,leadTime:'',laborHours:null,formulaType:'fixed'});
+  saveToStorage(); renderItems();
+  showToast('➕ Section added: '+label);
+  setTimeout(()=>{
+    const cells=document.querySelectorAll('#itemsTbody .name-cell');
+    const last=cells[cells.length-1];
+    if(last){ last.focus(); document.getSelection()?.selectAllChildren(last); }
+  },30);
+}
+
+// Reorders whole sections by rebuilding `items` in the swapped section order.
+// Mutates the array IN PLACE (length=0 + push) — editableState and the draft
+// snapshot hold a reference to this same array, so reassigning it would
+// silently detach them.
+function moveSection(catId,dir){
+  const keys=sectionKeys();
+  const pos=keys.indexOf(catId);
+  if(pos===-1||!keys[pos+dir]) return;
+  const newKeys=keys.slice();
+  newKeys[pos]=keys[pos+dir]; newKeys[pos+dir]=catId;
+  withPhotoIndexRemap(()=>{
+    const grouped={};
+    items.forEach(i=>{ (grouped[i.category]=grouped[i.category]||[]).push(i); });
+    const out=[];
+    newKeys.forEach(k=>{ (grouped[k]||[]).forEach(i=>out.push(i)); });
+    items.length=0; out.forEach(i=>items.push(i));
+  });
+  saveToStorage(); renderItems(); flashItemSaved();
+}
+
+// Cross-section move — the up/down/drag controls are deliberately scoped
+// inside a group, so this is the only way an item changes section.
+function moveItemToSection(idx){
+  const it=items[idx]; if(!it) return;
+  const keys=sectionKeys().filter(k=>k!==it.category);
+  const newN=keys.length+1;
+  const lines=keys.map((k,i)=>`${i+1}. ${sectionLabel(k)}`);
+  lines.push(`${newN}. ➕ New section…`);
+  const ans=prompt(`Move "${it.name}" to which section?\n\n${lines.join('\n')}\n\nEnter a number:`,'');
+  if(ans===null) return;
+  const n=parseInt(String(ans).trim(),10);
+  if(!n||n<1||n>newN){ showToast('Enter a number from the list.','error'); return; }
+  if(n===newN){
+    const raw=prompt('Name the new section — e.g. "Option B — Budget Package":','');
+    if(raw===null) return;
+    const label=raw.trim();
+    if(!label){ showToast('Section name is required.','error'); return; }
+    it.category=nextSectionId(); it.catLabel=label;
+  } else {
+    const target=keys[n-1];
+    const carrier=items.find(i=>i.category===target&&i.catLabel);
+    it.category=target;
+    if(carrier) it.catLabel=carrier.catLabel; else delete it.catLabel;
+  }
+  saveToStorage(); renderItems(); flashItemSaved();
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  RENDER ITEMS TABLE
 // ═══════════════════════════════════════════════════════════════════
 function renderItems(){
@@ -3083,13 +3221,18 @@ function renderItems(){
   items.forEach((item,idx)=>{(catMap[item.category]=catMap[item.category]||[]).push({item,idx});});
 
   let html=''; let globalN=1;
-  const catOrder=DB.categories?DB.categories.map(c=>c.id):Object.keys(catMap);
-  const catKeys=[...catOrder.filter(k=>catMap[k]),...Object.keys(catMap).filter(k=>!catOrder.includes(k))];
+  const catKeys=sectionKeys();
+  // Section ▲▼ only appear once ordering is actually item-driven (see
+  // sectionKeys) — on a legacy, database-ordered quote they would do nothing.
+  const secOrderable=catKeys.length>1&&catKeys.some(isCustomSection);
 
-  catKeys.forEach(catId=>{
+  catKeys.forEach((catId,secPos)=>{
     if(!catMap[catId]) return;
-    const catObj=DB.categories?DB.categories.find(c=>c.id===catId)||{label:catId}:{label:catId};
-    html+=`<tr class="cat-row"><td colspan="8">${catObj.icon||''} ${catObj.label}</td></tr>`;
+    const secLabel=sectionLabel(catId), secIcon=sectionIcon(catId);
+    const secTools=secOrderable
+      ? `<span class="cat-tools no-print"><button onclick="moveSection('${catId}',-1)" title="Move section up" ${secPos===0?'disabled':''}>▲</button><button onclick="moveSection('${catId}',1)" title="Move section down" ${secPos===catKeys.length-1?'disabled':''}>▼</button></span>`
+      : '';
+    html+=`<tr class="cat-row"><td colspan="8">${secIcon?secIcon+' ':''}<span class="cat-label-edit" contenteditable="true" onblur="editCatLabel('${catId}',this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="Click to rename this section">${txtEsc(secLabel)}</span>${secTools}</td></tr>`;
     let subtotal=0;
     const grpLen=catMap[catId].length;
     catMap[catId].forEach(({item,idx},posInCat)=>{
@@ -3138,12 +3281,13 @@ function renderItems(){
             <button class="move-btn" onclick="moveItemUp(${idx})" title="Move up" ${isFirst?'disabled':''}>▲</button>
             <button class="move-btn" onclick="moveItemDown(${idx})" title="Move down" ${isLast?'disabled':''}>▼</button>
             <button class="move-btn" onclick="duplicateItem(${idx})" title="Duplicate this line">⧉</button>
+            <button class="move-btn" onclick="moveItemToSection(${idx})" title="Move to another section">⇄</button>
             <button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button>
           </div>
         </td>
       </tr>`;
     });
-    html+=`<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${catObj.label}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
+    html+=`<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
   });
 
   tbody.innerHTML=html;
@@ -3152,12 +3296,15 @@ function renderItems(){
   if(currentView==='internal') buildLaborTable();
 }
 
-function computeTotals(){
-  const subtotal=items.reduce((s,i)=>s+i.amount,0);
+// `subset` scopes the whole computation to one section (options quote).
+// Called with no argument everywhere else — identical behaviour to before.
+function computeTotals(subset){
+  const list=subset||items;
+  const subtotal=list.reduce((s,i)=>s+i.amount,0);
   // PRICING-TIERS-SPEC.md §2.3 — NEW. With VOLUME_TIERS=[] (no tiers
   // configured) volumeBreakFor always returns null, so this reduces to 0 and
   // preDiscount below is float-exact-identical to subtotal+diAdded (§1.4).
-  const volumeBreakTotal=items.reduce((s,i)=>{
+  const volumeBreakTotal=list.reduce((s,i)=>{
     const b=volumeBreakFor(i); return s+(b?b.amt:0);
   },0);
   const consts=DB.constants||{};
@@ -3190,9 +3337,55 @@ function computeTotals(){
   return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
-function renderTotals(){
-  const t=computeTotals();
-  const _iq=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
+// ═══════════════════════════════════════════════════════════════════
+//  OPTIONS QUOTE — no grand total
+//  Owner request: "allow to not make a grand total ... so we can make
+//  different options in one quote like option a, option b, so they choose
+//  which option they'll take."
+//  Each SECTION becomes a self-contained priced option. Because the client
+//  takes exactly ONE of them, every quote-level figure is applied to each
+//  option in full — D&I, the flat or percentage discount, VAT and commission
+//  all land on whichever option is chosen. That is just computeTotals() run
+//  over that section's items, so there is no second pricing engine to keep
+//  in step with the first.
+//  Downstream figures that need a single number (payment schedule,
+//  milestones, the filed total) run off ONE nominated option — the basis —
+//  and every screen says which. Averaging or summing options would file a
+//  price no one was ever quoted.
+// ═══════════════════════════════════════════════════════════════════
+let optionsBasisKey='';
+function optionsOn(){ return !!document.getElementById('optionsMode')?.checked; }
+function computeOptions(){
+  return sectionKeys().map(k=>({
+    key:k, label:sectionLabel(k), icon:sectionIcon(k),
+    count:sectionItems(k).length, totals:computeTotals(sectionItems(k)),
+  }));
+}
+function basisOption(){
+  const opts=computeOptions();
+  if(!opts.length) return null;
+  return opts.find(o=>o.key===optionsBasisKey)||opts[0];
+}
+function basisTotals(){
+  if(!optionsOn()) return computeTotals();
+  const b=basisOption();
+  return b?b.totals:computeTotals();
+}
+function setOptionsBasis(v){ optionsBasisKey=v; renderTotals(); }
+function onOptionsModeChange(){ renderTotals(); }
+function renderOptionsBasisPicker(opts){
+  const wrap=document.getElementById('optionsBasisWrap'); if(!wrap) return;
+  if(!optionsOn()||!opts||opts.length<2){ wrap.style.display='none'; wrap.innerHTML=''; return; }
+  const cur=(basisOption()||opts[0]).key;
+  optionsBasisKey=cur;
+  wrap.style.display='';
+  wrap.innerHTML=`<label class="pc-lbl">Payment terms shown for</label>
+    <select id="optionsBasis" onchange="setOptionsBasis(this.value)" style="min-width:180px;max-width:320px;flex:1 1 180px;">${opts.map(o=>`<option value="${attrEsc(o.key)}"${o.key===cur?' selected':''}>${txtEsc(o.label)}</option>`).join('')}</select>
+    <span class="pc-hint">the payment schedule below is illustrated on this option</span>`;
+}
+
+// The Subtotal→GRAND ladder, shared by the single-total and per-option paths.
+function totalsRowsHtml(t,grandLabel,grandCls){
   let html='';
   html+=`<tr><td>Subtotal</td><td>${formatPeso(t.subtotal)}</td></tr>`;
   // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
@@ -3206,12 +3399,38 @@ function renderTotals(){
   // break-only quote prints Subtotal → VAT → Grand with an unexplained gap.
   if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
   if(t.showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(t.vatAmt)}</td></tr>`;
-  html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(t.grand)}</td></tr>`;
-  html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${items.length} line item${items.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}</td></tr>`;
+  html+=`<tr class="${grandCls}"><td>${grandLabel}</td><td>${formatPeso(t.grand)}</td></tr>`;
+  return html;
+}
+
+function renderTotals(){
+  const optOn=optionsOn();
+  const opts=optOn?computeOptions():null;
+  const useOpts=optOn&&opts&&opts.length>0;
+  const t=useOpts?basisTotals():computeTotals();
+  const _iq=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
+  let html='';
+  if(useOpts){
+    opts.forEach(o=>{
+      html+=`<tr class="opt-head"><td colspan="2">${o.icon?o.icon+' ':''}${txtEsc(o.label)}</td></tr>`;
+      // The option's name already heads the block — repeating it here reads
+      // badly once the preparer's own label carries a dash of its own.
+      html+=totalsRowsHtml(o.totals,'TOTAL FOR THIS OPTION','grand opt-total');
+    });
+    html+=`<tr class="opt-note"><td colspan="2">These are alternative options — please select ONE. The amounts above are per option and are not cumulative; no grand total applies.</td></tr>`;
+  } else {
+    html+=totalsRowsHtml(t,'GRAND TOTAL','grand');
+  }
+  html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${items.length} line item${items.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}${useOpts?` across ${opts.length} option${opts.length===1?'':'s'}`:''}</td></tr>`;
   html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}.</td></tr>`;
   const commLabel=t.commMode==='amount' ? 'Referral/Agent Commission (flat)' : `Referral/Agent Commission (${t.commPct}%)`;
-  if(t.commissionAmt>0) html+=`<tr class="commission agent-only"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
+  if(useOpts){
+    opts.forEach(o=>{
+      if(o.totals.commissionAmt>0) html+=`<tr class="commission agent-only"><td>${commLabel} — ${txtEsc(o.label)}</td><td>${formatPeso(o.totals.commissionAmt)}</td></tr>`;
+    });
+  } else if(t.commissionAmt>0) html+=`<tr class="commission agent-only"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
   document.getElementById('totalsTbl').innerHTML=html;
+  renderOptionsBasisPicker(opts);
   renderTimeline();
   renderPaymentSchedule(t.grand);
   // Deliberately its OWN line, AFTER renderPaymentSchedule — that function
@@ -3234,8 +3453,13 @@ function renderTotals(){
 function updateRunningTotalPill(t){
   const pill=document.getElementById('runningTotalPill'); if(!pill) return;
   if(!items.length){ pill.style.display='none'; return; }
-  t=t||computeTotals();
+  t=t||basisTotals();
   const _q=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
+  if(optionsOn()){
+    const opts=computeOptions(), b=basisOption();
+    pill.textContent=`🧺 ${items.length} item(s) · ${opts.length} option(s) · ${b?b.label+': ':''}${formatPeso(b?b.totals.grand:0)}`;
+    return;
+  }
   pill.textContent=`🧺 ${items.length} item(s) · ${_q} unit(s) · ${formatPeso(t.grand)}`;
   pill.style.display='block';
 }
@@ -3262,9 +3486,15 @@ function renderPaymentSchedule(grand){
   const box=document.getElementById('paymentSummary');
   if(!box) return;
   if(!grand){box.innerHTML='<div class="pay-note">Add items to compute the payment schedule.</div>';return;}
+  // In options mode `grand` is ONE option's total, not a quote-wide figure —
+  // this note is print-facing so the client can never read the schedule as a
+  // price for the whole quote.
+  const optNote=optionsOn()
+    ? `<div class="pay-note">Payment terms are illustrated for <strong>${txtEsc((basisOption()||{}).label||'')}</strong>. The same structure applies to whichever option is selected; the amounts follow that option's total.</div>`
+    : '';
   // MILESTONE mode replaces the whole DP/balance schedule — this table is the
   // read-only, PRINT-FACING contract wording (#paymentSummary is not .no-print).
-  if(Array.isArray(payMilestones)){ box.innerHTML=milestoneSummaryHtml(grand); return; }
+  if(Array.isArray(payMilestones)){ box.innerHTML=optNote+milestoneSummaryHtml(grand); return; }
   const dpMode=document.getElementById('dpMode')?.value||'50';
   const dp=getDpAmount(grand);
   const balance=Math.max(0,grand-dp);
@@ -3315,7 +3545,7 @@ function renderPaymentSchedule(grand){
       ` Payments are due on the same day each month following the down payment. Late payments may incur a 2% monthly surcharge. Equipment remains the property of the company until full payment is received.`;
   }
 
-  let html=`<table class="pay-tbl"><tbody>${rows}</tbody></table>`;
+  let html=optNote+`<table class="pay-tbl"><tbody>${rows}</tbody></table>`;
   if(note) html+=`<div class="pay-note">${note}</div>`;
   box.innerHTML=html;
 }
@@ -4487,7 +4717,7 @@ window.addEventListener('pagehide', flushSaveToStorageNow);
 
 // Pricing / payment / delivery fields — single source for save, load, payload
 const PRICING_IDS=['showVat','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
-  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails','quoteValidDays'];
+  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails','quoteValidDays','optionsMode'];
 // Quote validity period (audit: "hardcoded to 30 days in two places, not
 // configurable") — a display-only helper, riding PRICING_IDS so it round-trips
 // through save/load/payload exactly like every other field in that list.
@@ -4507,6 +4737,11 @@ function getPricingFields(){
   // Deep-copied so a later mutation of payMilestones can't retro-edit a
   // snapshot someone already took.
   o.milestones = Array.isArray(payMilestones) ? payMilestones.map(r=>({pct:r.pct,label:r.label,date:r.date})) : null;
+  // Rides here rather than in PRICING_IDS for the same reason milestones do:
+  // #optionsBasis is built by renderOptionsBasisPicker AFTER applyPricingFields
+  // runs, so writing el.value on a select whose <option>s don't exist yet
+  // would silently drop the saved basis. The module variable is authoritative.
+  o.optionsBasis = optionsBasisKey || '';
   return o;
 }
 function applyPricingFields(o){
@@ -4536,6 +4771,10 @@ function applyPricingFields(o){
   // must land in LEGACY mode rather than inherit whatever the previously-open
   // quote had.
   payMilestones = sanitizeMilestones(o.milestones);
+  // Same "every caller is loading a WHOLE state" contract as payMilestones —
+  // assigned unconditionally so a quote saved before this existed can't
+  // inherit the previously-open quote's basis.
+  optionsBasisKey = o.optionsBasis || '';
   renderMilestoneEditor();
   if(document.getElementById('discountMode')) onDiscountModeChange();
   if(document.getElementById('commissionMode')) onCommissionModeChange();
@@ -4696,6 +4935,7 @@ function clearForm(){
     commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
     diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
     interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30',
+    optionsMode:false,optionsBasis:'',
     milestones:null});   // back to LEGACY dpMode/balMode mode on a brand-new quote
   _msStash=null;         // and drop the toggle-off stash so it can't resurrect on the next quote
   document.getElementById('quoteDate').value=today;
@@ -4821,9 +5061,23 @@ function buildVerifyModal(){
   // Grand total summary (audit: "Verify & File modal never shows the grand
   // total before submission") — display-only, pulled straight from the same
   // computeTotals() every other total on screen already uses.
-  const t=computeTotals();
+  const t=basisTotals();
   const discBit=t.discountAmt>0 ? (t.discMode==='amount'?' − discount':` − ${t.discPct}% discount`) : '';
   const vatBit=t.showVat?' · incl. 12% VAT':' · VAT exclusive';
+  if(optionsOn()){
+    // An options quote has no single total — show every option, and say
+    // outright which one the filed figure and payment schedule come from.
+    const opts=computeOptions(), b=basisOption();
+    const lines=opts.map(o=>`${txtEsc(o.label)}: <strong>${formatPeso(o.totals.grand)}</strong>${b&&o.key===b.key?' &nbsp;<span style="color:#1f8f4e;font-weight:600">← filed / payment basis</span>':''}`).join('<br>');
+    html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+      <div class="verify-icon">💰</div>
+      <div class="verify-info">
+        <div class="verify-label" style="font-size:13px;font-weight:700">Options quote — no grand total</div>
+        <div class="verify-val" style="margin-top:4px">${lines}</div>
+        <div class="verify-val" style="margin-top:4px">${items.length} item(s)${discBit}${vatBit} · the client selects one option</div>
+      </div>
+    </div>`;
+  } else {
   html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
     <div class="verify-icon">💰</div>
     <div class="verify-info">
@@ -4831,6 +5085,7 @@ function buildVerifyModal(){
       <div class="verify-val">${items.length} item(s)${discBit}${vatBit}</div>
     </div>
   </div>`;
+  }
   // Approval option
   const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
   html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
@@ -4967,7 +5222,17 @@ async function fileQuotation(){
 function buildQuotePayload(){
   const co = currentCo;
   const quoteNo = document.getElementById('quoteNo').value;
-  const t = computeTotals();
+  // Options quote: `t` is the NOMINATED option, never a sum across options —
+  // filing the sum would record a price the client was never offered. The
+  // per-option breakdown rides alongside in `options`.
+  const optOn = optionsOn();
+  const optionList = optOn ? computeOptions().map(o=>({
+    key:o.key, label:o.label, itemCount:o.count,
+    subtotal:o.totals.subtotal, discountAmount:o.totals.discountAmt,
+    netAmount:o.totals.net, vatAmount:o.totals.vatAmt, total:o.totals.grand,
+    commissionAmount:o.totals.commissionAmt,
+  })) : null;
+  const t = optOn ? basisTotals() : computeTotals();
   // PRICING-TIERS-SPEC.md §2.5 — outputs only; recomputed fresh from
   // (qty, amount, VOLUME_TIERS) on every payload build and never read back
   // into the math. Stamp the applied tier onto each item (a record of what
@@ -5068,6 +5333,12 @@ function buildQuotePayload(){
     vatAmount:     t.vatAmt,
     total:         grand,
     grandTotal:    grand,
+    // ADDITIVE — false/null on every quote filed before options mode existed.
+    // When true, `total`/`grandTotal` are the SELECTED option's figures
+    // (optionsBasis), not a quote-wide total.
+    optionsMode:   optOn,
+    options:       optionList,
+    optionsBasis:  optOn ? ((basisOption()||{}).key || '') : '',
     commissionPct: t.commPct,
     commissionAmount:t.commissionAmt,
     payment: {
@@ -5250,7 +5521,7 @@ function closeVerifyModal(e){
 
 function buildAgentBox(){
   const box=document.getElementById('agentBox'); if(!box) return;
-  const t=computeTotals();
+  const t=basisTotals();
   const agent=document.getElementById('salesperson')?.value?.trim()||'—';
   if(!t.commissionAmt){
     box.innerHTML=`<div style="font-weight:800;color:#8E44AD;letter-spacing:.5px;">AGENT / SALES COPY</div>
@@ -5261,10 +5532,12 @@ function buildAgentBox(){
   box.innerHTML=`<div style="font-weight:800;color:#8E44AD;letter-spacing:.5px;">AGENT / SALES COPY — COMMISSION</div>
     <table class="pay-tbl" style="margin-top:5px;"><tbody>
       <tr><td>Agent / Salesperson</td><td>${agent}</td></tr>
-      <tr><td>Grand Total (basis)</td><td>${formatPeso(t.grand)}</td></tr>
-      <tr class="pay-head"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>
+      ${optionsOn()
+        ? computeOptions().map(o=>`<tr><td>${txtEsc(o.label)} — total</td><td>${formatPeso(o.totals.grand)}</td></tr><tr class="pay-head"><td>${commLabel} — ${txtEsc(o.label)}</td><td>${formatPeso(o.totals.commissionAmt)}</td></tr>`).join('')
+        : `<tr><td>Grand Total (basis)</td><td>${formatPeso(t.grand)}</td></tr>
+      <tr class="pay-head"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>`}
     </tbody></table>
-    <div class="pay-note">Commission is computed on the grand total and payable upon full client settlement. CONFIDENTIAL — for the agent only; do not give this copy to the client.</div>`;
+    <div class="pay-note">Commission is computed on the ${optionsOn()?'total of the option the client selects':'grand total'} and payable upon full client settlement. CONFIDENTIAL — for the agent only; do not give this copy to the client.</div>`;
 }
 
 // Populates the print-only running footer (audit: "no page identifier on
