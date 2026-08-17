@@ -196,6 +196,26 @@ body::after { content: none; }
 .badge-red    { background: rgba(255,69,58,0.12);    color: #FF7066; border-color: rgba(255,69,58,0.18); }
 .badge-gray   { background: rgba(255,255,255,0.06);  color: var(--text-muted-strong, var(--text-muted)); border-color: var(--border); }
 .badge-purple { background: rgba(139,92,246,0.14);   color: #B07EFF; border-color: rgba(139,92,246,0.20); }
+
+/* ── PRIORITY STARS (window.priorityStarPicker, js/screens/production.js) ──
+   Tap-to-set job priority, used on Production's Orders + Job Orders cards and
+   on the Sales Orders table. Buttons, not a select, because the whole point is
+   that a planner can re-rank a list without opening anything. */
+.pstars { display:inline-flex; align-items:center; gap:1px; vertical-align:middle; }
+.pstars .pstar {
+  background:none; border:none; padding:0 1px; margin:0; line-height:1;
+  font-size:15px; color:var(--text-faint, #8a8a8a); cursor:pointer;
+  border-radius:3px; transition:transform .08s ease, color .12s ease;
+}
+.pstars .pstar.on { color:#F5A623; }
+.pstars.pstars-high .pstar.on { color:#F07800; }
+.pstars.pstars-urgent .pstar.on { color:var(--danger, #E5484D); }
+.pstars .pstar:hover { transform:scale(1.18); color:#F5A623; }
+.pstars .pstar:focus-visible { outline:2px solid var(--primary); outline-offset:1px; }
+.pstars.pstars-ro .pstar { cursor:default; }
+.pstars-lbl { font-size:10px; color:var(--text-muted); margin-left:5px; font-weight:600; }
+.pstars.pstars-busy { opacity:.5; pointer-events:none; }
+@media print { .pstars .pstar { color:#666; } .pstars .pstar.on { color:#000; } }
 .badge-teal   { background: rgba(0,212,170,0.12);    color: #00DDB8; border-color: rgba(0,212,170,0.18); }
 .badge-warn,
 .badge-amber  { background: var(--warning-soft);     color: var(--warning); border-color: var(--warning-soft); }

@@ -3813,8 +3813,19 @@ window.renderSalesOrders = async function(container){
   // profile listed Finance, and the ledger write would then have been refused.
   const isFin = isFinancePriv();
   c.innerHTML=window.skeletonHtml('table');
-  const snap = await db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  // Priority is read from and written to the LINKED job_project, not
+  // sales_orders.priority. Two reasons: the project is the spine record
+  // Production plans off (so Sales and Production can never see different
+  // priorities for one job), and firestore.rules gates a sales_orders update to
+  // finance/design — a Sales rep tapping a star on their own order would be
+  // denied, whereas job_projects allows any non-partner staff a non-money write.
+  const [snap, projSnap] = await Promise.all([
+    db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    dbCachedGet('job_projects', ()=>db.collection('job_projects').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]}))
+  ]);
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const projById = {};
+  projSnap.docs.forEach(d=>{ projById[d.id] = { id:d.id, ...d.data() }; });
   const pending = orders.filter(o=>o.status!=='recorded');
   const totalContract = orders.reduce((s,o)=>s+(o.contractAmount||0),0);
   const totalRecorded = orders.filter(o=>o.status==='recorded').reduce((s,o)=>s+(o.recordedAmount||o.paymentReceived||0),0);
@@ -3829,10 +3840,21 @@ window.renderSalesOrders = async function(container){
     <div class="card"><div class="card-body" style="padding:0">
     ${!orders.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>`:
     `<div class="table-wrap"><table class="data-table table-cards">
-      <thead><tr><th>Date</th><th>Client / Project</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Client / Project</th><th>Priority</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th><th></th></tr></thead>
       <tbody>${orders.map(o=>`<tr class="so-row">
         <td class="tc-avatar" style="white-space:nowrap">${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
         <td class="tc-name"><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+        <td class="tc-detail" data-label="Priority">${(()=>{
+          const pr = o.projectId ? projById[o.projectId] : null;
+          if (!pr) return '<span style="font-size:11px;color:var(--text-muted)">—</span>';
+          // isPartner() can't write a job_project they don't own, and the star
+          // row is the only control here that isn't already gated — render it
+          // read-only for them rather than offering a tap that will be refused.
+          return window.priorityStarPicker
+            ? window.priorityStarPicker({ value: pr.priority, coll:'job_projects', id: pr.id,
+                                          editable: !(typeof isPartner==='function' && isPartner()), showLabel:false })
+            : escHtml(pr.priority||'—');
+        })()}</td>
         <td class="tc-detail" data-label="Contract">₱${fmt(o.contractAmount||0)}</td>
         <td class="tc-detail" data-label="Received">₱${fmt(o.recordedAmount||o.paymentReceived||0)}</td>
         <td class="tc-detail" data-label="Method" style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
@@ -3851,6 +3873,9 @@ window.renderSalesOrders = async function(container){
       tr.classList.toggle('tc-expanded');
     });
   });
+  // Stars repaint themselves in place — no re-render, so a planner re-ranking
+  // several orders keeps their scroll position and any expanded rows.
+  window.bindPriorityStars && window.bindPriorityStars(c);
   // Tracking link is available to every viewer of this list (non-partner).
   c.querySelectorAll('.so-link-btn').forEach(b=>b.addEventListener('click', async ()=>{
     const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;

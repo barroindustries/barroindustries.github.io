@@ -432,6 +432,471 @@ function isProductionOnlyViewer(){
   return canEditDept('Production');        // true only for Production-dept members
 }
 
+
+// ═══════════════════════════════════════════════════
+//  PRIORITY STARS — one job priority, set by tapping stars
+//  Owner request (2026-08-17): "allow to create priority by putting stars,
+//  editable in production department and sales department."
+//
+//  The star count is NOT a new field. It is a rendering of the `priority`
+//  string three collections already store, in the two vocabularies they
+//  already use — job_projects/sales_orders write Title case ('Normal'),
+//  production_orders write lower case ('medium'). Both are read back to the
+//  same star count, so every existing badge, CSV column and filter that reads
+//  `priority` keeps working untouched, and a job priority set before this
+//  existed shows the right number of stars.
+//
+//  CANONICAL SOURCE IS job_projects.priority — the spine record for a won
+//  quote. Firestore rules let ANY non-partner staff update a job_project as
+//  long as the write doesn't touch money keys, so Production and Sales can
+//  both set it with no rules change. The Sales Orders table therefore reads
+//  and writes the LINKED PROJECT rather than sales_orders.priority, whose
+//  update rule is gated to finance/design and would deny a Sales rep.
+//  A work order's own star writes production_orders.priority (Production's
+//  shop-floor field) and mirrors to its project, so the two never disagree.
+// ═══════════════════════════════════════════════════
+const PRIORITY_STARS = window.PRIORITY_STARS = [
+  { n:1, title:'Low',    prod:'low',    hint:'Low — fit it in'            },
+  { n:2, title:'Normal', prod:'medium', hint:'Normal — the standard queue' },
+  { n:3, title:'High',   prod:'high',   hint:'High — ahead of normal work' },
+  { n:4, title:'Urgent', prod:'urgent', hint:'Urgent — drop everything'    },
+];
+window.priorityToStars = function(v){
+  const s = String(v==null?'':v).trim().toLowerCase();
+  if (!s) return 0;
+  if (s === 'low') return 1;
+  if (s === 'normal' || s === 'medium' || s === 'med') return 2;
+  if (s === 'high') return 3;
+  if (s === 'urgent' || s === 'critical' || s === 'rush') return 4;
+  return 0;   // unrecognised → unset, never a silent wrong star count
+};
+// vocab 'prod' for production_orders, 'title' (default) for job_projects / sales_orders.
+window.starsToPriority = function(n, vocab){
+  const row = PRIORITY_STARS.find(p => p.n === Number(n));
+  if (!row) return '';
+  return vocab === 'prod' ? row.prod : row.title;
+};
+window.priorityLabel = function(v){
+  const n = window.priorityToStars(v);
+  return n ? (PRIORITY_STARS.find(p=>p.n===n).title) : '';
+};
+// Plain ★★☆☆ text — for print, where a button is meaningless.
+window.priorityStarsText = function(v){
+  const n = window.priorityToStars(v);
+  return n ? ('★'.repeat(n) + '☆'.repeat(4-n)) : '';
+};
+// Editable (or read-only) star row. coll+id say what a tap should write.
+window.priorityStarPicker = function(opts){
+  const o = opts || {};
+  const n = window.priorityToStars(o.value);
+  const editable = o.editable !== false && o.coll && o.id;
+  const label = n ? PRIORITY_STARS.find(p=>p.n===n).title + ' priority' : 'No priority set';
+  const cls = 'pstars' + (editable ? '' : ' pstars-ro') + (n>=4 ? ' pstars-urgent' : n===3 ? ' pstars-high' : '');
+  const attrs = editable
+    ? ` data-pcoll="${escHtml(o.coll)}" data-pid="${escHtml(o.id)}" data-pvocab="${escHtml(o.vocab||'title')}"${o.mirrorProject?` data-pmirror="${escHtml(o.mirrorProject)}"`:''}`
+    : '';
+  const stars = PRIORITY_STARS.map(p => {
+    const on = p.n <= n;
+    return editable
+      ? `<button type="button" class="pstar${on?' on':''}" data-n="${p.n}" title="${escHtml(p.hint)}" aria-label="${escHtml(p.hint)}">${on?'★':'☆'}</button>`
+      : `<span class="pstar${on?' on':''}">${on?'★':'☆'}</span>`;
+  }).join('');
+  return `<span class="${cls}"${attrs} data-stars="${n}" title="${escHtml(label)}">${stars}${
+    o.showLabel !== false ? `<span class="pstars-lbl">${n?escHtml(PRIORITY_STARS.find(p=>p.n===n).title):'—'}</span>` : ''}</span>`;
+};
+// Repaints an EXISTING star row in place — never by replacing the node. The
+// buttons carry the click listeners bindPriorityStars attached, so swapping the
+// markup would mean rebinding, and any rebind that can reach a sibling row
+// double-binds it: two listeners, two Firestore writes per tap, the second
+// racing the first. Mutating text + classes keeps one listener per button for
+// the life of the render.
+function paintPriorityStars(row, stars, vocab){
+  row.dataset.stars = String(stars);
+  row.classList.toggle('pstars-urgent', stars >= 4);
+  row.classList.toggle('pstars-high', stars === 3);
+  row.classList.remove('pstars-busy');
+  const title = window.starsToPriority(stars, 'title');
+  row.title = stars ? (title + ' priority') : 'No priority set';
+  row.querySelectorAll('.pstar').forEach(b => {
+    const on = Number(b.dataset.n) <= stars;
+    b.classList.toggle('on', on);
+    b.textContent = on ? '★' : '☆';
+  });
+  const lbl = row.querySelector('.pstars-lbl');
+  if (lbl) lbl.textContent = stars ? title : '—';
+  return window.starsToPriority(stars, vocab);
+}
+
+// One binder for every star row inside `root`. afterSave(stars, coll, id) is
+// optional — omit it and the row repaints itself in place with no reload, which
+// is the point: setting a priority must never cost the user their scroll spot.
+window.bindPriorityStars = function(root, afterSave){
+  if (!root) return;
+  root.querySelectorAll('.pstars[data-pcoll] .pstar').forEach(btn => {
+    // Idempotent: a screen that binds the same subtree twice (a partial
+    // re-render inside an already-bound container) must not stack listeners.
+    if (btn.dataset.pbound) return;
+    btn.dataset.pbound = '1';
+    btn.addEventListener('click', async (ev) => {
+      // Star rows sit inside cards and table rows that are themselves click
+      // targets (expand / open detail) — without this, setting a priority also
+      // navigates away from the list you were triaging.
+      ev.preventDefault(); ev.stopPropagation();
+      const row  = btn.closest('.pstars');
+      const coll = row.dataset.pcoll, id = row.dataset.pid;
+      const vocab = row.dataset.pvocab || 'title';
+      const want = Number(btn.dataset.n);
+      const cur  = Number(row.dataset.stars || 0);
+      // Tapping the star you are already on clears the priority — otherwise a
+      // priority set by mistake can only ever be changed, never removed.
+      const stars = (want === cur) ? 0 : want;
+      const value = window.starsToPriority(stars, vocab);
+      row.classList.add('pstars-busy');
+      try {
+        await db.collection(coll).doc(id).update({
+          priority: value,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate(coll);
+        // A work order's star also moves its project, so Sales and Production
+        // are never looking at two different priorities for one job. Strictly
+        // best-effort: the work order's own field is the one that just saved.
+        const mirror = row.dataset.pmirror;
+        if (mirror) {
+          try {
+            await db.collection('job_projects').doc(mirror).update({
+              priority: window.starsToPriority(stars, 'title'),
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            });
+            if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
+          } catch(_) {}
+        }
+        paintPriorityStars(row, stars, vocab);
+        Notifs.showToast(stars ? `Priority set to ${window.starsToPriority(stars,'title')}.` : 'Priority cleared.');
+        afterSave && afterSave(stars, coll, id);
+      } catch(e) {
+        // Roll the display back to what is actually stored — a star row left
+        // showing the value someone TRIED to set is worse than an error.
+        paintPriorityStars(row, cur, vocab);
+        Notifs.showToast('Could not set priority: ' + (e.message || e.code), 'error');
+      }
+    });
+  });
+};
+
+// ═══════════════════════════════════════════════════
+//  JOB ORDER — the printable sheet Production works from
+//  Owner request (2026-08-17): "allow to create Job Order to print for
+//  Production ... produced from the quote that is won ... do not show the
+//  prices, show deadlines and schedule."
+//
+//  DELIBERATELY MONEY-FREE. Every job_projects doc carries contractAmount,
+//  arBalance and quote line items complete with unitPrice/amount — this sheet
+//  goes to the shop floor and to whoever is standing next to it, so not one of
+//  those fields may reach the page. The item renderer below reads name/dims/
+//  specs/qty/unit/leadTime by name and never iterates the item object, so a
+//  new priced field added to the quote payload later cannot leak in by
+//  accident. Same reason there is no showMoney branch here: there is no
+//  audience for a priced Job Order.
+//
+//  Every job_project IS a won quote (createJobProject is only ever called from
+//  the convert-a-won-quote flow), so "from the quote that is won" needs no
+//  extra filter — the tab lists projects, and the sheet quotes the quote
+//  number it came from.
+// ═══════════════════════════════════════════════════
+
+// Even spread of the shop-floor stages across the window we actually know
+// (issue date → target completion). Labelled "Planned" on the sheet and
+// footnoted, because it is a plan derived from two dates, not a commitment
+// anyone made per stage. Returns [] when the target date is missing or behind
+// the start — a blank ruled schedule is honest, invented dates are not.
+function planStageDates(startISO, targetISO, stages){
+  if (!startISO || !targetISO) return [];
+  const s = new Date(startISO + 'T00:00:00'), t = new Date(targetISO + 'T00:00:00');
+  if (isNaN(s) || isNaN(t) || t <= s) return [];
+  const span = Math.round((t - s) / 86400000);
+  return stages.map((st, i) => {
+    const d = new Date(s.getTime());
+    d.setDate(d.getDate() + Math.round(span * (i + 1) / stages.length));
+    return window.bizDate ? window.bizDate(d) : d.toISOString().slice(0, 10);
+  });
+}
+
+function jobOrderNoFor(p){
+  const base = String(p.projectNo || '').replace(/^JP-/, '');
+  return base ? ('JO-' + base) : ('JO-' + String(p.id || '').slice(0, 6).toUpperCase());
+}
+
+// One line item, described for someone who has to build it — never priced.
+function jobOrderItemRow(it, n){
+  const e = s => escHtml(s == null ? '' : String(s));
+  const specs = it.specEdit !== undefined && it.specEdit !== null && String(it.specEdit).trim()
+    ? String(it.specEdit)
+    : (Array.isArray(it.specs) && it.specs.length
+        ? it.specs.map(s => s && s.label ? (s.label + ': ' + s.value) : (s && s.value) || '').filter(Boolean).join(' • ')
+        : (it.specStr || ''));
+  const bits = [];
+  if (specs) bits.push(`<div class="sub">${e(specs)}</div>`);
+  if (it.dims) bits.push(`<div class="sub">Dimensions: ${e(it.dims)}</div>`);
+  if (it.notes) bits.push(`<div class="sub note-em">${e(it.notes)}</div>`);
+  return `<tr>
+    <td class="c">${n}</td>
+    <td><div class="nm">${e(it.name || 'Item')}</div>${bits.join('')}</td>
+    <td class="c b">${e(Number(it.qty || 1).toLocaleString('en-PH'))}</td>
+    <td class="c">${e(it.unit || 'pc')}</td>
+    <td class="c">${e(it.leadTime || '—')}</td>
+    <td class="sig"></td>
+  </tr>`;
+}
+
+function printJobOrder(p, orders){
+  const e = s => escHtml(s == null ? '' : String(s));
+  const jobOrders = (orders || []).filter(o => o.projectId === p.id);
+  const todayISO = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+  const jo = jobOrderNoFor(p);
+
+  // Start = the earliest stage actually entered on the floor, else the day the
+  // sheet is issued. Never the project creation date: a job won in June and
+  // released to Production in August would spread its stages across two dead
+  // months and print a schedule that was overdue before anyone read it.
+  let startISO = todayISO;
+  jobOrders.forEach(o => (o.stageHistory || []).forEach(h => {
+    const d = String(h.enteredAt || '').slice(0, 10);
+    if (d && d < startISO) startISO = d;
+  }));
+  const targetISO = p.targetDate || (jobOrders.find(o => o.dueDate) || {}).dueDate || '';
+  const daysLeft = targetISO
+    ? Math.round((new Date(targetISO + 'T00:00:00') - new Date(todayISO + 'T00:00:00')) / 86400000)
+    : null;
+
+  // Stage schedule. Assigned / Started come from the linked work orders;
+  // Planned from the two dates above. Actual + Done stay blank on purpose —
+  // this sheet is written on at the machine.
+  const planned = planStageDates(startISO, targetISO, PROD_STAGES);
+  const stageRows = PROD_STAGES.map((st, i) => {
+    let who = '', started = '';
+    jobOrders.forEach(o => {
+      const a = (o.assignments || {})[st.id];
+      if (a && (a.workerNames || []).length) who = who || a.workerNames.join(', ');
+      else if (!who && o.team && normProdStageId(o.stage) === st.id) who = o.team;
+      const h = (o.stageHistory || []).filter(x => normProdStageId(x.stage) === st.id).pop();
+      if (h && h.enteredAt) started = started || String(h.enteredAt).slice(0, 10);
+    });
+    const reached = jobOrders.some(o => {
+      const cur = PROD_STAGES.findIndex(s2 => s2.id === normProdStageId(o.stage));
+      return cur >= i;
+    });
+    return `<tr class="${reached ? '' : 'ahead'}">
+      <td class="b">${i + 1}. ${e(st.label)}</td>
+      <td class="c">${e(planned[i] || '')}</td>
+      <td>${e(who)}</td>
+      <td class="c">${e(started)}</td>
+      <td class="sig"></td>
+      <td class="sig"></td>
+    </tr>`;
+  }).join('');
+
+  const items = Array.isArray(p.items) ? p.items : [];
+  // Grouped by the quote's own section label — the same sections the preparer
+  // named in the quote builder, so the sheet reads in the order it was sold.
+  const groups = [];
+  items.forEach(it => {
+    const key = it.catLabel || it.category || '';
+    let g = groups.find(x => x.key === key);
+    if (!g) groups.push(g = { key, label: it.catLabel || '', rows: [] });
+    g.rows.push(it);
+  });
+  let n = 0;
+  const itemsHtml = items.length
+    ? groups.map(g => (g.label && groups.length > 1
+        ? `<tr class="grp"><td colspan="6">${e(g.label)}</td></tr>` : '')
+        + g.rows.map(it => jobOrderItemRow(it, ++n)).join('')).join('')
+    : `<tr><td colspan="6" class="c" style="padding:14px;color:#777">No line items were carried over from the quote — attach the quotation to this Job Order.</td></tr>`;
+  // Ruled blanks so extra work found on the floor is written on the sheet
+  // rather than on a scrap of paper nobody files.
+  let blanks = ''; for (let k = 0; k < 3; k++) blanks += `<tr class="blank"><td class="c">${n + k + 1}</td><td></td><td></td><td></td><td></td><td class="sig"></td></tr>`;
+
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'JOB ORDER',
+    docNumber: jo,
+    dateLabel: 'Issued: ' + todayISO,
+    extraMeta: [
+      p.projectNo ? ('Project: ' + p.projectNo) : null,
+      p.quoteNumber ? ('Quotation: ' + p.quoteNumber) : null,
+      jobOrders.length ? ('Work Order' + (jobOrders.length > 1 ? 's' : '') + ': ' + jobOrders.map(o => o.orderNo || '—').join(', ')) : null,
+    ].filter(Boolean),
+    signatures: [
+      { label: 'Issued by', name: (userProfile?.displayName || currentUser?.email || ''), title: 'Production Planning' },
+      { label: 'Received by (shop floor)', name: '', title: 'Foreman / Team Leader' },
+    ],
+    // BRAND.fullName is "Barro Industries Operating System" — the app's name,
+    // not the company's. The letterhead header already carries the registered
+    // entity, so the footer only needs the document's own identity.
+    footerNote: 'Job Order ' + jo + ' · Internal production document — not a price quotation',
+  }) : null;
+
+  const pageCss = `
+  .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
+  .parties{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+  .pbox{border:1px solid #999;border-radius:6px;padding:8px 11px}
+  .pbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:3px}
+  .pbox .v{font-size:12px;font-weight:700;min-height:15px}
+  .dl{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 0 12px}
+  .dl .d{border:1px solid #999;border-radius:6px;padding:7px 9px;text-align:center}
+  .dl .d .l{font-size:7.5px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800}
+  .dl .d .v{font-size:12.5px;font-weight:800;margin-top:2px}
+  .dl .d.late .v{color:#B03024}
+  .dl .d.soon .v{color:#B36B00}
+  .stars{font-size:13px;letter-spacing:1px;color:#1E3A5F}
+  h4.sec{font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:#1E3A5F;margin:14px 0 5px;
+    border-bottom:1.5px solid #1E3A5F;padding-bottom:2px}
+  table{margin-bottom:6px}
+  th{background:#1E3A5F;color:#fff;font-size:8.5px;text-transform:uppercase;letter-spacing:.04em}
+  td{font-size:10.5px;vertical-align:top}
+  td.c{text-align:center}
+  td.b{font-weight:700}
+  td.sig{background:#fafafa}
+  tr.grp td{background:#D6E4F0;color:#1E3A5F;font-weight:800;font-size:8.5px;
+    text-transform:uppercase;letter-spacing:.5px;padding:3px 6px}
+  tr.ahead td{color:#777}
+  tr.blank td{height:22px}
+  .nm{font-weight:700}
+  .sub{font-size:9px;color:#555;margin-top:1px;line-height:1.35}
+  .sub.note-em{color:#1E3A5F;font-style:italic}
+  .note{font-size:9.5px;color:#444;margin:3px 0 9px;line-height:1.5}
+  .note b{color:#1E3A5F}
+  @media print{ .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}`;
+
+  const dueCls = daysLeft == null ? '' : daysLeft < 0 ? ' late' : daysLeft <= 7 ? ' soon' : '';
+  const bodyHtml = `
+  ${_lh ? _lh.headerHTML : `<div style="font-size:20px;font-weight:900">JOB ORDER ${e(jo)}</div>`}
+  <div class="parties">
+    <div class="pbox"><div class="l">Client</div><div class="v">${e(p.clientName || p.name || '—')}</div></div>
+    <div class="pbox"><div class="l">Job / Project</div><div class="v">${e(p.name || p.projectNo || '—')}</div></div>
+  </div>
+  <div class="dl">
+    <div class="d"><div class="l">Issued</div><div class="v">${e(todayISO)}</div></div>
+    <div class="d"><div class="l">Floor start</div><div class="v">${e(startISO)}</div></div>
+    <div class="d${dueCls}"><div class="l">Target completion</div><div class="v">${targetISO ? e(targetISO) : '—'}</div></div>
+    <div class="d${dueCls}"><div class="l">Days remaining</div><div class="v">${daysLeft == null ? '—' : (daysLeft < 0 ? Math.abs(daysLeft) + ' overdue' : daysLeft)}</div></div>
+  </div>
+  <div class="parties">
+    <div class="pbox"><div class="l">Priority</div><div class="v"><span class="stars">${e(window.priorityStarsText(p.priority) || '☆☆☆☆')}</span> ${e(window.priorityLabel(p.priority) || 'Not set')}</div></div>
+    <div class="pbox"><div class="l">Current stage</div><div class="v">${e(jobOrders.length ? prodStage(jobOrders[0].stage).label : jobStage(p.stage).label)}</div></div>
+  </div>
+
+  <h4 class="sec">What to build</h4>
+  <table>
+    <thead><tr>
+      <th style="width:26px">#</th><th>Description &amp; specification</th>
+      <th style="width:46px">Qty</th><th style="width:46px">Unit</th>
+      <th style="width:74px">Lead time</th><th style="width:70px">Done ✓</th>
+    </tr></thead>
+    <tbody>${itemsHtml}${blanks}</tbody>
+  </table>
+  <div class="note">Quantities and specifications are taken from quotation <b>${e(p.quoteNumber || '—')}</b>. Any change on the floor must be written above and initialled — do not vary the specification without Production Planning.</div>
+
+  <h4 class="sec">Production schedule</h4>
+  <table>
+    <thead><tr>
+      <th>Stage</th><th style="width:74px">Planned</th><th style="width:130px">Assigned to</th>
+      <th style="width:74px">Started</th><th style="width:74px">Actual finish</th><th style="width:60px">Signed</th>
+    </tr></thead>
+    <tbody>${stageRows}</tbody>
+  </table>
+  <div class="note">${planned.length
+      ? `<b>Planned</b> dates are an even spread of the ${e(startISO)} → ${e(targetISO)} window across the ${PROD_STAGES.length} shop-floor stages — a planning guide, not a per-stage commitment. Record the real dates in Actual finish and sign each stage off.`
+      : `A target completion date has not been set on this job, so the Planned column is blank — fill it in on the floor, and ask Sales to set the target date in the system.`}</div>
+  ${p.notes ? `<div class="note"><b>Notes from Sales / Design:</b> ${e(p.notes)}</div>` : ''}
+  ${_lh ? _lh.footerHTML : ''}`;
+
+  window.openPrintableDoc({
+    title: `Job Order — ${jo}`,
+    barLabel: `${emojiIcon('🧾',16)} Job Order — ${e(jo)}`,
+    bodyHtml, pageCss,
+    winFeatures: 'width=900,height=760',
+  });
+}
+window.printJobOrder = printJobOrder;
+
+// ── Production → Job Orders tab ──────────────────────────────────
+// Lists the won jobs Production is actually responsible for, each printable
+// as a Job Order and each with its priority stars editable in place.
+async function renderProdJobOrders(el, currentUser, currentRole){
+  const canEdit = canEditDept('Production') && (window.currentRole !== 'secretary');
+  el.innerHTML = window.skeletonHtml('table');
+  const [projSnap, ordSnap] = await Promise.all([
+    dbCachedGet('job_projects', ()=>db.collection('job_projects').orderBy('createdAt','desc').get(), 45000),
+    dbCachedGet('production_orders', ()=>db.collection('production_orders').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]}))
+  ]);
+  const orders = ordSnap.docs.map(d=>({id:d.id,...d.data()}));
+  // 'paid' and 'cancelled' are gone from the floor; everything else is a live
+  // or recently-finished job whose sheet someone may still need to reprint.
+  const projects = projSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .filter(p=>!['paid','cancelled'].includes(p.stage));
+  const todayStr = window.bizDate ? window.bizDate() : today();
+  const weekAhead = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return (window.bizDate?window.bizDate(d):d.toISOString().slice(0,10)); })();
+  const overdue = projects.filter(p=>p.targetDate && p.targetDate < todayStr && !['delivered','completed'].includes(p.stage));
+  const soon    = projects.filter(p=>p.targetDate && p.targetDate >= todayStr && p.targetDate <= weekAhead);
+  const noTarget= projects.filter(p=>!p.targetDate);
+  const urgent  = projects.filter(p=>window.priorityToStars(p.priority) >= 3);
+
+  // Most urgent first, then soonest deadline — the order a planner triages in.
+  const sorted = projects.slice().sort((a,b)=>{
+    const pa=window.priorityToStars(a.priority), pb=window.priorityToStars(b.priority);
+    if (pa!==pb) return pb-pa;
+    const ta=a.targetDate||'9999-12-31', tb=b.targetDate||'9999-12-31';
+    return ta<tb?-1:ta>tb?1:0;
+  });
+
+  const card = (p)=>{
+    const jobOrders = orders.filter(o=>o.projectId===p.id);
+    const late = p.targetDate && p.targetDate < todayStr && !['delivered','completed'].includes(p.stage);
+    const st = jobStage(p.stage);
+    return `<div class="item-card" style="border-left:3px solid ${st.color}">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:1;min-width:170px">
+          <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            <span style="font-family:monospace">${escHtml(jobOrderNoFor(p))}</span>
+            ${p.quoteNumber?` · quote ${escHtml(p.quoteNumber)}`:''}
+            · <span class="badge" style="font-size:9px;background:${st.color};color:var(--on-primary)">${escHtml(st.label)}</span>
+          </div>
+          <div style="font-size:11px;margin-top:4px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <span style="color:${late?'var(--danger)':'var(--text-muted)'}">${emojiIcon('📅',16)} ${p.targetDate?`Target ${escHtml(p.targetDate)}${late?` ${emojiIcon('⚠️',16)}`:''}`:'No target date'}</span>
+            <span style="color:var(--text-muted)">${emojiIcon('📦',16)} ${(Array.isArray(p.items)?p.items.length:0)} item(s)</span>
+            ${jobOrders.length?`<span style="color:var(--text-muted)">${emojiIcon('🏭',16)} ${escHtml(jobOrders.map(o=>o.orderNo||'WO').join(', '))}</span>`:`<span class="badge badge-orange" style="font-size:9px">no work order yet</span>`}
+          </div>
+          <div style="margin-top:5px">${window.priorityStarPicker({value:p.priority, coll:'job_projects', id:p.id, editable:canEdit})}</div>
+        </div>
+        <button class="btn-primary btn-sm jo-print" data-id="${p.id}" style="flex-shrink:0;white-space:nowrap">${emojiIcon('🖨',16)} Job Order</button>
+      </div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Open jobs</div><div class="kpi-value">${projects.length}</div></div>
+      <div class="kpi-card" style="${urgent.length?'border-color:var(--danger)':''}"><div class="kpi-label">High / Urgent</div><div class="kpi-value" style="${urgent.length?'color:var(--danger)':''}">${urgent.length}</div></div>
+      <div class="kpi-card" style="${soon.length?'border-color:var(--warning)':''}"><div class="kpi-label">Due ≤7 days</div><div class="kpi-value" style="${soon.length?'color:var(--warning)':''}">${soon.length}</div></div>
+      <div class="kpi-card ${overdue.length?'red':''}"><div class="kpi-label">Overdue</div><div class="kpi-value">${overdue.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">No target date</div><div class="kpi-value">${noTarget.length}</div></div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+      Every job here came from a won quotation. The printed Job Order carries the scope, the deadlines and the stage schedule — and no prices, so it can be handed to anyone on the floor. Tap the stars to set a job's priority.
+    </div>
+    ${!sorted.length ? window.renderEmptyState({icon:'🧾',title:'No open jobs',hint:'A job appears here once Sales converts a won quotation into a sales order.'}) : ''}
+    ${sorted.length?`<div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:8px">${sorted.map(card).join('')}</div></div>`:''}`;
+  if (window.lucide) lucide.createIcons({ nodes: [el] });
+
+  el.querySelectorAll('.jo-print').forEach(b=>b.addEventListener('click', ()=>{
+    const p = projects.find(x=>x.id===b.dataset.id);
+    if (p) printJobOrder(p, orders);
+  }));
+  window.bindPriorityStars(el);
+}
+
 // Create the master project when a quote is won (called from the Sales Order flow).
 async function createJobProject(d){
   // Money-critical fix — this is the single choke point every "convert quote
@@ -1170,7 +1635,7 @@ async function openJobBillingInvoiceModal(p){
 
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
   const c = deptContainer();
-  const subs = ['Orders','Materials','Inventory','Count Form','Budgeting','Tasks','Files'];
+  const subs = ['Orders','Job Orders','Materials','Inventory','Count Form','Budgeting','Tasks','Files'];
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -1180,6 +1645,7 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
     </div>
     ${window.sopPanel('How Production works', [
       'Orders is the shop-floor pipeline: '+PROD_STAGES.map(s=>s.label).join(' → ')+'.',
+      `Job Orders prints the sheet the floor works from — scope, deadlines and stage schedule, ${emojiIcon('🚫',16)} never prices. Tap the stars there to set a job's priority.`,
       `Quality Checking requires a passed ${emojiIcon('🔍',16)} QC checklist before an order can go Out for Delivery.`,
       `Marking Delivered requires a ${emojiIcon('🧾',16)} Delivery Receipt (received-by + date) — printable on letterhead.`,
       'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
@@ -1195,6 +1661,7 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
 async function loadProdContent(currentUser, currentRole, sub) {
   const el = document.getElementById('prod-content');
   try {
+    if (sub==='Job Orders') return await renderProdJobOrders(el, currentUser, currentRole);
     if (sub==='Materials') return await renderProdMaterials(el, currentRole);
     if (sub==='Inventory') return await window.renderInventory(el, 'Stock');
     if (sub==='Count Form') return await renderProdInventoryForm(el, currentRole);
@@ -1276,7 +1743,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
                 : (o.team?`<span style="color:var(--text-muted)">${emojiIcon('👷',16)} ${escHtml(o.team)}</span>`:''); })()}
             ${o.qc?`<span class="badge ${o.qc.result==='passed'?'badge-green':'badge-red'}" style="font-size:9px">${o.qc.result==='passed'?`${emojiIcon('✅',16)} QC`:`${emojiIcon('❌',16)} QC`}</span>`:''}
             ${o.deliveryReceipt?`<span class="badge badge-blue" style="font-size:9px">${emojiIcon('🧾',9)} ${escHtml(o.deliveryReceipt.no||'DR')}</span>`:''}
-            <span class="badge ${pr==='high'||pr==='urgent'?'badge-red':pr==='low'?'badge-green':'badge-orange'}" style="font-size:9px">${pr}</span>
+            ${window.priorityStarPicker({value:pr, coll:'production_orders', id:o.id, vocab:'prod', editable:canEdit, mirrorProject:o.projectId||'', showLabel:false})}
           </div>
         </div>
         ${canEdit?`<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
@@ -1315,7 +1782,8 @@ async function renderProdOrders(el, currentUser, currentRole) {
                 <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span>${p.quoteNumber?` · ${escHtml(p.quoteNumber)}`:''} · <span class="badge ${p.stage==='in_production'?'badge-blue':'badge-green'}" style="font-size:9px">${escHtml(jobStage(p.stage).label)}</span></div>
                 ${showMoney
                   ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">Contract ₱${fmt(p.contractAmount||0)}</div>`
-                  : (p.targetDate||p.priority) ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">${p.targetDate?`${emojiIcon('📅',16)} Target ${escHtml(p.targetDate)}`:''}${p.targetDate&&p.priority?' · ':''}${p.priority?escHtml(p.priority)+' priority':''}</div>` : ''}
+                  : p.targetDate ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">${emojiIcon('📅',16)} Target ${escHtml(p.targetDate)}</div>` : ''}
+                <div style="margin-top:4px">${window.priorityStarPicker({value:p.priority, coll:'job_projects', id:p.id, editable:canEdit, showLabel:false})}</div>
               </div>
               ${canEdit?`<button class="btn-primary btn-sm prod-start" data-id="${p.id}" style="flex-shrink:0;white-space:nowrap">＋ Start work order</button>`:''}
             </div>
@@ -1340,6 +1808,8 @@ async function renderProdOrders(el, currentUser, currentRole) {
       </details>`:''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [el] });
+
+  window.bindPriorityStars(el);
 
   document.getElementById('prod-csv')?.addEventListener('click', ()=>window.exportCSV('production-orders', orders, [
     {key:'orderNo',label:'Order #'},{key:'title',label:'Product'},{key:'client',label:'Client'},{key:'qty',label:'Qty'},
