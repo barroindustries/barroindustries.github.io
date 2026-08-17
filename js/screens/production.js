@@ -610,83 +610,118 @@ window.bindPriorityStars = function(root, afterSave){
 // footnoted, because it is a plan derived from two dates, not a commitment
 // anyone made per stage. Returns [] when the target date is missing or behind
 // the start — a blank ruled schedule is honest, invented dates are not.
-function planStageDates(startISO, targetISO, stages){
-  if (!startISO || !targetISO) return [];
-  const s = new Date(startISO + 'T00:00:00'), t = new Date(targetISO + 'T00:00:00');
-  if (isNaN(s) || isNaN(t) || t <= s) return [];
-  const span = Math.round((t - s) / 86400000);
-  return stages.map((st, i) => {
-    const d = new Date(s.getTime());
-    d.setDate(d.getDate() + Math.round(span * (i + 1) / stages.length));
-    return window.bizDate ? window.bizDate(d) : d.toISOString().slice(0, 10);
-  });
-}
+// ═══════════════════════════════════════════════════
+//  THE JOB ORDER SHEET
+//  Modelled on the real document (JO-ML-FB-260730-001, Mamitas Bulaluhan) the
+//  owner works from, not on a layout of this app's invention. Its shape is the
+//  point: the floor ticks NINE stages PER ITEM as the work happens, and the
+//  three checklists (pre-fabrication, QC before crating, delivery/turnover)
+//  carry the standing conditions that otherwise live in somebody's head.
+//
+//  Everything here is money-free by construction — see joScopeRow.
+// ═══════════════════════════════════════════════════
 
+// The nine tick columns, exactly as the printed sheet runs them. These are NOT
+// PROD_STAGES: that is the app's work-order pipeline (one stage per ORDER, used
+// for routing, KPIs and the tracker). These are per-ITEM shop-floor operations
+// on one sheet, and an item can be cut and formed while the next is still
+// waiting on parts — a single order-level stage cannot express that.
+const JO_STAGE_COLS = window.JO_STAGE_COLS = [
+  { id:'parts',  l1:'PARTS',  l2:'COMPLETE' },
+  { id:'layout', l1:'LAYOUT', l2:'CHECK'    },
+  { id:'cut',    l1:'CUT'     },
+  { id:'form',   l1:'FORM'    },
+  { id:'weld',   l1:'WELD'    },
+  { id:'assy',   l1:'ASSY'    },
+  { id:'polish', l1:'POLISH'  },
+  { id:'qc',     l1:'QC'      },
+  { id:'pack',   l1:'PACK'    },
+];
+
+// House standard text, lifted from the sheet in use. Seeded onto a new job
+// order and editable per job — a kitchen with no gas line should not carry a
+// burner test-fire line, and the preparer is the one who knows that.
+const JO_DEFAULTS = {
+  preFab: [
+    'Shop drawings prepared and approved by client',
+    'On-site layouting completed at site (per quotation remarks)',
+    'Final dimensions verified against site measurements',
+    'SS 304 sheet stock issued (1.2mm top plate / 1.0mm body & shelving)',
+    'Burners, faucets, footings & hardware allocated',
+    'Down payment confirmed — release to production',
+  ],
+  qc: [
+    'All welds ground smooth, no burrs or sharp edges',
+    'Dimensions verified against approved shop drawings',
+    'SS 304 gauge correct per item spec (1.2mm tops / 1.0mm bodies)',
+    'Adjustable footings installed & levelling tested on all units',
+    'Burners test-fired; valves & thermometer functional',
+    'Faucets & goosenecks leak-tested',
+    'Sinks & grease trap drain-tested, no seepage',
+    'Surfaces cleaned, protective film applied, units labelled',
+  ],
+  delivery: [
+    'All units packed, wrapped & counted against this job order',
+    'Truck booked & loading plan set (racks upright)',
+    'Long items secured — long-item handling',
+    'Supplied units loaded upright, strapped, cushioned',
+    'Client notified of delivery window & site access confirmed',
+    'Tools, consumables & installation hardware loaded',
+    'Delivery receipt / packing list printed & on board',
+    'Crew travel & accommodation arranged',
+  ],
+  install: [
+    'Units positioned per approved site layout',
+    'All units levelled via adjustable footings',
+    'Wall-mounted items mounted & load-tested',
+    'Pass-thru window aligned with dispatch table',
+    'Grease trap set & connected to drain line',
+    'Gas / electrical / civil works confirmed by client (excluded from scope)',
+    'Final clean-down; protective film removed',
+    'Client walkthrough, orientation & punch list cleared',
+  ],
+  standing: [
+    'Drawings and on-site layouting must be completed before fabrication starts.',
+    'Work is scheduled from receipt of down payment and approved design. Client-side changes or site delays shift the completion date.',
+    'Scope covers fabrication, delivery and installation only. Electrical works, gas connections and civil works are excluded unless stated.',
+    'Site must be ready for installation on arrival; report any blocking site condition to the office immediately.',
+    'Fabrication workmanship carries a 12-month warranty — record serial/unit tags on turnover.',
+    'Any deviation from the specifications above requires written approval from the office before proceeding.',
+  ],
+  scopeText: 'Fabrication · Delivery · Installation',
+};
+
+// JO-ML-FB-260730-001 comes from quotation BK-ML-FB-260730-001-R3: the company
+// prefix is swapped for JO and the revision suffix dropped, so the job order and
+// the quotation it came from read as obviously the same job at a glance. Falls
+// back to the project number only when there is no quote to derive from.
 function jobOrderNoFor(p){
+  const q = String(p.quoteNumber || '').trim();
+  if (q) return 'JO-' + q.replace(/^(BK|BS|BI|PT)-/i, '').replace(/-R\d+$/i, '');
   const base = String(p.projectNo || '').replace(/^JP-/, '');
   return base ? ('JO-' + base) : ('JO-' + String(p.id || '').slice(0, 6).toUpperCase());
 }
 
-// One line item, in the quotation's own Description cell shape — product name
-// on the first line, specification / dimensions / note beneath it — minus the
-// Unit Price and Amount columns.
-function jobOrderItemRow(it, n){
-  const e = s => escHtml(s == null ? '' : String(s));
-  // Rows reaching here have been through joScopeRow, which already flattened
-  // the quote's three spec shapes (specEdit string / specs[] objects / specStr)
-  // into one `specs` STRING. Reading it as an array again silently printed
-  // nothing — every specification vanished off the sheet. The array/specEdit
-  // branch stays only as a fallback for a raw quote item passed in directly.
-  const specs = typeof it.specs === 'string'
-    ? it.specs
-    : (it.specEdit !== undefined && it.specEdit !== null && String(it.specEdit).trim()
-        ? String(it.specEdit)
-        : (Array.isArray(it.specs) && it.specs.length
-            ? it.specs.map(s => s && s.label ? (s.label + ': ' + s.value) : (s && s.value) || '').filter(Boolean).join(' • ')
-            : (it.specStr || '')));
-  const bits = [];
-  if (specs) bits.push(`<div class="sub">${e(specs)}</div>`);
-  if (it.dims) bits.push(`<div class="sub">Dimensions: ${e(it.dims)}</div>`);
-  if (it.notes) bits.push(`<div class="sub note-em">${e(it.notes)}</div>`);
-  return `<tr>
-    <td class="c">${n}</td>
-    <td><div class="nm">${e(it.name || 'Item')}</div>${bits.join('')}</td>
-    <td class="c b">${e(Number(it.qty || 1).toLocaleString('en-PH'))}</td>
-    <td class="c">${e(it.unit || 'pc')}</td>
-    <td class="c">${e(it.leadTime || '—')}</td>
-  </tr>`;
+function joLongDate(iso){
+  if (!iso) return '';
+  const d = new Date(String(iso).slice(0,10) + 'T00:00:00');
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
 }
 
-
-// ── EDITING A JOB ORDER ──────────────────────────────────────────
-// Owner request (2026-08-17): "allow to edit job orders."
-//
-// Edits land in job_projects.jobOrder — a PRODUCTION-SIDE OVERRIDE — and never
-// on the quote-derived scope in job_projects.items. That is not tidiness, it is
-// the money:
-//   * items[] carries unitPrice/amount and contractAmount is the signed deal.
-//     Letting the floor retype a quantity into items[] would leave amount no
-//     longer equal to qty × unitPrice, and every margin, AR and revenue figure
-//     downstream reads those. A job order is a build instruction, not a
-//     re-pricing, so a quantity change here must not be able to move a peso.
-//   * The quotation stays intact and auditable. When the override differs from
-//     the quote, the PRINTED SHEET SAYS SO (see printJobOrder) — a sheet that
-//     silently disagrees with the contract is how disputes start.
-// The one exception is the target completion date, which writes the real
-// top-level job_projects.targetDate: it is the field the KPIs, the Incoming
-// banner and the overdue counts all read, so a copy inside jobOrder would let
-// the sheet and the dashboards disagree about the deadline.
-const JO_ITEM_KEYS = ['name','specs','dims','qty','unit','leadTime','notes','catLabel'];
-
-// The money-free view of a quote line — the ONLY shape the editor and the
-// override ever hold. Built by naming the keys, so a priced field added to the
-// quote payload later cannot ride along into a job order.
+// ── The money-free item projection ───────────────────────────────
+// The ONLY shape the editor, the tracker and the printed sheet ever hold. Built
+// by naming keys, so a priced field added to the quote payload later cannot
+// ride along into a job order (job_projects.items carries unitPrice/amount and
+// this document goes to whoever is standing next to it).
 function joScopeRow(it){
   const specs = (it.specEdit !== undefined && it.specEdit !== null && String(it.specEdit).trim())
     ? String(it.specEdit).trim()
     : (Array.isArray(it.specs) && it.specs.length
         ? it.specs.map(s => s && s.label ? (s.label + ': ' + s.value) : (s && s.value) || '').filter(Boolean).join(' • ')
         : String(it.specStr || it.specs || '').trim());
+  const stages = {};
+  JO_STAGE_COLS.forEach(c => { if ((it.stages || {})[c.id]) stages[c.id] = true; });
   return {
     name: String(it.name || '').trim(),
     specs, dims: String(it.dims || '').trim(),
@@ -694,7 +729,12 @@ function joScopeRow(it){
     unit: String(it.unit || 'pc').trim(),
     leadTime: String(it.leadTime || '').trim(),
     notes: String(it.notes || '').trim(),
+    location: String(it.location || '').trim(),
+    adjustment: String(it.adjustment || '').trim(),
     catLabel: String(it.catLabel || '').trim(),
+    stages,
+    initials: String(it.initials || '').trim(),
+    doneDate: String(it.doneDate || '').trim(),
   };
 }
 function joScopeOf(p){
@@ -702,74 +742,144 @@ function joScopeOf(p){
   const rows = Array.isArray(jo.items) && jo.items.length ? jo.items : (Array.isArray(p.items) ? p.items : []);
   return rows.map(joScopeRow);
 }
-// Is the override actually different from the quotation? Used both to decide
-// whether to store one at all and whether the sheet must warn.
+// Compares SCOPE only — a stage tick is progress, not a change to what was sold,
+// and must never make the sheet claim it no longer matches the quotation.
+function joScopeSignature(rows){
+  return JSON.stringify(rows.map(r => [r.name, r.specs, r.dims, r.qty, r.unit, r.catLabel, r.location, r.adjustment]));
+}
 function joScopeEdited(p){
   const jo = p.jobOrder || {};
   if (!Array.isArray(jo.items) || !jo.items.length) return false;
-  const a = jo.items.map(joScopeRow), b = (Array.isArray(p.items) ? p.items : []).map(joScopeRow);
-  return JSON.stringify(a) !== JSON.stringify(b);
+  const quote = Array.isArray(p.items) ? p.items : [];
+  // Nothing to differ FROM. A job whose quote line items were never carried
+  // over (an older project, or one typed straight into the job order) would
+  // otherwise print "no longer matches the quotation line for line" about a
+  // comparison that was never possible — a false alarm on the one document
+  // whose warnings have to be trusted.
+  if (!quote.length) return false;
+  return joScopeSignature(jo.items.map(joScopeRow)) !== joScopeSignature(quote.map(joScopeRow));
+}
+// Stored job order merged over the derived defaults — one place that decides
+// what the sheet, the editor and the tracker are all looking at.
+function joDoc(p){
+  const jo = p.jobOrder || {};
+  const list = (v, d) => Array.isArray(v) && v.length ? v.slice() : d.slice();
+  return {
+    no: jobOrderNoFor(p),
+    startDate: jo.startDate || '',
+    deliveryDate: jo.deliveryDate || '',
+    targetDate: p.targetDate || '',
+    siteAddress: jo.siteAddress || '',
+    projectType: jo.projectType || '',
+    scopeText: jo.scopeText || JO_DEFAULTS.scopeText,
+    items: joScopeOf(p),
+    preFab: list(jo.preFab, JO_DEFAULTS.preFab),
+    qcChecks: list(jo.qcChecks, JO_DEFAULTS.qc),
+    deliveryChecks: list(jo.deliveryChecks, JO_DEFAULTS.delivery),
+    installChecks: list(jo.installChecks, JO_DEFAULTS.install),
+    standing: list(jo.standing, JO_DEFAULTS.standing),
+    instructions: jo.instructions || '',
+    revision: Number(jo.revision) || 0,
+    updatedAt: jo.updatedAt || '', updatedByName: jo.updatedByName || '',
+  };
+}
+function joTickedCount(d){
+  const total = d.items.length * JO_STAGE_COLS.length;
+  const done = d.items.reduce((s, it) => s + JO_STAGE_COLS.filter(c => it.stages[c.id]).length, 0);
+  return { done, total, pct: total ? Math.round(100 * done / total) : 0 };
+}
+
+
+// ═══════════════════════════════════════════════════
+//  EDITOR — the job order as a screen, not just a printout
+//  Owner, 2026-08-18: "allow for a system integrated ui but there is a print
+//  option which will look like this". Everything the sheet prints is edited
+//  here; the sheet is a rendering of this record, never a separate document
+//  somebody retypes.
+//
+//  Edits land in job_projects.jobOrder — a PRODUCTION-SIDE OVERRIDE — and never
+//  on the quote-derived items[]. That is the money: items[] carries
+//  unitPrice/amount and contractAmount is the signed deal, so a quantity
+//  retyped by the floor must not be able to move a peso. When the scope
+//  diverges from the quotation the printed sheet says so, in red.
+// ═══════════════════════════════════════════════════
+function joChecklistEditor(id, label, hint, rows){
+  return `<div class="card" style="margin-bottom:10px"><div class="card-body">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted)">${escHtml(label)}</span>
+      <span style="display:flex;gap:6px">
+        <button type="button" class="btn-secondary btn-sm jo-cl-reset" data-cl="${id}">Reset to standard</button>
+        <button type="button" class="btn-secondary btn-sm jo-cl-add" data-cl="${id}">＋ Line</button>
+      </span>
+    </div>
+    <div id="jo-cl-${id}">${rows.map(t => joChecklistRow(id, t)).join('')}</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:5px">${escHtml(hint)}</div>
+  </div></div>`;
+}
+function joChecklistRow(id, text){
+  return `<div class="form-row jo-cl-row" data-cl="${id}" style="align-items:flex-end">
+    <div class="form-group" style="flex:1"><input class="jo-cl-text" value="${escHtml(text || '')}" placeholder="Checklist line"/></div>
+    <div class="form-group" style="flex:0 0 auto"><button type="button" class="btn-danger btn-sm jo-cl-del" title="Remove">${emojiIcon('🗑',14)}</button></div>
+  </div>`;
 }
 
 function openJobOrderEditor(p, onSaved){
   const jo = p.jobOrder || {};
-  const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  const d = joDoc(p);
   const quoteScope = (Array.isArray(p.items) ? p.items : []).map(joScopeRow);
-  let rows = joScopeOf(p);
-  if (!rows.length) rows = [joScopeRow({})];
+  let rows = d.items.length ? d.items : [joScopeRow({})];
 
   const scopeRowHtml = (r, i) => `
-    <div class="jo-row" data-i="${i}" style="border:1px solid var(--border);border-radius:9px;padding:9px 10px;margin-bottom:8px;background:var(--surface-2,transparent)">
+    <div class="jo-row" data-i="${i}" style="border:1px solid var(--border);border-radius:9px;padding:9px 10px;margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">
         <span style="font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--text-muted)">ITEM ${i+1}</span>
         <button type="button" class="btn-danger btn-sm jo-del" data-i="${i}" title="Remove this item">${emojiIcon('🗑',14)}</button>
       </div>
-      <div class="form-group"><label>Description</label><input class="jo-name" data-i="${i}" value="${escHtml(r.name)}" placeholder="e.g. SS Range Hood"/></div>
+      <div class="form-group"><label>Description</label><input class="jo-name" value="${escHtml(r.name)}" placeholder="e.g. SS Preparation Table (2 Layer)"/></div>
       <div class="form-row">
-        <div class="form-group" style="flex:0 0 80px"><label>Qty</label><input class="jo-qty" data-i="${i}" type="number" min="0" step="1" value="${escHtml(String(r.qty))}"/></div>
-        <div class="form-group" style="flex:0 0 90px"><label>Unit</label><input class="jo-unit" data-i="${i}" value="${escHtml(r.unit)}" placeholder="pc"/></div>
-        <div class="form-group"><label>Lead time</label><input class="jo-lead" data-i="${i}" value="${escHtml(r.leadTime)}" placeholder="e.g. 10-14 days"/></div>
+        <div class="form-group" style="flex:0 0 80px"><label>Qty</label><input class="jo-qty" type="number" min="0" step="1" value="${escHtml(String(r.qty))}"/></div>
+        <div class="form-group" style="flex:0 0 90px"><label>Unit</label><input class="jo-unit" value="${escHtml(r.unit)}" placeholder="pc"/></div>
+        <div class="form-group"><label>Dimensions</label><input class="jo-dims" value="${escHtml(r.dims)}" placeholder="L1900 × W800 × H850 mm"/></div>
       </div>
-      <div class="form-group"><label>Specification</label><input class="jo-specs" data-i="${i}" value="${escHtml(r.specs)}" placeholder="Material, gauge, finish…"/></div>
+      <div class="form-group"><label>Specification</label><input class="jo-specs" value="${escHtml(r.specs)}" placeholder="SS 304 1.2mm Top Plate, 1.0mm Shelvings…"/></div>
       <div class="form-row">
-        <div class="form-group"><label>Dimensions</label><input class="jo-dims" data-i="${i}" value="${escHtml(r.dims)}" placeholder="L × W × H mm"/></div>
-        <div class="form-group"><label>Section (optional)</label><input class="jo-cat" data-i="${i}" value="${escHtml(r.catLabel)}" placeholder="e.g. Option A"/></div>
+        <div class="form-group"><label>Location on site</label><input class="jo-loc" value="${escHtml(r.location)}" placeholder="e.g. Behind Dispatch Table"/></div>
+        <div class="form-group"><label>Adjustment</label><input class="jo-adj" value="${escHtml(r.adjustment)}" placeholder="e.g. Increased Length · Faucet Added"/></div>
       </div>
-      <div class="form-group"><label>Note to the floor</label><input class="jo-note" data-i="${i}" value="${escHtml(r.notes)}" placeholder="Anything the fabricator must know"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Section</label><input class="jo-cat" value="${escHtml(r.catLabel)}" placeholder="e.g. Cooking Line"/></div>
+        <div class="form-group"><label>Lead time</label><input class="jo-lead" value="${escHtml(r.leadTime)}" placeholder="e.g. 10-14 days"/></div>
+      </div>
+      <div class="form-group"><label>Note to the floor</label><input class="jo-note" value="${escHtml(r.notes)}" placeholder="Anything the fabricator must know"/></div>
     </div>`;
 
-  const stageInputs = () => PROD_STAGES.map(st => `
-    <div class="form-group" style="flex:1 1 150px;min-width:140px">
-      <label style="white-space:nowrap">${st.icon} ${escHtml(st.label)}</label>
-      <input class="jo-stage" data-stage="${st.id}" type="date" value="${escHtml((jo.stageDates||{})[st.id]||'')}"/>
-    </div>`).join('');
-
-  const _panel = openPage(`${emojiIcon('✏️',16)} Edit Job Order — ` + escHtml(jobOrderNoFor(p)), `
+  const _panel = openPage(`${emojiIcon('✏️',16)} Edit Job Order — ` + escHtml(d.no), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
-      This edits the <b>Job Order</b> the floor works from — the scope, the deadlines and the schedule.
-      It never changes quotation <b>${escHtml(p.quoteNumber||'—')}</b> or the contract value: a quantity or
-      description changed here is a build instruction, and the printed sheet flags any difference from the quote.
+      This IS the job order — everything below prints on the sheet the floor works from.
+      It never changes quotation <b>${escHtml(p.quoteNumber||'—')}</b> or the contract value, and the
+      printed sheet flags any difference from the quote.
     </div>
 
-    <div class="card" style="margin-bottom:12px"><div class="card-body">
-      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">DEADLINES</div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">HEADER</div>
       <div class="form-row">
-        <div class="form-group"><label>Floor start</label><input id="jo-start" type="date" value="${escHtml(jo.startDate||'')}"/></div>
-        <div class="form-group"><label>Target completion</label><input id="jo-target" type="date" value="${escHtml(p.targetDate||'')}"/></div>
+        <div class="form-group"><label>Project type</label><input id="jo-ptype" value="${escHtml(d.projectType)}" placeholder="e.g. Restaurant"/></div>
+        <div class="form-group"><label>Scope line</label><input id="jo-scope" value="${escHtml(d.scopeText)}" placeholder="Fabrication · Delivery · Installation"/></div>
       </div>
-      <div style="font-size:11px;color:var(--text-muted)">Target completion is the job's real deadline — it also drives the overdue and due-soon counts on this screen and the Incoming banner.</div>
+      <div class="form-group"><label>Delivery &amp; installation site</label><textarea id="jo-site" rows="2" placeholder="Baguio Athletic Bowl, Tennis Court&#10;Burnham Park, Baguio City">${escHtml(d.siteAddress)}</textarea></div>
     </div></div>
 
-    <div class="card" style="margin-bottom:12px"><div class="card-body">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-        <span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted)">STAGE SCHEDULE</span>
-        <button type="button" class="btn-secondary btn-sm" id="jo-spread">${emojiIcon('📅',14)} Spread evenly</button>
+    <div class="card" style="margin-bottom:10px"><div class="card-body">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">DATES</div>
+      <div class="form-row">
+        <div class="form-group"><label>Production start</label><input id="jo-start" type="date" value="${escHtml(d.startDate)}"/></div>
+        <div class="form-group"><label>Delivery date</label><input id="jo-delivery" type="date" value="${escHtml(d.deliveryDate)}"/></div>
+        <div class="form-group"><label>Target completion</label><input id="jo-target" type="date" value="${escHtml(d.targetDate)}"/></div>
       </div>
-      <div class="form-row" style="flex-wrap:wrap">${stageInputs()}</div>
-      <div style="font-size:11px;color:var(--text-muted)">Leave a stage blank to let the sheet fall back to an even spread of the start → target window. "Spread evenly" fills them all in from the two dates above so you can then adjust the ones that matter.</div>
+      <div style="font-size:11px;color:var(--text-muted)">Target completion is the job's real deadline — it drives the overdue and due-soon counts on this screen and the Incoming banner.</div>
     </div></div>
 
-    <div class="card" style="margin-bottom:12px"><div class="card-body">
+    <div class="card" style="margin-bottom:10px"><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
         <span style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted)">WHAT TO BUILD</span>
         <span style="display:flex;gap:6px">
@@ -778,332 +888,420 @@ function openJobOrderEditor(p, onSaved){
         </span>
       </div>
       <div id="jo-rows">${rows.map(scopeRowHtml).join('')}</div>
-      <div style="font-size:11px;color:var(--text-muted)">No prices here by design — a Job Order is handed to whoever is standing next to it. Add fabrication work found on the floor; it will print on the sheet and be flagged as a change from the quotation.</div>
+      <div style="font-size:11px;color:var(--text-muted)">No prices by design — a job order is handed to whoever is standing next to it. Stage ticks are set in ${emojiIcon('✅',14)} Progress, not here.</div>
     </div></div>
 
+    ${joChecklistEditor('prefab','PRE-FABRICATION REQUIREMENTS','Printed with tick boxes, before the item table. Must be complete before cutting.', d.preFab)}
+    ${joChecklistEditor('qc','QUALITY CONTROL — BEFORE CRATING','Printed on the continuation page.', d.qcChecks)}
+    ${joChecklistEditor('delivery','DELIVERY','Printed on the continuation page, headed with the delivery date above.', d.deliveryChecks)}
+    ${joChecklistEditor('install','INSTALLATION & TURNOVER','Printed on the continuation page, headed with the target completion date.', d.installChecks)}
+    ${joChecklistEditor('standing','STANDING INSTRUCTIONS','Numbered clauses at the foot of the sheet — the conditions the job is run under.', d.standing)}
+
     <div class="card" style="margin-bottom:4px"><div class="card-body">
-      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">INSTRUCTIONS TO THE FLOOR</div>
-      <div class="form-group"><textarea id="jo-instr" rows="3" placeholder="Sequencing, jigs, handling, anything the team must read before starting.">${escHtml(jo.instructions||'')}</textarea></div>
+      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">INSTRUCTIONS FOR THIS JOB</div>
+      <div class="form-group"><textarea id="jo-instr" rows="3" placeholder="Sequencing, jigs, handling — anything specific to this job.">${escHtml(d.instructions)}</textarea></div>
       ${p.notes?`<div style="font-size:11px;color:var(--text-muted)">Notes from Sales / Design (not editable here, also printed): ${escHtml(p.notes)}</div>`:''}
     </div></div>
     <div id="jo-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="jo-save">Save Job Order</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  // ⚠ EVERY lookup below is scoped to _panel, not document — openPage's
-  // teardown keeps a closed panel document-connected for 300ms, so a
-  // document-wide query during that window can read the PREVIOUS job's inputs
-  // and save them onto this project (same hazard openDeliveryReceiptModal
-  // documents above).
+  // ⚠ EVERY lookup scoped to _panel, not document — openPage keeps a closed
+  // panel document-connected for 300ms, so a document-wide query in that window
+  // reads the PREVIOUS job's inputs and saves them onto this project.
   const $ = s => _panel.querySelector(s);
   const $$ = s => Array.from(_panel.querySelectorAll(s));
 
-  // Read straight off the DOM rather than keeping a shadow array in sync — one
-  // source of truth, so a re-render can never drop a keystroke.
-  const collect = () => $$('#jo-rows .jo-row').map(el => {
+  // Read off the DOM rather than keeping a shadow array in sync — one source of
+  // truth, so a re-render can never drop a keystroke.
+  const collect = () => $$('#jo-rows .jo-row').map((el, i) => {
     const g = c => (el.querySelector('.' + c)?.value ?? '');
     return joScopeRow({ name:g('jo-name'), qty:g('jo-qty'), unit:g('jo-unit'), leadTime:g('jo-lead'),
-                        specEdit:g('jo-specs'), dims:g('jo-dims'), catLabel:g('jo-cat'), notes:g('jo-note') });
+      specEdit:g('jo-specs'), dims:g('jo-dims'), catLabel:g('jo-cat'), notes:g('jo-note'),
+      location:g('jo-loc'), adjustment:g('jo-adj'),
+      // Stage ticks live in the tracker, not here — carry the stored ones
+      // through so saving a description can never wipe the floor's progress.
+      stages:(rows[i]||{}).stages, initials:(rows[i]||{}).initials, doneDate:(rows[i]||{}).doneDate });
   });
   const repaint = (list) => {
-    $('#jo-rows').innerHTML = (list.length ? list : [joScopeRow({})]).map(scopeRowHtml).join('');
+    rows = list.length ? list : [joScopeRow({})];
+    $('#jo-rows').innerHTML = rows.map(scopeRowHtml).join('');
     if (window.lucide) lucide.createIcons({ nodes: [$('#jo-rows')] });
     bindRows();
   };
   const bindRows = () => $$('#jo-rows .jo-del').forEach(b => b.addEventListener('click', () => {
-    const list = collect();
-    list.splice(Number(b.dataset.i), 1);
-    repaint(list);
+    const list = collect(); list.splice(Number(b.dataset.i), 1); repaint(list);
   }));
   bindRows();
-
   $('#jo-add').addEventListener('click', () => {
     const list = collect();
-    // Inherit the section of the row above so an added item lands in the group
-    // the person was already working in rather than starting a nameless one.
     list.push(joScopeRow({ catLabel: list.length ? list[list.length-1].catLabel : '' }));
     repaint(list);
   });
   $('#jo-reset').addEventListener('click', async () => {
-    if (!(await confirmDialog({ message:'Replace the job order scope with the quotation’s line items? Any production-only items you added here are removed.', danger:true }))) return;
+    if (!(await confirmDialog({ message:'Replace the job order scope with the quotation’s line items? Production-only items you added here are removed, along with their stage ticks.', danger:true }))) return;
     repaint(quoteScope.map(joScopeRow));
     Notifs.showToast('Scope reset to the quotation — press Save to keep it.');
   });
-  $('#jo-spread').addEventListener('click', () => {
-    const plan = planStageDates($('#jo-start').value || dayStr, $('#jo-target').value, PROD_STAGES);
-    if (!plan.length) { Notifs.showToast('Set a target completion date after the floor start first.','error'); return; }
-    $$('.jo-stage').forEach((inp, i) => { inp.value = plan[i] || ''; });
-    Notifs.showToast('Stage dates spread across the window — adjust any of them before saving.');
-  });
+
+  // Checklists
+  const CL_DEFAULTS = { prefab:JO_DEFAULTS.preFab, qc:JO_DEFAULTS.qc, delivery:JO_DEFAULTS.delivery,
+                        install:JO_DEFAULTS.install, standing:JO_DEFAULTS.standing };
+  const bindCl = () => $$('.jo-cl-del').forEach(b => { if (b.dataset.b) return; b.dataset.b='1';
+    b.addEventListener('click', () => b.closest('.jo-cl-row').remove()); });
+  bindCl();
+  $$('.jo-cl-add').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.cl;
+    $('#jo-cl-' + id).insertAdjacentHTML('beforeend', joChecklistRow(id, ''));
+    if (window.lucide) lucide.createIcons({ nodes: [$('#jo-cl-' + id)] });
+    bindCl();
+  }));
+  $$('.jo-cl-reset').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.cl;
+    $('#jo-cl-' + id).innerHTML = (CL_DEFAULTS[id] || []).map(t => joChecklistRow(id, t)).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [$('#jo-cl-' + id)] });
+    bindCl();
+    Notifs.showToast('Reset to the standard lines — press Save to keep it.');
+  }));
+  const readCl = (id) => Array.from(_panel.querySelectorAll(`#jo-cl-${id} .jo-cl-text`))
+    .map(i => i.value.trim()).filter(Boolean);
 
   $('#jo-save').addEventListener('click', async () => {
     const err = $('#jo-err');
     const items = collect().filter(r => r.name);
     if (!items.length) { err.textContent = 'A job order needs at least one item with a description.'; err.classList.remove('hidden'); return; }
-    const start = $('#jo-start').value || '';
-    const target = $('#jo-target').value || '';
-    if (start && target && target < start) {
-      err.textContent = 'Target completion is before the floor start date.'; err.classList.remove('hidden'); return; }
-    const stageDates = {};
-    $$('.jo-stage').forEach(inp => { if (inp.value) stageDates[inp.dataset.stage] = inp.value; });
-
+    const start = $('#jo-start').value || '', delivery = $('#jo-delivery').value || '', target = $('#jo-target').value || '';
+    if (start && target && target < start) { err.textContent = 'Target completion is before the production start date.'; err.classList.remove('hidden'); return; }
+    if (delivery && start && delivery < start) { err.textContent = 'Delivery date is before the production start date.'; err.classList.remove('hidden'); return; }
     const btn = $('#jo-save'); btn.disabled = true;
     try {
       const who = userProfile?.displayName || currentUser.email || '';
-      // Store an override ONLY when it really differs from the quotation —
-      // otherwise the sheet would print a "changed from the quote" warning
-      // about a scope that matches it exactly.
-      const differs = JSON.stringify(items) !== JSON.stringify(quoteScope);
+      // Store the scope override only when it really differs from the quotation,
+      // otherwise the sheet warns about a scope that matches it exactly. Compared
+      // on scope fields only — a stage tick is progress, not a change to what was
+      // sold. Ticks still have to be KEPT, so the override is written whenever
+      // any exist even if the wording is identical.
+      const differs = joScopeSignature(items) !== joScopeSignature(quoteScope);
+      const anyTicks = items.some(r => Object.keys(r.stages || {}).length || r.initials || r.doneDate);
       const jobOrder = {
-        startDate: start,
-        stageDates,
-        items: differs ? items : null,
+        startDate: start, deliveryDate: delivery,
+        siteAddress: $('#jo-site').value.trim(),
+        projectType: $('#jo-ptype').value.trim(),
+        scopeText: $('#jo-scope').value.trim() || JO_DEFAULTS.scopeText,
+        items: (differs || anyTicks) ? items : null,
+        preFab: readCl('prefab'), qcChecks: readCl('qc'),
+        deliveryChecks: readCl('delivery'), installChecks: readCl('install'),
+        standing: readCl('standing'),
         instructions: $('#jo-instr').value.trim(),
         revision: (Number(jo.revision) || 0) + 1,
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser.uid,
-        updatedByName: who,
+        updatedAt: new Date().toISOString(), updatedBy: currentUser.uid, updatedByName: who,
       };
       const patch = { jobOrder, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
-      // targetDate is a real top-level field the KPIs read — write it there, and
-      // only when it actually moved, so an unrelated save can't stamp a timeline
-      // entry about a deadline nobody changed.
+      // targetDate is a real top-level field the KPIs read — written there, not
+      // copied inside jobOrder, and only when it actually moved.
       if (target !== (p.targetDate || '')) {
         patch.targetDate = target;
-        patch.timeline = firebase.firestore.FieldValue.arrayUnion({
-          at: new Date().toISOString(),
-          event: 'Job order target completion set to ' + (target || '—'), by: who });
+        patch.timeline = firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(),
+          event:'Job order target completion set to ' + (target || '—'), by:who });
       }
       await db.collection('job_projects').doc(p.id).update(patch);
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
-      window.logAudit && window.logAudit('update', 'job_order', p.id,
-        { jobOrder: jobOrderNoFor(p), revision: jobOrder.revision, scopeEdited: differs });
-      Notifs.success('Job Order ' + jobOrderNoFor(p) + ' saved (rev. ' + jobOrder.revision + ').');
-      closeModal();
-      onSaved && onSaved();
-    } catch (ex) {
-      err.textContent = 'Save failed: ' + (ex.message || ex.code); err.classList.remove('hidden'); btn.disabled = false;
-    }
+      window.logAudit && window.logAudit('update','job_order',p.id,{ jobOrder:d.no, revision:jobOrder.revision, scopeEdited:differs });
+      Notifs.success('Job Order ' + d.no + ' saved (rev. ' + jobOrder.revision + ').');
+      closeModal(); onSaved && onSaved();
+    } catch (ex) { err.textContent = 'Save failed: ' + (ex.message || ex.code); err.classList.remove('hidden'); btn.disabled = false; }
   });
 }
 window.openJobOrderEditor = openJobOrderEditor;
 
+// ═══════════════════════════════════════════════════
+//  PROGRESS TRACKER — the printed tick grid, in the system
+//  The same nine columns the sheet carries, tickable per item. Whatever is
+//  ticked here prints as ✓ on the next copy, so a sheet reprinted mid-job
+//  arrives on the floor already showing what is done instead of starting blank.
+// ═══════════════════════════════════════════════════
+function openJobOrderProgress(p, onSaved){
+  const canEdit = canEditDept('Production') && (window.currentRole !== 'secretary');
+  const d = joDoc(p);
+  const t = joTickedCount(d);
+  const rowHtml = (it, i) => `
+    <tr data-i="${i}">
+      <td style="font-size:11px;color:var(--text-muted);text-align:center">${i+1}</td>
+      <td style="font-size:12px"><div style="font-weight:600">${escHtml(it.name||'Item')}</div>
+        ${it.dims?`<div style="font-size:10px;color:var(--text-muted)">${escHtml(it.dims)}</div>`:''}</td>
+      ${JO_STAGE_COLS.map(c => `<td style="text-align:center;padding:2px">
+        <input type="checkbox" class="jop-tick" data-i="${i}" data-s="${c.id}" ${it.stages[c.id]?'checked':''} ${canEdit?'':'disabled'} style="width:17px;height:17px;accent-color:var(--success)"/>
+      </td>`).join('')}
+      <td style="padding:2px"><input class="jop-ini" data-i="${i}" value="${escHtml(it.initials)}" ${canEdit?'':'disabled'} style="width:52px;font-size:11px" placeholder="—"/></td>
+      <td style="padding:2px"><input class="jop-date" data-i="${i}" type="date" value="${escHtml(it.doneDate)}" ${canEdit?'':'disabled'} style="width:126px;font-size:11px"/></td>
+    </tr>`;
+
+  const _panel = openPage(`${emojiIcon('✅',16)} Progress — ` + escHtml(d.no), `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+      The same grid the printed job order carries. Tick a stage as it is finished — the next copy you print
+      arrives on the floor already showing it.
+    </div>
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Items</div><div class="kpi-value">${d.items.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Stages done</div><div class="kpi-value" id="jop-done">${t.done} / ${t.total}</div></div>
+      <div class="kpi-card ${t.pct>=100?'green':''}"><div class="kpi-label">Complete</div><div class="kpi-value" id="jop-pct">${t.pct}%</div></div>
+    </div>
+    ${d.items.length ? `<div class="table-wrap"><table class="data-table"><thead><tr>
+      <th style="width:26px">#</th><th>Item</th>
+      ${JO_STAGE_COLS.map(c=>`<th style="text-align:center;font-size:9px">${escHtml(c.l1)}${c.l2?'<br>'+escHtml(c.l2):''}</th>`).join('')}
+      <th style="font-size:9px">INITIALS</th><th style="font-size:9px">DATE</th>
+    </tr></thead><tbody id="jop-body">${d.items.map(rowHtml).join('')}</tbody></table></div>`
+      : window.renderEmptyState({icon:'📋',title:'No scope on this job order',hint:'Use Edit to enter what is to be built, then track it here.'})}
+    <div id="jop-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `${canEdit&&d.items.length?`<button class="btn-primary" id="jop-save">Save progress</button>`:''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+  const $ = s => _panel.querySelector(s), $$ = s => Array.from(_panel.querySelectorAll(s));
+  const recount = () => {
+    const done = $$('.jop-tick').filter(c => c.checked).length;
+    const total = d.items.length * JO_STAGE_COLS.length;
+    $('#jop-done').textContent = `${done} / ${total}`;
+    $('#jop-pct').textContent = (total ? Math.round(100*done/total) : 0) + '%';
+  };
+  $$('.jop-tick').forEach(c => c.addEventListener('change', recount));
+
+  $('#jop-save')?.addEventListener('click', async () => {
+    const err = $('#jop-err'); const btn = $('#jop-save'); btn.disabled = true;
+    try {
+      const items = d.items.map((it, i) => {
+        const stages = {};
+        JO_STAGE_COLS.forEach(c => {
+          const box = _panel.querySelector(`.jop-tick[data-i="${i}"][data-s="${c.id}"]`);
+          if (box && box.checked) stages[c.id] = true;
+        });
+        return joScopeRow({ ...it, stages,
+          initials: _panel.querySelector(`.jop-ini[data-i="${i}"]`)?.value || '',
+          doneDate: _panel.querySelector(`.jop-date[data-i="${i}"]`)?.value || '' });
+      });
+      const jo = p.jobOrder || {};
+      // Writes items ONLY — the checklists, dates and header text are the
+      // editor's, and a merge that rewrote them from this screen's stale copy
+      // would silently revert somebody else's edit made while this was open.
+      await db.collection('job_projects').doc(p.id).update({
+        'jobOrder.items': items,
+        'jobOrder.progressAt': new Date().toISOString(),
+        'jobOrder.progressBy': userProfile?.displayName || currentUser.email || '',
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
+      const done = items.reduce((s,it)=>s+Object.keys(it.stages||{}).length,0);
+      window.logAudit && window.logAudit('update','job_order',p.id,{ progress: done });
+      Notifs.success('Progress saved.');
+      closeModal(); onSaved && onSaved();
+    } catch (ex) { err.textContent = 'Save failed: ' + (ex.message || ex.code); err.classList.remove('hidden'); btn.disabled = false; }
+  });
+}
+window.openJobOrderProgress = openJobOrderProgress;
+
+// ═══════════════════════════════════════════════════
+//  PRINT
+// ═══════════════════════════════════════════════════
 function printJobOrder(p, orders){
   const e = s => escHtml(s == null ? '' : String(s));
+  const d = joDoc(p);
   const jobOrders = (orders || []).filter(o => o.projectId === p.id);
   const todayISO = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
-  const jo = jobOrderNoFor(p);
-  const ed = p.jobOrder || {};                 // production-side edits, if any
   const scopeEdited = joScopeEdited(p);
+  const units = d.items.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+  const co = (window.QUOTE_COMPANIES && window.QUOTE_COMPANIES[p.company || 'BK']) || { label: 'Barro Kitchens' };
+  const ent = window.brandEntity ? window.brandEntity('corporate') : {};
+  const clientLine = [p.clientName, p.name && p.name !== p.clientName ? p.name : ''].filter(Boolean).join(' — ');
 
-  // Start = the earliest stage actually entered on the floor, else the day the
-  // sheet is issued. Never the project creation date: a job won in June and
-  // released to Production in August would spread its stages across two dead
-  // months and print a schedule that was overdue before anyone read it.
-  let startISO = todayISO;
-  jobOrders.forEach(o => (o.stageHistory || []).forEach(h => {
-    const d = String(h.enteredAt || '').slice(0, 10);
-    if (d && d < startISO) startISO = d;
-  }));
-  if (ed.startDate) startISO = ed.startDate;   // an explicitly planned start wins
-  const targetISO = p.targetDate || (jobOrders.find(o => o.dueDate) || {}).dueDate || '';
-  const daysLeft = targetISO
-    ? Math.round((new Date(targetISO + 'T00:00:00') - new Date(todayISO + 'T00:00:00')) / 86400000)
-    : null;
-
-  // Stage schedule. Assigned / Started come from the linked work orders;
-  // Planned from the two dates above. Actual + Done stay blank on purpose —
-  // this sheet is written on at the machine.
-  const autoPlan = planStageDates(startISO, targetISO, PROD_STAGES);
-  // A stage the planner dated by hand wins; the rest fall back to the spread.
-  const planned = PROD_STAGES.map((st, i) => (ed.stageDates || {})[st.id] || autoPlan[i] || '');
-  const anyPlanned = planned.some(Boolean);
-  const stageRows = PROD_STAGES.map((st, i) => {
-    let who = '', started = '';
-    jobOrders.forEach(o => {
-      const a = (o.assignments || {})[st.id];
-      if (a && (a.workerNames || []).length) who = who || a.workerNames.join(', ');
-      else if (!who && o.team && normProdStageId(o.stage) === st.id) who = o.team;
-      const h = (o.stageHistory || []).filter(x => normProdStageId(x.stage) === st.id).pop();
-      if (h && h.enteredAt) started = started || String(h.enteredAt).slice(0, 10);
-    });
-    const reached = jobOrders.some(o => {
-      const cur = PROD_STAGES.findIndex(s2 => s2.id === normProdStageId(o.stage));
-      return cur >= i;
-    });
-    return `<tr class="${reached ? '' : 'ahead'}">
-      <td class="b">${i + 1}. ${e(st.label)}</td>
-      <td class="c">${e(planned[i] || '')}</td>
-      <td>${e(who)}</td>
-      <td class="c">${e(started)}</td>
-      <td class="sig"></td>
-      <td class="sig"></td>
-    </tr>`;
-  }).join('');
-
-  const items = joScopeOf(p);
-  // Grouped by the quote's own section label — the same sections the preparer
-  // named in the quote builder, so the sheet reads in the order it was sold.
+  // Item block: title + dims on one line, spec beneath, then location /
+  // adjustment, then three ruled lines the floor writes on.
+  let n = 0;
+  const itemRows = [];
   const groups = [];
-  items.forEach(it => {
-    const key = it.catLabel || it.category || '';
+  d.items.forEach(it => {
+    const key = it.catLabel || '';
     let g = groups.find(x => x.key === key);
     if (!g) groups.push(g = { key, label: it.catLabel || '', rows: [] });
     g.rows.push(it);
   });
-  let n = 0;
-  const itemsHtml = items.length
-    ? groups.map(g => (g.label && groups.length > 1
-        ? `<tr class="grp"><td colspan="5">${e(g.label)}</td></tr>` : '')
-        + g.rows.map(it => jobOrderItemRow(it, ++n)).join('')).join('')
-    : `<tr><td colspan="5" class="c" style="padding:14px;color:#777">No line items were carried over from the quote — edit this Job Order to enter the scope, or attach the quotation.</td></tr>`;
-  // Ruled blanks so extra work found on the floor is written on the sheet
-  // rather than on a scrap of paper nobody files.
-  let blanks = ''; for (let k = 0; k < 3; k++) blanks += `<tr class="blank"><td class="c">${n + k + 1}</td><td></td><td></td><td></td><td></td></tr>`;
+  groups.forEach(g => {
+    if (g.label && groups.length > 1) itemRows.push(`<tr class="grp"><td colspan="${3 + JO_STAGE_COLS.length + 2}">${e(g.label)}</td></tr>`);
+    g.rows.forEach(it => {
+      n++;
+      const sub = [];
+      if (it.specs) sub.push(`<div class="spec">${e(it.specs)}</div>`);
+      const la = [it.location ? 'Location: ' + it.location : '', it.adjustment ? 'Adjustment: ' + it.adjustment : ''].filter(Boolean).join(' · ');
+      if (la) sub.push(`<div class="la">${e(la)}</div>`);
+      if (it.notes) sub.push(`<div class="la">${e(it.notes)}</div>`);
+      itemRows.push(`<tr class="it">
+        <td class="c n">${n}</td>
+        <td class="desc">
+          <div class="nm">${e(it.name || 'Item')}${it.dims ? ` <span class="dims">${e(it.dims)}</span>` : ''}</div>
+          ${sub.join('')}
+          <ol class="ln"><li></li><li></li><li></li></ol>
+        </td>
+        <td class="c qty">${e(String(it.qty || 1))} ${e(it.unit || 'pc')}</td>
+        ${JO_STAGE_COLS.map(c => `<td class="tick">${it.stages[c.id] ? '✓' : ''}</td>`).join('')}
+        <td class="wr">${e(it.initials)}</td>
+        <td class="wr">${e(it.doneDate)}</td>
+      </tr>`);
+    });
+  });
+  if (!d.items.length) itemRows.push(`<tr><td colspan="${3 + JO_STAGE_COLS.length + 2}" class="c" style="padding:14px;color:#777">No scope on this job order yet — edit it to enter what is to be built.</td></tr>`);
+
+  const checkList = (arr) => `<ul class="cl">${arr.map(t => `<li><span class="box"></span>${e(t)}</li>`).join('')}</ul>`;
 
   const _lh = window.buildLetterhead ? window.buildLetterhead({
     docTitle: 'JOB ORDER',
-    docNumber: jo,
-    dateLabel: 'Issued: ' + todayISO,
+    docNumber: d.no,
+    dateLabel: 'Issued: ' + joLongDate(todayISO),
+    // The sheet's masthead is the trading brand with the OPC beneath it, not the
+    // OPC alone — this is the document the client's site sees on delivery day.
+    entity: { name: (co.label || 'Barro Kitchens').toUpperCase(), registration: 'By ' + (ent.name || 'Barro Industries OPC'),
+              address: ent.address, phone: ent.phone, email: ent.email },
     extraMeta: [
-      p.projectNo ? ('Project: ' + p.projectNo) : null,
-      p.quoteNumber ? ('Quotation: ' + p.quoteNumber) : null,
-      jobOrders.length ? ('Work Order' + (jobOrders.length > 1 ? 's' : '') + ': ' + jobOrders.map(o => o.orderNo || '—').join(', ')) : null,
-      ed.revision ? ('Revision ' + ed.revision + ' — ' + String(ed.updatedAt || '').slice(0, 10)
-                     + (ed.updatedByName ? ' by ' + ed.updatedByName : '')) : null,
+      p.quoteNumber ? ('Ref. Quotation: ' + p.quoteNumber) : null,
+      d.revision ? ('Revision ' + d.revision + (d.updatedByName ? ' — ' + d.updatedByName : '')) : null,
+      jobOrders.length ? ('Work Order: ' + jobOrders.map(o => o.orderNo || '—').join(', ')) : null,
     ].filter(Boolean),
-    signatures: [
-      { label: 'Issued by', name: (userProfile?.displayName || currentUser?.email || ''), title: 'Production Planning' },
-      { label: 'Received by (shop floor)', name: '', title: 'Foreman / Team Leader' },
-    ],
-    // BRAND.fullName is "Barro Industries Operating System" — the app's name,
-    // not the company's. The letterhead header already carries the registered
-    // entity, so the footer only needs the document's own identity.
-    footerNote: 'Job Order ' + jo + ' · Internal production document — not a price quotation',
+    footerNote: 'Job Order ' + d.no + ' · Internal production document — carries no prices and is not a quotation',
   }) : null;
 
-  // Deliberately the QUOTATION's printed proportions (quote-builder-v2.html's
-  // @media print block), not a layout of this document's own. Owner, 2026-08-17:
-  // "the format of a job order is exactly the same with a quotation, its just
-  // the prices are deleted, and spaces are readjusted for the deleted info."
-  // The quote prints seven fixed columns — 4 / 46 / 9 / 9 / 12 / 12 / 8. Unit
-  // Price and Amount are the two 12% columns; deleting them frees 24%, and all
-  // of it goes to Description (46 → 70) so the table still fills the page
-  // edge-to-edge instead of leaving a dead gutter where the money used to be.
   const pageCss = `
-  .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm;color:#000}
-  .bill-strip{margin-bottom:8px;background:#F7F8FA;border:1px solid #D6DAE3;border-radius:7px;
-    padding:8px 12px;font-size:9pt;line-height:1.55}
-  .bill-strip .bl{font-size:7.5pt;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800}
-  .subject{font-size:9.5pt;margin:0 0 10px;line-height:1.5}
-  .subject b{color:#1E3A5F}
-  .sec{margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #e3e7ef;page-break-inside:avoid;break-inside:avoid}
-  .sec-title{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;
-    border-bottom:1.5px solid #1E3A5F;margin:0 0 5px;padding-bottom:2px}
-  table{width:100%;table-layout:fixed;border-collapse:collapse;margin-bottom:6px}
+  .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:11mm;color:#000}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:0 0 7px}
+  .meta5{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:0 0 10px}
+  .mb{border:1px solid #B9C2D0;border-radius:5px;padding:6px 9px}
+  .mb .l{font-size:6.5pt;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:2px}
+  .mb .v{font-size:9.5pt;font-weight:700;line-height:1.35}
+  .mb .v small{display:block;font-size:7.5pt;font-weight:500;color:#444;margin-top:1px}
+  .meta5 .mb .v{font-size:8.5pt}
+  h4.sec{font-size:8pt;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#1E3A5F;
+    margin:9px 0 4px;border-bottom:1.5px solid #1E3A5F;padding-bottom:2px}
+  ul.cl{list-style:none;margin:0 0 6px;padding:0;column-count:2;column-gap:14px}
+  ul.cl li{font-size:8pt;line-height:1.5;padding:1px 0;break-inside:avoid;display:flex;gap:6px;align-items:flex-start}
+  ul.cl .box{flex:0 0 9px;height:9px;border:1px solid #555;border-radius:2px;margin-top:2px;display:inline-block}
+  table{width:100%;border-collapse:collapse;table-layout:fixed}
   thead{display:table-header-group}
-  th{background:#1E3A5F;color:#fff;font-size:8pt;font-weight:700;text-transform:uppercase;
-    letter-spacing:.04em;padding:3px 6px;text-align:left}
-  td{padding:2.5px 6px;font-size:8.5pt;vertical-align:top;border-bottom:1px solid #E3E7EF}
-  tr,tr.grp{page-break-inside:avoid;break-inside:avoid}
+  th{background:#1E3A5F;color:#fff;font-size:6pt;font-weight:700;text-transform:uppercase;
+    letter-spacing:.3px;padding:3px 2px;text-align:center;line-height:1.25;border:1px solid #1E3A5F}
+  /* THE NINE STAGE HEADINGS RUN VERTICALLY. Fourteen columns on A4 portrait
+     leaves a stage column ~25px wide; "COMPLETE" laid horizontally in that
+     space either clips or drops below the size at which a person can read it
+     while ticking. Rotating removes the width constraint altogether — the
+     labels stay whole words at 6pt, and Description gets 42% of the sheet back
+     instead of 31%. This is what shop-floor travellers do. */
+  th.rot{padding:0;height:62px;vertical-align:bottom}
+  th.rot span{writing-mode:vertical-rl;transform:rotate(180deg);display:inline-block;
+    white-space:nowrap;padding:5px 0 7px;letter-spacing:.4px}
+  th.desc{text-align:left;padding-left:5px;font-size:6pt;letter-spacing:.3px}
+  td{border:1px solid #C9D2DE;padding:2px 3px;font-size:8pt;vertical-align:top}
   td.c{text-align:center}
-  td.b{font-weight:700}
-  td.sig{background:#FAFAFA}
-  /* 4 + 70 + 9 + 9 + 8 = 100 — the quotation's widths with the two price columns removed */
-  table.scope th:nth-child(1),table.scope td:nth-child(1){width:4%}
-  table.scope th:nth-child(2),table.scope td:nth-child(2){width:70%}
-  table.scope th:nth-child(3),table.scope td:nth-child(3){width:9%;text-align:center}
-  table.scope th:nth-child(4),table.scope td:nth-child(4){width:9%;text-align:center}
-  table.scope th:nth-child(5),table.scope td:nth-child(5){width:8%;text-align:center}
-  tr.grp td{background:#D6E4F0;color:#1E3A5F;font-weight:700;font-size:7.5pt;
-    text-transform:uppercase;letter-spacing:.5px;padding:2.5px 6px}
-  tr.ahead td{color:#777}
-  tr.blank td{height:20px}
-  .nm{font-weight:700}
-  .sub{font-size:7.5pt;color:#555;margin-top:1px;line-height:1.35}
-  .sub.note-em{color:#1E3A5F;font-style:italic}
-  .dl{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:0 0 8px}
-  .dl .d{border:1px solid #D6DAE3;border-radius:6px;padding:6px 8px;text-align:center}
-  .dl .d .l{font-size:7pt;text-transform:uppercase;letter-spacing:.5px;color:#1E3A5F;font-weight:800}
-  .dl .d .v{font-size:10.5pt;font-weight:800;margin-top:2px}
-  .dl .d.late .v{color:#B03024}
-  .dl .d.soon .v{color:#B36B00}
-  .stars{letter-spacing:1px;color:#1E3A5F}
-  .note{font-size:8pt;color:#444;margin:3px 0 6px;line-height:1.5}
+  td.n{font-weight:700;font-size:8.5pt}
+  td.qty{font-size:7.5pt;white-space:nowrap}
+  td.tick{text-align:center;font-size:11pt;font-weight:700;color:#1E7A3C;line-height:1}
+  td.wr{background:#FAFBFC;font-size:6.5pt;text-align:center;white-space:nowrap}
+  tr.it{page-break-inside:avoid;break-inside:avoid}
+  tr.grp td{background:#D6E4F0;color:#1E3A5F;font-weight:800;font-size:6.5pt;
+    text-transform:uppercase;letter-spacing:.6px;padding:2.5px 5px;text-align:left}
+  .nm{font-weight:700;font-size:8.2pt;line-height:1.25}
+  .dims{font-weight:400;color:#333}
+  .spec{font-size:7pt;color:#444;line-height:1.3;margin-top:1px}
+  .la{font-size:7pt;color:#1E3A5F;font-style:italic;line-height:1.3;margin-top:1px}
+  ol.ln{margin:2px 0 0 11px;padding:0;font-size:6.5pt;color:#999}
+  ol.ln li{height:9px;border-bottom:1px solid #DDE3EC;margin-bottom:1px}
+  .legend{font-size:6.5pt;color:#555;line-height:1.45;margin-top:4px}
+  .legend b{color:#1E3A5F}
+  .cont{page-break-before:always;break-before:page}
+  .conthead{display:flex;justify-content:space-between;align-items:flex-end;
+    border-bottom:2.5px solid #1E3A5F;padding-bottom:5px;margin-bottom:9px}
+  .conthead .a{font-size:13pt;font-weight:900;color:#1E3A5F;letter-spacing:.4px}
+  .conthead .b{font-size:8pt;color:#555;margin-top:2px}
+  .conthead .c2{text-align:right;font-size:8pt;color:#555}
+  .conthead .c2 b{display:block;font-size:10pt;color:#1E3A5F}
+  table.punch td{height:19px;background:#FAFBFC}
+  ol.std{margin:0 0 8px 15px;padding:0}
+  ol.std li{font-size:7.5pt;color:#333;line-height:1.5;margin-bottom:2px}
+  .sigs{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:16px}
+  .sig{text-align:center}
+  .sig .line{border-top:1px solid #000;margin-top:30px}
+  .sig .who{font-size:7pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#1E3A5F;margin-top:4px}
+  .sig .sub{font-size:6.5pt;color:#666;margin-top:1px}
+  .sig .nm2{font-size:8pt;font-weight:700;margin-top:2px}
+  .warn{border:1px solid #E0B4AE;background:#FDF3F2;border-radius:5px;padding:5px 8px;
+    color:#7A2018;font-size:7.5pt;line-height:1.5;margin:4px 0 8px}
+  .warn b{color:#B03024}
+  .note{font-size:7.5pt;color:#444;margin:3px 0 6px;line-height:1.5}
   .note b{color:#1E3A5F}
-  .note.warn{border:1px solid #E0B4AE;background:#FDF3F2;border-radius:5px;padding:6px 9px;color:#7A2018}
-  .note.warn b{color:#B03024}
   @media print{ .page{padding:0;width:auto;min-height:0} }
 ${_lh ? _lh.printCSS : ''}`;
 
-  const dueCls = daysLeft == null ? '' : daysLeft < 0 ? ' late' : daysLeft <= 7 ? ' soon' : '';
-  // The quotation's own running order — letterhead, bill-to strip, subject,
-  // the line-item table, then the short sections and the signature block. The
-  // only sections that differ are the ones that WERE the money: the totals box,
-  // the payment schedule and the per-section subtotals are gone, and the
-  // deadlines + stage schedule the floor actually needs stand where the
-  // quotation puts its timeline and terms.
   const bodyHtml = `
-  ${_lh ? _lh.headerHTML : `<div style="font-size:20px;font-weight:900">JOB ORDER ${e(jo)}</div>`}
-  <div class="bill-strip">
-    <div><span class="bl">Job for:</span> <b>${e(p.clientName || p.name || '—')}</b></div>
-    <div><span class="bl">Project:</span> ${e(p.name || p.projectNo || '—')}</div>
-    <div><span class="bl">Quotation:</span> ${e(p.quoteNumber || '—')}${p.projectNo ? ` &nbsp;·&nbsp; <span class="bl">Project no:</span> ${e(p.projectNo)}` : ''}${jobOrders.length ? ` &nbsp;·&nbsp; <span class="bl">Work order:</span> ${e(jobOrders.map(o => o.orderNo || '—').join(', '))}` : ''}</div>
+  ${_lh ? _lh.headerHTML : `<div style="font-size:20px;font-weight:900">JOB ORDER ${e(d.no)}</div>`}
+  <div class="meta">
+    <div class="mb"><div class="l">Client / Project</div><div class="v">${e(clientLine || '—')}${d.projectType ? `<small>Project Type: ${e(d.projectType)}</small>` : ''}</div></div>
+    <div class="mb"><div class="l">Delivery &amp; Installation Site</div><div class="v">${d.siteAddress ? e(d.siteAddress).replace(/\n/g, '<br>') : '<span style="font-weight:400;color:#888">—</span>'}</div></div>
   </div>
-  <div class="subject"><b>Scope:</b> Fabrication, finishing and delivery of the items scheduled below, per quotation ${e(p.quoteNumber || '—')}. <b>This is a production instruction — it carries no prices and is not a quotation.</b></div>
+  <div class="meta5">
+    <div class="mb"><div class="l">Production Start</div><div class="v">${e(joLongDate(d.startDate)) || '—'}</div></div>
+    <div class="mb"><div class="l">Delivery Date</div><div class="v">${e(joLongDate(d.deliveryDate)) || '—'}</div></div>
+    <div class="mb"><div class="l">Target Completion</div><div class="v">${e(joLongDate(d.targetDate)) || '—'}</div></div>
+    <div class="mb"><div class="l">Scope</div><div class="v">${e(d.scopeText)}</div></div>
+    <div class="mb"><div class="l">Total Units</div><div class="v">${d.items.length} item${d.items.length===1?'':'s'} · ${units} unit${units===1?'':'s'}</div></div>
+  </div>
+  ${scopeEdited ? `<div class="warn"><b>Scope edited for production.</b> This sheet no longer matches quotation <b>${e(p.quoteNumber || '—')}</b> line for line — it was revised for the floor${d.updatedByName ? ' by ' + e(d.updatedByName) : ''}${d.updatedAt ? ' on ' + e(String(d.updatedAt).slice(0,10)) : ''}. The quotation and the contract value are unchanged; anything here that adds cost must be priced by Sales before it is billed.</div>` : ''}
 
-  <div class="sec">
-    <div class="sec-title">Deadlines</div>
-    <div class="dl">
-      <div class="d"><div class="l">Issued</div><div class="v">${e(todayISO)}</div></div>
-      <div class="d"><div class="l">Floor start</div><div class="v">${e(startISO)}</div></div>
-      <div class="d${dueCls}"><div class="l">Target completion</div><div class="v">${targetISO ? e(targetISO) : '—'}</div></div>
-      <div class="d${dueCls}"><div class="l">Days remaining</div><div class="v">${daysLeft == null ? '—' : (daysLeft < 0 ? Math.abs(daysLeft) + ' overdue' : daysLeft)}</div></div>
+  <h4 class="sec">Pre-fabrication requirements — complete before cutting</h4>
+  ${checkList(d.preFab)}
+
+  <h4 class="sec">Production checklist — tick each stage as completed</h4>
+  <table>
+    <colgroup><col style="width:3.5%"><col style="width:42%"><col style="width:6%">
+      ${JO_STAGE_COLS.map(() => '<col style="width:3.6%">').join('')}
+      <col style="width:8%"><col style="width:8%"></colgroup>
+    <thead><tr>
+      <th>#</th><th class="desc">Item / Specification &amp; Notes</th><th>Qty</th>
+      ${JO_STAGE_COLS.map(c => `<th class="rot"><span>${e(c.l1)}${c.l2 ? ' ' + e(c.l2) : ''}</span></th>`).join('')}
+      <th>Initials</th><th>Date</th>
+    </tr></thead>
+    <tbody>${itemRows.join('')}</tbody>
+  </table>
+  <div class="legend"><b>Parts Complete → Layout Check → Cut.</b> Parts Complete: all sheets, burners, faucets, footings &amp; hardware on hand · Layout Check: marking verified vs. approved drawing &amp; site measurements · Assy: posts, footings, fittings · QC: inspection sign-off · Pack: wrapped &amp; labelled. Use lines 1–3 for item notes.</div>
+
+  <div class="cont">
+    <div class="conthead">
+      <div><div class="a">${e((co.label || 'Barro Kitchens').toUpperCase())}</div>
+        <div class="b">Job Order ${e(d.no)}${clientLine ? ' — ' + e(clientLine) : ''}</div></div>
+      <div class="c2"><b>Continued</b>QC · Delivery · Installation &amp; Turnover</div>
     </div>
-    <div class="note"><b>Priority:</b> <span class="stars">${e(window.priorityStarsText(p.priority) || '☆☆☆☆')}</span> ${e(window.priorityLabel(p.priority) || 'Not set')} &nbsp;·&nbsp; <b>Current stage:</b> ${e(jobOrders.length ? prodStage(jobOrders[0].stage).label : jobStage(p.stage).label)}</div>
-  </div>
+    <h4 class="sec">Quality control — before crating</h4>
+    ${checkList(d.qcChecks)}
+    <h4 class="sec">Delivery${d.deliveryDate ? ' — arrive ' + e(joLongDate(d.deliveryDate)) : ''}</h4>
+    ${checkList(d.deliveryChecks)}
+    <h4 class="sec">Installation &amp; turnover${d.targetDate ? ' — by ' + e(joLongDate(d.targetDate)) : ''}</h4>
+    ${checkList(d.installChecks)}
 
-  <div class="sec" style="page-break-inside:auto;break-inside:auto">
-    <div class="sec-title">Scope of work</div>
-    <table class="scope">
-      <thead><tr>
-        <th>#</th><th>Description</th><th style="text-align:center">Qty</th>
-        <th style="text-align:center">Unit</th><th style="text-align:center">Lead Time</th>
-      </tr></thead>
-      <tbody>${itemsHtml}${blanks}</tbody>
+    <h4 class="sec">Punch list / site notes</h4>
+    <table class="punch">
+      <colgroup><col style="width:5%"><col style="width:45%"><col style="width:18%"><col style="width:17%"><col style="width:15%"></colgroup>
+      <thead><tr><th>#</th><th class="desc">Item / Issue</th><th>Action By</th><th>Target Date</th><th>Cleared</th></tr></thead>
+      <tbody>${[1,2,3,4,5].map(k => `<tr><td class="c n">${k}</td><td></td><td></td><td></td><td></td></tr>`).join('')}</tbody>
     </table>
-    ${scopeEdited
-      ? `<div class="note warn"><b>Scope edited for production.</b> This sheet no longer matches quotation <b>${e(p.quoteNumber || '—')}</b> line for line — it was revised for the floor on ${e(String(ed.updatedAt||'').slice(0,10))}${ed.updatedByName?' by '+e(ed.updatedByName):''}. The quotation and the contract value are unchanged; anything here that adds cost must be priced by Sales before it is billed.</div>`
-      : `<div class="note">Quantities and specifications are taken from quotation <b>${e(p.quoteNumber || '—')}</b>. Any change on the floor must be written above and initialled — do not vary the specification without Production Planning.</div>`}
-  </div>
 
-  <div class="sec">
-    <div class="sec-title">Production schedule</div>
-    <table>
-      <thead><tr>
-        <th>Stage</th><th style="width:13%;text-align:center">Planned</th><th style="width:22%">Assigned to</th>
-        <th style="width:13%;text-align:center">Started</th><th style="width:13%;text-align:center">Actual finish</th><th style="width:11%;text-align:center">Signed</th>
-      </tr></thead>
-      <tbody>${stageRows}</tbody>
-    </table>
-    <div class="note">${anyPlanned
-        ? (Object.keys(ed.stageDates || {}).length
-            ? `<b>Planned</b> dates were set by Production Planning${autoPlan.length?' (undated stages fall back to an even spread of the '+e(startISO)+' → '+e(targetISO)+' window)':''}. Record the real dates in Actual finish and sign each stage off.`
-            : `<b>Planned</b> dates are an even spread of the ${e(startISO)} → ${e(targetISO)} window across the ${PROD_STAGES.length} shop-floor stages — a planning guide, not a per-stage commitment. Record the real dates in Actual finish and sign each stage off.`)
-        : `No target completion date or stage dates have been set on this job, so the Planned column is blank — fill it in on the floor, and ask Production Planning to date the schedule in the system.`}</div>
-  </div>
+    <h4 class="sec">Standing instructions</h4>
+    <ol class="std">${d.standing.map(t => `<li>${e(t)}</li>`).join('')}</ol>
+    ${d.instructions ? `<div class="note"><b>Instructions for this job:</b> ${e(d.instructions)}</div>` : ''}
+    ${p.notes ? `<div class="note"><b>Notes from Sales / Design:</b> ${e(p.notes)}</div>` : ''}
 
-  ${(ed.instructions || p.notes) ? `<div class="sec">
-    <div class="sec-title">Instructions</div>
-    ${ed.instructions ? `<div class="note"><b>Production Planning:</b> ${e(ed.instructions)}</div>` : ''}
-    ${p.notes ? `<div class="note"><b>Sales / Design:</b> ${e(p.notes)}</div>` : ''}
-  </div>` : ''}
+    <div class="sigs">
+      ${[['Prepared by', userProfile?.displayName || ''], ['Production in-charge', ''], ['QC inspected by', ''], ['Approved by', '']]
+        .map(([who, nm]) => `<div class="sig"><div class="line"></div><div class="who">${e(who)}</div>${nm ? `<div class="nm2">${e(nm)}</div>` : ''}<div class="sub">Signature over printed name</div><div class="sub">Date: ______________</div></div>`).join('')}
+    </div>
+  </div>
   ${_lh ? _lh.footerHTML : ''}`;
 
   window.openPrintableDoc({
-    title: `Job Order — ${jo}`,
-    barLabel: `${emojiIcon('🧾',16)} Job Order — ${e(jo)}`,
+    title: `Job Order — ${d.no}`,
+    barLabel: `${emojiIcon('🧾',16)} Job Order — ${e(d.no)}`,
     bodyHtml, pageCss,
-    winFeatures: 'width=900,height=760',
+    winFeatures: 'width=980,height=780',
   });
 }
 window.printJobOrder = printJobOrder;
@@ -1157,12 +1355,14 @@ async function renderProdJobOrders(el, currentUser, currentRole){
             <span style="color:var(--text-muted)">${emojiIcon('📦',16)} ${(Array.isArray(p.items)?p.items.length:0)} item(s)</span>
             ${jobOrders.length?`<span style="color:var(--text-muted)">${emojiIcon('🏭',16)} ${escHtml(jobOrders.map(o=>o.orderNo||'WO').join(', '))}</span>`:`<span class="badge badge-orange" style="font-size:9px">no work order yet</span>`}
             ${ed.revision?`<span class="badge badge-blue" style="font-size:9px" title="Edited by Production Planning">${emojiIcon('✏️',9)} rev. ${escHtml(String(ed.revision))}</span>`:''}
+            ${(()=>{ const t=joTickedCount(joDoc(p)); return t.total?`<span style="color:var(--text-muted)" title="${t.done} of ${t.total} item-stages ticked">${emojiIcon('✅',16)} ${t.pct}%</span>`:''; })()}
             ${joScopeEdited(p)?`<span class="badge badge-orange" style="font-size:9px" title="The job order scope differs from the quotation">scope changed</span>`:''}
           </div>
           <div style="margin-top:5px">${window.priorityStarPicker({value:p.priority, coll:'job_projects', id:p.id, editable:canEdit})}</div>
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
           <button class="btn-primary btn-sm jo-print" data-id="${p.id}" style="white-space:nowrap">${emojiIcon('🖨',16)} Job Order</button>
+          <button class="btn-secondary btn-sm jo-prog" data-id="${p.id}" style="white-space:nowrap">${emojiIcon('✅',16)} Progress</button>
           ${canEdit?`<button class="btn-secondary btn-sm jo-edit" data-id="${p.id}" style="white-space:nowrap">${emojiIcon('✏️',16)} Edit</button>`:''}
         </div>
       </div>
@@ -1191,6 +1391,10 @@ async function renderProdJobOrders(el, currentUser, currentRole){
   el.querySelectorAll('.jo-edit').forEach(b=>b.addEventListener('click', ()=>{
     const p = projects.find(x=>x.id===b.dataset.id);
     if (p) openJobOrderEditor(p, ()=>renderProdJobOrders(el, currentUser, currentRole));
+  }));
+  el.querySelectorAll('.jo-prog').forEach(b=>b.addEventListener('click', ()=>{
+    const p = projects.find(x=>x.id===b.dataset.id);
+    if (p) openJobOrderProgress(p, ()=>renderProdJobOrders(el, currentUser, currentRole));
   }));
   window.bindPriorityStars(el);
 }
@@ -2148,7 +2352,7 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
     ${window.sopPanel('How Production works', [
       'Orders is the shop-floor pipeline: '+PROD_STAGES.map(s=>s.label).join(' → ')+'.',
       `Job Orders prints the sheet the floor works from — scope, deadlines and stage schedule, ${emojiIcon('🚫',16)} never prices. Tap the stars there to set a job's priority.`,
-      `${emojiIcon('✏️',16)} Edit on a Job Order changes the BUILD instruction — scope, deadlines, stage dates, floor notes. It never re-prices the quotation, and the sheet prints a warning when the scope no longer matches it.`,
+      `${emojiIcon('✏️',16)} Edit on a Job Order is the sheet itself — header, dates, site, scope and the four checklists. ${emojiIcon('✅',16)} Progress ticks the nine shop-floor stages per item, and those ticks print on the next copy. Neither re-prices the quotation; the sheet warns when the scope no longer matches it.`,
       `Quality Checking requires a passed ${emojiIcon('🔍',16)} QC checklist before an order can go Out for Delivery.`,
       `Marking Delivered requires a ${emojiIcon('🧾',16)} Delivery Receipt (received-by + date) — printable on letterhead.`,
       'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
