@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.175';
+window.APP_VERSION = '14.0.176';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -612,7 +612,11 @@ window.NAV_REGISTRY = {
   predicates: {
     isPresident:        () => typeof isPresident === 'function' && isPresident(),
     hasProductionDept:  () => (window.currentDepts||[]).includes('Production'),
-    hasProjectsDept:    () => (window.currentDepts||[]).some(d => ['Sales','Production','Finance'].includes(d)) || window.currentRole === 'finance',
+    // The project folder is the one record the whole quote→production flow
+    // shares, so every department in that flow reaches it — Design and
+    // Marketing were missing, which is why Design could only see a job from
+    // inside its own screen and Marketing could not see one at all.
+    hasProjectsDept:    () => (window.currentDepts||[]).some(d => ['Sales','Production','Finance','Design','Marketing'].includes(d)) || window.currentRole === 'finance',
     hasSalesOrdersDept: () => (window.currentDepts||[]).includes('Finance') || window.currentRole === 'finance',
     isFinanceRole:      () => window.currentRole === 'finance',
     // The Finance sidebar entry is on the SHARED admin variant, which the

@@ -1354,6 +1354,100 @@ window.renderProjectLifecycle = async function(){
 // NOTE: named openJobProjectDetail (not openProjectDetail) deliberately. The Design
 // board defines window.openProjectDetail; in this shared global script a bare
 // `openProjectDetail` would resolve to that Design modal and shadow this one.
+
+// ═══════════════════════════════════════════════════
+//  THE PROJECT FOLDER — one record every department opens
+//  Owner's flow, 2026-08-18: the folder is "accessible by sales, production,
+//  crm, marketing, and design" and carries "a dashboard, spent so far, days
+//  passed, etc, status".
+//
+//  There were TWO project records and neither did that job. job_projects is the
+//  spine — created at sales-order conversion, referenced by sales_orders,
+//  production_orders and every ledger entry's projectId — but it had no
+//  drawings and no elapsed/spend figures. `projects` (the Design folder) has
+//  the drawings, files and Drive folder, but was reachable only from inside the
+//  Design screen. Rather than migrate either into the other (a data migration
+//  on live money records, for a presentation problem), job_projects is now the
+//  folder and PULLS the design side in through the designProjectId link it
+//  already stored. Nothing moves; two screens stop disagreeing.
+// ═══════════════════════════════════════════════════
+function jobDaysElapsed(p){
+  const start = p.createdAt?.toDate ? p.createdAt.toDate() : (p.createdAt ? new Date(p.createdAt) : null);
+  if (!start || isNaN(start)) return null;
+  const today = new Date((window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)) + 'T00:00:00');
+  return Math.max(0, Math.round((today - new Date(start.toISOString().slice(0,10) + 'T00:00:00')) / 86400000));
+}
+function jobDaysToTarget(p){
+  if (!p.targetDate) return null;
+  const today = new Date((window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)) + 'T00:00:00');
+  return Math.round((new Date(p.targetDate + 'T00:00:00') - today) / 86400000);
+}
+// Actual recorded spend. Deliberately NOT `capital`: that field is the manual
+// margin estimate somebody types in Edit Profit Factors, and it only moves on a
+// material consume when the ledger post succeeded. These two are incremented by
+// Production directly, so they are right even for a user with no finance rights.
+function jobSpend(p){
+  return (Number(p.spentMaterials) || 0) + (Number(p.spentLabor) || 0);
+}
+
+// ── Design → Sales approval ──────────────────────────────────────
+// Owner's flow: Design "makes drawings, passes to sales for approval, and once
+// approved, forwards to production". The drawing status machine already has an
+// approval step, but canApproveDrawing resolves to president/manager or the
+// project's own Design Lead — an internal sign-off, with Sales having no say.
+// Rather than add a status to that machine (its transitions are enforced in
+// firestore.rules, so every change there needs a rules deploy), the Sales
+// sign-off lives on the job project as its own record and gates the ONE thing
+// it is really about: the hand-off to Production.
+function designApprovalOf(p){
+  const a = (p && p.designApproval) || {};
+  return { status: a.status || 'none', ...a };
+}
+function designApprovalBadge(p){
+  const a = designApprovalOf(p);
+  const map = {
+    none:     { cls:'badge-gray',   txt:'Not sent to Sales' },
+    pending:  { cls:'badge-orange', txt:'Awaiting Sales approval' },
+    approved: { cls:'badge-green',  txt:'Approved by Sales' },
+    changes:  { cls:'badge-red',    txt:'Changes requested by Sales' },
+  };
+  const m = map[a.status] || map.none;
+  return `<span class="badge ${m.cls}" style="font-size:9px">${escHtml(m.txt)}</span>`;
+}
+// The gate transferOrderToProduction consults. `noDrawingsNeeded` is the
+// documented escape hatch for an order that genuinely has nothing to draw.
+window.jobDesignApproved = function(p, so){
+  if (so && so.noDrawingsNeeded) return true;
+  return designApprovalOf(p).status === 'approved';
+};
+async function setDesignApproval(p, status, note){
+  const who = userProfile?.displayName || currentUser.email || '';
+  const at = new Date().toISOString();
+  const cur = designApprovalOf(p);
+  const designApproval = status === 'pending'
+    ? { status, requestedAt: at, requestedBy: currentUser.uid, requestedByName: who, notes: note || '' }
+    : { ...cur, status, decidedAt: at, decidedBy: currentUser.uid, decidedByName: who, notes: note || '' };
+  const event = status === 'pending' ? 'Drawings sent to Sales for approval'
+    : status === 'approved' ? 'Drawings approved by Sales'
+    : 'Sales requested changes to the drawings';
+  await db.collection('job_projects').doc(p.id).update({
+    designApproval,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    timeline: firebase.firestore.FieldValue.arrayUnion({ at, event: event + (note ? ' — ' + note : ''), by: who }),
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
+  p.designApproval = designApproval;
+  window.logAudit && window.logAudit('update', 'project', p.id, { designApproval: status });
+  try {
+    if (status === 'pending') await Notifs.sendToDept('Sales', { title:'🔏 Drawings need your approval',
+      body:`${p.clientName||p.name||'A job'} — Design has finished the drawings. Approve them so the job can go to Production.`,
+      icon:'🔏', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true });
+    else await Notifs.sendToDept('Design', { title: status==='approved' ? '✅ Sales approved the drawings' : '↩️ Sales requested changes',
+      body:`${p.clientName||p.name||'A job'}${note?' — '+note:''}`,
+      icon: status==='approved'?'✅':'↩️', type:'project_stage', link:'dept:Design' }, { fallbackToOwner:true });
+  } catch(_) {}
+}
+
 function openJobProjectDetail(p, opts){
   if(!p) return;
   const st=jobStage(p.stage);
@@ -1392,6 +1486,45 @@ function openJobProjectDetail(p, opts){
     ${stageUnknown?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} This project's stage ("${escHtml(p.stage||'')}") doesn't match any known lifecycle stage — data may be corrupted. An admin should fix it directly before advancing.</span></div>`:''}
     ${needsAck?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} Acknowledge receipt of this job before you can update its status.</span></div>`:''}
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
+    ${/* Dashboard — status, elapsed, deadline, spend. Spend is money, so it
+         follows the same showMoney rule as contract/AR; the day counts are
+         operational and everyone sees them. */''}
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Status</div><div class="kpi-value" style="font-size:13px;color:${st.color}">${st.icon} ${escHtml(st.label)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Days elapsed</div><div class="kpi-value">${jobDaysElapsed(p) ?? '—'}</div></div>
+      ${(()=>{ const d=jobDaysToTarget(p); const late=d!=null&&d<0&&!['delivered','completed','paid'].includes(p.stage);
+        return `<div class="kpi-card ${late?'red':(d!=null&&d<=7?'warn':'')}"><div class="kpi-label">${late?'Overdue by':'Days to target'}</div><div class="kpi-value">${d==null?'—':(late?Math.abs(d):d)}</div></div>`; })()}
+      ${showMoney?`<div class="kpi-card"><div class="kpi-label">Spent so far</div><div class="kpi-value" style="font-size:14px">₱${fmt(jobSpend(p))}</div></div>`:''}
+      ${showMoney?`<div class="kpi-card ${((p.contractAmount||0)-jobSpend(p))<0?'red':'green'}"><div class="kpi-label">Left of contract</div><div class="kpi-value" style="font-size:14px">₱${fmt((p.contractAmount||0)-jobSpend(p))}</div></div>`:''}
+    </div>
+    ${showMoney&&jobSpend(p)>0?`<div style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px">Spent = materials consumed ₱${fmt(p.spentMaterials||0)} + labor logged ₱${fmt(p.spentLabor||0)}. Recorded by Production as the work happens — not the same figure as the manual Capital estimate below.</div>`:''}
+    ${/* Design → Sales approval. Shown to everyone (it is the job's state);
+         the ACTIONS are gated to the department whose turn it is. */''}
+    <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <strong style="font-size:12px">${emojiIcon('🔏',12)} Drawings — Sales approval</strong>
+        ${designApprovalBadge(p)}
+      </div>
+      ${(()=>{ const a=designApprovalOf(p); const bits=[];
+        if(a.requestedByName) bits.push(`Sent by ${escHtml(a.requestedByName)}${a.requestedAt?' on '+escHtml(String(a.requestedAt).slice(0,10)):''}`);
+        if(a.decidedByName) bits.push(`${a.status==='approved'?'Approved':'Answered'} by ${escHtml(a.decidedByName)}${a.decidedAt?' on '+escHtml(String(a.decidedAt).slice(0,10)):''}`);
+        if(a.notes) bits.push(escHtml(a.notes));
+        return bits.length?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px">${bits.join(' · ')}</div>`:
+          `<div style="font-size:11px;color:var(--text-muted);margin-top:5px">Production cannot be handed this job until Sales approves the drawings (or the order is marked as needing none).</div>`; })()}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        ${(!isPartnerU && canEditDept('Design') && ['none','changes'].includes(designApprovalOf(p).status))?`<button class="btn-primary btn-sm" id="jpd-send-approval">${emojiIcon('🔏',16)} Send drawings to Sales</button>`:''}
+        ${(!isPartnerU && canEditDept('Sales') && designApprovalOf(p).status==='pending')?`
+          <button class="btn-success btn-sm" id="jpd-approve">${emojiIcon('✅',16)} Approve drawings</button>
+          <button class="btn-secondary btn-sm" id="jpd-changes">${emojiIcon('↩️',16)} Request changes</button>`:''}
+      </div>
+    </div></div>
+    ${/* Drawings. Production could not reach these AT ALL before — design_drawings
+         appeared nowhere on this side of the app, so the department told to build
+         from the drawings had no way to open one. Filled in async below. */''}
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📐',16)} Drawings</div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0" id="jpd-drawings">
+      <div style="padding:12px;font-size:12px;color:var(--text-muted)">Loading drawings…</div>
+    </div></div>
     ${(p.targetDate||p.priority||p.notes)?`
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
       ${p.targetDate?`<div style="margin-bottom:3px"><span style="color:var(--text-muted)">${emojiIcon('📅',16)} Target Date</span> <strong>${escHtml(p.targetDate)}</strong></div>`:''}
@@ -1478,6 +1611,64 @@ function openJobProjectDetail(p, opts){
       if (fresh.exists) openJobProjectDetail({ id:p.id, ...fresh.data() });
     } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); if (btn) btn.disabled = false; }
   });
+  // Drawings, filled after the panel is up (openPage paints on the tap frame).
+  // panelLive() guards the late landing — the user can press Back mid-flight.
+  (async () => {
+    const box = jpdPanel.querySelector('#jpd-drawings');
+    if (!box) return;
+    if (!p.designProjectId) {
+      if (panelLive(jpdPanel)) box.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--text-muted)">No design folder is linked to this job yet — it is created when Finance records the sale and sends the order to Design.</div>`;
+      return;
+    }
+    let dwgs = [];
+    try {
+      const snap = await db.collection('design_drawings').where('projectId','==',p.designProjectId).get();
+      dwgs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    } catch(ex) {
+      if (panelLive(jpdPanel)) box.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--text-muted)">Couldn't load the drawings (${escHtml(ex.message||ex.code||'')}).</div>`;
+      return;
+    }
+    if (!panelLive(jpdPanel)) return;
+    // The shop floor builds from RELEASED drawings. Showing a Production-only
+    // viewer a draft or an unapproved revision invites the wrong part getting
+    // made, so they see released only and are told when others exist.
+    const prodOnly = isProductionOnlyViewer();
+    const shown = prodOnly ? dwgs.filter(d=>d.status==='released') : dwgs;
+    const hidden = dwgs.length - shown.length;
+    box.innerHTML = shown.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Drawing</th><th>Rev</th><th>Status</th><th></th></tr></thead><tbody>
+      ${shown.map(d=>`<tr>
+        <td style="font-size:12px;font-weight:600">${escHtml(d.title||d.number||'Drawing')}</td>
+        <td style="font-size:12px">${escHtml(d.currentRev||'A')}</td>
+        <td><span class="badge ${d.status==='released'?'badge-green':d.status==='approved'?'badge-blue':d.status==='for_review'?'badge-orange':'badge-gray'}" style="font-size:9px">${escHtml((d.status||'draft').replace('_',' '))}</span></td>
+        <td style="text-align:right">${(d.driveUrl||d.fileUrl)?`<a class="btn-secondary btn-sm" href="${escHtml(d.driveUrl||d.fileUrl)}" target="_blank" rel="noopener">${emojiIcon('📄',14)} Open</a>`:'<span style="font-size:11px;color:var(--text-muted)">no file</span>'}</td>
+      </tr>`).join('')}
+      </tbody></table></div>${hidden>0?`<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">${hidden} more drawing(s) are not released yet and are not shown here — build only from released revisions.</div>`:''}`
+      : `<div style="padding:12px;font-size:12px;color:var(--text-muted)">${dwgs.length
+          ? `${dwgs.length} drawing(s) exist but none are released yet — build only from released revisions.`
+          : 'No drawings have been uploaded for this job yet.'}</div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [box] });
+  })();
+
+  const reopenJpd = async () => {
+    closeModal();
+    const fresh = await db.collection('job_projects').doc(p.id).get();
+    if (fresh.exists) openJobProjectDetail({ id:p.id, ...fresh.data() });
+  };
+  jpdPanel.querySelector('#jpd-send-approval')?.addEventListener('click', (ev)=>window.busy(ev.currentTarget, async ()=>{
+    await setDesignApproval(p, 'pending', '');
+    Notifs.success('Sent to Sales for approval.'); await reopenJpd();
+  }));
+  jpdPanel.querySelector('#jpd-approve')?.addEventListener('click', (ev)=>window.busy(ev.currentTarget, async ()=>{
+    await setDesignApproval(p, 'approved', '');
+    Notifs.success('Drawings approved — Design can now hand the job to Production.'); await reopenJpd();
+  }));
+  jpdPanel.querySelector('#jpd-changes')?.addEventListener('click', (ev)=>window.busy(ev.currentTarget, async ()=>{
+    const note = prompt('What needs to change on the drawings?', '');
+    if (note === null) return;
+    await setDesignApproval(p, 'changes', note.trim());
+    Notifs.success('Sent back to Design.'); await reopenJpd();
+  }));
+
   jpdPanel.querySelector('#proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
   jpdPanel.querySelector('#proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
   jpdPanel.querySelector('#proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
@@ -1570,6 +1761,19 @@ async function advanceProjectStage(p, nextId){
     }
     // No SO (legacy/manual project): fall through to the generic write below,
     // but still demand the handoff trio on the job doc via the shared panel.
+    // The Sales sign-off is enforced HERE TOO. Without it this branch is a hole
+    // straight through the gate: transferOrderToProduction guards the path with
+    // a sales order, and a legacy job would reach the floor with unapproved
+    // drawings simply because nobody had linked an order to it.
+    if (!window.jobDesignApproved(p, null)) {
+      const a = designApprovalOf(p);
+      Notifs.showToast(a.status === 'pending'
+        ? 'Sales has not approved the drawings yet — this job cannot go to Production until they do.'
+        : a.status === 'changes'
+          ? 'Sales asked for changes to the drawings. Resolve them and send to Sales again first.'
+          : 'Send the drawings to Sales for approval before moving this job to Production.', 'error');
+      return;
+    }
     const ok = await window.ensureProdHandoffFields({ id:null, projectId:p.id,
       targetDate:p.targetDate, priority:p.priority, notes:p.notes });
     if (!ok) return;
@@ -1948,6 +2152,7 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
       `Quality Checking requires a passed ${emojiIcon('🔍',16)} QC checklist before an order can go Out for Delivery.`,
       `Marking Delivered requires a ${emojiIcon('🧾',16)} Delivery Receipt (received-by + date) — printable on letterhead.`,
       'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
+      `${emojiIcon('👷',16)} Labor on an order logs the hours worked on its current stage — costed at the shop rate (settings, President-set) and posted to COS – Direct Labor. No rate on file means hours are still recorded, with no cost invented.`,
       'Count Form records physical counts; Tasks and Files hold the department board and documents.'
     ])}
     ${window.chipTabs(subs.map(s=>({key:s,label:s})), subtab)}
@@ -2040,6 +2245,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
             ${(()=>{ const w=(o.assignments?.[normProdStageId(o.stage)]?.workerNames)||[];
               return w.length?`<span style="color:var(--text-muted)">${emojiIcon('👷',16)} ${escHtml(w.join(', '))}</span>`
                 : (o.team?`<span style="color:var(--text-muted)">${emojiIcon('👷',16)} ${escHtml(o.team)}</span>`:''); })()}
+            ${orderLaborHours(o)?`<span style="color:var(--text-muted)" title="Labor logged on this order">${emojiIcon('👷',16)} ${orderLaborHours(o)} hrs</span>`:''}
             ${o.qc?`<span class="badge ${o.qc.result==='passed'?'badge-green':'badge-red'}" style="font-size:9px">${o.qc.result==='passed'?`${emojiIcon('✅',16)} QC`:`${emojiIcon('❌',16)} QC`}</span>`:''}
             ${o.deliveryReceipt?`<span class="badge badge-blue" style="font-size:9px">${emojiIcon('🧾',9)} ${escHtml(o.deliveryReceipt.no||'DR')}</span>`:''}
             ${window.priorityStarPicker({value:pr, coll:'production_orders', id:o.id, vocab:'prod', editable:canEdit, mirrorProject:o.projectId||'', showLabel:false})}
@@ -2048,6 +2254,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
         ${canEdit?`<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
           ${normProdStageId(o.stage)!=='delivered'?`<button class="btn-success btn-sm prod-advance" data-id="${o.id}">Advance →</button>`:''}
           ${normProdStageId(o.stage)==='qc'?`<button class="btn-secondary btn-sm prod-qc" data-id="${o.id}">${emojiIcon('🔍',16)} QC</button>`:''}
+          <button class="btn-secondary btn-sm prod-labor" data-id="${o.id}" title="Log the hours worked on this stage">${emojiIcon('👷',16)} Labor</button>
           <button class="btn-secondary btn-sm prod-edit" data-id="${o.id}">Edit</button>
         </div>`:''}
       </div>
@@ -2108,11 +2315,17 @@ async function renderProdOrders(el, currentUser, currentRole) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [el] });
 
+  el.querySelectorAll('.prod-labor').forEach(b=>b.addEventListener('click', (ev)=>{
+    ev.stopPropagation();
+    const o = orders.find(x=>x.id===b.dataset.id);
+    if (o) openLaborLogModal(o, ()=>renderProdOrders(el, currentUser, currentRole));
+  }));
   window.bindPriorityStars(el);
 
   document.getElementById('prod-csv')?.addEventListener('click', ()=>window.exportCSV('production-orders', orders, [
     {key:'orderNo',label:'Order #'},{key:'title',label:'Product'},{key:'client',label:'Client'},{key:'qty',label:'Qty'},
     {key:'stage',label:'Stage',get:o=>prodStage(o.stage).label},{key:'priority',label:'Priority'},
+    {key:'laborHours',label:'Labor hrs',get:o=>orderLaborHours(o)},{key:'laborCost',label:'Labor ₱',get:o=>orderLaborTotal(o)},
     {key:'team',label:'Workers',get:o=>{const a=o.assignments?.[normProdStageId(o.stage)];return (a?.workerNames?.length)?a.workerNames.join('; '):(o.team||'');}},
     {key:'qc',label:'QC',get:o=>o.qc?o.qc.result:''},{key:'dr',label:'DR #',get:o=>o.deliveryReceipt?.no||''},
     {key:'dueDate',label:'Due'},{key:'quoteRef',label:'Quote Ref'}]));
@@ -2288,9 +2501,226 @@ async function consumeProductionMaterials(order) {
       cosPosted = true;
     } catch (ledErr) { console.warn('[production COS] ledger post skipped (needs finance rights):', ledErr?.message || ledErr); }
   }
-  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('inventory_items'); dbCacheInvalidate('projects-unified'); }
+  // Job spend, rolled up OUTSIDE the ledger try above. `capital` only moves when
+  // the ledger post succeeds, and that post is refused for a Production-only
+  // user (no finance rights) — which is precisely the person who consumes
+  // materials. Their job would show ₱0 spent forever. job_projects allows a
+  // non-partner this write because `spentMaterials` is not one of the money
+  // keys the rule guards, and consumption is already one-shot (materialsConsumed),
+  // so the increment cannot run twice.
+  if (order.projectId && cos > 0) {
+    try {
+      await db.collection('job_projects').doc(order.projectId).update({
+        spentMaterials: firebase.firestore.FieldValue.increment(cos),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch(_) {}
+  }
+  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('inventory_items'); dbCacheInvalidate('projects-unified'); dbCacheInvalidate('job_projects'); }
   return { ok: true, cos, count: mats.length, cosPosted };
 }
+
+
+// ═══════════════════════════════════════════════════
+//  LABOR COSTING — hours on the floor → COS – Direct Labor
+//  Closes the half of job costing that was manual: materials already posted
+//  COS – Direct Material on consumption, but assignments were only ever stored
+//  as NAMES, so the labor side of `capital` was a number somebody typed into
+//  Edit Profit Factors from memory.
+//
+//  WHY A SHOP RATE AND NOT EACH WORKER'S PAY. The payroll collection is
+//  isMoneyAdmin() in firestore.rules — a Production-dept user cannot read it,
+//  and fetchUsersWithPayroll's catch turns that denial into an EMPTY map, so
+//  costing off individual salaries would silently produce ₱0 for exactly the
+//  people who do the logging. A shop rate in settings/laborRates is readable by
+//  all non-partner staff, president-writable, and exposes nobody's salary.
+//
+//  NEVER INVENTED. With no rate on file, hours are still recorded (they are the
+//  shop-floor fact and are worth having) but the cost is left blank and the
+//  screen says the rate is unset — the same rule the payroll work follows about
+//  rates nobody has confirmed.
+// ═══════════════════════════════════════════════════
+window.getLaborRates = async function(){
+  return await dbCachedGet('labor-rates', async () => {
+    const d = await db.collection('settings').doc('laborRates').get();
+    return d.exists ? (d.data() || {}) : {};
+  }, 120000).catch(() => ({}));
+};
+// Per-stage override, else the shop default, else null = "not set".
+function laborRateFor(stageId, rates){
+  const r = rates || {};
+  const byStage = r.byStage || {};
+  const v = Number(byStage[stageId]);
+  if (v > 0) return v;
+  const d = Number(r.defaultHourly);
+  return d > 0 ? d : null;
+}
+function orderLaborTotal(o){
+  return (o.laborLogs || []).reduce((s, l) => s + (Number(l.cost) || 0), 0);
+}
+function orderLaborHours(o){
+  return (o.laborLogs || []).reduce((s, l) => s + (Number(l.hours) || 0), 0);
+}
+
+// Log hours for the workers assigned to one stage. Appends to the order's
+// laborLogs, rolls the money onto the job project's spend, and posts
+// COS – Direct Labor. The ledger leg is BEST-EFFORT and idempotent by ref, the
+// same shape consumeProductionMaterials uses: a Production-only user has no
+// finance rights, and losing their hours because the ledger refused the debit
+// would be the worse failure.
+async function openLaborLogModal(order, onSaved){
+  const canEdit = canEditDept('Production') && (window.currentRole !== 'secretary');
+  const stageId = normProdStageId(order.stage);
+  const st = prodStage(stageId);
+  const panel = openPage(`${emojiIcon('👷',16)} Log Labor — ${escHtml(order.orderNo || order.title || '')}`, window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="lab-save" disabled>Save hours</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const body = panel.querySelector('.page-panel-body');
+  const rates = await window.getLaborRates();
+  if (!panelLive(panel)) return;
+  const rate = laborRateFor(stageId, rates);
+  const isPres = (typeof isRealPresident === 'function' && isRealPresident());
+  const assigned = ((order.assignments || {})[stageId] || {}).workerNames || (order.team ? [order.team] : []);
+  const prior = (order.laborLogs || []).filter(l => l.stage === stageId);
+
+  body.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+      Hours worked on <b>${st.icon} ${escHtml(st.label)}</b> for this order. Costed at the shop rate and posted to
+      <b>COS – Direct Labor</b>, then added to the job's spend.
+    </div>
+    ${rate
+      ? `<div class="alert-banner" style="margin-bottom:10px"><span>${emojiIcon('💵',16)} Shop rate <b>₱${fmt(rate)}/hour</b>${(rates.byStage||{})[stageId]?' (set for this stage)':''}.</span></div>`
+      : `<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} No shop labor rate is set, so hours will be recorded without a cost and nothing is posted to the ledger.${isPres?' Set one below.':' Ask the President to set one.'}</span></div>`}
+    ${isPres ? `<div class="card" style="margin-bottom:10px"><div class="card-body">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">SHOP LABOR RATE (PRESIDENT ONLY)</div>
+      <div class="form-row">
+        <div class="form-group"><label>Default ₱ per hour</label><input id="lab-rate-def" type="number" min="0" step="0.01" inputmode="decimal" value="${escHtml(String(rates.defaultHourly||''))}" placeholder="e.g. 95"/></div>
+        <div class="form-group"><label>${escHtml(st.label)} ₱ per hour (optional)</label><input id="lab-rate-stage" type="number" min="0" step="0.01" inputmode="decimal" value="${escHtml(String((rates.byStage||{})[stageId]||''))}" placeholder="uses the default"/></div>
+      </div>
+      <button type="button" class="btn-secondary btn-sm" id="lab-rate-save">Save rate</button>
+    </div></div>` : ''}
+    <div class="card" style="margin-bottom:10px"><div class="card-body">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px">HOURS</div>
+      <div id="lab-rows">${
+        (assigned.length ? assigned : ['']).map((n, i) => `
+        <div class="form-row lab-row" data-i="${i}">
+          <div class="form-group"><label>Worker</label><input class="lab-name" value="${escHtml(n)}" placeholder="Name"/></div>
+          <div class="form-group" style="flex:0 0 110px"><label>Hours</label><input class="lab-hours" type="number" min="0" step="0.5" inputmode="decimal" placeholder="0"/></div>
+          <div class="form-group" style="flex:0 0 120px"><label>Cost</label><input class="lab-cost" value="—" disabled/></div>
+        </div>`).join('')}</div>
+      <button type="button" class="btn-secondary btn-sm" id="lab-add">＋ Worker</button>
+      <div style="margin-top:10px;font-size:13px;font-weight:700">Total: <span id="lab-total">0 hrs${rate?' · ₱0':''}</span></div>
+    </div></div>
+    <div class="form-group"><label>Note (optional)</label><input id="lab-note" placeholder="Overtime, rework, subcontracted…"/></div>
+    ${prior.length ? `<div class="card" style="margin-top:10px"><div class="card-body">
+      <div style="font-size:11px;font-weight:800;letter-spacing:.5px;color:var(--text-muted);margin-bottom:6px">ALREADY LOGGED ON THIS STAGE</div>
+      ${prior.map(l => `<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)">${escHtml(l.workerName||'—')} · ${Number(l.hours)||0} hrs${l.cost?` · ₱${fmt(l.cost)}`:''} <span style="color:var(--text-muted)">${escHtml(String(l.at||'').slice(0,10))}</span></div>`).join('')}
+    </div></div>` : ''}
+    <div id="lab-err" class="error-msg hidden" style="margin-top:8px"></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [body] });
+  const $ = s => panel.querySelector(s), $$ = s => Array.from(panel.querySelectorAll(s));
+
+  const recompute = () => {
+    let hrs = 0, cost = 0;
+    $$('.lab-row').forEach(r => {
+      const h = Number(r.querySelector('.lab-hours').value) || 0;
+      hrs += h;
+      const c = rate ? h * rate : null;
+      if (c != null) cost += c;
+      r.querySelector('.lab-cost').value = c == null ? '—' : '₱' + fmt(c);
+    });
+    $('#lab-total').textContent = `${hrs} hrs` + (rate ? ` · ₱${fmt(cost)}` : '');
+  };
+  const bindRows = () => $$('.lab-hours').forEach(i => { i.oninput = recompute; });
+  bindRows();
+  $('#lab-add').addEventListener('click', () => {
+    const d = document.createElement('div');
+    d.className = 'form-row lab-row';
+    d.innerHTML = `<div class="form-group"><label>Worker</label><input class="lab-name" placeholder="Name"/></div>
+      <div class="form-group" style="flex:0 0 110px"><label>Hours</label><input class="lab-hours" type="number" min="0" step="0.5" inputmode="decimal" placeholder="0"/></div>
+      <div class="form-group" style="flex:0 0 120px"><label>Cost</label><input class="lab-cost" value="—" disabled/></div>`;
+    $('#lab-rows').appendChild(d); bindRows(); recompute();
+  });
+  $('#lab-rate-save')?.addEventListener('click', async (ev) => {
+    const def = Number($('#lab-rate-def').value) || 0;
+    const stg = Number($('#lab-rate-stage').value) || 0;
+    const btn = ev.currentTarget; btn.disabled = true;
+    try {
+      const patch = { defaultHourly: def, updatedAt: new Date().toISOString(),
+        updatedBy: userProfile?.displayName || currentUser.email || '' };
+      patch['byStage.' + stageId] = stg > 0 ? stg : firebase.firestore.FieldValue.delete();
+      await db.collection('settings').doc('laborRates').set({ defaultHourly: def }, { merge: true });
+      await db.collection('settings').doc('laborRates').update(patch);
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('labor-rates');
+      Notifs.success('Shop labor rate saved — reopen this window to cost at the new rate.');
+    } catch (ex) { Notifs.showToast('Could not save the rate: ' + (ex.message || ex.code), 'error'); }
+    btn.disabled = false;
+  });
+
+  const saveBtn = $('#lab-save');
+  saveBtn.disabled = !canEdit;
+  saveBtn.addEventListener('click', async () => {
+    const err = $('#lab-err');
+    const who = userProfile?.displayName || currentUser.email || '';
+    const note = $('#lab-note').value.trim();
+    const rows = $$('.lab-row').map(r => ({
+      workerName: r.querySelector('.lab-name').value.trim(),
+      hours: Number(r.querySelector('.lab-hours').value) || 0,
+    })).filter(r => r.hours > 0);
+    if (!rows.length) { err.textContent = 'Enter hours for at least one worker.'; err.classList.remove('hidden'); return; }
+    saveBtn.disabled = true;
+    const at = new Date().toISOString();
+    // Sequence number makes the ledger ref deterministic AND unique per batch,
+    // so a re-log of the same stage tomorrow posts its own debit instead of
+    // being swallowed by Ledger.post's dedupe as "already posted".
+    const seq = (order.laborLogs || []).length + 1;
+    const logs = rows.map(r => ({ ...r, stage: stageId, rate: rate || 0,
+      cost: rate ? r.hours * rate : 0, at, by: currentUser.uid, byName: who, note, batch: seq }));
+    const batchCost = logs.reduce((s, l) => s + l.cost, 0);
+    const batchHours = logs.reduce((s, l) => s + l.hours, 0);
+    try {
+      await db.collection('production_orders').doc(order.id).update({
+        laborLogs: firebase.firestore.FieldValue.arrayUnion(...logs),
+        laborCost: firebase.firestore.FieldValue.increment(batchCost),
+        laborHours: firebase.firestore.FieldValue.increment(batchHours),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders');
+      // Roll the spend onto the job OUTSIDE the ledger call — see spentMaterials
+      // in consumeProductionMaterials for why: a Production-only user's ledger
+      // post is refused, and the job's spend must still be right for them.
+      if (order.projectId && batchCost > 0) {
+        try {
+          await db.collection('job_projects').doc(order.projectId).update({
+            spentLabor: firebase.firestore.FieldValue.increment(batchCost),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            timeline: firebase.firestore.FieldValue.arrayUnion({ at,
+              event: `Labor logged — ${batchHours} hrs on ${st.label}`, by: who }),
+          });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
+        } catch(_) {}
+      }
+      let posted = false;
+      if (batchCost > 0) {
+        try {
+          await window.Ledger.post({
+            ref: `POLAB-${order.id}-${seq}`, date: today(), kind: 'debit',
+            accountType: 'expense', account: 'COS – Direct Labor', category: 'COS – Direct Labor',
+            description: `Direct labor — ${order.title || order.orderNo || ''}${order.client ? ` (${order.client})` : ''}`,
+            amount: batchCost, source: 'Production', projectId: order.projectId || null,
+            extra: { hours: batchHours, stage: stageId, rate: rate || 0 },
+          });
+          posted = true;
+        } catch (ledErr) { console.warn('[production labor] ledger post skipped (needs finance rights):', ledErr?.message || ledErr); }
+      }
+      window.logAudit && window.logAudit('update', 'production_order', order.id, { laborHours: batchHours, laborCost: batchCost });
+      Notifs.success(batchCost
+        ? `${batchHours} hrs logged · ₱${fmt(batchCost)}${posted ? ' posted to COS – Direct Labor.' : ' recorded (ask Finance to post it to the ledger).'}`
+        : `${batchHours} hrs logged — no shop rate set, so no cost was computed.`);
+      closeModal(); onSaved && onSaved();
+    } catch (ex) { err.textContent = 'Save failed: ' + (ex.message || ex.code); err.classList.remove('hidden'); saveBtn.disabled = false; }
+  });
+}
+window.openLaborLogModal = openLaborLogModal;
 
 async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillProjectId) {
   const e = order || {};

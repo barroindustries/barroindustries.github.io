@@ -4179,6 +4179,27 @@ window.transferOrderToDesign = async function(o){
 async function transferOrderToProduction(o){
   const ok = await ensureProdHandoffFields(o);
   if (!ok) return false;
+  // Owner's flow, 2026-08-18: Design "passes to sales for approval, and once
+  // approved, forwards to production". Until now nothing checked that — the
+  // released-drawings prompt in the Design hub is a soft confirm anyone can
+  // click through, and Sales had no say at any point. This is the real gate,
+  // and it reads the job project because that is where the Sales sign-off is
+  // recorded (see setDesignApproval, js/screens/production.js). An order marked
+  // noDrawingsNeeded is the documented way past it.
+  if (o.projectId && !o.noDrawingsNeeded) {
+    try {
+      const ps = await db.collection('job_projects').doc(o.projectId).get();
+      if (ps.exists && !window.jobDesignApproved({ id:o.projectId, ...ps.data() }, o)) {
+        const a = (ps.data().designApproval || {});
+        Notifs.showToast(a.status === 'pending'
+          ? 'Sales has not approved the drawings yet — this job cannot go to Production until they do.'
+          : a.status === 'changes'
+            ? 'Sales asked for changes to the drawings. Resolve them and send to Sales again before handing this to Production.'
+            : 'Send the drawings to Sales for approval first — open the job in Projects and use "Send drawings to Sales".', 'error');
+        return false;
+      }
+    } catch(_) { /* read failed — fall through rather than strand the job */ }
+  }
   const who=userProfile?.displayName||currentUser.email;
   try{
     if(o.projectId){

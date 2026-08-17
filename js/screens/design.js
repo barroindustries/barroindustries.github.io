@@ -430,6 +430,9 @@ async function renderProjOverview(host, p, currentUser, currentRole, canBill){
         await db.collection('sales_orders').doc(so.id).update({ noDrawingsNeeded:true });
         so.noDrawingsNeeded = true;
       }
+      // Also enforces the Sales sign-off on the drawings now (see
+      // transferOrderToProduction, js/departments.js) — it toasts the reason
+      // and returns false rather than handing an unapproved job to the floor.
       const done = await window.transferOrderToProduction(so);   // enforces the targetDate/priority/notes gate
       if (!done) return;
       await db.collection('projects').doc(p.id).update({
