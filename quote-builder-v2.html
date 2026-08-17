@@ -178,6 +178,15 @@ td{padding:8px 8px;border-bottom:1px solid var(--gray-mid);font-size:13px;vertic
   letter-spacing:.5px;color:var(--mid-blue);padding:5px 8px;}
 .subtotal-row td{background:#f0f4ff;font-weight:700;font-size:12px;color:var(--dark-blue);
   text-align:right;padding:5px 8px;border-bottom:2px solid var(--mid-blue);}
+/* OPTIONS QUOTE — each option's own Subtotal→TOTAL ladder, printed directly
+   beneath that option's lines so the reader never has to hold a number in
+   their head while scrolling to a totals box at the far end of the quote.
+   Amounts sit in the Amount column, under the line amounts they add up. */
+.opt-sub-row td{background:#f7f9ff;font-weight:600;font-size:12px;color:var(--dark-blue);
+  padding:4px 8px;border-bottom:none;}
+.opt-sub-row.discount td{color:var(--red);}
+.opt-grand-row td{background:#e9f0fb;font-weight:700;font-size:13.5px;color:var(--dark-blue);
+  padding:7px 8px;border-top:1px solid var(--mid-blue);border-bottom:2px solid var(--mid-blue);}
 tr:hover td{background:#fafbff;}
 .del-btn{color:var(--red);background:none;border:none;cursor:pointer;font-size:15px;padding:2px 5px;border-radius:4px;}
 .del-btn:hover{background:#fdecea;}
@@ -638,9 +647,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   .items-table td:nth-child(2){width:46%!important;}
   /* repeat column headers on every printed page; keep rows + category groups intact */
   thead{display:table-header-group;}
-  tr,.cat-row,.subtotal-row{page-break-inside:avoid;break-inside:avoid;}
+  tr,.cat-row,.subtotal-row,.opt-sub-row,.opt-grand-row{page-break-inside:avoid;break-inside:avoid;}
   .cat-row td{padding:2.5px 6px;font-size:7.5pt;background:#D6E4F0!important;color:#1E3A5F!important;font-weight:700;}
   .subtotal-row td{padding:2.5px 6px;font-size:8pt;background:#f0f4ff!important;}
+  .opt-sub-row td{padding:2px 6px;font-size:8pt;background:#F7F9FF!important;}
+  .opt-grand-row td{padding:3.5px 6px;font-size:9.5pt;background:#E9F0FB!important;}
   /* hide editable form controls — render values as plain text in print */
   .cell-num,.cell-unit,.lead-in{border:none!important;background:transparent!important;
     padding:0!important;font-size:8.5pt!important;-webkit-appearance:none;appearance:none;text-align:inherit;}
@@ -3221,6 +3232,9 @@ function renderItems(){
   items.forEach((item,idx)=>{(catMap[item.category]=catMap[item.category]||[]).push({item,idx});});
 
   let html=''; let globalN=1;
+  // In options mode each section is a standalone offer, so its line numbering
+  // restarts at 1 — "item 7 of Option B" reads as a continuation of Option A.
+  const optOn=optionsOn();
   const catKeys=sectionKeys();
   // Section ▲▼ only appear once ordering is actually item-driven (see
   // sectionKeys) — on a legacy, database-ordered quote they would do nothing.
@@ -3228,6 +3242,7 @@ function renderItems(){
 
   catKeys.forEach((catId,secPos)=>{
     if(!catMap[catId]) return;
+    if(optOn) globalN=1;
     const secLabel=sectionLabel(catId), secIcon=sectionIcon(catId);
     const secTools=secOrderable
       ? `<span class="cat-tools no-print"><button onclick="moveSection('${catId}',-1)" title="Move section up" ${secPos===0?'disabled':''}>▲</button><button onclick="moveSection('${catId}',1)" title="Move section down" ${secPos===catKeys.length-1?'disabled':''}>▼</button></span>`
@@ -3287,7 +3302,12 @@ function renderItems(){
         </td>
       </tr>`;
     });
-    html+=`<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
+    // Options mode prints the option's WHOLE ladder here (Subtotal → discount
+    // → VAT → TOTAL) instead of a bare subtotal, so each option closes with
+    // its own price where the reader is already looking.
+    html+= optOn
+      ? optionTotalRowsHtml(computeTotals(sectionItems(catId)),`TOTAL — ${txtEsc(secLabel)}`)
+      : `<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
   });
 
   tbody.innerHTML=html;
@@ -3372,7 +3392,10 @@ function basisTotals(){
   return b?b.totals:computeTotals();
 }
 function setOptionsBasis(v){ optionsBasisKey=v; renderTotals(); }
-function onOptionsModeChange(){ renderTotals(); }
+// renderItems(), not renderTotals(): the numbering restart and each option's
+// inline totals ladder both live in the ITEMS table, so toggling the mode has
+// to repaint that table too. renderItems() ends in renderTotals().
+function onOptionsModeChange(){ renderItems(); }
 function renderOptionsBasisPicker(opts){
   const wrap=document.getElementById('optionsBasisWrap'); if(!wrap) return;
   if(!optionsOn()||!opts||opts.length<2){ wrap.style.display='none'; wrap.innerHTML=''; return; }
@@ -3384,23 +3407,41 @@ function renderOptionsBasisPicker(opts){
     <span class="pc-hint">the payment schedule below is illustrated on this option</span>`;
 }
 
-// The Subtotal→GRAND ladder, shared by the single-total and per-option paths.
-function totalsRowsHtml(t,grandLabel,grandCls){
-  let html='';
-  html+=`<tr><td>Subtotal</td><td>${formatPeso(t.subtotal)}</td></tr>`;
+// The Subtotal→GRAND ladder as DATA. Two very different tables render it —
+// the 2-column totals box and the 8-column items table (options mode prints
+// each option's ladder inline beneath its own lines) — and they must never
+// drift apart, so the row list is defined exactly once, here.
+function totalsLines(t,grandLabel){
+  const out=[];
+  out.push({label:'Subtotal', amt:formatPeso(t.subtotal)});
   // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
   // D&I. With t.volumeBreakTotal===0 (no tiers configured) this renders
   // nothing (§1.4).
-  if(t.volumeBreakTotal>0) html+=`<tr class="discount"><td>Volume Discount (qty breaks)</td><td>−${formatPeso(t.volumeBreakTotal)}</td></tr>`;
-  if(t.diAdded>0) html+=`<tr><td>Delivery &amp; Installation</td><td>${formatPeso(t.diAdded)}</td></tr>`;
+  if(t.volumeBreakTotal>0) out.push({label:'Volume Discount (qty breaks)', amt:'−'+formatPeso(t.volumeBreakTotal), cls:'discount'});
+  if(t.diAdded>0) out.push({label:'Delivery &amp; Installation', amt:formatPeso(t.diAdded)});
   const discLabel=t.discMode==='amount' ? 'Discount (flat)' : `Discount (${t.discPct}%)`;
-  if(t.discountAmt>0) html+=`<tr class="discount"><td>${discLabel}</td><td>−${formatPeso(t.discountAmt)}</td></tr>`;
+  if(t.discountAmt>0) out.push({label:discLabel, amt:'−'+formatPeso(t.discountAmt), cls:'discount'});
   // widened §3.3 — was: t.discountAmt>0||t.diAdded>0 — otherwise a
   // break-only quote prints Subtotal → VAT → Grand with an unexplained gap.
-  if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
-  if(t.showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(t.vatAmt)}</td></tr>`;
-  html+=`<tr class="${grandCls}"><td>${grandLabel}</td><td>${formatPeso(t.grand)}</td></tr>`;
-  return html;
+  if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) out.push({label:'Net Amount', amt:formatPeso(t.net)});
+  if(t.showVat) out.push({label:'VAT (12%)', amt:formatPeso(t.vatAmt)});
+  out.push({label:grandLabel, amt:formatPeso(t.grand), grand:true});
+  return out;
+}
+// 2-column totals box.
+function totalsRowsHtml(t,grandLabel,grandCls){
+  return totalsLines(t,grandLabel).map(r=>{
+    const cls=r.grand?grandCls:(r.cls||'');
+    return `<tr${cls?` class="${cls}"`:''}><td>${r.label}</td><td>${r.amt}</td></tr>`;
+  }).join('');
+}
+// 8-column items table — label right-aligned through Unit Price, amount in
+// the Amount column so it lines up under the line amounts it totals.
+function optionTotalRowsHtml(t,grandLabel){
+  return totalsLines(t,grandLabel).map(r=>{
+    const cls='opt-sub-row'+(r.grand?' opt-grand-row':'')+(r.cls?' '+r.cls:'');
+    return `<tr class="${cls}"><td colspan="5" style="text-align:right;">${r.label}</td><td style="text-align:right;">${r.amt}</td><td></td><td class="no-print"></td></tr>`;
+  }).join('');
 }
 
 function renderTotals(){
@@ -3411,13 +3452,11 @@ function renderTotals(){
   const _iq=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
   let html='';
   if(useOpts){
-    opts.forEach(o=>{
-      html+=`<tr class="opt-head"><td colspan="2">${o.icon?o.icon+' ':''}${txtEsc(o.label)}</td></tr>`;
-      // The option's name already heads the block — repeating it here reads
-      // badly once the preparer's own label carries a dash of its own.
-      html+=totalsRowsHtml(o.totals,'TOTAL FOR THIS OPTION','grand opt-total');
-    });
-    html+=`<tr class="opt-note"><td colspan="2">These are alternative options — please select ONE. The amounts above are per option and are not cumulative; no grand total applies.</td></tr>`;
+    // Deliberately NO figures here: each option's ladder is printed inside the
+    // items table under its own lines (renderItems → optionTotalRowsHtml).
+    // Repeating them in a box at the end of the quote is what made an options
+    // quote confusing to read in the first place.
+    html+=`<tr class="opt-note"><td colspan="2">These are alternative options — please select ONE. Each option is priced in full beneath its own items above; the amounts are not cumulative and no grand total applies.</td></tr>`;
   } else {
     html+=totalsRowsHtml(t,'GRAND TOTAL','grand');
   }
