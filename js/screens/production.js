@@ -1658,6 +1658,35 @@ async function setDesignApproval(p, status, note){
   } catch(_) {}
 }
 
+
+// ── The folder's Drawings / Files / Tasks ────────────────────────
+// All three live on the DESIGN project (`projects`) that job_projects links to
+// via designProjectId: drawings query design_drawings.projectId, files key off
+// the deterministic proj__<id> folder, tasks query tasks.projectId. Files and
+// Tasks are Design's own renderers, published from js/screens/design.js — one
+// implementation, so the folder cannot drift from the Design screen.
+function renderJpdDrawings(host, dwgs){
+  // The shop floor builds from RELEASED drawings. Showing a Production-only
+  // viewer a draft or an unapproved revision invites the wrong part getting
+  // made, so they see released only and are told when others exist.
+  const prodOnly = isProductionOnlyViewer();
+  const shown = prodOnly ? dwgs.filter(d => d.status === 'released') : dwgs;
+  const hidden = dwgs.length - shown.length;
+  host.innerHTML = shown.length
+    ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Drawing</th><th>Rev</th><th>Status</th><th></th></tr></thead><tbody>
+      ${shown.map(d=>`<tr>
+        <td style="font-size:12px;font-weight:600">${escHtml(d.title||d.number||'Drawing')}</td>
+        <td style="font-size:12px">${escHtml(d.currentRev||'A')}</td>
+        <td><span class="badge ${d.status==='released'?'badge-green':d.status==='approved'?'badge-blue':d.status==='for_review'?'badge-orange':'badge-gray'}" style="font-size:9px">${escHtml((d.status||'draft').replace('_',' '))}</span></td>
+        <td style="text-align:right">${(d.driveUrl||d.fileUrl)?`<a class="btn-secondary btn-sm" href="${escHtml(d.driveUrl||d.fileUrl)}" target="_blank" rel="noopener">${emojiIcon('📄',14)} Open</a>`:'<span style="font-size:11px;color:var(--text-muted)">no file</span>'}</td>
+      </tr>`).join('')}
+      </tbody></table></div>${hidden>0?`<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">${hidden} more drawing(s) are not released yet and are not shown here — build only from released revisions.</div>`:''}`
+    : `<div style="padding:12px;font-size:12px;color:var(--text-muted)">${dwgs.length
+        ? `${dwgs.length} drawing(s) exist but none are released yet — build only from released revisions.`
+        : 'No drawings have been uploaded for this job yet.'}</div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+}
+
 function openJobProjectDetail(p, opts){
   if(!p) return;
   const st=jobStage(p.stage);
@@ -1728,13 +1757,27 @@ function openJobProjectDetail(p, opts){
           <button class="btn-secondary btn-sm" id="jpd-changes">${emojiIcon('↩️',16)} Request changes</button>`:''}
       </div>
     </div></div>
-    ${/* Drawings. Production could not reach these AT ALL before — design_drawings
-         appeared nowhere on this side of the app, so the department told to build
-         from the drawings had no way to open one. Filled in async below. */''}
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📐',16)} Drawings</div>
-    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0" id="jpd-drawings">
-      <div style="padding:12px;font-size:12px;color:var(--text-muted)">Loading drawings…</div>
-    </div></div>
+    ${/* THE FOLDER. Drawings, Files and Tasks were each reachable from exactly
+         one screen — drawings and files only from inside Design, and Production
+         could not open a drawing at all despite being the department told to
+         build from them. All three now sit on the job every department opens.
+         Filled in async below. */''}
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📁',16)} Project Folder</div>
+    <div class="card" style="margin-bottom:10px" id="jpd-folder">
+      <div class="card-body" style="padding:10px 12px 0">
+        ${/* icon, NOT label: chipTabs escapes `label` and injects `icon` raw, so
+             an emojiIcon() call in `label` prints its markup as literal text on
+             the chip. This is the known emojiIcon-into-a-text-sink trap. */''}
+        ${window.chipTabs([
+          {key:'Drawings', icon:emojiIcon('📐',14), label:'Drawings'},
+          {key:'Files',    icon:emojiIcon('📁',14), label:'Files'},
+          {key:'Tasks',    icon:emojiIcon('📋',14), label:'Tasks'},
+        ], 'Drawings')}
+      </div>
+      <div class="card-body" style="padding:0 12px 12px" id="jpd-folder-body">
+        <div style="padding:12px;font-size:12px;color:var(--text-muted)">Loading…</div>
+      </div>
+    </div>
     ${(p.targetDate||p.priority||p.notes)?`
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
       ${p.targetDate?`<div style="margin-bottom:3px"><span style="color:var(--text-muted)">${emojiIcon('📅',16)} Target Date</span> <strong>${escHtml(p.targetDate)}</strong></div>`:''}
@@ -1821,42 +1864,57 @@ function openJobProjectDetail(p, opts){
       if (fresh.exists) openJobProjectDetail({ id:p.id, ...fresh.data() });
     } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); if (btn) btn.disabled = false; }
   });
-  // Drawings, filled after the panel is up (openPage paints on the tap frame).
-  // panelLive() guards the late landing — the user can press Back mid-flight.
+  // The folder, filled after the panel is up (openPage paints on the tap frame).
+  // panelLive() guards every late landing — the user can press Back mid-flight,
+  // and openPage keeps a closed panel document-connected for 300ms afterwards.
   (async () => {
-    const box = jpdPanel.querySelector('#jpd-drawings');
-    if (!box) return;
-    if (!p.designProjectId) {
-      if (panelLive(jpdPanel)) box.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--text-muted)">No design folder is linked to this job yet — it is created when Finance records the sale and sends the order to Design.</div>`;
-      return;
-    }
-    let dwgs = [];
+    const card = jpdPanel.querySelector('#jpd-folder');
+    const box  = jpdPanel.querySelector('#jpd-folder-body');
+    if (!card || !box) return;
+    const nope = (msg) => { if (panelLive(jpdPanel)) box.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--text-muted)">${msg}</div>`; };
+    let dp = null, dwgs = [], loadErr = null, loaded = false, active = 'Drawings';
+
+    const show = (key) => {
+      active = key || active;
+      if (!panelLive(jpdPanel)) return;
+      if (!p.designProjectId) return nope('No design folder is linked to this job yet — it is created when Finance records the sale and sends the order to Design.');
+      if (loadErr) return nope(`Couldn't open the design folder (${escHtml(loadErr)}).`);
+      if (!loaded) return nope('Loading…');
+      if (!dp) return nope('The design folder linked to this job no longer exists.');
+      if (active === 'Files') {
+        if (window.renderProjectFiles) window.renderProjectFiles(box, dp, currentUser, currentRole);
+        else nope('The Files view is unavailable — js/screens/design.js did not load.');
+      } else if (active === 'Tasks') {
+        if (window.renderProjectTasks) window.renderProjectTasks(box, dp, currentUser, currentRole, false);
+        else nope('The Tasks view is unavailable — js/screens/design.js did not load.');
+      } else {
+        renderJpdDrawings(box, dwgs);
+      }
+    };
+    // Bound BEFORE the read, and scoped to the CARD rather than the panel. Before:
+    // because a read that fails or is still in flight would otherwise leave three
+    // visible chips wired to nothing — the folder looked broken rather than slow.
+    // Scoped: the Production screen behind this panel has chip rows of its own,
+    // and a panel-wide bind would wire those too.
+    window.bindChipTabs(card, show);
+    show(active);
+
+    if (!p.designProjectId) return;
+    // ONE read of the design project, shared by all three tabs. Files and Tasks
+    // are Design's own renderers and expect that doc (they read .client,
+    // .clientId and .id off it), not the job project.
     try {
-      const snap = await db.collection('design_drawings').where('projectId','==',p.designProjectId).get();
-      dwgs = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const [ps, ds] = await Promise.all([
+        db.collection('projects').doc(p.designProjectId).get(),
+        db.collection('design_drawings').where('projectId','==',p.designProjectId).get().catch(()=>({docs:[]})),
+      ]);
+      if (ps.exists) dp = { id: ps.id, ...ps.data() };
+      dwgs = ds.docs.map(x=>({id:x.id,...x.data()}));
     } catch(ex) {
-      if (panelLive(jpdPanel)) box.innerHTML = `<div style="padding:12px;font-size:12px;color:var(--text-muted)">Couldn't load the drawings (${escHtml(ex.message||ex.code||'')}).</div>`;
-      return;
+      loadErr = ex.message || ex.code || '';
     }
-    if (!panelLive(jpdPanel)) return;
-    // The shop floor builds from RELEASED drawings. Showing a Production-only
-    // viewer a draft or an unapproved revision invites the wrong part getting
-    // made, so they see released only and are told when others exist.
-    const prodOnly = isProductionOnlyViewer();
-    const shown = prodOnly ? dwgs.filter(d=>d.status==='released') : dwgs;
-    const hidden = dwgs.length - shown.length;
-    box.innerHTML = shown.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Drawing</th><th>Rev</th><th>Status</th><th></th></tr></thead><tbody>
-      ${shown.map(d=>`<tr>
-        <td style="font-size:12px;font-weight:600">${escHtml(d.title||d.number||'Drawing')}</td>
-        <td style="font-size:12px">${escHtml(d.currentRev||'A')}</td>
-        <td><span class="badge ${d.status==='released'?'badge-green':d.status==='approved'?'badge-blue':d.status==='for_review'?'badge-orange':'badge-gray'}" style="font-size:9px">${escHtml((d.status||'draft').replace('_',' '))}</span></td>
-        <td style="text-align:right">${(d.driveUrl||d.fileUrl)?`<a class="btn-secondary btn-sm" href="${escHtml(d.driveUrl||d.fileUrl)}" target="_blank" rel="noopener">${emojiIcon('📄',14)} Open</a>`:'<span style="font-size:11px;color:var(--text-muted)">no file</span>'}</td>
-      </tr>`).join('')}
-      </tbody></table></div>${hidden>0?`<div style="padding:8px 12px;font-size:11px;color:var(--text-muted)">${hidden} more drawing(s) are not released yet and are not shown here — build only from released revisions.</div>`:''}`
-      : `<div style="padding:12px;font-size:12px;color:var(--text-muted)">${dwgs.length
-          ? `${dwgs.length} drawing(s) exist but none are released yet — build only from released revisions.`
-          : 'No drawings have been uploaded for this job yet.'}</div>`;
-    if (window.lucide) lucide.createIcons({ nodes: [box] });
+    loaded = true;
+    show(active);   // repaint whichever tab the user is on now that data is in
   })();
 
   const reopenJpd = async () => {

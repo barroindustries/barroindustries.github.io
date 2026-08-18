@@ -721,6 +721,17 @@ async function renderProjectTasks(host, p, currentUser, currentRole, canBill){
   host.querySelector('#proj-add-task-btn')?.addEventListener('click',()=>openAddProjectTaskModal(p, currentUser, currentRole, canBill));
 }
 
+// Published so the PROJECT FOLDER (openJobProjectDetail, js/screens/production.js)
+// renders the same Files and Tasks every department now opens, rather than a
+// second implementation of them drifting alongside this one. Both take the
+// DESIGN project doc (`projects`) — Files keys off the deterministic
+// proj__<id> folder and Tasks queries tasks.projectId — so the folder resolves
+// job_projects.designProjectId before calling them. Their own canEditDept('Design')
+// gate travels with them, so a Sales or Production viewer gets the read-only
+// view without this side having to reason about permissions.
+window.renderProjectFiles = renderProjectFiles;
+window.renderProjectTasks = renderProjectTasks;
+
 // ── Activity tab — merged project + drawing timeline ──
 async function renderProjActivity(host, p, currentUser, currentRole){
   host.innerHTML = '<div class="loading-placeholder">Loading activity…</div>';
