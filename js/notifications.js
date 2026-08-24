@@ -218,6 +218,11 @@ window.Notifs = (() => {
     att_extension:{icon:'⏱️',accent:'#0CA678'}, att_extension_approved:{icon:'✅',accent:'#0CA678'},
     att_extension_denied:{icon:'❌',accent:'#D92D20'},
     leave:{icon:'🌴',accent:'#0CA678'},
+    // Layoff (LAYOFF-SPEC)
+    layoff_placed:{icon:'🔒',accent:'#D92D20'}, layoff_lifted:{icon:'✅',accent:'#2F9E44'},
+    layoff_expense:{icon:'🧾',accent:'#E8590C'}, layoff_expense_approved:{icon:'✅',accent:'#2F9E44'},
+    layoff_expense_rejected:{icon:'❌',accent:'#D92D20'}, layoff_expense_paid:{icon:'💰',accent:'#2F9E44'},
+    layoff_file_request:{icon:'📎',accent:'#7048E8'}, layoff_file_fulfilled:{icon:'📥',accent:'#1C7ED6'},
     // Posts / memos / company
     post:{icon:'📣',accent:'#D6336C'}, post_approval:{icon:'📣',accent:'#D6336C'}, memo:{icon:'📄',accent:'#7048E8'},
     award:{icon:'🏆',accent:'#F59F00'}, nudge:{icon:'👋',accent:'#7048E8'},
@@ -313,7 +318,7 @@ window.Notifs = (() => {
     const unreadCount = (_trueUnreadCount != null && _trueUnreadCount > windowUnread) ? _trueUnreadCount : windowUnread;
     _updatePanelHint(unreadCount, items.length);
 
-    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment','chat_message']);
+    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment','chat_message','layoff_placed','layoff_lifted','layoff_expense','layoff_expense_approved','layoff_expense_rejected','layoff_expense_paid','layoff_file_request','layoff_file_fulfilled']);
     const isNavigable = n => n.taskId || n.link || n.meetingId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att') || n.type?.startsWith('meeting');
 
     // Many notifications set BOTH an icon AND a title that starts with the same

@@ -274,6 +274,12 @@ service cloud.firestore {
           && n.get('removedBy', null)    == o.get('removedBy', null)
           && n.get('reinstatedAt', null) == o.get('reinstatedAt', null)
           && n.get('reinstatedBy', null) == o.get('reinstatedBy', null)
+          // LAYOFF-SPEC — the layoff pointer map is privileged: an employee
+          // must never lift (or place!) their OWN layoff via a raw client
+          // write, and the secretary's isAdmin() branch calls this helper so
+          // freezing it here keeps that role view-only on layoffs too. HR-dept
+          // members and senior admins write it via their own branches below.
+          && n.get('layoff', null)       == o.get('layoff', null)
           // v14 re-audit ROUND 2 — see userIdentityBindingUnchanged() above.
           // Covers the OWNER and the non-senior isAdmin() (secretary) branches,
           // which are the two that call this helper.
@@ -525,6 +531,16 @@ service cloud.firestore {
         (inDept('HR') && !isOwner(uid)
           && resource.data.get('role', 'employee') != 'president'
           && onlyOffboardingFieldsChanged())
+        ||
+        // LAYOFF-SPEC — HR-dept members (any role except partner — isHrDept()
+        // excludes partners itself) plus the senior branch above may toggle
+        // ONLY the layoff pointer map on ANOTHER user's doc; never president,
+        // never self (self-lift laundering). `layoff` is ONE top-level map
+        // key, so hasOnly(['layoff']) covers place (map) and lift (null).
+        (isHrDept() && !isOwner(uid)
+          && resource.data.get('role', 'employee') != 'president'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['layoff']))
       );
       allow delete: if isAuth() && isPresident();
     }
@@ -967,6 +983,152 @@ service cloud.firestore {
           && request.resource.data.amount  == resource.data.amount)
       );
       allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Layoff (LAYOFF-SPEC 2026-08-19) ─────────────────────────────────
+    // Owner ruling: HR-department members + president/manager place and lift
+    // layoffs, no approval step. The Corporate Secretary / Accountant keep
+    // SIGHT via canHrView() (same split as leave_requests/attendance above)
+    // and never the write verb. One doc per layoff EPISODE — history is
+    // retained after lifting (status flips to 'lifted', doc is never
+    // deleted; delete is president-only cleanup).
+    // The live pointer lives on users/{uid}.layoff (frozen in
+    // userPrivilegedFieldsUnchanged; HR writes it via the hasOnly(['layoff'])
+    // branch in the users update rule).
+    match /layoffs/{docId} {
+      // Employee reads their own episode(s); HR surface reads all. The HR
+      // list queries (status=='active' / 'lifted' / uid==X) are provable via
+      // the role disjunct; the employee side never lists (the pointer carries
+      // everything) but may resolve their own doc.
+      allow read: if isAuth() && (
+        resource.data.get('uid', '') == request.auth.uid || canHrView()
+      );
+      allow create: if isAuth() && (isSeniorAdmin() || isHrDept())
+        && request.resource.data.keys().hasOnly(
+             ['uid','userName','employeeId','reason','status','effectiveDate',
+              'placedBy','placedByName','createdAt',
+              'liftedAt','liftedBy','liftedByName','liftNote'])
+        && request.resource.data.get('status', '') == 'active'
+        && request.resource.data.get('uid', '') != request.auth.uid
+        && request.resource.data.get('placedBy', '') == request.auth.uid
+        && request.resource.data.get('reason', '') != ''
+        && isBoundedString(request.resource.data.get('reason', ''), 2000)
+        && isBoundedString(request.resource.data.get('userName', ''), 200)
+        && isBoundedString(request.resource.data.get('employeeId', ''), 50)
+        && isBoundedString(request.resource.data.get('effectiveDate', ''), 20)
+        && isBoundedString(request.resource.data.get('placedByName', ''), 200);
+      // Lift / edit-reason-while-active. Status may only ever be
+      // 'active'|'lifted'; uid is immutable (an episode can't be re-pointed).
+      allow update: if isAuth() && (isSeniorAdmin() || isHrDept())
+        && request.resource.data.get('uid', '') == resource.data.get('uid', '')
+        && request.resource.data.get('status', '') in ['active', 'lifted']
+        && isBoundedString(request.resource.data.get('reason', ''), 2000)
+        // liftNote is nullable (spec §1.3). isBoundedString(null) is FALSE —
+        // reading it unguarded would deny every lift that carries no note,
+        // which is the common case. Null-tolerant, same shape as receiptUrl.
+        && (request.resource.data.get('liftNote', null) == null
+            || isBoundedString(request.resource.data.get('liftNote', ''), 1000));
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Layoff expenses — the Statement of Account lines ─────────────────
+    // Mirrors cash_advances: the employee files their OWN line as 'pending';
+    // only the layoff-write tier moves status/money. Employee may edit or
+    // withdraw a line ONLY while it is still pending; after HR has decided,
+    // the line is theirs to read, not to touch.
+    match /layoff_expenses/{docId} {
+      allow read: if isAuth() && (
+        resource.data.get('uid', '') == request.auth.uid || canHrView()
+      );
+      allow create: if isAuth() && !isPartner()
+        && request.resource.data.get('uid', '') == request.auth.uid
+        && request.resource.data.get('status', '') == 'pending'
+        && isNonNegNumber(request.resource.data.get('amount', 0))
+        && request.resource.data.get('description', '') != ''
+        && isBoundedString(request.resource.data.get('description', ''), 1000)
+        && isBoundedString(request.resource.data.get('userName', ''), 200)
+        && isBoundedString(request.resource.data.get('expenseDate', ''), 20)
+        && isBoundedString(request.resource.data.get('layoffId', ''), 128)
+        && (request.resource.data.get('receiptUrl', null) == null
+            || isBoundedString(request.resource.data.get('receiptUrl', ''), 500))
+        && (request.resource.data.get('receiptName', null) == null
+            || isBoundedString(request.resource.data.get('receiptName', ''), 300))
+        && request.resource.data.keys().hasOnly(
+             ['layoffId','uid','userName','description','amount','expenseDate',
+              'receiptUrl','receiptName','receiptKind','status',
+              'approvedAmount','hrNote','decidedAt','decidedBy','decidedByName',
+              'paidAt','paidDate','paidBy','paidByName','paidMethod',
+              'createdAt','updatedAt']);
+      allow update: if isAuth() && (
+        // HR decisions & payment. approvedAmount validated whenever present.
+        ((isSeniorAdmin() || isHrDept())
+          && request.resource.data.get('status', '') in
+               ['pending', 'approved', 'rejected', 'paid']
+          && (request.resource.data.get('approvedAmount', null) == null
+              || isNonNegNumber(request.resource.data.get('approvedAmount', 0)))
+          // hrNote is nullable (spec §1.3) and stays null whenever HR approves
+          // without typing a note — the DEFAULT case. isBoundedString(null) is
+          // FALSE, so reading it unguarded would deny the ordinary approval.
+          && (request.resource.data.get('hrNote', null) == null
+              || isBoundedString(request.resource.data.get('hrNote', ''), 1000))) ||
+        // Owner edit while (and only while) still pending — never the money
+        // decision fields, never a status change, never re-owning.
+        (resource.data.get('uid', '') == request.auth.uid
+          && resource.data.get('status', '') == 'pending'
+          && request.resource.data.get('status', '') == 'pending'
+          && request.resource.data.get('uid', '') == request.auth.uid
+          && request.resource.data.get('layoffId', '')
+               == resource.data.get('layoffId', '')
+          && isNonNegNumber(request.resource.data.get('amount', 0))
+          && isBoundedString(request.resource.data.get('description', ''), 1000)
+          // Pin the edit to the employee's OWN fields. Without this the owner
+          // could scribble approvedAmount/hrNote/paidDate/decidedByName onto a
+          // still-pending line and fabricate an HR decision trail in the UI.
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['description','amount','expenseDate','receiptUrl',
+                         'receiptName','receiptKind','updatedAt']))
+      );
+      // Owner may withdraw a still-pending line; president cleans up anything.
+      allow delete: if isAuth() && (
+        isPresident() ||
+        (resource.data.get('uid', '') == request.auth.uid
+          && resource.data.get('status', '') == 'pending')
+      );
+    }
+
+    // ── Layoff file requests — HR asks, the employee delivers ────────────
+    match /layoff_file_requests/{docId} {
+      allow read: if isAuth() && (
+        resource.data.get('uid', '') == request.auth.uid || canHrView()
+      );
+      allow create: if isAuth() && (isSeniorAdmin() || isHrDept())
+        && request.resource.data.get('status', '') == 'open'
+        && request.resource.data.get('createdBy', '') == request.auth.uid
+        && request.resource.data.get('description', '') != ''
+        && isBoundedString(request.resource.data.get('description', ''), 1000)
+        && isBoundedString(request.resource.data.get('userName', ''), 200)
+        && isBoundedString(request.resource.data.get('layoffId', ''), 128)
+        && request.resource.data.keys().hasOnly(
+             ['layoffId','uid','userName','description','dueDate','allowLink',
+              'status','createdAt','createdBy','createdByName',
+              'fulfilledAt','hubFileId','fileUrl','fileName','fileKind',
+              'updatedAt']);
+      allow update: if isAuth() && (
+        (isSeniorAdmin() || isHrDept()) ||
+        // The employee's ONE legitimate update: fulfilling the request.
+        // Locked to the fulfilment fields so the request text/ownership can
+        // never be rewritten from the receiving end.
+        (resource.data.get('uid', '') == request.auth.uid
+          && request.resource.data.get('status', '') == 'fulfilled'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['status','fulfilledAt','hubFileId','fileUrl',
+                         'fileName','fileKind','updatedAt'])
+          && (request.resource.data.get('fileUrl', null) == null
+              || isBoundedString(request.resource.data.get('fileUrl', ''), 500))
+          && (request.resource.data.get('fileName', null) == null
+              || isBoundedString(request.resource.data.get('fileName', ''), 300)))
+      );
+      allow delete: if isAuth() && (isSeniorAdmin() || isHrDept());
     }
 
     // ── Tasks ──────────────────────────────────────────

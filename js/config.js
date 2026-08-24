@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.180';
+window.APP_VERSION = '14.0.181';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -246,7 +246,7 @@ window.DEPARTMENTS = {
     key: 'HR', icon: '👥', lucideIcon: 'users', color: '#E64980',
     // renderHR's card list (departments.js:3153-3159); 'Accounts & Logins' only
     // shows for president/manager, kept in its real position for accuracy.
-    subtabs: ['People & Roles', 'Payroll', 'Accounts & Logins', 'Leave', 'Attendance', 'Budgeting'], navOrder: 3
+    subtabs: ['People & Roles', 'Payroll', 'Accounts & Logins', 'Leave', 'Attendance', 'Budgeting', 'Layoff'], navOrder: 3
   },
   'Sales': {
     key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#F76707',
@@ -501,6 +501,24 @@ window.employmentStatusMeta = function(v) {
   const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
   return window.EMPLOYMENT_STATUSES[k] || { label: 'Not set', badge: 'badge-gray', ends: false, unset: true };
 };
+
+// ── Layoff (LAYOFF-SPEC 2026-08-19) ──────────────────────────────────────
+// THE one predicate for "this signed-in user is on layoff". Reads the
+// users/{uid}.layoff pointer map that loadUserProfile() (js/app.js) merges
+// onto window.userProfile at auth time — no extra read, available before
+// buildNav()/navigateTo() run. FAIL-OPEN by design: if the profile read
+// failed, layoff reads false. Layoff lockdown is an HR-workflow affordance,
+// not the security boundary (firestore.rules is) — failing closed here would
+// lock every user out of the whole app on any transient profile-read error.
+window.isLaidOff = function () {
+  return !!(window.userProfile && window.userProfile.layoff
+            && window.userProfile.layoff.active === true);
+};
+// Pages a laid-off user may still reach (owner ruling, 2026-08-19):
+// dashboard (renders the layoff view incl. Statement of Account + uploads),
+// notifications inbox, payslips/payroll history (My Finance), chat with HR.
+// Everything else redirects to 'dashboard' in navigateTo (js/app.js).
+window.LAYOFF_ALLOWED_PAGES = ['dashboard', 'chat', 'notifications', 'personal-finance'];
 
 // ── Leave policy (WS25) ──────────────────────────
 // ‼️ PLACEHOLDER — Neil to confirm (legal floor is ONE 5-day SIL pool, not
@@ -790,6 +808,16 @@ window.NAV_REGISTRY = {
       { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory',     when:'hasProductionDept' },
       { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR',       when:'isFinanceRole' },
       { key:'sys-health',  icon:'activity',    label:'System Health',page:'system-health', when:'isFinanceRole' }
+    ],
+
+    // ── Laid-off employee (LAYOFF-SPEC). Deliberately tiny: the layoff
+    // dashboard carries the Statement of Account and uploads itself, the
+    // topbar bell reaches 'notifications'. Every page here already has a
+    // .nav-item[data-page] colour rule in css/styles.css (dashboard :1354,
+    // chat :1384, personal-finance :1380) — NO new CSS needed, and
+    // ci-invariants 6/6 stays green because no NEW page key is introduced.
+    laidOff: [
+      { key:'my-finance', icon:'wallet', label:'My Payslips', page:'personal-finance' }
     ]
   },
 
@@ -864,6 +892,14 @@ window.NAV_REGISTRY = {
       { icon:'home',           label:'Home',    page:'dashboard'   },
       { icon:'message-circle', label:'Chats',   page:'chat'        },
       { icon:'circle-user',    label:'Profile', page:'my-profile'  }
+    ],
+
+    // Bottom Nav — laid-off employee (LAYOFF-SPEC). 4 items, under the 5-tab
+    // More threshold. Profile is stripped by _primaryNavItems as everywhere.
+    laidOff: [
+      { icon:'home',           label:'Home',        page:'dashboard'        },
+      { icon:'message-circle', label:'Chats',       page:'chat'             },
+      { icon:'wallet',         label:'My Payslips', page:'personal-finance' }
     ]
   }
 };

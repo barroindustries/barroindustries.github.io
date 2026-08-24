@@ -872,6 +872,15 @@ function _dashWarnOnce(label, err) {
 }
 
 async function renderDashboard() {
+  // LAYOFF-SPEC — a laid-off user of ANY role gets the layoff view. A separate
+  // render function (js/screens/layoff.js), not a branch inside
+  // renderEmployeeDashboard: the layoff screen shares nothing with the normal
+  // dashboard (no tasks/KPI/attendance), and gutting a 200-line template with
+  // conditionals would be strictly worse than dispatching cleanly here.
+  if (window.isLaidOff && window.isLaidOff() && window.renderLayoffDashboard) {
+    await window.renderLayoffDashboard();
+    return;
+  }
   if (isPresident()) {
     await renderPresidentDashboard();
   } else if (currentRole === 'secretary') {
@@ -2916,7 +2925,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   c.innerHTML = `
     <div class="page-header">
       <h2>Personal Finance</h2>
-      <button class="btn-primary btn-sm" id="req-advance-btn">+ Cash Advance</button>
+      ${(window.isLaidOff && window.isLaidOff()) ? '' : `<button class="btn-primary btn-sm" id="req-advance-btn">+ Cash Advance</button>`}
     </div>
 
     ${isPayrollWindow && !selfDoneThisMonth ? `
@@ -3064,7 +3073,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
              row folds into My Finance; this is the entry point. cash-advances page,
              route, and renderCashAdvancePage are all unchanged (deep links/notifications
              keep working) — presentation move only. -->
-        <button class="btn-secondary" style="margin-top:8px;width:100%" id="my-cash-adv-btn">${emojiIcon('💵',16)} Cash Advances</button>
+        ${(window.isLaidOff && window.isLaidOff()) ? '' : `<button class="btn-secondary" style="margin-top:8px;width:100%" id="my-cash-adv-btn">${emojiIcon('💵',16)} Cash Advances</button>`}
       </div>
     </div>
 

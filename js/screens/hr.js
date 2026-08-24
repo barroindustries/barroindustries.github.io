@@ -454,6 +454,11 @@ window.renderHR = async function(currentUser, currentRole){
     // would get a roster whose every pay column was denied and swallowed.
     ...(canPayroll ? [{ icon:'🪪', title:'Employee Profiles', desc:'Employment date, status, job, IDs · rates, cash advance, raises & payroll history', go:()=>window.renderEmployeeProfiles && window.renderEmployeeProfiles() }] : []),
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
+    // LAYOFF-SPEC — place/lift layoffs, review reimbursement claims, request
+    // documents. Door for every isHrPriv() viewer; write buttons inside are
+    // canLayoffAdmin() (HR dept + president/manager) — secretary/finance get
+    // sight, not the pen, same split as Work Sites/Leave/Attendance below.
+    { icon:'🔒', title:'Layoff', desc:`Place staff on layoff, reimbursements & requested documents${(window.canLayoffAdmin && window.canLayoffAdmin())?'':' · view only'}`, go:()=>window.renderLayoffAdmin && window.renderLayoffAdmin() },
     // DEPT-BUDGETS-SPEC-2026-08-11 §8 — HR is a card hub, not chip tabs, so it
     // gets its own signpost card into window.renderDeptBudgetingPage rather
     // than a chip route through loadFinanceContent-style switches.

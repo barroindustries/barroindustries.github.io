@@ -2777,6 +2777,7 @@ window.renderFilesHub = function(){
     { key:'designs',         label:'Marketing Designs', dept:'Marketing'  },
     { key:'sss',             label:'SSS & Gov Docs',    dept:'Finance'    },
     { key:'accounting',      label:'Accounting',        dept:'Finance'    },
+    { key:'hr_layoff',       label:'Layoff Documents',  dept:'HR'         },
     { key:'proposals',       label:'Sales Proposals',   dept:'Sales'      },
     { key:'product_designs', label:'Product Designs',   dept:'Design'     },
     { key:'references',      label:'References',        dept:'Design'     },

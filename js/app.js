@@ -202,8 +202,8 @@ document.addEventListener('DOMContentLoaded', () => {
       showApp();
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
-      Notifs.checkDeadlines(user.uid);
-      if (userProfile.role !== 'partner') Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
+      if (!(window.isLaidOff && window.isLaidOff())) Notifs.checkDeadlines(user.uid);
+      if (userProfile.role !== 'partner' && !(window.isLaidOff && window.isLaidOff())) Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
       Notifs.checkLowStock?.(user.uid, userProfile.role);
       Notifs.checkAECFollowups?.(user.uid, userProfile.role);
       checkPayrollDuties(user);
@@ -460,6 +460,36 @@ function startClaimsListener(uid) {
     if (window.userProfile && userProfile.id === uid) {
       userProfile.displayName = data.displayName || userProfile.displayName;
       window.userProfile = userProfile;
+    }
+    // LAYOFF-SPEC — live layoff enforcement. HR flipping users/{uid}.layoff
+    // must take effect mid-session, not on next sign-in. Compare the wire
+    // state to the cached pointer; on ANY change: refresh the cached profile,
+    // rebuild the chrome, and if the current page is no longer allowed, land
+    // on the dashboard (which renders the layoff view / normal view as
+    // appropriate). Runs before the claims baseline logic below on purpose —
+    // it is independent of the claims re-gate.
+    if (window.userProfile && userProfile.id === uid) {
+      const wireL = data.layoff || null;
+      const curL  = userProfile.layoff || null;
+      const changed = (!!(wireL && wireL.active) !== !!(curL && curL.active))
+                   || ((wireL && wireL.id) !== (curL && curL.id));
+      if (changed) {
+        userProfile.layoff = wireL;
+        window.userProfile = userProfile;
+        try { buildNav(); } catch(_) {}
+        const allowed = (window.LAYOFF_ALLOWED_PAGES || ['dashboard']);
+        if (window.isLaidOff() && !allowed.includes(window.currentPage)) {
+          navigateTo('dashboard', { replace: true });
+        } else if (window.currentPage === 'dashboard') {
+          navigateTo('dashboard', { replace: true });   // repaint: layoff view on/off
+        }
+        if (window.Notifs) {
+          Notifs.showToast(window.isLaidOff()
+            ? '🔒 Your account has been placed on layoff. See your dashboard.'
+            : '✅ Your layoff has been lifted. Welcome back.',
+            window.isLaidOff() ? 'error' : 'success');
+        }
+      }
     }
     const ts = data.claimsUpdatedAt;
     const ms = (ts && ts.toMillis) ? ts.toMillis() : 0;
@@ -1569,7 +1599,7 @@ function buildNav() {
   buildSidebarNav(); buildBottomNav(); buildTopNavStrip();
   // Global search is internal-only — show the topbar magnifier for everyone except partners / Brilliant-Steel-only
   const gs = document.getElementById('global-search-btn');
-  if (gs) { gs.style.display = (isPartner() || isBrilliantOnly()) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
+  if (gs) { gs.style.display = (isPartner() || isBrilliantOnly() || (window.isLaidOff && window.isLaidOff())) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
   // v12 WS42 nav-consolidation — the standalone topbar-depts-btn (grid icon)
   // and topbar-chat-btn were removed: Chat is already a center top-nav-strip
   // tab, and departments stay reachable via the persistent sidebar (each of
@@ -1625,6 +1655,9 @@ function partnerCompanyName() {
 // (admin → generic-partner → partner → brilliant-only → staff) so every
 // existing role/dept combination resolves to the identical bucket it did before.
 function _navVariant() {
+  // LAYOFF-SPEC — layoff lockdown beats every other variant, including admin
+  // and Type-B: whoever is laid off gets the minimal chrome, full stop.
+  if (window.isLaidOff && window.isLaidOff()) return 'laidOff';
   const pres = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   if (pres) return 'admin';
   const partner = isPartner();
@@ -2641,6 +2674,20 @@ function navigateTo(page, opts) {
   opts = opts || {};
   const subtab = (opts.subtab !== undefined) ? opts.subtab : null;
 
+  // ── LAYOFF LOCKDOWN (LAYOFF-SPEC) ────────────────────────────────────────
+  // THE router interception point — same posture as _deptBlockedForRole below:
+  // sidebar, bottom nav, deep links (#/dept/Finance), notification payloads,
+  // search results and hand-typed hashes ALL come through here, and the
+  // `dept:` prefix branch below returns before the main switch, so the gate
+  // must sit above both. Rewrites (not blocks) to 'dashboard': a laid-off
+  // user always lands somewhere honest, never on a dead "access denied".
+  // UI-only — firestore.rules on the layoff collections is the data boundary;
+  // see LAYOFF-SPEC §12 for the acknowledged residual gap on old dept data.
+  if (window.isLaidOff && window.isLaidOff()
+      && !(window.LAYOFF_ALLOWED_PAGES || ['dashboard']).includes(page)) {
+    page = 'dashboard';
+  }
+
   // If overlays are open and this is a real (non-history) navigation, tear them
   // down first so a nav click from inside a modal/page doesn't leave a dangling panel.
   if (!opts.fromHistory && window.Overlay && window.Overlay.isOpen()) window.Overlay.clearAll();
@@ -2710,7 +2757,9 @@ function navigateTo(page, opts) {
     // (js/screens/dashboards.js, owned by another pass — this is the one
     // safe interception point, same pattern renderDeptModule/the dept:
     // prefix above already uses to redirect before the switch's normal case).
-    case 'dashboard':        (isTypeBWorker() && window.renderWorkerHome) ? window.renderWorkerHome() : renderDashboard(); break;
+    case 'dashboard':        (window.isLaidOff && window.isLaidOff())
+                               ? renderDashboard()
+                               : ((isTypeBWorker() && window.renderWorkerHome) ? window.renderWorkerHome() : renderDashboard()); break;
     case 'company':          renderCompany(); break;
     case 'tasks':            renderTasks(currentUser, currentRole, currentDepts[0]||''); break;
     case 'submissions':      renderSubmissions(currentUser, currentRole, currentDepts[0]||''); break;

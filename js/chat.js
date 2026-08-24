@@ -371,6 +371,7 @@ window.Chat = (() => {
       && (window.SECRETARY_BLOCKED_DEPTS || ['Finance', 'IT']).includes(department);
   }
   function myDeptChannels() {
+    if (window.isLaidOff && window.isLaidOff()) return [];  // LAYOFF-SPEC — no dept channels while laid off
     if (typeof isPartner === 'function' && isPartner()) return [];  // partners NEVER
     // ⚠ CARVE-OUT GAP (2026-08-09). _isAdminRole() includes 'secretary', so the
     // Corporate Secretary's inbox listed EVERY department channel — including
@@ -423,6 +424,16 @@ window.Chat = (() => {
       return users.filter(u => u.id !== currentUser.uid && (
         (u.role === 'partner' && (u.company || '').trim() === myCo) ||
         ['president','manager'].includes(u.role)));
+    }
+    // LAYOFF-SPEC — a laid-off employee may only START a conversation with
+    // HR-department members, the President, or a Manager. Existing threads in
+    // their inbox stay readable/writable (deliberate: an in-flight work
+    // conversation should be closable, and the inbox query cannot prove a
+    // role filter anyway — see the fence comment above).
+    if (window.isLaidOff && window.isLaidOff()) {
+      return users.filter(u => u.id !== currentUser.uid && u.role !== 'partner' && (
+        ['president','manager'].includes(u.role) ||
+        u.department === 'HR' || (u.departments || []).includes('HR')));
     }
     return users.filter(u => u.id !== currentUser.uid);   // internal: everyone
   }

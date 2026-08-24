@@ -126,6 +126,18 @@
     { id: 'rejected',  label: 'Rejected',         badge: 'badge-red'    },
   ];
 
+  // ── Layoff (LAYOFF-SPEC 2026-08-19) ────────────────────────────────────
+  const LAYOFF_EXPENSE_STATUSES = [
+    { id: 'pending',   label: 'Pending',   badge: 'badge-orange' },
+    { id: 'approved',  label: 'Approved',  badge: 'badge-green'  },
+    { id: 'paid',      label: 'Paid',      badge: 'badge-blue'   },
+    { id: 'rejected',  label: 'Rejected',  badge: 'badge-red'    },
+  ];
+  const LAYOFF_REQUEST_STATUSES = [
+    { id: 'open',      label: 'Awaiting upload', badge: 'badge-orange' },
+    { id: 'fulfilled', label: 'Submitted',       badge: 'badge-green'  },
+  ];
+
   // ── Expense status (Phase 116) ──────────────────────────────────────
   // From departments.js expenseTable (~1701): generic statusBadge(e.status)
   // falls through to its default map {pending:'badge-orange',
@@ -155,6 +167,12 @@
     it_software: IT_SOFTWARE_STATUSES,
     leave:       LEAVE_STATUSES,
     ca:          CA_STATUSES,
+    layoff_expense: LAYOFF_EXPENSE_STATUSES,
+    layoff_request: LAYOFF_REQUEST_STATUSES,
+    layoff: [
+      { id:'active', label:'On Layoff', badge:'badge-red'  },
+      { id:'lifted', label:'Lifted',    badge:'badge-gray' },
+    ],
     expense:     EXPENSE_STATUSES,
     gov:         GOV_STATUSES,
     // Lazy passthrough — departments.js owns TASK_STATUSES; exposed on
