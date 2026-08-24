@@ -3690,7 +3690,10 @@ function purchRfqCard(r, canEdit) {
         <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(r.requestingDept || '—')}${r.neededBy ? ` · Needed by ${escHtml(r.neededBy)}` : ''}</div>
         ${r.deliverTo ? `<div style="font-size:12px;color:var(--text-muted)">Deliver to: ${escHtml(r.deliverTo)}</div>` : ''}
       </div>
-      ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}" aria-label="Delete RFQ">${emojiIcon('trash-2',14)}</button>` : ''}
+      ${canEdit ? `<div style="display:flex;gap:6px;flex:0 0 auto">
+        <button class="btn-secondary btn-sm rfq-edit" data-id="${r.id}" aria-label="Edit RFQ">${emojiIcon('pencil',14)} Edit</button>
+        <button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}" aria-label="Delete RFQ">${emojiIcon('trash-2',14)}</button>
+      </div>` : ''}
     </div>
     ${r.notes ? `<div style="font-size:12px;margin-top:6px">${escHtml(r.notes)}</div>` : ''}
     <div class="table-wrap" style="margin-top:10px"><table class="data-table table-cards no-toggle">
@@ -3776,6 +3779,21 @@ function bindRfqCard(r, currentUser, currentRole, content) {
     } catch (err) { Notifs.showToast('Convert failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   });
 
+  // Edit the RFQ itself (header fields + item rows), not just the prices. Reuses
+  // the create window in edit mode; entered prices survive because each row
+  // carries its unitPrice through.
+  cardEl.querySelector('.rfq-edit')?.addEventListener('click', () => {
+    openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole), {
+      title: r.title || '',
+      supplier: r.supplier || '',
+      requestingDept: r.requestingDept || '',
+      neededBy: r.neededBy || '',
+      deliverTo: r.deliverTo || '',
+      notes: r.notes || '',
+      items: (r.items || []).map(x => ({ ...x }))
+    }, r.id);
+  });
+
   cardEl.querySelector('.rfq-del')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     if (!(await confirmDialog({message:`Delete RFQ "${escHtml(btn.dataset.label)}"? This cannot be undone.`, danger:true, html:true}))) return;
@@ -3787,7 +3805,9 @@ function bindRfqCard(r, currentUser, currentRole, content) {
   });
 }
 
-async function openRfqModal(currentUser, onDone, prefill) {
+// `editId` — when present the window edits that existing RFQ in place instead of
+// minting a new one (no new rfqNo, no new serial).
+async function openRfqModal(currentUser, onDone, prefill, editId) {
   prefill = prefill || {};
   // v14 tap-latency inversion — the inventory_items read that backs the per-row
   // item picker used to sit in front of openPage, so "＋ New RFQ" (and the bulk
@@ -3796,8 +3816,8 @@ async function openRfqModal(currentUser, onDone, prefill) {
   // except that "Create RFQ" ships `disabled`, since its listener (and the item
   // rows it collects from) only exist once the renderer has run. Cancel is an
   // inline onclick and stays live throughout.
-  const panel = openPage(`${emojiIcon('🛒',16)} New Request for Quotation`, window.skeletonHtml('rows'),
-    `<button class="btn-primary" id="rfq-save" disabled>Create RFQ</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const panel = openPage(`${emojiIcon('🛒',16)} ${editId ? 'Edit' : 'New'} Request for Quotation`, window.skeletonHtml('rows'),
+    `<button class="btn-primary" id="rfq-save" disabled>${editId ? 'Save Changes' : 'Create RFQ'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   const rfqBody = panel.querySelector('.page-panel-body');
   // Renderer body deliberately not re-indented — see openProjectBillingModal.
   await window.withLoadingAndError(rfqBody, async () => {
@@ -3814,20 +3834,24 @@ async function openRfqModal(currentUser, onDone, prefill) {
   if (!panelLive(panel)) return;   // closed mid-flight — fill nothing, wire nothing
   const riItemOpts = (sel='') => `<option value="">— Free text / new —</option>` +
     invItems.map(i => `<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-unit="${escHtml(i.unit||'')}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')}</option>`).join('');
-  const deptOpts = Object.keys(window.DEPARTMENTS || {})
-    .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
-    .map(k => `<option>${escHtml(k)}</option>`).join('');
+  const deptList = Object.keys(window.DEPARTMENTS || {})
+    .filter(k => k !== 'Brilliant Steel' && k !== 'Partners');
+  // Keep a saved department that is no longer in DEPARTMENTS selectable, so editing
+  // an old RFQ can't silently reassign it.
+  if (prefill.requestingDept && !deptList.includes(prefill.requestingDept)) deptList.unshift(prefill.requestingDept);
+  const deptOpts = deptList
+    .map(k => `<option${k === prefill.requestingDept ? ' selected' : ''}>${escHtml(k)}</option>`).join('');
   rfqBody.innerHTML = `
     <div class="form-row">
       <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" value="${escHtml(prefill.title||'')}" placeholder="e.g. Steel sheets for Job #123"/></div>
-      <div class="form-group"><label>Supplier</label><input id="rfq-supplier" placeholder="Supplier name (optional)"/></div>
+      <div class="form-group"><label>Supplier</label><input id="rfq-supplier" value="${escHtml(prefill.supplier||'')}" placeholder="Supplier name (optional)"/></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Requesting Department</label><select id="rfq-dept">${deptOpts}</select></div>
-      <div class="form-group"><label>Needed By</label><input id="rfq-needed" type="date"/></div>
+      <div class="form-group"><label>Needed By</label><input id="rfq-needed" type="date" value="${escHtml(prefill.neededBy||'')}"/></div>
     </div>
-    <div class="form-group"><label>Deliver To (address / site)</label><input id="rfq-deliver" placeholder="e.g. Barro Industries — La Union Plant, Brgy. …"/></div>
-    <div class="form-group"><label>Notes</label><textarea id="rfq-notes" rows="2" placeholder="Optional"></textarea></div>
+    <div class="form-group"><label>Deliver To (address / site)</label><input id="rfq-deliver" value="${escHtml(prefill.deliverTo||'')}" placeholder="e.g. Barro Industries — La Union Plant, Brgy. …"/></div>
+    <div class="form-group"><label>Notes</label><textarea id="rfq-notes" rows="2" placeholder="Optional">${escHtml(prefill.notes||'')}</textarea></div>
     <label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px">Items</label>
     <div id="rfq-items"></div>
     <button class="btn-secondary btn-sm" id="rfq-add-item" type="button" style="margin-top:6px">+ Add item</button>
@@ -3840,9 +3864,12 @@ async function openRfqModal(currentUser, onDone, prefill) {
   // the PREVIOUS RFQ's title/supplier/dept/items under a freshly minted serial.
   const $rfq = (id) => panel.querySelector('#' + id);
   const itemsWrap = $rfq('rfq-items');
-  const addRow = (desc = '', qty = '', unit = '', itemId = '') => {
+  const addRow = (desc = '', qty = '', unit = '', itemId = '', unitPrice = null) => {
     const row = document.createElement('div');
     row.className = 'rfq-item-row';
+    // Carry any price already quoted for this line so editing the RFQ's items
+    // doesn't wipe the prices typed on the card.
+    if (unitPrice != null && unitPrice !== '') row.dataset.price = unitPrice;
     row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap';
     row.innerHTML = `
       <select class="ri-item" title="Bind to an inventory item so receiving lands automatically" style="flex:1 1 100%;min-width:0;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${riItemOpts(itemId)}</select>
@@ -3861,7 +3888,7 @@ async function openRfqModal(currentUser, onDone, prefill) {
     });
     itemsWrap.appendChild(row);
   };
-  if (Array.isArray(prefill.items) && prefill.items.length) prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit, it.itemId || ''));
+  if (Array.isArray(prefill.items) && prefill.items.length) prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit, it.itemId || '', it.unitPrice));
   else { addRow(); addRow(); }
   $rfq('rfq-add-item').addEventListener('click', () => addRow());
 
@@ -3873,13 +3900,34 @@ async function openRfqModal(currentUser, onDone, prefill) {
       const itemId = sel.value || null;
       let desc = row.querySelector('.ri-desc').value.trim();
       if (!desc && itemId) desc = sel.selectedOptions[0]?.dataset.name || '';
+      const priced = row.dataset.price;
       return { itemId, desc,
         qty: parseFloat(row.querySelector('.ri-qty').value) || 0,
         unit: row.querySelector('.ri-unit').value.trim(),
-        unitPrice: null };
+        unitPrice: priced != null && priced !== '' ? (parseFloat(priced) || 0) : null };
     }).filter(it => it.desc || it.itemId);
     if (!items.length) { Notifs.showToast('Add at least one item.', 'error'); return; }
     const btn = $rfq('rfq-save'); btn.disabled = true;
+    if (editId) {
+      try {
+        await db.collection('purchase_requisitions').doc(editId).update({
+          title,
+          supplier: $rfq('rfq-supplier').value.trim(),
+          requestingDept: $rfq('rfq-dept').value,
+          neededBy: $rfq('rfq-needed').value,
+          deliverTo: $rfq('rfq-deliver').value.trim(),
+          notes: $rfq('rfq-notes').value.trim(),
+          items, total: purchTotal(items),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: currentUser.uid,
+          updatedByName: window.userProfile?.displayName || currentUser.email
+        });
+        closeModal();
+        Notifs.success('RFQ updated.');
+        onDone && onDone();
+      } catch (err) { Notifs.showToast('Save failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+      return;
+    }
     try {
       // v14 prod-fixlist — atomic serial instead of `RFQ-${yr}-${Date.now().slice(-4)}`,
       // which repeats every 10s and can collide on a busy procurement day (or via
