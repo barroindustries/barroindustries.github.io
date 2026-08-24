@@ -942,298 +942,18 @@ function liveDateTime(elId) {
   Session.addCleanup(() => { if (_liveDateInterval) { clearInterval(_liveDateInterval); _liveDateInterval = null; } });
 }
 
-/* ════════════════════════════════════════════════════════════════
-   TODAY'S ATTENDANCE CARD — one renderer, five callers
-   ────────────────────────────────────────────────────────────────
-   Owner report (2026-08-09): "secretary time in cant be found".
-   It could not be found because it did not exist: the Time In / Time Out /
-   Request-Extension card lived ONLY inside renderEmployeeDashboard, so the
-   president, manager, Corporate Secretary and finance dashboards had no way
-   to record a day at all — while js/app.js still fired the 7–9 AM
-   "Don't forget to time in today" reminder at every one of those roles.
-
-   The WRITE PATH needs no change and neither do the rules:
-   firestore.rules attendance/{uid}/records/{date} already grants
-   `allow write: isOpsAdmin()` (president/manager/secretary/finance) and an
-   owner clause for everyone else. This was purely a missing client surface.
-
-   Split three ways so the four admin dashboards fold it into their EXISTING
-   Promise.all (no extra round-trip) and so the handlers can be scoped to the
-   card's own root element instead of document.getElementById.
-
-   NOT for partners (excluded from attendance reads, firestore.rules) and NOT
-   for Operations Team workers — they have their own geofenced selfie punch in
-   js/screens/worker.js writing attendance_worker/{profileId}. Two punch paths
-   on one screen is the double-population defect this pass exists to reduce.
-   ════════════════════════════════════════════════════════════════ */
-
-// Reads today's attendance + extension docs and derives every flag the card
-// renders. Async so callers can drop it straight into their Promise.all.
-window.attendanceCardState = async function(uid) {
-  const now      = new Date();
-  const todayStr = bizDate();
-  const [attSnap, extSnap] = await Promise.all([
-    db.collection('attendance').doc(uid).collection('records').doc(todayStr).get()
-      .catch(e => { _dashWarnOnce('attendance', e); return { exists:false, data:()=>({}) }; }),
-    db.collection('attendance_extensions').doc(`${uid}_${todayStr}`).get()
-      .catch(e => { _dashWarnOnce('attendance_extensions', e); return { exists:false, data:()=>({}) }; })
-  ]);
-
-  // Holiday / Sunday check — anchored to Manila time
-  const phHolidays  = typeof getPHHolidays === 'function' ? getPHHolidays(bizYear()) : {};
-  const todayHoliday = phHolidays[todayStr];
-  const isSundayToday = bizDow() === 0;
-  const isNoWorkDay  = isSundayToday || !!todayHoliday;
-
-  // Attendance — 0 / 0.5 / 1.0 model
-  const attData   = attSnap.exists ? attSnap.data() : {};
-  const hasLogin  = !!attData.loginTime;
-  const attScore  = window.attRecScore(attData);
-  const hasFull   = attScore >= 1.0;
-  const hasLogout = !!attData.logoutTime;
-
-  // An admin correction (People → Attendance → pencil) stamps editedBy. For a
-  // plain employee firestore.rules already refuses their next self-write on
-  // such a doc — so Time In/Out were DEAD CONTROLS there, failing with a
-  // permission error. For president/manager/secretary/finance the opposite is
-  // true and worse: they match the unrestricted isOpsAdmin() write clause, so
-  // their own tap would silently REVERT HR's correction, and payroll reads
-  // attendanceScore directly. Making it terminal for everyone fixes the dead
-  // control and the silent revert at once, in the client, with no rules change
-  // (narrowing the isOpsAdmin() clause would break the admin edit path itself).
-  const adminRecorded = !!attData.editedBy;
-
-  // Attendance window: 7:00–9:00 AM Manila time (or an approved extension)
-  const nowHour      = bizHour();
-  const inWindow     = nowHour >= 7 && nowHour < 9;
-  const beforeWindow = nowHour < 7;
-  const extData      = extSnap.exists ? extSnap.data() : null;
-  const _ext         = window.attExtActive(extData, now);
-  const extApproved  = _ext.active;
-  const extPending   = extData?.status === 'pending';
-  const extDenied    = extData?.status === 'denied';
-  const extExpired   = extData?.status === 'approved'
-                         && (!extData?.expiresAt || now >= extData.expiresAt.toDate());
-  const canTimeIn    = !adminRecorded && !hasLogin && (inWindow || extApproved);
-  const extExpiresStr = extApproved
-    ? _ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
-    : '';
-
-  const isLeaveToday       = attData.status === 'leave';
-  const isUnpaidLeaveToday = attData.status === 'unpaid_leave';
-  const attBadgeClass = isLeaveToday ? 'badge-green' : isUnpaidLeaveToday ? 'badge-gray' : isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
-  const attLabel      = isLeaveToday ? `${emojiIcon('🌴',16)} On Leave` : isUnpaidLeaveToday ? `${emojiIcon('📅',16)} Unpaid Leave` : isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? `100% Full ${emojiIcon('✅',16)}` : hasLogin ? `50% Timed In ${emojiIcon('🟡',16)}` : 'Not Timed In';
-
-  return { uid, now, todayStr, attData, extData, todayHoliday, isSundayToday, isNoWorkDay,
-           hasLogin, attScore, hasFull, hasLogout, adminRecorded, inWindow, beforeWindow,
-           extApproved, extPending, extDenied, extExpired, canTimeIn, extExpiresStr,
-           isLeaveToday, isUnpaidLeaveToday, attBadgeClass, attLabel };
-};
-
-// The card markup. Uses only .card/.card-header/.card-body/.badge/.btn-* — all
-// already present on every dashboard, so no new CSS and no 375px risk (buttons
-// are full-bleed, comfortably over the 44px tap target).
-window.attendanceCardHtml = function(st) {
-  const { attData, todayHoliday, isSundayToday, isNoWorkDay, hasLogin, hasFull, hasLogout,
-          adminRecorded, canTimeIn, beforeWindow, extApproved, extPending, extDenied,
-          extExpired, extExpiresStr, attBadgeClass, attLabel, now } = st;
-  return `
-      <div class="card" id="attendance-card" style="margin-bottom:16px">
-        <div class="card-header">
-          <h3>Today's Attendance <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${now.toLocaleDateString('en-PH',{weekday:'short',month:'short',day:'numeric'})}</span></h3>
-          <span class="badge ${attBadgeClass}">${attLabel}</span>
-        </div>
-        <div class="card-body">
-          ${isNoWorkDay ? `
-            <div style="display:flex;align-items:center;gap:14px;padding:4px 0">
-              <div style="font-size:32px">${isSundayToday?`${emojiIcon('😴',16)}`:`${emojiIcon('🎌',16)}`}</div>
-              <div>
-                <div style="font-size:14px;font-weight:700;color:var(--text)">${isSundayToday?'It\'s Sunday — rest day!':escHtml(todayHoliday.name||'Holiday')}</div>
-                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">No attendance required today. Enjoy your ${isSundayToday?'day off':'holiday'}!</div>
-              </div>
-            </div>`
-          : adminRecorded ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="width:40px;height:40px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('🔒',20)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--text)">Recorded by HR — ${escHtml(attData.status || (hasFull?'present':hasLogin?'half day':'absent'))}</div>
-                <div style="font-size:11px;color:var(--text-muted)">Today was set by an administrator${attData.note?` · ${escHtml(attData.note)}`:''}. Ask HR if this needs correcting.</div>
-              </div>
-            </div>`
-          : hasFull ? `
-            <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('✅',20)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
-                <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ${emojiIcon('✓',16)}</div>
-              </div>
-            </div>
-            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
-              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
-            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}`
-          : hasLogin ? `
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-              <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('🟡',20)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
-                <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check all notifications before 9:00 AM → 100%'}</div>
-              </div>
-            </div>
-            ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
-              Tap the ${emojiIcon('🔔',16)} bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
-            </div>`:''}
-            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
-              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
-            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
-          ` : canTimeIn ? `
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-              ${extApproved?`<span style="color:var(--warning)">${emojiIcon('⏰',16)} Extension approved — expires ${extExpiresStr}</span><br>`:''}
-              <strong>Step 1:</strong> Time in (7–9 AM) = 50%.<br>
-              <strong>Step 2:</strong> Check every notification before 9:00 AM = 100%.
-            </p>
-            <button class="btn-primary" id="check-in-btn" style="width:100%">
-              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
-            </button>`
-          : beforeWindow ? `
-            <div style="text-align:center;padding:10px 0;color:var(--text-muted);font-size:13px">
-              <div style="font-size:24px;margin-bottom:6px">${emojiIcon('⏳',24)}</div>
-              Time In window opens at <strong>7:00 AM</strong>
-            </div>`
-          : extPending ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">${emojiIcon('⏳',24)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600">Extension requested</div>
-                <div style="font-size:11px;color:var(--text-muted)">Waiting for president to approve. Refresh to check status.</div>
-              </div>
-            </div>`
-          : extDenied ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">${emojiIcon('❌',24)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--danger)">Extension denied</div>
-                <div style="font-size:11px;color:var(--text-muted)">Attendance marked absent for today.</div>
-              </div>
-            </div>`
-          : extExpired ? `
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">${emojiIcon('⌛',24)}</div>
-              <div>
-                <div style="font-size:13px;font-weight:600;color:var(--text-muted)">Extension expired</div>
-                <div style="font-size:11px;color:var(--text-muted)">The 6-hour window has closed.</div>
-              </div>
-            </div>`
-          : `
-            <div style="padding:4px 0">
-              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-                <div style="font-size:24px">${emojiIcon('⚠️',24)}</div>
-                <div>
-                  <div style="font-size:13px;font-weight:600;color:var(--warning)">Time window missed</div>
-                  <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–9:00 AM. You can request an extension.</div>
-                </div>
-              </div>
-              <button class="btn-secondary" id="req-ext-btn" style="width:100%">${emojiIcon('⏰',16)} Request Time Extension</button>
-            </div>`}
-        </div>
-      </div>`;
-};
-
-// Wires the three buttons. `rootEl` is the container the card was rendered
-// into — every lookup is scoped to it (house rule: never
-// document.getElementById inside a panel). `onChange` is the caller's own
-// re-render, so the card stays role-agnostic.
-window.bindAttendanceCard = function(rootEl, st, onChange) {
-  if (!rootEl) return;
-  const todayStr = st.todayStr;
-  const refresh  = () => { try { onChange && onChange(); } catch(_) {} };
-
-  rootEl.querySelector('#check-in-btn')?.addEventListener('click', async () => {
-    // Check if no new notifs today (or all already read) → auto 100%
-    // Manila midnight (not UTC) so early-morning notifications are counted.
-    const todayStart = new Date(todayStr + 'T00:00:00+08:00').getTime();
-    let autoFull = false;
-    try {
-      const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
-        .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0)).get();
-      const todayNotifs = notifSnap.docs.map(d => d.data());
-      autoFull = todayNotifs.length === 0 || todayNotifs.every(n => n.read);
-    } catch {}
-    try {
-      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-        loginTime: firebase.firestore.FieldValue.serverTimestamp(),
-        uid: currentUser.uid, date: todayStr,
-        attendanceScore: autoFull ? 1.0 : 0.5,
-        fullTime: autoFull,
-        autoFull
-      }, { merge: true });
-    } catch (err) {
-      // The exact rule that refused is surfaced, not paraphrased — an employee
-      // reporting "it says X" is how the next one of these gets diagnosed
-      // without guessing. (2026-08-13: office staff reported a refusal toast
-      // and the generic wording named a cause the client already prevents.)
-      Notifs.showToast(err?.code === 'permission-denied'
-        ? 'Time In was refused by the server. Please screenshot this and send it to your manager: permission-denied on attendance/' + currentUser.uid + '/records/' + todayStr
-        : 'Time In failed to save: ' + (err?.message || err), 'error');
-      return;
-    }
-    // Toasts render via textContent — plain emoji only, never emojiIcon() HTML.
-    Notifs.info(autoFull
-      ? '✅ Full attendance (100%) — no unchecked notifications!'
-      : '🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.');
-    // PERF-WAVE1 WP3 #3 — the employee dashboard now caches this exact read
-    // under 'att-card-'+uid+'-'+todayStr; without invalidating it here the
-    // card would keep showing "Not Timed In" for up to 15s after a punch.
-    dbCacheInvalidate && dbCacheInvalidate('att-card-' + currentUser.uid + '-' + todayStr);
-    refresh();
-  });
-
-  // Office self-service Time Out button
-  rootEl.querySelector('#time-out-btn')?.addEventListener('click', async () => {
-    const inTs = st.attData.loginTime?.toDate ? st.attData.loginTime.toDate() : null;
-    const hrs  = inTs ? window.computeHoursBetween(inTs, new Date()) : 0;
-    try {
-      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-        logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
-        hoursWorked: hrs
-      }, { merge: true });
-    } catch (err) {
-      Notifs.showToast('Time Out failed to save: ' + (err?.message || err), 'error');
-      return;
-    }
-    Notifs.info(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
-    // PERF-WAVE1 WP3 #3 — same cache key as Time In above; keep the card live.
-    dbCacheInvalidate && dbCacheInvalidate('att-card-' + currentUser.uid + '-' + todayStr);
-    refresh();
-  });
-
-  // Request extension button
-  rootEl.querySelector('#req-ext-btn')?.addEventListener('click', async () => {
-    const btn = rootEl.querySelector('#req-ext-btn');
-    btn.disabled = true; btn.textContent = 'Requesting…';
-    try {
-      await db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).set({
-        uid:         currentUser.uid,
-        userName:    userProfile.displayName || currentUser.email,
-        date:        todayStr,
-        status:      'pending',
-        requestedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      // Notify president
-      await Notifs.sendToOwner({
-        title: '⏰ Attendance Extension Requested',
-        body:  `${userProfile.displayName||currentUser.email} missed the 7–9am window on ${todayStr} and is requesting an extension.`,
-        icon:  '⏰', type: 'att_extension',
-        link:  'attendance'
-      });
-      dbCacheInvalidate && dbCacheInvalidate('att-ext-pending');
-      Notifs.success('Extension requested — waiting for president approval.');
-      refresh();
-    } catch(err) {
-      btn.disabled = false; btn.textContent = '⏰ Request Time Extension';
-      Notifs.showToast('Failed to submit request','error');
-    }
-  });
-};
+// ════════════════════════════════════════════════════════════════
+// OFFICE-KPI-PAY-SPEC-2026-08-25 R1 — the daily check-in / time-out card
+// (window.attendanceCardState, window.attendanceCardHtml, window.
+// bindAttendanceCard — the 7-9am Time In window, the Time Out button, and
+// the attendance_extensions request-creation flow) is REMOVED. Office pay
+// is now base + KPI (see js/money-core.js's 'basekpi' policy); attendance
+// has no pay meaning and the write path is retired entirely. Historic
+// attendance/{uid}/records are PRESERVED (never deleted, still exported by
+// backup) — this removal is of the WRITER only, not the data. Operations
+// Team punches (attendance_worker/**, js/screens/worker.js, geofenced
+// selfie punch) are untouched by this spec.
+// ════════════════════════════════════════════════════════════════
 
 async function renderPresidentDashboard() {
   const c = document.getElementById('page-content');
@@ -1241,14 +961,17 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList, attState] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
       dbCachedGet('all-quotes',    getAllQuotes,                                                          30000),
       dbCachedGet('approvals-pending',   () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'),     30000),
       dbCachedGet('ca-pending',          () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),         30000),
-      dbCachedGet('att-ext-pending',     () => safeGet(db.collection('attendance_extensions').where('status','==','pending'), 'attendance_extensions'), 30000),
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — attendance_extensions pending
+      // fetch removed. The request-creation flow (bindAttendanceCard) that fed
+      // this queue is gone, so this source can no longer contribute a genuine
+      // pending count going forward.
       dbCachedGet('signups-pending',     () => safeGet(db.collection('signup_requests').where('status','==','pending'), 'signup_requests'),       30000),
       // v14 fix — mirror the Approvals page's full 14-source fetch (approvals.js:140-155)
       // so the Command Center's pending total/badge never disagrees with the queue it
@@ -1267,8 +990,6 @@ async function renderPresidentDashboard() {
       ledgerForPeriod('prev'),
       dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                       45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
-      // Own attendance — the President clocks in like everyone else.
-      window.attendanceCardState(currentUser.uid),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1295,7 +1016,6 @@ async function renderPresidentDashboard() {
     const totalQuotes = window.quotePipelineValue ? window.quotePipelineValue(_rawQuotes) : 0;
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
-    const pendingExtensions = extSnap.size || 0;
     const pendingSignups = signupSnap.size || 0;
     // v14 fix — the remaining 9 Approvals-page sources (approvals.js:145-154).
     // tasksSnap/allTasks is already loaded above, so the review-task count is
@@ -1309,7 +1029,9 @@ async function renderPresidentDashboard() {
     const pendingClientDel = clientDelSnap.size || 0;
     const pendingPO      = poSnap.size || 0;
     const pendingRaises  = raiseSnap.size || 0;
-    const totalPending = pendingApprovals + pendingCA + pendingExtensions + pendingSubs + pendingSignups
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — pendingExtensions (attendance_extensions)
+    // dropped from this sum; that queue can no longer receive new requests.
+    const totalPending = pendingApprovals + pendingCA + pendingSubs + pendingSignups
       + pendingReview + pendingLeave + pendingFinDel + pendingPayDel + pendingBsDel + pendingBkDel + pendingClientDel + pendingPO + pendingRaises;
 
     // Total payroll burn (sum of net pay of all employees)
@@ -1369,11 +1091,9 @@ async function renderPresidentDashboard() {
 
       ${totalPending>0?`
       <div class="alert-banner alert-warn" onclick="navigateTo('approvals')">
-        <span>${emojiIcon('📋',16)} <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):'', pendingReview>0?pendingReview+' review'+(pendingReview!==1?'s':''):'', pendingLeave>0?pendingLeave+' leave'+(pendingLeave!==1?'s':''):'', (pendingFinDel+pendingPayDel)>0?(pendingFinDel+pendingPayDel)+' delete req'+((pendingFinDel+pendingPayDel)!==1?'s':''):'', (pendingBsDel+pendingBkDel+pendingClientDel)>0?(pendingBsDel+pendingBkDel+pendingClientDel)+' record delete'+((pendingBsDel+pendingBkDel+pendingClientDel)!==1?'s':''):'', pendingPO>0?pendingPO+' PO'+(pendingPO!==1?'s':''):'', pendingRaises>0?pendingRaises+' raise'+(pendingRaises!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
+        <span>${emojiIcon('📋',16)} <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):'', pendingReview>0?pendingReview+' review'+(pendingReview!==1?'s':''):'', pendingLeave>0?pendingLeave+' leave'+(pendingLeave!==1?'s':''):'', (pendingFinDel+pendingPayDel)>0?(pendingFinDel+pendingPayDel)+' delete req'+((pendingFinDel+pendingPayDel)!==1?'s':''):'', (pendingBsDel+pendingBkDel+pendingClientDel)>0?(pendingBsDel+pendingBkDel+pendingClientDel)+' record delete'+((pendingBsDel+pendingBkDel+pendingClientDel)!==1?'s':''):'', pendingPO>0?pendingPO+' PO'+(pendingPO!==1?'s':''):'', pendingRaises>0?pendingRaises+' raise'+(pendingRaises!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
-
-      ${window.attendanceCardHtml(attState)}
 
       <div class="kpi-row">
         <div class="kpi-card">
@@ -1477,7 +1197,6 @@ async function renderPresidentDashboard() {
     `;
     liveDateTime('live-clock');
     renderMiniCal();
-    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderPresidentDashboard);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
@@ -1493,27 +1212,21 @@ async function renderManagerDashboard() {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
     const depts = currentDepts || [];
-    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, attExtSnap, leaveSnap, poSnap, attState] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, leaveSnap, poSnap] = await Promise.all([
       dbCachedGet('users',     () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
       dbCachedGet('approvals-pending', () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'), 30000),
       dbCachedGet('ca-pending',        () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),     30000),
-      // Re-audit 2026-08-03: deptPending below used to omit pending attendance
-      // extensions entirely, even though APPROVAL_CAPS lists 'attendance' as
-      // manager-actionable and both the President/Secretary dashboards already
-      // fold it into their totals — a manager saw no alert/badge for a team
-      // member's pending Time-In extension.
-      dbCachedGet('att-ext-pending', () => safeGet(db.collection('attendance_extensions').where('status','==','pending'), 'attendance_extensions'), 30000),
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — attendance_extensions pending
+      // fetch removed. The request-creation flow (bindAttendanceCard) that fed
+      // this queue is gone, so this source can no longer contribute a genuine
+      // pending count going forward.
       // v14 fix — APPROVAL_CAPS (approvals.js:105,106,111) also authorizes a
       // manager on 'leave' and 'po-approval'; 'review-task' is covered for free
       // below via deptTasks (tasksSnap is already fetched, no extra query needed).
-      // Both new sources are dept/team-scoped the same way submissions/attendance
-      // extensions already are, below.
       dbCachedGet('leave-pending', () => safeGet(db.collection('leave_requests').where('status','==','pending'), 'leave_requests'), 30000),
       dbCachedGet('po-pending',    () => safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'), 30000),
-      // Own attendance — a manager records their own day like everyone else.
-      window.attendanceCardState(currentUser.uid),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
@@ -1527,7 +1240,6 @@ async function renderManagerDashboard() {
     const doneT = deptTasks.filter(t=>CLOSED.includes(t.status));
     const overdueT = openT.filter(t=>t.dueDate && t.dueDate < todayStr);
     const subs = subsSnap.docs.map(d=>({id:d.id,...d.data()}));
-    const attExtPending = attExtSnap.docs.filter(d=>teamIds.has(d.data().uid)).length;
     // v14 fix — review-task count is free via deptTasks (same dept/assignedTo
     // scoping as "Department Tasks" below); leave and PO are dept/team-scoped
     // the same way submissions is scoped above (createdBy/uid resp. requestingDept/createdBy).
@@ -1535,29 +1247,13 @@ async function renderManagerDashboard() {
     const leavePending  = leaveSnap.docs.filter(d=>teamIds.has(d.data().userId)).length;
     const poPending     = poSnap.docs.filter(d=>{ const p=d.data(); return depts.includes(p.requestingDept) || teamIds.has(p.createdBy); }).length;
     const deptPending = subs.filter(s=>s.status==='pending' && (depts.includes(s.department)||teamIds.has(s.createdBy)||teamIds.has(s.uid))).length
-      + (approvalsSnap.size||0) + (caSnap.size||0) + attExtPending + reviewPending + leavePending + poPending;
+      + (approvalsSnap.size||0) + (caSnap.size||0) + reviewPending + leavePending + poPending;
 
-    // Today's attendance for the team (admin can read attendance/{uid}/records/{date})
-    // Attendance status is derived via the shared window.attRecKind reader (config.js),
-    // which DOES check a `status` key (present/half/absent/leave/unpaid-leave, plus
-    // 'none' for no record yet) — kept consistent with every other attendance reader.
-    const attStatus = (data) => {
-      const kind = !data ? 'unmarked' : window.attRecKind(data);
-      return kind === 'none' ? 'unmarked' : kind;
-    };
-    // Re-audit 2026-08-03: this ran N uncached Firestore reads (one per team
-    // member) on EVERY render, unlike every other read on this dashboard —
-    // for a larger team that's real read-quota cost and latency that scales
-    // with headcount, for data that only changes a handful of times a day.
-    // Cache keyed by dept+day so switching subtabs/re-rendering within the
-    // same minute reuses the same batch instead of re-reading per employee.
-    const att = await dbCachedGet('mgr-att-today:'+depts.join(',')+':'+todayStr, () => Promise.all(team.map(u =>
-      db.collection('attendance').doc(u.id).collection('records').doc(todayStr).get()
-        .then(d => ({ uid:u.id, name:u.displayName||u.email, status: attStatus(d.exists ? d.data() : null) }))
-        .catch(() => ({ uid:u.id, name:u.displayName||u.email, status:'unmarked' })))), 60000);
-    const present = att.filter(a=>a.status==='present').length;
-    const half    = att.filter(a=>a.status==='half').length;
-    const unmarked = att.filter(a=>a.status==='unmarked').length;
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 R9 — the "Today's attendance for the
+    // team" tile (present/half/not-in derived from a live per-employee read
+    // of attendance/{uid}/records/{today}) is REMOVED. Office attendance is
+    // retired entirely (R1 removed the check-in writer); a tile fed by it
+    // would just show every employee permanently "not in" going forward.
 
     const priorityOrder = { high:0, medium:1, low:2 };
     const sortedOpen = [...openT].sort((a,b)=>{
@@ -1573,10 +1269,8 @@ async function renderManagerDashboard() {
       <div id="live-clock" class="live-clock-line"></div>
       ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>${emojiIcon('⚠️',16)} <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
       ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
-      ${window.attendanceCardHtml(attState)}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
-        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="user-check" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Present today</div><div class="kpi-value">${present}</div><div class="kpi-sub">${half} half · ${unmarked} not in yet</div></div>
         <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="check-square" style="stroke:var(--primary);width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div><div class="kpi-sub">${doneT.length} done</div></div>
         <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="alert-triangle" style="stroke:var(--danger);width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
       </div>
@@ -1592,21 +1286,6 @@ async function renderManagerDashboard() {
           </div>
         </div>
         <div>
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-header"><h3>${emojiIcon('👥',20)} Team Today</h3><button class="btn-primary btn-sm" onclick="navigateTo('attendance')">Attendance</button></div>
-            <div class="card-body" style="padding:0">
-              ${!team.length?'<div class="empty-state" style="padding:20px"><p>No team members assigned</p></div>':
-                att.slice(0,12).map(a=>{
-                  const dot = { present:'var(--success)', half:'var(--warning)', absent:'var(--danger)', leave:'var(--success)', 'unpaid-leave':'var(--text-muted)' }[a.status] || 'var(--text-muted)';
-                  const cls = { present:'badge-green', half:'badge-orange', absent:'badge-red', leave:'badge-green', 'unpaid-leave':'badge-gray' }[a.status] || 'badge-gray';
-                  const label = { present:'present', half:'half', absent:'absent', leave:`${emojiIcon('🌴',16)} leave`, 'unpaid-leave':`${emojiIcon('📅',16)} unpaid leave`, unmarked:'not in' }[a.status] || a.status;
-                  return `<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border)">
-                  <span style="width:8px;height:8px;border-radius:50%;background:${dot}"></span>
-                  <span style="flex:1;font-size:13px">${escHtml(a.name)}</span>
-                  <span class="badge ${cls}" style="font-size:10px">${label}</span>
-                </div>`;}).join('')}
-            </div>
-          </div>
           <div class="card"><div class="card-header"><h3>Quick Actions</h3></div>
             <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
               <button class="quick-action-btn" onclick="navigateTo('tasks')"><i data-lucide="plus-circle"></i> New Task</button>
@@ -1617,13 +1296,6 @@ async function renderManagerDashboard() {
         </div>
       </div>`;
     liveDateTime('live-clock');
-    // A manager sitting in their own department also appears in "Team Today",
-    // which is cached for 60s — drop that key on their own punch so the row
-    // they just changed is not still showing "not in yet".
-    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, () => {
-      dbCacheInvalidate && dbCacheInvalidate('mgr-att-today:'+depts.join(',')+':'+todayStr);
-      renderManagerDashboard();
-    });
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
@@ -1650,7 +1322,7 @@ async function renderSecretaryDashboard() {
     // _dashWarnOnce keys its dedupe on, so the two must not be conflated.
     const _QUEUE_NAMES = {
       approval_requests:'Quote / ROA approvals', cash_advances:'Cash advances',
-      attendance_extensions:'Attendance extensions', signup_requests:'Sign-ups',
+      signup_requests:'Sign-ups',
       leave_requests:'Leave requests', finance_delete_requests:'Finance delete requests',
       payroll_delete_requests:'Payroll delete requests', tasks:'Tasks for review',
       bs_quotes:'BS quote deletions', bk_quotes:'BK quote deletions',
@@ -1662,13 +1334,16 @@ async function renderSecretaryDashboard() {
       catch(e) { _dashWarnOnce(label || 'query', e); _denied.push(_QUEUE_NAMES[label] || label || 'a queue'); return { docs:[], size:0, failed:true }; }
     };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, attState] = await Promise.all([
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — the attendance_extensions
+    // pending fetch is removed. The request-creation flow (bindAttendanceCard)
+    // that fed this queue is gone, so this source can no longer contribute a
+    // genuine pending count going forward.
+    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap] = await Promise.all([
       dbCachedGet('users',       () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all',   () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
       safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'),
       safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),
-      safeGet(db.collection('attendance_extensions').where('status','==','pending'), 'attendance_extensions'),
       safeGet(db.collection('signup_requests').where('status','==','pending'), 'signup_requests'),
       safeGet(db.collection('leave_requests').where('status','==','pending'), 'leave_requests'),
       safeGet(db.collection('finance_delete_requests').where('status','==','pending'), 'finance_delete_requests'),
@@ -1681,10 +1356,6 @@ async function renderSecretaryDashboard() {
       safeGet(db.collection('clients').where('deleteRequested','==',true), 'clients'),
       safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'),
       safeGet(db.collection('pending_raises').where('status','==','pending_approval'), 'pending_raises'),
-      // Own attendance — owner report 2026-08-09, "secretary time in cant be
-      // found". The Corporate Secretary records his own day here, same card and
-      // same write path as every other role.
-      window.attendanceCardState(currentUser.uid),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1698,13 +1369,12 @@ async function renderSecretaryDashboard() {
     const pendingDeletes = (finDelSnap.size||0) + (payDelSnap.size||0) + (bsDelSnap.size||0) + (bkDelSnap.size||0) + (clientDelSnap.size||0);
     const pendingPO = poSnap.size||0;
     const pendingRaises = raiseSnap.size||0;
-    const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(extSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes+pendingPO+pendingRaises;
+    const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes+pendingPO+pendingRaises;
     const activeStaff = users.filter(u=>u.role!=='partner').length;
     const rows = [
       ['Sign-ups', signupSnap.size||0, `${emojiIcon('👤',16)}`],
       ['Cash Advances', caSnap.size||0, `${emojiIcon('💸',16)}`],
       ['Leave Requests', leaveSnap.size||0, `${emojiIcon('🌴',16)}`],
-      ['Attendance Extensions', extSnap.size||0, `${emojiIcon('⏰',16)}`],
       ['Work Submissions', pendingSubs, `${emojiIcon('📤',16)}`],
       ['Tasks for Review', reviewSnap.size||0, `${emojiIcon('📋',16)}`],
       ['Quote Approvals', apprSnap.size||0, `${emojiIcon('📝',16)}`],
@@ -1716,11 +1386,10 @@ async function renderSecretaryDashboard() {
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('🗂',20)} Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
       <div id="live-clock" class="live-clock-line"></div>
-      <div class="alert-banner" style="cursor:default"><span>${emojiIcon('👁',16)} <strong>Oversight role.</strong> You can review everything across the company except Finance and IT. You approve the everyday queue — sign-ups, attendance, leave, submissions and task reviews; money-moving requests and deletions of key records go to the President.</span></div>
+      <div class="alert-banner" style="cursor:default"><span>${emojiIcon('👁',16)} <strong>Oversight role.</strong> You can review everything across the company except Finance and IT. You approve the everyday queue — sign-ups, leave, submissions and task reviews; money-moving requests and deletions of key records go to the President.</span></div>
       ${_denied.length?`<div class="alert-banner" style="cursor:default"><span>${emojiIcon('🔒',16)} <strong>Not counted here:</strong> ${escHtml(_denied.join(', '))} — outside your access, so these are omitted rather than shown as 0.</span></div>`:''}
       ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
       ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>${emojiIcon('🗑',16)} <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
-      ${window.attendanceCardHtml(attState)}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">People</div><div class="kpi-value">${activeStaff}</div></div>
         <div class="kpi-card ${totalPending?'accent':''}" style="cursor:pointer" onclick="navigateTo('approvals')"><div class="kpi-icon-wrap" style="background:var(--warning-soft)"><i data-lucide="shield-check" style="stroke:var(--warning);width:18px"></i></div><div class="kpi-label">Pending Approvals</div><div class="kpi-value">${totalPending}</div></div>
@@ -1762,7 +1431,6 @@ async function renderSecretaryDashboard() {
         </div>
       </div>`;
     liveDateTime('live-clock');
-    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderSecretaryDashboard);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
@@ -1785,7 +1453,7 @@ async function renderFinanceDashboard() {
     const todayStr = bizDate();
     const period = window._FIN_DASH_PERIOD || 'month';
     const plabel = finPeriodLabel(period);
-    const [usersSnap, ledgerSnap, prevLedSnap, expSnap, caSnap, invSnap, jobSnap, projList, attState] = await Promise.all([
+    const [usersSnap, ledgerSnap, prevLedSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
       dbCachedGet('users', fetchUsersWithPayroll, 30000),
       ledgerForPeriod(period),
       ledgerForPeriod('prev'),
@@ -1794,8 +1462,6 @@ async function renderFinanceDashboard() {
       dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                   45000),
       dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs'), 'job_costs'),                                         45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
-      // Own attendance — the accountant records their own day like everyone else.
-      window.attendanceCardState(currentUser.uid),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const payrollGross = users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
@@ -1848,7 +1514,6 @@ async function renderFinanceDashboard() {
       <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
       <div id="fin-dash-period">${window.periodPicker(period, {closedBadge:true})}</div>
-      ${window.attendanceCardHtml(attState)}
       ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>${emojiIcon('💸',16)} <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="trending-up" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
@@ -1903,7 +1568,6 @@ async function renderFinanceDashboard() {
         </div>
       </div>`;
     liveDateTime('live-clock');
-    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderFinanceDashboard);
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     window.bindPeriodPicker(document.getElementById('fin-dash-period'), (newKey) => {
       window._FIN_DASH_PERIOD = newKey; renderFinanceDashboard();
@@ -1942,27 +1606,25 @@ async function renderEmployeeDashboard() {
     const now      = new Date();
     const todayStr = bizDate();
     const uid = currentUser.uid;
-    // PERF-WAVE1 WP3 #3 — all 5 reads now go through dbCachedGet. 'tasks-mine-'+uid
-    // is the SAME key js/screens/tasks.js's 'mine' filter uses (WP5) — one shared
-    // cache, invalidated on task writes there. 'att-card-'+uid+'-'+todayStr is
-    // invalidated below in bindAttendanceCard's Time In/Time Out handlers. The
-    // getAttendanceScore(uid) call is unchanged here — it caches internally now
-    // (see getAttendanceScore).
-    const [myTasksSnap, attState, caSnap, kpiProfile, monthAttScore] = await Promise.all([
+    // PERF-WAVE1 WP3 #3 — all reads go through dbCachedGet. 'tasks-mine-'+uid
+    // is the SAME key js/screens/tasks.js's 'mine' filter uses (WP5) — one
+    // shared cache, invalidated on task writes there.
+    //
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 R1 — the daily check-in card
+    // (window.attendanceCardState/attendanceCardHtml/bindAttendanceCard) and
+    // its 'att-card-'+uid+'-'+todayStr read are REMOVED. Office attendance no
+    // longer has a writer, so a live check-in state has nothing left to show.
+    const [myTasksSnap, caSnap, kpiProfile] = await Promise.all([
       dbCachedGet('tasks-mine-' + uid, () =>
         db.collection('tasks').where('assignedTo','array-contains', uid).get()
           .catch(()=>db.collection('tasks').where('assignedTo','==', uid).get()),
         30000),
-      // Today's attendance + extension, and every flag the card renders — one
-      // shared reader, same call the four admin dashboards now make.
-      dbCachedGet('att-card-' + uid + '-' + todayStr, () => window.attendanceCardState(uid), 15000),
       dbCachedGet('ca-mine-' + uid, () =>
         db.collection('cash_advances').where('userId','==', uid).get().catch(e => { _dashWarnOnce('cash_advances', e); return {docs:[]}; }),
         60000),
       dbCachedGet('kpi-' + uid, () =>
         db.collection('kpi_targets').doc(uid).get().catch(e => { _dashWarnOnce('kpi_targets', e); return null; }),
         300000),
-      getAttendanceScore(uid)
     ]);
 
     const DONE_TASK_STATUSES = ['approved','archived','done'];
@@ -1972,13 +1634,6 @@ async function renderEmployeeDashboard() {
     const overdue    = openTasks.filter(t=>t.dueDate && t.dueDate < todayStr);
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
-
-    // Today's attendance state — holiday/Sunday, the 0/0.5/1.0 score, the
-    // extension window and the badge — now lives entirely in the shared reader
-    // (window.attendanceCardState) and is consumed by the shared card markup,
-    // so none of it is unpacked here any more. The month-to-date attendance
-    // figure on the Current Standing card is a different value and still comes
-    // from getAttendanceScore(uid) in the Promise.all above.
 
     // KPI computation
     const taskScore = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 0;
@@ -1993,10 +1648,6 @@ async function renderEmployeeDashboard() {
       return tb - ta;
     });
 
-    // Monthly attendance for Current Standing card (fetched in Promise.all above)
-    // Manila calendar Y/M/D (device-local clock can be off-by-one near UTC midnight).
-    const workDaysDash = countWorkDays(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, +todayStr.slice(8,10));
-    const attDaysFull = Math.round(monthAttScore * workDaysDash);
     const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
     // Dept quick tab buttons
@@ -2056,11 +1707,6 @@ async function renderEmployeeDashboard() {
           <h3>${emojiIcon('📊',20)} Current Standing — ${now.toLocaleDateString('en-PH',{month:'long',year:'numeric'})}</h3>
         </div>
         <div class="card-body" style="display:flex;gap:16px;flex-wrap:wrap;padding:12px 16px">
-          <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(48,209,88,0.08);border-radius:10px">
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">Attendance</div>
-            <div style="font-size:22px;font-weight:800;color:${monthAttScore>=0.9?'var(--success)':monthAttScore>=0.6?'var(--warning)':'var(--danger)'}">${Math.round(monthAttScore*100)}%</div>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">~${attDaysFull} / ${workDaysDash} days</div>
-          </div>
           <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(10,132,255,0.08);border-radius:10px">
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">Task KPI</div>
             <div style="font-size:22px;font-weight:800;color:${kpiColor}">${taskScore}%</div>
@@ -2073,9 +1719,6 @@ async function renderEmployeeDashboard() {
           </div>
         </div>
       </div>
-
-      <!-- Attendance Card — shared renderer, see window.attendanceCardHtml -->
-      ${window.attendanceCardHtml(attState)}
 
       <!-- Management row: Tasks + KPI -->
       <div class="dashboard-grid">
@@ -2132,9 +1775,6 @@ async function renderEmployeeDashboard() {
     liveDateTime('live-clock');
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
-
-    // Attendance buttons — shared binder, scoped to the card element.
-    window.bindAttendanceCard(c.querySelector('#attendance-card'), attState, renderEmployeeDashboard);
 
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
@@ -2415,20 +2055,22 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       const delivScore  = typeof kpiTargetD.deliverableScore === 'number'
         ? Math.min(1, kpiTargetD.deliverableScore / 100) : 0.5;
       const kpi = taskScore * 0.7 + delivScore * 0.3;
-      // Attendance score still requires a per-user subcollection read
-      const att = await getAttendanceScore(u.id);
-      const mult = kpi*0.7 + att*0.3;
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — office attendance is retired
+      // (no writer left), so this quick-glance reference figure is KPI-only
+      // now. This was always a client-side estimate, never the real pay
+      // computation (see the card caption below) — actual pay runs through
+      // computePayLine/Finance → Payroll.
+      const mult = kpi;
       const computed = net * mult * (daysElapsed2 / daysInMonth2);
       const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
       // Eval — from the already-fetched bulk snapshot (no extra reads)
       const evalD = evalsMap[u.id] || {};
       const selfDone2 = evalD.selfAssessMonth === defaultMonth2;
-      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr class="pf-perf-row">
+      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr class="pf-perf-row">
         <td class="tc-name">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
         <td class="tc-detail" data-label="Dept">${escHtml(depts)}</td>
         <td class="tc-detail" data-label="Net Pay">₱${formatNum(net)}</td>
         <td class="tc-detail" data-label="Task KPI">${Math.round(kpi*100)}%<br><span style="font-size:10px;color:var(--text-muted)">${tasksDone}/${tasksTotal} tasks</span></td>
-        <td class="tc-detail" data-label="Attendance">${Math.round(att*100)}%</td>
         <td class="tc-net"><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
         <td class="tc-detail" data-label="Self /10" style="text-align:center">
           ${selfDone2
@@ -2454,11 +2096,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div id="pf-payrun-summary" style="padding:14px 16px">${window.skeletonHtml('cards')}</div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h3>Performance &amp; Attendance — ${monthLabel}</h3></div>
-        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Task KPI and attendance — a performance reference, not the pay computation. Actual pay runs through Finance → Payroll.</div>
+        <div class="card-header"><h3>Performance &amp; KPI — ${monthLabel}</h3></div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Task KPI — a performance reference, not the pay computation. Actual pay runs through Finance → Payroll.</div>
         <div class="table-wrap">
           <table class="data-table table-cards">
-            <thead><tr><th>Employee</th><th>Dept</th><th>Net Pay</th><th>Task KPI</th><th>Attendance</th><th>Earned So Far</th><th>Self /10</th><th>Pres /10</th><th></th></tr></thead>
+            <thead><tr><th>Employee</th><th>Dept</th><th>Net Pay</th><th>Task KPI</th><th>Earned So Far</th><th>Self /10</th><th>Pres /10</th><th></th></tr></thead>
             <tbody>${userRows.map(r=>r.row).join('')}</tbody>
           </table>
         </div>
@@ -2620,8 +2262,15 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // screen already fetches the identical assignedTo-array-contains query for
   // its own task list rendering, so without this the same query ran twice
   // per page view. Numbers produced are unchanged (same math, same inputs).
-  const [att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap, policySnap, legalBasisSnap] = await Promise.all([
-    getAttendanceScore(currentUser.uid),
+  //
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3/item5 — the live getAttendanceScore
+  // fetch is REMOVED. Office attendance has no writer left (R1), so a live
+  // read here would only ever describe a collection nobody writes anymore.
+  // getAttendanceScore itself is NOT deleted — historic recomputes of
+  // pre-retirement months still call it (js/departments.js) — it is simply no
+  // longer called from this live path. A frozen historic month still shows
+  // its own stored attScore below (salary_history is real data, unaffected).
+  const [cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap, kpiTargetSnap, policySnap, legalBasisSnap] = await Promise.all([
     db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
     db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
     db.collection('kpi_evals').doc(currentUser.uid).get().catch(()=>null),
@@ -2714,7 +2363,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const frozenThisMonth = salaryHistory.find(h => h.month === currentMonth);
   const isFinalMonth    = !!frozenThisMonth;
   const dispKpi = isFinalMonth ? (frozenThisMonth.kpiScore ?? kpi) : kpi;
-  const dispAtt = isFinalMonth ? (frozenThisMonth.attScore ?? att) : att;
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — dispAtt is null for a still-
+  // running month (no live attendance data left to show, R1). It stays a real
+  // number for a FROZEN month, read off the stored historic figure exactly as
+  // before — that data was captured while office attendance was still live
+  // and is preserved, never deleted.
+  const dispAtt = isFinalMonth ? (frozenThisMonth.attScore ?? null) : null;
   // TASK-BASED-PAY-SPEC-2026-08-12 §10 step 1 — a failed/corrupted policy
   // read disables the live projection entirely (never a guessed number).
   const projUnavailable = !isFinalMonth && policySettingsFailed;
@@ -2730,15 +2384,23 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const noPayRecordWords = (!isFinalMonth && !projUnavailable && (Number(u.salary) || 0) <= 0 && typeof window.noPayRateWords === 'function')
     ? window.noPayRateWords('employee') : null;
   const projBlocked = projUnavailable || !!noPayRecordWords;
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item5 — attScore: 0, not a live read.
+  // Under 'basekpi' this is unread by computePayLine (money-core.js §1.1 —
+  // "attScore NOT read here"). Under the other, superseded office policies
+  // this is the honest input now: office attendance has no writer left, so
+  // there is no live score left to feed in (getAttendanceScore stays reserved
+  // for historic recomputes of pre-retirement months, never this live path).
   const projLine = (!isFinalMonth && !projUnavailable && window.computePayLine)
-    ? window.computePayLine({ ...u, id: currentUser.uid }, { month: currentMonth, policy: activePolicy, kpiScore: kpi, attScore: att, caPlan: [], caBalance: totalAdvance })
+    ? window.computePayLine({ ...u, id: currentUser.uid }, { month: currentMonth, policy: activePolicy, kpiScore: kpi, attScore: 0, caPlan: [], caBalance: totalAdvance })
     : null;
   // §10 step 3 — the displayed factor is ALWAYS read off a line (frozen or
   // live), never a third computation. The `dispKpi*0.7+dispAtt*0.3` fallback
-  // is kept ONLY for a legacy frozen row with no perfFactor field at all.
+  // is kept ONLY for a legacy frozen row with no perfFactor field at all — a
+  // historic month, so dispAtt is a real stored number there. The live-side
+  // fallback (projLine unavailable) drops the retired attendance term.
   const multiplier = isFinalMonth
-    ? (frozenThisMonth.perfFactor ?? (dispKpi*0.7+dispAtt*0.3))
-    : (projLine ? projLine.perfFactor : (kpi*0.7+att*0.3));
+    ? (frozenThisMonth.perfFactor ?? (dispKpi*0.7+(dispAtt||0)*0.3))
+    : (projLine ? projLine.perfFactor : (kpi*0.7));
   // netBeforeCA / netPay — pre-CA, so the existing "Cash Advance Balance" line
   // further down isn't double-subtracted.
   // §10 step 2 — ALWAYS projLine.netBeforeCA, never a second expression; the
@@ -2831,6 +2493,18 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           : (projLine ? projLine.otherDeductions : 0),
         policy: isFinalMonth ? (frozenThisMonth.policy || 'flat') : (projLine ? projLine.policy : 'flat'),
         perfFactor: isFinalMonth ? frozenThisMonth.perfFactor : (projLine ? projLine.perfFactor : null),
+        // OFFICE-KPI-PAY-SPEC-2026-08-25 — payDerivationSteps' 'basekpi'
+        // branch reads base/kpiFactor/incentiveFull/incentiveEarned; without
+        // them the branch sums base 0 + incentive 0 and the guard fired a
+        // false "these figures do not add up" red banner on a correct basekpi
+        // paycheck (caught in adversarial verify). Frozen months read the
+        // disburse mirror (departments.js freezes all three ?? null); live
+        // months read the projection line's conditional keys. Null on every
+        // other policy — the generic ladder ignores them.
+        base: isFinalMonth ? (Number(frozenThisMonth.salary) || 0) : (projLine ? projLine.base : 0),
+        kpiFactor: isFinalMonth ? (frozenThisMonth.kpiFactor ?? null) : (projLine ? (projLine.kpiFactor ?? null) : null),
+        incentiveFull: isFinalMonth ? (frozenThisMonth.incentiveFull ?? null) : (projLine ? (projLine.incentiveFull ?? null) : null),
+        incentiveEarned: isFinalMonth ? (frozenThisMonth.incentiveEarned ?? null) : (projLine ? (projLine.incentiveEarned ?? null) : null),
         cashAdvance: isFinalMonth ? (Number(frozenThisMonth.caDeducted) || 0) : (projLine ? (Number(projLine.caPlanned) || 0) : 0),
         overridden: isFinalMonth ? !!frozenThisMonth.overridden : false,
         overrideNote: isFinalMonth ? (frozenThisMonth.overrideNote || '') : '',
@@ -2867,6 +2541,24 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // "Combined Multiplier" as though it drove the figure is exactly the
   // two-screens-two-numbers problem this fix exists to end.
   const multiplierDrivesPay = !noPayRecordWords && payBasisLine && payBasisLine.policy === 'taskbased';
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1/item3 — 'basekpi' gets its own display
+  // branch below: KPI factor + incentive full/earned, never attendance. Reads
+  // straight off payBasisLine (frozen historic OR live projLine) — never a
+  // second computation. money-core.js's computePayLine returns the conditional
+  // kpiFactor/incentiveFull/incentiveEarned keys under 'basekpi'; the ?? falls
+  // back to deriving the same values from allowance/kpiScore (always present
+  // on the line regardless of policy) so this screen degrades gracefully if
+  // an older frozen row predates those keys.
+  const isBasekpiLine = !noPayRecordWords && payBasisLine && payBasisLine.policy === 'basekpi';
+  const _bkKpiFactor = isBasekpiLine
+    ? (payBasisLine.kpiFactor != null ? Number(payBasisLine.kpiFactor) : Math.min(1, Math.max(0, Number(payBasisLine.kpiScore) || 0)))
+    : 0;
+  const _bkIncentiveFull = isBasekpiLine
+    ? (payBasisLine.incentiveFull != null ? Number(payBasisLine.incentiveFull) : (Number(payBasisLine.allowance) || 0))
+    : 0;
+  const _bkIncentiveEarned = isBasekpiLine
+    ? (payBasisLine.incentiveEarned != null ? Number(payBasisLine.incentiveEarned) : Math.round(_bkIncentiveFull * _bkKpiFactor * 100) / 100)
+    : 0;
 
   // YTD = completed months from salary history + current month earned so far
   const thisYear  = String(bzYear);
@@ -2875,7 +2567,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
 
   const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
   const kpiColor  = dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
-  const attColor  = dispAtt>=0.85?'var(--success)':dispAtt>=0.6?'var(--warning)':'var(--danger)';
+  // dispAtt is null on a live (not-yet-frozen) month — see its definition
+  // above. attColor is only ever consumed where dispAtt != null is already
+  // checked, so this fallback color is unreachable in practice; kept only so
+  // an accidental unguarded read never crashes the render.
+  const attColor  = dispAtt!=null && dispAtt>=0.85?'var(--success)':dispAtt!=null && dispAtt>=0.6?'var(--warning)':'var(--danger)';
 
   // PAY-EXPLANATION-SPEC-2026-08-13 — "How your pay is worked out". The
   // owner's ask, verbatim: "on the 'my finance' of each employee show this:
@@ -2907,7 +2603,13 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   const payExplainHtml = (() => {
     if (!payTeamKnown) return '';
     const K = Math.round(dispKpi * 100);
-    const A = Math.round(dispAtt * 100);
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — dispAtt is null on a live
+    // month (no attendance writer left, R1); `attKnown` gates every sentence
+    // below that would otherwise quote a stale/zero attendance number. It
+    // stays true (and A a real figure) for a frozen historic month, which
+    // keeps showing its own stored figures unchanged.
+    const attKnown = dispAtt != null;
+    const A = attKnown ? Math.round(dispAtt * 100) : null;
     const F = Math.round((multiplier || 0) * 100);
     const legalRow = legalBasisText
       ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:11px;color:var(--text-muted);line-height:1.6"><strong style="color:var(--text)">Legal basis:</strong> ${escHtml(legalBasisText)}</div>`
@@ -2926,24 +2628,54 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         </div>
       </div>`;
     }
-    // Office Team. Two separate reasons the factor can be inert today — no
-    // pay record on file, or the switch simply being off — and the words
-    // must name the actual one (noPayRecordWords is already shown elsewhere
-    // on this page; conflating it with "the switch is off" here would tell
-    // someone with no salary on file the wrong reason for the same fact).
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1/§3 — 'basekpi' (base + KPI-dependent
+    // incentive) is its own explanation, not a variant of the task-KPI-70%/
+    // attendance-30% wording below: the formula itself is different (a
+    // protected base plus an incentive scaled by KPI alone), and attendance
+    // never enters it at any weight, even zero.
+    if (isBasekpiLine) {
+      const baseAmt = Number(payBasisLine.base) || 0;
+      const kpiPct = Math.round(_bkKpiFactor * 100);
+      const factorLine = noPayRecordWords
+        ? `You do not have a pay record set up yet, so this does not apply to your pay right now.`
+        : `₱${formatNum(baseAmt)} of your pay is a protected base — paid in full every month, never reduced. The remaining ₱${formatNum(_bkIncentiveFull)} is an incentive that depends on this month's KPI score (tasks 70%, deliverables 30%). This month your KPI factor is <strong>${kpiPct}%</strong>, so ₱${formatNum(_bkIncentiveEarned)} of that incentive is earned so far. Attendance does not affect your pay at all.`;
+      return `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>How your pay is worked out</h3></div>
+        <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
+          <p style="margin:0 0 10px"><strong>Base + KPI incentive.</strong> Your role on the Office Team pays a protected base plus a KPI-dependent incentive — not a fixed 9-to-5 schedule, and not tied to attendance.</p>
+          <p style="margin:0 0 10px">${factorLine}</p>
+          <p style="margin:0 0 10px">Your KPI score comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${myTasks.length} this month) — plus any deliverable score your manager sets.</p>
+          <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
+          ${legalRow}
+        </div>
+      </div>`;
+    }
+    // Office Team, superseded policies (flat/performance/taskbased). Two
+    // separate reasons the factor can be inert today — no pay record on
+    // file, or the switch simply being off — and the words must name the
+    // actual one (noPayRecordWords is already shown elsewhere on this page;
+    // conflating it with "the switch is off" here would tell someone with no
+    // salary on file the wrong reason for the same fact).
     const factorLine = noPayRecordWords
-      ? `You do not have a pay record set up yet, so this does not apply to your pay right now. Once one is set up, here is where your task KPI and attendance currently stand: task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30%, for a performance factor of ${F}% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%).`
+      ? (attKnown
+          ? `You do not have a pay record set up yet, so this does not apply to your pay right now. Once one is set up, here is where your task KPI and attendance currently stand: task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30%, for a performance factor of ${F}% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%).`
+          : `You do not have a pay record set up yet, so this does not apply to your pay right now. Once one is set up, here is where your task KPI currently stands: ${K}%.`)
       : multiplierDrivesPay
-        ? `This month, your performance factor is <strong>${F}%</strong> — task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%). Your take-home pay above, after government and other deductions, is multiplied by this factor.`
-        : `Task-based pay is not switched on for the Office Team right now, so this does not change your pay yet — everyone is paid the full amount regardless of it. If it is switched on, here is where you currently stand: task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30%, for a performance factor of ${F}% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%).`;
+        ? (attKnown
+            ? `This month, your performance factor is <strong>${F}%</strong> — task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%). Your take-home pay above, after government and other deductions, is multiplied by this factor.`
+            : `This month, your performance factor is <strong>${F}%</strong> — task KPI ${K}% counted at 70%. Office attendance has been retired and no longer contributes to this factor. Your take-home pay above, after government and other deductions, is multiplied by this factor.`)
+        : (attKnown
+            ? `Task-based pay is not switched on for the Office Team right now, so this does not change your pay yet — everyone is paid the full amount regardless of it. If it is switched on, here is where you currently stand: task KPI ${K}% counted at 70%, plus attendance ${A}% counted at 30%, for a performance factor of ${F}% (${K}% × 0.70 + ${A}% × 0.30 = ${F}%).`
+            : `This pay model is not switched on for the Office Team right now, so this does not change your pay — everyone is paid the full amount regardless of it. Office attendance has been retired; only your task KPI (${K}%) is tracked going forward.`);
     return `
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h3>How your pay is worked out</h3></div>
         <div class="card-body" style="font-size:13px;line-height:1.6;color:var(--text)">
           <p style="margin:0 0 10px"><strong>No work, no pay.</strong> Your role on the Office Team is task-based, not a fixed 9-to-5 schedule — pay follows what you deliver, not hours spent at a desk.</p>
           <p style="margin:0 0 10px">${factorLine}</p>
-          <p style="margin:0 0 10px">Task KPI comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${myTasks.length} this month), plus any deliverable score your manager sets. Attendance comes from the Attendance screen — your on-time morning check-ins, counted as on time when you time in and read your notifications before 9:00 AM.</p>
-          <p style="margin:0 0 10px">Finishing your assigned tasks raises your task KPI. Timing in and reading your notifications before 9:00 AM raises your attendance score.</p>
+          <p style="margin:0 0 10px">Task KPI comes from the tasks assigned to you — how many are finished (${doneTasks.length} of ${myTasks.length} this month), plus any deliverable score your manager sets.${attKnown ? ' Attendance comes from the Attendance screen — your on-time morning check-ins, counted as on time when you time in and read your notifications before 9:00 AM.' : ' Office attendance has been retired and no longer affects pay.'}</p>
+          <p style="margin:0 0 10px">Finishing your assigned tasks raises your task KPI.${attKnown ? ' Timing in and reading your notifications before 9:00 AM raises your attendance score.' : ''}</p>
           <p style="margin:0">If you have questions about a specific month's pay, the Payroll Breakdown below shows the same figures and the same working Finance sees for you.</p>
           ${legalRow}
         </div>
@@ -2983,11 +2715,17 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="kpi-value" style="color:${kpiColor}">${taskPct}%</div>
         <div class="kpi-sub">${doneTasks.length}/${myTasks.length} done</div>
       </div>
+      ${dispAtt!=null ? `
       <div class="kpi-card accent">
         <div class="kpi-label">Attendance</div>
         <div class="kpi-value" style="color:${attColor}">${Math.round(dispAtt*100)}%</div>
         <div class="kpi-sub">${daysElapsed} days elapsed</div>
-      </div>
+      </div>` : isBasekpiLine ? `
+      <div class="kpi-card accent">
+        <div class="kpi-label">KPI Factor</div>
+        <div class="kpi-value" style="color:${kpiColor}">${Math.round(_bkKpiFactor*100)}%</div>
+        <div class="kpi-sub">drives your incentive</div>
+      </div>` : ''}
       <div class="kpi-card ${computedMonth==null?'':(computedMonth<net*0.9?'red':'green')}">
         <div class="kpi-label">${isFinalMonth?'Final — Disbursed':'Projected Full Month'}</div>
         <div class="kpi-value" style="font-size:14px">${computedMonth==null?'—':'₱'+formatNum(computedMonth)}</div>
@@ -3053,20 +2791,39 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="payslip-row"><span>Deductions</span><span style="color:var(--danger)">-₱${formatNum(u.deductions)}</span></div>
         <div class="payslip-row"><span>Net Pay (Full Month)</span><strong>₱${formatNum(net)}</strong></div>
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
+        ${isBasekpiLine ? `
+        <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${isFinalMonth?'KPI Incentive (final)':'KPI Incentive'}</div>
+        <div class="payslip-row">
+          <span>KPI Factor — ${taskPct}% task completion</span>
+          <span style="color:${kpiColor}">${Math.round(_bkKpiFactor*100)}%</span>
+        </div>
+        <div class="payslip-row">
+          <span>Incentive (full)</span>
+          <span>₱${formatNum(_bkIncentiveFull)}</span>
+        </div>
+        <div class="payslip-row" style="font-weight:700">
+          <span>Incentive earned at KPI ${Math.round(_bkKpiFactor*100)}%</span>
+          <span>₱${formatNum(_bkIncentiveEarned)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Attendance does not affect pay. Your base above is protected — paid in full regardless of KPI.</div>
+        ` : `
         <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${multiplierDrivesPay ? (isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier') : 'Performance Snapshot — informational, does not affect pay'}</div>
         <div class="payslip-row">
           <span>Task KPI${multiplierDrivesPay?' (70%)':''} — ${taskPct}% completion</span>
           <span style="color:${kpiColor}">${multiplierDrivesPay ? (dispKpi*0.7).toFixed(2)+'×' : Math.round(dispKpi*100)+'%'}</span>
         </div>
+        ${dispAtt!=null ? `
         <div class="payslip-row">
           <span>Attendance${multiplierDrivesPay?' (30%)':''} — ${Math.round(dispAtt*100)}% rate (${daysElapsed} days)</span>
           <span style="color:${attColor}">${multiplierDrivesPay ? (dispAtt*0.3).toFixed(2)+'×' : Math.round(dispAtt*100)+'%'}</span>
-        </div>
+        </div>` : (!isFinalMonth ? `
+        <div style="font-size:11px;color:var(--text-muted);margin:-2px 0 6px">Office attendance has been retired and no longer contributes here.</div>` : '')}
         ${multiplierDrivesPay ? `
         <div class="payslip-row" style="font-weight:700">
           <span>Combined Multiplier</span>
           <span>${multiplier.toFixed(2)}×</span>
         </div>` : ''}
+        `}
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
         ${projUnavailable ? `
         <div class="payslip-row"><span style="color:var(--text-muted)">The projection is unavailable right now — try again in a moment.</span></div>` : `
@@ -3532,14 +3289,26 @@ function _attRecScore(r) {
 }
 
 // getAttendanceScore(uid, month?) — payroll recall spec §A2. `month` is an
-// optional 'YYYY-MM'; every pre-existing caller passes only `uid` (this file
-// at :1375/:2015/:2165/:2709/:2872, js/screens/people.js:2557) and gets
+// optional 'YYYY-MM'; every pre-existing caller passes only `uid` and gets
 // BYTE-IDENTICAL current-month behavior via the `month || todayStr.slice(0,7)`
 // fallback below — this is the backward-compat contract the spec requires.
-// The new second arg lets computePayRun (departments.js) score a DELAYED
-// month's actual attendance instead of always scoring "today-to-date",
-// fixing the bug where recomputing June in August scored August's
-// attendance-to-date onto June's payroll.
+// The second arg lets computePayRun (departments.js) score a DELAYED month's
+// actual attendance instead of always scoring "today-to-date", fixing the bug
+// where recomputing June in August scored August's attendance-to-date onto
+// June's payroll.
+//
+// OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item5 — office attendance is retired (no
+// writer left); this function is KEPT ONLY for historic recomputes of
+// pre-retirement months (js/departments.js's payroll Compute, when it recalls
+// an old month under its own stored pre-'basekpi' policy) — it must not be
+// deleted. It is deliberately NO LONGER called from any live path in this
+// file: renderPersonalFinance's own live projection, the President's
+// "Personal Finance — Team" table, and renderWorkerProfileTab's Overview tab
+// all stopped calling it live (they read a FROZEN historic attScore off
+// salary_history when one exists, and show nothing for a still-running
+// month). openEmpStandingsModal (Progress Reports → per-employee Standings)
+// still calls it live below — that surface is outside this pass's scope and
+// was left untouched; flagged for a follow-up decision.
 async function getAttendanceScore(uid, month) {
   try {
     const todayStr = bizDate();                            // YYYY-MM-DD Manila
@@ -3808,8 +3577,14 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
   try {
     if (tabName === 'overview') {
       subtitle.textContent = 'Overview';
-      const [kpi, att, caSnap, userSnap, evalSnap] = await Promise.all([
-        getKpiScore(uid), getAttendanceScore(uid),
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item3 — the live getAttendanceScore
+      // read is removed (office attendance has no writer left); this
+      // reference "Earned So Far" figure is now KPI-only, matching the same
+      // fix applied to renderPersonalFinance's President "Team" table above
+      // (both are informational client-side estimates, never the real pay
+      // computation — see this panel's own "Payslip" button for the real one).
+      const [kpi, caSnap, userSnap, evalSnap] = await Promise.all([
+        getKpiScore(uid),
         db.collection('cash_advances').where('userId','==',uid).get().catch(()=>({docs:[]})),
         db.collection('users').doc(uid).get().catch(()=>null),
         db.collection('kpi_evals').doc(uid).get().catch(()=>null)
@@ -3818,15 +3593,14 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const evalD = evalSnap?.exists ? evalSnap.data() : {};
       const caBalance = caSnap.docs.map(d=>d.data()).filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
       const net = (preloaded.salary||0)+(preloaded.allowance||0)-(preloaded.deductions||0);
-      const mult = kpi*0.7+att*0.3;
+      const mult = kpi;
       const _bzS = bizDate();
       const bzSY = +_bzS.slice(0,4), bzSM = +_bzS.slice(5,7)-1, bzSD = +_bzS.slice(8,10);
       const daysElapsed = countWorkDays(bzSY, bzSM, bzSD);
       const daysInMonth = countWorkDays(bzSY, bzSM, new Date(bzSY,bzSM+1,0).getDate());
       const earnedSoFar = net*mult*(daysElapsed/daysInMonth);
-      const kpiPct = Math.round(kpi*100), attPct = Math.round(att*100);
+      const kpiPct = Math.round(kpi*100);
       const kpiColor = kpiPct>=80?'var(--success)':kpiPct>=50?'var(--warning)':'var(--danger)';
-      const attColor = attPct>=80?'var(--success)':attPct>=50?'var(--warning)':'var(--danger)';
       const dept = (Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):u.department)||'—';
       const role = u.role?(window.ROLES?.[u.role]?.label||u.role):'—';
       const monthLabel = new Date(bzSY, bzSM, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
@@ -3843,9 +3617,8 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
             </div>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
           <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">Task KPI</div><div style="font-size:24px;font-weight:800;color:${kpiColor}">${kpiPct}%</div><div style="font-size:10px;color:var(--text-muted)">${preloaded.mDone||0}/${preloaded.mTotal||0} done</div></div>
-          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">Attendance</div><div style="font-size:24px;font-weight:800;color:${attColor}">${attPct}%</div><div style="font-size:10px;color:var(--text-muted)">${daysElapsed} days</div></div>
           <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">CA Balance</div><div style="font-size:20px;font-weight:800;color:${caBalance>0?'var(--danger)':'var(--success)'}">₱${formatNum(caBalance)}</div><div style="font-size:10px;color:var(--text-muted)">${caBalance>0?'outstanding':'cleared'}</div></div>
         </div>
         <div style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px">

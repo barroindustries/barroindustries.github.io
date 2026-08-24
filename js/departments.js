@@ -2151,10 +2151,23 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
     // Firestore read count (that would need cross-employee batching — a
     // bigger redesign, flagged separately), but halves this line's own
     // per-employee latency.
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R8 — attendance is retired for the
+    // 'basekpi' policy: computePayLine's basekpi branch never reads attScore
+    // (§1.1 — "attScore NOT read here"), so the read that produces it is
+    // skipped entirely rather than fetched and discarded. Pass 0 straight
+    // through — it is inert for this branch, only present so the shared
+    // computePayLine signature stays uniform across policies. Every OTHER
+    // policy keeps calling getAttendanceScore exactly as before: historic
+    // recomputes of pre-retirement months under 'flat'/'performance'/
+    // 'taskbased' still need it, reading the preserved attendance records
+    // (§2 — "historic records are PRESERVED... retirement removes writers,
+    // reminders, and score consumption — not history").
     const [attScore, planResult] = await Promise.all([
-      // §A2 — month-scoped attendance (same "recomputing an old month scored
-      // today's attendance" bug, now fixed the same way as KPI above).
-      window.getAttendanceScore ? window.getAttendanceScore(emp.id, month) : Promise.resolve(1),
+      runPolicy === 'basekpi'
+        ? Promise.resolve(0)
+        // §A2 — month-scoped attendance (same "recomputing an old month scored
+        // today's attendance" bug, now fixed the same way as KPI above).
+        : (window.getAttendanceScore ? window.getAttendanceScore(emp.id, month) : Promise.resolve(1)),
       window.CashAdvance ? window.CashAdvance.planFor(emp.id, month) : Promise.resolve({ plan: [] })
     ]);
     // §C3 — per-line overrides. Real month-scoped kpiScore/attScore are
@@ -2438,6 +2451,18 @@ window.disbursePayRun = async function(month, opts = {}) {
       // source line for 'flat'/'performance', §2.4), so payBasisSentence's
       // "no `preMultiplierNet`" fallback branch renders correctly for those.
       preMultiplierNet: line.preMultiplierNet ?? null,
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — mirror the 'basekpi' line's
+      // three conditional keys onto the employee-readable payslip record,
+      // same ?? null convention as preMultiplierNet above. Without these the
+      // employee's payslip for a disbursed basekpi month printed "Incentive
+      // earned: ₱0.00" against the real net (gross − deductions ≠ net by
+      // exactly the incentive) — the same mirror-gap class as the one-off
+      // fields documented a few lines up. Caught in adversarial verify
+      // before first flip; ?? null keeps every other policy's mirror
+      // byte-identical to before.
+      kpiFactor: line.kpiFactor ?? null,
+      incentiveFull: line.incentiveFull ?? null,
+      incentiveEarned: line.incentiveEarned ?? null,
       policy: line.policy, runMonth: month,
       caDeducted: line.caPlanned, netPay: line.netBeforeCA, finalPay: line.finalPay,
       // v12 WS39 — mirror the frozen statutory IDs so a historical salary_history

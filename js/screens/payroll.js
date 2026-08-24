@@ -190,6 +190,10 @@ function _pyRead(l) {
   const oneOffNet = oneOffs.length
     ? oneOffs.reduce((a, o) => a + ((o && o.kind === 'deduction') ? -(+o.amount || 0) : (+o.amount || 0)), 0)
     : null;
+  // Resolved ahead of the return shape below (rather than inline, as it used
+  // to be) because OFFICE-KPI-PAY-SPEC-2026-08-25 needs to know the policy
+  // BEFORE deciding what to do with attScore, just below.
+  const policy = (l.detail && l.detail.policy) || l.policy || 'flat';
   return {
     id:   _pyId(l),
     name: _pyName(l) || _pyId(l) || 'Unnamed person',
@@ -272,14 +276,35 @@ function _pyRead(l) {
     // "Where did the number come from" (§6.4) — Office Team only; these are
     // already frozen onto the line by computePayLine, never recomputed here.
     kpiScore:   _pyPick(l.detail && l.detail.kpiScore, l.kpiScore),
-    attScore:   _pyPick(l.detail && l.detail.attendanceScore, l.attScore),
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 — nulled (not just left at 0) under
+    // 'basekpi'. buildPayRunLines' R8 feeds computePayLine an unread attScore:
+    // 0 sentinel purely so the shared function signature stays uniform across
+    // policies (money-core.js's basekpi branch never reads it) — showing that
+    // sentinel as a live "Attendance" chip/column would read as a real (and
+    // alarming) 0% score against a system nobody writes to anymore, which is
+    // exactly the false alarm this spec retires. Every downstream reader
+    // (_pyColsFor's column detection, the "days present" decomposition in
+    // paint(), _pyFieldHtml's attScore branch) already treats null as "no
+    // score on this line" — same as an Operations line — so nulling here is
+    // the one place this needs deciding. Months frozen under an OLDER policy
+    // ('flat'/'performance'/'taskbased') are untouched: their real attScore
+    // renders exactly as it did before this spec.
+    attScore:   policy === 'basekpi' ? null : _pyPick(l.detail && l.detail.attendanceScore, l.attScore),
     // PAYROLL-ROSTER-ACCRUAL-2026-08-13 — item 2, "KPI with its working
     // shown". Frozen by js/departments.js's buildPayRunLines (additive; never
     // read by any money computation). Absent on a period prepared before this
     // change — the KPI column degrades to the plain percentage it always was.
     kpiBreakdown: (l.kpiBreakdown && typeof l.kpiBreakdown === 'object') ? l.kpiBreakdown : null,
-    policy:     (l.detail && l.detail.policy) || l.policy || 'flat',
+    policy,
     perfFactor: _pyPick(l.perfFactor, l.detail && l.detail.perfFactor),
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1/§3 — the base+incentive figures,
+    // conditional on the source line exactly like preMultiplierNet above
+    // (present on the raw computePayLine line at the top level under
+    // 'basekpi', relocated to detail.* by PC.normalizeLine). kpiFactor is the
+    // ONLY factor a 'basekpi' line ever shows — never perfFactor (§1.1).
+    kpiFactor:       _pyPick(l.kpiFactor, l.detail && l.detail.kpiFactor),
+    incentiveFull:   _pyPick(l.incentiveFull, l.detail && l.detail.incentiveFull),
+    incentiveEarned: _pyPick(l.incentiveEarned, l.detail && l.detail.incentiveEarned),
     // STATUTORY-BY-STATUS-SPEC-2026-08-12 — passed through from the
     // normalised line untouched; nothing here is recomputed.
     employmentStatus: (l.detail && l.detail.employmentStatus) || l.employmentStatus || '',
@@ -981,8 +1006,19 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       // not yet done". Do NOT restore the old "shows in full" wording — the
       // take-home column below is now the ACCRUED figure (window.
       // accruedTakeHomeSoFar, js/pay-policy.js), not the projected full month.
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §1/§2 — a basekpi month has no
+      // attendance term at all ("Attendance appears NOWHERE", §1), so telling
+      // people it is "measured up to today" here would be false — the same
+      // false-alarm class as a live 0%-attendance chip, just in prose instead
+      // of a column. `reads` (from _pyRead) already carries the resolved
+      // policy per line; a month period is one policy for every line (§6.2's
+      // precedence chain resolves ONE runPolicy for the whole build), so the
+      // first line's policy stands for the period.
+      const isBaseKpiMonth = liveOpts.kind !== 'week' && reads.some(r => r.policy === 'basekpi');
       const officeSub = (liveOpts.kind !== 'week')
-        ? `<div class="py-sub" style="margin-top:6px">Take-home builds up day by day as the month goes — it is not the full month's pay yet. Attendance and KPI are measured up to today.</div>`
+        ? (isBaseKpiMonth
+            ? `<div class="py-sub" style="margin-top:6px">Take-home builds up day by day as the month goes — it is not the full month's pay yet. KPI is measured up to today; attendance no longer affects Office pay.</div>`
+            : `<div class="py-sub" style="margin-top:6px">Take-home builds up day by day as the month goes — it is not the full month's pay yet. Attendance and KPI are measured up to today.</div>`)
         : '';
       el.innerHTML = `<div class="card py-live-banner" style="margin-bottom:14px"><div class="card-body">
           <div class="py-headline">${_pyEsc(label)} is still going — figures so far, as of ${_pyEsc(asOf)}.</div>
@@ -1728,7 +1764,17 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       earnings: r.earnings, allowances: r.allowances, oneOffNet: r.oneOffNet,
       statutoryTotal: r.statutory, otherDeductions: r.otherDed,
       policy: r.policy, perfFactor: r.perfFactor, cashAdvance: r.cashAdv,
-      overridden: r.overridden, overrideNote: r.overrideNote, takeHome: r.takeHome
+      overridden: r.overridden, overrideNote: r.overrideNote, takeHome: r.takeHome,
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §1/§3 — payDerivationSteps' 'basekpi'
+      // branch (js/pay-policy.js) uses a DIFFERENT step shape (base in full,
+      // then the incentive already scaled by kpiFactor, per money-core.js's
+      // basekpi arm) and reads these four fields instead of earnings/
+      // allowances/perfFactor above. Harmless no-ops for every other policy —
+      // that branch never looks at them. r.earnings IS the base salary for an
+      // office line (see _pyRead's `earnings` mapping), so no new figure is
+      // introduced here, only passed through.
+      base: r.earnings, kpiFactor: r.kpiFactor,
+      incentiveFull: r.incentiveFull, incentiveEarned: r.incentiveEarned
     });
     const rows = d.steps.map(s => {
       if (s.sign === '×') {
@@ -1782,13 +1828,37 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     // task-based line — the same field-name drift documented on _pyRead
     // above, hitting a second call site. Built from r's already-resolved
     // fields instead, which read correctly regardless of shape.
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — 'basekpi' renders through this
+    // SAME sentence (payBasisSentence gains the case there; never hand-roll a
+    // second one here). base/allowance/incentiveFull/incentiveEarned/
+    // kpiFactor added to the object alongside the existing taskbased fields —
+    // ignored by whichever branch doesn't need them.
     const taskBasedLine = (typeof window.payBasisSentence === 'function' && (() => {
       const s = window.payBasisSentence({
         policy: r.policy, perfFactor: r.perfFactor, kpiScore: r.kpiScore, attScore: r.attScore,
-        preMultiplierNet: r.preMultiplierNet, netBeforeCA: r.netBeforeCA
+        preMultiplierNet: r.preMultiplierNet, netBeforeCA: r.netBeforeCA,
+        // r.earnings, not r.monthlySalary — r.monthlySalary reads l.base/
+        // l.salary, neither of which exists at the top level of a normalised
+        // row (PC.normalizeLine only ever produces `.earnings` there; see
+        // _pyRead's own `earnings` mapping just above in this file), so it is
+        // always undefined for an office line and would render "₱0.00 base".
+        base: r.earnings, allowance: r.allowances,
+        kpiFactor: r.kpiFactor, incentiveFull: r.incentiveFull, incentiveEarned: r.incentiveEarned
       });
       return s ? `<div class="py-oneoff">${_pyEsc(s)}</div>` : '';
     })()) || '';
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §3 — "the unified payroll screen's
+    // per-person 'where the number came from' ledger gains the two rows:
+    // 'Incentive (full)' and 'Incentive earned at KPI x%'." payBasisSentence
+    // above narrates the incentive and the multiplication in prose but never
+    // states the earned peso figure as its own number — these two explicit
+    // rows are that number, plus the full figure it was multiplied against,
+    // matching js/payroll.js's PC.breakdownOf (same labels, same source
+    // fields, so the two surfaces can never disagree).
+    const basekpiLine = (r.policy === 'basekpi')
+      ? `<div class="py-oneoff">Incentive (full): ${_pyEsc(_pyPeso(r.incentiveFull))}</div>
+         <div class="py-oneoff">Incentive earned at KPI ${r.kpiFactor != null ? Math.round(r.kpiFactor * 100) : '—'}%: ${_pyEsc(_pyPeso(r.incentiveEarned))}</div>`
+      : '';
     // "Pay records are kept in HR" (§6.5) — permanently visible text, never
     // behind a tap, plus the one door out. Read-only here on purpose: the
     // payroll screen writes only period-scoped inputs, never standing pay.
@@ -1816,6 +1886,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
       ${oneOffLines}
       ${perfLine}
       ${taskBasedLine}
+      ${basekpiLine}
       ${statusLine}
       ${hrLine}
       ${acts.length ? `<div class="py-rowacts">${acts.join('')}</div>` : ''}

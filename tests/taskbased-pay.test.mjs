@@ -206,12 +206,15 @@ describe('window.payBasisSentence — js/pay-policy.js §9.1', () => {
 });
 
 describe('window.PAY_POLICY_VALUES — the §6.1 whitelist', () => {
-  it('is exactly the three known policy strings', () => {
+  it('is exactly the four known policy strings', () => {
     // 'performance' joined the list 2026-08-14 for the base-and-incentive
     // split — it is the only branch that scales an incentive while leaving
-    // the base wage whole. Pinned so a fourth value cannot appear without
-    // someone deciding to add it here.
-    assert.deepEqual(PAY_POLICY_VALUES, ['flat', 'taskbased', 'performance']);
+    // the base wage whole. 'basekpi' joined 2026-08-25 per
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 (10k base + KPI incentive; this
+    // pin updated knowingly with the widening, as this comment demands).
+    // Pinned so a fifth value cannot appear without someone deciding to
+    // add it here.
+    assert.deepEqual(PAY_POLICY_VALUES, ['flat', 'taskbased', 'performance', 'basekpi']);
   });
 
   it("'performance' scales ONLY the incentive — the base wage is never docked", () => {

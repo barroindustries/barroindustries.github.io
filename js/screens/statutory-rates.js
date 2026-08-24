@@ -432,19 +432,27 @@ window.renderStatutoryStatusSection = async function (container, canWrite, curre
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
-   TASK-BASED-PAY-SPEC-2026-08-12 §7 — Office Team task-based pay: the
+   TASK-BASED-PAY-SPEC-2026-08-12 §7 — Office Team pay method: the
    explanation, the minimum-wage floor, the two-build preview, and the
-   President-gated switch.
+   President-gated picker.
 
-   The owner's formula (§0/§2): net × (0.7·task results + 0.3·on-time morning
-   check-ins). Nothing here writes payroll directly — the only writes in this
-   whole section are settings/payrollOfficePolicy (the switch) and
+   OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — the picker now offers exactly two
+   choices going forward: 'flat' and 'basekpi' (₱10,000 base paid in full,
+   the remainder multiplied by the month's KPI score alone — attendance is
+   NOT read by this branch, see money-core.js's 'basekpi' arm). 'taskbased'
+   (net × 0.7·KPI + 0.3·on-time check-ins) is SUPERSEDED as of 2026-08-25 —
+   it stays in window.PAY_POLICY_VALUES (never remove a value a stored
+   settings doc might hold) and is shown honestly if that is what is
+   currently stored, but it is not offered for new activation.
+
+   Nothing here writes payroll directly — the only writes in this whole
+   section are settings/payrollOfficePolicy (the picker) and
    settings/payrollWageFloor (the floor), both already President-write /
    staff-read under the existing settings/{docId} rule (zero rules changes).
    Every peso below is built through window.buildPayRunLines with an EXPLICIT
    policy argument — which bypasses the settings rung (§6.2) — so this is a
-   preview regardless of the stored switch value, and it can never show a
-   number the real engine wouldn't (never a second copy of the math).
+   preview regardless of the stored value, and it can never show a number
+   the real engine wouldn't (never a second copy of the math).
    ═══════════════════════════════════════════════════════════════════════ */
 window.renderTaskBasedPaySection = async function (container, currentUser, currentRole) {
   if (!container) return;
@@ -474,7 +482,15 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
   // flag rather than silently treated as either state).
   const storedPolicy = switchDoc && switchDoc.policy;
   const policyUnknown = storedPolicy != null && window.PAY_POLICY_VALUES && window.PAY_POLICY_VALUES.indexOf(storedPolicy) === -1;
-  const switchOn = storedPolicy === 'taskbased';
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — three display states now, not a
+  // binary switch: the two policies the picker actually offers going
+  // forward (isFlat/isBaseKpi), plus the superseded 'taskbased' value shown
+  // honestly if that is what is stored (isSuperseded) — never crash on it,
+  // never offer it as a fresh choice.
+  const isBaseKpi = storedPolicy === 'basekpi';
+  const isSuperseded = storedPolicy === 'taskbased';
+  const isFlat = !isBaseKpi && !isSuperseded;
+  const activePolicyLabel = isBaseKpi ? 'Base + KPI incentive' : (isSuperseded ? 'Task-based (superseded)' : 'Flat');
 
   // ── the minimum-wage floor (§8.2) ───────────────────────────────────────
   let floorDoc = null, floorReadFailed = false;
@@ -491,9 +507,15 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
   let rows = [], previewFailed = false;
   if (typeof window.buildPayRunLines === 'function') {
     try {
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — the preview is always Flat vs.
+      // Base + KPI incentive, the two choices the picker actually offers,
+      // regardless of which policy is currently stored (same as before,
+      // when this always previewed Flat vs. Task-based regardless of switch
+      // state) — never a second copy of who's on payroll or how their KPI
+      // is worked out.
       const [nowBuilt, nextBuilt] = await Promise.all([
         window.buildPayRunLines(month, { policy: 'flat' }),
-        window.buildPayRunLines(month, { policy: 'taskbased' })
+        window.buildPayRunLines(month, { policy: 'basekpi' })
       ]);
       const nextByUid = {};
       (nextBuilt.lines || []).forEach(l => { nextByUid[l.uid] = l; });
@@ -504,7 +526,9 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
         return {
           uid: l.uid, name: l.name,
           nowPay: l.finalPay, nextPay: n.finalPay,
-          perfFactor: n.perfFactor, kpiScore: n.kpiScore, attScore: n.attScore,
+          // basekpi-only fields (§1.1) — attendance is never part of this
+          // branch's math, so it is never read here either.
+          kpiFactor: n.kpiFactor, incentiveFull: n.incentiveFull, incentiveEarned: n.incentiveEarned,
           below: chk.checked && !chk.ok
         };
       });
@@ -519,9 +543,14 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
   const year = (window.bizYear ? window.bizYear() : new Date().getFullYear());
   const tableVerified = ((window.STATUTORY && window.STATUTORY[String(year)]) || {}).verified === true;
 
-  const stateLine = switchOn
-    ? `<div class="py-sub" style="margin:6px 0 10px">On since ${esc(switchDoc.changedAtLabel || '—')} — turned on by ${esc(switchDoc.changedByName || '—')}.</div>`
-    : `<div class="py-sub" style="margin:6px 0 10px">Off — nothing below has changed anyone's pay yet.</div>`;
+  const stateLine = isBaseKpi
+    ? `<div class="py-sub" style="margin:6px 0 10px">Base + KPI incentive is on, since ${esc(switchDoc.changedAtLabel || '—')} — turned on by ${esc(switchDoc.changedByName || '—')}.</div>`
+    : isSuperseded
+      ? `<div class="py-sub" style="margin:6px 0 10px">Still on the superseded Task-based policy, since ${esc(switchDoc.changedAtLabel || '—')} — turned on by ${esc(switchDoc.changedByName || '—')}. Switch to Base + KPI incentive below.</div>`
+      : `<div class="py-sub" style="margin:6px 0 10px">Flat — nothing below has changed anyone's pay yet.</div>`;
+  const supersededBannerHtml = isSuperseded
+    ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} Office pay is currently set to Task-based pay, which is superseded (2026-08-25) — switch to Base + KPI incentive below.</span></div>`
+    : '';
 
   const floorCardHtml = `
     <div class="card" style="margin-bottom:12px">
@@ -555,26 +584,31 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
         <div class="py-problem">
           <div class="py-ptext"><strong>${esc(r.name)}</strong> — Pay now ${esc(peso(r.nowPay))} → ${esc(peso(r.nextPay))}
             ${r.below ? `<span class="badge badge-red" style="font-size:10px">Below the saved minimum wage</span>` : ''}<br/>
-            <span style="color:var(--text-muted)">${Math.round((r.perfFactor || 0) * 100)}% — task results ${Math.round((r.kpiScore || 0) * 100)}%, on-time check-ins ${Math.round((r.attScore || 0) * 100)}%</span>
+            <span style="color:var(--text-muted)">KPI ${Math.round((r.kpiFactor || 0) * 100)}% — under Base + KPI incentive: incentive ${esc(peso(r.incentiveEarned))} of ${esc(peso(r.incentiveFull))} possible</span>
           </div>
         </div>`).join(''));
 
   // Disabled on EITHER failure — a switch read failure means we do not
-  // actually know today's state (switchOn above would be a guess), and a
-  // preview failure means the confirm dialog would restate numbers nobody
-  // can trust. Never let the President flip a switch this screen can't
-  // honestly describe right now.
-  const toggleDisabled = previewFailed || switchReadFailed;
-  const toggleBtnHtml = canWrite
-    ? `<button class="btn-primary btn-sm" id="sr-tb-toggle"${toggleDisabled ? ' disabled' : ''}>${switchOn ? 'Go back to fixed pay' : 'Use task-based pay'}</button>${toggleDisabled ? '<p style="font-size:11px;color:var(--text-muted);margin-top:4px">Reload before using this — what is shown above may not be accurate right now.</p>' : ''}`
-    : `<span class="badge ${switchOn ? 'badge-green' : 'badge-gray'}" style="font-size:11px">${switchOn ? 'On' : 'Off'}</span>
-       <p style="font-size:11px;color:var(--text-muted);margin-top:4px">${ico('🔒', 12)} Only the President can turn this on or off.</p>`;
+  // actually know today's state (isBaseKpi/isSuperseded/isFlat above would
+  // be a guess), and a preview failure means the confirm dialog would
+  // restate numbers nobody can trust. Never let the President change the
+  // pay method this screen can't honestly describe right now.
+  const pickersDisabled = previewFailed || switchReadFailed;
+  const pickerHtml = canWrite
+    ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+         <button class="btn-${isFlat ? 'primary' : 'secondary'} btn-sm" id="sr-tb-pick-flat"${pickersDisabled || isFlat ? ' disabled' : ''}>Flat — full package regardless of performance</button>
+         <button class="btn-${isBaseKpi ? 'primary' : 'secondary'} btn-sm" id="sr-tb-pick-basekpi"${pickersDisabled || isBaseKpi ? ' disabled' : ''}>Base + KPI incentive — ₱ base paid in full, the rest multiplied by the month's KPI</button>
+       </div>
+       ${pickersDisabled ? '<p style="font-size:11px;color:var(--text-muted);margin-top:4px">Reload before using this — what is shown above may not be accurate right now.</p>' : ''}`
+    : `<span class="badge ${isBaseKpi ? 'badge-green' : (isSuperseded ? 'badge-red' : 'badge-gray')}" style="font-size:11px">${esc(activePolicyLabel)}</span>
+       <p style="font-size:11px;color:var(--text-muted);margin-top:4px">${ico('🔒', 12)} Only the President can change this.</p>`;
 
   container.innerHTML = `
     <div class="card" style="margin-bottom:12px">
-      <div class="card-header"><h3>Task-based pay — Office Team</h3></div>
-      <p style="font-size:13px;line-height:1.5">When this is on, an office person's monthly pay follows their results: take-home pay is worked out as usual (salary plus allowance, minus government deductions and other deductions), then multiplied by a percentage — 70% from task results and 30% from on-time morning check-ins. A check-in counts as on time when the person has timed in and read every notification before 9:00 AM. Government deductions are never reduced — they stay at the full amounts and are paid to the agencies in full. The Operations Team is not affected: their pay follows geo-tracked clock-ins and hours only.</p>
-      ${switchReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} Could not read the pay method setting — what's shown below may not reflect whether task-based pay is actually on or off right now. Reload before deciding anything from this.</span></div>` : ''}
+      <div class="card-header"><h3>Office pay method</h3></div>
+      <p style="font-size:13px;line-height:1.5">Two ways to pay the Office Team. <strong>Flat</strong> pays each person's full package every month regardless of performance. <strong>Base + KPI incentive</strong> protects a ₱10,000 base — paid in full, never reduced — and multiplies only the remainder of the package by that month's KPI score (70% task results, 30% deliverables). Government deductions are never reduced under either method — they stay at the full amounts and are paid to the agencies in full. Attendance does not affect office pay. The Operations Team is not affected: their pay follows geo-tracked clock-ins and hours only.</p>
+      ${supersededBannerHtml}
+      ${switchReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} Could not read the pay method setting — what's shown below may not reflect what's actually on right now. Reload before deciding anything from this.</span></div>` : ''}
       ${policyUnknown ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} The pay method setting holds a value the app does not know ("${esc(storedPolicy)}") — fix it here before relying on this report.</span></div>` : ''}
       ${stateLine}
       ${!tableVerified ? `<p style="font-size:11px;color:var(--text-muted);margin-top:4px">${ico('⚠', 12)} Amounts use this year's placeholder rates, which are not confirmed yet — see the rates form above.</p>` : ''}
@@ -583,7 +617,7 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
     ${floorCardHtml}
 
     <div class="card" style="margin-bottom:12px">
-      <div class="card-header"><h3>Pay for ${esc(monthLabel)} — now vs. task-based</h3></div>
+      <div class="card-header"><h3>Pay for ${esc(monthLabel)} — Flat vs. Base + KPI incentive</h3></div>
       <div class="card-body" style="padding-top:0">
         ${floorMonthly == null && !previewFailed ? `<div class="py-sub" style="margin-bottom:8px">No minimum wage amount is saved yet — the figures above are not being checked against one.</div>` : ''}
         ${totalsHtml}
@@ -592,10 +626,10 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
     </div>
 
     <div class="card" style="margin-bottom:12px">
-      <div class="card-header"><h3>Switch</h3></div>
+      <div class="card-header"><h3>Pay method</h3></div>
       <div class="card-body" style="padding-top:0">
-        ${toggleBtnHtml}
-        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Weighting is 70% task results, 30% on-time check-ins — the owner's decision, 2026-08-12. A person who finishes every task but checks in late loses up to about 15% of the month's pay.</p>
+        ${pickerHtml}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Base + KPI incentive: KPI is 70% task results, 30% deliverables score. The ₱10,000 base is never at risk — only the incentive above it moves with KPI, and attendance never affects it.</p>
       </div>
     </div>
   `;
@@ -628,31 +662,36 @@ window.renderTaskBasedPaySection = async function (container, currentUser, curre
       }));
     }
 
-    const toggleBtn = container.querySelector('#sr-tb-toggle');
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', () => window.busy(toggleBtn, async () => {
-        const turningOn = !switchOn;
-        const nextPolicy = turningOn ? 'taskbased' : 'flat';
-        const msg = turningOn
-          ? `Office pay for ${monthLabel} would go from ${peso(totalNow)} to ${peso(totalNext)} for ${rows.length} people. This takes effect the next time a month's figures are worked out — months already paid are not touched. Turn it on?`
-          : `Office pay for ${monthLabel} would go from ${peso(totalNext)} back to ${peso(totalNow)} for ${rows.length} people. This takes effect the next time a month's figures are worked out — months already paid are not touched. Turn it off?`;
-        if (!(await window.confirmDialog({ message: msg, confirmLabel: turningOn ? 'Use task-based pay' : 'Go back to fixed pay', cancelLabel: 'Cancel' }))) return;
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — two picker buttons, not one
+    // toggle: from Flat you can only go to Base + KPI incentive, from Base +
+    // KPI incentive you can only go back to Flat, and from the superseded
+    // Task-based value (isSuperseded) either button is offered — there is no
+    // path that writes 'taskbased' again.
+    const bindPolicyPick = (id, targetPolicy, targetLabel) => {
+      const btn = container.querySelector(id);
+      if (!btn) return;
+      btn.addEventListener('click', () => window.busy(btn, async () => {
+        const toPay = targetPolicy === 'basekpi' ? totalNext : totalNow;
+        const msg = `Office pay for ${monthLabel} would be worked out as ${targetLabel} the next time a month's figures are run — ${peso(toPay)} for ${rows.length} people on today's figures. This takes effect the next time a month's figures are worked out — months already paid are not touched. Switch to ${targetLabel}?`;
+        if (!(await window.confirmDialog({ message: msg, confirmLabel: `Use ${targetLabel}`, cancelLabel: 'Cancel' }))) return;
         try {
           await db.collection('settings').doc('payrollOfficePolicy').set({
-            policy: nextPolicy,
+            policy: targetPolicy,
             changedBy: (currentUser && currentUser.uid) || '',
             changedByName: (window.userProfile && window.userProfile.displayName) || '',
             changedAtLabel: (window.bizDate ? window.bizDate() : ''),
             changedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
-          window.logAudit && window.logAudit('update', 'settings', 'payrollOfficePolicy', { policy: nextPolicy });
-          Notifs.success(turningOn ? 'Task-based pay is on for the Office Team.' : 'Office Team pay is back to fixed.');
+          window.logAudit && window.logAudit('update', 'settings', 'payrollOfficePolicy', { policy: targetPolicy });
+          Notifs.success(`Office pay switched to ${targetLabel}.`);
           window.renderTaskBasedPaySection(container, currentUser, currentRole);
         } catch (e) {
           Notifs.showToast('Could not save: ' + (e.message || e.code || e), 'error');
         }
       }));
-    }
+    };
+    bindPolicyPick('#sr-tb-pick-flat', 'flat', 'Flat');
+    bindPolicyPick('#sr-tb-pick-basekpi', 'basekpi', 'Base + KPI incentive');
   }
 };
 
@@ -920,15 +959,24 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
   if (!container.isConnected) return;
   const floorMonthly = (floorDoc && Number(floorDoc.monthlyFloor) > 0) ? Number(floorDoc.monthlyFloor) : null;
 
-  // Is the incentive actually being paid on performance right now? Read the
-  // SAME settings doc buildPayRunLines reads, so this section can never claim
-  // a state the pay run disagrees with. A failed read is reported as unknown
+  // Is the incentive actually being paid on KPI right now? Read the SAME
+  // settings doc buildPayRunLines reads, so this section can never claim a
+  // state the pay run disagrees with. A failed read is reported as unknown
   // rather than assumed off — telling somebody the incentive is not scaling
   // when it is would be the worse of the two errors.
-  let splitPolicyOn = false, policyReadFailed = false;
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 — 'basekpi' is the live scaling policy
+  // going forward (base paid in full, remainder × KPI, attendance never
+  // read). 'performance' (KPI 70% / attendance 30%, OFFICE-SPLIT-SPEC
+  // 2026-08-14) is kept recognised as the HISTORIC on-state, since a stored
+  // settings doc can still hold it — shown honestly below with its own
+  // "switch to Base + KPI incentive" affordance rather than silently folded
+  // into either "on" or "off".
+  let splitPolicyOn = false, splitPolicyLegacy = false, policyReadFailed = false;
   try {
     const pd = await db.collection('settings').doc('payrollOfficePolicy').get();
-    splitPolicyOn = !!(pd.exists && pd.data() && pd.data().policy === 'performance');
+    const p = (pd.exists && pd.data()) ? pd.data().policy : null;
+    splitPolicyOn = p === 'basekpi';
+    splitPolicyLegacy = p === 'performance';
   } catch (_) { policyReadFailed = true; }
   if (!container.isConnected) return;
 
@@ -954,10 +1002,15 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
 
   const alreadySplit = officeRaw.filter(u => u.officeSplit && u.officeSplit.active === true);
 
-  // ── pure preview math — kpiScore/attScore/caPlan/caBalance are ALREADY
-  // resolved for real by the 'flat' build above; only the base/incentive
-  // split and the 'performance' call are done here, per person, per the
-  // currently-typed base amount. Never touches Firestore. ─────────────────
+  // ── pure preview math — kpiScore/caPlan/caBalance are ALREADY resolved
+  // for real by the 'flat' build above; only the base/incentive split and
+  // the 'basekpi' call are done here, per person, per the currently-typed
+  // base amount. Never touches Firestore.
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 — the preview policy is 'basekpi', not
+  // 'performance': base paid in full, remainder × this month's KPI alone,
+  // attendance never read by that branch (money-core.js §1.1). Keeping this
+  // preview on the old 'performance' policy would silently blend attendance
+  // back into a number this section's own copy now says is KPI-only. ───────
   function computeRows(baseAmount) {
     const rows = [], noSalary = [];
     officeRaw.forEach((u) => {
@@ -981,11 +1034,11 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
       let proposedLine;
       try {
         proposedLine = window.computePayLine(synth, {
-          month, policy: 'performance',
+          month, policy: 'basekpi',
           kpiScore: flatLine.kpiScore, attScore: flatLine.attScore,
           caPlan: flatLine.caPlan, caBalance: flatLine.caBalance
         });
-      } catch (_) { return; } // 'performance' never throws for a non-production person — defensive only
+      } catch (_) { return; } // 'basekpi' never throws for a non-production person — defensive only
 
       const floorChk = window.wageFloorCheck
         ? window.wageFloorCheck({ effectiveGross: proposedBase }, floorMonthly)
@@ -994,7 +1047,8 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
       rows.push({
         uid: u.id, name: flatLine.name || u.displayName || u.email || u.id,
         package: pkg, proposedBase, proposedIncentive,
-        kpiScore: flatLine.kpiScore, attScore: flatLine.attScore, perfFactor: proposedLine.perfFactor,
+        kpiScore: flatLine.kpiScore, kpiFactor: proposedLine.kpiFactor,
+        incentiveFull: proposedLine.incentiveFull, incentiveEarned: proposedLine.incentiveEarned,
         nowPay: flatLine.finalPay, proposedPay: proposedLine.finalPay,
         belowFloor: floorChk.checked && !floorChk.ok,
         alreadySplit: !!(u.officeSplit && u.officeSplit.active === true)
@@ -1007,7 +1061,7 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
   const stateHtml = `
     <div class="card" style="margin-bottom:12px">
       <div class="card-header"><h3>Base and incentive — Office Team</h3></div>
-      <p style="font-size:13px;line-height:1.5">Splits each Office Team person's pay into a protected base and a performance-linked incentive. The base is never reduced for performance — it is a wage, the same as today. The incentive is the rest of their current package; it is only scaled by KPI and attendance once performance-based pay is separately turned on. Nobody's total package changes by applying this. The Operations Team is not shown here — their pay follows geo-tracked hours only, with no KPI to link an incentive to.</p>
+      <p style="font-size:13px;line-height:1.5">Splits each Office Team person's pay into a protected base and a KPI-linked incentive. The base is never reduced for performance — it is a wage, the same as today. The incentive is the rest of their current package; it is only scaled by this month's KPI score once Base + KPI incentive pay is separately turned on. Attendance does not affect pay. Nobody's total package changes by applying this. The Operations Team is not shown here — their pay follows geo-tracked hours only, with no KPI to link an incentive to.</p>
       ${hardFail ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} ${payrollDenied ? 'Office pay figures: not shown to you.' : 'This month’s figures could not be read right now.'} Reload before deciding anything from this.</span></div>` : ''}
       ${statusReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} Could not read the employment-status payroll setting — the figures below may not reflect it. Reload before relying on this.</span></div>` : ''}
       ${floorReadFailed ? `<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${ico('⚠', 16)} The saved minimum wage could not be read — the floor check below may be out of date.</span></div>` : ''}
@@ -1033,7 +1087,7 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
     <div class="card" style="margin-bottom:12px">
       <div class="card-header"><h3>Apply</h3></div>
       <div class="card-body" style="padding-top:0">
-        <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Writes each person's protected base and incentive to their pay record. Their total package stays the same today — this only changes which part is at risk once performance-based pay is turned on. Each person is applied one at a time; if one fails, the rest are still applied and the failure is named below, nothing is left half-done.</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Writes each person's protected base and incentive to their pay record. Their total package stays the same today — this only changes which part is at risk once Base + KPI incentive pay is turned on. Each person is applied one at a time; if one fails, the rest are still applied and the failure is named below, nothing is left half-done.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn-primary btn-sm" id="os-apply">${ico('✅', 14)} Apply the split</button>
           ${alreadySplit.length ? `<button class="btn-secondary btn-sm" id="os-undo" style="color:var(--danger)">${ico('↩️', 14)} Undo (${alreadySplit.length})</button>` : ''}
@@ -1041,18 +1095,20 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
         ${/* THE SECOND, SEPARATE ACTION. Applying the split moves nothing on
              its own — under 'flat' a base of 10,000 plus an incentive of
              4,500 pays exactly what 14,500 paid. This is the switch that
-             makes the incentive actually scale with KPI and attendance, and
-             it is deliberately its own decision with its own confirmation,
-             the same shape as the task-based switch above. */''}
+             makes the incentive actually scale with KPI (attendance never
+             affects it, OFFICE-KPI-PAY-SPEC-2026-08-25), and it is
+             deliberately its own decision with its own confirmation, the
+             same shape as the pay-method picker above. */''}
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-          <div style="font-size:12px;font-weight:700;margin-bottom:4px">Pay the incentive on performance</div>
+          <div style="font-size:12px;font-weight:700;margin-bottom:4px">Pay the incentive on KPI</div>
+          ${splitPolicyLegacy ? `<div class="alert-banner" style="cursor:default;margin-bottom:8px"><span>${ico('⚠', 16)} Still on the superseded 'performance' policy — the incentive is scaling by KPI 70% / attendance 30% the old way. Switch to Base + KPI incentive to drop attendance from pay.</span></div>` : ''}
           <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
             ${splitPolicyOn
-              ? 'On. Each person\'s protected base is paid in full; the incentive above it is multiplied by their performance factor (KPI 70%, attendance 30%). Turning this off pays every package in full again.'
-              : 'Off. Everyone is paid their full package regardless of KPI or attendance. Turning this on pays the base in full and scales only the incentive — it does not touch anybody\'s base wage.'}
+              ? 'On. Each person\'s protected base is paid in full; the remainder is multiplied by this month\'s KPI score. Attendance does not affect pay. Turning this off pays every package in full again.'
+              : 'Off. Everyone is paid their full package regardless of KPI. Turning this on pays the base in full and scales only the incentive by KPI — it does not touch anybody\'s base wage, and attendance never affects it.'}
           </p>
           <button class="btn-${splitPolicyOn ? 'secondary' : 'primary'} btn-sm" id="os-policy">
-            ${splitPolicyOn ? 'Stop paying the incentive on performance' : 'Pay the incentive on performance'}
+            ${splitPolicyOn ? 'Stop paying the incentive on KPI' : (splitPolicyLegacy ? 'Switch to Base + KPI incentive' : 'Pay the incentive on KPI')}
           </button>
           ${floorMonthly == null ? `<div style="font-size:11px;color:var(--danger);margin-top:8px">No minimum wage amount is saved yet, so nothing is checking these figures against one. Save it above first.</div>` : ''}
         </div>
@@ -1072,7 +1128,7 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
     <div class="py-problem">
       <div class="py-ptext"><strong>${esc(r.name)}</strong> — package ${esc(peso(r.package))}${r.alreadySplit ? ` <span class="badge badge-green" style="font-size:10px">Already applied</span>` : ''}${r.belowFloor ? ` <span class="badge badge-red" style="font-size:10px">Base below the saved minimum wage</span>` : ''}<br/>
         Base ${esc(peso(r.proposedBase))} + incentive ${esc(peso(r.proposedIncentive))}<br/>
-        <span style="color:var(--text-muted)">KPI ${Math.round((r.kpiScore || 0) * 100)}% · attendance ${Math.round((r.attScore || 0) * 100)}% · factor ${Math.round((r.perfFactor || 0) * 100)}%</span><br/>
+        <span style="color:var(--text-muted)">KPI ${Math.round((r.kpiFactor || 0) * 100)}% — incentive ${esc(peso(r.incentiveEarned))} of ${esc(peso(r.incentiveFull))} possible</span><br/>
         Pay now ${esc(peso(r.nowPay))} → pay under the split ${esc(peso(r.proposedPay))}
       </div>
     </div>`;
@@ -1186,22 +1242,26 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
       }
       const totalNow = rows.reduce((s, r) => s + (Number(r.nowPay) || 0), 0);
       const totalNew = rows.reduce((s, r) => s + (Number(r.proposedPay) || 0), 0);
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 — this always targets 'basekpi' now,
+      // whether coming from 'flat' (off) or from the legacy 'performance'
+      // value (splitPolicyOn is false in both cases, so turningOn is true in
+      // both cases) — there is no path left that writes 'performance' again.
       const msg = turningOn
-        ? `Pay the incentive on performance from now on?\n\nOn this month's figures that is ${peso(totalNew)} across ${rows.length} ${rows.length === 1 ? 'person' : 'people'}, instead of ${peso(totalNow)}. Each person's protected base is paid in full either way — only the incentive above it moves.${floorMonthly == null ? '\n\nNo minimum wage amount is saved, so nothing is checking these figures against one.' : ''}`
-        : `Stop paying the incentive on performance?\n\nEveryone goes back to their full package — ${peso(totalNow)} across ${rows.length} ${rows.length === 1 ? 'person' : 'people'} on this month's figures.`;
+        ? `Pay the incentive on this month's KPI from now on?\n\nOn this month's figures that is ${peso(totalNew)} across ${rows.length} ${rows.length === 1 ? 'person' : 'people'}, instead of ${peso(totalNow)}. Each person's protected base is paid in full either way — only the incentive above it moves, and attendance does not affect it.${floorMonthly == null ? '\n\nNo minimum wage amount is saved, so nothing is checking these figures against one.' : ''}`
+        : `Stop paying the incentive on KPI?\n\nEveryone goes back to their full package — ${peso(totalNow)} across ${rows.length} ${rows.length === 1 ? 'person' : 'people'} on this month's figures.`;
       if (!(await window.confirmDialog({
-        message: msg, confirmLabel: turningOn ? 'Pay on performance' : 'Pay in full', cancelLabel: 'Cancel', danger: turningOn
+        message: msg, confirmLabel: turningOn ? 'Pay on KPI' : 'Pay in full', cancelLabel: 'Cancel', danger: turningOn
       }))) return;
       try {
         await db.collection('settings').doc('payrollOfficePolicy').set({
-          policy: turningOn ? 'performance' : 'flat',
+          policy: turningOn ? 'basekpi' : 'flat',
           setBy: (window.currentUser && currentUser.uid) || null,
           setByName: (window.userProfile && userProfile.displayName) || null,
           setAt: firebase.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
         window.logAudit && window.logAudit('update', 'settings', 'payrollOfficePolicy',
-          { policy: turningOn ? 'performance' : 'flat' });
-        Notifs.success(turningOn ? 'The incentive now scales with performance.' : 'Everyone is paid their full package again.');
+          { policy: turningOn ? 'basekpi' : 'flat' });
+        Notifs.success(turningOn ? 'The incentive now scales with this month\'s KPI.' : 'Everyone is paid their full package again.');
       } catch (e) {
         Notifs.showToast('Could not change this: ' + ((e && e.message) || e), 'error'); return;
       }

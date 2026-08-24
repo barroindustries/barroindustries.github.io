@@ -2922,80 +2922,12 @@ function setActiveNav(page) {
 // bare global; departments.js/people.js reach forward into getAllQuotes the
 // same way (typeof-guarded, already defensive before this move).
 
-// Called by notifications.js when all notifications checked — upgrades attendance to 100%
-// Must time in AND read all notifications before 9:00 AM
-window.tryUpgradeAttendanceOnNotifRead = async function() {
-  if (!currentUser) return;
-  const todayStr = bizDate();
-  const now = new Date();
-  // Honor an approved extension: its expiresAt replaces the flat 9:00 AM cutoff.
-  const extSnap = await db.collection('attendance_extensions')
-    .doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})}));
-  const ext = window.attExtActive(extSnap.exists ? extSnap.data() : null, now);
-  const pastDeadline = ext.active ? (now >= ext.expiresAt) : (bizHour() >= 9);
-  if (pastDeadline) {
-    const dl = ext.active
-      ? ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ})
-      : '9:00 AM';
-    Notifs.showToast(`⏰ Deadline passed — notifications must be checked before ${dl} for full attendance.`, 'error');
-    return;
-  }
-  const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
-  if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have timed in first
-  const current = todaySnap.data();
-  if ((current.attendanceScore||0) >= 1.0) return;              // already full
-  if (current.editedBy) return;                                // admin-set day — never self-override (also WS19-denied)
-  try {
-    await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-      attendanceScore: 1.0, fullTime: true,
-      fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-    Notifs.success('✅ Full attendance (100%) — all notifications checked!');
-    // The card that renders "50% — Timed In" sits on the dashboard, and nothing
-    // here used to refresh it — so the upgrade only became visible on the next
-    // navigation. Now that all five office roles carry the attendance card
-    // (window.attendanceCardHtml), this stale state is no longer employee-only.
-    if (window.currentPage === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
-  } catch(e) { /* WS19 rule denied (admin-edited day) — silently ignore */ }
-};
-
-window.approveAttendanceExtension = async function(extId, uid, name) {
-  const approvedAt = new Date();
-  const expiresAt  = new Date(approvedAt.getTime() + window.ATT_EXT_HOURS * 60 * 60 * 1000);
-  await db.collection('attendance_extensions').doc(extId).update({
-    status: 'approved',
-    approvedBy: currentUser.uid,
-    approvedByName: userProfile?.displayName || currentUser.email,
-    approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    expiresAt: firebase.firestore.Timestamp.fromDate(expiresAt)
-  });
-  const dl = expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ});
-  await Notifs.send(uid, {
-    title: '✅ Attendance Extension Approved',
-    body:  `Your Time In extension is approved. You have until ${dl} to time in and check all notifications.`,
-    icon: '✅', type: 'att_extension_approved'
-  });
-  if (typeof dbCacheInvalidate === 'function') {
-    dbCacheInvalidate('att-ext-pending');
-    dbCacheInvalidate('approvals-pending:attendance_extensions-pending'); // PERF-WAVE1 Approvals-page cache
-  }
-  return expiresAt;
-};
-window.denyAttendanceExtension = async function(extId, uid, name) {
-  await db.collection('attendance_extensions').doc(extId).update({
-    status: 'denied', deniedBy: currentUser.uid,
-    deniedAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  await Notifs.send(uid, {
-    title: '❌ Attendance Extension Denied',
-    body:  'Your attendance extension request was not approved.',
-    icon: '❌', type: 'att_extension_denied'
-  });
-  if (typeof dbCacheInvalidate === 'function') {
-    dbCacheInvalidate('att-ext-pending');
-    dbCacheInvalidate('approvals-pending:attendance_extensions-pending'); // PERF-WAVE1 Approvals-page cache
-  }
-};
+// OFFICE-KPI-PAY-SPEC-2026-08-25 R2/R3 — the notification-read attendance
+// score upgrade (tryUpgradeAttendanceOnNotifRead) and the attendance-extension
+// approve/deny handlers (approveAttendanceExtension/denyAttendanceExtension)
+// were removed here as part of retiring office attendance. Operations
+// geofenced attendance (attendance_worker/**, recordAttendancePunch,
+// WeeklyRun) is untouched — see the spec.
 
 // ── ID verify token minting + public-safe projection ──────────────
 // Builds the ONLY fields that may live in the public id_verify/{token} doc.

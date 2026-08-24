@@ -458,6 +458,16 @@ if (typeof window === 'undefined') {
     if (l.policy === 'taskbased') {
       parts.push('paid at ' + Math.round((+l.perfFactor || 0) * 100) + '% on task results and on-time check-ins');
     }
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — the base+incentive policy that
+    // retires office attendance. `kpiFactor` (not `perfFactor` — §1.1: "every
+    // user-visible factor/traceability string reads kpiFactor, never
+    // perfFactor" under 'basekpi') lives at the TOP LEVEL of the raw
+    // computePayLine return, same placement as `perfFactor` above. Short
+    // roster words only; the full sentence (with the pesos and the "attendance
+    // does not affect pay" line) lives in the breakdown via payBasisSentence.
+    if (l.policy === 'basekpi') {
+      parts.push('incentive paid at ' + Math.round((+l.kpiFactor || 0) * 100) + '% on KPI results');
+    }
     return parts.join(', ');
   };
 
@@ -569,6 +579,17 @@ if (typeof window === 'undefined') {
           // row the breakdown already lists separately.
           preMultiplierNet: l.preMultiplierNet == null ? null : r2(l.preMultiplierNet),
           netBeforeCA: l.netBeforeCA == null ? null : r2(l.netBeforeCA),
+          // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — same conditional-key pattern
+          // as preMultiplierNet/netBeforeCA just above: these three are absent
+          // on the source line for every policy except 'basekpi' (the fourth
+          // permitted edit to money-core.js's computePayLine), so they carry
+          // through here as null/present exactly the same way. kpiFactor is
+          // the ONLY factor 'basekpi' ever shows on screen — never perfFactor
+          // (§1.1 — "every user-visible factor/traceability string reads
+          // kpiFactor, never perfFactor" under this policy).
+          kpiFactor: l.kpiFactor == null ? null : r2(l.kpiFactor),
+          incentiveFull: l.incentiveFull == null ? null : r2(l.incentiveFull),
+          incentiveEarned: l.incentiveEarned == null ? null : r2(l.incentiveEarned),
           withheldDeductions: r2(l.withheldDeductions != null ? l.withheldDeductions : l.otherDeductions),
           unearnedDeductions: r2(l.unearnedDeductions),
           employerShare: l.er || null,
@@ -644,14 +665,43 @@ if (typeof window === 'undefined') {
       // score'. That label is exactly the "days worked" misreading §1 of the
       // spec warns about: this score is punctuality/notification-read, not
       // presence. Display-label change only — no stored field renamed.
-      if (d.attendanceScore != null) out.push(info('On-time check-ins', String(Math.round(d.attendanceScore * 100)) + '%'));
+      //
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §1/§2 — NOT shown under 'basekpi'.
+      // Attendance is retired for this policy ("Attendance appears NOWHERE",
+      // §1); js/departments.js's buildPayRunLines (R8) feeds attScore:0 as an
+      // unread sentinel so computePayLine's shared signature stays uniform,
+      // and printing that sentinel as "On-time check-ins 0%" would read as a
+      // real (and alarming) score against a system nobody writes to anymore —
+      // the exact false-alarm this spec exists to remove.
+      if (d.attendanceScore != null && d.policy !== 'basekpi') out.push(info('On-time check-ins', String(Math.round(d.attendanceScore * 100)) + '%'));
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §3 — the base+incentive working, shown
+      // as its own two rows (distinct from the ONE sentence below, which
+      // narrates the full incentive and the multiplication but never states
+      // the earned peso figure on its own — see payBasisSentence's §1.2
+      // wording). incentiveFull/incentiveEarned/kpiFactor are the conditional
+      // keys money-core.js's computePayLine freezes only under 'basekpi'
+      // (mirrors preMultiplierNet's §2.4 pattern) and PC.normalizeLine carries
+      // them through unchanged above.
+      if (d.policy === 'basekpi') {
+        if (d.incentiveFull != null) out.push(info('Incentive (full)', peso(d.incentiveFull)));
+        if (d.incentiveEarned != null) {
+          out.push(info('Incentive earned at KPI ' + Math.round((d.kpiFactor || 0) * 100) + '%', peso(d.incentiveEarned)));
+        }
+      }
       // TASK-BASED-PAY-SPEC-2026-08-12 §9.1/§9.2 — the ONE traceability
       // sentence, fed straight off the frozen line's own fields (never
       // recomputed here). Empty string for 'flat'/'performance' — no row.
-      if (d.policy === 'taskbased' && typeof window.payBasisSentence === 'function') {
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — 'basekpi' also renders through
+      // this SAME function (window.payBasisSentence gains the 'basekpi' case
+      // there — never hand-roll a second sentence here); the kpiFactor/
+      // incentiveFull/incentiveEarned fields are passed alongside the
+      // existing ones so that branch has everything it needs.
+      if ((d.policy === 'taskbased' || d.policy === 'basekpi') && typeof window.payBasisSentence === 'function') {
         const sentence = window.payBasisSentence({
           policy: d.policy, perfFactor: d.perfFactor, kpiScore: d.kpiScore, attScore: d.attendanceScore,
-          preMultiplierNet: d.preMultiplierNet, netBeforeCA: d.netBeforeCA
+          preMultiplierNet: d.preMultiplierNet, netBeforeCA: d.netBeforeCA,
+          base: row.earnings, allowance: row.allowances,
+          kpiFactor: d.kpiFactor, incentiveFull: d.incentiveFull, incentiveEarned: d.incentiveEarned
         });
         if (sentence) out.push(info('How this was worked out', sentence));
       }

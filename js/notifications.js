@@ -424,9 +424,6 @@ window.Notifs = (() => {
         });
         const remaining = list.querySelectorAll('.notif-item.unread').length;
         _updatePanelHint(remaining, items.length);
-        if (remaining === 0 && typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
-          window.tryUpgradeAttendanceOnNotifRead();
-        }
       });
     });
 

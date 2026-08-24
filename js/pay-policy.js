@@ -51,7 +51,14 @@ if (typeof window === 'undefined') {
 // split is preview-and-apply on pay RECORDS; this is the line that decides
 // which arithmetic a live run uses, so it is changed knowingly and its pinned
 // test updated with it, rather than slipped in alongside a UI build.
-window.PAY_POLICY_VALUES = ['flat', 'taskbased', 'performance'];
+//
+// 'basekpi' added 2026-08-25 (OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2) — the
+// owner's ruling that Office pay becomes a ₱10,000 protected base plus a
+// KPI-dependent incentive, and that the office attendance system is retired
+// entirely. Additive, same as 'performance' before it: nothing here removes
+// a value, because a stored legacy policy string must never take the pay
+// screen down.
+window.PAY_POLICY_VALUES = ['flat', 'taskbased', 'performance', 'basekpi'];
 
 // §8.3 — the pure minimum-wage check. NEVER invents the floor: an
 // absent/non-positive floorMonthly means the check is INERT (checked:false),
@@ -103,6 +110,19 @@ function _ppPeso(n) {
 // did, even years later (§9.3).
 window.payBasisSentence = function (line) {
   const l = line || {};
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — 'basekpi' wording. Plain words,
+  // no arithmetic walkthrough (unlike 'taskbased' below): the base is never
+  // scaled so there is nothing to show working for, and attendance is
+  // explicitly named as having no bearing at all — the owner's 2026-08-25
+  // ruling in one sentence, so nobody discovers its absence by surprise
+  // (spec §3). Real base/incentive figures off the frozen line, same as
+  // every other case here.
+  if (l.policy === 'basekpi') {
+    const baseAmt = Number(l.base) || 0;
+    const incentiveFull = (l.incentiveFull != null) ? Number(l.incentiveFull) : (Number(l.allowance) || 0);
+    return _ppPeso(baseAmt) + ' base paid in full; the remaining ' + _ppPeso(incentiveFull) +
+      ' is multiplied by this month\'s KPI score (tasks 70%, deliverables 30%). Attendance does not affect pay.';
+  }
   if (l.policy !== 'taskbased') return '';
   const F = Math.round((Number(l.perfFactor) || 0) * 100);
   const K = Math.round((Number(l.kpiScore) || 0) * 100);
@@ -330,6 +350,95 @@ window.kpiMonthBreakdown = function (userTasks, month) {
 window.payDerivationSteps = function (input) {
   var d = input || {};
   var n = function (v) { return (typeof v === 'number' && isFinite(v)) ? v : 0; };
+
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1/§3 — 'basekpi' has its own step shape,
+  // kept as a separate early-return branch rather than folded into the
+  // earnings/allowances ladder below: the money order genuinely differs.
+  // Every other policy adds earnings+allowances first and (for 'taskbased')
+  // scales the WHOLE after-deduction remainder afterwards; 'basekpi' instead
+  // adds the base in full, then adds the incentive ALREADY scaled by this
+  // month's KPI factor (money-core.js's computePayLine: netBeforeCA =
+  // base - statutoryTotal - otherDeductions + allowance*kpiFactor — the
+  // scaling happens on the incentive alone, before it is added in, not on
+  // the remainder after). Steps: base -> + incentive earned at KPI x% ->
+  // - statutory -> - other deductions -> - cash advance = take-home.
+  // `incentiveEarned`, when supplied, is taken as-is (the SAME _round2(
+  // allowance*kpiFactor) value money-core.js already froze on the line) so
+  // this never recomputes a number the engine already produced — the guard
+  // below still checks the running total reconciles to `takeHome` exactly.
+  if (d.policy === 'basekpi') {
+    var baseAmt          = n(d.base);
+    var statutoryTotalB  = n(d.statutoryTotal);
+    var otherDeductionsB = n(d.otherDeductions);
+    var incentiveFull    = n(d.incentiveFull);
+    var kpiFactor        = (typeof d.kpiFactor === 'number' && isFinite(d.kpiFactor)) ? d.kpiFactor : 0;
+    var incentiveEarned  = (typeof d.incentiveEarned === 'number' && isFinite(d.incentiveEarned))
+      ? d.incentiveEarned : _ppRound2(incentiveFull * kpiFactor);
+    var cashAdvanceB     = n(d.cashAdvance);
+    var takeHomeB        = n(d.takeHome);
+    var kpiPct           = Math.round(kpiFactor * 100);
+
+    var stepsB = [];
+    var runningB = baseAmt;
+    stepsB.push({ label: 'Base pay', amount: _ppRound2(baseAmt), sign: '+', kind: 'earning' });
+
+    runningB = _ppRound2(runningB + incentiveEarned);
+    stepsB.push({
+      label: 'Incentive earned at KPI ' + kpiPct + '%',
+      amount: _ppRound2(incentiveEarned), sign: '+', kind: 'earning',
+      note: _ppPeso(incentiveFull) + ' × ' + kpiPct + '% = ' + _ppPeso(incentiveEarned)
+    });
+
+    // One-off amounts fold into a basekpi line's finalPay exactly as they do
+    // for every other policy (js/payroll.js PC.applyOneOffs is policy-blind),
+    // so the step ladder must show them or the guard below fires a false
+    // "does not add up" on any basekpi month carrying a bonus/penalty.
+    // Same step shape as the generic ladder's one-off step further down.
+    var oneOffNetB = n(d.oneOffNet);
+    if (oneOffNetB) {
+      runningB = _ppRound2(runningB + oneOffNetB);
+      stepsB.push({
+        label: 'One-off amounts', amount: _ppRound2(Math.abs(oneOffNetB)),
+        sign: oneOffNetB >= 0 ? '+' : '-', kind: oneOffNetB >= 0 ? 'earning' : 'deduction'
+      });
+    }
+
+    runningB = _ppRound2(runningB - statutoryTotalB);
+    stepsB.push({ label: 'Government deductions', amount: _ppRound2(statutoryTotalB), sign: '-', kind: 'deduction' });
+
+    runningB = _ppRound2(runningB - otherDeductionsB);
+    stepsB.push({ label: 'Other deductions', amount: _ppRound2(otherDeductionsB), sign: '-', kind: 'deduction' });
+
+    if (cashAdvanceB) {
+      runningB = _ppRound2(runningB - cashAdvanceB);
+      stepsB.push({ label: 'Cash advance instalment', amount: _ppRound2(cashAdvanceB), sign: '-', kind: 'deduction' });
+    }
+
+    var residueB = _ppRound2(takeHomeB - runningB);
+    var reconciledB = Math.abs(residueB) < 0.005;
+
+    if (!reconciledB && d.overridden) {
+      stepsB.push({
+        label: 'Manual adjustment', amount: _ppRound2(Math.abs(residueB)),
+        sign: residueB >= 0 ? '+' : '-', kind: 'override',
+        note: d.overrideNote ? d.overrideNote : 'No reason was recorded for this adjustment.'
+      });
+      runningB = _ppRound2(runningB + residueB);
+      residueB = _ppRound2(takeHomeB - runningB);
+      reconciledB = Math.abs(residueB) < 0.005;
+    }
+
+    stepsB.push({ label: 'Take-home pay', amount: _ppRound2(takeHomeB), sign: '=', kind: 'total' });
+
+    return {
+      steps: stepsB,
+      computed: runningB,
+      takeHome: _ppRound2(takeHomeB),
+      residue: residueB,
+      reconciled: reconciledB
+    };
+  }
+
   var earnings        = n(d.earnings);
   var allowances       = n(d.allowances);
   var oneOffNet        = n(d.oneOffNet);

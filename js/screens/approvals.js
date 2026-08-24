@@ -36,7 +36,7 @@
      MAJOR items per the two-tier oversight map APPROVAL_CAPS), the
      13-collection pending-count fetch (+ grading-queue count for
      President/Manager), the chip-tab nav (All Requests/Grading/Tasks
-     for Review/Sign-ups/Attendance/Cash Advances/Raises/Quote
+     for Review/Sign-ups/Cash Advances/Raises/Quote
      Approvals/PO Approvals/Finance Requests/Deletions/Leave — via
      window.chipTabs/bindChipTabs, already clean, no hand-rolled
      `.subtab-bar` found), and loadApprovalsSub (the per-tab list
@@ -100,7 +100,6 @@ window.renderApprovals = async function(currentUser) {
   // instead of approve/deny. Mirrors firestore.rules (delete → president).
   const APPROVAL_CAPS = {
     'signup':         ['president','manager','secretary'],
-    'attendance':     ['president','manager','secretary'],
     'submission':     ['president','manager','secretary'],
     'review-task':    ['president','manager','secretary'],
     'leave':          ['president','manager','secretary'],
@@ -163,9 +162,8 @@ window.renderApprovals = async function(currentUser) {
     _deniedQueues.push({ label, chip, denied });
     return { size: 0, docs: [], failed: true, denied };
   });
-  const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2] = await Promise.all([
+  const [sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2] = await Promise.all([
     _apq('Sign-ups', 'signups', 'signup_requests-pending',                                 db.collection('signup_requests').where('status','==','pending')),
-    _apq('Attendance', 'attendance', 'attendance_extensions-pending',                       db.collection('attendance_extensions').where('status','==','pending')),
     _apq('Cash Advances', 'ca', 'cash_advances-pending',                                    db.collection('cash_advances').where('status','==','pending')),
     _apq('Work submissions', 'all', 'submissions-pending',                                  db.collection('submissions').where('status','==','pending')),
     _apq('Tasks for Review', 'review-tasks', 'tasks-review',                                db.collection('tasks').where('status','==','review')),
@@ -206,9 +204,8 @@ window.renderApprovals = async function(currentUser) {
   // Persistent marker on any chip whose count cannot be complete, independent of
   // what the number happens to be this render.
   const _lbl = (chip, label) => _incompleteChips.has(chip) ? (label + ' 🔒') : label;
-  let _cachedAllSnaps = { sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, deptSpendSnap2 };
+  let _cachedAllSnaps = { sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2, deptSpendSnap2 };
   const pendingSignups = sgSnap.size || 0;
-  const pendingExt     = atSnap.size || 0;
   const pendingCA      = caSnap2.size || 0;
   const pendingSubs    = subSnap2.size || 0;
   const pendingReview  = reviewTasksSnap.size || 0;
@@ -220,7 +217,7 @@ window.renderApprovals = async function(currentUser) {
   const pendingLeave      = leaveSnap2.size || 0;
   const pendingPO         = poSnap2.size || 0;
   const pendingRaises     = raiseSnap2.size || 0;
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO + pendingRaises;
+  const totalPending   = pendingSignups + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO + pendingRaises;
 
   // ── Grading queue count (President's grading subtab) ──────────────────
   // Completed/approved tasks awaiting a presidentScore + employees whose
@@ -244,7 +241,6 @@ window.renderApprovals = async function(currentUser) {
     _showGrading ? { key:'grading', label:'Grading',    icon:emojiIcon('⭐',14), count: pendingGrading } : null,
     { key:'review-tasks',     label:_lbl('review-tasks','Tasks for Review'), count: _cnt('review-tasks', pendingReview) },
     { key:'signups',          label:_lbl('signups','Sign-ups'),              count: _cnt('signups', pendingSignups) },
-    { key:'attendance',       label:_lbl('attendance','Attendance'),         count: _cnt('attendance', pendingExt) },
     { key:'leave',            label:_lbl('leave','Leave'),          icon:emojiIcon('🌴',14), count: _cnt('leave', pendingLeave) },
     { key:'ca',               label:_lbl('ca','Cash Advances'),              count: _cnt('ca', pendingCA) },
     { key:'roa',              label:_lbl('roa','Quote / ROA'),               count: _cnt('roa', pendingQApprovals) },
@@ -273,7 +269,7 @@ window.renderApprovals = async function(currentUser) {
       'Already-decided items don\'t clutter the queue — find them under the History chip (last 30 days, read-only).'
     ])}
     ${_deniedBanner}
-    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews). Cash advances, raises and payroll deletions stay visible here so you can flag them — approving them is the President's.</span></div>`
+    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, leave, submissions, task reviews). Cash advances, raises and payroll deletions stay visible here so you can flag them — approving them is the President's.</span></div>`
       :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('ℹ️',16)} Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     ${window.chipTabs(approvalChips, 'all')}
@@ -307,7 +303,7 @@ window.renderApprovals = async function(currentUser) {
   const loadApprovalsSub = async (sub, opts) => {
     const wrap = document.getElementById('approvals-content');
     if (!wrap) return;
-    // Acting here mutates signup_requests / attendance_extensions / cash_advances /
+    // Acting here mutates signup_requests / cash_advances /
     // approval_requests. Invalidate the dashboard's cached pending counts so badges
     // and lists don't keep showing already-actioned items for up to the 30s TTL.
     if (typeof dbCacheInvalidate === 'function')
@@ -427,18 +423,17 @@ window.renderApprovals = async function(currentUser) {
       // v13 Phase 35 — reuse the count fetch above on the very first load instead
       // of re-querying all 13 collections a second time. Only a later re-visit
       // to this tab (cache already consumed) hits Firestore again here.
-      let sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2;
+      let sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2;
       if (_cachedAllSnaps) {
-        ({ sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 } = _cachedAllSnaps);
+        ({ sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 } = _cachedAllSnaps);
         _cachedAllSnaps = null;
       } else {
         // PERF-WAVE1 WP6 — same dbCachedGet keys as the count-phase _apq()
         // fetch above (30s TTL), so a same-session revisit to 'all' (once the
         // single-use _cachedAllSnaps hop is spent) hits cache instead of
-        // re-querying all 14 collections again.
-        ([sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2] = await Promise.all([
+        // re-querying all 13 collections again.
+        ([sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2] = await Promise.all([
           dbCachedGet('approvals-pending:signup_requests-pending', () => db.collection('signup_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
-          dbCachedGet('approvals-pending:attendance_extensions-pending', () => db.collection('attendance_extensions').where('status','==','pending').get(), 30000).catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:cash_advances-pending', () => db.collection('cash_advances').where('status','==','pending').get(), 30000).catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000).catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:tasks-review', () => db.collection('tasks').where('status','==','review').get(), 30000).catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
@@ -456,7 +451,6 @@ window.renderApprovals = async function(currentUser) {
 
       const allPending = [
         ...sgSnap.docs.map(d=>({id:d.id,...d.data(),type:'signup',icon:'👤',label:'Sign-up Request',name:d.data().fullName||d.data().email||'Unknown',detail:d.data().email||'',ts:d.data().createdAt})),
-        ...atSnap.docs.map(d=>({id:d.id,...d.data(),type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt})),
         ...caSnap2.docs.map(d=>({id:d.id,...d.data(),type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt})),
         ...subSnap2.docs.map(d=>({id:d.id,...d.data(),type:'submission',icon:'📤',label:'Work Submission',name:d.data().submittedByName||d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt})),
         ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);const nm=(d.data().assignedToNames||[]).join(', ');return uids.length&&nm?'by '+nm:'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
@@ -493,7 +487,7 @@ window.renderApprovals = async function(currentUser) {
       // of a bare emoji (color keyed by request type; money-moving = warning/danger
       // hues, everyday items = primary/info).
       const APPROVAL_TYPE_COLOR = {
-        'signup':'#1971C2','attendance':'#0CA678','ca':'#F76707','ca_deduct':'#F76707',
+        'signup':'#1971C2','ca':'#F76707','ca_deduct':'#F76707',
         'submission':'#3B5BDB','review-task':'#3B5BDB','finance-req':'#D92D20','finance-del':'#D92D20',
         'quote-approval':'#7048E8','po-approval':'#099268','leave':'#2F9E44','raise':'#E64980',
         'delete-quote':'#D92D20','delete-client':'#D92D20'
@@ -518,9 +512,6 @@ window.renderApprovals = async function(currentUser) {
               ${ canActOn(item.type) ? (item.type==='signup'?`
                 <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
-              `:item.type==='attendance'?`
-                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-uid="${item.uid||''}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-uid="${item.uid||''}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='ca'?`
                 <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">${emojiIcon('✓',16)} Approve CA</button>
                 <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
@@ -583,25 +574,9 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
 
-      // Attendance approve/deny — re-audit 2026-08-03: this used to hand-write a
-      // hardcoded 2-hour extension with only a local toast, while the dedicated
-      // Attendance sub-tab granted the canonical ATT_EXT_HOURS=6 and notified the
-      // employee. Same request, two different outcomes depending on which tab was
-      // clicked. Now routes through the exact same window.approveAttendanceExtension/
-      // denyAttendanceExtension the Attendance sub-tab uses, so the grant length and
-      // the employee notification are identical no matter which tab approved it.
-      wrap.querySelectorAll('.at-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
-          Notifs.success(`Extension approved for ${btn.dataset.name}`);
-          loadApprovalsSub('all');
-      }));
-      wrap.querySelectorAll('.at-deny-btn').forEach(btn => onClickSafe(btn, async () => {
-          await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
-          Notifs.error(`Extension denied for ${btn.dataset.name}`);
-          loadApprovalsSub('all');
-      }));
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 R3 — attendance-extension approve/deny
+      // (the .at-approve-btn/.at-deny-btn handlers) removed here along with
+      // the rest of the office attendance-extension flow.
 
       // CA approve/reject
       // v12 WS22 — routes through the shared service (fixes: this approve used
@@ -965,9 +940,8 @@ window.renderApprovals = async function(currentUser) {
       // complete. Routed through _paneQ so this pane can name what it did not
       // get; the page-level banner above was computed once from the COUNT phase
       // and is not re-derived per pane, so History has to say it itself.
-      const [sgH, atH, caH, subH, frH, fdH, qaH, lvH, rzH, poH] = await Promise.all([
+      const [sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH] = await Promise.all([
         _paneQ('Sign-ups',                 db.collection('signup_requests').orderBy('createdAt','desc').limit(150)),
-        _paneQ('Attendance',               db.collection('attendance_extensions').orderBy('requestedAt','desc').limit(150)),
         _paneQ('Cash Advances',            db.collection('cash_advances').orderBy('createdAt','desc').limit(150)),
         _paneQ('Work submissions',         db.collection('submissions').orderBy('createdAt','desc').limit(150)),
         _paneQ('Payroll delete requests',  db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(150)),
@@ -977,20 +951,19 @@ window.renderApprovals = async function(currentUser) {
         _paneQ('Raises',                   db.collection('pending_raises').orderBy('createdAt','desc').limit(150)),
         _paneQ('Purchase approvals',       db.collection('purchase_requisitions').orderBy('createdAt','desc').limit(150))
       ]);
-      const histBanner = _paneDeniedBanner([sgH, atH, caH, subH, frH, fdH, qaH, lvH, rzH, poH]);
+      const histBanner = _paneDeniedBanner([sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH]);
       const tsOf = x => (x.resolvedAt || x.approvedAt || x.decidedAt || x.updatedAt || x.createdAt);
       const mk = (d, type, icon, label, name, detail) => {
         const x = d.data(); const ts = tsOf(x);
         return { id:d.id, type, icon, label, name, detail, status:(x.status||x.approvalStatus||(x.deleteRequested===false?'approved':'')), ts };
       };
       const HIST_TYPE_COLOR = {
-        'signup':'#1971C2','attendance':'#0CA678','ca':'#F76707','ca_deduct':'#F76707',
+        'signup':'#1971C2','ca':'#F76707','ca_deduct':'#F76707',
         'submission':'#3B5BDB','finance-req':'#D92D20','finance-del':'#D92D20',
         'quote-approval':'#7048E8','po-approval':'#099268','leave':'#2F9E44','raise':'#E64980'
       };
       let items = [
         ...sgH.docs.map(d=>mk(d,'signup','👤','Sign-up Request', d.data().fullName||d.data().email||'Unknown', d.data().email||'')),
-        ...atH.docs.map(d=>mk(d,'attendance','⏰','Attendance Extension', d.data().userName||'Unknown', d.data().date||'')),
         ...caH.docs.map(d=>mk(d,'ca','💸','Cash Advance', d.data().userName||'Unknown', `₱${fmt(d.data().amount||0)}`)),
         ...subH.docs.map(d=>mk(d,'submission','📤','Work Submission', d.data().submittedByName||d.data().userName||d.data().authorName||'Unknown', d.data().title||'')),
         ...frH.docs.map(d=>mk(d,'finance-req','💼','Finance Request', `Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`, `by ${d.data().requestedByName||'?'}`)),
@@ -1328,62 +1301,10 @@ window.renderApprovals = async function(currentUser) {
       return;
     }
 
-    if (sub === 'attendance') {
-      // Attendance Extension Requests
-      const snap = await db.collection('attendance_extensions').orderBy('requestedAt','desc').get().catch(()=>({docs:[]}));
-      const items = snap.docs.map(d=>({id:d.id,...d.data()}));
-      const pending = items.filter(i=>i.status==='pending');
-
-      if (!items.length) {
-        wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⏰',44)}</div><h4>No extension requests</h4></div>`;
-        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
-        return;
-      }
-      wrap.innerHTML = `
-        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">${emojiIcon('⚠️',16)} ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
-        <div class="item-list">
-          ${items.map(item=>`
-          <div class="item-card" data-id="${item.id}">
-            <div class="item-top">
-              <div class="item-title">${emojiIcon('⏰',16)} ${escHtml(item.userName||'Unknown')}</div>
-              <span class="badge ${item.status==='approved'?'badge-green':item.status==='denied'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
-            </div>
-            <div class="item-meta">
-              <span>${emojiIcon('📅',16)} ${item.date||'—'}</span>
-              ${item.requestedAt?`<span>Requested: ${new Date(item.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
-              ${item.status==='approved'&&item.expiresAt?`<span>Expires: ${new Date(item.expiresAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
-            </div>
-            ${(item.status==='pending'&&canActOn('attendance'))?`
-            <div style="display:flex;gap:8px;margin-top:12px">
-              <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">${emojiIcon('✓',16)} Approve (6-hr)</button>
-              <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">${emojiIcon('✗',16)} Deny</button>
-            </div>`:''}
-          </div>`).join('')}
-        </div>
-      `;
-      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
-
-      wrap.querySelectorAll('.ext-approve').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          const { id, uid, name } = e.currentTarget.dataset;
-          await window.approveAttendanceExtension(id, uid, name);
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
-          Notifs.success(`Extension approved for ${name}`);
-          loadApprovalsSub('attendance');
-        });
-      });
-
-      wrap.querySelectorAll('.ext-deny').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          const { id, uid, name } = e.currentTarget.dataset;
-          await window.denyAttendanceExtension(id, uid, name);
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
-          Notifs.error(`Extension denied for ${name}`);
-          loadApprovalsSub('attendance');
-        });
-      });
-      return;
-    }
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 R3 — the 'attendance' sub-tab (Attendance
+    // Extension Requests: list + ext-approve/ext-deny handlers) removed here
+    // along with the rest of the office attendance-extension flow. Operations
+    // geofenced attendance is untouched.
 
     if (sub === 'ca') {
       // Cash Advances

@@ -833,61 +833,27 @@ async function reportHealth(db, job, stats, label) {
 }
 
 /**
- * Daily (Mon–Sat) 07:30 Manila — attendance morning reminder.
- * Ports js/notifications.js checkAttendanceReminder() server-side: find every
- * non-partner, non-inactive user with no attendance/{uid}/records/{today} doc,
- * and write a reminder notification. dedupKey matches the client's exactly
- * (`bi-att-remind-${uid}-${todayStr}`) so re-runs — and the still-live client
- * check firing between 7-9am on an open tab — are no-ops on the loser side.
+ * OFFICE-KPI-PAY-SPEC-2026-08-25 §2 (removal site R4) — this job was ENTIRELY
+ * the office attendance morning reminder: it queried attendance/{uid}/records
+ * (the OFFICE collection the spec retires) and targeted office/admin users
+ * about timing in. There is no separate worker-side half to preserve here —
+ * the Operations geofenced flow (attendance_worker/**, recordAttendancePunch,
+ * WeeklyRun/computeWeeklyLine) is a wholly separate code path elsewhere in
+ * this file and is untouched by this change, byte-for-byte.
+ *
+ * Historic attendance/{uid}/records documents are PRESERVED (spec §2 data
+ * ruling) — only the writer/reminder is retired, not the history. Gutted to
+ * a no-op rather than deleted so the deployed Cloud Functions set (and its
+ * Cloud Scheduler job, firebase-schedule-scheduledAttendanceReminder-
+ * asia-east1) stays stable across this deploy instead of being torn down and
+ * requiring `--force`; the schedule still fires but does no reads/writes.
  */
 exports.scheduledAttendanceReminder = functions
   .region('asia-east1')
   .pubsub.schedule('30 7 * * 1-6')
   .timeZone('Asia/Manila')
   .onRun(async () => {
-    const db = admin.firestore();
-    const stats = { errors: 0, notified: 0 };
-    try {
-      const todayStr = manilaDate();
-      const usersSnap = await db.collection('users').get();
-      const candidates = usersSnap.docs.filter(d => {
-        const u = d.data();
-        return u.role !== 'partner' && u.status !== 'inactive' && !u.pendingPasswordSetup;
-      });
-
-      // Attendance records live at attendance/{uid}/records/{date} — no
-      // collection-group query available for "has no record today" without
-      // scanning, so check each candidate's record doc individually.
-      const toNotify = [];
-      for (const doc of candidates) {
-        try {
-          const rec = await db.collection('attendance').doc(doc.id)
-            .collection('records').doc(todayStr).get();
-          if (rec.exists) continue;
-          const u = doc.data();
-          const name = u.displayName || 'there';
-          toNotify.push({
-            ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
-            notifData: {
-              title: `🌅 Good morning, ${name}!`,
-              body: "Don't forget to time in today. Wishing you a productive day! 💪",
-              icon: '🌅', type: 'att_morning_remind', link: 'attendance',
-              dedupKey: `bi-att-remind-${doc.id}-${todayStr}`
-            }
-          });
-        } catch (e) {
-          stats.errors++;
-          console.error('[scheduledAttendanceReminder] attendance read failed for', doc.id, e.message);
-        }
-      }
-
-      stats.notified = await commitInChunks(db, toNotify, null);
-      console.log(`[scheduledAttendanceReminder] ${stats.notified} reminder(s) queued for ${todayStr}`);
-    } catch (err) {
-      stats.errors++;
-      console.error('[scheduledAttendanceReminder] failed:', err);
-    }
-    await reportHealth(db, 'scheduledAttendanceReminder', stats, 'Server-side attendance reminders');
+    console.log('[scheduledAttendanceReminder] no-op — office attendance retired, OFFICE-KPI-PAY-SPEC-2026-08-25 R4');
     return null;
   });
 

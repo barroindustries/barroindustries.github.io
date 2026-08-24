@@ -797,9 +797,18 @@ function eomMonthLabel(ym) {
   return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
 }
 
-// The award is now SYSTEM-CHOSEN, not manually picked: each eligible team member
-// is scored from task KPI (50%), attendance (40%) and performance grade (10%),
-// and the top scorer is the Employee of the Month.
+// The award is SYSTEM-CHOSEN, not manually picked. Two eras:
+//   • Before OFFICE-KPI-PAY-SPEC-2026-08-25 rescoring takes effect: each
+//     eligible team member is scored from task KPI (50%), attendance (40%)
+//     and performance grade (10%) — the original blend, still used for any
+//     month before EOM_KPI_ONLY_FROM, computed over PRESERVED attendance
+//     records (office attendance writes are retired, history is not).
+//   • From EOM_KPI_ONLY_FROM forward: office attendance is retired, so
+//     standings score KPI ONLY — the same window.computeKpiForMonth
+//     pipeline (tasks 70% / deliverables 30%) departments.js's
+//     buildPayRunLines reads for the 'basekpi' pay policy's incentive
+//     factor. Per the owner's 2026-08-25 ruling #3, "one score drives both
+//     pay and recognition" — see computeEomStandings below.
 //
 // Why the President's session does the computing: per firestore.rules, regular
 // employees can't read other people's attendance (isOwner || isFinanceOrAdmin),
@@ -813,6 +822,16 @@ function ymShift(ym, delta) {
   return `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
+// OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — office attendance is retired; EOM
+// standings score KPI-only from this month forward. '2026-09' = the first
+// full calendar month after the retirement shipped (2026-08-25), matching
+// §1.1's precedent of "the fourth permitted edit" style pinned constants.
+// Months before this keep the original attendance+task+grade blend, scored
+// over PRESERVED attendance records (§2: retirement removes writers, not
+// history). NEVER move this backward to cover a month that already had a
+// persisted settings/employeeOfMonth winner under the old blend.
+const EOM_KPI_ONLY_FROM = '2026-09';
+
 async function renderEomBanner(users, canManage) {
   const host = document.getElementById('eom-banner');
   if (!host) return;
@@ -824,6 +843,9 @@ async function renderEomBanner(users, canManage) {
   const _today = window.bizDate();
   const month = ymShift(_today.slice(0, 7), (+_today.slice(8, 10) >= 5) ? -1 : -2);
   const monthLbl = eomMonthLabel(month) || month;
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — copy for this month's award must
+  // not mention attendance once it's a KPI-only month.
+  const kpiOnlyMonth = month >= EOM_KPI_ONLY_FROM;
 
   // ── President: compute live standings and persist the winner ──
   if (canManage) {
@@ -837,7 +859,7 @@ async function renderEomBanner(users, canManage) {
           <div class="eom-empty-icon">${emojiIcon('🏆',16)}</div>
           <div class="eom-empty-text">
             <strong>Employee of the Month · ${escHtml(monthLbl)}</strong>
-            <span>Auto-selected from KPI &amp; attendance, finalised and revealed on the 5th. No eligible activity recorded for ${escHtml(monthLbl)}.</span>
+            <span>${kpiOnlyMonth ? 'Auto-selected from KPI' : 'Auto-selected from KPI &amp; attendance'}, finalised and revealed on the 5th. No eligible activity recorded for ${escHtml(monthLbl)}.</span>
           </div>
           <button class="btn-secondary btn-sm" id="eom-standings-btn">${emojiIcon('📊',16)} Standings</button>
         </div>`;
@@ -901,7 +923,11 @@ function renderEomCard(host, data, users, canManage, standings, month) {
   const depts = deptsArr.join(' · ') || 'Barro Industries';
   const initials = (name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
   const attPct = data.attPct, kpiPct = data.kpiPct ?? data.taskPct;
-  const metrics = (attPct != null && kpiPct != null) ? ` · ${attPct}% att · ${kpiPct}% KPI` : '';
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — a KPI-only winner (attPct null,
+  // attendance retired) still shows its one score; only a legacy blended
+  // month shows both.
+  const metrics = (attPct != null && kpiPct != null) ? ` · ${attPct}% att · ${kpiPct}% KPI`
+    : (kpiPct != null) ? ` · ${kpiPct}% KPI` : '';
 
   host.innerHTML = `
     <div class="eom-banner">
@@ -923,24 +949,38 @@ function renderEomCard(host, data, users, canManage, standings, month) {
   if (canManage) document.getElementById('eom-standings-btn')?.addEventListener('click', () => openEomStandingsModal(standings, month));
 }
 
-// Score every eligible team member for the current month and return them ranked
-// (highest first). Eligible = internal Barro Industries staff who have logged at
-// least one attendance day this month — excludes the President (who runs the
-// award), external partners, and Brilliant Steel-only members.
+// Score every eligible team member for the given month and return them ranked
+// (highest first). Excludes the President (who runs the award), external
+// partners, and Brilliant Steel-only members.
 //
-// score = 0.50·taskKPI + 0.40·attendance + 0.10·grade  (each component 0–1)
-//   taskKPI    = completed / assigned tasks  (neutral 0.5 when none assigned)
-//   attendance = attendance points / workdays elapsed this month
-//   grade      = President grade /10  (neutral 0.5 when ungraded)
+// Two eras (OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — see EOM_KPI_ONLY_FROM):
+//
+//   month >= EOM_KPI_ONLY_FROM (office attendance retired):
+//     score = kpiScore, via window.computeKpiForMonth(userTasks, month,
+//     deliverableScore, taskDoneMonth, taskCreatedMonth) — the same tasks-70%/
+//     deliverables-30% pipeline departments.js's buildPayRunLines reads for the
+//     'basekpi' pay policy. Eligible = at least one in-scope task this month
+//     (the KPI-race analogue of the old "logged an attendance day" gate — with
+//     attendance gone this is the only remaining activity signal).
+//
+//   month < EOM_KPI_ONLY_FROM (legacy, byte-identical to pre-retirement):
+//     score = 0.50·taskKPI + 0.40·attendance + 0.10·grade  (each component 0–1)
+//       taskKPI    = completed / assigned tasks  (neutral 0.5 when none assigned)
+//       attendance = attendance points / workdays elapsed this month, read from
+//                    PRESERVED attendance/{uid}/records (§2 — history is kept)
+//       grade      = President grade /10  (neutral 0.5 when ungraded)
+//     Eligible = logged at least one attendance day this month.
 async function computeEomStandings(users, monthStr) {
   const todayStr = window.bizDate();
   const month = monthStr || todayStr.slice(0, 7);
+  const kpiOnly = month >= EOM_KPI_ONLY_FROM;
 
-  // PERF-WAVE1 WP8: this fans out one attendance read PER CANDIDATE on top of
-  // the tasks/kpi_evals reads, every time the Team tab paints the banner. The
-  // standings are month-scale (only ever shown for a COMPLETED month), so the
-  // WHOLE computation is cached per month for 30 min — accepted staleness: a
-  // mid-window attendance/task/grade edit can lag up to 30 min here.
+  // PERF-WAVE1 WP8: this fans out one attendance read PER CANDIDATE (legacy
+  // months only) on top of the tasks/kpi_evals/kpi_targets reads, every time
+  // the Team tab paints the banner. The standings are month-scale (only ever
+  // shown for a COMPLETED month), so the WHOLE computation is cached per month
+  // for 30 min — accepted staleness: a mid-window attendance/task/grade edit
+  // can lag up to 30 min here.
   const computeFn = async () => {
     const isPastMonth = month < todayStr.slice(0, 7);
     const y = +month.slice(0, 4), m = +month.slice(5, 7) - 1;
@@ -956,26 +996,51 @@ async function computeEomStandings(users, monthStr) {
       && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'));
     if (!candidates.length) return [];
 
-    // Load all tasks + grades once (shared across candidates), then read each
-    // candidate's attendance in parallel.
+    // Load all tasks once (shared across candidates). kpi_evals (President
+    // grade) is only needed for the legacy blend; kpi_targets (deliverableScore)
+    // is only needed for the kpiOnly branch's computeKpiForMonth call — fetch
+    // whichever era needs, skip the other (Promise.resolve, not a real read).
     const tasksGet = (typeof dbCachedGet === 'function')
       ? dbCachedGet('tasks-all', () => db.collection('tasks').get(), 60000)
       : db.collection('tasks').get();
-    const evalsGet = (typeof dbCachedGet === 'function')
+    const evalsGet = kpiOnly ? Promise.resolve({ docs: [] }) : ((typeof dbCachedGet === 'function')
       ? dbCachedGet('kpi-evals', () => db.collection('kpi_evals').get(), 60000)
-      : db.collection('kpi_evals').get();
-    const [taskSnap, evalSnap] = await Promise.all([
+      : db.collection('kpi_evals').get());
+    const targetsGet = !kpiOnly ? Promise.resolve({ docs: [] }) : ((typeof dbCachedGet === 'function')
+      ? dbCachedGet('kpi-targets', () => db.collection('kpi_targets').get(), 60000)
+      : db.collection('kpi_targets').get());
+    const [taskSnap, evalSnap, targetSnap] = await Promise.all([
       tasksGet.catch(() => ({ docs: [] })),
-      evalsGet.catch(() => ({ docs: [] }))
+      evalsGet.catch(() => ({ docs: [] })),
+      targetsGet.catch(() => ({ docs: [] }))
     ]);
     const allTasks = taskSnap.docs.map(t => t.data());
     const evals = {}; evalSnap.docs.forEach(e => { evals[e.id] = e.data(); });
+    const kpiTargets = {}; targetSnap.docs.forEach(d => { kpiTargets[d.id] = d.data(); });
     const DONE = ['done', 'approved', 'archived'];
     const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
     const recScore = r => window.attRecScore(r);
 
     const rows = await Promise.all(candidates.map(async u => {
       const uid = u.id;
+      const mine = allTasks.filter(t => isAssigned(t, uid));
+
+      if (kpiOnly) {
+        const deliv = kpiTargets[uid]?.deliverableScore;
+        const kpiScore = window.computeKpiForMonth(mine, month, deliv, window.taskDoneMonth, window.taskCreatedMonth);
+        const kb = window.kpiMonthBreakdown ? window.kpiMonthBreakdown(mine, month) : { doneInM: null, inScopeCount: null };
+        return {
+          uid, displayName: u.displayName || u.email || '', email: u.email || '',
+          photoUrl: u.photoUrl || '', role: u.role || 'employee',
+          departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
+          // attendance retired — not read, not scored (kept null so the
+          // banner/modal render branches can tell a kpiOnly row from a legacy one)
+          attScore: null, attDays: null, attPct: null,
+          taskScore: kpiScore, doneTasks: kb.doneInM, totalTasks: kb.inScopeCount, taskPct: Math.round(kpiScore * 100),
+          grade: null, score: kpiScore, citation: ''
+        };
+      }
+
       let attScore = 0, attDays = 0;
       try {
         const snap = await db.collection('attendance').doc(uid).collection('records')
@@ -986,7 +1051,6 @@ async function computeEomStandings(users, monthStr) {
         attScore = Math.min(1, total / workDaysElapsed);
       } catch (e) { attScore = 0; attDays = 0; }
 
-      const mine = allTasks.filter(t => isAssigned(t, uid));
       const doneTasks = mine.filter(t => DONE.includes(t.status)).length;
       const taskScore = mine.length ? Math.min(1, doneTasks / mine.length) : 0.5;
 
@@ -1006,14 +1070,17 @@ async function computeEomStandings(users, monthStr) {
       };
     }));
 
-    const eligible = rows.filter(r => r.attDays >= 1);
+    const eligible = kpiOnly ? rows.filter(r => (r.totalTasks || 0) >= 1) : rows.filter(r => r.attDays >= 1);
     eligible.sort((a, b) =>
-      b.score - a.score || b.attScore - a.attScore || b.taskScore - a.taskScore
+      b.score - a.score || (b.attScore || 0) - (a.attScore || 0) || b.taskScore - a.taskScore
       || (a.displayName || '').localeCompare(b.displayName || ''));
     const monthLbl = eomMonthLabel(month) || month;
     eligible.forEach(r => {
-      r.citation = `Top performer for ${monthLbl} — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
-        + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
+      r.citation = kpiOnly
+        ? `Top performer for ${monthLbl} — ${r.taskPct}% KPI (tasks 70% / deliverables 30%)`
+          + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.'
+        : `Top performer for ${monthLbl} — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
+          + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
     });
     return eligible;
   };
@@ -1027,9 +1094,12 @@ async function computeEomStandings(users, monthStr) {
 // option to announce (notify) the current winner. The system chooses the person;
 // announcing is an explicit, one-tap action so the congrats fires when intended.
 function openEomStandingsModal(standings, month) {
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — copy must not mention attendance
+  // once `month` is on/after the KPI-only cutover.
+  const kpiOnly = (month || '') >= EOM_KPI_ONLY_FROM;
   if (!standings || !standings.length) {
     openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`,
-      `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No eligible team members have logged attendance yet this month.</p></div>`,
+      `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>${kpiOnly ? 'No eligible team members have recorded KPI activity yet this month.' : 'No eligible team members have logged attendance yet this month.'}</p></div>`,
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     return;
   }
@@ -1037,12 +1107,13 @@ function openEomStandingsModal(standings, month) {
   const rows = standings.map((s, i) => {
     const medal = i === 0 ? `${emojiIcon('🥇',16)}` : i === 1 ? `${emojiIcon('🥈',16)}` : i === 2 ? `${emojiIcon('🥉',16)}` : `${i + 1}.`;
     const initials = (s.displayName || s.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const statLine = (s.attPct != null ? `${s.attPct}% att · ` : '') + `${s.taskPct}% KPI` + (s.grade != null ? ` · grade ${s.grade}/10` : '');
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:${i === 0 ? 'rgba(255,196,0,0.1)' : 'var(--surface2,rgba(255,255,255,0.04))'};margin-bottom:8px;border:1px solid ${i === 0 ? 'rgba(255,196,0,0.35)' : 'transparent'}">
       <div style="font-size:18px;width:28px;text-align:center;flex:0 0 auto">${medal}</div>
       <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:var(--on-primary);font-weight:800;font-size:14px;flex:0 0 auto;overflow:hidden">${safeHttpUrl(s.photoUrl) ? `<img src="${escHtml(s.photoUrl)}" style="width:100%;height:100%;object-fit:cover" alt=""/>` : escHtml(initials)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.displayName || s.email)}</div>
-        <div style="font-size:11px;color:var(--text-muted)">${s.attPct}% att · ${s.taskPct}% KPI${s.grade != null ? ` · grade ${s.grade}/10` : ''}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${statLine}</div>
       </div>
       <div style="text-align:right;flex:0 0 auto">
         <div style="font-size:16px;font-weight:800;color:${i === 0 ? '#FFB800' : 'var(--text)'}">${Math.round(s.score * 100)}</div>
@@ -1057,8 +1128,11 @@ function openEomStandingsModal(standings, month) {
     ? `<button class="btn-secondary" disabled style="opacity:.6">${emojiIcon('✓',16)} Announced</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
     : `<button class="btn-primary" id="eom-announce-btn">${emojiIcon('📣',16)} Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
 
+  const rankingExplainer = kpiOnly
+    ? 'ranked by KPI score alone — tasks 70% / deliverables 30%, the same score that drives Base + KPI pay'
+    : 'ranked by task KPI (50%), attendance (40%) and performance grade (10%)';
   const _panel = openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ranked by task KPI (50%), attendance (40%) and performance grade (10%). Revealed &amp; awarded on the 5th.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ${rankingExplainer}. Revealed &amp; awarded on the 5th.</p>
     <div>${rows}</div>
   `, footer);
 
@@ -1370,31 +1444,23 @@ window.loadHolidayOverrides = async function(years) {
 
 window.renderAttendancePage = async function() {
   const c = document.getElementById('page-content');
-  // TWO tiers, not one. The old single `pres` predicate
-  // (president|manager|finance) was wrong in both directions:
-  //   • it EXCLUDED the Corporate Secretary, whom firestore.rules explicitly
-  //     allows to read/write any attendance record (isOpsAdmin) and to approve
-  //     extensions (isAdmin) — so the one oversight role saw only their own
-  //     calendar, silently, with no error to report.
-  //   • it INCLUDED finance on the extension Approve/Deny buttons, which
-  //     `attendance_extensions` update = isAdmin() denies — a dead control the
-  //     handler below never surfaced, because it has no error branch.
-  // canSeeAll  → mirrors isOpsAdmin(): employee picker + day-edit pencil.
-  // canApprove → mirrors isAdmin():    the extension approve/deny queue.
+  // canSeeAll → mirrors isOpsAdmin(): the employee picker (HR/admins browse
+  // anyone's historic calendar). The extension approve/deny queue that used
+  // to live here is gone — OFFICE-KPI-PAY-SPEC-2026-08-25 R3 retired the
+  // attendance-extension workflow with the rest of office attendance.
   const canSeeAll  = (typeof window.isOpsPriv   === 'function') ? window.isOpsPriv()   : (currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance');
-  const canApprove = (typeof window.isAdminPriv === 'function') ? window.isAdminPriv() : (currentRole === 'president' || currentRole === 'manager');
 
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('📅',20)} Attendance</h2>
       ${canSeeAll ? `<select id="att-emp-select" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"><option value="">Loading…</option></select>` : ''}
     </div>
+    <div class="badge badge-gray" style="display:inline-flex;align-items:center;gap:6px;margin-bottom:12px">${emojiIcon('🗂️',14)} Historic — office attendance retired 2026-08-25</div>
     ${window.sopPanel('How Attendance works', [
-      'Time In happens on your Dashboard, 7:00–9:00 AM only — this calendar just shows the recorded history.',
-      'Green = Present (100%), half-circle = Half Day (50%), red = Absent. Tap the pencil on a day to correct it (admins only).',
-      'Missed the window? Request a Time In extension from your Dashboard; admins approve pending extensions from the banner above.'
+      'Office attendance is retired (2026-08-25) — this calendar is a read-only historic record. Nothing new is logged here, and it can no longer be edited.',
+      'Green = Present (100%), half-circle = Half Day (50%), red = Absent — the classification recorded before retirement.',
+      'Office pay no longer depends on attendance — it\'s base + KPI. HR/admins can still look up anyone\'s history using the picker above.'
     ], {open:false})}
-    ${canApprove ? `<div id="att-ext-requests" style="margin-bottom:14px"></div>` : ''}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <button class="btn-secondary btn-sm" id="att-prev-month" aria-label="Previous month">‹</button>
       <span id="att-month-label" style="font-weight:700;font-size:15px;min-width:140px;text-align:center"></span>
@@ -1444,60 +1510,6 @@ window.renderAttendancePage = async function() {
     }
   }
 
-  // ── Extension requests (isAdmin tier: president/manager/secretary) ──
-  async function loadExtensionRequests() {
-    const extEl = document.getElementById('att-ext-requests');
-    if (!extEl) return;
-    // Approving/denying mutates attendance_extensions — keep the dashboard's
-    // cached pending count fresh.
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
-    const todayStr = window.bizDate();
-    const snap = await db.collection('attendance_extensions')
-      .where('date','==',todayStr).where('status','==','pending').get().catch(()=>({docs:[]}));
-    if (snap.docs.length === 0) { extEl.innerHTML = ''; return; }
-    const requests = snap.docs.map(d=>({id:d.id,...d.data()}));
-    extEl.innerHTML = `
-      <div class="card" style="border:1.5px solid rgba(255,159,10,.35);background:rgba(255,159,10,.05)">
-        <div class="card-header"><h3 style="color:rgba(255,159,10,.9)">${emojiIcon('⏰',20)} Pending Extension Requests (${requests.length})</h3></div>
-        <div class="card-body" style="padding:0">
-          <div class="table-wrap"><table class="data-table table-cards">
-            <thead><tr><th>Employee</th><th>Date</th><th>Requested</th><th></th></tr></thead>
-            <tbody>${requests.map(r=>`<tr>
-              <td class="tc-name"><strong>${escHtml(r.userName||'—')}</strong></td>
-              <td class="tc-detail" data-label="Date">${r.date||'—'}</td>
-              <td class="tc-detail" data-label="Requested">${r.requestedAt ? new Date(r.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
-              <td class="tc-actions" style="white-space:nowrap">
-                <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}" style="margin-left:4px">${emojiIcon('✕',16)} Deny</button>
-              </td>
-            </tr>`).join('')}</tbody>
-          </table></div>
-        </div>
-      </div>`;
-    if (window.lucide) lucide.createIcons({ nodes: [extEl] });
-
-    extEl.querySelectorAll('.ext-approve-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true; btn.textContent = 'Approving…';
-        await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-        Notifs.success(`Extension approved for ${btn.dataset.name||'employee'}`);
-        loadExtensionRequests();
-      });
-    });
-
-    extEl.querySelectorAll('.ext-deny-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!(await confirmDialog({ message: 'Deny this extension request?' }))) return;
-        btn.disabled = true;
-        await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-        Notifs.error('Extension denied');
-        loadExtensionRequests();
-      });
-    });
-  }
-
-  if (canApprove) loadExtensionRequests();
-
   async function renderAttMonth() {
     const calEl  = document.getElementById('att-calendar');
     const sumEl  = document.getElementById('att-summary');
@@ -1530,7 +1542,11 @@ window.renderAttendancePage = async function() {
 
     const firstDay    = window.bizDow(monthStart);
     const todayStr    = window.bizDate();
-    const canEdit     = canSeeAll;
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R5 — office attendance retired. This
+    // calendar is READ-ONLY historic now: no more Present/Half/Absent edit
+    // pencil, no more write path into attendance/{uid}/records from this
+    // screen. Historic records are PRESERVED and still browsable via the
+    // canSeeAll employee picker above (HR still needs to look up history).
     const phHolidays  = getPHHolidays(viewYear);
 
     const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -1577,7 +1593,6 @@ window.renderAttendancePage = async function() {
           status==='absent'?`<span class="att-mark">${emojiIcon('x',14)}</span>`:
           status==='leave'?`<span class="att-mark" style="color:${window.attKindBadge('leave').c}">${window.attKindBadge('leave').m}</span>`:
           status==='unpaid-leave'?`<span class="att-mark" style="color:${window.attKindBadge('unpaid-leave').c}">${window.attKindBadge('unpaid-leave').m}</span>`:''}
-        ${canEdit&&!isNoWork?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit" aria-label="Edit ${dateStr} attendance">${emojiIcon('✎',16)}</button>`:''}
       </div>`;
     }
     html += '</div>';
@@ -1595,93 +1610,11 @@ window.renderAttendancePage = async function() {
           <div class="kpi-card accent"><div class="kpi-label">Rate</div><div class="kpi-value">${pct}%</div></div>
         </div>
       </div>`;
-
-    if (canEdit) {
-      calEl.querySelectorAll('.att-edit-btn').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          e.stopPropagation();
-          const date = btn.dataset.date;
-          const cur  = records[date];
-          // v13 Phase 17 — pre-fill via attRecKind so a leave/unpaid-leave day shows
-          // as 'leave' rather than silently pre-selecting 'present'/'absent'.
-          const recKind = window.attRecKind ? window.attRecKind(cur) : null;
-          const isLeaveDay = recKind === 'leave' || recKind === 'unpaid-leave';
-          const curStatus = isLeaveDay ? 'leave' : (cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent');
-          const _panel = openPage(`${emojiIcon('✎',16)} Attendance — ${date}`, `
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${escHtml(targetName)}</strong></p>
-            <div class="form-group"><label>Status</label>
-              <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
-                <button class="att-status-opt ${curStatus==='present'?'att-opt-active':''}" data-val="present" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='present'?'#30d158':'var(--border)'};background:${curStatus==='present'?'rgba(48,209,88,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('✓',13)} Present</button>
-                <button class="att-status-opt ${curStatus==='half'?'att-opt-active':''}" data-val="half" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='half'?'#ffaa00':'var(--border)'};background:${curStatus==='half'?'rgba(255,170,0,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">½ Half Day</button>
-                <button class="att-status-opt ${curStatus==='absent'?'att-opt-active':''}" data-val="absent" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='absent'?'#ff453a':'var(--border)'};background:${curStatus==='absent'?'rgba(255,69,58,.12)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('✗',13)} Absent</button>
-                ${isLeaveDay?`<button class="att-status-opt ${curStatus==='leave'?'att-opt-active':''}" data-val="leave" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='leave'?'#af52de':'var(--border)'};background:${curStatus==='leave'?'rgba(175,82,222,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('calendar',13)} Leave</button>`:''}
-              </div>
-              <input type="hidden" id="att-status-sel" value="${curStatus}"/>
-              ${isLeaveDay?`<p style="font-size:11px;color:var(--text-muted);margin-top:6px">This is an approved leave day. Switching to Present/Half/Absent will convert it and clear the leave link.</p>`:''}
-            </div>
-            <div class="form-group" style="margin-top:12px"><label>Note (optional)</label><input id="att-note" value="${escHtml(cur?.note||'')}" placeholder="e.g. sick leave, official business"/></div>
-            ${cur?.editedBy?`<p style="font-size:11px;color:var(--text-muted);margin-top:8px">Last edited by admin</p>`:''}
-          `, `<button class="btn-primary" id="save-att-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-          if (window.lucide) lucide.createIcons({ nodes: [_panel] });
-
-          // Option button toggle
-          const colors = {present:'#30d158',half:'#ffaa00',absent:'#ff453a',leave:'#af52de'};
-          const bgs    = {present:'rgba(48,209,88,.15)',half:'rgba(255,170,0,.15)',absent:'rgba(255,69,58,.12)',leave:'rgba(175,82,222,.15)'};
-          // ⚠ SCOPED TO THIS PANEL, NOT document.
-          // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
-          // inside that window and two panels carry the same ids at once —
-          // document.getElementById() returns the FIRST in document order, which is
-          // the DYING one, so the handler binds to a button nobody can see and the
-          // visible button does nothing (and a save can read the PREVIOUS record's
-          // field values). Reported by the Corporate Secretary 2026-08-10.
-          _panel.querySelectorAll('.att-status-opt').forEach(optBtn => {
-            optBtn.addEventListener('click', () => {
-              _panel.querySelector('#att-status-sel').value = optBtn.dataset.val;
-              _panel.querySelectorAll('.att-status-opt').forEach(b => {
-                b.style.borderColor = 'var(--border)';
-                b.style.background = 'var(--surface)';
-              });
-              optBtn.style.borderColor = colors[optBtn.dataset.val];
-              optBtn.style.background  = bgs[optBtn.dataset.val];
-            });
-          });
-
-          _panel.querySelector('#save-att-btn').addEventListener('click', async () => {
-            const status = _panel.querySelector('#att-status-sel').value;
-            const note   = _panel.querySelector('#att-note').value.trim();
-            const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
-            const FV  = firebase.firestore.FieldValue;
-            // Guard: converting an approved leave day into a worked/absent day needs
-            // explicit confirmation, since it silently drops the leave link otherwise.
-            let clearLeaveFields = false;
-            if (isLeaveDay && status !== 'leave') {
-              const ok = await window.confirmDialog({ message: 'This day is an approved leave. Convert it to a worked/absent day? This clears the leave link.' });
-              if (!ok) return;
-              clearLeaveFields = true;
-            }
-            // Always write attendanceScore too: payroll and EOM read it FIRST (before
-            // the fullTime/loginTime fallbacks), so an edit that leaves an old score
-            // behind silently never reaches pay.
-            const leaveClear = clearLeaveFields ? { leaveType: FV.delete(), leaveReqId: FV.delete() } : {};
-            if (status==='present')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,status:'present',attendanceScore:1.0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp(),...leaveClear},{merge:true});
-            else if (status==='half')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,status:'half',attendanceScore:0.5,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp(),...leaveClear},{merge:true});
-            else if (status==='leave')
-              // Leave selected but unchanged (option only shown when already a leave day) — no-op besides note.
-              await ref.set({date,uid:targetUid,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
-            else
-              // Soft-archive instead of deleting: preserve the audit trail payroll
-              // depends on. Clear time markers so downstream reads classify as absent.
-              await ref.set({date,uid:targetUid,status:'absent',fullTime:false,loginTime:FV.delete(),attendanceScore:0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp(),...leaveClear},{merge:true});
-            // Refresh in-memory copy so the calendar re-renders with the new state
-            renderAttMonth();
-            closeModal();
-            Notifs.success('Attendance updated!');
-          });
-        });
-      });
-    }
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R5 — the admin edit-day modal and its
+    // write path into attendance/{uid}/records (Present/Half/Absent/soft-
+    // archive-absent, and the leave-day conversion guard) were REMOVED from
+    // here. This screen no longer writes attendance at all; preserved history
+    // is still fully browsable above via the employee picker + month nav.
   }
 
   document.getElementById('att-prev-month').addEventListener('click', () => {
@@ -2239,7 +2172,15 @@ async function openPresidentCashAdvanceModal(users) {
   const LEAVE_SOP_STEPS = [
     'Tap "+ Request Leave", pick a type — Vacation and Sick draw down your balance; Emergency and Unpaid don\'t — and file it.',
     'Finance/admin approve or reject. An approval automatically decrements your balance and notifies you either way.',
-    'Vacation and Sick balances accrue annually; admins run Annual Accrual or make a one-off adjustment from Leave Management.'
+    'Vacation and Sick balances accrue annually; admins run Annual Accrual or make a one-off adjustment from Leave Management.',
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R6 / §3 — office attendance is retired
+    // and leave is now record-keeping only (balances still tracked, nothing
+    // writes attendance anymore), so this needs saying plainly on-screen.
+    // Scoped to "For Office staff" deliberately — this leave screen is shared
+    // with the Operations Team, whose pay stays attendance-only (untouched by
+    // this spec, TASK-BASED-PAY-SPEC-2026-08-12 Ruling 2), so an unqualified
+    // "pay is base + KPI, not attendance" line would be false for them.
+    'For Office staff, unpaid leave does not reduce pay — Office pay is base + KPI, not attendance.'
   ];
   // Leave status badges go through the unified status registry (Phase 116):
   // call window.statusBadge2('leave', status) / window.statusBadgeClass('leave', status)
@@ -2532,30 +2473,14 @@ async function openPresidentCashAdvanceModal(users) {
     });
   }
 
-  // Writes a paid/unpaid attendance record for every WORK day in the leave range,
-  // skipping Sundays & PH holidays, non-destructively (merge). Runs as the approver
-  // (finance/admin/secretary) → passes the attendance finance/admin write path.
-  async function writeLeaveAttendance(r, lt){
-    if(!r.startDate || !r.endDate) return;
-    const FV = firebase.firestore.FieldValue;
-    const paid = lt.paid !== false;
-    const s=new Date(r.startDate+'T12:00:00'), e=new Date(r.endDate+'T12:00:00');
-    if(isNaN(s)||isNaN(e)||e<s) return;
-    const d=new Date(s); let guard=0;
-    while(d<=e && guard++<366){
-      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      const hol=(typeof getPHHolidays==='function')?getPHHolidays(d.getFullYear()):{};
-      if(window.bizDow(ds)!==0 && !hol[ds]){
-        await db.collection('attendance').doc(r.userId).collection('records').doc(ds).set(
-          paid
-            ? { date:ds, uid:r.userId, attendanceScore:1.0, fullTime:true,  status:'leave',        leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() }
-            : { date:ds, uid:r.userId, attendanceScore:0,   fullTime:false, status:'unpaid_leave', leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() },
-          {merge:true});
-      }
-      d.setDate(d.getDate()+1);
-    }
-  }
-  // Shared balance-decrement + attendance-write. BOTH approval paths call this.
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R6 — leave approval no longer writes an
+  // attendance record. window.writeLeaveAttendance (formerly here, wrote paid/
+  // unpaid records into attendance/{uid}/records for every work day in the
+  // range) is REMOVED — office attendance is retired, and pay is base + KPI,
+  // so attendance has no pay or scoring meaning left for it to feed. Historic
+  // leave-attendance records already written before retirement are PRESERVED
+  // (§2 — never deleted), just no longer written going forward.
+  // Shared balance-decrement. BOTH approval paths call this.
   async function applyLeaveApproval(r){
     const lt = leaveType(r.type);
     if(lt.drawsBalance){
@@ -2564,7 +2489,6 @@ async function openPresidentCashAdvanceModal(users) {
       await db.collection('leave_balances').doc(r.userId).set(
         { [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
     }
-    await writeLeaveAttendance(r, lt);
   }
 
   async function approveLeave(r, c){
@@ -2572,7 +2496,7 @@ async function openPresidentCashAdvanceModal(users) {
     if(r.status==='approved') return;   // idempotency guard — already applied; a retry must not re-decrement the balance
     try{
       const lt=leaveType(r.type);
-      await applyLeaveApproval(r);   // decrement + write attendance FIRST (single source) — status flips only after this succeeds
+      await applyLeaveApproval(r);   // decrement FIRST (single source) — status flips only after this succeeds
       await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
       try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', link:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
@@ -2600,7 +2524,7 @@ async function openPresidentCashAdvanceModal(users) {
     const r = { id:s.id, ...s.data() };
     if(r.status==='approved') return r;   // idempotency guard — already applied; a retry must not re-decrement the balance
     const lt = leaveType(r.type);
-    await applyLeaveApproval(r);    // decrement + write attendance FIRST (single source) — status flips only after this succeeds
+    await applyLeaveApproval(r);    // decrement FIRST (single source) — status flips only after this succeeds
     await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
     window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
     try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', link:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}

@@ -3062,7 +3062,6 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       <div class="kpi-card green"><div class="kpi-label">Payslips This Month</div><div class="kpi-value">${payslips.length}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Disbursed (${now.toLocaleString('en-PH',{month:'short'})})</div><div class="kpi-value" style="font-size:16px">₱${fmt(totalDisbursed)}</div></div>
     </div>
-    <div id="hrp-trouble-panel"></div>
     ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       ${isPayPriv?`<button class="btn-secondary btn-sm" id="hrp-goto-accounts-btn" title="Create the login and the worker record together">${emojiIcon('🔑',16)} Create Worker Account</button>`:''}
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">${emojiIcon('📄',16)} All Payslips</button>
@@ -3176,12 +3175,6 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
       btn.addEventListener('click', () => { if (profile) openWorkerKioskModal(profile, currentUser); });
     });
-
-    // v14 HR remediation P1 — surface pending "trouble timing in" / attendance
-    // override requests right here in the worker-attendance area (not just the
-    // main Approvals tab), since HR reviewing worker_profiles is exactly who
-    // needs to act on these. Best-effort/non-blocking.
-    _loadHrTroublePanel(container, currentUser);
   }
 
   // Generate payslip
@@ -3189,86 +3182,6 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     const profile = profiles.find(p=>p.id===btn.dataset.id);
     btn.addEventListener('click', () => openPayslipGenerator(profile, currentUser, currentRole));
   });
-}
-
-// ── v14 HR remediation P1 — supervisor-override / "trouble timing in" intake.
-// `attendance_extensions` (grepped) already exists and is written by the
-// Type-A regular-employee flow with the confirmed shape
-// {uid, userName, date, status:'pending', requestedAt} — keyed
-// `${uid}_${date}` (see js/app.js's tryUpgradeAttendanceOnNotifRead/
-// approveAttendanceExtension/denyAttendanceExtension, and
-// js/screens/dashboards.js's req-ext-btn handler). The worker-side agent's
-// Type-B "trouble timing in" requests are ASSUMED to land in this SAME
-// collection (no dedicated collection found anywhere in the codebase), so
-// this renders every pending doc generically and works whether the row is a
-// Type-A employee (uid) or a Type-B worker_profile (assumed workerId field —
-// unconfirmed; reconcile with the worker-side agent's actual field name).
-// Approve/Deny reuse the existing global window.approveAttendanceExtension/
-// denyAttendanceExtension (js/app.js) so no approval logic is duplicated;
-// they fall back to a raw status update if those globals are ever absent.
-async function _loadHrTroublePanel(container, currentUser) {
-  const panelEl = document.getElementById('hrp-trouble-panel');
-  if (!panelEl) return;
-  let snap;
-  try {
-    snap = await db.collection('attendance_extensions').where('status','==','pending').get();
-  } catch (_) { panelEl.innerHTML = ''; return; }
-  const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  if (!rows.length) { panelEl.innerHTML = ''; return; }
-  // DEAD-CONTROL FIX (2026-08-09): Approve/Deny write attendance_extensions,
-  // whose rule is `allow update, delete: if isAuth() && isAdmin()` —
-  // president/manager/secretary ONLY. This panel lives inside the Operations
-  // Team roster, which the `finance` role and any Finance-department member
-  // also reach, so both were being offered buttons the boundary refuses. The
-  // queue itself is still worth showing them (read is `isAuth() && !isPartner()`),
-  // so render it read-only with the reason stated instead of hiding it.
-  const canAct = (typeof window.isAdminPriv === 'function') ? window.isAdminPriv() : true;
-  panelEl.innerHTML = `
-    <div class="card" style="margin-bottom:16px;border:1.5px solid var(--warning,#d97706)">
-      <div class="card-header"><h3>${emojiIcon('🚧',20)} Trouble Timing In — Pending (${rows.length})</h3></div>
-      <div class="card-body" style="padding:0">
-        <div style="font-size:11px;color:var(--text-muted);padding:10px 12px 0">Includes both regular-employee attendance-extension requests and (once the worker-side flow ships) Type-B worker "trouble timing in" reports — same collection, unconfirmed field-name overlap. See code comment for the assumption.</div>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Requester</th><th>Date</th><th>Reason / Note</th><th>Requested</th><th></th></tr></thead>
-          <tbody>${rows.map(r => `<tr>
-            <td style="font-weight:600">${escHtml(r.userName || r.workerName || r.workerId || r.uid || r.id || '—')}</td>
-            <td>${escHtml(r.date || '—')}</td>
-            <td style="font-size:12px">${escHtml(r.reason || r.note || '—')}</td>
-            <td style="font-size:11px;color:var(--text-muted)">${r.requestedAt?.toDate ? escHtml(r.requestedAt.toDate().toLocaleString('en-PH')) : '—'}</td>
-            <td style="white-space:nowrap">
-              ${canAct ? `<button class="btn-primary btn-sm hrp-trbl-approve" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}">Approve</button>
-              <button class="btn-secondary btn-sm hrp-trbl-deny" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}" style="margin-left:4px">Deny</button>`
-              : `<span style="font-size:11px;color:var(--text-muted)">President / Manager / Secretary approves</span>`}
-            </td>
-          </tr>`).join('')}</tbody>
-        </table></div>
-      </div>
-    </div>`;
-  if (window.lucide) lucide.createIcons({ nodes: [panelEl] });
-  panelEl.querySelectorAll('.hrp-trbl-approve').forEach(btn => btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    try {
-      if (typeof window.approveAttendanceExtension === 'function') {
-        await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-      } else {
-        await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'approved', approvedBy: currentUser.uid, approvedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      }
-      Notifs.success('Request approved.');
-    } catch(e) { Notifs.showToast('Could not approve: '+(e.message||e),'error'); }
-    _loadHrTroublePanel(container, currentUser);
-  }));
-  panelEl.querySelectorAll('.hrp-trbl-deny').forEach(btn => btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    try {
-      if (typeof window.denyAttendanceExtension === 'function') {
-        await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-      } else {
-        await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'denied', deniedBy: currentUser.uid, deniedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      }
-      Notifs.success('Request denied.');
-    } catch(e) { Notifs.showToast('Could not deny: '+(e.message||e),'error'); }
-    _loadHrTroublePanel(container, currentUser);
-  }));
 }
 
 function openHRProfileForm(profile, currentUser, currentRole, onSave) {
@@ -5386,13 +5299,28 @@ window.toPayslipModel = function(source, kind) {
       // 'taskbased' — money-core.js §2.4 / departments.js's disbursePayRun
       // mirror), so buildPayslipHTML's sentence can render without a second
       // computation. null on every other policy, same as the source itself.
-      performance: (source.kpiScore!=null||source.perfFactor!=null)
+      //
+      // OFFICE-KPI-PAY-SPEC-2026-08-25 §3 — additive only: kpi/att/perfFactor/
+      // policy/preMultiplierNet/netBeforeCA are read exactly as before for
+      // every existing policy, so an old ('flat'/'taskbased'/'performance')
+      // month renders byte-identical. `kpiFactor`/`incentiveFull`/
+      // `incentiveEarned` are appended ONLY when the frozen line's own
+      // `policy === 'basekpi'` (money-core.js's computePayLine writes these
+      // three fields only under that policy, §1.1) — a legacy line never has
+      // them, so this spread is a true no-op for every payslip printed before
+      // the split shipped.
+      performance: (source.kpiScore!=null||source.perfFactor!=null||source.policy==='basekpi')
         ? { kpi:source.kpiScore||0, att:source.attScore||0, perfFactor:source.perfFactor??1, policy:source.policy||'flat',
             preMultiplierNet: source.preMultiplierNet ?? null,
             // A raw pay_runs line carries `netBeforeCA`; the salary_history
             // mirror carries the SAME figure under `netPay` (disbursePayRun's
             // mirror write: `netPay: line.netBeforeCA`) — both read here.
-            netBeforeCA: source.netBeforeCA ?? source.netPay ?? null } : null,
+            netBeforeCA: source.netBeforeCA ?? source.netPay ?? null,
+            ...(source.policy === 'basekpi' ? {
+              kpiFactor: source.kpiFactor ?? Math.min(1, Math.max(0, Number(source.kpiScore)||0)),
+              incentiveFull: source.incentiveFull ?? allowance,
+              incentiveEarned: source.incentiveEarned ?? null,
+            } : {}) } : null,
       timeLog:null,
       signatures:[{label:'Prepared by',name:'',title:'Finance'},{label:'Verified by',name:'',title:'HR'},{label:'Approved by',name:(window.BRAND&&window.BRAND.legal.signatory.name)||'',title:'President'}],
       proofUrl:''
@@ -5552,21 +5480,43 @@ window.buildPayslipHTML = function(model) {
   // TASK-BASED-PAY-SPEC-2026-08-12 §9.1/§9.2 — the ONE traceability sentence,
   // read straight off the model's own frozen fields (never recomputed here).
   // '' for every policy except 'taskbased' (payBasisSentence's own contract).
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.2 — kpiFactor/incentiveFull/
+  // incentiveEarned are forwarded too so payBasisSentence can render the
+  // 'basekpi' wording once it gains that branch; on every other policy these
+  // three are simply undefined and payBasisSentence's existing contract
+  // (only 'taskbased' returns non-'') is unchanged.
   const _psBasisSentence = (m.performance && typeof window.payBasisSentence === 'function')
     ? window.payBasisSentence({
         policy: m.performance.policy, perfFactor: m.performance.perfFactor,
         kpiScore: m.performance.kpi, attScore: m.performance.att,
-        preMultiplierNet: m.performance.preMultiplierNet, netBeforeCA: m.performance.netBeforeCA
+        preMultiplierNet: m.performance.preMultiplierNet, netBeforeCA: m.performance.netBeforeCA,
+        kpiFactor: m.performance.kpiFactor, incentiveFull: m.performance.incentiveFull,
+        incentiveEarned: m.performance.incentiveEarned
       })
     : '';
-  const perf = m.performance ? `
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §3 — a 'basekpi' line shows the KPI factor
+  // and the two incentive lines (full / earned) instead of the old Task
+  // KPI/Attendance/Performance-factor rows; every OTHER stored policy
+  // ('flat'/'taskbased'/'performance', or a legacy line with no `policy` at
+  // all) renders through the untouched branch below — same markup, same
+  // fields, same order as before this spec. Old payslips do not move by one
+  // pixel.
+  const _psIsBaseKpi = !!(m.performance && m.performance.policy === 'basekpi');
+  const perf = m.performance ? (_psIsBaseKpi ? `
+    <div class="ps-sec-h">Performance</div>
+    <table class="ps-t">
+      <tr><td>KPI factor</td><td class="num">${Math.round((m.performance.kpiFactor||0)*100)}%</td></tr>
+      <tr><td>Incentive (full)</td><td class="num">${f(m.performance.incentiveFull||0)}</td></tr>
+      <tr class="ps-sub"><td>Incentive earned at KPI ${Math.round((m.performance.kpiFactor||0)*100)}%</td><td class="num">${f(m.performance.incentiveEarned||0)}</td></tr>
+    </table>
+    ${_psBasisSentence ? `<div style="font-size:10.5px;color:#555;margin-top:4px;line-height:1.4">${escHtml(_psBasisSentence)}</div>` : ''}` : `
     <div class="ps-sec-h">Performance</div>
     <table class="ps-t">
       <tr><td>Task KPI (70%)</td><td class="num">${Math.round(m.performance.kpi*100)}%</td></tr>
       <tr><td>Attendance (30%)</td><td class="num">${Math.round(m.performance.att*100)}%</td></tr>
       <tr class="ps-sub"><td>Performance factor (policy: ${escHtml(m.performance.policy)})</td><td class="num">${m.performance.perfFactor.toFixed(2)}×</td></tr>
     </table>
-    ${_psBasisSentence ? `<div style="font-size:10.5px;color:#555;margin-top:4px;line-height:1.4">${escHtml(_psBasisSentence)}</div>` : ''}` : '';
+    ${_psBasisSentence ? `<div style="font-size:10.5px;color:#555;margin-top:4px;line-height:1.4">${escHtml(_psBasisSentence)}</div>` : ''}`) : '';
   // v14 HR remediation P2 — provenance column (source: kiosk-verified/kiosk-
   // manual/manual, set by openPayslipGenerator's Load Kiosk Hours flow).
   // Display-only and additive: older saved payslips have no r.source at all,
@@ -5594,9 +5544,11 @@ window.buildPayslipHTML = function(model) {
   <div class="ps-sec-h">Earnings</div>
   <table class="ps-t">
     <tr><td>Basic Pay</td><td class="num">${f(m.earnings.base)}</td></tr>
-    <tr><td>Allowances</td><td class="num">${f(m.earnings.allowance)}</td></tr>
+    ${_psIsBaseKpi
+      ? `<tr><td>Incentive (earned at KPI ${Math.round((m.performance.kpiFactor||0)*100)}%)</td><td class="num">${f(m.performance.incentiveEarned||0)}</td></tr>`
+      : `<tr><td>Allowances</td><td class="num">${f(m.earnings.allowance)}</td></tr>`}
     ${m.earnings.overtime?`<tr><td>Overtime</td><td class="num">${f(m.earnings.overtime)}</td></tr>`:''}
-    <tr class="ps-gross"><td>Gross Pay</td><td class="num">${f(m.earnings.gross)}</td></tr>
+    <tr class="ps-gross"><td>Gross Pay</td><td class="num">${f(_psIsBaseKpi ? (m.earnings.base + (m.performance.incentiveEarned||0)) : m.earnings.gross)}</td></tr>
   </table>
 
   <div class="ps-sec-h">Deductions &amp; Contributions</div>

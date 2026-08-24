@@ -134,6 +134,21 @@ window.computePayLine = function(emp, ctx) {
   const attScore   = ctx.attScore != null ? ctx.attScore : 1;
   const perfFactor = Math.min(1, Math.max(0, kpiScore*0.7 + attScore*0.3));
 
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — kpiFactor is a SEPARATE clamp from
+  // perfFactor's blended kpiScore*0.7 + attScore*0.3 above. 'basekpi' (base +
+  // KPI-dependent incentive, replacing the retired office attendance system)
+  // reads ctx.kpiScore ALONE and never reads attScore — the owner's
+  // 2026-08-25 ruling ("its more dole based now") removes attendance from
+  // office pay entirely, so this factor must not blend attendance in even at
+  // zero weight. Deliberately reads ctx.kpiScore raw (Number(...) || 0, so an
+  // absent/invalid score is conservative-zero here), NOT the `kpiScore`
+  // local above (which defaults an absent ctx.kpiScore to a full 1 — correct
+  // for perfFactor's "no KPI data yet = don't penalise" stance, wrong for a
+  // brand-new incentive nobody has confirmed a score for yet). perfFactor
+  // keeps being computed and stored exactly as today (shared with
+  // 'taskbased'/'performance'); this is purely additive.
+  const kpiFactor = Math.min(1, Math.max(0, Number(ctx.kpiScore) || 0));
+
   const caPlan    = ctx.caPlan || [];
   const caPlanned = caPlan.reduce((s,p)=>s+(p.amount||0), 0);
   const caBalance = ctx.caBalance != null ? ctx.caBalance : caPlanned;
@@ -147,7 +162,15 @@ window.computePayLine = function(emp, ctx) {
   // operation is done through attendance only by geo tracked timing in." The
   // weekly engine (computeWeeklyLine, below) never sees a policy at all —
   // this throw is the monthly-side half of that boundary.
-  if (policy === 'taskbased' && emp.payClass === 'production') {
+  //
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — the FOURTH permitted edit to this
+  // frozen function (after §A4's statutory year, the statutory-config
+  // resolver, and TASK-BASED-PAY-SPEC's 'taskbased' branch above). 'basekpi'
+  // (base + KPI-dependent incentive) is an Office-only policy exactly like
+  // 'taskbased' was — it joins the SAME structural guard rather than a
+  // second, easy-to-miss one, so a production (weekly-paid) worker can never
+  // be silently run through either Office policy.
+  if ((policy === 'taskbased' || policy === 'basekpi') && emp.payClass === 'production') {
     throw new Error((emp.displayName || emp.email || 'This person') +
       ' is paid weekly on the Operations Team — task-based pay applies to the Office Team only. Nothing was worked out for them.');
   }
@@ -166,7 +189,17 @@ window.computePayLine = function(emp, ctx) {
   // it already is above (function hoisting — see that comment) because the
   // 0.7/0.3 blend is an irrational-in-binary float on purpose (§2.5 of the
   // spec) and must not be pre-rounded before this multiply.
-  const netBeforeCA = policy === 'taskbased'
+  // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — 'basekpi' arm, additive, checked
+  // FIRST so the existing three-way branch below it stays byte-identical.
+  // base is protected (never scaled, never docked — same "PH labor-safe"
+  // principle 'performance' already documents for base); only the incentive
+  // (`allowance`) is at risk, scaled by kpiFactor alone. Statutory and other
+  // deductions are computed on the nominal gross exactly as every other
+  // policy — never themselves scaled by any policy branch, same rule §2.2 of
+  // TASK-BASED-PAY-SPEC states for 'taskbased'.
+  const netBeforeCA = policy === 'basekpi'
+    ? _round2(base - statutoryTotal - otherDeductions + allowance * kpiFactor)
+    : policy === 'taskbased'
     ? _round2((gross - statutoryTotal - otherDeductions) * perfFactor)
     : policy === 'performance'
       ? (base - statutoryTotal - otherDeductions + allowance*perfFactor)
@@ -196,7 +229,19 @@ window.computePayLine = function(emp, ctx) {
     // at factor 0 and reintroduces float dust) so the traceability sentence
     // (js/pay-policy.js's payBasisSentence) always has the pre-multiplier
     // figure exactly as it was at the moment pay was worked out.
-    ...(policy === 'taskbased' ? { preMultiplierNet: gross - statutoryTotal - otherDeductions } : {})
+    ...(policy === 'taskbased' ? { preMultiplierNet: gross - statutoryTotal - otherDeductions } : {}),
+    // OFFICE-KPI-PAY-SPEC-2026-08-25 §1.1 — CONDITIONAL keys, 'basekpi' only.
+    // Same reasoning as the 'taskbased' spread above: the existing pinned
+    // tests deepEqual the FULL return object for 'flat'/'performance'/
+    // 'taskbased', so an unconditional key here would fail every one of
+    // them. Frozen on the line (not reconstructed at render time) so
+    // js/pay-policy.js's payBasisSentence and payDerivationSteps always
+    // describe exactly what the math did, even years later.
+    ...(policy === 'basekpi' ? {
+      kpiFactor,
+      incentiveFull: allowance,
+      incentiveEarned: _round2(allowance * kpiFactor),
+    } : {})
   };
 };
 
