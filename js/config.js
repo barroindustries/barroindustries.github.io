@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.181';
+window.APP_VERSION = '14.0.182';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -635,7 +635,11 @@ window.NAV_REGISTRY = {
     // Marketing were missing, which is why Design could only see a job from
     // inside its own screen and Marketing could not see one at all.
     hasProjectsDept:    () => (window.currentDepts||[]).some(d => ['Sales','Production','Finance','Design','Marketing'].includes(d)) || window.currentRole === 'finance',
-    hasSalesOrdersDept: () => (window.currentDepts||[]).includes('Finance') || window.currentRole === 'finance',
+    // Sales added 2026-08-24 (owner: "allow sales access to sales orders under
+    // operations"). No rules change needed: sales_orders read already allows
+    // any non-partner, and renderSalesOrders renders read-only for viewers
+    // outside isFinancePriv() — Sales sees the list, Finance still records.
+    hasSalesOrdersDept: () => (window.currentDepts||[]).some(d => ['Finance','Sales'].includes(d)) || window.currentRole === 'finance',
     isFinanceRole:      () => window.currentRole === 'finance',
     // The Finance sidebar entry is on the SHARED admin variant, which the
     // Corporate Secretary also uses — and the owner closed Finance to that role
@@ -658,76 +662,45 @@ window.NAV_REGISTRY = {
 
   sidebar: {
     // ── Admin / President Command Center (president, manager, secretary) ──
-    // ── Admin / President Command Center (president, manager, secretary) ──
     //
-    // GROUPED, 2026-08-10 (owner: "theres way too mauch happening in the left
-    // side app drawer, organize it"). Measured before the change: 23 items,
-    // 1376px, 1.69 SCREENS of scrolling on a 375px phone — and the first TEN
-    // had no section header at all, so the drawer opened as a flat wall. The
-    // one labelled group, "Management", was a grab-bag of seven that included
-    // Calendar and Files; "Catalog" held a single item.
+    // REBUILT 2026-08-24 to the owner's own list, in his order (same process as
+    // the staff drawer on 08-12): everyday set with no header, then a Workspace
+    // group, then Operations. History that still binds: headings are PLAIN
+    // LABELS, never foldable (owner, 2026-08-10); if this grows past ~15,
+    // reach for FEWER ENTRIES, not folding. A group of one means the group is
+    // wrong. Adding an entry is TWO EDITS (see the registry comment above).
     //
-    // Now: three labelled groups, ordered by how often the thing is actually
-    // opened rather than by when it was built. The first five carry no header —
-    // they are the every-day set and a header above Dashboard would be noise.
+    // OUT with this rebuild, per the owner's enumeration:
+    //   - Finance / CRM / Ventures dept rows → reachable via All Departments
+    //     (one tap deeper). canSeeFinanceNav keeps guarding any future
+    //     re-add of the Finance row against the Corporate Secretary.
+    //   - The president-only System group (Product Database / Audit Log /
+    //     System Health). ⚠ audit-log and system-health have NO other nav
+    //     entry point — until re-homed they are reachable only by deep link
+    //     (#audit-log / #system-health); product-database still surfaces via
+    //     global search. Flagged to the owner at rebuild time.
     //
-    // Headings are PLAIN LABELS. They were briefly foldable, while this list ran
-    // to 23 entries and folding was the only way to make it fit; the same day it
-    // was cut to eleven the owner asked for the dropdowns back out, and at this
-    // length they were friction buying nothing. Every destination is visible
-    // without a click. If this list ever grows back past ~15, reach for FEWER
-    // ENTRIES first — folding was treating the symptom.
-    //
-    // Adding an entry: put it in the group it BELONGS to, not at the end.
-    // A group of one means the group is wrong.
-    // ── Admin / President Command Center (president, manager, secretary) ──
-    //
-    // TRIMMED TO PRIORITY, 2026-08-10 (owner: "lessen the icons there, theres
-    // too many / priority only / like finance calendar files etc etc").
-    // It was 23 entries. Grouping and folding made that ten VISIBLE rows, but
-    // the list itself was still 23 things to read once anything was expanded —
-    // the fix for "too many" is fewer, not better-hidden.
-    //
-    // Now ELEVEN, plus a folded president-only System group. The test applied to
-    // each one: is this opened most days, or is it a place you go when you have
-    // a reason? Daily things earn a row. The rest live behind All Departments,
-    // which is one tap and is the screen built to be that door.
-    //
-    // FINANCE IS NEW HERE. The owner named it FIRST and it was never in this
-    // drawer at all — reachable only through All Departments, which for the
-    // person who runs the company is the wrong depth for the money screen.
-    //
-    // MOVED BEHIND "All Departments" (each still one tap, nothing removed from
-    // the app): Posts, Memos, Progress Reports, HR, Attendance, Projects,
-    // Sales Orders, Inventory. If any of those turn out to be daily for you,
-    // moving one back is a single line here — Company came back that way the
-    // same day it was trimmed out, which is the process working, not a mistake.
-    //
-    // CRM and Ventures STAY despite the trim: the owner asked for both by name
-    // on 2026-08-09 for the Corporate Secretary's first week, and this variant
-    // is the secretary's drawer too.
+    // IN (new to this drawer): Notes, Announcements, My Profile, My Finance,
+    // Projects — all already routed + colour-ruled from the staff drawer.
     admin: [
       // ── Every day (no header — the reasons the drawer gets opened)
-      { key:'tasks',     icon:'check-square',  label:'Tasks',     page:'tasks' },
-      { key:'calendar',  icon:'calendar-days', label:'Calendar',  page:'calendar' },
-      { key:'approvals', icon:'shield-check',  label:'Approvals', page:'approvals' },
+      { key:'notes',     icon:'sticky-note',   label:'Notes',         page:'notes' },
+      { key:'tasks',     icon:'check-square',  label:'Tasks',         page:'tasks' },
+      { key:'calendar',  icon:'calendar-days', label:'Calendar',      page:'calendar' },
+      { key:'approvals', icon:'shield-check',  label:'Approvals',     page:'approvals' },
+      { key:'analytics', icon:'bar-chart-2',   label:'Analytics',     page:'analytics' },
+      { key:'posts',     icon:'megaphone',     label:'Announcements', page:'posts' },
 
-      // ── The three the owner named, plus the one screen that reaches the rest
-      { key:'finance',     icon:'wallet',      label:'Finance',         page:'dept:Finance', section:true, sectionLabel:'Work', when:'canSeeFinanceNav' },
-      { key:'files-hub',   icon:'folder-open', label:'Files',           page:'files-hub' },
-      { key:'analytics',   icon:'bar-chart-2', label:'Analytics',       page:'analytics' },
-      { key:'team',        icon:'users',       label:'Team',            page:'team-directory' },
-      { key:'company',     icon:'building-2',  label:'Company',         page:'company' },
+      // ── Me + company-wide
+      { key:'profile',    icon:'circle-user',  label:'My Profile',    page:'my-profile', section:true, sectionLabel:'Workspace' },
+      { key:'my-finance', icon:'wallet',       label:'My Finance',    page:'personal-finance' },
+      { key:'files-hub',  icon:'folder-open',  label:'Files',         page:'files-hub' },
+      { key:'team',       icon:'users',        label:'Team',          page:'team-directory' },
+      { key:'company',    icon:'building-2',   label:'Company',       page:'company' },
 
-      // ── Departments: the hub, plus the two in active use this week
-      { key:'departments', icon:'layout-grid', label:'All Departments', page:'departments', section:true, sectionLabel:'Departments' },
-      { key:'crm',         icon:'target',      label:'CRM',             page:'dept:CRM' },
-      { key:'ventures',    icon:'rocket',      label:'Ventures',        page:'dept:Ventures' },
-
-      // ── President-only, folded: you go here deliberately, never in passing.
-      { key:'product-db',  icon:'package',      label:'Product Database', page:'product-database', section:true, sectionLabel:'System', when:'isPresident' },
-      { key:'audit-log',   icon:'scroll-text',  label:'Audit Log',        page:'audit-log',        when:'isPresident' },
-      { key:'sys-health',  icon:'activity',     label:'System Health',    page:'system-health',    when:'isPresident' }
+      // ── The door to everything else, plus the cross-dept project spine
+      { key:'departments', icon:'layout-grid', label:'All Departments', page:'departments', section:true, sectionLabel:'Operations' },
+      { key:'projects',    icon:'trending-up', label:'Projects',        page:'projects-lifecycle' }
     ],
 
     genericPartner: [
