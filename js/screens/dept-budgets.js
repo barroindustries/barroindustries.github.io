@@ -677,6 +677,7 @@ async function _dbOpenSpendReview(spend, currentRole, onDone) {
       decidedBy: currentUser.uid, decidedByName: uName,
       decidedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:dept_spend_logs-pending'); // PERF-WAVE1
     await Notifs.send(spend.loggedBy, {
       title: '❌ Spend rejected',
       body: `${spend.description} — ₱${window.fmtN2(spend.amount)}. Reason: ${reason}. Edit it and resubmit.`,
@@ -767,6 +768,7 @@ async function _dbConfirmSpend(spend, currentRole) {
     confirmedTotal: firebase.firestore.FieldValue.increment(spend.amount)
   });
   await batch.commit();
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:dept_spend_logs-pending'); // PERF-WAVE1
 
   await Notifs.send(spend.loggedBy, {
     title: '✅ Spend confirmed',

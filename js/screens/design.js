@@ -1387,7 +1387,11 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
         }
       }
       try { await Notifs.sendToOwner({title:'📌 New Task Created',body:`${who} created "${title}"`,icon:'📌',type:'task_created',dedupKey:`task-created-${ref.id}`}); } catch(_){}
-      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+      if (typeof dbCacheInvalidate === 'function') {
+        dbCacheInvalidate('tasks-all');
+        // PERF-WAVE1 — assignees' My Tasks lists are cached per-uid (tasks-mine-*)
+        picks.forEach(a => dbCacheInvalidate('tasks-mine-' + a.uid));
+      }
       Notifs.showToast('Task created','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not create task','error'); return; }
     window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks');

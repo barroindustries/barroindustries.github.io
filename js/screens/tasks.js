@@ -141,6 +141,22 @@ function scopeTasksToRole(tasks) {
   return tasks.filter(t => !blocked.includes(t.department || ''));
 }
 
+// ── Task cache invalidation — single choke point for every write path below
+// (PERF-WAVE1 WP5). loadTasksList's default 'mine' filter now reads through
+// dbCachedGet('tasks-mine-' + uid, …, 30000) — the same key WP3 (dashboards.js
+// employee dashboard) primes — so any create/update/status/delete here must
+// drop that key for every uid whose "My Tasks" list the write affects, plus
+// the existing 'tasks-all' key already invalidated throughout this file.
+// Pass the acting user's uid at minimum; callers additionally pass the task's
+// assignedTo array (pre- or post-write, whichever is available) so an
+// assignee who didn't perform the write doesn't keep a stale card/status/
+// follow-up-badge for up to 30s.
+function invalidateTaskCaches(uids) {
+  if (typeof dbCacheInvalidate !== 'function') return;
+  dbCacheInvalidate('tasks-all');
+  (Array.isArray(uids) ? uids : [uids]).filter(Boolean).forEach(u => dbCacheInvalidate('tasks-mine-' + u));
+}
+
 function normTask(data,id) {
   const t={id,...data};
   if (!Array.isArray(t.assignedTo))      t.assignedTo      = t.assignedTo     ?[t.assignedTo]     :[];
@@ -468,8 +484,15 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   const userDepts = window.currentDepts || [];
   let snap;
   if (filter==='mine') {
-    snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
-      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
+    // PERF-WAVE1 WP5 — shared key with dashboards.js's employee-dashboard read
+    // (WP3): both fetch "tasks assigned to uid" and both accept up to 30s
+    // staleness, so one cache line serves both call sites instead of two
+    // separate reads racing each other on every nav.
+    snap = typeof dbCachedGet==='function'
+      ? await dbCachedGet('tasks-mine-' + currentUser.uid, () => db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+          .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()), 30000)
+      : await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+          .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
   } else if (isPriv||filter==='all') {
     snap = typeof dbCachedGet==='function'
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
@@ -518,7 +541,22 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
     `;
     if (window.lucide) lucide.createIcons({ nodes: [list] });
   } else {
-    list.innerHTML = tasks.map(t=>taskCard(t)).join('');
+    // PERF-WAVE1 WP5 — 'all'/'dept' can be the entire company's task list.
+    // Keep the cached full fetch (dbCachedGet above) and the same `tasks`
+    // array/filtering exactly as before; only cap what gets PAINTED, behind a
+    // "Show all N" button that re-renders unbounded on tap. Status-filter
+    // views and the privileged 'mine' view (also routed through this branch)
+    // are left uncapped — out of spec scope and typically small.
+    const capped = (filter==='all' || filter==='dept') && tasks.length > 150;
+    const shown  = capped ? tasks.slice(0, 150) : tasks;
+    list.innerHTML = shown.map(t=>taskCard(t)).join('')
+      + (capped ? `<div style="text-align:center;padding:14px 0"><button class="btn-secondary btn-sm" id="tasks-show-all-btn">Show all ${tasks.length}</button></div>` : '');
+    if (capped) {
+      list.querySelector('#tasks-show-all-btn')?.addEventListener('click', () => {
+        list.innerHTML = tasks.map(t=>taskCard(t)).join('');
+        list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
+      });
+    }
   }
   list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
 }
@@ -905,7 +943,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
       lastModifiedBy: currentUser.uid, lastModifiedByName: actorName,
       lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo]);
     await notifyTaskInvolved(t, {
       title: '📍 Task Standing Updated',
       body: `"${t.title}" — ${val||'(cleared)'}`,
@@ -938,7 +976,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     if (DONE_STATUSES.includes(newStatus)) _statusUpd.completedAt=firebase.firestore.FieldValue.serverTimestamp();
     else if (DONE_STATUSES.includes(t.status)) _statusUpd.completedAt=firebase.firestore.FieldValue.delete();
     await db.collection('tasks').doc(taskId).update(_statusUpd);
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo]);
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.success(`Status → ${statusLabel(newStatus)}`);
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
@@ -948,7 +986,9 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     await db.collection('tasks').doc(taskId).update({status:'review',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo]);
+    // PERF-WAVE1 — this task just entered the Approvals review queue (WP6 cache)
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:tasks-review');
     await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
     Notifs.success('Submitted for review!');
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
@@ -966,7 +1006,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   $p('del-task-btn')?.addEventListener('click', async()=>{
     if (!(await confirmDialog({message:'Delete this task?', danger:true}))) return;
     await db.collection('tasks').doc(taskId).delete();
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo]);
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
@@ -986,7 +1026,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     // the fuller note on the create path below (openAddTaskModal).
     if (note) update.description=(t.description||'')+`\n\n📝 ${actorName}: ${note}`;
     await db.collection('tasks').doc(taskId).update(update);
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo, newUid]);
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
     await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified',taskId});
     Notifs.success(`${newName} added`);
@@ -1030,7 +1070,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
         lastFollowUpByName: actorName,
         lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
+      invalidateTaskCaches([currentUser.uid, ...(ft.assignedTo||[])]);
       await notifyTaskInvolved(ft,{title:'📣 Follow-up Requested',body:`"${ft.title}" — ${actorName}: ${entry.message}`,icon:'📣',type:'task_followup',taskId},currentUser.uid);
       if(input) input.value='';
       Notifs.success('Follow-up sent');
@@ -1056,7 +1096,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
         openFollowUpCount:arr.filter(f=>f.status!=='addressed').length,
         lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
       });
-      if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
+      invalidateTaskCaches([currentUser.uid, ...t.assignedTo]);
       if (target&&target.byUid&&target.byUid!==currentUser.uid) {
         await Notifs.send(target.byUid,{title:'✅ Follow-up Addressed',body:`${actorName} addressed your follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
       }
@@ -1079,7 +1119,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     const score=parseFloat($p('pres-score').value);
     if (!score||score<1||score>10) { Notifs.showToast('Enter 1–10','error'); return; }
     await db.collection('tasks').doc(taskId).update({presidentScore:score});
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo]);
     for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
     Notifs.success('Score saved & KPI updated!');
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
@@ -1217,7 +1257,11 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     if (DONE_STATUSES.includes(update.status)) update.completedAt=firebase.firestore.FieldValue.serverTimestamp();
     else if (DONE_STATUSES.includes(t.status)) update.completedAt=firebase.firestore.FieldValue.delete();
     await db.collection('tasks').doc(taskId).update(update);
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    // Covers both the pre-edit assignee set (t.assignedTo) and, when isAdmin
+    // changed it, the post-edit set (update.assignedTo) — an assignee who was
+    // just REMOVED needs their 'tasks-mine-<uid>' cache dropped too, or the
+    // task lingers in their My Tasks list until the 30s TTL expires.
+    invalidateTaskCaches([currentUser.uid, ...t.assignedTo, ...(update.assignedTo||[])]);
     const updatedTask={...t,assignedTo:update.assignedTo||t.assignedTo};
     // Build a SPECIFIC change summary so the notification says what actually changed
     const changes=[];
@@ -1372,7 +1416,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       await Notifs.send(a.uid,{title:'📌 New Task Assigned',body:`"${title}" assigned by ${creatorName}`,icon:'📌',type:'task_assigned',taskId,dedupKey:`task-assigned-${taskId}-${a.uid}`});
     }
     await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created',dedupKey:`task-created-${taskId}`});
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+    invalidateTaskCaches([currentUser.uid, ...newAssignees.map(a=>a.uid)]);
     closeModal(); Notifs.success('Task created!');
     renderTasks(currentUser,currentRole,$p('t-dept')?.value||'');
   });
@@ -1483,11 +1527,13 @@ function paintSubDetail(panel, bodyEl, subId, snap, currentUser, currentRole) {
   // visible buttons do nothing until the old panel finally leaves.
   panel.querySelector('#approve-btn')?.addEventListener('click', async e => {
     await db.collection('submissions').doc(e.currentTarget.dataset.id).update({status:'approved'});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending');
     if (s.createdBy) await Notifs.send(s.createdBy, {title:'✅ Submission Approved',body:`"${s.title}" was approved.`,icon:'✅',type:'submission_reviewed',link:'submissions'});
     closeModal(); renderSubmissions(currentUser, currentRole, '');
   });
   panel.querySelector('#reject-btn')?.addEventListener('click', async e => {
     await db.collection('submissions').doc(e.currentTarget.dataset.id).update({status:'rejected'});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending');
     if (s.createdBy) await Notifs.send(s.createdBy, {title:'❌ Submission Rejected',body:`"${s.title}" was rejected.`,icon:'❌',type:'submission_reviewed',link:'submissions'});
     closeModal(); renderSubmissions(currentUser, currentRole, '');
   });
@@ -1530,6 +1576,7 @@ function openAddSubModal(currentUser) {
       fileSource:      uploadedFile?.source || null,
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending'); // PERF-WAVE1
     // Notify owner
     await Notifs.sendToOwner({ title:'📋 New Submission', body:`${name} submitted: "${$s('s-title').value.trim()}"`, icon:'📋', type:'submission_new', link:'submissions' });
     closeModal();

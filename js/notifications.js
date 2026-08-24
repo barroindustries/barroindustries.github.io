@@ -170,9 +170,16 @@ window.Notifs = (() => {
     } else if (type === 'approval_result') {
       if (typeof navigateTo === 'function') navigateTo('approvals');
     } else if (type === 'payroll' || type === 'kpi_grade' || type === 'self_assessment') {
-      if (typeof navigateTo === 'function') navigateTo('personal-finance');
-      if (type === 'payroll' && month && typeof window.renderPersonalFinance === 'function') {
-        window.renderPersonalFinance(window.currentUser, window.currentRole, { openPayslipMonth: month });
+      if (typeof navigateTo === 'function') {
+        // navigateTo is async since PERF-WAVE1 (lazy-loads hr.js for this
+        // page). Chain the month-scoped re-render behind it — calling it
+        // synchronously raced the 414KB hr.js fetch and hit toPayslipModel
+        // before it existed (verifier finding, 2026-08-24).
+        const nav = navigateTo('personal-finance');
+        if (type === 'payroll' && month && typeof window.renderPersonalFinance === 'function') {
+          Promise.resolve(nav).then(() => window.renderPersonalFinance(window.currentUser, window.currentRole, { openPayslipMonth: month }))
+            .catch(e => console.warn('[notif] payslip deep-link failed', e));
+        }
       }
     } else if (link && typeof navigateTo === 'function') {
       navigateTo(link);
@@ -1190,9 +1197,14 @@ window.Notifs = (() => {
     const tomorrowStr = window.bizDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
     const DONE_STATUSES = ['done','approved','archived'];
+    // PERF-WAVE1 WP5 — checkDeadlines runs once per login (see callers), but
+    // auth-state can flap and re-fire it within the same session; cache both
+    // queries per-uid so a flap doesn't re-read. 10 min TTL means a task's
+    // due-date edit can take up to 10 min to be reflected here — accepted
+    // (deadline-* is one of the spec's named acceptable-staleness exceptions).
     const [tomorrowSnap, todaySnap] = await Promise.all([
-      db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',tomorrowStr).get().catch(()=>({docs:[]})),
-      db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',todayStr).get().catch(()=>({docs:[]}))
+      dbCachedGet('deadline-tomorrow-' + uid, () => db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',tomorrowStr).get().catch(()=>({docs:[]})), 600000),
+      dbCachedGet('deadline-today-' + uid, () => db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',todayStr).get().catch(()=>({docs:[]})), 600000)
     ]);
 
     const toNotify = [];

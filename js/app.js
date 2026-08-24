@@ -1298,7 +1298,17 @@ function initLogin() {
     try { window._applyBrandVersion && window._applyBrandVersion(); } catch (e) {}
   }
   paintPersistenceState();
-  window.addEventListener('auth-persistence-change', paintPersistenceState);
+  // PERF-WAVE1 WP1 §1f — idempotent rebind. paintPersistenceState is a fresh
+  // closure every showLogin() call, so a same-scope removeEventListener
+  // using THIS invocation's reference would be a no-op against a PREVIOUS
+  // invocation's listener (different function identity, same name) — the
+  // handle has to be hoisted onto a stable window slot for removal to
+  // actually find the old one. Without this, every showLogin() (logout ->
+  // login screen shown again, auth-state flap, etc.) added one more listener
+  // that never gets removed.
+  if (window._loginPersistHandler) window.removeEventListener('auth-persistence-change', window._loginPersistHandler);
+  window._loginPersistHandler = paintPersistenceState;
+  window.addEventListener('auth-persistence-change', window._loginPersistHandler);
 
   // Unticking is now a real decision with a real consequence, so say so at the
   // moment it is made rather than after the app has already signed them out.
@@ -1777,7 +1787,7 @@ function buildSidebarNav() {
       // tablet-rail widths), so it shouldn't be the one primary-nav surface
       // that stays silent.
       window.haptic && window.haptic('light');
-      navigateTo(btn.dataset.page);
+      navigateTo(btn.dataset.page, { fromNav: true }); // PERF-WAVE1 WP1 §1f — same-page short-circuit
       // navigateTo() already runs Overlay.clearAll() (tearing down + consuming
       // the sidebar's history entry if one is open); this is a harmless no-op
       // safety net for any path that reaches here without an Overlay entry.
@@ -1847,7 +1857,7 @@ function openMoreNavSheet(items) {
     btn.addEventListener('click', () => {
       window.haptic && window.haptic('light');
       window.Overlay.dismissTop();
-      navigateTo(btn.dataset.page);
+      navigateTo(btn.dataset.page, { fromNav: true }); // PERF-WAVE1 WP1 §1f — same-page short-circuit
     });
   });
 }
@@ -1879,7 +1889,7 @@ function buildBottomNav() {
      </button>` : '');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     if (btn.id === 'bottom-nav-more') { btn.addEventListener('click', () => { window.haptic && window.haptic('light'); openMoreNavSheet(more); }); return; }
-    btn.addEventListener('click', () => { window.haptic && window.haptic('light'); navigateTo(btn.dataset.page); }); // v14 G2 — bottom-nav tap
+    btn.addEventListener('click', () => { window.haptic && window.haptic('light'); navigateTo(btn.dataset.page, { fromNav: true }); }); // v14 G2 — bottom-nav tap; PERF-WAVE1 WP1 §1f same-page short-circuit
   });
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
 }
@@ -2670,8 +2680,16 @@ function _skeletonKindFor(page) {
   return _SKELETON_KIND[page] || 'rows';
 }
 
-function navigateTo(page, opts) {
+async function navigateTo(page, opts) {
   opts = opts || {};
+  // PERF-WAVE1 WP1 §1f — same-page short-circuit. Only bottom-nav/drawer/
+  // More-sheet taps pass opts.fromNav (they're the only callers where
+  // "already on this page" is possible without an intentional reload —
+  // programmatic navigateTo() calls, notification deep-links and history
+  // pop never pass it, so they are unaffected). Deliberately the very first
+  // check: page is still the RAW string the caller passed, before the
+  // layoff-lockdown rewrite below can change it.
+  if (opts.fromNav && page === window.currentPage) return;
   const subtab = (opts.subtab !== undefined) ? opts.subtab : null;
 
   // ── LAYOFF LOCKDOWN (LAYOFF-SPEC) ────────────────────────────────────────
@@ -2710,6 +2728,7 @@ function navigateTo(page, opts) {
     try { useReplace ? history.replaceState(st,'',url) : history.pushState(st,'',url); } catch(_){}
   }
 
+  const _prevPage = currentPage;          // restored if the lazy-load fails below
   currentPage = page;
   window.currentPage = page;
   window.currentSubtab = subtab;          // screens read this via initialSubtab()
@@ -2740,6 +2759,47 @@ function navigateTo(page, opts) {
     });
   }
   c.innerHTML = window.skeletonHtml(_skeletonKindFor(page));
+
+  // ── PERF-WAVE1 WP1 — lazy per-page script loading ───────────────────────
+  // Runs AFTER the skeleton paints (so the tap has visible feedback instead
+  // of a frozen screen while the network fetch is in flight) and BEFORE both
+  // the `dept:` prefix branch and the switch below: renderDeptModule's own
+  // switch (Finance/HR/Sales/Design/Production/…) and this switch's cases
+  // both call bare/window.* globals that live in js/screens/*.js files
+  // config.js's PAGE_SCRIPTS may have moved to lazy, unguarded — those files
+  // must already be on the page before either branch runs.
+  // 'dashboard' resolves to one of three synthetic PAGE_SCRIPTS keys because
+  // which lazy file its role-dispatch needs depends on who's signed in, not
+  // on the page string alone (see config.js's PAGE_SCRIPTS comment) — decided
+  // here, not baked into the manifest, which stays pure per-page data.
+  let _pageScriptsKey = page;
+  if (page === 'dashboard') {
+    if (window.isLaidOff && window.isLaidOff()) _pageScriptsKey = 'dashboard:layoff';
+    else if (isTypeBWorker()) _pageScriptsKey = 'dashboard:workerB';
+    else if (isPartner() || isBrilliantOnly()) _pageScriptsKey = 'dashboard:partner';
+  }
+  try {
+    await window.ensurePage(_pageScriptsKey);
+  } catch (err) {
+    // Never a blank screen: replace the skeleton with a retry card. A real
+    // <button> + addEventListener (not an inline onclick="navigateTo('…')")
+    // sidesteps quoting `page`/`opts` into an HTML attribute entirely, and
+    // lets Retry replay the ORIGINAL opts (subtab, fromHistory, …), not just
+    // a bare re-navigation.
+    console.warn('[navigateTo] failed to load scripts for page', page, err);
+    // Roll currentPage back to where the user actually is, and strip fromNav
+    // on the replay: otherwise the same-page short-circuit at the top of this
+    // function sees currentPage===page and turns Retry into a dead button
+    // (verifier finding, 2026-08-24).
+    currentPage = _prevPage;
+    window.currentPage = _prevPage;
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load this page</h4><p>Check your connection and try again.</p><button class="btn-primary" id="nav-retry-btn">Retry</button></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+    c.querySelector('#nav-retry-btn')?.addEventListener('click', () => navigateTo(page, { ...opts, fromNav: false }));
+    _devCheckIconIntegrity(page);
+    if (typeof window.devCheckStacking === 'function') window.devCheckStacking();
+    return;
+  }
 
   // dept: prefix for dual dept tabs
   if (page.startsWith('dept:')) {
@@ -2915,7 +2975,10 @@ window.approveAttendanceExtension = async function(extId, uid, name) {
     body:  `Your Time In extension is approved. You have until ${dl} to time in and check all notifications.`,
     icon: '✅', type: 'att_extension_approved'
   });
-  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
+  if (typeof dbCacheInvalidate === 'function') {
+    dbCacheInvalidate('att-ext-pending');
+    dbCacheInvalidate('approvals-pending:attendance_extensions-pending'); // PERF-WAVE1 Approvals-page cache
+  }
   return expiresAt;
 };
 window.denyAttendanceExtension = async function(extId, uid, name) {
@@ -2928,7 +2991,10 @@ window.denyAttendanceExtension = async function(extId, uid, name) {
     body:  'Your attendance extension request was not approved.',
     icon: '❌', type: 'att_extension_denied'
   });
-  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
+  if (typeof dbCacheInvalidate === 'function') {
+    dbCacheInvalidate('att-ext-pending');
+    dbCacheInvalidate('approvals-pending:attendance_extensions-pending'); // PERF-WAVE1 Approvals-page cache
+  }
 };
 
 // ── ID verify token minting + public-safe projection ──────────────
@@ -3086,7 +3152,11 @@ function renderIDCard(containerId, u) {
   ensureEmployeeVerifyToken(u).then(token => {
     const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token);
     const qrEl = document.getElementById(`id-qr-${containerId}`);
-    if (qrEl) qrEl.innerHTML = window.buildQRSVG ? window.buildQRSVG(url, 64) : '';
+    // PERF-WAVE1 WP1 — js/qrcode.js is lazy-loaded now; render empty then
+    // fill in once (if) it arrives, instead of a guard that would leave this
+    // permanently blank whenever no OTHER page happened to load it first.
+    if (qrEl) qrEl.innerHTML = '';
+    window.ensureScript('js/qrcode.js').then(() => { if (qrEl && window.buildQRSVG) qrEl.innerHTML = window.buildQRSVG(url, 64); }).catch(() => {});
     printBtn.addEventListener('click', () => window.printIDCards([buildIdVerifyDoc('employee', u, currentUser.uid)], token ? [token] : ['']));
   }).catch(() => {
     printBtn.addEventListener('click', () => window.printIDCards([buildIdVerifyDoc('employee', u, currentUser.uid)], ['']));
@@ -3098,7 +3168,13 @@ function renderIDCard(containerId, u) {
 // seven printable docs) instead of its own bespoke window.open+
 // document.write host. Signature unchanged — all three call sites (app.js
 // employee self-card ×2 above, hr.js worker single/batch IDs) work as-is.
-window.printIDCards = function(data, tokens) {
+// PERF-WAVE1 WP1 — js/qrcode.js is lazy-loaded now; ensure it here (the ONE
+// shared function all three call sites funnel through) rather than at each
+// caller, so hr.js's two call sites are covered too without editing that
+// file. Best-effort: a failed fetch still prints the card, just without a QR
+// (the existing `window.buildQRSVG && tok` guard below already handles that).
+window.printIDCards = async function(data, tokens) {
+  await window.ensureScript('js/qrcode.js').catch(() => {});
   const B = window.BRAND || {};
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const logoAbs = (location.origin||'') + '/' + ((B.logo && B.logo.print) || 'icons/barro-kitchens.png');

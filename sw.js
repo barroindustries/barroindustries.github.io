@@ -20,11 +20,16 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.184';
+const CACHE_VER = 'bi-ops-v14.0.185';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
 // Core app shell — pre-cached on install so first load is instant after SW installs
+// FORMAT CONTRACT: keep every entry a single-quoted string literal, one per line.
+// .githooks/pre-commit parses this array with sed+grep to generate
+// precache-manifest.json — double quotes, concatenation, or computed entries
+// would silently break manifest generation (the hook exits loudly on zero
+// entries, but partial matches could under-extract).
 const PRECACHE = [
   '/',
   '/index.html',
@@ -125,13 +130,125 @@ const CDN_CACHE_PATTERNS = [
 ];
 
 // ── Install: pre-cache app shell ─────────────────────
+// Deploy-diff precache (PERF-WAVE1 WP2): a deploy that changes 3 files should
+// cost users ~those 3 files, not the whole ~1.6 MB gz PRECACHE list.
+// .githooks/pre-commit generates precache-manifest.json — one sha1 per
+// PRECACHE path — after every version bump. On install we diff THIS
+// install's manifest against the PREVIOUS install's manifest (stashed inside
+// the outgoing STATIC cache under PRECACHE_MANIFEST_CACHE_KEY) and, for any
+// entry whose hash is unchanged, copy the Response straight from the old
+// cache into the new one — zero network. Only genuinely changed files, plus
+// the app-shell documents (which pin the running app version and must never
+// be served stale), hit the network. Any problem with the current manifest
+// (fetch/parse failure) degrades to the pre-WP2 behavior: a plain
+// cache.addAll(PRECACHE).
+const PRECACHE_MANIFEST_URL = '/precache-manifest.json';
+const PRECACHE_MANIFEST_CACHE_KEY = '/__precache-manifest__';
+// Documents pin the app version (index.html carries the vX.Y.Z footer string
+// and decides which SW registers next) — always fetch these fresh even when
+// their hash is unchanged, so a deploy's HTML is never served from a
+// copy-forwarded cache entry.
+const PRECACHE_ALWAYS_FRESH = ['/', '/index.html', '/t/', '/t/index.html', '/v/', '/v/index.html'];
+
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(STATIC).then(cache =>
-      cache.addAll(PRECACHE).catch(err => console.warn('[SW] Pre-cache partial fail:', err))
-    )
+    precacheDeployDiff().catch(err => {
+      console.warn('[SW] Deploy-diff precache failed, falling back to wholesale cache.addAll:', err);
+      return caches.open(STATIC).then(cache =>
+        cache.addAll(PRECACHE).catch(err2 => console.warn('[SW] Pre-cache partial fail:', err2))
+      );
+    })
   );
 });
+
+// Locate the newest previous bi-ops-*-static cache. There's realistically at
+// most one lying around — activate() prunes down to exactly {STATIC,
+// RUNTIME} after every install/activate cycle — but pick the highest version
+// defensively (e.g. a prior activate() never completed because the tab
+// closed mid-cycle).
+async function findPrevStaticCache() {
+  const names = (await caches.keys()).filter(n => n.endsWith('-static') && n !== STATIC);
+  if (!names.length) return null;
+  names.sort((a, b) => {
+    const va = (a.match(/bi-ops-v(\d+)\.(\d+)\.(\d+)-static$/) || []).slice(1).map(Number);
+    const vb = (b.match(/bi-ops-v(\d+)\.(\d+)\.(\d+)-static$/) || []).slice(1).map(Number);
+    if (va.length !== 3 || vb.length !== 3) return a < b ? -1 : 1; // unrecognized name shape → best-effort lexical
+    for (let i = 0; i < 3; i++) { if (va[i] !== vb[i]) return va[i] - vb[i]; }
+    return 0;
+  });
+  return names[names.length - 1];
+}
+
+async function precacheDeployDiff() {
+  // no-store: this must reflect what's actually on the server for THIS
+  // deploy, never an HTTP-cached or SW-cached copy of an older manifest.
+  const manifestRes = await fetch(PRECACHE_MANIFEST_URL, { cache: 'no-store' });
+  if (!manifestRes || !manifestRes.ok) {
+    throw new Error('precache-manifest.json fetch failed: ' + (manifestRes && manifestRes.status));
+  }
+  const manifest = await manifestRes.json();
+  if (!manifest || typeof manifest.files !== 'object' || manifest.files === null) {
+    throw new Error('precache-manifest.json malformed: missing .files object');
+  }
+
+  const newCache = await caches.open(STATIC);
+
+  const prevStaticName = await findPrevStaticCache();
+  const prevCache = prevStaticName ? await caches.open(prevStaticName) : null;
+  const prevManifestRes = prevCache ? await prevCache.match(PRECACHE_MANIFEST_CACHE_KEY) : null;
+  const prevManifest = prevManifestRes ? await prevManifestRes.json().catch(() => null) : null;
+
+  if (!prevCache || !prevManifest || typeof prevManifest.files !== 'object') {
+    // No previous manifest to diff against — either this is the first
+    // install to ship this feature, or the prior cache was already pruned.
+    // Nothing to copy forward, so fetch the whole PRECACHE list wholesale —
+    // identical to pre-WP2 behavior, including the partial-failure tolerance.
+    await newCache.addAll(PRECACHE).catch(err => console.warn('[SW] Pre-cache partial fail:', err));
+  } else {
+    // Every path handles its own failure and the aggregate NEVER rejects.
+    // A bare Promise.all here would fail fast on one bad fetch, triggering
+    // install()'s wholesale-addAll fallback while this loop's still-running
+    // siblings keep writing into the same cache unsupervised — install could
+    // then report success with an unpredictable subset cached. Per-path
+    // try/catch keeps the outcome deterministic: good entries land, bad ones
+    // are warned and skipped (the runtime network-first strategy still serves
+    // them while online), and no fallback ever races this loop.
+    const results = await Promise.all(PRECACHE.map(async path => {
+      try {
+        const newHash = manifest.files[path];
+        const oldHash = prevManifest.files[path];
+        const canCopyForward = !!newHash && !!oldHash && newHash === oldHash && !PRECACHE_ALWAYS_FRESH.includes(path);
+        if (canCopyForward) {
+          const oldResponse = await prevCache.match(path);
+          if (oldResponse) {
+            await newCache.put(path, oldResponse.clone());
+            return true;
+          }
+          // Hash matched but the old cache didn't actually have the response
+          // (e.g. a partial previous install) — fall through to a fresh fetch.
+        }
+        const res = await fetch(path);
+        if (res && res.ok) {
+          await newCache.put(path, res.clone());
+          return true;
+        }
+        console.warn('[SW] Precache fetch failed for', path, res && res.status);
+        return false;
+      } catch (err) {
+        console.warn('[SW] Precache entry failed for', path, err);
+        return false;
+      }
+    }));
+    const missing = results.filter(ok => !ok).length;
+    if (missing) console.warn('[SW] Deploy-diff precache completed with', missing, 'missing entries (will self-heal via runtime caching / next install)');
+  }
+
+  // Stash THIS install's manifest so the NEXT install can diff against it.
+  await newCache.put(
+    PRECACHE_MANIFEST_CACHE_KEY,
+    new Response(JSON.stringify(manifest), { headers: { 'Content-Type': 'application/json' } })
+  );
+}
 
 // ── Message: let the page decide when to activate a waiting SW ──
 self.addEventListener('message', event => {

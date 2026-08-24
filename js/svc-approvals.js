@@ -58,6 +58,11 @@
       approvedBy: currentUser.uid
     });
     await batch.commit();
+    // PERF-WAVE1 WP6 — the signups count/list on the Approvals page is now
+    // cached (dbCachedGet, 'approvals-pending:signup_requests-pending', 30s);
+    // this is the single write path (Approvals.dispatch('signup','approve')),
+    // so invalidating here covers every caller.
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:signup_requests-pending');
     // After the atomic pair: a failed accrual no longer strands the request —
     // the account exists and is resolvable; surface it for a manual grant.
     await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate }).catch(e => {
@@ -69,6 +74,7 @@
     await db.collection('signup_requests').doc(id).update({
       status: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:signup_requests-pending');
   }
 
   // ── Payroll delete request (type 'finance-req' in the approvals feed). ──
@@ -86,6 +92,8 @@
     await db.collection('payroll_delete_requests').doc(id).update({
       status: 'approved', resolvedBy: currentUser.uid, resolvedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    // PERF-WAVE1 WP6 — 'approvals-pending:payroll_delete_requests-pending' (30s cache).
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:payroll_delete_requests-pending');
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '✅ Payroll Delete Approved',
       body: `Your request to delete ${name}'s ${month} payroll record has been approved.`,
@@ -98,6 +106,7 @@
     await db.collection('payroll_delete_requests').doc(id).update({
       status: 'denied', resolvedBy: currentUser.uid, resolvedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:payroll_delete_requests-pending');
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '❌ Payroll Delete Denied',
       body: `Your request to delete ${name}'s ${month} payroll record was denied by the President.`,
@@ -116,6 +125,8 @@
     await db.collection('finance_delete_requests').doc(id).update({
       status: 'approved', resolvedBy: currentUser.uid, resolvedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    // PERF-WAVE1 WP6 — 'approvals-pending:finance_delete_requests-pending' (30s cache).
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:finance_delete_requests-pending');
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '✅ Delete Approved', body: `Your request to delete ${label} was approved.`,
       icon: '✅', type: 'finance_delete_approved', link: 'approvals'
@@ -127,6 +138,7 @@
     await db.collection('finance_delete_requests').doc(id).update({
       status: 'denied', resolvedBy: currentUser.uid, resolvedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:finance_delete_requests-pending');
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '❌ Delete Denied', body: `Your request to delete ${label} was denied by the President.`,
       icon: '❌', type: 'finance_delete_denied', link: 'approvals'
@@ -136,17 +148,51 @@
   // ── Leave — delegates to the existing shared helpers (modules.js) so leave
   // balances stay consistent with the Leave Management screen. Only the
   // call-site wiring was duplicated, not the write itself.
-  async function leaveApprove(id) { return window.approveLeaveRequest(id); }
-  async function leaveReject(id, ctx) { return window.rejectLeaveRequest(id, (ctx && ctx.reason) || ''); }
+  // PERF-WAVE1 WP6 — leaveApprove/leaveReject/caReject/raiseApprove/
+  // raiseReject/poApprove/poReject delegate their actual write to a function
+  // defined OUTSIDE this file (people.js / config.js / departments.js /
+  // production.js — none owned by this work package), so the matching
+  // 'approvals-pending:*' cache key is invalidated HERE, right after the
+  // delegated call resolves, rather than inside the external function.
+  async function leaveApprove(id) {
+    const r = await window.approveLeaveRequest(id);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:leave_requests-pending');
+    return r;
+  }
+  async function leaveReject(id, ctx) {
+    const r = await window.rejectLeaveRequest(id, (ctx && ctx.reason) || '');
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:leave_requests-pending');
+    return r;
+  }
 
   // ── Thin registry entries for types with pre-existing shared services. ──
   // Not duplicated before this refactor; wrapped here only for a uniform
   // dispatch(type, action, id) surface.
-  async function caReject(id) { return window.CashAdvance.reject(id); }
-  async function raiseApprove(id) { return window.RaiseFlow.approve(id); }
-  async function raiseReject(id, ctx) { return window.RaiseFlow.reject(id, (ctx && ctx.reason) || ''); }
-  async function poApprove(id) { return window.approvePurchaseOrder(id); }
-  async function poReject(id, ctx) { return window.rejectPurchaseOrder(id, (ctx && ctx.reason) || ''); }
+  async function caReject(id) {
+    const r = await window.CashAdvance.reject(id);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:cash_advances-pending');
+    return r;
+  }
+  async function raiseApprove(id) {
+    const r = await window.RaiseFlow.approve(id);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:pending_raises-pending');
+    return r;
+  }
+  async function raiseReject(id, ctx) {
+    const r = await window.RaiseFlow.reject(id, (ctx && ctx.reason) || '');
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:pending_raises-pending');
+    return r;
+  }
+  async function poApprove(id) {
+    const r = await window.approvePurchaseOrder(id);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:purchase_requisitions-pending');
+    return r;
+  }
+  async function poReject(id, ctx) {
+    const r = await window.rejectPurchaseOrder(id, (ctx && ctx.reason) || '');
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:purchase_requisitions-pending');
+    return r;
+  }
   async function quoteApprove(id, ctx) {
     return approveQuoteApproval(ctx.quoteId, ctx.agentId, ctx.quoteNumber, ctx.clientName, ctx.quoteColl);
   }
@@ -156,6 +202,8 @@
   async function deleteQuoteApprove(id, ctx) {
     const coll = ctx.coll || 'bs_quotes';
     await db.collection(coll).doc(id).delete();
+    // PERF-WAVE1 WP6 — coll-aware: bs_quotes and bk_quotes cache separately.
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:' + (coll === 'bk_quotes' ? 'bk_quotes-delete' : 'bs_quotes-delete'));
     window.logAudit && window.logAudit('delete', 'quote', id, { quoteNo: ctx.qno, coll, viaApproval: true });
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: '🗑 Quote Deletion Approved', body: `Your request to delete quote ${ctx.qno} was approved.`,
@@ -167,6 +215,7 @@
     await db.collection(coll).doc(id).update({
       deleteRequested: firebase.firestore.FieldValue.delete(), deleteReason: firebase.firestore.FieldValue.delete()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:' + (coll === 'bk_quotes' ? 'bk_quotes-delete' : 'bs_quotes-delete'));
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: 'Quote Deletion Denied', body: `Your request to delete quote ${ctx.qno} was denied.`,
       icon: '❌', type: 'delete_denied', link: 'approvals'
@@ -174,7 +223,7 @@
   }
   async function deleteClientApprove(id, ctx) {
     await db.collection('clients').doc(id).delete();
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('clients'); dbCacheInvalidate('approvals-pending:clients-delete'); }
     window.logAudit && window.logAudit('delete', 'client', id, { name: ctx.name, viaApproval: true });
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: '🗑 Client Deletion Approved', body: `Your request to delete client "${ctx.name}" was approved.`,
@@ -185,7 +234,7 @@
     await db.collection('clients').doc(id).update({
       deleteRequested: firebase.firestore.FieldValue.delete(), deleteReason: firebase.firestore.FieldValue.delete()
     });
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('clients'); dbCacheInvalidate('approvals-pending:clients-delete'); }
     if (ctx.by) await safeNotify(() => Notifs.send(ctx.by, {
       title: 'Client Deletion Denied', body: `Your request to delete client "${ctx.name}" was denied.`,
       icon: '❌', type: 'delete_denied', link: 'approvals'

@@ -541,7 +541,7 @@ window.Chat = (() => {
   async function _runInboxRefresh(snap) {
     _convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     await _refreshDeptChannels();            // deterministic-ID direct gets
-    await _refreshPresence();                // DM row presence dots (users-presence cache)
+    await _refreshPresence();                // DM row presence dots (shared 'users' cache — PERF-WAVE1 WP4)
     _renderInbox();
   }
   function _scheduleInboxRefresh(snap) {
@@ -591,11 +591,14 @@ window.Chat = (() => {
   // the user opens the conversation once (which self-heals it via _markRead's
   // new conv-doc merge below). The one place a SINGLE own-reader-doc get still
   // happens is thread-open (_myReadAtForOpen), for the "New messages" divider.
-  // DM inbox-row presence dots read the SAME 8s-TTL users-presence cache the
-  // Team tab uses (Decision 7) — no new listener, just a local uid→doc map.
+  // DM inbox-row presence dots read the SAME 30s-TTL 'users' cache the Team
+  // tab / rest of the app share (PERF-WAVE1 WP4 — unified from the former
+  // 8s-TTL 'users-presence' key so the 30s repaint interval in
+  // _startPresenceHeader below hits cache instead of refetching two whole
+  // collections per tick) — no new listener, just a local uid→doc map.
   async function _refreshPresence() {
     try {
-      const snap = await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000);
+      const snap = await dbCachedGet('users', fetchUsersWithPayroll, 30000);
       const map = {};
       snap.docs.forEach(d => { map[d.id] = d.data(); });
       _presenceByUid = map;
@@ -2655,7 +2658,7 @@ window.Chat = (() => {
     _renderThread({ keepScrollAnchor: true });
   }
 
-  // ── Presence (Decision 7 — reuses users-presence cache, NO listener) ──
+  // ── Presence (Decision 7 — reuses shared 'users' cache, NO listener) ──
   // Same bucket thresholds as renderTeam's local getPresence() (app.js) — not
   // exported globally there, so replicated here rather than adding a second
   // competing heartbeat.
@@ -2673,7 +2676,7 @@ window.Chat = (() => {
     const paint = async () => {
       const el = document.getElementById('chat-presence-label'); if (!el || !otherUid) return;
       const dotEl = document.getElementById('chat-presence-dot');
-      const snap = await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000).catch(() => null);
+      const snap = await dbCachedGet('users', fetchUsersWithPayroll, 30000).catch(() => null);
       const u = snap && snap.docs.map(d => ({ id: d.id, ...d.data() })).find(x => x.id === otherUid);
       const pres = _presenceBucket(u && u.lastSeen);
       const color = { green: '#30D158', orange: '#FF9F0A', gray: '#8E8E93' }[pres.dot] || '#8E8E93';
@@ -2904,10 +2907,22 @@ window.Chat = (() => {
     if (!ref || !ref.kind || !ref.id) return;
     try {
       if (ref.kind === 'task') {
+        // PERF-WAVE1 WP4 — tasks.js is lazy-loaded (WP1), so openTaskDetail
+        // may not be defined yet at the moment a chat ref chip is tapped.
+        // Ensure-load it, then open the SPECIFIC task, instead of the old
+        // fallback of dumping the user on the whole tasks list page.
+        const go = () => window.openTaskDetail(ref.id, window.currentUser, window.currentRole);
         if (typeof window.openTaskDetail === 'function') {
-          window.openTaskDetail(ref.id, window.currentUser, window.currentRole);
-        } else if (typeof window.navigateTo === 'function') {
-          window.navigateTo('tasks');
+          go();
+        } else if (typeof window.ensureScript === 'function') {
+          window.ensureScript('js/screens/tasks.js').then(go).catch(() => {
+            console.warn('[chat] failed to load js/screens/tasks.js for task deep-link', ref.id);
+            if (typeof window.navigateTo === 'function') window.navigateTo('tasks');
+          });
+        } else {
+          // Degrade: ensureScript itself isn't available (e.g. WP1 not yet
+          // landed in this tree) — no-op rather than throw.
+          console.warn('[chat] openTaskDetail unavailable and ensureScript missing — cannot deep-link to task', ref.id);
         }
       } else if (ref.kind === 'quote') {
         if (typeof window.reopenQuoteFromDoc === 'function') {
@@ -2925,6 +2940,12 @@ window.Chat = (() => {
         // deleted itself (toast, never a thrown rejection).
         if (typeof window.openPostById === 'function') {
           window.openPostById(ref.id);
+        } else if (window.ensureScript) {
+          // people.js is lazy (PERF-WAVE1) — load it, then open; same pattern
+          // as the 'task' kind above.
+          window.ensureScript('js/screens/people.js')
+            .then(() => window.openPostById ? window.openPostById(ref.id) : Notifs.showToast('That post is no longer available', 'error'))
+            .catch(() => Notifs.showToast('Could not load posts — check your connection', 'error'));
         } else {
           Notifs.showToast('That post is no longer available', 'error');
         }

@@ -1028,6 +1028,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const productionStaff = allStaff.filter(isPaidWeekly);
   const employees = allStaff.filter(u=>!isPaidWeekly(u))
     .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  // PERF-WAVE1 WP7 — usersByUid, threaded through window.payslipYtdMonthly ->
+  // window.thirteenthMonthFor below so the Print-All bulk path (and the
+  // single print button) reuse this already-fetched roster instead of each
+  // line firing its own users/{uid}.get() fallback read.
+  const usersByUid = {};
+  allStaff.forEach(u => { usersByUid[u.id] = u; });
   const history   = histSnap.docs.map(d=>({id:d.id,...d.data()}));
   const delReqs   = delReqSnap.docs.map(d=>({id:d.id,...d.data()}));
   const pendingDelIds = new Set(delReqs.map(r=>r.historyId));
@@ -1956,7 +1962,11 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             // Same dual-shape assignedTo filter as computePayRun (departments.js) —
             // deliberately NOT getKpiScore's array-contains query (dashboards.js),
             // which misses a scalar (non-array) assignedTo value.
-            db.collection('tasks').get().catch(()=>({docs:[]})),
+            // PERF-WAVE1 WP7 — shared 'tasks-all' cache key (already invalidated
+            // on every task write path in tasks.js/approvals.js/design.js).
+            (typeof window.dbCachedGet === 'function'
+              ? window.dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000)
+              : db.collection('tasks').get()).catch(()=>({docs:[]})),
             db.collection('kpi_targets').doc(uid).get().catch(()=>null),
             window.getAttendanceScore ? window.getAttendanceScore(uid, month) : Promise.resolve(1)
           ]);
@@ -2767,7 +2777,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       model.employee.pagibig    = emp.pagibigNum || '';
       model.official = false;
     }
-    model.ytd = await window.payslipYtdMonthly(b.dataset.uid, window.bizYear?window.bizYear():new Date().getFullYear());
+    model.ytd = await window.payslipYtdMonthly(b.dataset.uid, window.bizYear?window.bizYear():new Date().getFullYear(), usersByUid);
     window.renderPayslipPage(model, () => window.renderFinance(currentUser, currentRole, 'Payroll'));
   });
   document.getElementById('print-payroll-btn').addEventListener('click', async () => {
@@ -2789,7 +2799,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const hrNote = official ? (shNoteByUid[l.uid] || null) : (employeeNotes[l.uid] || null);
       const mdl = window.toPayslipModel({...l, month, hrNote}, 'monthly');
       mdl.official = official;
-      mdl.ytd = await window.payslipYtdMonthly(l.uid, year);
+      mdl.ytd = await window.payslipYtdMonthly(l.uid, year, usersByUid);
       return mdl;
     }));
     const host = document.getElementById('page-content');
@@ -2972,7 +2982,10 @@ window.openWorkerIDModal = async function(profile, onDone) {
   // refreshes the list UNDERNEATH this panel and was never scoped to it.
   if (!panel.isConnected) { if (onDone) onDone(); return; }
   const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token||'');
-  const qr = (window.buildQRSVG && token) ? window.buildQRSVG(url, 120) : '';
+  // PERF-WAVE1 WP7 — js/qrcode.js is lazy-loaded (WP1), so buildQRSVG may not
+  // exist yet. Render the plain-URL fallback synchronously into #wid-qr, then
+  // ensure-wrap the real QR SVG in over it once the script (and buildQRSVG)
+  // are available. Same pattern as WP1's app.js QR call sites.
   bodyEl.innerHTML = `
     <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div style="width:90px;height:110px;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:34px">
@@ -2983,10 +2996,17 @@ window.openWorkerIDModal = async function(profile, onDone) {
         <div style="font-size:12px;margin-top:4px">ID: <b>${escHtml(profile.idNumber||'—')}</b></div>
         <div style="font-size:12px">${escHtml(profile.department||'')} · ${escHtml(profile.employmentType||'')}</div>
       </div>
-      <div style="width:120px;height:120px">${qr||`<div style="font-size:10px;word-break:break-all">${escHtml(url)}</div>`}</div>
+      <div id="wid-qr" style="width:120px;height:120px">${token?`<div style="font-size:10px;word-break:break-all">${escHtml(url)}</div>`:''}</div>
     </div>
     ${token?`<p style="font-size:11px;color:var(--text-muted);margin-top:12px">Verify link: <a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></p>`:'<p style="font-size:11px;color:var(--danger);margin-top:12px">Could not create a verify link (permission). The card will print without a QR.</p>'}
   `;
+  if (token) {
+    const fillQR = () => {
+      const qrEl = bodyEl.querySelector('#wid-qr');
+      if (qrEl && window.buildQRSVG) qrEl.innerHTML = window.buildQRSVG(url, 120);
+    };
+    window.buildQRSVG ? fillQR() : window.ensureScript?.('js/qrcode.js')?.then(fillQR);
+  }
   panel.querySelector('#wid-print')?.removeAttribute('disabled');
   // emojiIcon('👤') in the photo fallback — hydrate what was just injected.
   if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
@@ -4577,7 +4597,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       const inp = $ps(`ps-tin-${i}`);
       if (cell && inp) cell.innerHTML = _srcLabel(inp.dataset.source || 'manual');
     }
-    if (window.lucide) lucide.createIcons();
+    if (window.lucide) lucide.createIcons({ nodes: [panel] });
   };
   // ── Statutory-config spec — D1 (the "Load from kiosk" under-deduction) ────
   // The statutory prefill below can only listen for 'input' events, and NOTHING
@@ -5475,7 +5495,11 @@ window.thirteenthMonthFor = async function(uid, year, rows, usersByUid) {
 };
 
 // YTD helpers — display-computed each render, never stored on the payslip.
-window.payslipYtdMonthly = async function(uid, year) {
+// usersByUid (optional, PERF-WAVE1 WP7): prefetched {uid:{startDate}} map,
+// forwarded straight into thirteenthMonthFor so a bulk caller (Print-All)
+// never triggers its per-uid users/{uid}.get() fallback. Single-shot callers
+// omit it and get the old one-read-per-call behavior, unchanged.
+window.payslipYtdMonthly = async function(uid, year, usersByUid) {
   const snap = await db.collection('salary_history').where('userId','==',uid)
     .where('month','>=',`${year}-01`).where('month','<=',`${year}-12`).get().catch(()=>({docs:[]}));
   const rows = snap.docs.map(d=>d.data());
@@ -5483,7 +5507,7 @@ window.payslipYtdMonthly = async function(uid, year) {
   rows.forEach(r=>{ const b=r.base??r.salary??0;
     gross+=b+(r.allowance||0); net+=(r.finalPay??r.netPay??0);
     tax+=(r.tax||0); sss+=(r.sss||0); philhealth+=(r.philhealth??r.philHealth??0); pagibig+=(r.pagibig??r.pagIbig??0); });
-  const th = await window.thirteenthMonthFor(uid, year, rows);
+  const th = await window.thirteenthMonthFor(uid, year, rows, usersByUid);
   // v12 WS39 — additive: tax/sss/philhealth/pagibig YTD sums for the alphalist/
   // 2316 worksheets. Existing callers (payslip YTD card) only read gross/net/
   // thirteenthAccrual and are unaffected.

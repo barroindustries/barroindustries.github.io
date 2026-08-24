@@ -953,7 +953,7 @@ window.openFinCategoryDrill = function(category, kind, rows, periodLabel) {
     </div>
   `, `<button class="btn-secondary" id="findrill-csv-btn">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary" id="findrill-print-btn">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
-  if (window.lucide) lucide.createIcons();
+  if (window.lucide) lucide.createIcons({ nodes: [_drillPanel] });
   // MOBILE FINANCE PASS (2026-08-08) — Print was `onclick="window.print()"`,
   // dead inside the iOS standalone webview. Routed through the shared
   // openScreenPrintDoc → openPrintableDoc host. Both lookups are now scoped to
@@ -1295,7 +1295,7 @@ function openBreakevenClassifyEditor(categories, cfg, onSaved) {
       : `<div style="font-size:12px;color:var(--text-muted)">No categories posted this period yet.</div>`;
     _panel.querySelector('#bke-classify-manual').innerHTML = manualRows.map(manualRowHtml).join('')
       || `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">No manual fixed costs added.</div>`;
-    if (window.lucide) lucide.createIcons();
+    if (window.lucide) lucide.createIcons({ nodes: [_panel] });
     bind();
   };
 

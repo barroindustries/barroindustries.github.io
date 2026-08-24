@@ -107,3 +107,80 @@ fi
 
 git add "$SW"
 echo "[sw] Cache version set to bi-ops-v${NEW_VERSION}"
+
+# ── Generate precache-manifest.json (PERF-WAVE1 WP2: deploy-diff precache) ──
+# sw.js's install() copy-forwards unchanged PRECACHE entries from the
+# previous cache instead of re-fetching all ~65 files on every deploy. It
+# does that by diffing this file's {path: sha1} map against the one stored
+# from the previous install. Parses the PRECACHE array straight out of
+# sw.js (same source of truth CHECK 2 in ci-invariants.sh already trusts),
+# hashes each entry's on-disk target, and writes precache-manifest.json =
+# {"files": {"<PRECACHE path>": "<sha1>"}, "version": "<APP_VERSION>"}.
+# Directory-root PRECACHE entries ('/', '/t/', '/v/') aren't files on disk —
+# hash their index.html target instead (same target their sibling
+# '/index.html' / '/t/index.html' / '/v/index.html' entries already hash).
+#
+# Hashes are taken from the git INDEX (`git show :path`), NOT the working
+# tree. This repo has multiple agent sessions editing the tree live (see
+# CLAUDE.md's "NEVER git stash" warning and the mtime-race note) — a working
+# -tree file can be carrying ANOTHER session's uncommitted, unstaged edit
+# that has nothing to do with THIS commit. Hashing the index blob guarantees
+# the manifest matches exactly the bytes being committed (freshly bumped
+# CONFIG/INDEX/SW already staged above by this point in the hook; every
+# other PRECACHE path falls back to its last-staged-or-HEAD content, i.e.
+# what will actually ship), never a bystander's in-progress edit.
+MANIFEST="precache-manifest.json"
+
+sha1_of_indexed() {
+  if command -v shasum >/dev/null 2>&1; then
+    git show ":$1" 2>/dev/null | shasum -a 1 | awk '{print $1}'
+  elif command -v sha1sum >/dev/null 2>&1; then
+    git show ":$1" 2>/dev/null | sha1sum | awk '{print $1}'
+  elif command -v openssl >/dev/null 2>&1; then
+    git show ":$1" 2>/dev/null | openssl dgst -sha1 | awk '{print $NF}'
+  fi
+}
+
+PRECACHE_ENTRIES=$(sed -n '/const PRECACHE = \[/,/^];/p' "$SW" | grep -oE "'/[^']*'" | tr -d "'")
+if [ -z "$PRECACHE_ENTRIES" ]; then
+  echo "[manifest] ERROR: could not parse any entries out of $SW's PRECACHE array — blocking commit"
+  exit 1
+fi
+
+MANIFEST_BODY=""
+FIRST=1
+ENTRY_COUNT=0
+for entry in $PRECACHE_ENTRIES; do
+  case "$entry" in
+    "/") target="index.html" ;;
+    "/t/") target="t/index.html" ;;
+    "/v/") target="v/index.html" ;;
+    *) target=$(printf '%s' "$entry" | sed 's#^/##') ;;
+  esac
+  if ! git cat-file -e ":$target" 2>/dev/null; then
+    echo "[manifest] ERROR: PRECACHE entry '$entry' has no staged/committed target '$target' in the git index — blocking commit"
+    exit 1
+  fi
+  HASH=$(sha1_of_indexed "$target")
+  if [ -z "$HASH" ]; then
+    echo "[manifest] ERROR: failed to hash indexed '$target' for PRECACHE entry '$entry' (no shasum/sha1sum/openssl found?) — blocking commit"
+    exit 1
+  fi
+  if [ "$FIRST" = "1" ]; then
+    FIRST=0
+  else
+    MANIFEST_BODY="${MANIFEST_BODY},"
+  fi
+  MANIFEST_BODY="${MANIFEST_BODY}\"${entry}\":\"${HASH}\""
+  ENTRY_COUNT=$((ENTRY_COUNT + 1))
+done
+
+printf '{"files":{%s},"version":"%s"}' "$MANIFEST_BODY" "$NEW_VERSION" > "$MANIFEST"
+
+if ! grep -q "\"version\":\"${NEW_VERSION}\"" "$MANIFEST"; then
+  echo "[manifest] ERROR: failed to write $MANIFEST — blocking commit"
+  exit 1
+fi
+
+git add "$MANIFEST"
+echo "[manifest] Generated $MANIFEST (${ENTRY_COUNT} entries) for v${NEW_VERSION}"

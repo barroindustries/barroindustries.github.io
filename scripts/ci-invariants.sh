@@ -128,8 +128,69 @@ else
   done
 fi
 
+# PERF-WAVE1 WP1 — most js/screens/*.js files are no longer <script> tags in
+# index.html (js/app.js's navigateTo() lazy-loads them per page via
+# js/config.js's PAGE_SCRIPTS + window.ensurePage()), so the loop above no
+# longer sees them at all. They still MUST stay in sw.js's PRECACHE — the
+# whole point of lazy-loading is an instant/offline-safe fetch the first
+# time a page needs one, and that only works if the service worker already
+# has it cached. Extract every path PAGE_SCRIPTS references (a superset scan
+# from the _PERF1_PAYROLL_ENGINE helper array, spread into several entries,
+# through the window.ensurePage definition right after PAGE_SCRIPTS's closing
+# brace — no entry is missed) and require the same '/js/…' PRECACHE
+# membership index.html's own script tags already have to satisfy above.
+page_scripts_paths=$(node -e "
+const fs = require('fs');
+const cfg = fs.readFileSync('js/config.js', 'utf8');
+const startIdx = cfg.indexOf('_PERF1_PAYROLL_ENGINE');
+const endIdx = cfg.indexOf('window.ensurePage', startIdx);
+if (startIdx === -1 || endIdx === -1) { process.exit(1); }
+const region = cfg.slice(startIdx, endIdx);
+const paths = [...new Set([...region.matchAll(/'(js\/[^']+\.js)'/g)].map(m => m[1]))];
+paths.forEach(p => console.log(p));
+" 2>/dev/null)
+
+if [ -z "$page_scripts_paths" ]; then
+  echo "FAIL: could not find/parse js/config.js's PAGE_SCRIPTS manifest (looked for the region between"
+  echo "  '_PERF1_PAYROLL_ENGINE' and 'window.ensurePage' in js/config.js — if either identifier was"
+  echo "  renamed, update the same markers in scripts/ci-invariants.sh)."
+  precache_fail=1
+else
+  for p in $page_scripts_paths; do
+    if ! grep -qF "'/$p'" sw.js; then
+      echo "FAIL: js/config.js PAGE_SCRIPTS references '$p' but sw.js PRECACHE has no '/$p' entry."
+      echo "  FIX: add   '/$p',   to the PRECACHE array near the top of sw.js."
+      precache_fail=1
+    fi
+  done
+fi
+
 if [ "$precache_fail" -eq 0 ]; then
-  echo "PASS: every local js/css asset referenced by index.html is in sw.js PRECACHE"
+  echo "PASS: every local js/css asset referenced by index.html or js/config.js's PAGE_SCRIPTS is in sw.js PRECACHE"
+else
+  overall_fail=1
+fi
+
+echo
+
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK — PAGE_SCRIPTS FILES EXIST (PERF-WAVE1 WP1)
+# ═══════════════════════════════════════════════════════════════════════
+echo "=== PAGE_SCRIPTS: checking every js/config.js PAGE_SCRIPTS path exists on disk ==="
+pagescripts_files_fail=0
+if [ -z "$page_scripts_paths" ]; then
+  echo "FAIL: could not find/parse js/config.js's PAGE_SCRIPTS manifest (see the PRECACHE check above)."
+  pagescripts_files_fail=1
+else
+  for p in $page_scripts_paths; do
+    if [ ! -f "$p" ]; then
+      echo "FAIL: js/config.js PAGE_SCRIPTS references '$p' but no such file exists on disk."
+      pagescripts_files_fail=1
+    fi
+  done
+fi
+if [ "$pagescripts_files_fail" -eq 0 ]; then
+  echo "PASS: every js/config.js PAGE_SCRIPTS path exists on disk"
 else
   overall_fail=1
 fi
@@ -278,6 +339,41 @@ if [ -n "$icon_hits" ]; then
   overall_fail=1
 else
   echo "PASS: every drawer entry has an icon colour"
+fi
+
+echo
+echo "=== PRECACHE MANIFEST: precache-manifest.json must match HEAD (PERF-WAVE1 WP2) ==="
+# The deploy-diff SW trusts this manifest's hashes to decide copy-forward vs
+# refetch. A stale manifest (e.g. committed with --no-verify so the pre-commit
+# hook never regenerated it) makes clients keep OLD code for changed files —
+# the exact failure CACHE_VER bumping exists to prevent. In CI, HEAD is the
+# pushed commit, so hashing HEAD blobs catches any bypassed-hook commit.
+manifest_fail=$(node -e "
+const fs=require('fs'),{execSync}=require('child_process');
+try{
+  const man=JSON.parse(fs.readFileSync('precache-manifest.json','utf8'));
+  if(!man.files||typeof man.files!=='object')throw new Error('missing .files');
+  const sw=fs.readFileSync('sw.js','utf8');
+  const m=sw.match(/const PRECACHE = \[([\s\S]*?)^\];/m);
+  if(!m)throw new Error('cannot parse PRECACHE from sw.js');
+  const paths=[...m[1].matchAll(/'(\/[^']*)'/g)].map(x=>x[1]);
+  const ver=(fs.readFileSync('js/config.js','utf8').match(/APP_VERSION\s*=\s*'([^']+)'/)||[])[1];
+  if(man.version!==ver)console.log('version mismatch: manifest '+man.version+' vs config.js '+ver);
+  for(const p of paths){
+    if(!man.files[p]){console.log('missing manifest entry: '+p);continue;}
+    let t=p.replace(/^\//,''); if(p==='/')t='index.html'; if(p==='/t/')t='t/index.html'; if(p==='/v/')t='v/index.html';
+    let blob; try{blob=execSync('git show HEAD:'+JSON.stringify(t),{maxBuffer:64*1024*1024});}catch(e){console.log('not in HEAD: '+t);continue;}
+    const h=require('crypto').createHash('sha1').update(blob).digest('hex');
+    if(h!==man.files[p])console.log('hash mismatch vs HEAD: '+p);
+  }
+}catch(e){console.log('manifest check error: '+e.message);}
+")
+if [ -n "$manifest_fail" ]; then
+  echo "FAIL: precache-manifest.json is stale or malformed — never commit it by hand or with --no-verify; the pre-commit hook regenerates it:"
+  echo "$manifest_fail" | sed 's/^/  /'
+  overall_fail=1
+else
+  echo "PASS: precache-manifest.json matches HEAD for every PRECACHE entry"
 fi
 
 echo

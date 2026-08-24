@@ -1315,7 +1315,7 @@ window.printJobOrder = printJobOrder;
 // ── Production → Job Orders tab ──────────────────────────────────
 // Lists the won jobs Production is actually responsible for, each printable
 // as a Job Order and each with its priority stars editable in place.
-async function renderProdJobOrders(el, currentUser, currentRole){
+async function renderProdJobOrders(el, currentUser, currentRole, showAll=false){
   const canEdit = canEditDept('Production') && (window.currentRole !== 'secretary');
   el.innerHTML = window.skeletonHtml('table');
   const [projSnap, ordSnap] = await Promise.all([
@@ -1375,6 +1375,12 @@ async function renderProdJobOrders(el, currentUser, currentRole){
     </div>`;
   };
 
+  // PERF-WAVE1 WP9 — unbounded card render was a mobile-data + main-thread
+  // cost as the shop floor's open-job count grows. Cap the DOM render at 150
+  // cards; a "Show all N" button re-renders unbounded on tap (fetch stays
+  // cached either way — dbCachedGet above already served this from cache).
+  const JO_CAP = 150;
+  const visible = showAll ? sorted : sorted.slice(0, JO_CAP);
   el.innerHTML = `
     <div class="kpi-row" style="margin-bottom:12px">
       <div class="kpi-card"><div class="kpi-label">Open jobs</div><div class="kpi-value">${projects.length}</div></div>
@@ -1387,8 +1393,10 @@ async function renderProdJobOrders(el, currentUser, currentRole){
       Every job here came from a won quotation. The printed Job Order carries the scope, the deadlines and the stage schedule — and no prices, so it can be handed to anyone on the floor. Tap the stars to set a job's priority.
     </div>
     ${!sorted.length ? window.renderEmptyState({icon:'🧾',title:'No open jobs',hint:'A job appears here once Sales converts a won quotation into a sales order.'}) : ''}
-    ${sorted.length?`<div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:8px">${sorted.map(card).join('')}</div></div>`:''}`;
+    ${sorted.length?`<div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:8px">${visible.map(card).join('')}</div></div>`:''}
+    ${(!showAll && sorted.length > JO_CAP) ? `<div style="text-align:center;margin:10px 0"><button type="button" class="btn-secondary btn-sm" id="jo-show-all">Show all ${sorted.length}</button></div>` : ''}`;
   if (window.lucide) lucide.createIcons({ nodes: [el] });
+  document.getElementById('jo-show-all')?.addEventListener('click', ()=>renderProdJobOrders(el, currentUser, currentRole, true));
 
   el.querySelectorAll('.jo-print').forEach(b=>b.addEventListener('click', ()=>{
     const p = projects.find(x=>x.id===b.dataset.id);
@@ -2468,7 +2476,7 @@ async function loadProdContent(currentUser, currentRole, sub) {
   }
 }
 
-async function renderProdOrders(el, currentUser, currentRole) {
+async function renderProdOrders(el, currentUser, currentRole, showAll=false) {
   // DEAD CONTROLS (fixed 2026-08-09). firestore.rules production_orders:
   //   create = canProduction()
   //   update = canProduction() && !isSecretary()
@@ -2515,6 +2523,23 @@ async function renderProdOrders(el, currentUser, currentRole) {
   const byStage = {};
   active.forEach(o=>{ (byStage[normProdStageId(o.stage)] ||= []).push(o); });
   const delivered = orders.filter(o=>normProdStageId(o.stage)==='delivered');
+
+  // PERF-WAVE1 WP9 — active orders are grouped into one card per pipeline
+  // stage; an unbounded shop-floor backlog would unbounded-render a card per
+  // order across every stage group. Cap the TOTAL order-cards drawn (not
+  // per-stage) at 150, in pipeline order, so KPI counts and per-stage badge
+  // counts (built from the full `byStage`/`active`, untouched below) stay
+  // accurate even when the body is truncated. "Show all N" re-renders
+  // unbounded on tap — the fetch above is already cached, so this is cheap.
+  const ORD_CAP = 150;
+  let _ordRendered = 0;
+  const capRow = (arr) => {
+    if (showAll) return arr;
+    const remaining = Math.max(0, ORD_CAP - _ordRendered);
+    const slice = arr.slice(0, remaining);
+    _ordRendered += slice.length;
+    return slice;
+  };
 
   const orderCard = (o)=>{
     const od = o.dueDate && o.dueDate < todayStr && normProdStageId(o.stage)!=='delivered';
@@ -2590,9 +2615,10 @@ async function renderProdOrders(el, currentUser, currentRole) {
           <span class="badge" style="background:${s.color};color:var(--on-primary)">${(byStage[s.id]||[]).length}</span>
         </div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
-          ${(byStage[s.id]||[]).map(orderCard).join('')}
+          ${capRow(byStage[s.id]||[]).map(orderCard).join('')}
         </div>
       </div>`).join('')}
+    ${(!showAll && active.length > ORD_CAP) ? `<div style="text-align:center;margin:10px 0"><button type="button" class="btn-secondary btn-sm" id="prod-show-all">Show all ${active.length}</button></div>` : ''}
     ${delivered.length?`
       <details style="margin-top:6px">
         <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">${emojiIcon('🚚',13)} Delivered (${delivered.length})</summary>
@@ -2600,6 +2626,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
       </details>`:''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [el] });
+  document.getElementById('prod-show-all')?.addEventListener('click', ()=>renderProdOrders(el, currentUser, currentRole, true));
 
   el.querySelectorAll('.prod-labor').forEach(b=>b.addEventListener('click', (ev)=>{
     ev.stopPropagation();
@@ -4463,6 +4490,7 @@ window.approvePurchaseOrder = async function(prId) {
     approvedAt: firebase.firestore.FieldValue.serverTimestamp()
   });
   window.logAudit && window.logAudit('approve', 'purchase_order', prId, { prNo: p.prNo || '', total: p.total || 0 });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:purchase_requisitions-pending'); // PERF-WAVE1
   const notifyUid = p.convertedBy || p.createdBy;
   if (notifyUid) await safeNotify(() => Notifs.send(notifyUid, {
     title: '✅ PO Approved',
@@ -4487,6 +4515,7 @@ window.rejectPurchaseOrder = async function(prId, reason) {
     rejectedReason: (reason || '').trim()
   });
   window.logAudit && window.logAudit('reject', 'purchase_order', prId, { prNo: p.prNo || '', reason: (reason || '').slice(0, 200) });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:purchase_requisitions-pending'); // PERF-WAVE1
   const notifyUid = p.convertedBy || p.createdBy;
   if (notifyUid) await safeNotify(() => Notifs.send(notifyUid, {
     title: '❌ PO Rejected',

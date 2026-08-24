@@ -657,7 +657,12 @@ window.financeExecuteDelete = async function(collection, docId) {
   }
   batch.delete(db.collection(collection).doc(docId));
   await batch.commit();
-  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  if (typeof dbCacheInvalidate === 'function') {
+    dbCacheInvalidate('ledger');
+    // Pay-run deletes restore cash_advances balances above — cascade the CA
+    // caches too (ca-approved-all + per-uid ca-mine-*, PERF-WAVE1).
+    dbCacheInvalidate('ca-pending');
+  }
   // finance_rollup deltas are best-effort, strictly AFTER the atomic delete
   // has committed — never gate the delete itself on a rollup write (matches
   // finance-ledger.js's CONSTRAINT note).
@@ -752,6 +757,7 @@ window.requestQuoteDelete = async function(collection, docId, label, createdBy, 
         deleteRequested: true, deleteReason: reason,
         deleteRequestedBy: u.uid, deleteRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:' + collection + '-delete'); // PERF-WAVE1
       await safeNotify(() => Notifs.sendToOwner({
         title: '🗑 Quote Deletion Requested',
         body:  `${window.userProfile?.displayName || 'The Corporate Secretary'} requested deletion of ${label}. Reason: ${reason}`,
@@ -770,6 +776,7 @@ window.requestQuoteDelete = async function(collection, docId, label, createdBy, 
       deleteRequested: true, deleteReason: reason,
       deleteRequestedBy: u.uid, deleteRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
     }).then(async () => {
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:' + collection + '-delete'); // PERF-WAVE1
       await safeNotify(() => Notifs.sendToOwner({
         title: '🗑 Quote Delete Requested',
         body: `${(window.userProfile && window.userProfile.displayName) || u.email || 'A user'} requests deleting ${label}.${reason?' Reason: '+reason:''}`,
@@ -1864,6 +1871,7 @@ window.RaiseFlow = (function () {
     await safeNotify(() => Notifs.send(r.requestedBy, { title: '✅ Raise Approved',
       body: `Your raise request for ${r.subjectName} was approved.`, icon: '✅', type: 'raise_request', link: 'approvals' }));
     if ((r.effectiveMonth || r.effectiveDate.slice(0, 7)) <= nowMonth()) await materialize(raiseId);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:pending_raises-pending'); // PERF-WAVE1
     return 'approved';
   }
 
@@ -1879,6 +1887,7 @@ window.RaiseFlow = (function () {
     await safeNotify(() => Notifs.send(r.requestedBy, { title: '❌ Raise Declined',
       body: `Your raise request for ${r.subjectName} was declined.${reason ? ' Reason: ' + reason : ''}`,
       icon: '❌', type: 'raise_request', link: 'approvals' }));
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:pending_raises-pending'); // PERF-WAVE1
     return 'rejected';
   }
 
@@ -2098,8 +2107,15 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
   employees.sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
 
   // Bulk-fetch once — avoids N+1 reads across the whole run.
+  // PERF-WAVE1 WP9 — 'tasks-all' is an existing shared dbCachedGet key (also
+  // used by dashboards.js, tasks.js, people.js); routing this scan through it
+  // means a Compute run that follows a recent task-tab visit skips the whole-
+  // collection read. 30s TTL; existing task write paths already call
+  // dbCacheInvalidate('tasks-all') (tasks.js, approvals.js, design.js) so this
+  // scan can go stale for at most one TTL window during a live edit, same
+  // staleness bound the key already carries everywhere else it's used.
   const [tasksSnap, kpiTargetsSnap] = await Promise.all([
-    db.collection('tasks').get().catch(()=>({docs:[]})),
+    dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000).catch(()=>({docs:[]})),
     db.collection('kpi_targets').get().catch(()=>({docs:[]}))
   ]);
   const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -4187,6 +4203,18 @@ async function transferOrderToProduction(o){
   // recorded (see setDesignApproval, js/screens/production.js). An order marked
   // noDrawingsNeeded is the documented way past it.
   if (o.projectId && !o.noDrawingsNeeded) {
+    // jobDesignApproved lives in production.js, which is lazy (PERF-WAVE1).
+    // Load it, and if it STILL isn't there, fail CLOSED — the catch below is
+    // for Firestore read failures; letting a missing function fall through it
+    // would silently skip the Sales-approval gate (verifier finding,
+    // 2026-08-24; gate itself is the owner's 2026-08-18 ruling).
+    if (typeof window.jobDesignApproved !== 'function' && window.ensureScript) {
+      try { await window.ensureScript('js/screens/production.js'); } catch(_){}
+    }
+    if (typeof window.jobDesignApproved !== 'function') {
+      Notifs.showToast('Could not verify Sales drawing approval — check your connection and try again.', 'error');
+      return false;
+    }
     try {
       const ps = await db.collection('job_projects').doc(o.projectId).get();
       if (ps.exists && !window.jobDesignApproved({ id:o.projectId, ...ps.data() }, o)) {
@@ -4421,7 +4449,11 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   document.getElementById('cl-migrate-btn')?.addEventListener('click', async () => {
     if (!(await confirmDialog({message:'Unify sales/design/BS client books into one CRM? Safe to re-run — already-migrated records are skipped.'}))) return;
     Notifs.showToast('Migrating client books…');
-    try { const r = await window.migrateClientBooks();
+    try {
+      // migrations.js is lazy (PERF-WAVE1) — this button renders on Design/
+      // Sales/BS client tabs whose page sets don't include it.
+      if (!window.migrateClientBooks && window.ensureScript) await window.ensureScript('js/migrations.js');
+      const r = await window.migrateClientBooks();
       window.logAudit && window.logAudit('migrate','clients',null,r);
       Notifs.success(`Done: ${r.created} created, ${r.merged} merged, ${r.soTagged+r.jpTagged} records linked, ${r.unmatched} left name-matched.`);
       renderClientProfiles(container, currentUser, currentRole, brand);

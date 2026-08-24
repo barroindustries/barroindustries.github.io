@@ -205,7 +205,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.184 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.185 · Barro Industries</div>
   </div>
 </div>
 
@@ -417,7 +417,22 @@
      comment) for its specific forward/backward call graph. What remains
      in departments.js/app.js/modules.js after Pass 10's cleanup is
      shared services, shared renderers, and app shell/router — not
-     screens. -->
+     screens.
+
+     PERF-WAVE1 WP1 (2026-08-24) — most js/screens/*.js files (and a few
+     js/*.js engine/utility files: bir, letterhead, migrations, pay-policy,
+     statutory-status, payroll-weekly, payroll, qrcode) are no longer listed
+     as <script defer> below. They still exist on disk and are still in
+     sw.js's PRECACHE list — js/app.js's navigateTo() now calls
+     window.ensurePage(page), which injects exactly the files that page's
+     PAGE_SCRIPTS entry (js/config.js) names, right before dispatching to
+     that page's render function. A typical employee boot now parses only
+     the files still listed here, not the whole tree. js/screens/dashboards.js
+     and js/screens/dept-budgets.js and js/print-docs.js stay eager on
+     purpose — see js/config.js's PAGE_SCRIPTS comment for why the latter two
+     were pulled back rather than bundled per-page. js/gestures.js is dead
+     (zero callers, its own listeners commented out) and was dropped
+     entirely — no PAGE_SCRIPTS entry loads it. -->
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" integrity="sha384-AQ3POAMqIhwS81FrUH95ekxqBZHeP5tG2JfEL3+7GuTtfRLWnrRh32UxwzM+//A9" crossorigin="anonymous"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" integrity="sha384-TnlRYaR4JYz/lpaGuaiU61PjNberSA4vjLjtF+oRC/IkohkJqnWxw5EmDSOt1vA1" crossorigin="anonymous"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" integrity="sha384-qn4Jh88HhJA8dplNQyGjOh9OGI4izVhrfj/qIFgaKcdgOE06pXqIKGlsCILZcLAC" crossorigin="anonymous"></script>
@@ -437,14 +452,8 @@
 <!-- v13 Part E Phase 40/115/116 — statusBadge2()/STATUS_META. Needs window.escHtml
      (config.js) only; must load before departments.js, the first consumer. -->
 <script defer src="js/ui-status-meta.js"></script>
-<!-- v12 WS42 Phase 12 — edge swipe-back + sheet swipe-dismiss. Needs window.Overlay
-     (config.js) only; must run before app.js's router/modal wiring uses it. -->
-<script defer src="js/gestures.js"></script>
-<script defer src="js/qrcode.js"></script>
 <script defer src="js/statutory-tables.js"></script>
-<script defer src="js/letterhead.js"></script>
 <script defer src="js/print-docs.js"></script>
-<script defer src="js/bir.js"></script>
 <script defer src="js/finance-ledger.js"></script>
 <script defer>
   /* runs immediately after config.js (defer preserves order). BRAND + APP_VERSION exist by now. */
@@ -505,177 +514,33 @@
      of departments.js so it's independently unit-tested (tests/money.test.mjs).
      Must load before departments.js, which calls these via window.*. -->
 <script defer src="js/money-core.js"></script>
-<!-- TASK-BASED-PAY-SPEC-2026-08-12 — pure helpers ABOVE the frozen money-core.js
-     (wageFloorCheck, payBasisSentence, the PAY_POLICY_VALUES whitelist). Must
-     load before js/payroll.js/js/departments.js/js/screens/* (its consumers) —
-     load order is load-bearing in this app (see CLAUDE.md). -->
-<script defer src="js/pay-policy.js"></script>
-<!-- STATUTORY-BY-STATUS-SPEC-2026-08-12 — pure derivation layer ABOVE the
-     frozen money-core.js resolvers (resolveStatutoryEE / resolveStatutoryWeekly);
-     turns employmentStatus into an effective statConfig. Must load before
-     js/payroll-weekly.js and js/departments.js (its consumers) — load order
-     is load-bearing in this app (see CLAUDE.md). -->
-<script defer src="js/statutory-status.js"></script>
+<!-- PERF-WAVE1 WP1 — js/pay-policy.js and js/statutory-status.js (formerly
+     here, load-bearing before js/payroll.js/js/departments.js/js/screens/*)
+     are now lazy-loaded as part of the payroll compute-engine bundle
+     (js/config.js's PAGE_SCRIPTS, every payroll-touching page) instead of
+     eager — the guarded (typeof-checked) references to them still in
+     js/departments.js/js/screens/dashboards.js degrade gracefully if a
+     non-payroll page never loads them. -->
 <!-- Type-B (Production, weekly) self-service attendance — pure geofencing
      math (haversineMeters/siteMatch), independently unit-tested
      (tests/geo.test.mjs). No dependencies; loads early like money-core.js. -->
 <script defer src="js/geo-core.js"></script>
 <script defer src="js/departments.js"></script>
-<!-- v14 Wave 2 Batch B — Design department screen, split verbatim out of
-     departments.js (extraction-protocol pilot). Must load after
-     departments.js: Design's functions call departments.js's shared
-     helpers (canEditDept, deptContainer, renderClientProfiles, etc.) by
-     window.*/bare-global name at runtime only, never at parse time. -->
-<script defer src="js/screens/design.js"></script>
-<!-- v14 Wave 7 Pass 1 — Tasks + Submissions screens, split verbatim out of
-     departments.js. Must load after departments.js: calls departments.js's
-     shared helpers (statusBadge, canEditDept, deptContainer, etc.) by
-     window.*/bare-global name at runtime only, never at parse time; renderApprovals
-     (still in departments.js) reaches forward into this file's globals
-     (normTask, notifyTaskInvolved, openTaskDetail, renderDeptTasks) the same way. -->
-<script defer src="js/screens/tasks.js"></script>
-<!-- v14 Wave 7 Pass 2 — Sales + AEC + Quotations screens (incl. the
-     revision-chain UI), split verbatim out of departments.js. Must load
-     after departments.js: calls its shared helpers (canEditDept,
-     deptContainer, dbCachedGet, openSalesOrderModal, renderClientProfiles,
-     etc.) by window.*/bare-global name at runtime only, never at parse
-     time; js/screens/partners.js's renderBrilliantSteel/loadBSContent (moved
-     there in Wave 7 Pass 6, loads after this file) reaches forward into this
-     file's renderBSQuotationsSummary the same way. -->
-<script defer src="js/screens/sales.js"></script>
-<!-- CRM department (added 2026-08-04) — Dashboard/AEC Leads/ROC Leads/Pipeline,
-     js/screens/crm.js. Must load after sales.js: its AEC Leads tab calls
-     window.renderAECDirectory directly, and after departments.js (canEditDept,
-     deptContainer, chipTabs/bindChipTabs, etc.) by window.*/bare-global name
-     at runtime only, never at parse time — same convention as every other
-     js/screens/*.js file. js/app.js's renderDeptModule ('CRM' case, loads
-     after this file) reaches forward into this file's window.renderCRM the
-     same way. -->
-<script defer src="js/screens/crm.js"></script>
-<!-- Ventures department (added 2026-08-08) — the owner's venture portfolio as
-     long-form written briefs (executive summary + user-defined reorderable
-     prose sections + links + one attachment), js/screens/ventures.js.
-     Documentation only, no money fields. Must load after departments.js
-     (canEditDept, deptContainer, escHtml, chipTabs/bindChipTabs, sopPanel,
-     confirmDialog, skeletonHtml) and it sits in the department-screens cluster
-     after crm.js; every reference is by window.*/bare-global name resolved at
-     RUNTIME only, never at parse time — same convention as every other
-     js/screens/*.js file. js/app.js's renderDeptModule ('Ventures' case,
-     loads after this file) reaches forward into window.renderVentures the
-     same way. -->
-<script defer src="js/screens/ventures.js"></script>
-<!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll reconciliation,
-     HR profiles, worker payslips), split verbatim out of
-     departments.js. Must load after departments.js: calls its shared
-     helpers (canEditDept, deptContainer, isFinancePriv, fetchUsersWithPayroll,
-     etc.) and money SERVICES that stayed behind (window.computePayRun/
-     disbursePayRun/reopenPayRun, window.RaiseFlow, window.CashAdvance/Ledger/
-     BankAccounts) by window.*/bare-global name at runtime only, never at
-     parse time; finance.js's loadFinanceContent ('HR Profiles' tab) reaches
-     forward into this file's renderFinanceHRProfiles the same way.
-     PAYROLL-LIVE-SPEC-2026-08-11 §8 (2026-08-12) — this file's
-     renderPayrollHub is retired (superseded by js/screens/payroll.js's
-     window.renderPayrollPage, loaded later); renderFinanceHRProfiles is
-     unaffected and now also has its own door, window.renderWorkersScreen. -->
-<script defer src="js/screens/hr.js"></script>
-<!-- Employee Profile (owner request 2026-08-09) — ONE per-person profile screen
-     shared by the Office Team and the Operations Team, composing users +
-     payroll + worker_profiles + cash_advances + raises + pay history. Must
-     load AFTER hr.js: it calls that file's openSalaryRaiseModal /
-     openRaiseHistory as bare globals at CLICK time (never at parse time), the
-     same forward-reference convention every other js/screens/*.js file uses. -->
-<script defer src="js/screens/employee-profile.js"></script>
-<!-- WEEKLY PAY RUN (owner ruling 2026-08-10) — one press pays the Operations
-     Team for a Monday–Sunday week.
-
-       js/payroll-weekly.js          window.WeeklyRun — the Firestore/state
-                                     layer (load/compute/setExcluded/
-                                     setAdjustment/verify/disburse over
-                                     pay_weeks/{weekId}). Touches no DOM.
-
-     Must load AFTER js/money-core.js (computeWeeklyLine /
-     resolveWorkerHourlyRate / weeklyRunSkipReason / payWeekMondayOf are the
-     whole of the pay maths and the engine calls them by window.* name) and
-     AFTER js/departments.js (the Manila helpers bizDate/bizDow, escHtml,
-     canEditDept, isMoneyPriv).
-
-     PAYROLL-LIVE-SPEC-2026-08-11 §8 (2026-08-12) — js/screens/
-     payroll-weekly-ui.js (window.renderWeeklyPayrollTab, the standalone
-     weekly SCREEN this engine used to feed) is retired: window.Payroll
-     (js/payroll.js, loaded below) now calls window.WeeklyRun.buildLines/
-     compute/setExcluded/setAdjustment/verify/disburse directly, and
-     js/screens/payroll.js is the one screen for both teams. This engine
-     file is unchanged and still load-bearing — do not delete it. -->
-<script defer src="js/payroll-weekly.js"></script>
-<!-- ═══ UNIFIED PAYROLL (PAYROLL-REDESIGN-BRIEF.md, owner ruling 2026-08-10) ══
-     "unify it as well, treat disbursement of office and operations the same,
-     the difference is just the system of computing their pay." ONE run concept
-     over both teams; payClass picks a COMPUTE STRATEGY for a line and nothing
-     else. Split engine-then-screen, the same shape as the weekly pair above:
-
-       js/payroll.js                    window.Payroll — the Firestore/state
-                                        layer over BOTH pay_runs/{YYYY-MM} and
-                                        pay_weeks/{YYYY-MM-DD}: load / prepare /
-                                        setHeld / setAdjustment / addOneOff /
-                                        markHoursCorrect / pay / reopen /
-                                        correctAfterPay. Touches no DOM.
-       js/screens/payroll.js            window.renderPayrollPage — THE payroll
-                                        screen. Both the Finance chip and the HR
-                                        card land here (js/screens/finance.js
-                                        loadFinanceContent case 'Payroll',
-                                        js/screens/hr.js renderPayrollScreen);
-                                        it calls ONLY the window.Payroll API.
-       js/screens/payroll-backfill.js   entering periods that were paid before
-                                        the system existed, on the same screen.
-
-     LOAD ORDER IS LOAD-BEARING and this position is the whole of it: AFTER
-     js/money-core.js (computePayLine / computeWeeklyLine / resolveWorkerHourly
-     Rate / payWeekMondayOf are the entire pay maths and are called by window.*
-     name), AFTER js/departments.js (escHtml, canEditDept, isMoneyPriv, the
-     Manila bizDate helpers, and the computePayRun / disbursePayRun engines this
-     wraps rather than duplicates), and AFTER js/payroll-weekly.js (window.
-     WeeklyRun, the other engine it wraps). Placed after js/screens/hr.js too,
-     so the screen can reach forward into that file's payslip builders — at
-     CLICK time only, never at parse time, the same forward-reference
-     convention every other js/screens/*.js file uses.
-     Both js/screens/finance.js and js/screens/hr.js resolve renderPayrollPage
-     by window.* name at NAV time. PAYROLL-LIVE-SPEC-2026-08-11 §8 retired the
-     old hub/weekly-screen fallback both used to degrade to: a missing
-     renderPayrollPage is a load failure now, and paints a plain "did not
-     load" message rather than falling back to a screen that no longer exists.
-
-     Every entry here must also be in sw.js's PRECACHE list — scripts/ci-
-     invariants.sh CHECK 2 fails the build otherwise. -->
-<script defer src="js/payroll.js"></script>
-<script defer src="js/screens/payroll.js"></script>
-<script defer src="js/screens/payroll-backfill.js"></script>
-<!-- v14 Wave 7 Pass 4 — Production + Purchasing + Projects (job_projects
-     lifecycle) screens, split verbatim out of departments.js (a single
-     contiguous tail cut — PROD_STAGES/QC/Delivery Receipt through
-     printReceivingReport at EOF). Must load after departments.js: calls its
-     shared services (window.Projects, openBillingInvoice/
-     buildBillingInvoiceHTML, nextCounterId, window.Ledger, BankAccounts,
-     canEditDept, deptContainer, dbCachedGet, etc.) by window.*/bare-global
-     name at runtime only, never at parse time; departments.js's
-     loadFinanceContent (Finance → Purchases tab) reaches forward into this
-     file's renderPurchaseRequests the same way. -->
-<script defer src="js/screens/production.js"></script>
-<!-- v14 Wave 7 Pass 8 — Finance screens (Overview/Ledger/Journals/Bank
-     Accounts/Reports/Taxes/Records/Cash Advances + Finance Tools + the
-     generic financeEditModal), split verbatim out of js/departments.js.
-     Must load after departments.js: calls its shared helpers
-     (canEditDept, deptContainer, isFinancePriv, statusBadge, etc.) and
-     money SERVICES that stayed behind (window.financeDelete/
-     financeExecuteDelete, postExpenseToLedger/postCRJToLedger/
-     postCDJToLedger, resyncLedgerForSource, window.closeFinancePeriod/
-     reopenFinancePeriod, window.Ledger/BankAccounts/CashAdvance,
-     window.assertPeriodOpen in js/config.js) by window.*/bare-global
-     name at runtime only, never at parse time; departments.js's
-     loadFinanceContent (Sales Orders/Purchases/HR Profiles/Payroll/Tasks
-     cases) reaches forward into hr.js/production.js/tasks.js the same
-     way, and js/screens/hr.js/js/app.js reach forward into this file's
-     window.renderFinance/financeEditModal identically. -->
-<script defer src="js/screens/finance.js"></script>
+<!-- PERF-WAVE1 WP1 (2026-08-24) — js/screens/design.js, tasks.js, sales.js,
+     crm.js, ventures.js, hr.js, employee-profile.js, js/payroll-weekly.js,
+     js/payroll.js, js/screens/payroll.js, js/screens/payroll-backfill.js,
+     js/screens/production.js, js/screens/finance.js,
+     js/screens/statutory-rates.js, js/screens/approvals.js,
+     js/screens/govit.js, js/screens/partners.js (formerly all listed here,
+     in this order) are now lazy-loaded per page via js/config.js's
+     PAGE_SCRIPTS + window.ensurePage(), called from js/app.js's navigateTo()
+     right before it dispatches to that page's render function — see
+     js/config.js's PAGE_SCRIPTS comment for the full per-page file list and
+     the export/caller sweep behind it. Every load-order relationship these
+     files' own header comments describe (which shared departments.js/
+     money-core.js/app.js helpers they call, by window.*/bare-global name,
+     never at parse time) is unchanged by this — only WHEN the file arrives
+     on the page did. -->
 <!-- DEPT-BUDGETS-SPEC-2026-08-11 — department budgets (release/spend/confirm/
      reimburse). Must load after departments.js (canEditDept, deptContainer,
      escHtml, fmt, today, onClickSafe, deptBlockedForSecretary) and
@@ -683,96 +548,36 @@
      at click/render time only, never at parse time. departments.js's
      renderBudgeting reaches forward into this file's window.openLogSpendForm/
      openBudgetRequestForm/openReleaseBudgetForm/openCloseFloatModal/
-     repostFloatRelease the same way every other pass in this file documents. -->
+     repostFloatRelease the same way every other pass in this file documents.
+     PERF-WAVE1 WP1 — kept EAGER (NOT moved to PAGE_SCRIPTS): the EAGER
+     departments.js's renderBudgeting above calls this file's exports
+     unguarded and is itself reused, unchanged, by NINE different
+     departments' "Budgeting" subtab — bundling this file into all nine
+     PAGE_SCRIPTS entries individually was strictly worse than its ~62KB
+     eager cost. See js/config.js's PAGE_SCRIPTS comment. -->
 <script defer src="js/screens/dept-budgets.js"></script>
-<!-- Government contribution rates. Loads after finance.js, which routes to it.
-     This is the screen that unblocks payroll: the verified flag lived in
-     js/statutory-tables.js and nothing could write it, so disbursement was
-     impossible without a code deploy. -->
-<script defer src="js/screens/statutory-rates.js"></script>
-<!-- v14 Wave 7 Pass 8 — Approvals screen (owner/oversight approval
-     queue), split verbatim out of js/departments.js. Re-checked for
-     clean extraction now that js/svc-approvals.js (v13 Phase 35) already
-     owns every approval type's write path — this file is UI only. Must
-     load after departments.js: calls its shared helpers (canEditDept,
-     deptContainer, statusBadge, nextCounterId, etc.) and services that
-     stayed behind (Approvals.dispatch in js/svc-approvals.js,
-     window.CashAdvance/RaiseFlow, window.approvePurchaseOrder/
-     rejectPurchaseOrder in production.js) by window.*/bare-global name
-     at runtime only, never at parse time; js/app.js's navigateTo
-     ('approvals' case) reaches forward into this file's
-     window.renderApprovals the same way. -->
-<script defer src="js/screens/approvals.js"></script>
-<!-- v14 Wave 7 Pass 5 — Government Biddings + IT screens, split verbatim out
-     of js/app.js (renderGovBiddings) and js/departments.js (renderIT +
-     loadITContent + openITTicketModal), plus the canonical window.GOV_BUCKETS
-     bucket list (was declared twice — once in app.js's renderGovBiddings,
-     once inside departments.js's renderDocCollection — now ONE definition
-     here that both consume). Must load after departments.js: calls its
-     shared helpers (canEditDept, deptContainer, renderDocCollection,
-     confirmDialog, etc.) by window.*/bare-global name at runtime only, never
-     at parse time; departments.js's renderDocCollection reaches forward into
-     this file's window.GOV_BUCKETS the same way. -->
-<script defer src="js/screens/govit.js"></script>
-<!-- v14 Wave 7 Pass 6 — Brilliant Steel + Partners screens, split verbatim
-     out of js/departments.js (Brilliant Steel: renderBrilliantSteel,
-     loadBSContent, renderBSFiles, renderBSClientData) and js/app.js
-     (Partners dept + partner portal: renderPartnersDept, loadPartnersDeptTab,
-     _showAddDealModal, renderPartnerDashboard, renderPartnerProjects,
-     PARTNER_STAGE). Must load after departments.js: calls its shared helpers
-     (deptContainer, dbCachedGet, renderClientProfiles, renderFileCollection/
-     bindFileCollection, statusBadgeClass/statusLabel2, window.getBsQuotesOrdered,
-     etc.) by window.*/bare-global name at runtime only, never at parse time;
-     departments.js's renderApprovals ('quote-files' chip) and sales.js's
-     bindQuoteActions reach forward into this file's renderBrilliantSteel/
-     loadBSContent/renderBSQuotationsSummary caller the same way. -->
-<script defer src="js/screens/partners.js"></script>
-<!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
-     departments.js for hot-file size. Plain deferred script (not the
-     dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant
-     for this pass; buttons in departments.js call these by window.* name. -->
-<script defer src="js/migrations.js"></script>
 <script defer src="js/app.js"></script>
 <script defer src="js/modules.js"></script>
-<!-- v14 Wave 7 Pass 7 — People screens (Posts, Team directory, Attendance,
-     Cash Advance UI, Company Overview, Leave, Global Search, Files Hub, My
-     Profile), split verbatim out of js/modules.js. Must load after
-     modules.js: calls its shared helpers (escHtml, safeHttpUrl,
-     isRealPresident, etc.) by bare-global/window.* name at runtime only,
-     never at parse time — same convention as every other Wave 7 pass.
-     Inventory (renderInventory/renderStock/renderMovements) stayed behind
-     in modules.js; see js/screens/people.js's header for why. -->
-<script defer src="js/screens/people.js"></script>
-<!-- NOTES-AND-DRAWER-SPEC-2026-08-12 §5.5 — Notes screen. Loads right after
-     people.js: only calls window globals defined earlier (config.js, app.js
-     openPage, modules.js escHtml) at runtime, never at parse time. -->
-<script defer src="js/screens/notes.js"></script>
 <!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
      System Health, Audit Log, Product Database, SOPs, Personal Finance +
      the KPI/attendance-score cluster, Progress Reports, Company, Departments,
      Analytics, Team accounts-admin, Help), split verbatim out of js/app.js.
-     Loads LAST of every js/screens/*.js file (after people.js): the screens
-     below call almost every other screen's shared globals at runtime
-     (fetchUsersWithPayroll, renderClientProfiles, window.Projects,
+     The screens below call almost every other screen's shared globals at
+     runtime (fetchUsersWithPayroll, renderClientProfiles, window.Projects,
      window.Ledger, window.CashAdvance, ledgerForPeriod, Period.parse, etc.)
      by bare-global/window.* name at runtime only, never at parse time — same
      convention as every other Wave 7 pass. app.js's navigateTo switch and
      the bottom-nav route tables (config.js) reach forward into this file's
      window.render()/bare render() entry points the same way; notifications.js's
-     openMemoById deep-link does too. -->
+     openMemoById deep-link does too.
+     PERF-WAVE1 WP1 (2026-08-24) — js/screens/people.js, notes.js, layoff.js
+     and js/screens/worker.js (formerly right after/around this file) are now
+     lazy-loaded per page — see js/config.js's PAGE_SCRIPTS comment. This
+     file (dashboards.js) and js/chat.js below stay eager: dashboards.js's
+     own performance fixes are PERF-WAVE1 WP3's package, not this one's, and
+     chat.js's one lazy-file reach (openTaskDetail, tasks.js) is WP4's. -->
 <script defer src="js/screens/dashboards.js"></script>
-<script defer src="js/screens/layoff.js"></script>
 <script defer src="js/chat.js"></script>
-<!-- Type-B (Production, weekly) self-service worker screens (renderWorkerHome:
-     geofenced Time In/Out + selfie, attendance calendar, finance/payslips).
-     Loads last, after every screen it calls at runtime by bare-global/
-     window.* name (computeDayHours/toPayslipModel/payslipYtdWeekly/
-     renderPayslipPage from hr.js, getPHHolidays from people.js, liveDateTime
-     from dashboards.js, siteMatch from geo-core.js) — same forward-reference
-     convention as every js/screens/*.js file above. js/app.js's navigateTo
-     ('dashboard' case) and NAV_REGISTRY (js/config.js, 'workerB' variant)
-     reach forward into this file's window.renderWorkerHome the same way. -->
-<script defer src="js/screens/worker.js"></script>
 <script>
   window.addEventListener('load', () => { if (window._applyBrandVersion) window._applyBrandVersion(); });
 </script>

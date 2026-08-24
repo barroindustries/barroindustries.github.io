@@ -935,80 +935,92 @@ function renderEomCard(host, data, users, canManage, standings, month) {
 async function computeEomStandings(users, monthStr) {
   const todayStr = window.bizDate();
   const month = monthStr || todayStr.slice(0, 7);
-  const isPastMonth = month < todayStr.slice(0, 7);
-  const y = +month.slice(0, 4), m = +month.slice(5, 7) - 1;
-  const monthStart = `${month}-01`;
-  // For a completed month, score the WHOLE month; for the (rare) current-month
-  // fallback, score through today.
-  const lastDom = isPastMonth ? new Date(y, m + 1, 0).getDate() : +todayStr.slice(8, 10);
-  const rangeEndStr = isPastMonth ? `${month}-${String(lastDom).padStart(2, '0')}` : todayStr;
-  const workDaysElapsed = (typeof countWorkDays === 'function') ? countWorkDays(y, m, lastDom) : Math.max(1, lastDom);
 
-  const candidates = users.filter(u =>
-    u.role !== 'partner' && u.role !== 'president'
-    && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'));
-  if (!candidates.length) return [];
+  // PERF-WAVE1 WP8: this fans out one attendance read PER CANDIDATE on top of
+  // the tasks/kpi_evals reads, every time the Team tab paints the banner. The
+  // standings are month-scale (only ever shown for a COMPLETED month), so the
+  // WHOLE computation is cached per month for 30 min — accepted staleness: a
+  // mid-window attendance/task/grade edit can lag up to 30 min here.
+  const computeFn = async () => {
+    const isPastMonth = month < todayStr.slice(0, 7);
+    const y = +month.slice(0, 4), m = +month.slice(5, 7) - 1;
+    const monthStart = `${month}-01`;
+    // For a completed month, score the WHOLE month; for the (rare) current-month
+    // fallback, score through today.
+    const lastDom = isPastMonth ? new Date(y, m + 1, 0).getDate() : +todayStr.slice(8, 10);
+    const rangeEndStr = isPastMonth ? `${month}-${String(lastDom).padStart(2, '0')}` : todayStr;
+    const workDaysElapsed = (typeof countWorkDays === 'function') ? countWorkDays(y, m, lastDom) : Math.max(1, lastDom);
 
-  // Load all tasks + grades once (shared across candidates), then read each
-  // candidate's attendance in parallel.
-  const tasksGet = (typeof dbCachedGet === 'function')
-    ? dbCachedGet('tasks-all', () => db.collection('tasks').get(), 60000)
-    : db.collection('tasks').get();
-  const evalsGet = (typeof dbCachedGet === 'function')
-    ? dbCachedGet('kpi-evals', () => db.collection('kpi_evals').get(), 60000)
-    : db.collection('kpi_evals').get();
-  const [taskSnap, evalSnap] = await Promise.all([
-    tasksGet.catch(() => ({ docs: [] })),
-    evalsGet.catch(() => ({ docs: [] }))
-  ]);
-  const allTasks = taskSnap.docs.map(t => t.data());
-  const evals = {}; evalSnap.docs.forEach(e => { evals[e.id] = e.data(); });
-  const DONE = ['done', 'approved', 'archived'];
-  const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
-  const recScore = r => window.attRecScore(r);
+    const candidates = users.filter(u =>
+      u.role !== 'partner' && u.role !== 'president'
+      && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'));
+    if (!candidates.length) return [];
 
-  const rows = await Promise.all(candidates.map(async u => {
-    const uid = u.id;
-    let attScore = 0, attDays = 0;
-    try {
-      const snap = await db.collection('attendance').doc(uid).collection('records')
-        .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
-        .where(firebase.firestore.FieldPath.documentId(), '<=', rangeEndStr).get();
-      attDays = snap.size;
-      const total = snap.docs.reduce((s, doc) => s + recScore(doc.data()), 0);
-      attScore = Math.min(1, total / workDaysElapsed);
-    } catch (e) { attScore = 0; attDays = 0; }
+    // Load all tasks + grades once (shared across candidates), then read each
+    // candidate's attendance in parallel.
+    const tasksGet = (typeof dbCachedGet === 'function')
+      ? dbCachedGet('tasks-all', () => db.collection('tasks').get(), 60000)
+      : db.collection('tasks').get();
+    const evalsGet = (typeof dbCachedGet === 'function')
+      ? dbCachedGet('kpi-evals', () => db.collection('kpi_evals').get(), 60000)
+      : db.collection('kpi_evals').get();
+    const [taskSnap, evalSnap] = await Promise.all([
+      tasksGet.catch(() => ({ docs: [] })),
+      evalsGet.catch(() => ({ docs: [] }))
+    ]);
+    const allTasks = taskSnap.docs.map(t => t.data());
+    const evals = {}; evalSnap.docs.forEach(e => { evals[e.id] = e.data(); });
+    const DONE = ['done', 'approved', 'archived'];
+    const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
+    const recScore = r => window.attRecScore(r);
 
-    const mine = allTasks.filter(t => isAssigned(t, uid));
-    const doneTasks = mine.filter(t => DONE.includes(t.status)).length;
-    const taskScore = mine.length ? Math.min(1, doneTasks / mine.length) : 0.5;
+    const rows = await Promise.all(candidates.map(async u => {
+      const uid = u.id;
+      let attScore = 0, attDays = 0;
+      try {
+        const snap = await db.collection('attendance').doc(uid).collection('records')
+          .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
+          .where(firebase.firestore.FieldPath.documentId(), '<=', rangeEndStr).get();
+        attDays = snap.size;
+        const total = snap.docs.reduce((s, doc) => s + recScore(doc.data()), 0);
+        attScore = Math.min(1, total / workDaysElapsed);
+      } catch (e) { attScore = 0; attDays = 0; }
 
-    const ev = evals[uid] || {};
-    const grade = (typeof ev.presidentGrade === 'number') ? ev.presidentGrade
-      : (typeof ev.presidentGradeFromTasks === 'number') ? ev.presidentGradeFromTasks : null;
-    const gradeNorm = grade != null ? Math.min(1, grade / 10) : 0.5;
+      const mine = allTasks.filter(t => isAssigned(t, uid));
+      const doneTasks = mine.filter(t => DONE.includes(t.status)).length;
+      const taskScore = mine.length ? Math.min(1, doneTasks / mine.length) : 0.5;
 
-    const score = 0.5 * taskScore + 0.4 * attScore + 0.1 * gradeNorm;
-    return {
-      uid, displayName: u.displayName || u.email || '', email: u.email || '',
-      photoUrl: u.photoUrl || '', role: u.role || 'employee',
-      departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
-      attScore, attDays, attPct: Math.round(attScore * 100),
-      taskScore, doneTasks, totalTasks: mine.length, taskPct: Math.round(taskScore * 100),
-      grade, score, citation: ''
-    };
-  }));
+      const ev = evals[uid] || {};
+      const grade = (typeof ev.presidentGrade === 'number') ? ev.presidentGrade
+        : (typeof ev.presidentGradeFromTasks === 'number') ? ev.presidentGradeFromTasks : null;
+      const gradeNorm = grade != null ? Math.min(1, grade / 10) : 0.5;
 
-  const eligible = rows.filter(r => r.attDays >= 1);
-  eligible.sort((a, b) =>
-    b.score - a.score || b.attScore - a.attScore || b.taskScore - a.taskScore
-    || (a.displayName || '').localeCompare(b.displayName || ''));
-  const monthLbl = eomMonthLabel(month) || month;
-  eligible.forEach(r => {
-    r.citation = `Top performer for ${monthLbl} — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
-      + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
-  });
-  return eligible;
+      const score = 0.5 * taskScore + 0.4 * attScore + 0.1 * gradeNorm;
+      return {
+        uid, displayName: u.displayName || u.email || '', email: u.email || '',
+        photoUrl: u.photoUrl || '', role: u.role || 'employee',
+        departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
+        attScore, attDays, attPct: Math.round(attScore * 100),
+        taskScore, doneTasks, totalTasks: mine.length, taskPct: Math.round(taskScore * 100),
+        grade, score, citation: ''
+      };
+    }));
+
+    const eligible = rows.filter(r => r.attDays >= 1);
+    eligible.sort((a, b) =>
+      b.score - a.score || b.attScore - a.attScore || b.taskScore - a.taskScore
+      || (a.displayName || '').localeCompare(b.displayName || ''));
+    const monthLbl = eomMonthLabel(month) || month;
+    eligible.forEach(r => {
+      r.citation = `Top performer for ${monthLbl} — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
+        + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
+    });
+    return eligible;
+  };
+
+  return (typeof dbCachedGet === 'function')
+    ? dbCachedGet('eom-standings-' + month, computeFn, 1800000)
+    : computeFn();
 }
 
 // President-only: show the ranked leaderboard behind the auto-selection, with an
@@ -1610,7 +1622,7 @@ window.renderAttendancePage = async function() {
             <div class="form-group" style="margin-top:12px"><label>Note (optional)</label><input id="att-note" value="${escHtml(cur?.note||'')}" placeholder="e.g. sick leave, official business"/></div>
             ${cur?.editedBy?`<p style="font-size:11px;color:var(--text-muted);margin-top:8px">Last edited by admin</p>`:''}
           `, `<button class="btn-primary" id="save-att-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-          if (window.lucide) lucide.createIcons();
+          if (window.lucide) lucide.createIcons({ nodes: [_panel] });
 
           // Option button toggle
           const colors = {present:'#30d158',half:'#ffaa00',absent:'#ff453a',leave:'#af52de'};
@@ -2085,6 +2097,7 @@ function renderCAList(advances, container, isAdmin) {
     const id = e.currentTarget.dataset.id;
     if (!(await confirmDialog({ message: 'Permanently delete this cash advance record? This cannot be undone.', danger: true }))) return;
     await db.collection('cash_advances').doc(id).delete();
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending'); // cascades ca-mine-* (PERF-WAVE1)
     Notifs.success('Record deleted.');
     window.renderCashAdvancePage();
   }));
@@ -2512,6 +2525,7 @@ async function openPresidentCashAdvanceModal(users) {
           createdAt:firebase.firestore.FieldValue.serverTimestamp(),
         });
         window.logAudit && window.logAudit('create','leave',null,{ user:userProfile?.displayName||currentUser.email, type, days });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:leave_requests-pending'); // PERF-WAVE1
         try{ await Notifs.sendToOwner({ title:'🌴 Leave Request', body:`${userProfile?.displayName||currentUser.email} requests ${days}-day ${lt.label} (${startDate}→${endDate}).`, icon:'🌴', type:'leave', link:'approvals' }); }catch(_){}
         closeModal(); Notifs.success('Leave request submitted!'); window.renderLeavePage(c);
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }

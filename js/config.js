@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.184';
+window.APP_VERSION = '14.0.185';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -982,7 +982,11 @@ window.fetchUsersWithPayroll = async function() {
     // never serve stale data time-wise regardless), but every existing CA
     // mutation already calls dbCacheInvalidate('ca-pending'), so piggybacking
     // here keeps the in-memory store tidy without a new call site.
-    'ca-pending': { alsoKeys: ['ca-approved-all'], prefixes: ['ca-deduct-requests-'] },
+    // alsoKeys addition (PERF-WAVE1): every CA mutation (request/approve/
+    // reject/payment/deduct/delete) already invalidates 'ca-pending', so
+    // cascading the Approvals-page pending-count key here covers creation AND
+    // resolution from every UI surface in one place.
+    'ca-pending': { alsoKeys: ['ca-approved-all', 'approvals-pending:cash_advances-pending'], prefixes: ['ca-deduct-requests-', 'ca-mine-'] },  // ca-mine-: PERF-WAVE1 per-uid dashboard CA card cache
     // COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2.6 — one meeting write must
     // invalidate every cached MONTH for every viewer's calendar in one call,
     // since a meeting created 'now' can land on someone else's calendar too
@@ -1385,6 +1389,200 @@ window.ensureChart = function() {
     s.onload = () => res(); s.onerror = rej; document.head.appendChild(s);
   });
   return window._chartLoading;
+};
+
+// ── Generic same-origin script loader (PERF-WAVE1 WP1) ──
+// Same shape as ensureChart above: one cached load-promise per <script src>,
+// so two overlapping callers (e.g. a fast double-tap on a nav item before the
+// first ensureScript resolves) share the one network fetch instead of
+// injecting the tag twice. No SRI — these are same-origin app files, already
+// covered by the service worker's own integrity via PRECACHE, unlike the
+// third-party Chart.js CDN load above. On a failed load the cached promise is
+// DELETED (not left permanently rejected) so the next call — a Retry button,
+// or simply navigating to the same page again — gets a fresh attempt instead
+// of replaying the same failure forever.
+window._scriptLoading = {};
+window.ensureScript = function(src) {
+  if (window._scriptLoading[src]) return window._scriptLoading[src];
+  window._scriptLoading[src] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = () => resolve();
+    s.onerror = (err) => { delete window._scriptLoading[src]; reject(err); };
+    document.head.appendChild(s);
+  });
+  return window._scriptLoading[src];
+};
+
+// ── PERF-WAVE1 WP1 — per-page lazy script manifest ──────────────────────
+// Maps a navigateTo(page) string (including 'dept:X' department pages, and
+// three synthetic 'dashboard:*' role-variant keys app.js's navigateTo
+// resolves itself — see its "PERF-WAVE1 WP1" comment) to the extra
+// js/screens/*.js (+ a few js/*.js engine/utility) files that page's render
+// path calls as bare/window.* globals WITHOUT a typeof/optional-chaining
+// guard. app.js's navigateTo calls window.ensurePage(page) right after the
+// skeleton paints and before it dispatches to a render function, so by the
+// time any of those unguarded calls run, every file listed here is already
+// on the page. Pure data — no logic — data-only per file, one entry per key.
+//
+// This list is NOT "every file a page's own screen touches" — most
+// js/screens/*.js → js/screens/*.js and js/screens/*.js → js/*.js references
+// in this app are already typeof/`&&`/`?.`-guarded (the codebase's existing
+// forward-reference convention) and degrade gracefully instead of throwing,
+// so they don't need to be listed. Every extra file below was added because a
+// real code-read (2026-08-24 export/caller sweep) found at least one
+// UNGUARDED bare call reaching it from that page's render path, or from a
+// shared EAGER helper (js/departments.js/js/screens/dashboards.js) that page
+// can trigger. Two js/screens/*.js files that were candidates for the lazy
+// list were pulled back to eager instead (still `<script defer>` in
+// index.html, not lazy — see index.html's own comment): js/print-docs.js
+// (openPrintableDoc/openScreenPrintDoc are called unguarded from js/app.js
+// itself AND js/departments.js AND at least 6 other screens — coupling too
+// wide to bundle per-page without missing one) and js/screens/dept-budgets.js
+// (js/departments.js's shared window.renderBudgeting — EAGER, reused by
+// EVERY department's "Budgeting" subtab — calls its open*Form exports
+// unguarded; bundling into 9+ dept: pages was strictly worse than the ~62KB
+// eager cost).
+//
+// Every payroll-touching page gets the full compute-engine set together —
+// window.Payroll (payroll.js) wraps window.WeeklyRun (payroll-weekly.js) and
+// both read pay-policy.js/statutory-status.js derivations by window.* name,
+// unguarded, at call time — so the four are never split across entries below.
+const _PERF1_PAYROLL_ENGINE = ['js/pay-policy.js', 'js/statutory-status.js', 'js/payroll-weekly.js', 'js/payroll.js'];
+
+window.PAGE_SCRIPTS = {
+  // ── Tasks (also the shared per-department "Tasks" subtab renderer,
+  // renderDeptTasks — bundled below wherever a dept: page's own render path
+  // calls it unguarded) ──
+  'tasks':       ['js/screens/tasks.js'],
+  'submissions': ['js/screens/tasks.js'],
+
+  // ── Personal Finance / "My Payslips" (js/screens/dashboards.js, EAGER) —
+  // renderPersonalFinance's "View payslip"/"my-payslip-btn"/Worker-Profile-
+  // Panel payslip handlers all call window.toPayslipModel/payslipYtdMonthly/
+  // renderPayslipPage (js/screens/hr.js) unguarded. This is the single
+  // largest bundle here (hr.js is the biggest js/screens/*.js file, 414KB) —
+  // flagged in the WP1 report as the top follow-up candidate (split hr.js's
+  // payslip-rendering functions into their own file so this everyday page
+  // doesn't have to pull in the whole HR admin surface). ──
+  'personal-finance': ['js/screens/hr.js', 'js/screens/employee-profile.js', ..._PERF1_PAYROLL_ENGINE],
+
+  // ── Dashboard — dashboards.js itself stays eager, so the plain
+  // president/manager/secretary/finance/employee branches need nothing extra.
+  // Three role variants call unguarded into a lazy screen from inside
+  // renderDashboard()/renderLayoffDashboard() gate — resolved to one of these
+  // synthetic keys by app.js's navigateTo (never dispatched to directly). ──
+  'dashboard':          [],
+  'dashboard:layoff':   ['js/screens/layoff.js'],   // renderDashboard() -> window.renderLayoffDashboard()
+  // workerB also needs hr.js (toPayslipModel/payslipYtdWeekly/renderPayslipPage
+  // behind the worker home's own "View Payslip" button) and people.js
+  // (getPHHolidays for the attendance calendar) — worker.js only GUARDS those
+  // calls, so without the files here they degrade to silent no-ops for the
+  // entire Type-B population (verifier finding, 2026-08-24).
+  'dashboard:workerB':  ['js/screens/worker.js', 'js/screens/hr.js', 'js/screens/people.js', ..._PERF1_PAYROLL_ENGINE],
+  'dashboard:partner':  ['js/screens/partners.js'], // renderDashboard() -> renderPartnerDashboard()/renderBrilliantSteel()
+
+  // ── Finance department — by far the widest fan-out in the app: Balance
+  // Sheet/Cash Flow/Bank Rec/BIR call js/bir.js (which itself calls
+  // js/letterhead.js unguarded); the Finance Tools panel's backfill buttons
+  // call js/migrations.js unguarded; Gov Rates calls
+  // js/screens/statutory-rates.js; Payroll calls js/screens/payroll.js;
+  // Purchases calls js/screens/production.js (renderPurchaseRequests);
+  // HR Profiles calls js/screens/hr.js (renderFinanceHRProfiles); Tasks calls
+  // js/screens/tasks.js (renderDeptTasks) — every one of those is a bare
+  // unguarded call inside js/screens/finance.js's own loadFinanceContent
+  // switch. ──
+  'dept:Finance': [
+    'js/screens/finance.js', 'js/bir.js', 'js/letterhead.js', 'js/migrations.js',
+    'js/screens/statutory-rates.js', 'js/screens/payroll.js',
+    'js/screens/hr.js', 'js/screens/employee-profile.js',
+    'js/screens/production.js', 'js/screens/tasks.js',
+    ..._PERF1_PAYROLL_ENGINE
+  ],
+
+  // ── HR department — renderPayrollScreen delegates to js/screens/payroll.js
+  // (guarded, but degrades to "Payroll did not load" without it); the Layoff
+  // card calls js/screens/layoff.js (guarded, silent no-op without it). ──
+  'dept:HR': [
+    'js/screens/hr.js', 'js/screens/employee-profile.js', 'js/screens/layoff.js',
+    'js/screens/payroll.js', ..._PERF1_PAYROLL_ENGINE
+  ],
+
+  // ── Sales — js/departments.js's EAGER openSalesOrderModal (the "convert a
+  // won quote" flow, reachable from this dept's Quotes tab) calls
+  // createJobProject (js/screens/production.js) and
+  // renderBSQuotationsSummary/renderBKQuotationsSummary (js/screens/sales.js
+  // itself) unguarded after the order is created. Same reach applies to
+  // 'bk-quotations' below (same renderSales screen). ──
+  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js'],
+  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js'],
+
+  // ── CRM — its "AEC Leads" tab calls window.renderAECDirectory
+  // (js/screens/sales.js) unguarded. ──
+  'dept:CRM': ['js/screens/crm.js', 'js/screens/sales.js'],
+
+  // ── Departments whose screen is EAGER (renderMarketing lives in
+  // js/departments.js) but whose shared "Tasks" subtab calls
+  // renderDeptTasks (js/screens/tasks.js) unguarded. ──
+  'dept:Marketing': ['js/screens/tasks.js'],
+
+  'dept:Government Biddings': ['js/screens/govit.js'],
+  'dept:IT':                  ['js/screens/govit.js', 'js/screens/tasks.js'],
+
+  // ── Design — nextSerial (js/letterhead.js) is called unguarded for
+  // invoice numbering; own "Tasks" subtab per above. ──
+  'dept:Design': ['js/screens/design.js', 'js/letterhead.js', 'js/screens/tasks.js'],
+
+  // ── Production / Purchasing (same screen file) — nextSerial
+  // (js/letterhead.js) is called unguarded multiple times (delivery
+  // receipts/invoices/PRs/RFQs); the Projects tab's "Tag" button calls
+  // window.runProjectKindBackfill (js/migrations.js) unguarded. ──
+  'dept:Production':    ['js/screens/production.js', 'js/letterhead.js', 'js/migrations.js', 'js/screens/tasks.js'],
+  'dept:Purchasing':    ['js/screens/production.js', 'js/letterhead.js', 'js/migrations.js', 'js/screens/tasks.js'],
+  'projects-lifecycle': ['js/screens/production.js', 'js/letterhead.js', 'js/migrations.js'],
+
+  'dept:Ventures': ['js/screens/ventures.js'],
+
+  // ── Brilliant Steel + generic Partners — renderBrilliantSteel/
+  // loadBSContent call js/screens/sales.js's bindQuoteActions unguarded, and
+  // the same openSalesOrderModal -> production.js reach as Sales above
+  // applies here too (a partner's quote can also convert to a sales order). ──
+  'dept:Brilliant Steel': ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
+  'bs-quotations':        ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
+  'bs-clients':           ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
+  'bs-files':             ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
+  'dept:Partners':        ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
+  'partner-projects':     ['js/screens/partners.js'],
+
+  // ── Approvals — Approvals.dispatch (js/svc-approvals.js, EAGER) calls
+  // window.approveLeaveRequest/rejectLeaveRequest (js/screens/people.js) and
+  // window.approvePurchaseOrder/rejectPurchaseOrder (js/screens/production.js)
+  // unguarded for the 'leave' and 'po-approval' types. ──
+  'approvals': ['js/screens/approvals.js', 'js/screens/people.js', 'js/screens/production.js'],
+
+  'notes': ['js/screens/notes.js'],
+
+  // ── People-family pages — all render functions for these live in
+  // js/screens/people.js. ──
+  'posts':          ['js/screens/people.js'],
+  'team-directory': ['js/screens/people.js'],
+  'attendance':     ['js/screens/people.js'],
+  'cash-advances':  ['js/screens/people.js'],
+  'leave':          ['js/screens/people.js'],
+  'holidays':       ['js/screens/people.js'],
+  'my-profile':     ['js/screens/people.js'],
+  'files-hub':      ['js/screens/people.js'],
+  'search':         ['js/screens/people.js']
+};
+
+// ── PERF-WAVE1 WP1 — resolve PAGE_SCRIPTS[page] and load every file, in
+// parallel, before navigateTo dispatches to that page's render function.
+// Unknown/unlisted pages (every page whose whole render path is already
+// eager, or already fully typeof/`?.`-guarded) resolve immediately. ──
+window.ensurePage = function(page) {
+  const files = window.PAGE_SCRIPTS[page];
+  if (!files || !files.length) return Promise.resolve();
+  return Promise.all(files.map(window.ensureScript));
 };
 
 // ── Audit log (append-only) ───────────────────────

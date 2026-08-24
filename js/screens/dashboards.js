@@ -892,6 +892,11 @@ async function renderDashboard() {
   } else if (isPartner()) {
     await renderPartnerDashboard();
   } else if (isBrilliantOnly()) {
+    // Direct render bypasses navigateTo's ensurePage, and the Quotations
+    // Summary tab reaches renderBSQuotationsSummary (sales.js) + production
+    // helpers — load the full Brilliant Steel set first or the content pane
+    // dies on a ReferenceError skeleton (verifier finding, 2026-08-24).
+    if (window.ensurePage) await window.ensurePage('dept:Brilliant Steel');
     renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary');
   } else {
     await renderEmployeeDashboard();
@@ -1175,6 +1180,10 @@ window.bindAttendanceCard = function(rootEl, st, onChange) {
     Notifs.info(autoFull
       ? '✅ Full attendance (100%) — no unchecked notifications!'
       : '🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.');
+    // PERF-WAVE1 WP3 #3 — the employee dashboard now caches this exact read
+    // under 'att-card-'+uid+'-'+todayStr; without invalidating it here the
+    // card would keep showing "Not Timed In" for up to 15s after a punch.
+    dbCacheInvalidate && dbCacheInvalidate('att-card-' + currentUser.uid + '-' + todayStr);
     refresh();
   });
 
@@ -1192,6 +1201,8 @@ window.bindAttendanceCard = function(rootEl, st, onChange) {
       return;
     }
     Notifs.info(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
+    // PERF-WAVE1 WP3 #3 — same cache key as Time In above; keep the card live.
+    dbCacheInvalidate && dbCacheInvalidate('att-card-' + currentUser.uid + '-' + todayStr);
     refresh();
   });
 
@@ -1931,14 +1942,26 @@ async function renderEmployeeDashboard() {
     const now      = new Date();
     const todayStr = bizDate();
     const uid = currentUser.uid;
+    // PERF-WAVE1 WP3 #3 — all 5 reads now go through dbCachedGet. 'tasks-mine-'+uid
+    // is the SAME key js/screens/tasks.js's 'mine' filter uses (WP5) — one shared
+    // cache, invalidated on task writes there. 'att-card-'+uid+'-'+todayStr is
+    // invalidated below in bindAttendanceCard's Time In/Time Out handlers. The
+    // getAttendanceScore(uid) call is unchanged here — it caches internally now
+    // (see getAttendanceScore).
     const [myTasksSnap, attState, caSnap, kpiProfile, monthAttScore] = await Promise.all([
-      db.collection('tasks').where('assignedTo','array-contains', uid).get()
-        .catch(()=>db.collection('tasks').where('assignedTo','==', uid).get()),
+      dbCachedGet('tasks-mine-' + uid, () =>
+        db.collection('tasks').where('assignedTo','array-contains', uid).get()
+          .catch(()=>db.collection('tasks').where('assignedTo','==', uid).get()),
+        30000),
       // Today's attendance + extension, and every flag the card renders — one
       // shared reader, same call the four admin dashboards now make.
-      window.attendanceCardState(uid),
-      db.collection('cash_advances').where('userId','==', uid).get().catch(e => { _dashWarnOnce('cash_advances', e); return {docs:[]}; }),
-      db.collection('kpi_targets').doc(uid).get().catch(e => { _dashWarnOnce('kpi_targets', e); return null; }),
+      dbCachedGet('att-card-' + uid + '-' + todayStr, () => window.attendanceCardState(uid), 15000),
+      dbCachedGet('ca-mine-' + uid, () =>
+        db.collection('cash_advances').where('userId','==', uid).get().catch(e => { _dashWarnOnce('cash_advances', e); return {docs:[]}; }),
+        60000),
+      dbCachedGet('kpi-' + uid, () =>
+        db.collection('kpi_targets').doc(uid).get().catch(e => { _dashWarnOnce('kpi_targets', e); return null; }),
+        300000),
       getAttendanceScore(uid)
     ]);
 
@@ -2467,7 +2490,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           </div>
           <button class="btn-primary btn-sm" id="pf-open-payroll-btn">Open Payroll →</button>
         </div>`;
-      document.getElementById('pf-open-payroll-btn')?.addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
+      document.getElementById('pf-open-payroll-btn')?.addEventListener('click', async () => {
+        // finance.js is lazy — load its page set before the direct render call
+        if (!window.renderFinance && window.ensurePage) await window.ensurePage('dept:Finance').catch(() => {});
+        if (window.renderFinance) window.renderFinance(currentUser, currentRole, 'Payroll');
+        else Notifs.showToast('Could not open Payroll — check your connection', 'error');
+      });
     })();
     // Grade buttons
     document.querySelectorAll('.grade-emp-btn').forEach(btn => {
@@ -3524,9 +3552,18 @@ async function getAttendanceScore(uid, month) {
     // excluded) up through b.upToDay — the full month for a past month, or
     // elapsed-to-today for the current month (countWorkDays itself unchanged).
     const workDaysElapsed = countWorkDays(y, mIdx, b.upToDay);
-    const snap = await db.collection('attendance').doc(uid).collection('records')
-      .where(firebase.firestore.FieldPath.documentId(), '>=', b.startDate)
-      .where(firebase.firestore.FieldPath.documentId(), '<=', b.endDate).get();
+    // PERF-WAVE1 WP3 #4 — 10-min cache. This one wrap collapses the repeat cost
+    // of three N+1 fan-out sites that each call getAttendanceScore per-employee
+    // in a loop (Team-tab standings, admin personal-finance-team, payroll
+    // Compute). ACCEPTED STALENESS: an attendance edit (self-punch, admin
+    // correction, or extension approval) can take up to 10 minutes to show up
+    // in this score — no write path in this file invalidates 'att-score-*'
+    // (see PERF-WAVE1-SPEC-2026-08-24.md's invalidation-completeness exception list).
+    const snap = await dbCachedGet('att-score-' + uid + '-' + m, () =>
+      db.collection('attendance').doc(uid).collection('records')
+        .where(firebase.firestore.FieldPath.documentId(), '>=', b.startDate)
+        .where(firebase.firestore.FieldPath.documentId(), '<=', b.endDate).get(),
+      600000);
     const totalScore = snap.docs.reduce((sum, doc) => sum + _attRecScore(doc.data()), 0);
     return Math.min(1, totalScore / workDaysElapsed);
   } catch { return 0.5; }
@@ -5680,6 +5717,15 @@ async function renderDepartments() {
 }
 
 // ── Analytics ─────────────────────────────────────
+// Destroys every live Chart.js instance mounted on a <canvas> inside el, so a
+// re-render (tab switch, theme change, or a fresh renderOverview paint) never
+// leaks a chart whose canvas is about to be discarded. Mirrors the inline
+// disposal the chip-tab switcher already did below (PERF-WAVE1 WP3 #1).
+function destroyChartsIn(el) {
+  if (!el || !window.Chart) return;
+  el.querySelectorAll('canvas').forEach(cv => { const ex = Chart.getChart(cv); if (ex) ex.destroy(); });
+}
+
 async function renderAnalytics() {
   if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
   const c=document.getElementById('page-content');
@@ -6027,6 +6073,8 @@ async function renderAnalytics() {
       </div>`).join('');
 
     const wrap=document.getElementById('analytics-content');
+    destroyChartsIn(wrap); // PERF-WAVE1 WP3 #1 — a bare re-render of Overview (e.g. the
+    // period picker) must not leak the bh-cash-chart/bh-margin-chart instances below.
     const _anDelta = (cur,prev) => anPeriod==='month' ? delta(cur,prev,true) : `<span style="font-size:11px;color:var(--text-muted)">${anPlabel}</span>`;
     const _cashAccts = M.cash ? Object.values(M.cash.perAccount||{}) : [];
     wrap.innerHTML=`
@@ -6606,11 +6654,25 @@ async function renderAnalytics() {
   // bar is gone from the DOM (navigated away), mirroring the chart-disposal lifecycle above.
   const onTheme = () => {
     const bar = c.querySelector('.an-subtabs');
-    if (!bar || !document.body.contains(bar)) { window.removeEventListener('bi-theme-change', onTheme); return; }
+    if (!bar || !document.body.contains(bar)) { window.removeEventListener('bi-theme-change', window._anThemeHandler); return; }
     const active = bar.querySelector('.chip-tab.active')?.dataset.chip || 'overview';
+    // PERF-WAVE1 WP3 #1 — every TAB_RENDERERS entry (not just Overview) mounts
+    // Chart.js instances; the outgoing tab's canvases are about to be replaced
+    // by innerHTML below, so destroy them first or Chart.js leaks one instance
+    // per theme flip.
+    destroyChartsIn(document.getElementById('analytics-content'));
     (TAB_RENDERERS[active] || renderOverview)();
   };
-  window.addEventListener('bi-theme-change', onTheme);
+  // PERF-WAVE1 WP3 #2 — each renderAnalytics() call created a fresh onTheme
+  // closure and added it to the global 'bi-theme-change' listener without ever
+  // removing the PREVIOUS visit's handler (self-removal only fires lazily, on
+  // the next theme-change event, once the old bar is gone from the DOM). Every
+  // re-visit to Analytics before a theme flip permanently accumulated one more
+  // listener. Storing the handler on window lets us remove the prior instance
+  // synchronously, before adding this one.
+  if (window._anThemeHandler) window.removeEventListener('bi-theme-change', window._anThemeHandler);
+  window._anThemeHandler = onTheme;
+  window.addEventListener('bi-theme-change', window._anThemeHandler);
 
   // Load initial tab
   renderOverview();
@@ -6632,14 +6694,18 @@ async function renderTeam() {
     </div>
     <div id="team-table">${window.skeletonHtml('table')}</div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
-  // Short TTL here so the online/offline presence dots reflect "now", not a
-  // stale snapshot left by another screen. Uses a DISTINCT key from the shared
-  // 'users' cache (standardized at 30s) so its 8s freshness is deterministic.
-  // Must use the payroll-aware fetcher so the Team table's Base/Allowance/Net
-  // columns and the CSV export carry merged pay (pay lives in payroll/{uid}).
+  // PERF-WAVE1 WP3 #5 — was a DISTINCT 'users-presence' key at 8s TTL so the
+  // online/offline dots stayed "now"-fresh independent of the shared 'users'
+  // cache. Folded onto the app-wide 'users' key (30s TTL) instead: dbCachedGet
+  // forces the payroll-aware fetchUsersWithPayroll for the 'users' key
+  // automatically (config.js), so this still carries merged pay for the Team
+  // table's Base/Allowance/Net columns and the CSV export, and now shares its
+  // reads/invalidations with every other 'users' consumer instead of forcing
+  // its own extra collection fetch on every Team visit. Presence can be up to
+  // 30s stale instead of 8s — accepted per PERF-WAVE1-SPEC-2026-08-24.md.
   // A rejected users read must not strand the Team table on "Loading…" —
   // every other fetchUsersWithPayroll call site catches; this one didn't.
-  const snap=await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000).catch(()=>({docs:[]}));
+  const snap=await dbCachedGet('users', fetchUsersWithPayroll, 30000).catch(()=>({docs:[]}));
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
   const now = Date.now();
   const onlineThresholdMs = 3 * 60 * 1000; // 3 min = online

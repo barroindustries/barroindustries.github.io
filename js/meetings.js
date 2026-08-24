@@ -665,8 +665,12 @@ window.Meetings = (function () {
     // attendee — say so instead.
     let people = [], peopleDenied = false;
     try {
-      const snap = await db.collection('users').get();
-      snap.forEach(d => {
+      // PERF-WAVE1 WP8: shares the app-wide 'users' cache (dbCachedGet forces
+      // fetchUsersWithPayroll for this key regardless of the fetcher passed —
+      // see config.js) instead of a raw collection read every time the editor
+      // opens. Same shape as a Firestore snapshot: {docs:[{id,data()}]}.
+      const snap = await dbCachedGet('users', window.fetchUsersWithPayroll, 60000);
+      snap.docs.forEach(d => {
         const u = d.data();
         if (u.removed === true || u.role === 'partner') return;
         people.push({ uid: d.id, name: u.displayName || u.email || d.id });

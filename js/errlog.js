@@ -121,14 +121,17 @@
   // Poll briefly for `db` to appear (firebase-config.js has already loaded by
   // the time this script runs, but init is not necessarily synchronous with
   // script execution in every code path) and flush any buffered boot errors.
+  // PERF-WAVE1 WP5 — interval widened 500ms -> 1000ms, cap halved 40 -> 20
+  // tries so the wall-clock window stays the same ~20s; this just halves the
+  // number of idle timer fires while `db` hasn't shown up yet.
   var pollTries = 0;
   var pollId = setInterval(function () {
     pollTries++;
     if (window.db) {
       tryFlushBuffer();
       clearInterval(pollId);
-    } else if (pollTries > 40) { // ~20s cap
+    } else if (pollTries > 20) { // ~20s cap
       clearInterval(pollId);
     }
-  }, 500);
+  }, 1000);
 })();

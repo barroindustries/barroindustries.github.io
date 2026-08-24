@@ -2060,6 +2060,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         });
         await Notifs.sendToOwner({ title:'🗑 Quote Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting quote "${b.dataset.qno}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'quote_delete_request', link:'approvals' });
         Notifs.success('Delete request sent to president');
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:bs_quotes-delete'); // PERF-WAVE1
         window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }

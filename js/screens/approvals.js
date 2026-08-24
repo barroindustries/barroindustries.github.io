@@ -148,31 +148,40 @@ window.renderApprovals = async function(currentUser) {
   // construction: it reacts to what the boundary actually did, not to a guess
   // about who is signed in, so it keeps working for any future role scoping.
   const _deniedQueues = [];
-  const _apq = (label, chip, q) => q.get().catch(e => {
+  // PERF-WAVE1 WP6 — each of these 15 queries used to hit Firestore fresh on
+  // every renderApprovals() call (every nav to this page). Now routed through
+  // dbCachedGet keyed 'approvals-pending:<collName>' (30s TTL). The 'all'
+  // pane's own fallback re-fetch below (used once _cachedAllSnaps is spent)
+  // reuses the SAME keys, so a same-session revisit to that tab also hits
+  // cache. Every write path that flips one of these collections' pending
+  // status must dbCacheInvalidate() the matching key — see the invalidation
+  // sweep in this file (inline mutation handlers) and svc-approvals.js
+  // (Approvals.dispatch registry).
+  const _apq = (label, chip, collName, q) => dbCachedGet('approvals-pending:' + collName, () => q.get(), 30000).catch(e => {
     console.error('approval count query failed', label, e);
     const denied = !!e && (e.code === 'permission-denied' || /permission/i.test(e.message || ''));
     _deniedQueues.push({ label, chip, denied });
     return { size: 0, docs: [], failed: true, denied };
   });
   const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2] = await Promise.all([
-    _apq('Sign-ups', 'signups',                 db.collection('signup_requests').where('status','==','pending')),
-    _apq('Attendance', 'attendance',            db.collection('attendance_extensions').where('status','==','pending')),
-    _apq('Cash Advances', 'ca',                 db.collection('cash_advances').where('status','==','pending')),
-    _apq('Work submissions', 'all',             db.collection('submissions').where('status','==','pending')),
-    _apq('Tasks for Review', 'review-tasks',    db.collection('tasks').where('status','==','review')),
-    _apq('Payroll delete requests', 'finance-requests', db.collection('payroll_delete_requests').where('status','==','pending')),
-    _apq('Finance delete requests', 'finance-requests', db.collection('finance_delete_requests').where('status','==','pending')),
-    _apq('Quote / ROA', 'roa',                  db.collection('approval_requests').where('status','==','pending')),
-    _apq('BS quote deletions', 'all',           db.collection('bs_quotes').where('deleteRequested','==',true)),
-    _apq('BK quote deletions', 'all',           db.collection('bk_quotes').where('deleteRequested','==',true)),
-    _apq('Client deletions', 'all',             db.collection('clients').where('deleteRequested','==',true)),
-    _apq('Leave', 'leave',                      db.collection('leave_requests').where('status','==','pending')),
-    _apq('Purchase approvals', 'all',           db.collection('purchase_requisitions').where('approvalStatus','==','pending')),
-    _apq('Raises', 'all',                       db.collection('pending_raises').where('status','==','pending_approval')),
+    _apq('Sign-ups', 'signups', 'signup_requests-pending',                                 db.collection('signup_requests').where('status','==','pending')),
+    _apq('Attendance', 'attendance', 'attendance_extensions-pending',                       db.collection('attendance_extensions').where('status','==','pending')),
+    _apq('Cash Advances', 'ca', 'cash_advances-pending',                                    db.collection('cash_advances').where('status','==','pending')),
+    _apq('Work submissions', 'all', 'submissions-pending',                                  db.collection('submissions').where('status','==','pending')),
+    _apq('Tasks for Review', 'review-tasks', 'tasks-review',                                db.collection('tasks').where('status','==','review')),
+    _apq('Payroll delete requests', 'finance-requests', 'payroll_delete_requests-pending',  db.collection('payroll_delete_requests').where('status','==','pending')),
+    _apq('Finance delete requests', 'finance-requests', 'finance_delete_requests-pending',  db.collection('finance_delete_requests').where('status','==','pending')),
+    _apq('Quote / ROA', 'roa', 'approval_requests-pending',                                 db.collection('approval_requests').where('status','==','pending')),
+    _apq('BS quote deletions', 'all', 'bs_quotes-delete',                                   db.collection('bs_quotes').where('deleteRequested','==',true)),
+    _apq('BK quote deletions', 'all', 'bk_quotes-delete',                                   db.collection('bk_quotes').where('deleteRequested','==',true)),
+    _apq('Client deletions', 'all', 'clients-delete',                                       db.collection('clients').where('deleteRequested','==',true)),
+    _apq('Leave', 'leave', 'leave_requests-pending',                                        db.collection('leave_requests').where('status','==','pending')),
+    _apq('Purchase approvals', 'all', 'purchase_requisitions-pending',                      db.collection('purchase_requisitions').where('approvalStatus','==','pending')),
+    _apq('Raises', 'all', 'pending_raises-pending',                                         db.collection('pending_raises').where('status','==','pending_approval')),
     // DEPT-BUDGETS-SPEC-2026-08-11 — pending department spends waiting on
     // Finance's confirm/reject, folded into the SAME 'finance-requests' chip
     // as the two delete queues (equality-only filter, no composite index).
-    _apq('Dept spend confirmations', 'finance-requests', db.collection('dept_spend_logs').where('status','==','pending'))
+    _apq('Dept spend confirmations', 'finance-requests', 'dept_spend_logs-pending',         db.collection('dept_spend_logs').where('status','==','pending'))
   ]);
   // Chips whose count is now known to be incomplete, and the human labels behind
   // them. 'All Requests' sums every queue, so ANY failure makes it incomplete.
@@ -423,21 +432,25 @@ window.renderApprovals = async function(currentUser) {
         ({ sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 } = _cachedAllSnaps);
         _cachedAllSnaps = null;
       } else {
+        // PERF-WAVE1 WP6 — same dbCachedGet keys as the count-phase _apq()
+        // fetch above (30s TTL), so a same-session revisit to 'all' (once the
+        // single-use _cachedAllSnaps hop is spent) hits cache instead of
+        // re-querying all 14 collections again.
         ([sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2] = await Promise.all([
-          db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
-          db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
-          db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
-          db.collection('submissions').where('status','==','pending').get().catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
-          db.collection('tasks').where('status','==','review').get().catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
-          db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
-          db.collection('finance_delete_requests').where('status','==','pending').get().catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};}),
-          db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
-          db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
-          db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bk_quotes delete query failed',e);return {docs:[]};}),
-          db.collection('clients').where('deleteRequested','==',true).get().catch(e=>{console.error('clients delete query failed',e);return {docs:[]};}),
-          db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};}),
-          db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};}),
-          db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(e=>{console.error('purchase_requisitions query failed',e);return {docs:[]};})
+          dbCachedGet('approvals-pending:signup_requests-pending', () => db.collection('signup_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:attendance_extensions-pending', () => db.collection('attendance_extensions').where('status','==','pending').get(), 30000).catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:cash_advances-pending', () => db.collection('cash_advances').where('status','==','pending').get(), 30000).catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000).catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:tasks-review', () => db.collection('tasks').where('status','==','review').get(), 30000).catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:payroll_delete_requests-pending', () => db.collection('payroll_delete_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:finance_delete_requests-pending', () => db.collection('finance_delete_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:approval_requests-pending', () => db.collection('approval_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:bs_quotes-delete', () => db.collection('bs_quotes').where('deleteRequested','==',true).get(), 30000).catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:bk_quotes-delete', () => db.collection('bk_quotes').where('deleteRequested','==',true).get(), 30000).catch(e=>{console.error('bk_quotes delete query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:clients-delete', () => db.collection('clients').where('deleteRequested','==',true).get(), 30000).catch(e=>{console.error('clients delete query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:leave_requests-pending', () => db.collection('leave_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:pending_raises-pending', () => db.collection('pending_raises').where('status','==','pending_approval').get(), 30000).catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:purchase_requisitions-pending', () => db.collection('purchase_requisitions').where('approvalStatus','==','pending').get(), 30000).catch(e=>{console.error('purchase_requisitions query failed',e);return {docs:[]};})
         ]));
       }
 
@@ -579,11 +592,13 @@ window.renderApprovals = async function(currentUser) {
       // the employee notification are identical no matter which tab approved it.
       wrap.querySelectorAll('.at-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
           Notifs.success(`Extension approved for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.at-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
           Notifs.error(`Extension denied for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
@@ -593,10 +608,14 @@ window.renderApprovals = async function(currentUser) {
       // to ignore totalPayable/interest, collecting strictly less than the
       // Cash Advance tab's own approve path for the same request).
       wrap.querySelectorAll('.ca-approve-btn').forEach(btn => {
-        btn.addEventListener('click', () => window.CashAdvance.openApproveModal(btn.dataset.id, () => loadApprovalsSub('all')));
+        btn.addEventListener('click', () => window.CashAdvance.openApproveModal(btn.dataset.id, () => {
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:cash_advances-pending');
+          loadApprovalsSub('all');
+        }));
       });
       wrap.querySelectorAll('.ca-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await window.CashAdvance.reject(btn.dataset.id);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:cash_advances-pending');
           loadApprovalsSub('all');
       }));
 
@@ -609,6 +628,7 @@ window.renderApprovals = async function(currentUser) {
       // approve/reject handler on this page.
       wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'✅ CA Deduction Approved', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was approved.`, icon:'✅', type:'ca_deduct_reviewed', link:'personal-finance'
           }));
@@ -617,6 +637,7 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'❌ CA Deduction Rejected', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was rejected.`, icon:'❌', type:'ca_deduct_reviewed', link:'personal-finance'
           }));
@@ -627,12 +648,14 @@ window.renderApprovals = async function(currentUser) {
       // Raise request approve/reject (v12 WS23) — re-entrancy guarded inside RaiseFlow itself.
       wrap.querySelectorAll('.rz-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           const r = await window.RaiseFlow.approve(btn.dataset.id);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:pending_raises-pending');
           Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.rz-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
           await window.RaiseFlow.reject(btn.dataset.id, reason);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:pending_raises-pending');
           Notifs.error('Raise declined.');
           loadApprovalsSub('all');
       }));
@@ -645,6 +668,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.po-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({ message: `Approve PO ${escHtml(btn.dataset.no)}? Your name will print on the "Approved by" line.`, html: true }))) return;
           await window.approvePurchaseOrder(btn.dataset.id);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:purchase_requisitions-pending');
           Notifs.success('PO approved ✓');
           loadApprovalsSub('all');
       }));
@@ -652,6 +676,7 @@ window.renderApprovals = async function(currentUser) {
           const reason = await promptDialog({ title:'Reject PO', message:'Reason for rejection (shown to Purchasing):', multiline:true });
           if (reason === null) return;
           await window.rejectPurchaseOrder(btn.dataset.id, reason);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:purchase_requisitions-pending');
           Notifs.error('PO rejected.');
           loadApprovalsSub('all');
       }));
@@ -662,6 +687,7 @@ window.renderApprovals = async function(currentUser) {
       // both ways). Employees who submit via the aggregated queue never heard back.
       wrap.querySelectorAll('.sub-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending');
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'✅ Submission Approved', body:`"${btn.dataset.title}" was approved.`, icon:'✅', type:'submission_reviewed', link:'submissions'
           }));
@@ -670,6 +696,7 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.sub-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending');
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'❌ Submission Rejected', body:`"${btn.dataset.title}" was rejected.`, icon:'❌', type:'submission_reviewed', link:'submissions'
           }));
@@ -686,7 +713,7 @@ window.renderApprovals = async function(currentUser) {
           // month-scoped KPI (computeKpiForMonth via taskDoneMonth) can
           // resolve which month this task was actually approved/finished in.
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), completedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+          if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
           Notifs.success(`"${btn.dataset.name}" approved!`);
@@ -698,7 +725,7 @@ window.renderApprovals = async function(currentUser) {
           // normally a no-op delete of an absent field; kept for safety if a
           // task somehow reaches here already carrying one).
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', completedAt:firebase.firestore.FieldValue.delete(), lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+          if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
           Notifs.error(`"${btn.dataset.name}" sent back for revision.`);
@@ -764,6 +791,7 @@ window.renderApprovals = async function(currentUser) {
         const coll = btn.dataset.coll || 'bs_quotes';
         try {
           await db.collection(coll).doc(btn.dataset.id).delete();
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:' + (coll === 'bk_quotes' ? 'bk_quotes-delete' : 'bs_quotes-delete'));
           window.logAudit && window.logAudit('delete','quote',btn.dataset.id,{ quoteNo:btn.dataset.qno, coll, viaApproval:true });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Quote Deletion Approved', body:`Your request to delete quote ${btn.dataset.qno} was approved.`, icon:'✅', type:'delete_approved', link:'approvals' }));
           Notifs.success('Quote deleted.'); loadApprovalsSub('all');
@@ -773,6 +801,7 @@ window.renderApprovals = async function(currentUser) {
         const coll = btn.dataset.coll || 'bs_quotes';
         try {
           await db.collection(coll).doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:' + (coll === 'bk_quotes' ? 'bk_quotes-delete' : 'bs_quotes-delete'));
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Quote Deletion Denied', body:`Your request to delete quote ${btn.dataset.qno} was denied.`, icon:'❌', type:'delete_denied', link:'approvals' }));
           Notifs.error('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -781,7 +810,7 @@ window.renderApprovals = async function(currentUser) {
         if (!(await confirmDialog({message:`Approve deletion of client "${escHtml(btn.dataset.name)}"? This permanently removes the client folder.`, danger:true, html:true}))) return;
         try {
           await db.collection('clients').doc(btn.dataset.id).delete();
-          if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
+          if (typeof dbCacheInvalidate==='function') { dbCacheInvalidate('clients'); dbCacheInvalidate('approvals-pending:clients-delete'); }
           window.logAudit && window.logAudit('delete','client',btn.dataset.id,{ name:btn.dataset.name, viaApproval:true });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Client Deletion Approved', body:`Your request to delete client "${btn.dataset.name}" was approved.`, icon:'✅', type:'delete_approved', link:'approvals' }));
           Notifs.success('Client deleted.'); loadApprovalsSub('all');
@@ -790,7 +819,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.dc-deny-btn').forEach(btn => onClickSafe(btn, async () => {
         try {
           await db.collection('clients').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
-          if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
+          if (typeof dbCacheInvalidate==='function') { dbCacheInvalidate('clients'); dbCacheInvalidate('approvals-pending:clients-delete'); }
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Client Deletion Denied', body:`Your request to delete client "${btn.dataset.name}" was denied.`, icon:'❌', type:'delete_denied', link:'approvals' }));
           Notifs.error('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -1207,7 +1236,7 @@ window.renderApprovals = async function(currentUser) {
         // Payroll recall spec §A3.1 — completedAt alongside approvedAt (see
         // the aggregated "All Requests" .rt-approve-btn handler above).
         await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
-        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+        if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
         const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
         if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
         Notifs.showToast(`"${btn.dataset.name}" approved!`,'success');
@@ -1218,7 +1247,7 @@ window.renderApprovals = async function(currentUser) {
         // Payroll recall spec §A3.1 — clear completedAt on send-back (see
         // the aggregated "All Requests" .rt-reject-btn handler above).
         await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.delete(),sentBackBy:currentUser.uid});
-        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+        if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
         const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
         if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
         Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`,'info');
@@ -1338,6 +1367,7 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
           await window.approveAttendanceExtension(id, uid, name);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
           Notifs.success(`Extension approved for ${name}`);
           loadApprovalsSub('attendance');
         });
@@ -1347,6 +1377,7 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
           await window.denyAttendanceExtension(id, uid, name);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:attendance_extensions-pending');
           Notifs.error(`Extension denied for ${name}`);
           loadApprovalsSub('attendance');
         });
@@ -1391,11 +1422,18 @@ window.renderApprovals = async function(currentUser) {
       // status to 'approved' without ever writing a balance, so an advance
       // approved here stayed invisible to every downstream balance filter.
       wrap.querySelectorAll('.ca-approve').forEach(btn => {
-        btn.addEventListener('click', e => window.CashAdvance.openApproveModal(e.currentTarget.dataset.id, () => loadApprovalsSub('ca')));
+        btn.addEventListener('click', e => window.CashAdvance.openApproveModal(e.currentTarget.dataset.id, () => {
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:cash_advances-pending');
+          loadApprovalsSub('ca');
+        }));
       });
       wrap.querySelectorAll('.ca-reject').forEach(btn => {
         btn.addEventListener('click', async e => {
-          try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.error('Request rejected.'); }
+          try {
+            await window.CashAdvance.reject(e.currentTarget.dataset.id);
+            if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:cash_advances-pending');
+            Notifs.error('Request rejected.');
+          }
           catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
           loadApprovalsSub('ca');
         });
@@ -1471,6 +1509,7 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.roa-resolve-btn').forEach(btn => onClickSafe(btn, async () => {
         await db.collection('approval_requests').doc(btn.dataset.id).update({ status: btn.dataset.status });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
         Notifs.success('Request resolved (no quote doc was linked).'); loadApprovalsSub('roa');
       }));
     }
@@ -1495,7 +1534,7 @@ async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
     if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
-    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
     Notifs.success('Quote approved and filed!');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -1511,7 +1550,7 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
     if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
-    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
     Notifs.error('Quote returned to partner.');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -1646,7 +1685,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
       if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
-      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
       if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
       closeModal(); Notifs.success('Quote edited, approved and filed!'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -1658,7 +1697,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
       if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
-      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
       if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
       closeModal(); Notifs.error('Quote updated and returned to partner.'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
