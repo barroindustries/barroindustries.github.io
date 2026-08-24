@@ -14,3 +14,20 @@ scripts/node_modules/
 *serviceAccount*.json
 firebase-debug.log
 .firebase/
+
+# Session scratch — verification harnesses, bisect copies, BEFORE/AFTER diffs.
+# Root-anchored on purpose: only repo-root probe files are scratch by convention.
+/_*.html
+/__*.html
+/modaltest*.html
+/kb-probe.html
+*.bak
+*.BEFORE.js
+*.AFTER.js
+*.BEFORE.css
+*.AFTER.css
+/css/styles-orig-verify.css
+/css/css/
+/dev/_*
+# Quarantined debris awaiting deletion (see dev/README.md)
+/dev/_attic/
