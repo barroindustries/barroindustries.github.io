@@ -2600,6 +2600,166 @@ window.quoteShareChipHtml = function(q) {
   return `<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🔗',9)} shared</span>`;
 };
 
+// ── Read-only quotation viewer ────────────────────────────────────────
+// "Show the quotation this deal was won on" (owner request 2026-08-24).
+// Opened from the job/project detail header (js/screens/production.js) and
+// reusable anywhere a quote {collection, id} pair is at hand. Renders the
+// SAME allowlist projection the public client page uses (buildPublicQuoteDoc
+// above) — items, prices, terms, brand — NEVER editableState / capital /
+// commission / margin internals, so any viewer cleared to see money sees
+// nothing the printed quotation itself wouldn't show. Visibility is layered:
+//   1. Callers gate the affordance (production.js: production-only viewers
+//      have no money view so they never get the link; partners only for
+//      bs_quotes).
+//   2. Firestore rules remain the real gate on the doc read (bk_quotes:
+//      creator or admin only; bs_quotes: any internal staff, or the partner
+//      who filed it).
+//   3. A denied read degrades to opts.fallback — the order snapshot the
+//      calling record already displays on the screen underneath
+//      (job_projects items/contract) — with a note that the filed
+//      quotation itself is restricted. No new exposure either way.
+// opts: { won: true to badge the quote as Won (the caller knows the deal
+//              closed — job_projects only exist for won quotes),
+//         fallback: {quoteNumber, clientName, company, items, total} }
+window.openQuoteReadOnly = async function(coll, docId, opts) {
+  opts = opts || {};
+  if (!docId) return;
+  if (!window.QUOTE_COLLECTIONS.includes(coll)) coll = 'bs_quotes';
+  const fbNo = (opts.fallback && opts.fallback.quoteNumber) || '';
+  const panel = window.openPage(`📋 Quotation${fbNo ? ' ' + escHtml(fbNo) : ''}`, window.skeletonHtml('rows'),
+    `<span id="qv-reopen-slot" style="display:contents"></span><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  const bodyEl = panel.querySelector('.page-panel-body');
+
+  let q = null, readErr = null;
+  try {
+    const snap = await db.collection(coll).doc(docId).get();
+    if (snap.exists) q = { id: snap.id, ...snap.data() };
+  } catch (ex) { readErr = ex; }
+  if (!bodyEl || !bodyEl.isConnected) return;   // dismissed while the read was in flight
+
+  const money = (n) => '₱' + fmt(Number(n) || 0);
+  const wonBadge = `<span class="badge ${window.statusBadgeClass('quote','won')}" style="font-size:10px">${window.statusLabel2('quote','won')}</span>`;
+
+  if (!q) {
+    // Doc unreadable (rules) or gone — degrade to the caller's own snapshot.
+    const denied = !!(readErr && readErr.code === 'permission-denied');
+    const note = denied
+      ? 'The filed quotation document is restricted — only whoever filed it or an admin can open it. Showing the order snapshot recorded on this project instead.'
+      : (readErr ? `Couldn't open the quotation (${escHtml(readErr.message || readErr.code || 'read failed')}).`
+                 : 'This quotation document no longer exists — it may have been deleted. Showing the order snapshot recorded on this project instead.');
+    const fb = opts.fallback;
+    bodyEl.innerHTML = `
+      <div class="alert-banner alert-warn" style="margin-bottom:12px"><span>${emojiIcon('🔒',16)} ${note}</span></div>
+      ${fb ? `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px"><span style="font-family:monospace">${escHtml(fb.quoteNumber || '')}</span>${fb.company ? ' · ' + escHtml(fb.company) : ''} ${opts.won ? wonBadge : ''}</div>
+      <div style="font-weight:700;font-size:15px;margin-bottom:10px">${escHtml(fb.clientName || '')}</div>
+      ${(Array.isArray(fb.items) && fb.items.length) ? `
+      <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>
+        ${fb.items.map(it => `<tr>
+          <td style="font-size:12px">${escHtml(it.name || '')}${it.dims ? ` <span style="color:var(--text-muted)">(${escHtml(it.dims)})</span>` : ''}</td>
+          <td style="font-size:12px;white-space:nowrap">${Number(it.qty) || 0} ${escHtml(it.unit || '')}</td>
+          <td style="font-size:12px">${money(it.unitPrice)}</td>
+          <td style="font-size:12px;font-weight:600">${money(it.amount)}</td>
+        </tr>`).join('')}
+      </tbody></table></div></div></div>` : ''}
+      <div style="display:flex;justify-content:flex-end;font-size:14px;font-weight:800">Contract total&nbsp;&nbsp;${money(fb.total)}</div>` : ''}
+    `;
+    return;
+  }
+
+  // Full render off the allowlist projection (same fields the client sees).
+  const { brand } = await window.resolveQuoteBrand(q);
+  if (!bodyEl.isConnected) return;
+  const v = window.buildPublicQuoteDoc(q, brand, coll, docId);
+  const stKey = (opts.won || q.salesOrderId) ? 'won' : (q.status || 'draft');
+  const di = v.deliveryInstall, pay = v.payment, tl = v.timeline;
+  const hasDI  = !!(di.amount || di.free || di.method || di.notes);
+  const hasTL  = !!(tl.startDate || tl.leadDays || tl.completionDate);
+  const hasPay = !!((pay.milestones && pay.milestones.length) || pay.downPayment || pay.balance);
+  const paymentRows = (pay.milestones && pay.milestones.length)
+    ? pay.milestones.map(m => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${m.pct ? m.pct + '% — ' : ''}${escHtml(m.label || '')}${m.date ? ` <span style="color:var(--text-muted)">(${escHtml(m.date)})</span>` : ''}</span><strong>${money(m.amount)}</strong></div>`).join('')
+    : [
+        pay.downPayment ? `<div style="display:flex;justify-content:space-between"><span>Down payment${pay.downPaymentMode ? ` <span style="color:var(--text-muted)">(${escHtml(pay.downPaymentMode)})</span>` : ''}</span><strong>${money(pay.downPayment)}</strong></div>` : '',
+        pay.balance ? `<div style="display:flex;justify-content:space-between"><span>Balance${pay.balanceMode ? ` <span style="color:var(--text-muted)">(${escHtml(pay.balanceMode)})</span>` : ''}</span><strong>${money(pay.balance)}</strong></div>` : '',
+        pay.interestRate ? `<div style="display:flex;justify-content:space-between"><span>Interest</span><strong>${pay.interestRate}%</strong></div>` : '',
+      ].join('');
+  bodyEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:8px">
+      <div>
+        <div style="font-weight:800;font-size:16px;letter-spacing:.3px">${escHtml(v.brand.name || '')}</div>
+        ${v.brand.sub ? `<div style="font-size:11px;color:var(--text-muted)">${escHtml(v.brand.sub)}</div>` : ''}
+      </div>
+      <div style="text-align:right">
+        <span class="badge ${window.statusBadgeClass('quote', stKey)}">${window.statusLabel2('quote', stKey)}</span>${window.quoteShareChipHtml(q)}
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+      <span style="font-family:monospace;font-weight:700;color:var(--text)">${escHtml(v.quoteNumber || q.id)}</span>${v.quoteDate ? ` · ${escHtml(v.quoteDate)}` : ''}${v.validUntil ? ` · valid until ${escHtml(v.validUntil)}` : ''}
+    </div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      <div><span style="color:var(--text-muted)">Client</span> <strong>${escHtml(v.clientName || '—')}</strong>${v.clientCompany ? ` · ${escHtml(v.clientCompany)}` : ''}</div>
+      ${v.salesperson ? `<div style="margin-top:3px"><span style="color:var(--text-muted)">Salesperson</span> ${escHtml(v.salesperson)}</div>` : ''}
+      ${v.subject ? `<div style="margin-top:3px"><span style="color:var(--text-muted)">Subject</span> ${escHtml(v.subject)}</div>` : ''}
+      ${v.purpose ? `<div style="margin-top:3px"><span style="color:var(--text-muted)">Purpose</span> ${escHtml(v.purpose)}</div>` : ''}
+    </div></div>
+    ${v.items.length ? `
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>
+      ${v.items.map(it => `<tr>
+        <td style="font-size:12px">${escHtml(it.name)}${it.dims ? ` <span style="color:var(--text-muted)">(${escHtml(it.dims)})</span>` : ''}${it.specStr ? `<div style="font-size:10px;color:var(--text-muted)">${escHtml(it.specStr)}</div>` : ''}${it.leadTime ? `<div style="font-size:10px;color:var(--text-muted)">Lead time: ${escHtml(it.leadTime)}</div>` : ''}</td>
+        <td style="font-size:12px;white-space:nowrap">${it.qty} ${escHtml(it.unit)}</td>
+        <td style="font-size:12px">${money(it.unitPrice)}</td>
+        <td style="font-size:12px;font-weight:600">${money(it.amount)}</td>
+      </tr>`).join('')}
+    </tbody></table></div></div></div>` : ''}
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:3px 12px">
+        <span style="color:var(--text-muted)">Subtotal</span><span style="text-align:right">${money(v.subtotal)}</span>
+        ${v.discountAmount ? `<span style="color:var(--text-muted)">Discount${v.discountPct ? ` (${v.discountPct}%)` : ''}</span><span style="text-align:right">− ${money(v.discountAmount)}</span>
+        <span style="color:var(--text-muted)">Net</span><span style="text-align:right">${money(v.netAmount)}</span>` : ''}
+        ${v.vatAmount ? `<span style="color:var(--text-muted)">VAT${v.vatIncluded ? ' (included in total)' : ''}</span><span style="text-align:right">${money(v.vatAmount)}</span>` : ''}
+        <span style="font-weight:800;border-top:1px solid var(--border);padding-top:4px">TOTAL</span><span style="text-align:right;font-weight:800;border-top:1px solid var(--border);padding-top:4px">${money(v.total)}</span>
+      </div>
+    </div></div>
+    ${hasDI ? `<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      <strong>${emojiIcon('🚚',12)} Delivery &amp; Installation</strong>
+      <div style="margin-top:5px;display:flex;flex-direction:column;gap:3px">
+        ${di.free ? '<div>Free delivery &amp; installation</div>' : (di.amount ? `<div style="display:flex;justify-content:space-between"><span>Fee${di.includedInTotal ? ' <span style="color:var(--text-muted)">(included in total)</span>' : ''}</span><strong>${money(di.amount)}</strong></div>` : '')}
+        ${di.method ? `<div><span style="color:var(--text-muted)">Method</span> ${escHtml(di.method)}</div>` : ''}
+        ${di.notes ? `<div>${escHtml(di.notes)}</div>` : ''}
+      </div></div></div>` : ''}
+    ${hasPay ? `<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      <strong>${emojiIcon('💳',12)} Payment Terms</strong>
+      <div style="margin-top:5px;display:flex;flex-direction:column;gap:3px">${paymentRows}</div>
+    </div></div>` : ''}
+    ${hasTL ? `<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      <strong>${emojiIcon('📅',12)} Timeline</strong>
+      <div style="margin-top:5px;display:flex;flex-direction:column;gap:3px">
+        ${tl.startDate ? `<div><span style="color:var(--text-muted)">Start</span> ${escHtml(tl.startDate)}</div>` : ''}
+        ${tl.leadDays ? `<div><span style="color:var(--text-muted)">Lead time</span> ${tl.leadDays} days</div>` : ''}
+        ${tl.completionDate ? `<div><span style="color:var(--text-muted)">Completion</span> ${escHtml(tl.completionDate)}</div>` : ''}
+      </div></div></div>` : ''}
+    ${v.remarks ? `<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px;font-size:12px"><strong>${emojiIcon('📝',12)} Remarks</strong><div style="margin-top:4px">${escHtml(v.remarks)}</div></div></div>` : ''}
+    ${v.photos.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      ${v.photos.map(ph => `<a href="${escHtml(ph.url)}" target="_blank" rel="noopener"><img src="${escHtml(ph.url)}" alt="${escHtml(ph.caption || 'photo')}" loading="lazy" style="height:64px;width:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border)"/></a>`).join('')}
+    </div>` : ''}
+    ${v.brand.thanks ? `<div style="font-size:11px;color:var(--text-muted);margin-top:12px">${escHtml(v.brand.thanks)}</div>` : ''}
+    ${v.brand.creds ? `<div style="font-size:10px;color:var(--text-muted);margin-top:6px">${escHtml(v.brand.creds)}</div>` : ''}
+  `;
+
+  // "Open in builder" — same audience the quotations screens give the Reopen
+  // button (internal Sales edit rights, never partner, never the view-only
+  // secretary role), and only when an editable snapshot exists to open.
+  const slot = panel.querySelector('#qv-reopen-slot');
+  if (slot && q.editableState && window.currentRole !== 'partner' && window.currentRole !== 'secretary'
+      && typeof canEditDept === 'function' && canEditDept('Sales')) {
+    slot.innerHTML = `<button class="btn-secondary" id="qv-reopen-btn" title="Open this quote in the builder — re-filing saves a new copy">↻ Open in builder</button>`;
+    slot.querySelector('#qv-reopen-btn').addEventListener('click', () => {
+      if (window.Overlay && Overlay.clearAll) Overlay.clearAll(); else closeModal();
+      window.reopenQuoteFromDoc(coll, docId);
+    });
+  }
+};
+
 // ── The share action itself ───────────────────────────────────────────
 // Wired as a 🔗 Share button on every filed/approved/accepted quote card
 // (spec §5.1: BS flat list, BK quotations summary, partner own-quotes

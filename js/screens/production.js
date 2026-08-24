@@ -1720,8 +1720,19 @@ function openJobProjectDetail(p, opts){
   // everything unchanged.
   const visDocs = (p.documents||[]).filter(dc => showMoney || !(/receipt|invoice|billing/i.test(dc.type||'') || /₱/.test(dc.ref||'')));
   const visTimeline = (p.timeline||[]).slice().reverse().filter(t => showMoney || !/₱/.test(t.event||''));
+  // "Show the quotation this deal was won on" (owner request 2026-08-24) — the
+  // quote reference in the header opens a READ-ONLY view of the filed quote
+  // (window.openQuoteReadOnly, js/screens/sales.js). The affordance follows
+  // the money rules already governing this panel: a quotation is a fully
+  // priced document, so production-only viewers keep the plain-text reference;
+  // partners only ever open bs_quotes (their own collection — Firestore still
+  // limits them to quotes they created). If the doc read is denied server-side
+  // (bk_quotes: creator/admin only), the viewer degrades to the order snapshot
+  // this project already displays — no new exposure on any path.
+  const quoteColl = p.quoteCollection || (window.quoteCollectionFor ? window.quoteCollectionFor(p.company||'BS') : (p.company==='BS'?'bs_quotes':'bk_quotes'));
+  const canViewQuote = showMoney && !!p.quoteId && (!isPartnerU || quoteColl==='bs_quotes') && typeof window.openQuoteReadOnly==='function';
   const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${canViewQuote?`<a href="#" id="jpd-quote-link" title="View the quotation this job was won on" style="font-weight:600">Quote ${escHtml(p.quoteNumber||'')} ↗</a>`:`Quote ${escHtml(p.quoteNumber||'')}`} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
     ${stageUnknown?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} This project's stage ("${escHtml(p.stage||'')}") doesn't match any known lifecycle stage — data may be corrupted. An admin should fix it directly before advancing.</span></div>`:''}
     ${needsAck?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} Acknowledge receipt of this job before you can update its status.</span></div>`:''}
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
@@ -1863,6 +1874,13 @@ function openJobProjectDetail(p, opts){
       const fresh = await db.collection('job_projects').doc(p.id).get();
       if (fresh.exists) openJobProjectDetail({ id:p.id, ...fresh.data() });
     } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); if (btn) btn.disabled = false; }
+  });
+  jpdPanel.querySelector('#jpd-quote-link')?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    window.openQuoteReadOnly(quoteColl, p.quoteId, {
+      won: true,   // a job_project only exists because this quote was won
+      fallback: { quoteNumber:p.quoteNumber, clientName:p.clientName, company:p.company, items:p.items||[], total:p.contractAmount||0 },
+    });
   });
   // The folder, filled after the panel is up (openPage paints on the tap frame).
   // panelLive() guards every late landing — the user can press Back mid-flight,
