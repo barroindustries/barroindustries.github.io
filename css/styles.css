@@ -4016,6 +4016,41 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .team-masonry > .team-member-card:nth-child(6) { animation-delay: 125ms; }
 .team-masonry > .team-member-card:nth-child(7) { animation-delay: 150ms; }
 .team-masonry > .team-member-card:nth-child(n+8) { animation-delay: 175ms; }
+/* ── TEAM-PAGE-ORG-SPEC-2026-08-25 — Fabricators + vacant-positions sections.
+   Neither section may share .team-masonry's 150px column floor: these cards
+   carry more text (type badges, role descriptions, a CTA/status footer), and
+   at 150px the vacant card's status pill overflowed the dashed border and
+   card bottoms landed ragged. Grid rows stretch by default, so every card in
+   a row is equal height; the base card is already a flex column, so
+   margin-top:auto pins each footer (Create-login button / Vacant pill) to
+   the bottom edge and the whole row lines up. */
+.team-fab-grid, .team-vacant-grid { display: grid; gap: 16px; }
+.team-fab-grid    { grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); }
+.team-vacant-grid { grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); }
+.team-fab-card    { cursor: default; }
+.team-fab-card .fab-badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.team-fab-card .fab-cta    { margin-top: auto; width: 100%; }
+/* A read-only placeholder must not pretend to be a live card: transparent
+   face, dashed frame, and the shared hover lift/glow suppressed. */
+.team-vacant-card {
+  cursor: default; opacity: .82;
+  background: transparent; border: 1.5px dashed var(--border); box-shadow: none;
+}
+.team-vacant-card:hover { transform: none; box-shadow: none; border-color: var(--border); }
+.team-vacant-card .vacant-desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.55; margin-top: 4px; }
+.team-vacant-card .vacant-pill {
+  margin-top: auto;
+  padding: 4px 12px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: .02em; line-height: 1.4;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+  max-width: 100%; white-space: normal;   /* wrap INSIDE the card, never bleed past it */
+}
+.team-section-head { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; margin: 0 0 12px; }
+.team-section-count {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 20px; padding: 1px 9px;
+}
 .team-note-bubble {
   position: absolute;
   top: -12px; left: 50%; transform: translateX(-50%);

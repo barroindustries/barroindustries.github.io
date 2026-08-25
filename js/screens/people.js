@@ -1433,11 +1433,11 @@ function renderFabricatorCards(list, q) {
 
   host.innerHTML = `
     <hr class="divider" style="margin:26px 0 18px"/>
-    <h3 style="font-size:15px;font-weight:700;margin:0 0 12px;display:flex;align-items:center;gap:6px">${emojiIcon('👷',18)} Fabricators — Operations Team</h3>
-    <div class="team-masonry">${filtered.map(f => {
+    <h3 class="team-section-head">${emojiIcon('👷',18)} Fabricators — Operations Team <span class="team-section-count">${filtered.length}</span></h3>
+    <div class="team-fab-grid">${filtered.map(f => {
       const initials = (f.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
       return `
-      <div class="team-member-card" data-fab-id="${f.id}" style="border-left:3px solid ${opType.color};cursor:default">
+      <div class="team-member-card team-fab-card" data-fab-id="${f.id}" style="border-left:3px solid ${opType.color}">
         <div class="team-member-avatar-wrap">
           <div class="team-member-avatar">
             ${safeHttpUrl(f.photoUrl)
@@ -1448,11 +1448,11 @@ function renderFabricatorCards(list, q) {
         <div class="team-member-name">${escHtml(f.name || 'Unnamed')}</div>
         <div class="team-member-role" style="color:${opType.color}">${escHtml(f.jobTitle || 'Fabricator')}</div>
         <div class="team-member-dept">${escHtml(f.department || 'Unassigned')}</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">
+        <div class="fab-badges">
           <span class="badge" style="font-size:9px;padding:2px 7px;line-height:1.5;background:${opType.color}22;color:${opType.color};border-color:${opType.color}44">${escHtml(opType.label)}</span>
-          <span class="badge badge-gray" style="font-size:9px;padding:2px 7px;line-height:1.5">No app login yet</span>
+          <span class="badge badge-gray" style="font-size:9px;padding:2px 7px;line-height:1.5">No login yet</span>
         </div>
-        ${canCreateLogin ? `<button type="button" class="btn-secondary btn-sm fab-create-login-btn" data-fab-id="${f.id}" style="margin-top:6px;width:100%">Create login</button>` : ''}
+        ${canCreateLogin ? `<button type="button" class="btn-secondary btn-sm fab-create-login-btn fab-cta" data-fab-id="${f.id}">${emojiIcon('🔑',13)} Create login</button>` : ''}
       </div>`;
     }).join('')}</div>
   `;
@@ -1494,8 +1494,8 @@ function renderAspirationalSection() {
       <hr class="divider" style="flex:1;margin:0"/>
     </div>
     <p style="font-size:12px;color:var(--text-muted);text-align:center;margin:0 0 16px">These positions are planned — employment for them is not yet open.</p>
-    <div class="team-masonry">${positions.map(p => `
-      <div class="team-member-card" style="cursor:default;opacity:.78;border:1.5px dashed var(--border)">
+    <div class="team-vacant-grid">${positions.map(p => `
+      <div class="team-member-card team-vacant-card">
         <div class="team-member-avatar-wrap">
           <div class="team-member-avatar" style="background:transparent;border:1.5px dashed var(--border);box-shadow:none">
             <span style="font-size:22px">${emojiIcon(p.icon,22)}</span>
@@ -1506,8 +1506,8 @@ function renderAspirationalSection() {
         <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:2px">
           ${(p.depts||[]).map(d=>`<span class="badge badge-gray" style="font-size:9px;padding:2px 7px;line-height:1.5">${escHtml(d)}</span>`).join('')}
         </div>
-        <div style="font-size:11px;color:var(--text-muted);line-height:1.4;margin-top:4px">${escHtml(p.desc||'')}</div>
-        <div class="badge badge-gray" style="margin-top:6px">Vacant — hiring not yet open</div>
+        <div class="vacant-desc">${escHtml(p.desc||'')}</div>
+        <div class="vacant-pill">Vacant — hiring not yet open</div>
       </div>`).join('')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [host] });
