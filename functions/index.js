@@ -423,7 +423,9 @@ exports.createUserDocOnAuthCreate = functions.auth.user().onCreate(async (user) 
 });
 
 /**
- * Callable: lets an admin/finance user reset an HR-managed worker's password
+ * Callable: lets an admin/finance user — or a President-flagged account admin
+ * (TEAM-PAGE-ORG-SPEC-2026-08-25 "designated personnel", the firestore.rules
+ * isAccountAdminFlag() predicate) — reset an HR-managed worker's password
  * WITHOUT the app ever storing a recoverable copy of any password.
  *
  * Replaces the old client-side flow that stashed btoa(password) in a
@@ -435,10 +437,17 @@ exports.adminResetPassword = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
   }
-  // Caller must hold an admin/finance role (verified server-side, not trusted from client).
+  // Caller must hold an admin/finance role, OR carry the accountAdmin flag
+  // (verified server-side off the caller's OWN doc, never trusted from
+  // client input — this callable runs with the Admin SDK and bypasses
+  // firestore.rules entirely, so the flag check has to be re-done here to
+  // mean anything). Every target-side guard below — HR-managed accounts
+  // only, never an admin/finance-tier target — is UNCHANGED: this widens
+  // WHO may call the function, not what it may be pointed at.
   const callerSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
   const callerRole = callerSnap.exists ? callerSnap.data().role : null;
-  if (!['president', 'manager', 'finance'].includes(callerRole)) {
+  const callerIsAccountAdmin = callerSnap.exists && callerSnap.data().accountAdmin === true;
+  if (!['president', 'manager', 'finance'].includes(callerRole) && !callerIsAccountAdmin) {
     throw new functions.https.HttpsError('permission-denied', 'Not authorized to reset passwords.');
   }
 

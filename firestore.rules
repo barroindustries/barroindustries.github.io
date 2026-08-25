@@ -46,6 +46,22 @@ service cloud.firestore {
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
 
+    // ── isAccountAdminFlag() — the "designated personnel" predicate ─────────
+    // TEAM-PAGE-ORG-SPEC-2026-08-25: fabricators need real logins, and account
+    // creation/management must live IN THE APP, "controlled by designated
+    // personnel, preferably HR and IT" — but owner ruling 2026-08-08 (see
+    // isFinanceDept() above) says a department dropdown must never hand out a
+    // tier: membership buys the door, not the money behind it. So this power
+    // is carried by an explicit per-user FLAG the President sets one person at
+    // a time (Edit Employee modal, president-only write — see
+    // accountAdminUnchanged() below), never by HR/IT department membership.
+    // Same null-safe read as getRole() — same doc, same .get(field, default)
+    // idiom — so a user doc that predates this flag (every doc before this
+    // spec) degrades to false instead of erroring the rule for its owner.
+    function isAccountAdminFlag() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountAdmin', false) == true;
+    }
+
     // ── isOpsAdmin() — THE SPLIT OF THE OLD 4-ROLE HELPER (2026-08-09) ───────
     // The deleted helper (president|manager|secretary|finance — see
     // SECRETARY-SCOPE-SPEC.md for its name and full history) was ONE NAME FOR
@@ -280,6 +296,21 @@ service cloud.firestore {
           // freezing it here keeps that role view-only on layoffs too. HR-dept
           // members and senior admins write it via their own branches below.
           && n.get('layoff', null)       == o.get('layoff', null)
+          // TEAM-PAGE-ORG-SPEC-2026-08-25 — accountAdmin is the "designated
+          // personnel" power flag (isAccountAdminFlag() above): a self-update
+          // or a non-senior isAdmin() (secretary) edit must never be able to
+          // flip it, or a flagged/secretary account could grant itself (or
+          // anyone) account-admin powers through this doc's own edit path.
+          // President-only mutation is enforced explicitly in the isSeniorAdmin
+          // branch below via accountAdminUnchanged() (parallel to
+          // hrFlagUnchanged()); freezing it here too closes the OWNER and
+          // isAdmin() branches, which route through this helper instead.
+          // `team` (employment-type classification, Team page color coding) is
+          // senior-admin-editable HR data like department/salary — frozen here
+          // for the same reason those are: it must not move via the owner's
+          // own self-update or a secretary's non-privileged edit.
+          && n.get('accountAdmin', null)  == o.get('accountAdmin', null)
+          && n.get('team', null)          == o.get('team', null)
           // v14 re-audit ROUND 2 — see userIdentityBindingUnchanged() above.
           // Covers the OWNER and the non-senior isAdmin() (secretary) branches,
           // which are the two that call this helper.
@@ -410,19 +441,48 @@ service cloud.firestore {
       // already president/manager-gated, i.e. isSeniorAdmin(), and keep full
       // power. Design is frozen alongside Finance for the same reason the
       // self-signup branch already froze it.
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — accountAdmin must be unforgeable at
+      // CREATE, not just at update. accountAdminUnchanged()/
+      // userPrivilegedFieldsUnchanged() below freeze the flag on the UPDATE
+      // path, but a freeze that starts at update leaves the same create-only
+      // window this block already documents for the IT/Ventures departments:
+      // the self-signup branch would let ANY new registrant bake
+      // accountAdmin:true into their own first doc, and the secretary /
+      // account-admin branches would let a non-president mint a flagged
+      // puppet account whose password they set. Every non-president branch
+      // therefore requires the flag absent-or-false on the incoming doc; only
+      // the President can create an account that is born flagged.
+      function noAccountAdminOnCreate() {
+        return request.resource.data.get('accountAdmin', false) == false;
+      }
       allow create: if isAuth() && (
         isPresident() || (
           isSeniorAdmin()
+          && noAccountAdminOnCreate()
           && request.resource.data.get('role', 'employee') != 'president'
           && request.resource.data.get('role', 'employee') in
                ['manager', 'secretary', 'employee', 'agent', 'finance', 'partner']
         ) || (
           isAdmin()
+          && noAccountAdminOnCreate()
           && request.resource.data.get('role', 'employee') in ['employee', 'agent']
           && noPrivilegedDeptOnCreate()
         ) || (
           isOwner(uid)
+          && noAccountAdminOnCreate()
           && request.resource.data.role == 'employee'
+          && noPrivilegedDeptOnCreate()
+        ) || (
+          // TEAM-PAGE-ORG-SPEC-2026-08-25 — a President-flagged account admin
+          // (isAccountAdminFlag(), not a department) may mint ordinary staff
+          // accounts (Invite Member / Create Worker Account) exactly like the
+          // isAdmin() branch above: employee/agent only, never a privileged
+          // department. Mirrors that branch's shape on purpose — it is the
+          // same "onboard staff, not power" capability, granted to a flagged
+          // individual instead of to president/manager/secretary.
+          isAccountAdminFlag()
+          && noAccountAdminOnCreate()
+          && request.resource.data.get('role', 'employee') in ['employee', 'agent']
           && noPrivilegedDeptOnCreate()
         )
       );
@@ -464,6 +524,22 @@ service cloud.firestore {
       // one field frozen explicitly.
       function hrFlagUnchanged() {
         return request.resource.data.get('hrManagedAccount', null) == resource.data.get('hrManagedAccount', null);
+      }
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — accountAdmin is PRESIDENT-ONLY
+      // mutable. isSeniorAdmin() does not call userPrivilegedFieldsUnchanged()
+      // (a manager legitimately changes role/department/salary as ordinary HR
+      // duty), so without this explicit guard a MANAGER could flip
+      // accountAdmin:true onto any non-president doc — including their own,
+      // via the isAdmin()/owner branches that DO freeze it through that
+      // helper, or onto a colleague's directly here — and mint themselves or
+      // an ally into the "designated personnel" tier the President is meant to
+      // hand out one flag at a time (owner ruling 2026-08-08: a dropdown/role
+      // must never hand out a tier). Exactly parallel to hrFlagUnchanged()
+      // just above: isPresident() is checked first in this file's OR chain, so
+      // that branch never reaches this one — this only fires for the
+      // isSeniorAdmin() (manager) branch, where it must hold.
+      function accountAdminUnchanged() {
+        return isPresident() || request.resource.data.get('accountAdmin', null) == resource.data.get('accountAdmin', null);
       }
       // v14 offboarding — an HR-dept member of any role may toggle ONLY the
       // removed/reinstated fields on ANOTHER user's doc (matches people.js's
@@ -525,6 +601,7 @@ service cloud.firestore {
           && request.resource.data.get('role', 'employee') != 'president'
           && fcmTokenUnchangedForOthers()
           && hrFlagUnchanged()
+          && accountAdminUnchanged()
           && userIdentityBindingUnchanged()) ||
         (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||
         (isAdmin() && userPrivilegedFieldsUnchanged() && fcmTokenUnchangedForOthers()) ||
@@ -555,7 +632,13 @@ service cloud.firestore {
     match /usernames/{username} {
       allow get: if true;
       allow list: if false;
-      allow create, update, delete: if isAuth() && isAdmin();
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — an account admin mints worker logins
+      // (Create Worker Account) the same as isAdmin(), so they need to CREATE
+      // the username→uid lookup doc too, or that write fails and the worker
+      // can never sign in. Update/delete (username changes, cleanup) stay
+      // isAdmin()-only — an account admin never needs those.
+      allow create: if isAuth() && (isAdmin() || isAccountAdminFlag());
+      allow update, delete: if isAuth() && isAdmin();
     }
 
     // ── Sequence counters (employees, workers, etc.) ────
@@ -1572,7 +1655,24 @@ service cloud.firestore {
     // an explicit `|| isSecretary()` on their read rule — read only, never write.
     match /payroll/{uid} {
       allow read:  if isAuth() && (isOwner(uid) || isMoneyAdmin());
-      allow create, update: if isAuth() && isMoneyAdmin();
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — an account admin may CREATE the
+      // INITIAL pay record as part of hiring (Create Worker Account,
+      // dashboards.js openCreateWorkerModal, the doc this collection is
+      // named for) — but reading everyone's pay, or editing a record that
+      // already exists, stays money-tier below. `create` alone guarantees no
+      // doc exists yet at this uid, so this can never overwrite a real
+      // employee's pay; payClass and the pay figures are shape-validated the
+      // same way the rest of this file validates numeric money fields
+      // (isNonNegNumber).
+      allow create: if isAuth() && (
+        isMoneyAdmin()
+        || ( isAccountAdminFlag()
+             && request.resource.data.get('payClass', 'regular') in ['regular', 'production']
+             && isNonNegNumber(request.resource.data.get('salary', 0))
+             && isNonNegNumber(request.resource.data.get('allowance', 0))
+             && isNonNegNumber(request.resource.data.get('deductions', 0)) )
+      );
+      allow update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -3333,7 +3433,46 @@ service cloud.firestore {
       // ops/finance tier let secretary set a worker's pay rates outright.
       // 2026-08-09 (owner ruling 2, "they lose … worker pay rates"): the READ is
       // money-tier now as well. The linkedUid self-read branch is untouched.
-      allow create, update: if isAuth() && isMoneyAdmin();
+      //
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — CREATE only widens to account admins
+      // too: the Create Worker Account flow (payClass 'production') writes
+      // this doc as part of minting a login, same as the worker_directory
+      // mirror below. But the account-admin leg carries the same shape
+      // validation as its payroll-create sibling — this doc IS worker pay
+      // (dailyRate/hourlyRate/foodAllowance feed the payslip; caBalance is a
+      // live cash-advance figure deducted at every run), and the 2026-08-09
+      // ruling above narrowed writes to money-tier precisely so a non-money
+      // principal could not set pay rates outright. An unvalidated create
+      // would reopen that hole for the LOWER-trust flag tier: rules are the
+      // boundary, not the modal, so a flag-only admin could otherwise mint a
+      // profile with a negative caBalance (instant phantom credit) or any
+      // rate. Rates must be non-negative and a BORN debt-free caBalance of
+      // exactly 0 — adjusting a real CA balance stays money-tier via update.
+      allow create: if isAuth() && (
+        isMoneyAdmin()
+        || ( isAccountAdminFlag()
+             && isNonNegNumber(request.resource.data.get('dailyRate', 0))
+             && isNonNegNumber(request.resource.data.get('hourlyRate', 0))
+             && isNonNegNumber(request.resource.data.get('foodAllowance', 0))
+             && request.resource.data.get('caBalance', 0) == 0 )
+      );
+      allow update: if isAuth() && isMoneyAdmin();
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — account-admin LINK-ONLY update:
+      // "Create login" on a no-login fabricator card (Team page) attaches a
+      // freshly-minted uid to an EXISTING worker_directory/worker_profiles
+      // record instead of creating a duplicate profile. Scoped to exactly the
+      // `linkedUid` key, and SET-ONCE: resource must currently carry '' (an
+      // already-linked doc denies outright — an account admin can never
+      // RE-POINT an existing link), and the new value must be a real,
+      // non-empty string. Re-pointing would silently hand another uid the
+      // linkedUid self-read branch above (rates) plus whatever punch/worker
+      // rights key off it — that stays money-tier via the general update
+      // branch just above, which has no such field restriction.
+      allow update: if isAuth() && isAccountAdminFlag()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid'])
+        && resource.data.get('linkedUid', '') == ''
+        && request.resource.data.get('linkedUid', '') is string
+        && request.resource.data.get('linkedUid', '') != '';
       // Owner ruling 2026-08-12: "hr should be able to reinstate those
       // offboarded". An Operations worker with no login is offboarded by
       // status:'inactive' alone, so putting them back is a status write — but
@@ -3368,7 +3507,21 @@ service cloud.firestore {
       // money-tier rather than president-only on purpose: syncWorkerDirectory()
       // (js/screens/hr.js) prunes directory docs whose profile is gone, and
       // that housekeeping must keep working for finance/manager.
-      allow create, update: if isAuth() && isMoneyAdmin();
+      //
+      // TEAM-PAGE-ORG-SPEC-2026-08-25 — account admins join this mirror's
+      // writers, but only as far as their two flows actually reach: CREATE is
+      // the full new-worker mirror doc (Create Worker Account — the doc id is
+      // the freshly-minted uid, so it never collides with a real row), while
+      // their UPDATE is scoped to exactly the linkedUid key ("Create login"
+      // merges {linkedUid} onto an EXISTING fabricator row). Without the
+      // hasOnly() an account admin could silently rewrite name/department/
+      // status on any active worker and desync the roster Production assigns
+      // stages from. Delete stays money-tier only — an account admin never
+      // removes a roster row, only HR/finance housekeeping does.
+      allow create: if isAuth() && (isMoneyAdmin() || isAccountAdminFlag());
+      allow update: if isAuth() && (isMoneyAdmin()
+        || ( isAccountAdminFlag()
+             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['linkedUid']) ));
       allow delete:         if isAuth() && isMoneyAdmin();
     }
 

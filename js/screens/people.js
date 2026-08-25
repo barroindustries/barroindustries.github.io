@@ -572,11 +572,20 @@ function openNewPostModal(publishDirectly) {
 
 window.renderTeamTab = async function() {
   const c = document.getElementById('page-content');
-  const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
+  // TEAM-PAGE-ORG-SPEC 2026-08-25 §2d — designated "account admins" (Neil's
+  // president-only flag, window.isAccountAdmin()) get the invite door too, on
+  // top of the existing president/manager/finance seniority gate.
+  const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance' || window.isAccountAdmin();
   const viewingAsPartner = typeof isPartner === 'function' && isPartner();
   // Employee of the Month is a Barro Industries-only recognition: hidden from the
   // external partner (Brilliant Steel) view, and only the President can set it.
   const canManageEom = currentRole === 'president' && !viewingAsPartner;
+  // TEAM-PAGE-ORG-SPEC 2026-08-25 — the type-color legend, fabricators-without-
+  // logins block and vacant/aspirational section are ALL internal org info,
+  // hidden from partner viewers exactly like everything else guarded by
+  // viewingAsPartner in this file. The legend is built once here (static —
+  // TEAM_TYPES doesn't change per render) so it is NOT rebuilt on every
+  // search keystroke the way #team-grid is.
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('👥',20)} Team</h2>
@@ -587,7 +596,9 @@ window.renderTeamTab = async function() {
       <input id="team-search" placeholder="Search name, role or department…" class="ms-input" style="max-width:320px"/>
       <button class="btn-secondary btn-sm" id="set-note-btn" style="white-space:nowrap">${emojiIcon('✏️',16)} Set My Note</button>
     </div>
+    ${!viewingAsPartner ? `<div id="team-legend" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:11px;color:var(--text-muted)">${Object.values(window.TEAM_TYPES||{}).map(t=>`<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0"></span>${escHtml(t.label)}</span>`).join('')}</div>` : ''}
     <div id="team-grid"></div>
+    ${!viewingAsPartner ? '<div id="team-fab-section"></div><div id="team-vacant-section"></div>' : ''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   const teamGrid = document.getElementById('team-grid');
@@ -607,6 +618,13 @@ window.renderTeamTab = async function() {
     document.getElementById('team-retry-btn')?.addEventListener('click', () => window.renderTeamTab());
     return;
   }
+  // TEAM-PAGE-ORG-SPEC 2026-08-25 §2b — "the users id set" fabricators are
+  // checked against is the FULL raw collection (before the partner-visibility/
+  // Brilliant-Steel-only filter below), so a login-holding staffer never
+  // double-appears as a "no login" fabricator card just because their users
+  // doc was filtered off the main grid for an unrelated reason.
+  const allUserIds = new Set(snap.docs.map(d => d.id));
+
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(u => {
       if (viewingAsPartner) {
@@ -627,6 +645,20 @@ window.renderTeamTab = async function() {
 
   if (!viewingAsPartner) renderEomBanner(users, canManageEom);
 
+  // TEAM-PAGE-ORG-SPEC 2026-08-25 §2b/2c — fabricators without logins +
+  // vacant/aspirational positions. Both are internal org info: never fetched
+  // or rendered for a partner viewer.
+  let fabricators = [];
+  if (!viewingAsPartner) {
+    const wdSnap = await dbCachedGet('worker_directory',
+      () => db.collection('worker_directory').get(), 60000).catch(() => ({docs:[]}));
+    fabricators = wdSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(f => f.status === 'active' && !allUserIds.has(f.id) && !f.linkedUid);
+    renderFabricatorCards(fabricators, '');
+    renderAspirationalSection();
+  }
+
   // Debounced to match the pattern already used elsewhere (Inventory/Movements
   // search, js/modules.js) — a full masonry-grid rebuild + card re-wiring on
   // every keystroke is wasted work once the team list grows.
@@ -642,6 +674,7 @@ window.renderTeamTab = async function() {
         (Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).join(' ').toLowerCase().includes(q)
       ) : users;
       renderTeamCards(filtered, currentUser);
+      if (!viewingAsPartner) renderFabricatorCards(fabricators, v);
     }, 180);
   });
 
@@ -680,14 +713,28 @@ window.renderTeamTab = async function() {
 
   if (pres) {
     document.getElementById('invite-user-btn')?.addEventListener('click', () => {
+      // TEAM-PAGE-ORG-SPEC 2026-08-25 §2d — a flag-only account admin (i.e.
+      // window.isAccountAdmin() true but NOT one of the senior-admin roles
+      // that already had this door) is narrower than president/manager/
+      // finance: only Employee/Agent roles, and never the privileged depts
+      // firestore.rules' noPrivilegedDeptOnCreate() freezes on create
+      // (Finance/Design/Ventures/IT). The rules are the real boundary — this
+      // just keeps the UI from offering an option the write will refuse.
+      const flagOnlyAdmin = window.isAccountAdmin() && !['president','manager','finance'].includes(currentRole);
+      const roleOptions = flagOnlyAdmin
+        ? Object.entries(window.ROLES||{}).filter(([k]) => k === 'employee' || k === 'agent')
+        : (window.assignableRoles ? window.assignableRoles() : Object.entries(window.ROLES||{}));
+      const RESTRICTED_INVITE_DEPTS = ['Finance','Design','Ventures','IT'];
+      const inviteDeptKeys = Object.keys(window.DEPARTMENTS||{}).filter(d => !flagOnlyAdmin || !RESTRICTED_INVITE_DEPTS.includes(d));
       const _panel = openPage('Invite Team Member', `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">They'll receive a password reset email to set their own password.</p>
+        ${flagOnlyAdmin ? `<p style="font-size:12px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:14px">As an account admin you can create Employee and Agent accounts.</p>` : ''}
         <div class="form-group"><label>Email</label><input id="inv-email" type="email" placeholder="employee@barroindustries.com"/></div>
         <div class="form-group"><label>Display Name</label><input id="inv-name" placeholder="Full name"/></div>
         <div class="form-group"><label>Phone</label><input id="inv-phone" type="tel" placeholder="+63 9XX XXX XXXX"/></div>
         <div class="form-group"><label>Role</label>
           <select id="inv-role" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            ${(window.assignableRoles ? window.assignableRoles() : Object.entries(window.ROLES||{})).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+            ${roleOptions.map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" id="inv-company-group" style="display:none"><label>Company <span style="font-weight:400;color:var(--text-muted)">(partner's own company)</span></label>
@@ -695,7 +742,7 @@ window.renderTeamTab = async function() {
         </div>
         <div class="form-group"><label>Department(s)</label>
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:4px">
-            ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<label class="check-row"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
+            ${inviteDeptKeys.map(d=>`<label class="check-row"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
           </div>
         </div>
       `, `<button class="btn-primary" id="save-inv-btn">Send Invite</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -733,15 +780,20 @@ window.renderTeamTab = async function() {
             t.set(counterRef, { count: next }, { merge: true });
             return `BI-${window.bizYear()}-${String(next).padStart(3,'0')}`;
           });
+          const invRoleVal = _panel.querySelector('#inv-role').value;
           await db.collection('users').doc(uid).set({
             uid, email,
             displayName: _panel.querySelector('#inv-name').value.trim() || email.split('@')[0],
             phone: _panel.querySelector('#inv-phone').value.trim(),
-            role:        _panel.querySelector('#inv-role').value,
+            role:        invRoleVal,
             company:     _panel.querySelector('#inv-company')?.value.trim() || '',
             departments: depts, department: depts[0]||'',
             employeeId:  empId,
             photoUrl:'', startDate: window.bizDate(),
+            // TEAM-PAGE-ORG-SPEC 2026-08-25 §2e — stamp the Team-page employment
+            // type at creation time (window.teamTypeOf reads this first, ahead of
+            // every legacy fallback).
+            team: invRoleVal === 'partner' ? 'partner' : invRoleVal === 'agent' ? 'agent' : 'office',
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
@@ -1203,6 +1255,10 @@ function renderTeamCards(users, currentUser) {
     const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
     const badgeColor = {president:'#9BA8FF',manager:'#30D158',finance:'#FFD60A',employee:'#0A84FF',agent:'#FF9F0A',partner:'#FF6B6B'}[u.role] || '#8E8E93';
     const isMe = u.id === currentUser?.uid;
+    // TEAM-PAGE-ORG-SPEC 2026-08-25 §2a — employment-type color coding, kept
+    // separate from the role-line color above (role ≠ employment type).
+    const tType = window.teamTypeMeta(u);
+    const empStatusBadge = (u.employmentStatus && u.employmentStatus !== 'regular') ? window.employmentStatusMeta(u.employmentStatus) : null;
 
     const lastSeenMs = u.lastSeen?.toMillis?.() || (u.lastSeen?.seconds ? u.lastSeen.seconds*1000 : 0);
     const diffMin = lastSeenMs ? Math.floor((now - lastSeenMs)/60000) : null;
@@ -1226,7 +1282,7 @@ function renderTeamCards(users, currentUser) {
     const noteAgeStr = noteAgeMin === null ? '' : noteAgeMin < 1 ? 'now' : noteAgeMin < 60 ? `${noteAgeMin}m` : `${Math.floor(noteAgeMin/60)}h`;
 
     return `
-    <div class="team-member-card" data-uid="${u.id}">
+    <div class="team-member-card" data-uid="${u.id}" style="border-left:3px solid ${tType.color}">
       ${statusNote ? `
         <div class="team-note-bubble">
           <span>${escHtml(statusNote)}</span>${noteAgeStr?`<span style="font-size:10px;opacity:.6;margin-left:6px">${noteAgeStr}</span>`:''}
@@ -1242,6 +1298,10 @@ function renderTeamCards(users, currentUser) {
       <div class="team-member-name">${escHtml(u.displayName||u.email)}</div>
       <div class="team-member-role" style="color:${badgeColor}">${roleLabel}${isMe?' · You':''}</div>
       <div class="team-member-dept">${escHtml(depts)}</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">
+        <span class="badge" style="font-size:9px;padding:2px 7px;line-height:1.5;background:${tType.color}22;color:${tType.color};border-color:${tType.color}44" title="${escHtml(tType.sub||'')}">${escHtml(tType.label)}</span>
+        ${empStatusBadge ? `<span class="badge ${empStatusBadge.badge}" style="font-size:9px;padding:2px 7px;line-height:1.5">${escHtml(empStatusBadge.label)}</span>` : ''}
+      </div>
       ${u.removed
         ? `<div class="team-status-pill" style="background:var(--danger,#ff4444);color:#fff">Removed</div>`
         : isOnline
@@ -1344,6 +1404,113 @@ function renderTeamCards(users, currentUser) {
       if (u) showCallingCard(u);
     });
   });
+}
+
+// TEAM-PAGE-ORG-SPEC 2026-08-25 §2b — fabricators (worker_directory docs) who
+// have no app login yet: no uid, so no DM/nudge/calling-card/remove actions —
+// just the roster fact that they're on the team. `list` is the FULL candidate
+// set (computed once in renderTeamTab); `q` is re-applied on every search
+// keystroke so this stays in sync with #team-grid's own filtering. Renders
+// nothing (no empty-state) when the read was denied/empty OR the search
+// leaves zero matches — this block is additive, not a primary empty-state
+// surface.
+function renderFabricatorCards(list, q) {
+  const host = document.getElementById('team-fab-section');
+  if (!host) return;
+  const query = (q || '').trim().toLowerCase();
+  const filtered = query ? list.filter(f =>
+    (f.name || '').toLowerCase().includes(query) ||
+    (f.jobTitle || '').toLowerCase().includes(query) ||
+    (f.department || '').toLowerCase().includes(query)
+  ) : list;
+  if (!filtered.length) { host.innerHTML = ''; return; }
+
+  const opType = window.TEAM_TYPES.operations;
+  // Gate the button on BOTH the designated-personnel flag and the modal
+  // actually being loaded (dashboards.js is eager today per index.html, but
+  // this page's own PAGE_SCRIPTS entry doesn't list it, so don't assume it).
+  const canCreateLogin = window.isAccountAdmin() && typeof window.openCreateWorkerModal === 'function';
+
+  host.innerHTML = `
+    <hr class="divider" style="margin:26px 0 18px"/>
+    <h3 style="font-size:15px;font-weight:700;margin:0 0 12px;display:flex;align-items:center;gap:6px">${emojiIcon('👷',18)} Fabricators — Operations Team</h3>
+    <div class="team-masonry">${filtered.map(f => {
+      const initials = (f.name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+      return `
+      <div class="team-member-card" data-fab-id="${f.id}" style="border-left:3px solid ${opType.color};cursor:default">
+        <div class="team-member-avatar-wrap">
+          <div class="team-member-avatar">
+            ${safeHttpUrl(f.photoUrl)
+              ? `<img src="${escHtml(f.photoUrl)}" alt="${escHtml(f.name||'')}"/>`
+              : `<span>${escHtml(initials)}</span>`}
+          </div>
+        </div>
+        <div class="team-member-name">${escHtml(f.name || 'Unnamed')}</div>
+        <div class="team-member-role" style="color:${opType.color}">${escHtml(f.jobTitle || 'Fabricator')}</div>
+        <div class="team-member-dept">${escHtml(f.department || 'Unassigned')}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center">
+          <span class="badge" style="font-size:9px;padding:2px 7px;line-height:1.5;background:${opType.color}22;color:${opType.color};border-color:${opType.color}44">${escHtml(opType.label)}</span>
+          <span class="badge badge-gray" style="font-size:9px;padding:2px 7px;line-height:1.5">No app login yet</span>
+        </div>
+        ${canCreateLogin ? `<button type="button" class="btn-secondary btn-sm fab-create-login-btn" data-fab-id="${f.id}" style="margin-top:6px;width:100%">Create login</button>` : ''}
+      </div>`;
+    }).join('')}</div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+
+  if (canCreateLogin) {
+    host.querySelectorAll('.fab-create-login-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const f = filtered.find(x => x.id === btn.dataset.fabId);
+        if (!f) return;
+        if (typeof window.openCreateWorkerModal === 'function') {
+          window.openCreateWorkerModal({ linkWorker: { id: f.id, name: f.name, jobTitle: f.jobTitle, department: f.department } });
+        } else if (typeof navigateTo === 'function') {
+          // Defensive fallback — dashboards.js should already be loaded (see
+          // canCreateLogin above), but if it somehow isn't, 'team' is the
+          // admin page that carries it.
+          navigateTo('team');
+        }
+      });
+    });
+  }
+}
+
+// TEAM-PAGE-ORG-SPEC 2026-08-25 §2c — the vacant/aspirational org section,
+// always AFTER the real people (fabricators included) — "above are the
+// current team". Pure config render off window.ASPIRATIONAL_POSITIONS: no
+// Firestore read, no search filtering, no click handlers (non-interactive).
+function renderAspirationalSection() {
+  const host = document.getElementById('team-vacant-section');
+  if (!host) return;
+  const positions = window.ASPIRATIONAL_POSITIONS || [];
+  if (!positions.length) { host.innerHTML = ''; return; }
+
+  host.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin:30px 0 4px">
+      <hr class="divider" style="flex:1;margin:0"/>
+      <span style="font-size:12px;font-weight:700;color:var(--text-muted);white-space:nowrap;display:inline-flex;align-items:center;gap:5px">${emojiIcon('🎯',14)} The team we're building · ${escHtml(window.ASPIRATIONAL_TARGET_LABEL||'')}</span>
+      <hr class="divider" style="flex:1;margin:0"/>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);text-align:center;margin:0 0 16px">These positions are planned — employment for them is not yet open.</p>
+    <div class="team-masonry">${positions.map(p => `
+      <div class="team-member-card" style="cursor:default;opacity:.78;border:1.5px dashed var(--border)">
+        <div class="team-member-avatar-wrap">
+          <div class="team-member-avatar" style="background:transparent;border:1.5px dashed var(--border);box-shadow:none">
+            <span style="font-size:22px">${emojiIcon(p.icon,22)}</span>
+          </div>
+        </div>
+        <div class="team-member-name">${escHtml(p.title)}</div>
+        <div class="team-member-role" style="color:var(--text-muted)">${escHtml(p.officer)}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:2px">
+          ${(p.depts||[]).map(d=>`<span class="badge badge-gray" style="font-size:9px;padding:2px 7px;line-height:1.5">${escHtml(d)}</span>`).join('')}
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.4;margin-top:4px">${escHtml(p.desc||'')}</div>
+        <div class="badge badge-gray" style="margin-top:6px">Vacant — hiring not yet open</div>
+      </div>`).join('')}</div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
 }
 
 // ══════════════════════════════════════════════════

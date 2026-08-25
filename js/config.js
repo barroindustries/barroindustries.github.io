@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.187';
+window.APP_VERSION = '14.0.188';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -485,6 +485,82 @@ window.employmentStatusMeta = function(v) {
   const k = typeof v === 'string' ? v.trim().toLowerCase() : '';
   return window.EMPLOYMENT_STATUSES[k] || { label: 'Not set', badge: 'badge-gray', ends: false, unset: true };
 };
+
+// ── Team / employment-type registry (TEAM-PAGE-ORG-SPEC 2026-08-25) ──────
+// Single source for the Team page's color coding + type pill. Distinct from
+// ROLES (what a person may DO) and EMPLOYMENT_STATUSES (hiring stage) — this
+// is "how this person is paid / what kind of team they're on".
+window.TEAM_TYPES = {
+  office:     { label: 'Office Team',            sub: 'Monthly payroll',  color: '#0A84FF' },
+  operations: { label: 'Fabricator · Operations', sub: 'Weekly payroll',   color: '#FF9F0A' },
+  agent:      { label: 'Sales Agent',            sub: 'Commission-based', color: '#FFD60A' },
+  partner:    { label: 'Partner',                sub: 'External company', color: '#FF6B6B' },
+};
+// Classify a users/{uid} doc into a TEAM_TYPES key. Priority order (first hit
+// wins):
+//   1. explicit u.team stamp (new accounts get this — people.js invite save,
+//      dashboards.js openCreateWorkerModal/openAddEmployeeModal)
+//   2. u.role 'partner'/'agent'
+//   3. u.payClass === 'production' (merged payroll — only visible to
+//      money-priv viewers via fetchUsersWithPayroll above)
+//   4. u.hrManagedAccount === true (visible to EVERYONE — worker accounts are
+//      always HR-minted, so this is a safe fallback even without payroll access)
+//   5. default 'office'
+// Returns the KEY, never undefined.
+window.teamTypeOf = function(u) {
+  if (!u) return 'office';
+  if (typeof u.team === 'string' && window.TEAM_TYPES[u.team]) return u.team;
+  if (u.role === 'partner') return 'partner';
+  if (u.role === 'agent') return 'agent';
+  if (u.payClass === 'production') return 'operations';
+  if (u.hrManagedAccount === true) return 'operations';
+  return 'office';
+};
+// The TEAM_TYPES entry for a user — never undefined, falls back to office.
+window.teamTypeMeta = function(u) {
+  return window.TEAM_TYPES[window.teamTypeOf(u)] || window.TEAM_TYPES.office;
+};
+
+// ── Account admin — the "designated personnel" predicate (owner ruling
+// 2026-08-08: "a department dropdown must never hand out a tier — membership
+// buys the door, not the money behind it"). Neil flags specific people (his
+// HR/IT staff) via the Edit Employee modal's president-only toggle
+// (dashboards.js openEditEmployeeModal) — the FLAG carries account-creation
+// power, never department membership. President/manager always pass (existing
+// seniority, unchanged).
+window.isAccountAdmin = function () {
+  return ['president','manager'].includes(window.currentRole || '')
+      || !!(window.userProfile && window.userProfile.accountAdmin === true);
+};
+
+// ── Aspirational org — the team we're building by January (owner request,
+// 2026-08-25). Display-only config for the Team page's bottom "vacant
+// positions" section (people.js renderTeamTab) — no Firestore collection, no
+// hiring workflow. ONE array so wording swaps are trivial. `depts` entries are
+// existing window.DEPARTMENTS keys (all six rows below resolve against the
+// object above — Design/Production/IT/Admin/Sales/Government
+// Biddings/Marketing/Finance/HR all exist as keys).
+window.ASPIRATIONAL_POSITIONS = [
+  { key:'factory-coord-1', title:'Factory Coordinator 1', officer:'Architectural Operations Officer',
+    depts:['Design','Production'], icon:'📐',
+    desc:"Runs the factory's architectural side — turns approved designs into fabrication plans, and coordinates measurements, materials and installation schedules between Design and the shop floor." },
+  { key:'factory-coord-2', title:'Factory Coordinator 2', officer:'Technical Operations Officer',
+    depts:['Production','IT'], icon:'🔧',
+    desc:'Owns the technical side of the factory — machine upkeep, fabrication methods, quality checks and process improvements across every production stage.' },
+  { key:'admin-coord-1', title:'Administrative Coordinator 1', officer:'Business Development Officer',
+    depts:['Admin','Sales','Government Biddings'], icon:'📈',
+    desc:'Grows the business — partnerships, dealer and distributor accounts, government biddings, and new product lines from first contact to signed contract.' },
+  { key:'admin-coord-2', title:'Administrative Coordinator 2', officer:'Commercial & Marketing Officer',
+    depts:['Admin','Marketing'], icon:'📣',
+    desc:'Owns how Barro sells and looks — pricing and commercial terms, campaigns and catalogues, and the brand across every channel.' },
+  { key:'foreman', title:'Foreman', officer:'Production Head',
+    depts:['Production'], icon:'👷',
+    desc:'Leads the fabricators on the floor — assigns daily work per production stage, tracks hours and output, and enforces safety and workmanship standards.' },
+  { key:'accountant', title:'Accountant', officer:'Finance & Compliance Officer',
+    depts:['Finance','HR'], icon:'🧾',
+    desc:'Keeps the books and the government happy — ledger and reports, BIR / SSS / PhilHealth / Pag-IBIG filings, payroll compliance and audit readiness.' },
+];
+window.ASPIRATIONAL_TARGET_LABEL = 'Target: January';
 
 // ── Layoff (LAYOFF-SPEC 2026-08-19) ──────────────────────────────────────
 // THE one predicate for "this signed-in user is on layoff". Reads the

@@ -6453,7 +6453,21 @@ async function renderAnalytics() {
 
 // ── Team / Payroll ────────────────────────────────
 async function renderTeam() {
-  if(!isPresident()&&currentRole!=='manager'){document.getElementById('page-content').innerHTML=renderAccessDenied('Team');return;}
+  // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3a — window.isAccountAdmin() (config.js,
+  // built alongside this change) admits Neil's designated "account admin"
+  // flag-holders through the same door as president/manager. typeof-guarded:
+  // config.js loads eagerly before any lazy screen script, but a missing
+  // global here must degrade to "not an admin", never throw and blank the tab.
+  const acctAdminFlag = (typeof window.isAccountAdmin === 'function') && window.isAccountAdmin();
+  if(!isPresident()&&currentRole!=='manager'&&!acctAdminFlag){document.getElementById('page-content').innerHTML=renderAccessDenied('Team');return;}
+  // Flag-only account admin = has the door via the flag alone, not via
+  // president/manager. The legacy record-only "+ Add Employee Profile" button
+  // is hidden for them as deliberate steering, not because rules would stop
+  // it (the account-admin create branch caps role/department but doesn't pin
+  // the doc id, so a role-capped random-id record WOULD land): a record-only
+  // doc can never gain a login, and the whole point of this tier is the ONE
+  // account path — Create Worker Account — that mints login + records together.
+  const flagOnlyAdmin = acctAdminFlag && !isPresident() && currentRole!=='manager';
   const c=document.getElementById('page-content');
   c.innerHTML=`
     <div class="page-header">
@@ -6461,7 +6475,7 @@ async function renderTeam() {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-secondary btn-sm" id="team-csv-btn">${emojiIcon('⬇',16)} CSV</button>
         <button class="btn-secondary btn-sm" id="add-worker-btn">${emojiIcon('👷',16)} Create Worker Account</button>
-        <button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>
+        ${flagOnlyAdmin?'':`<button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>`}
         ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">${emojiIcon('🔴',16)} Logout All</button>`:''}
       </div>
     </div>
@@ -6493,7 +6507,9 @@ async function renderTeam() {
     const days = Math.floor(diff/86400000);
     return { dot: 'gray', label: days>0?days+'d ago':hrs+'h ago' };
   }
-  document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table table-cards" id="team-payroll-table">
+  document.getElementById('team-table').innerHTML=`
+    ${snap.payrollDenied?`<p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">${emojiIcon('🔒',12)} Pay figures are not shown to you.</p>`:''}
+    <div class="card"><div class="table-wrap"><table class="data-table table-cards" id="team-payroll-table">
     <thead><tr><th>Employee</th><th>Status</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
     <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';const pres=getPresence(u);return `<tr class="team-row">
       <td class="tc-name">${escHtml(u.displayName||u.email)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
@@ -6502,9 +6518,9 @@ async function renderTeam() {
       <td class="tc-detail" data-label="ID"><code style="font-size:11px">${escHtml(u.employeeId||'—')}</code></td>
       <td class="tc-detail" data-label="Role"><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td>
       <td class="tc-detail" data-label="Departments">${escHtml(depts)}</td>
-      <td class="tc-detail" data-label="Base">₱${formatNum(u.salary)}</td>
-      <td class="tc-net"><strong>₱${formatNum(net)}</strong></td>
-      <td class="tc-actions"><button class="btn-icon edit-emp-btn" data-uid="${u.id}" title="Edit employee" aria-label="Edit ${escHtml(u.displayName||u.email)}"><i data-lucide="pencil" style="width:14px;height:14px;stroke:currentColor"></i></button></td>
+      <td class="tc-detail" data-label="Base">${snap.payrollDenied?'—':'₱'+formatNum(u.salary)}</td>
+      <td class="tc-net"><strong>${snap.payrollDenied?'—':'₱'+formatNum(net)}</strong></td>
+      <td class="tc-actions"><button class="btn-icon edit-emp-btn" data-uid="${u.id}" title="${flagOnlyAdmin?'View employee / reset password':'Edit employee'}" aria-label="${flagOnlyAdmin?'View':'Edit'} ${escHtml(u.displayName||u.email)}"><i data-lucide="${flagOnlyAdmin?'eye':'pencil'}" style="width:14px;height:14px;stroke:currentColor"></i></button></td>
     </tr>`;}).join('')}</tbody>
   </table></div></div>`;
   document.querySelectorAll('.edit-emp-btn').forEach(btn=>btn.addEventListener('click',()=>{const u=users.find(x=>x.id===btn.dataset.uid);if(u)openEditEmployeeModal(u);}));
@@ -6517,16 +6533,20 @@ async function renderTeam() {
       tr.classList.toggle('tc-expanded');
     });
   });
-  document.getElementById('add-emp-btn').addEventListener('click', openAddEmployeeModal);
+  document.getElementById('add-emp-btn')?.addEventListener('click', openAddEmployeeModal);
   document.getElementById('add-worker-btn').addEventListener('click', openCreateWorkerModal);
   document.getElementById('team-csv-btn')?.addEventListener('click', () => window.exportCSV('team-payroll', users, [
     { key:'displayName', label:'Name', get:u=>u.displayName||u.email },
     { key:'username', label:'Username' }, { key:'employeeId', label:'Employee ID' },
     { key:'role', label:'Role', get:u=>ROLES[u.role]?.label||u.role },
     { key:'departments', label:'Departments', get:u=>(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join('; ') },
-    { key:'salary', label:'Base', get:u=>u.salary||0 }, { key:'allowance', label:'Allowance', get:u=>u.allowance||0 },
-    { key:'deductions', label:'Deductions', get:u=>u.deductions||0 },
-    { key:'net', label:'Net', get:u=>(u.salary||0)+(u.allowance||0)-(u.deductions||0) },
+    // Pay columns are omitted from the export entirely when payroll is denied to
+    // this viewer — an exported ₱0 reads as "no pay on file", not "not shown to you".
+    ...(snap.payrollDenied ? [] : [
+      { key:'salary', label:'Base', get:u=>u.salary||0 }, { key:'allowance', label:'Allowance', get:u=>u.allowance||0 },
+      { key:'deductions', label:'Deductions', get:u=>u.deductions||0 },
+      { key:'net', label:'Net', get:u=>(u.salary||0)+(u.allowance||0)-(u.deductions||0) },
+    ]),
   ]));
   document.getElementById('force-logout-all-btn')?.addEventListener('click', async () => {
     if (!await confirmDialog({ message: 'This will immediately sign out ALL active members. Continue?', danger: true })) return;
@@ -6579,11 +6599,18 @@ function openAddEmployeeModal() {
     const dept1=$('#emp-dept').value;
     const dept2=$('#emp-dept2').value;
     const depts=[dept1,dept2].filter(Boolean);
+    const empRole=$('#emp-role').value;
+    // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3b — same team stamp derivation as the
+    // invite path (people.js): partner/agent read off role, everyone else is
+    // 'office' (this record-only path can never produce an Operations hire —
+    // see the payClass:'regular' note below).
+    const team = empRole==='partner'?'partner':empRole==='agent'?'agent':'office';
     const ref = await db.collection('users').add({
       displayName:$('#emp-name').value.trim(),
       email:$('#emp-email').value.trim(),
       employeeId:$('#emp-eid').value.trim(),
-      role:$('#emp-role').value,
+      role:empRole,
+      team,
       departments:depts, department:depts[0]||'',
       title:$('#emp-title').value.trim(),
       startDate:$('#emp-start').value,
@@ -6613,7 +6640,26 @@ function _getWorkerAuth() {
 }
 
 // ── Create Worker Account (username + password, no email required) ────────
-function openCreateWorkerModal() {
+// TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3b — optional opts.linkWorker = { id, name,
+// jobTitle, department } (a worker_directory doc with no login yet, surfaced by
+// people.js's Fabricators block). When present this mints a login and LINKS it
+// to that existing worker record instead of creating a second, duplicate one —
+// see the linkWorker branch inside the save handler below.
+function openCreateWorkerModal(opts) {
+  const linkWorker = opts && opts.linkWorker;
+  // TEAM-PAGE-ORG-SPEC-2026-08-25 (verify pass) — a flag-only account admin's
+  // rules branch caps creates at employee/agent with no privileged department
+  // (noPrivilegedDeptOnCreate). This flow creates the Firebase Auth account
+  // FIRST and the users doc second, so offering them a role/dept the rules
+  // will deny doesn't just error — it strands a live auth account with a real
+  // password and no profile. Filter the options to what their branch can
+  // actually land, same as the Invite Member panel (js/screens/people.js).
+  const cwFlagOnly = (typeof window.isAccountAdmin==='function' && window.isAccountAdmin())
+    && !isPresident() && currentRole!=='manager';
+  const cwRoleEntries = (window.assignableRoles?window.assignableRoles():Object.entries(ROLES))
+    .filter(([k])=>!cwFlagOnly || k==='employee' || k==='agent');
+  const cwDeptKeys = Object.keys(DEPARTMENTS)
+    .filter(k=>!cwFlagOnly || !['Finance','Design','Ventures','IT'].includes(k));
   // ⚠ Panel-scoped, like the rest of this form (see the note under the openPage
   // call below). Unscoped, this was the same dying-panel bug in reverse: with a
   // closing Create-Worker panel still in the DOM, typing a name in the NEW form
@@ -6652,8 +6698,9 @@ function openCreateWorkerModal() {
       Creates a username + password login. The worker does <strong>not</strong> need an email address.
       HR manages all credentials.
     </p>
+    ${linkWorker ? `<p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">${emojiIcon('🔗',14)} Linking a login to existing worker record <strong>${escHtml(linkWorker.name||'')}</strong> — no duplicate profile will be created.</p>` : ''}
     <div class="form-row">
-      <div class="form-group"><label>Full Name <span style="color:var(--danger)">*</span></label><input id="cw-name" placeholder="e.g. Juan dela Cruz"/></div>
+      <div class="form-group"><label>Full Name <span style="color:var(--danger)">*</span></label><input id="cw-name" placeholder="e.g. Juan dela Cruz" value="${linkWorker?escHtml(linkWorker.name||''):''}"/></div>
       <div class="form-group"><label>Employee ID</label><input id="cw-eid" placeholder="BI-2026-001"/></div>
     </div>
     <div class="form-row">
@@ -6671,17 +6718,18 @@ function openCreateWorkerModal() {
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Role</label><select id="cw-role">${(window.assignableRoles?window.assignableRoles():Object.entries(ROLES)).map(([k,v])=>`<option value="${k}" ${k==='employee'?'selected':''}>${v.label}</option>`).join('')}</select></div>
-      <div class="form-group"><label>Primary Department</label><select id="cw-dept"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Role</label><select id="cw-role">${cwRoleEntries.map(([k,v])=>`<option value="${k}" ${k==='employee'?'selected':''}>${v.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Primary Department</label><select id="cw-dept"><option value="">None</option>${cwDeptKeys.map(k=>`<option value="${k}" ${linkWorker&&linkWorker.department===k?'selected':''}>${k}</option>`).join('')}</select></div>
     </div>
-    <div class="form-group"><label>Job Title</label><input id="cw-title" placeholder="e.g. Machine Operator"/></div>
+    ${cwFlagOnly?`<p style="font-size:11px;color:var(--text-muted);margin:-6px 0 10px">As an account admin you can create Employee and Agent accounts in non-restricted departments.</p>`:''}
+    <div class="form-group"><label>Job Title</label><input id="cw-title" placeholder="e.g. Machine Operator" value="${linkWorker?escHtml(linkWorker.jobTitle||''):''}"/></div>
     <div class="form-row">
       <div class="form-group"><label>Employee Type <span style="color:var(--danger)">*</span></label>
-        <select id="cw-payclass">
-          <option value="regular" selected>Office Team — paid monthly</option>
-          <option value="production">Operations Team — paid weekly</option>
+        <select id="cw-payclass" ${linkWorker?'disabled':''}>
+          <option value="regular" ${linkWorker?'':'selected'}>Office Team — paid monthly</option>
+          <option value="production" ${linkWorker?'selected':''}>Operations Team — paid weekly</option>
         </select>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Decides which pay run this person appears in. Nobody can be in both.</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${linkWorker?'Locked to Operations — linking an existing worker record.':'Decides which pay run this person appears in. Nobody can be in both.'}</div>
       </div>
       <div class="form-group"><label>Employment Status</label>
         <select id="cw-empstatus">
@@ -6690,14 +6738,15 @@ function openCreateWorkerModal() {
         </select>
       </div>
     </div>
-    <div class="form-row" id="cw-monthly-row">
+    <div class="form-row${linkWorker?' hidden':''}" id="cw-monthly-row">
       <div class="form-group"><label>Base Salary (₱ / month)</label><input id="cw-salary" type="number" inputmode="decimal" value="0"/></div>
       <div class="form-group"><label>Allowance (₱)</label><input id="cw-allow" type="number" inputmode="decimal" value="0"/></div>
     </div>
-    <div class="form-row hidden" id="cw-weekly-row">
+    <div class="form-row${linkWorker?'':' hidden'}" id="cw-weekly-row">
       <div class="form-group"><label>Daily Rate (₱)</label><input id="cw-daily" type="number" inputmode="decimal" value="0"/></div>
       <div class="form-group"><label>Hourly Rate (₱)</label><input id="cw-hourly" type="number" inputmode="decimal" value="0"/></div>
     </div>
+    ${linkWorker ? `<p style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px">Pay rate is not changed here — it stays whatever is already on file for this worker.</p>` : ''}
     <div class="form-group"><label>Official Employment Date</label><input id="cw-start" type="date" value="${bizDate()}"/></div>
     <div id="cw-error" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="cw-save-btn">Create Account</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -6777,6 +6826,10 @@ function openCreateWorkerModal() {
         startDate:   start,
         employmentStatus: empStatus,
         hrManagedAccount: true,
+        // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3b — both create and link modes
+        // stamp the explicit team classification (teamTypeOf's config.js
+        // priority-1 signal), same rule the invite path (people.js) uses.
+        team: payClass === 'production' ? 'operations' : 'office',
         createdBy:   currentUser.uid,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -6795,35 +6848,51 @@ function openCreateWorkerModal() {
       // ID-card and directory joins all resolve, and the double-pay guard
       // (window.monthlyRunSkipReason) sees BOTH facts agree instead of one.
       if (payClass === 'production') {
-        let idNumber = '';
-        try { idNumber = await window.nextWorkerIdNumber(); } catch (_) { idNumber = ''; }
-        await db.collection('worker_profiles').doc(uid).set({
-          name,
-          idNumber,
-          jobTitle: title,
-          department: dept || 'General',
-          dailyRate, hourlyRate,
-          status: 'active',
-          includeInPayroll: true,
-          linkedUid: uid,
-          startDate: start,
-          // issuedOn stays the ID-CARD date and keeps defaulting to today —
-          // js/screens/worker.js's pre-hire punch guard reads startDate first
-          // now and only falls back to this for older records.
-          issuedOn: start,
-          employmentStatus: empStatus,
-          caBalance: 0,
-          createdBy: currentUser.uid,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        // Keep the assignment-safe roster projection in step (Production picks
-        // workers from worker_directory, not worker_profiles).
-        await db.collection('worker_directory').doc(uid).set({
-          name, idNumber, jobTitle: title, department: dept || 'General',
-          status: 'active', photoUrl: ''
-        }, { merge: true }).catch(()=>{});
-        window.logAudit && window.logAudit('create','worker_profiles',uid,{ linkedUid: uid, dailyRate });
-        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('worker_profiles');
+        if (linkWorker) {
+          // Linking a login to an EXISTING worker_directory/worker_profiles
+          // record — never a second profile, never rates/status. firestore.rules
+          // enforces this as a set-once, single-key write: worker_profiles
+          // .update() must hasOnly(['linkedUid']) and the record must not
+          // already carry one; the worker_directory mirror is a merge of the
+          // same single key. nextWorkerIdNumber() is skipped — the id already
+          // exists on the linked record.
+          await db.collection('worker_profiles').doc(linkWorker.id).update({ linkedUid: uid });
+          await db.collection('worker_directory').doc(linkWorker.id).set({ linkedUid: uid }, { merge: true }).catch(()=>{});
+          window.logAudit && window.logAudit('link','worker_profiles',linkWorker.id,{ linkedUid: uid });
+        } else {
+          let idNumber = '';
+          try { idNumber = await window.nextWorkerIdNumber(); } catch (_) { idNumber = ''; }
+          await db.collection('worker_profiles').doc(uid).set({
+            name,
+            idNumber,
+            jobTitle: title,
+            department: dept || 'General',
+            dailyRate, hourlyRate,
+            status: 'active',
+            includeInPayroll: true,
+            linkedUid: uid,
+            startDate: start,
+            // issuedOn stays the ID-CARD date and keeps defaulting to today —
+            // js/screens/worker.js's pre-hire punch guard reads startDate first
+            // now and only falls back to this for older records.
+            issuedOn: start,
+            employmentStatus: empStatus,
+            caBalance: 0,
+            createdBy: currentUser.uid,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          // Keep the assignment-safe roster projection in step (Production picks
+          // workers from worker_directory, not worker_profiles). linkedUid mirrored
+          // here too so a fresh worker created straight from this form reads the
+          // same "already has a login" signal a legacy worker_directory doc gets
+          // only after being linked (people.js's Fabricators block id/linkedUid check).
+          await db.collection('worker_directory').doc(uid).set({
+            name, idNumber, jobTitle: title, department: dept || 'General',
+            status: 'active', photoUrl: '', linkedUid: uid
+          }, { merge: true }).catch(()=>{});
+          window.logAudit && window.logAudit('create','worker_profiles',uid,{ linkedUid: uid, dailyRate });
+        }
+        if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('worker_profiles'); dbCacheInvalidate('worker_directory'); }
       }
 
       dbCacheInvalidate('users'); dbCacheInvalidate('users-presence');
@@ -6844,7 +6913,12 @@ function openCreateWorkerModal() {
           <div>Password: <strong style="color:var(--primary-light)">${escHtml(password)}</strong></div>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin-top:10px">${emojiIcon('⚠️',12)} Write this down now. The password won't be shown again in plain text.</p>
-      `, `<button class="btn-primary" onclick="Overlay.clearAll();renderTeam()">Done</button>`);
+      `, `<button class="btn-primary" onclick="Overlay.clearAll();${linkWorker?"navigateTo('team-directory')":"renderTeam()"}">Done</button>`);
+      // ^ Done returns to where the flow STARTED: the two legacy callers live on
+      // renderTeam, but linkWorker mode is launched from the Team directory's
+      // Fabricators block (people.js) — dumping that user onto the admin payroll
+      // table instead of back onto the directory they were browsing is a silent
+      // page hijack (verify pass, TEAM-PAGE-ORG-SPEC-2026-08-25).
     } catch(err) {
       btn.disabled = false; btn.textContent = 'Create Account';
       errEl.textContent = err.code === 'auth/email-already-in-use'
@@ -6865,7 +6939,16 @@ window.openCreateWorkerModal = openCreateWorkerModal;
 
 function openEditEmployeeModal(u) {
   const curDepts = Array.isArray(u.departments)&&u.departments.length ? u.departments : u.department ? [u.department] : [];
-  const _panel = openPage(`Edit: ${u.displayName||u.email}`,`
+  // TEAM-PAGE-ORG-SPEC-2026-08-25 — a flag-only account admin (accountAdmin
+  // flag, but not president/manager) reaches this modal for ONE live action:
+  // the worker password reset (the adminResetPassword callable admits them).
+  // Every users/payroll UPDATE in the Save handler below would be rules-denied
+  // for them, so the form renders view-only — inputs disabled, Save replaced by
+  // Close — rather than offering a Save that always errors.
+  const euViewOnly = (typeof window.isAccountAdmin==='function' && window.isAccountAdmin())
+    && !isPresident() && currentRole!=='manager';
+  const _panel = openPage(`${euViewOnly?'View':'Edit'}: ${u.displayName||u.email}`,`
+    ${euViewOnly?`<p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:8px 12px;border-radius:8px;margin-bottom:12px">View only — account admins can reset worker passwords here; profile and pay edits are for the President and Managers.</p>`:''}
     ${u.username ? `
     <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="font-size:13px">${emojiIcon('👷',13)} Worker account — login: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></span>
@@ -6879,12 +6962,26 @@ function openEditEmployeeModal(u) {
       <div class="form-group"><label>Primary Dept</label><select id="eu-dept"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}" ${curDepts[0]===k?'selected':''}>${k}</option>`).join('')}</select></div>
     </div>
     <div class="form-group"><label>Secondary Dept</label><select id="eu-dept2"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}" ${curDepts[1]===k?'selected':''}>${k}</option>`).join('')}</select></div>
+    <div class="form-group">
+      <label>Team / Employment Type</label>
+      <select id="eu-team">
+        <option value="">— auto —</option>
+        ${Object.entries(window.TEAM_TYPES||{}).map(([k,v])=>`<option value="${k}" ${u.team===k?'selected':''}>${escHtml(v.label)}</option>`).join('')}
+      </select>
+    </div>
+    ${isPresident() ? `
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="eu-acctadmin" ${u.accountAdmin===true?'checked':''} style="width:16px;height:16px;flex-shrink:0"/>
+      <label for="eu-acctadmin" style="margin:0;font-weight:400;font-size:13px">Account admin — may create logins, invite members and reset worker passwords</label>
+    </div>` : ''}
     <div class="form-row">
       <div class="form-group"><label>Base Salary (₱)</label><input id="eu-salary" type="number" inputmode="decimal" value="${u.salary||0}"/></div>
       <div class="form-group"><label>Allowance (₱)</label><input id="eu-allow" type="number" inputmode="decimal" value="${u.allowance||0}"/></div>
     </div>
     <div class="form-group"><label>Deductions (₱)</label><input id="eu-deduct" type="number" inputmode="decimal" value="${u.deductions||0}"/></div>
-  `,`<button class="btn-primary" id="save-eu-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, euViewOnly
+    ? `<button class="btn-secondary" onclick="closeModal()">Close</button>`
+    : `<button class="btn-primary" id="save-eu-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   // ⚠ SCOPED TO THIS PANEL, NOT document. This is the money-adjacent half of the
   // dying-panel bug: openPage keeps a CLOSING page in the DOM for ~300ms, so
@@ -6893,17 +6990,28 @@ function openEditEmployeeModal(u) {
   // users/{uid} and payroll/{uid} docs were written with A's name, employee id,
   // role, departments, salary, allowance and deductions.
   const $ = (sel) => _panel.querySelector(sel);
-  $('#save-eu-btn').addEventListener('click',async()=>{
+  // View-only mode: dead the form controls, never the Reset Password button.
+  if (euViewOnly) _panel.querySelectorAll('input, select').forEach(el => { el.disabled = true; });
+  $('#save-eu-btn')?.addEventListener('click',async()=>{
     const dept1=$('#eu-dept').value;
     const dept2=$('#eu-dept2').value;
     const depts=[dept1,dept2].filter(Boolean);
-    await db.collection('users').doc(u.id).update({
+    const euUpdate = {
       displayName:$('#eu-name').value.trim(),
       employeeId:$('#eu-eid').value.trim(),
       title:$('#eu-title').value.trim(),
       role:$('#eu-role').value,
       departments:depts, department:depts[0]||'',
-    });
+      team:$('#eu-team').value,
+    };
+    // Account-admin is a PRESIDENT-ONLY mutable field (firestore.rules Part 4b:
+    // accountAdminUnchanged() denies the whole update if any other viewer's
+    // write tries to touch it). The checkbox only exists in the DOM when
+    // isPresident() rendered it above, so a manager's save must never even
+    // carry the key — not write false, not omit-as-clear, just never appear —
+    // or a manager saving THIS form would silently strip a flag they can't see.
+    if (isPresident()) euUpdate.accountAdmin = $('#eu-acctadmin').checked === true;
+    await db.collection('users').doc(u.id).update(euUpdate);
     // Pay is stored in the protected payroll/{uid} collection (finance/admin write).
     await db.collection('payroll').doc(u.id).set({
       salary:parseFloat($('#eu-salary').value)||0,
@@ -6914,7 +7022,12 @@ function openEditEmployeeModal(u) {
     dbCacheInvalidate('users'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 
-  // Reset Password (worker accounts only)
+  // Reset Password (worker accounts only) — calls the adminResetPassword callable.
+  // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3d's "widen the callable's visibility gate
+  // with || window.isAccountAdmin()" is satisfied one level up: this button's
+  // only gate is `u.username` (above), and the only way to reach this modal at
+  // all is renderTeam's edit-emp-btn, whose gate was already widened in Part 3a.
+  // There is no separate role check here to duplicate.
   // v14 Batch5 A3 — KEEP as openModal: a small single-field quick sheet nested
   // over the Edit Employee openPage. Its follow-up "Password Reset" success
   // screen below is also openModal, so Batch1 1b's modal-over-modal swap

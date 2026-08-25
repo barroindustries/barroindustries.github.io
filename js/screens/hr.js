@@ -435,8 +435,13 @@ window.renderHR = async function(currentUser, currentRole){
   // department split this file's own header warns about. Surfaced 2026-08-12
   // by the owner asking that HR be able to reinstate offboarded staff: they
   // already could, and simply could not get there.
+  // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3c — window.isAccountAdmin() (config.js)
+  // is Neil's designated-personnel flag, orthogonal to HR-department membership
+  // (his 2026-08-08 ruling: a department must never hand out a tier). typeof-
+  // guarded so a config.js load race degrades to "not an admin", not a throw.
   const canAccounts = ['president','manager'].includes(role)
-    || (Array.isArray(window.currentDepts) && window.currentDepts.includes('HR'));
+    || (Array.isArray(window.currentDepts) && window.currentDepts.includes('HR'))
+    || (typeof window.isAccountAdmin === 'function' && window.isAccountAdmin());
   // 2026-08-09 — HR stays OPEN to the Corporate Secretary (People & Roles,
   // attendance, leave, ID cards, holidays, work sites: owner ruling 2), but
   // Payroll does NOT: firestore.rules now denies them payroll/payslips/pay_runs/
@@ -478,7 +483,13 @@ window.renderHR = async function(currentUser, currentRole){
     // button) needed its own door once the hub's Type A/Type B toggle went
     // away. Nothing in that screen was deleted; it just moved here.
     ...(canPayroll ? [{ icon:'👷', title:'Workers & Clock', desc:'Operations Team profiles, the punch kiosk, ID cards & one-worker payslips', go:()=>window.renderWorkersScreen(currentUser, currentRole) }] : []),
-    ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
+    // Card desc must match what THIS viewer can actually do behind the door
+    // (TEAM-PAGE-ORG-SPEC-2026-08-25 verify pass): a flag-only account admin
+    // gets create/reset but a view-only Edit Employee modal — promising
+    // "edit pay" to them is a dead affordance.
+    ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins',
+      desc: (['president','manager'].includes(role) ? 'Create worker logins, reset passwords, edit pay' : 'Create worker logins & reset passwords'),
+      go:()=>navigateTo('team') }] : []),
     // The three screens an HR-DEPARTMENT member can now reach. They read fine
     // (firestore.rules canHrView()), but every WRITE verb on them — approving
     // leave, editing an attendance record, moving a geofence — is still the
