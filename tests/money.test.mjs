@@ -49,7 +49,7 @@ window.bizYear = () => 2026;
 
 const statutory = require('../js/statutory-tables.js');
 const money = require('../js/money-core.js');
-const { vatSplit, computePayLine, computeBreakeven, monthBounds, computeKpiForMonth, applyPayLineOverride, resolveStatutoryEE } = money;
+const { vatSplit, computePayLine, computeBreakeven, payrollSplitFromRows, monthBounds, computeKpiForMonth, applyPayLineOverride, resolveStatutoryEE } = money;
 const { computeStatutory } = statutory;
 
 // window.ledgerKind lives in js/config.js (the ONE place P&L income/expense
@@ -695,6 +695,36 @@ describe('computeBreakeven', () => {
     assert.deepEqual(r.classifiedFixed, [{ cat: 'Payroll Expense', amt: 20000 }]);
     assert.equal(r.fixedTotal, 20000);
     assert.equal(r.variableTotal, 20000);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// payrollSplitFromRows — js/money-core.js (COSTING-DASHBOARD-SPEC-2026-08-26
+// §A1). Moved verbatim out of js/screens/finance.js's beComputePayrollSplit
+// (that function now delegates here); these two tests pin the exact same
+// refNumber-prefix behavior that file's own beComputePayrollSplit tests
+// (exercised indirectly above, via computeBreakeven's payrollSplit tests)
+// already relied on, now against the money-core function directly.
+// ═══════════════════════════════════════════════════════════
+describe('payrollSplitFromRows — js/money-core.js §A1 (moved from finance.js\'s beComputePayrollSplit)', () => {
+  it('splits "Payroll Expense" rows by refNumber prefix: a weekly/worker prefix (e.g. PAYW-) is direct labor, everything else in that category is office', () => {
+    const r = payrollSplitFromRows([
+      { category: 'Payroll Expense', amount: 40000, refNumber: 'PAYW-2026-08-24' },  // weekly fabricator run -> direct
+      { category: 'Payroll Expense', amount: 60000, refNumber: 'PAY-2026-08' },       // monthly office run -> office
+      { category: 'Materials', amount: 15000, refNumber: 'PAYW-should-be-ignored' },  // wrong category -> ignored entirely
+    ]);
+    assert.deepEqual(r, { directPesos: 40000, officePesos: 60000 });
+  });
+
+  it('every listed weekly prefix is recognized as direct labor, and rows with no/other refNumber default to office', () => {
+    const rows = [
+      'PAYW-1', 'WPAY-1', 'NETPAYW-1', 'SSSPAYW-1', 'PHPAYW-1', 'HDMFPAYW-1', 'WHTPAYW-1', 'EMPDEDW-1', 'CADEDUCTW-1'
+    ].map(ref => ({ category: 'Payroll Expense', amount: 1000, refNumber: ref }));
+    rows.push({ category: 'Payroll Expense', amount: 5000, refNumber: '' });        // no refNumber -> office
+    rows.push({ category: 'Payroll Expense', amount: 7000 });                        // refNumber absent -> office
+    const r = payrollSplitFromRows(rows);
+    assert.equal(r.directPesos, 9000);   // 9 weekly-prefixed rows × 1000
+    assert.equal(r.officePesos, 12000);  // 5000 + 7000
   });
 });
 

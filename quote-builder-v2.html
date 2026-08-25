@@ -1787,6 +1787,19 @@ const COSTING_DEFAULTS = Object.freeze({
   updatedAt: null,
 });
 
+// COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — live pace feed published
+// by the Analytics costing dashboard (Workstream A) at product_costs/_pace,
+// `{pace, baseOH, suggestedOH, computedAt, byUid}`. Read-only here, same
+// finance/admin-gated collection as COSTING_SETTINGS above and the same
+// `!PARTNER_MODE` branch in loadDatabase() below — never fetched for a
+// partner session (BS included), so it stays null for every PARTNER_MODE
+// session exactly like COSTING_SETTINGS does, with no extra guard needed at
+// the read sites. Stays null until that read completes/fails, or when the
+// dashboard has never published a pace doc yet; paceFactor() (below,
+// computeTrueCost()'s section) treats null/stale (>7 days old) the same way
+// — pace 1, i.e. Phase 1's baseOH×sizeF behavior, unchanged.
+let COSTING_PACE = null;
+
 // ═══════════════════════════════════════════════════════════════════
 //  DATABASE LOADING
 //  Tries to load from a local/relative products-database.json first,
@@ -1840,15 +1853,21 @@ async function loadDatabase(force) {
         // one Firestore round-trip as the per-product cost docs (Promise.all,
         // not a second sequential await). '_settings' is skipped out of
         // costMap below so it can never be mistaken for a product's cost row.
-        const [costSnap, settingsSnap] = await Promise.all([
+        // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — the pace doc rides
+        // the same round-trip too; '_pace' is skipped out of costMap for the
+        // same reason '_settings' is.
+        const [costSnap, settingsSnap, paceSnap] = await Promise.all([
           db.collection('product_costs').limit(1000).get(),
           db.collection('product_costs').doc('_settings').get(),
+          db.collection('product_costs').doc('_pace').get(),
         ]);
-        costSnap.docs.forEach(cd => { if (cd.id !== '_settings') costMap[cd.id] = cd.data(); });
+        costSnap.docs.forEach(cd => { if (cd.id !== '_settings' && cd.id !== '_pace') costMap[cd.id] = cd.data(); });
         COSTING_SETTINGS = settingsSnap.exists ? { ...COSTING_DEFAULTS, ...settingsSnap.data() } : { ...COSTING_DEFAULTS };
+        COSTING_PACE = paceSnap.exists ? paceSnap.data() : null;
       } catch (ce) {
         console.warn('[quote-builder] product_costs load skipped (finance/admin only)', ce);
         COSTING_SETTINGS = { ...COSTING_DEFAULTS };
+        COSTING_PACE = null;
       }
     }
 
@@ -4323,6 +4342,26 @@ function sizeBandFactor(direct, bands){
   return list[list.length-1][1];
 }
 
+// COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — turns the Analytics
+// costing dashboard's published product_costs/_pace doc (COSTING_PACE
+// global, set by loadDatabase()'s `!PARTNER_MODE` branch — never populated
+// for a partner session, so this naturally returns the "no live pace"
+// result there with no extra guard needed) into the OH loading multiplier.
+// Live only when computedAt parses and is within the last 7 days — a
+// dashboard nobody has opened in over a week is stale, not wrong, so it
+// falls back to pace 1 (Phase 1's baseOH×sizeF behavior, byte-identical).
+// Pure/no-DOM, no Firestore read, same posture as sizeBandFactor() above;
+// its only caller is computeTrueCost() below.
+function paceFactor(){
+  if (!COSTING_PACE || !COSTING_PACE.computedAt) return { pace:1, live:false };
+  const computedMs = Date.parse(COSTING_PACE.computedAt);
+  if (!Number.isFinite(computedMs)) return { pace:1, live:false };
+  const ageMs = Date.now()-computedMs;
+  const live = ageMs>=0 && ageMs<=7*24*60*60*1000; // 7 days, ms
+  const pace = live ? Math.min(1.25, Math.max(0.85, COSTING_PACE.pace)) : 1;
+  return { pace, live, computedAt:computedMs };
+}
+
 // COSTING-PHASE1-SPEC-2026-08-26 §2/§4 — one item's cost inputs for the
 // true-cost engine. Catalog items (item.id !== 'CUSTOM') prefer the LIVE
 // product_costs-backed value on DB.products (looked up by id) over the
@@ -4385,7 +4424,8 @@ function computeTrueCost(){
   const consumables = labor*cs.consumablesPct;
   const direct = materials+matWaste+labor+consumables;              // = FLOOR
   const sizeF = sizeBandFactor(direct, cs.sizeBands);
-  const ohPct = Math.min(cs.ohMax, Math.max(cs.ohMin, cs.baseOH*sizeF));
+  const pf = paceFactor();                                          // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B
+  const ohPct = Math.min(cs.ohMax, Math.max(cs.ohMin, cs.baseOH*pf.pace*sizeF));
   const ohAmt = direct*ohPct;
   const trueCost = direct+ohAmt;
   const target = trueCost/(1-cs.targetMargin);
@@ -4393,7 +4433,8 @@ function computeTrueCost(){
   const marginPct = sell>0 ? (sell-trueCost)/sell : 0;
   return {
     materials, matWaste, laborHrsTotal, laborPesosFallback, labor, consumables,
-    direct, sizeF, ohPct, ohAmt, trueCost, target, sell, marginPct,
+    direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
+    ohPct, ohAmt, trueCost, target, sell, marginPct,
     anyMissingCatalogCost, liveById, cs,
   };
 }
@@ -4464,13 +4505,21 @@ function renderTrueCostPanelHtml(cost){
   else if (cost.laborPesosFallback>0) laborLabel='capital labor';
   else laborLabel='no labor basis yet';
 
+  // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — pace chip. Live (fresh
+  // ≤7-day product_costs/_pace doc) shows the published multiplier + when it
+  // was computed; stale/absent keeps the original Phase 1 "pace —" text
+  // byte-identical. Same tooltip either way per spec.
+  const paceChip = cost.paceLive
+    ? `<span title="published by the Analytics costing dashboard">pace ×${cost.pace.toFixed(3)} · as of ${fmtShortDate(new Date(cost.paceComputedAt))}</span>`
+    : `<span title="published by the Analytics costing dashboard">pace —</span>`;
+
   const buildup=`<table class="labor-tbl" style="margin-bottom:10px;"><tbody>
     <tr><td>Materials</td><td style="text-align:right;">${formatPeso(cost.materials)}</td></tr>
     <tr><td>+ Waste (${Math.round(cs.wastePct*100)}%)</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
     <tr><td>+ Labor (${laborLabel})</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
     <tr><td>+ Consumables (${Math.round(cs.consumablesPct*100)}%)</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
-    <tr><td>+ OH (base ${Math.round(cs.baseOH*100)}% × size ${cost.sizeF.toFixed(2)}, <span title="live pace lands with the Overhead dashboard phase">pace —</span>)</td><td style="text-align:right;">${formatPeso(cost.ohAmt)}</td></tr>
+    <tr><td>+ OH (base ${Math.round(cs.baseOH*100)}% × size ${cost.sizeF.toFixed(2)}, ${paceChip})</td><td style="text-align:right;">${formatPeso(cost.ohAmt)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>TRUE COST</td><td style="text-align:right;">${formatPeso(cost.trueCost)}</td></tr>
   </tbody></table>`;
 
@@ -5947,6 +5996,13 @@ function addDays(iso,n){
 function fmtDate(d){
   if(!(d instanceof Date)||isNaN(d)) return '';
   return d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'});
+}
+// COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — short "Aug 26" form for
+// the true-cost panel's live pace chip (renderTrueCostPanelHtml()); fmtDate()
+// above is the full "August 26, 2026" form used elsewhere.
+function fmtShortDate(d){
+  if(!(d instanceof Date)||isNaN(d)) return '';
+  return d.toLocaleDateString('en-PH',{month:'short',day:'numeric'});
 }
 function sanitizeFile(s){
   return (s||'').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();

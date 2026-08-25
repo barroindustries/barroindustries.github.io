@@ -5541,7 +5541,9 @@ async function renderAnalytics() {
   const _denied = [];
   const _DENY_NAMES = { ledger:'Income & expenses (ledger)', job_costs:'Job costs & margins',
                         payslips:'Payslips', payroll:'Payroll', expenses:'Expenses',
-                        strategy_notes:'Strategy notes' };
+                        strategy_notes:'Strategy notes',
+                        // COSTING-DASHBOARD-SPEC-2026-08-26 — Costing subtab's 6-month trend card.
+                        finance_rollup:'6-month cost trend (rollups)' };
   const _noteDenied = (key, e) => {
     if (!(e && (e.code === 'permission-denied' || e.code === 'permission_denied'))) return;
     const base = String(key).split(':')[0];
@@ -5776,10 +5778,16 @@ async function renderAnalytics() {
     {id:'sales',label:'Sales',icon:emojiIcon('🛒',16)},
     {id:'marketing',label:'Marketing',icon:emojiIcon('📣',16)},
     {id:'finance',label:'Finance',icon:emojiIcon('💰',16)},
+    // COSTING-DASHBOARD-SPEC-2026-08-26 — same money-tier carve-out as
+    // 'finance' just above (both are filtered out below for a Secretary
+    // whose SECRETARY_BLOCKED_DEPTS includes 'Finance'): this subtab reads
+    // the ledger, finance_config/breakeven and finance_rollup, exactly the
+    // collections the Secretary is refused.
+    {id:'costing',label:'Costing',icon:emojiIcon('🧮',16)},
     {id:'production',label:'Production',icon:emojiIcon('🏭',16)},
     {id:'government',label:'Gov. Biddings',icon:emojiIcon('🏛️',16)},
     {id:'strategy',label:'Strategy',icon:emojiIcon('🎯',16)},
-  ].filter(t => !(t.id === 'finance' && _anBlockedDepts.includes('Finance')));
+  ].filter(t => !((t.id === 'finance' || t.id === 'costing') && _anBlockedDepts.includes('Finance')));
 
   c.innerHTML=`
     <div class="page-header"><h2>${emojiIcon('📊',20)} Analytics & Performance</h2></div>
@@ -6175,6 +6183,220 @@ async function renderAnalytics() {
     new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:CT.good,backgroundColor:CT.goodA,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text,callback:v=>'₱'+window.fmtN2(v)},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
   };
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // COSTING-DASHBOARD-SPEC-2026-08-26 — Analytics "Costing" subtab.
+  // Powered by the SAME break-even engine (window.computeBreakeven) the
+  // Finance › Break-even tab uses (js/screens/finance.js's
+  // renderBreakevenTab) — same classification resolver
+  // (window.beResolveClassification, exposed there for this), same payroll
+  // split (window.payrollSplitFromRows, js/money-core.js §A1) — so this
+  // screen's numbers can never disagree with Break-even's. Editing overhead
+  // stays on Finance › Break-even; this tab reads and links there (chip
+  // below, and the reverse chip on Break-even's own header).
+  // ═══════════════════════════════════════════════════════════════════════
+  const renderCosting = async () => {
+    const CT = window.chartTheme();
+    const wrap = document.getElementById('analytics-content');
+    const todayStr = bizDate();
+    const month = todayStr.slice(0,7);   // Manila 'YYYY-MM', current month only (spec: "current month")
+
+    // ── Data — identical inputs to the Break-even tab ("This Month") ──────
+    const ledSnap = await window.ledgerForPeriod('month').catch(() => ({ docs: [], _denied: true }));
+    if (ledSnap && ledSnap._denied) _noteDenied('ledger', { code: 'permission-denied' });
+    const monthLedger = (ledSnap.docs || []).map(d => (d && d.data ? { id: d.id, ...d.data() } : d));
+    const incomeRows  = monthLedger.filter(l => ledgerKind(l) === 'income');
+    const expenseRows = monthLedger.filter(l => ledgerKind(l) === 'expense');
+    const income = sum(incomeRows, l => l.amount);
+
+    // {cat:{income,expense}} — same shape/build as renderBreakevenTab's own
+    // `bump`, so beResolveClassification resolves every category exactly as
+    // the Break-even tab would for this same month.
+    const byCategory = {};
+    const _bump = (arr, field) => arr.forEach(e => {
+      const k = e.category || 'Other';
+      const b = byCategory[k] || (byCategory[k] = { income: 0, expense: 0 });
+      b[field] += (e.amount || 0);
+    });
+    _bump(expenseRows, 'expense');
+    _bump(incomeRows, 'income');
+    const categories = Object.keys(byCategory);
+
+    const cfgSnap = await db.collection('finance_config').doc('breakeven').get().catch(() => null);
+    const cfg = (cfgSnap && cfgSnap.exists) ? (cfgSnap.data() || {}) : {};   // catch → defaults, no denial banner (config, not money data)
+    const classification = window.beResolveClassification
+      ? window.beResolveClassification(cfg, categories)
+      : { fixed: [], variable: [] };
+    const manualFixed = Array.isArray(cfg.manualFixed) ? cfg.manualFixed : [];
+    const profitGoal = +cfg.profitGoal || 0;
+    const payrollSplit = window.payrollSplitFromRows(expenseRows);
+
+    const r = window.computeBreakeven({ income, byCategory, classification, manualFixed, payrollSplit });
+
+    // ── Card 3 inputs — pace factor ────────────────────────────────────────
+    const targetContribution = r.fixedTotal + profitGoal;
+    const monthB = window.monthBounds ? window.monthBounds(month, todayStr) : { upToDay: 1, daysInMonth: 30 };
+    const elapsed = monthB.daysInMonth > 0 ? monthB.upToDay / monthB.daysInMonth : 0;
+    let pace = 1, paceNote = null;
+    if (targetContribution <= 0 || elapsed <= 0) {
+      pace = 1;
+      paceNote = 'set overhead/profit goal';
+    } else {
+      const raw = 1 + 0.5 * (1 - (r.contributionPesos / (targetContribution * elapsed))) * elapsed;
+      pace = Math.min(1.25, Math.max(0.85, raw));
+    }
+
+    // ── Card 2 — required sales / per-day-remaining sub-line ──────────────
+    const reqSales = r.requiredSales(profitGoal);
+    const daysRemaining = Math.max(1, monthB.daysInMonth - monthB.upToDay);
+    const gapToGoal = (typeof reqSales === 'number') ? Math.max(0, reqSales - income) : null;
+    const perDayGoal = (gapToGoal != null) ? +(gapToGoal / daysRemaining).toFixed(2) : null;
+    const cmPct = (r.contributionMarginRatio != null) ? (r.contributionMarginRatio * 100).toFixed(1) + '%' : '—';
+    const contribBarPct = targetContribution > 0 ? Math.max(0, Math.min(100, Math.round(r.contributionPesos / targetContribution * 100))) : 0;
+
+    // ── Card 4 — suggested OH% (product_costs/_settings, catch → code
+    // defaults matching quote-builder-v2.html's COSTING_DEFAULTS) ─────────
+    const settingsSnap = await db.collection('product_costs').doc('_settings').get().catch(() => null);
+    const settingsData = (settingsSnap && settingsSnap.exists) ? (settingsSnap.data() || {}) : {};
+    const baseOH = (typeof settingsData.baseOH === 'number') ? settingsData.baseOH : 0.25;
+    const ohMin  = (typeof settingsData.ohMin  === 'number') ? settingsData.ohMin  : 0.10;
+    const ohMax  = (typeof settingsData.ohMax  === 'number') ? settingsData.ohMax  : 0.45;
+    const suggestedOH = Math.min(ohMax, Math.max(ohMin, baseOH * pace));
+    // Same size bands as quote-builder-v2.html's COSTING_DEFAULTS.sizeBands — display-only
+    // reference table here (the per-quote factor itself is applied in the quote builder).
+    const SIZE_BANDS_REF = [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]];
+
+    // ── Card 5 — 6-month trend (finance_rollup/{YYYY-MM}, catch → denied) ──
+    const rollupResults = await Promise.all(months6.map(m =>
+      db.collection('finance_rollup').doc(m.ym).get()
+        .then(s => ({ ym: m.ym, data: s.exists ? s.data() : null, denied: false }))
+        .catch(e => ({ ym: m.ym, data: null, denied: !!(e && e.code === 'permission-denied') }))
+    ));
+    if (rollupResults.length && rollupResults.every(x => x.denied)) _noteDenied('finance_rollup', { code: 'permission-denied' });
+    const rollupOf = (ym) => { const x = rollupResults.find(x => x.ym === ym); return x ? x.data : null; };
+    // Fixed-cost line, cheaply derived from each month's byCategory + the SAME
+    // classification.fixed list resolved above — rollups have no refNumber
+    // detail, so this can't apply the payroll split; "keep it simple" per spec.
+    const fixedCostOf = (data) => {
+      if (!data || !data.byCategory) return 0;
+      return classification.fixed.reduce((s, cat) => s + (+((data.byCategory[cat] || {}).expense) || 0), 0);
+    };
+
+    // ── Publish the pace feed — this is what makes the quote builder's pace
+    // chip go live. Write allowed for senior-admin/finance per firestore.rules
+    // (product_costs/{docId}); silent skip on denial, the dashboard still
+    // renders either way. ──────────────────────────────────────────────────
+    try {
+      await db.collection('product_costs').doc('_pace').set({
+        pace: +pace.toFixed(4),
+        baseOH,
+        suggestedOH: +suggestedOH.toFixed(4),
+        computedAt: new Date().toISOString(),
+        byUid: (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || ''
+      }, { merge: true });
+    } catch (_e) { /* denied for this role/session — silent skip, per spec */ }
+
+    // ── Render ──────────────────────────────────────────────────────────
+    const top5Fixed = [...r.classifiedFixed].sort((a, b) => b.amt - a.amt).slice(0, 5);
+    const manualTotal = +(r.classifiedFixed.filter(x => x.manual).reduce((s, x) => s + x.amt, 0)).toFixed(2);
+    const paceGaugePct = Math.max(0, Math.min(100, Math.round((pace - 0.85) / (1.25 - 0.85) * 100)));
+
+    wrap.innerHTML = `
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card"><div class="kpi-label">Overhead Pool (Fixed)</div><div class="kpi-value">₱${fmt(r.fixedTotal)}</div></div>
+        <div class="kpi-card ${r.contributionPesos>=0?'green':'warn'}"><div class="kpi-label">Contribution MTD</div><div class="kpi-value">₱${fmt(r.contributionPesos)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Pace Factor</div><div class="kpi-value">×${pace.toFixed(2)}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Suggested OH%</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <h3>${emojiIcon('🏗',18)} Overhead Pool</h3>
+          <button class="btn-secondary btn-sm" id="cost-edit-overhead-btn">${emojiIcon('✏️',14)} Edit overhead → Finance › Break-even</button>
+        </div>
+        <div class="card-body">
+          <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Fabricator payroll is counted as direct labor, not overhead — only office/admin payroll is in the pool below.</p>
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+            <tbody>${top5Fixed.length ? top5Fixed.map(x=>`<tr><td>${escHtml(x.cat)}${x.manual?` <span class="badge badge-gray" style="font-size:9px">manual</span>`:''}</td><td style="text-align:right">₱${fmt(x.amt)}</td></tr>`).join('') : `<tr><td colspan="2" style="color:var(--text-muted)">No fixed costs classified this month</td></tr>`}</tbody>
+          </table></div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Manual overhead entries: <strong style="color:var(--text)">₱${fmt(manualTotal)}</strong> · Total pool: <strong style="color:var(--text)">₱${fmt(r.fixedTotal)}</strong></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>${emojiIcon('💰',18)} Contribution — MTD</h3></div>
+        <div class="card-body">
+          <div class="kpi-row" style="margin-bottom:10px">
+            <div class="kpi-card"><div class="kpi-label">Contribution (₱)</div><div class="kpi-value">₱${fmt(r.contributionPesos)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Contribution Margin %</div><div class="kpi-value">${cmPct}</div></div>
+          </div>
+          <div class="progress-bar-wrap" style="margin-bottom:8px"><div class="progress-bar-fill" style="width:${contribBarPct}%;background:${contribBarPct>=100?'var(--success)':'var(--warning)'}"></div></div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Target (fixed + profit goal): <strong style="color:var(--text)">₱${fmt(targetContribution)}</strong> — ${contribBarPct}% reached</div>
+          ${reqSales!=null ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);flex-wrap:wrap;gap:8px">
+            <span>Required sales for goal: <strong style="color:var(--text)">₱${fmt(reqSales)}</strong></span>
+            <span>Per day (${daysRemaining} day${daysRemaining===1?'':'s'} left): <strong style="color:var(--text)">${perDayGoal!=null?'₱'+fmt(perDayGoal):'—'}</strong></span>
+          </div>` : `<div style="font-size:12px;color:var(--text-muted)">Required sales: n/a — variable costs consume all of revenue at today's mix.</div>`}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>${emojiIcon('📈',18)} Pace Factor</h3></div>
+        <div class="card-body">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+            <div style="font-size:28px;font-weight:800">×${pace.toFixed(2)}</div>
+            <div style="flex:1">
+              <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${paceGaugePct}%;background:${pace>=1?'var(--success)':'var(--warning)'}"></div></div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:2px"><span>0.85×</span><span>1.00×</span><span>1.25×</span></div>
+            </div>
+          </div>
+          ${paceNote ? `<div style="font-size:12px;color:var(--warning)">${emojiIcon('⚠️',14)} ${escHtml(paceNote)}</div>` :
+            `<div style="font-size:11px;color:var(--text-muted)">MTD contribution ₱${fmt(r.contributionPesos)} vs target ₱${fmt(targetContribution)} · ${Math.round(elapsed*100)}% of the month elapsed (day ${monthB.upToDay} of ${monthB.daysInMonth})</div>`}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>${emojiIcon('🎯',18)} Suggested OH%</h3></div>
+        <div class="card-body">
+          <div class="kpi-row" style="margin-bottom:10px">
+            <div class="kpi-card accent"><div class="kpi-label">Suggested OH%</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
+            <div class="kpi-card"><div class="kpi-label">Base OH% × Pace</div><div class="kpi-value">${(baseOH*100).toFixed(0)}% × ${pace.toFixed(2)}</div></div>
+          </div>
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Quote size (₱, up to)</th><th style="text-align:right">Size factor</th></tr></thead>
+            <tbody>${SIZE_BANDS_REF.map(([cap,f])=>`<tr><td>${cap==null?'Above ₱1,600,000':'₱'+fmt(cap)}</td><td style="text-align:right">×${f.toFixed(2)}</td></tr>`).join('')}</tbody>
+          </table></div>
+          <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">per-quote size factor applies on top</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>${emojiIcon('📊',18)} 6-Month Trend — Income vs Expense</h3></div>
+        <div class="card-body"><div class="chart-wrap"><canvas id="cost-trend-chart"></canvas></div></div>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+
+    wrap.querySelector('#cost-edit-overhead-btn')?.addEventListener('click', () => navigateTo('Finance', { subtab: 'Break-even' }));
+
+    if (!window.Chart) { await window.ensureChart(); }
+    new Chart(document.getElementById('cost-trend-chart'), {
+      type: 'bar',
+      data: {
+        labels: months6.map(m => m.label),
+        datasets: [
+          { type:'bar',  label:'Income',      data: months6.map(m => (rollupOf(m.ym)||{}).income  || 0), backgroundColor: CT.good },
+          { type:'bar',  label:'Expense',     data: months6.map(m => (rollupOf(m.ym)||{}).expense || 0), backgroundColor: CT.bad },
+          { type:'line', label:'Fixed Costs', data: months6.map(m => fixedCostOf(rollupOf(m.ym))), borderColor: CT.warn, backgroundColor: 'transparent', tension: 0.3 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { color: CT.text } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ₱${window.fmtN2(c.parsed.y)}` } } },
+        scales: { y: { ticks: { color: CT.text, callback: v => '₱' + window.fmtN2(v) }, grid: { color: CT.grid } }, x: { ticks: { color: CT.text, font: { size: 10 } }, grid: { display: false } } }
+      }
+    });
+  };
+
   const renderProduction = async () => {
     await loadSubs();   // Phase 86 item 2 — lazy, shared with Marketing (prodSubs below)
     const CT = window.chartTheme();
@@ -6433,6 +6655,7 @@ async function renderAnalytics() {
     sales: renderSales,
     marketing: renderMarketing,
     finance: renderFinanceAnalytics,
+    costing: renderCosting,
     production: renderProduction,
     government: renderGovernment,
     strategy: renderStrategy,
@@ -6471,8 +6694,16 @@ async function renderAnalytics() {
   window._anThemeHandler = onTheme;
   window.addEventListener('bi-theme-change', window._anThemeHandler);
 
-  // Load initial tab
-  renderOverview();
+  // Load initial tab — honors navigateTo('analytics', {subtab:'costing'}) deep
+  // links (window.initialSubtab). Validated against the role-filtered SUBTABS
+  // list so a secretary deep-linked to a blocked money tab lands on Overview.
+  const _anInitial = (typeof window.initialSubtab === 'function') ? window.initialSubtab('overview') : 'overview';
+  if (_anInitial !== 'overview' && SUBTABS.some(t => t.id === _anInitial) && TAB_RENDERERS[_anInitial]) {
+    const _chip = c.querySelector(`.an-subtabs [data-chip="${_anInitial}"]`);
+    if (_chip) _chip.click(); else TAB_RENDERERS[_anInitial]();
+  } else {
+    renderOverview();
+  }
 }
 
 // ── Team / Payroll ────────────────────────────────

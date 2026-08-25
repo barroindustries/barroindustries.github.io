@@ -449,6 +449,42 @@ window.computeBreakeven = function(input) {
   };
 };
 
+// ── COSTING-DASHBOARD-SPEC-2026-08-26 §A1 — shared payroll-split helper ────
+// Moved out of js/screens/finance.js's beComputePayrollSplit (that function
+// now delegates here — same name, same one call site, byte-identical
+// output) so the Analytics "Costing" subtab (js/screens/dashboards.js) can
+// build computeBreakeven's SAME payrollSplit input from its OWN ledger read
+// without a second, drift-risking copy of the refNumber-prefix list that
+// tells weekly/fabricator pay runs apart from the monthly office run. See
+// computeBreakeven's own payrollSplit doc comment above for what the two
+// pesos figures this returns do once they reach it.
+//
+// Weekly/worker pay runs (js/payroll-weekly.js's WRC.LEDGER_KINDS) and the
+// standalone worker-payslip submit poster (js/screens/hr.js ~3949) post
+// these refNumber prefixes; the monthly office run (js/departments.js's
+// disbursePayRun, 'PAY-'/'NETPAY-'/etc., no trailing W) does not — that's
+// the whole signal this function reads. Only rows filed under category ===
+// 'Payroll Expense' are ever inspected, exactly as before this move.
+const PAYROLL_SPLIT_WEEKLY_PREFIXES = [
+  'PAYW-', 'WPAY-', 'NETPAYW-', 'SSSPAYW-', 'PHPAYW-', 'HDMFPAYW-', 'WHTPAYW-', 'EMPDEDW-', 'CADEDUCTW-'
+];
+const _isDirectLaborRef = function(refNumber) {
+  const ref = String(refNumber || '');
+  return PAYROLL_SPLIT_WEEKLY_PREFIXES.some(p => ref.startsWith(p));
+};
+// Splits an already-fetched, already period-bounded ledger rows array into
+// {directPesos, officePesos}. Pure — no Firestore, no DOM, no wall-clock.
+window.payrollSplitFromRows = function(rows) {
+  let directPesos = 0, officePesos = 0;
+  (rows || []).forEach(e => {
+    if ((e.category || 'Other') !== 'Payroll Expense') return;
+    const amt = +e.amount || 0;
+    if (_isDirectLaborRef(e.refNumber)) directPesos += amt;
+    else officePesos += amt;
+  });
+  return { directPesos: +directPesos.toFixed(2), officePesos: +officePesos.toFixed(2) };
+};
+
 // ---- payroll recall spec (2026-08-04) — month-scoped inputs + overrides ----
 // Private rounding helper, scoped to this file only (statutory-tables.js has
 // its own identically-shaped `round2` — deliberately NOT imported/shared per
@@ -785,6 +821,7 @@ if (typeof module !== 'undefined' && module.exports) {
     resolveStatutoryEE: window.resolveStatutoryEE,
     computePayLine: window.computePayLine,
     computeBreakeven: window.computeBreakeven,
+    payrollSplitFromRows: window.payrollSplitFromRows,
     monthBounds: window.monthBounds,
     computeKpiForMonth: window.computeKpiForMonth,
     applyPayLineOverride: window.applyPayLineOverride,

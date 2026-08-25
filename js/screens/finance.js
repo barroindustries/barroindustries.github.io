@@ -1027,38 +1027,20 @@ const BE_DEFAULT_VARIABLE_KW = ['material','cos','cost of sales','freight','deli
 // (js/payroll-weekly.js's WRC.LEDGER_KINDS) and the standalone worker-payslip
 // submit poster (js/screens/hr.js ~3949) post distinct refNumber prefixes
 // from the monthly office run (js/departments.js's disbursePayRun, 'PAY-'/
-// 'NETPAY-'/etc.) specifically so the two can be told apart after the fact —
-// this is that read. Only entries actually filed under category === 'Payroll
-// Expense' are ever inspected (see beComputePayrollSplit below), so a
-// statutory-remittance leg like 'SSSPAYW-' — which posts under its OWN
-// liability category ('SSS Payable'), not 'Payroll Expense' — never reaches
-// this list in practice; it's included anyway for defensiveness against a
-// future category change.
-const BE_WEEKLY_PAYROLL_PREFIXES = [
-  'PAYW-', 'WPAY-', 'NETPAYW-', 'SSSPAYW-', 'PHPAYW-', 'HDMFPAYW-', 'WHTPAYW-', 'EMPDEDW-', 'CADEDUCTW-'
-];
-function beIsDirectLaborRef(refNumber) {
-  const ref = String(refNumber || '');
-  return BE_WEEKLY_PAYROLL_PREFIXES.some(p => ref.startsWith(p));
-}
-// Splits the ALREADY-fetched, ALREADY period-bounded `expense` rows (the
-// same array loadFinStatement returned from window.ledgerForPeriod/
-// gjForPeriod — no second ledger read) into {directPesos, officePesos}.
-// Deliberately reads from `expense`, not a raw unfiltered ledger fetch: only
-// rows loadFinStatement already classified as ledgerKind()==='expense' feed
-// byCategory's 'Payroll Expense' bucket (see renderBreakevenTab's `bump`
-// below), so directPesos+officePesos always sums to EXACTLY the same figure
-// that bucket already contributes — the split reclassifies existing money,
-// it can never create or drop a peso relative to the unsplit total.
+// 'NETPAY-'/etc.) specifically so the two can be told apart after the fact.
+//
+// COSTING-DASHBOARD-SPEC-2026-08-26 §A1 — the refNumber-prefix list and the
+// split math itself moved to js/money-core.js's window.payrollSplitFromRows
+// (pure, no DOM/Firestore) so the Analytics "Costing" subtab
+// (js/screens/dashboards.js) can build the SAME payrollSplit input from its
+// own ledger read without a second, drift-risking copy of the prefix list.
+// beComputePayrollSplit keeps its name and this file's one call site
+// (renderBreakevenTab, below) — it now delegates, byte-identical output to
+// before this move. Deliberately still takes `expense` (loadFinStatement's
+// already-fetched, already period-bounded rows, ledgerKind()==='expense'
+// only) — not a second/raw ledger read.
 function beComputePayrollSplit(expenseRows) {
-  let directPesos = 0, officePesos = 0;
-  expenseRows.forEach(e => {
-    if ((e.category || 'Other') !== 'Payroll Expense') return;
-    const amt = +e.amount || 0;
-    if (beIsDirectLaborRef(e.refNumber)) directPesos += amt;
-    else officePesos += amt;
-  });
-  return { directPesos: +directPesos.toFixed(2), officePesos: +officePesos.toFixed(2) };
+  return window.payrollSplitFromRows(expenseRows);
 }
 
 function beDefaultGuess(cat) {
@@ -1084,6 +1066,13 @@ function beResolveClassification(cfg, categories) {
   });
   return { fixed, variable };
 }
+// COSTING-DASHBOARD-SPEC-2026-08-26 §A2 — exposed so the Analytics "Costing"
+// subtab (js/screens/dashboards.js) can resolve the SAME finance_config/
+// breakeven classification this file's own Break-even tab uses, from its
+// own ledger read, and never disagree with it. Purely additive — every
+// existing in-file call (beResolveClassification(...), unqualified) is
+// untouched.
+window.beResolveClassification = beResolveClassification;
 // Tri-state resolved view for ONE category (same precedence as
 // beResolveClassification) — used by the Classify editor to show what's
 // actually in effect right now (explicit choice OR live default guess).
@@ -1176,6 +1165,11 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
         ${canWrite?`<button class="btn-secondary btn-sm" id="bke-classify-btn">${emojiIcon('🏷',16)} Classify</button>`:''}
         <button class="btn-secondary btn-sm" id="bke-csv-btn">${emojiIcon('⬇',16)} CSV</button>
         <button class="btn-secondary btn-sm" id="bke-print-btn">${emojiIcon('🖨',16)} Print</button>
+        <!-- COSTING-DASHBOARD-SPEC-2026-08-26 — one-line chip-link to the
+             Analytics "Costing" subtab, which reads this SAME break-even
+             engine (window.computeBreakeven) for its own numbers. Editing
+             overhead stays here; the dashboard just reads and links. -->
+        <button class="btn-secondary btn-sm" id="bke-costing-link-btn">${emojiIcon('🧮',16)} Costing dashboard → Analytics</button>
       </div>
     </div>
 
@@ -1426,6 +1420,14 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
   window.bindPeriodPicker(document.getElementById('bke-period'), (newKey) => {
     renderBreakevenTab(container, currentUser, currentRole, newKey);
   }, { activeKey: periodKey });
+
+  // COSTING-DASHBOARD-SPEC-2026-08-26 — 'analytics' is navigateTo()'s page
+  // key (js/app.js's `case 'analytics': renderAnalytics(); break;`); the
+  // Costing subtab is opened via opts.subtab, same mechanism every other
+  // deep link into a subtabbed screen already uses (see window.initialSubtab).
+  document.getElementById('bke-costing-link-btn')?.addEventListener('click', () => {
+    navigateTo('analytics', { subtab: 'costing' });
+  });
 
   // MOBILE FINANCE PASS (2026-08-08) — see the Financial Report handler above:
   // the bare window.print() this replaces is a no-op on iOS standalone.
