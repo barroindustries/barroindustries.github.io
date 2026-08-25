@@ -323,6 +323,9 @@ tr:hover td{background:#fafbff;}
 .ms-chip.ok{background:#e6f7ee;color:#1f8f4e;border:1px solid #a8e0c2;}
 .ms-chip.warn{background:#fdf2e2;color:#a1610a;border:1px solid #f0cf95;}
 .ms-chip.bad{background:#fdecea;color:#b03024;border:1px solid #f3b8b1;}
+/* COSTING-PHASE1-SPEC-2026-08-26 §2 — shadow-mode badge on the Cost & Margin
+   panel; reuses the .ms-chip pill shape with a neutral gray variant. */
+.ms-chip.shadow{background:var(--gray-light);color:var(--gray-dark);border:1px solid var(--gray-mid);}
 .ms-row{display:grid;grid-template-columns:22px 78px minmax(140px,1fr) 138px 108px auto;gap:6px;align-items:center;margin-bottom:6px;}
 .ms-idx{font-size:11px;font-weight:700;color:var(--gray-dark);text-align:center;}
 .ms-row input{font-size:12.5px;padding:5px 7px;}
@@ -1442,8 +1445,12 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   <!-- Cost of goods + margin (uses per-product Materials/Labor capital from the database) -->
   <div id="costMarginWrap">
   <div class="sec-title" style="margin-top:14px;">💰 Cost &amp; Margin (Internal)</div>
-  <p style="font-size:11px;color:var(--gray-dark);margin:-4px 0 8px;">
-    Materials &amp; per-unit labor pull from each product's <em>capital cost</em> in the database. Edit them in the President's Product Database.
+  <!-- COSTING-PHASE1-SPEC-2026-08-26 §2 — static shadow-mode label (doesn't
+       depend on any computed value, so it's plain HTML, not re-rendered on
+       every computeMarginSummary() pass). -->
+  <span class="ms-chip shadow" title="Reference only — filing, pricing, and totals are untouched by this panel.">SHADOW — reference only, does not change quote prices</span>
+  <p style="font-size:11px;color:var(--gray-dark);margin:6px 0 8px;">
+    Materials &amp; per-unit labor pull from each product's <em>capital cost</em> in the database (live where available). Edit them in the President's Product Database.
   </p>
 
   <!-- Per-item capital + labor breakdown -->
@@ -1454,16 +1461,13 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <tfoot><tr style="font-weight:700;background:#fff5e0;"><td colspan="2">Totals</td><td id="piMatTotal" style="text-align:right;">₱0</td><td id="piLabTotal" style="text-align:right;">₱0</td><td id="piGrand" style="text-align:right;">₱0</td></tr></tfoot>
   </table>
 
-  <table class="labor-tbl" id="marginTbl">
-    <tbody>
-      <tr><td>Materials cost (from DB)</td><td id="miMaterials" style="text-align:right;">₱0</td></tr>
-      <tr id="miLaborRow"><td>Labor — estimated (table above)</td><td id="miLabor" style="text-align:right;">₱0</td></tr>
-      <tr><td>Labor — per-unit capital (from DB)</td><td id="miCapLabor" style="text-align:right;">₱0</td></tr>
-      <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>Total Cost (COGS)</td><td id="miCogs" style="text-align:right;font-weight:700;">₱0</td></tr>
-      <tr><td>Quoted (ex-VAT)</td><td id="miSell" style="text-align:right;">₱0</td></tr>
-      <tr style="font-weight:700;"><td>Gross Margin</td><td id="miMargin" style="text-align:right;font-weight:700;">₱0</td></tr>
-    </tbody>
-  </table>
+  <!-- COSTING-PHASE1-SPEC-2026-08-26 §2 — v2 true-cost buildup/ladder/margin
+       panel. Was a static <table> of fixed <tr id="mi*"> rows; now fully
+       rendered by computeMarginSummary()/renderTrueCostPanel() every pass,
+       same container id so the GENERIC_PARTNER DOM-removal above and the
+       function's own `if(!document.getElementById('marginTbl'))` guard need
+       no changes. -->
+  <div id="marginTbl"></div>
 
   <div style="margin-top:10px;font-size:12px;color:var(--orange);">
     ⚠️ This panel is hidden in the client view and in print mode.
@@ -1762,6 +1766,27 @@ let fileMode='revision'; // 'revision' | 'update' — chosen in the Verify & Fil
 // isn't lost if the tab closes; see QUOTE_DRAFT in the app.js bridge.
 let draftSaveTimer=null, draftAckTimer=null;
 
+// COSTING-PHASE1-SPEC-2026-08-26 §1 — shadow-mode true-cost settings.
+// Read-only from product_costs/_settings (finance/admin-gated by
+// firestore.rules, same collection as the per-product cost docs) inside
+// loadDatabase()'s existing `!PARTNER_MODE` branch below — never fetched for
+// a partner session (BS included — see D14 note at computeTrueCost()).
+// COSTING_SETTINGS stays null until that read completes/fails; every reader
+// falls back to COSTING_DEFAULTS, which is also the doc's own initial shape
+// for the (later-phase) President settings editor. Writing this doc is out
+// of scope here — read-only.
+let COSTING_SETTINGS = null;
+const COSTING_DEFAULTS = Object.freeze({
+  wastePct: 0.06,          // materials waste allowance
+  consumablesPct: 0.08,    // of direct labor
+  loadedLaborRate: 150,    // ₱/h — wage grossed up for utilization; NOT settings/laborRates
+  baseOH: 0.25,            // OH pool ÷ target monthly direct cost
+  sizeBands: [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]],
+  ohMin: 0.10, ohMax: 0.45,
+  targetMargin: 0.20,
+  updatedAt: null,
+});
+
 // ═══════════════════════════════════════════════════════════════════
 //  DATABASE LOADING
 //  Tries to load from a local/relative products-database.json first,
@@ -1811,10 +1836,19 @@ async function loadDatabase(force) {
     let costMap = {};
     if (!PARTNER_MODE) {
       try {
-        const costSnap = await db.collection('product_costs').limit(1000).get();
-        costSnap.docs.forEach(cd => { costMap[cd.id] = cd.data(); });
+        // COSTING-PHASE1-SPEC-2026-08-26 §1 — the settings doc rides the same
+        // one Firestore round-trip as the per-product cost docs (Promise.all,
+        // not a second sequential await). '_settings' is skipped out of
+        // costMap below so it can never be mistaken for a product's cost row.
+        const [costSnap, settingsSnap] = await Promise.all([
+          db.collection('product_costs').limit(1000).get(),
+          db.collection('product_costs').doc('_settings').get(),
+        ]);
+        costSnap.docs.forEach(cd => { if (cd.id !== '_settings') costMap[cd.id] = cd.data(); });
+        COSTING_SETTINGS = settingsSnap.exists ? { ...COSTING_DEFAULTS, ...settingsSnap.data() } : { ...COSTING_DEFAULTS };
       } catch (ce) {
         console.warn('[quote-builder] product_costs load skipped (finance/admin only)', ce);
+        COSTING_SETTINGS = { ...COSTING_DEFAULTS };
       }
     }
 
@@ -3101,6 +3135,51 @@ function addCustomItem(){
   },30);
 }
 
+// COSTING-PHASE1-SPEC-2026-08-26 §3 — per-line costing gate for custom
+// (non-catalog) items: a custom line has no product_costs row, so its
+// materials/labor basis for the true-cost engine (computeTrueCost() above)
+// has to come from the preparer directly. Internal view only, and never for
+// ANY PARTNER_MODE session — including Brilliant Steel. Unlike the Cost &
+// Margin panel itself (which BS keeps per the standing D14 ruling), this is
+// a raw cost-ENTRY control, the same category as the Labor & Timeline
+// staffing table that's already hidden from BS (applyPartnerMode() hides
+// laborTimelineWrap/miLaborRow for every PARTNER_MODE session, not just
+// GENERIC_PARTNER) — partners see the computed results, never the inputs.
+// Absent from the DOM entirely (not display:none) for every other case:
+// client view, catalog items, any partner session.
+function customCostGateHtml(item, idx){
+  if (PARTNER_MODE) return '';
+  if (typeof currentView==='undefined' || currentView!=='internal') return '';
+  if (item.id!=='CUSTOM') return '';
+  const uncosted = item.costMat===undefined && item.costHrs===undefined;
+  const chip = uncosted
+    ? '<span class="ms-chip warn" title="No cost basis entered for this custom line — cost it here before filing.">needs costing</span>'
+    : '';
+  return `<div class="spec-line cost-gate-row no-print">
+    <span class="spec-tag no-print">Cost</span>
+    <input type="number" min="0" step="1" class="cell-unit" placeholder="Materials ₱" title="Materials cost for this custom line" value="${item.costMat??''}" onchange="updateCustomCost(${idx},'costMat',this.value)" style="width:84px;">
+    <input type="number" min="0" step="0.5" class="cell-unit" placeholder="Labor hrs" title="Labor hours for this custom line" value="${item.costHrs??''}" onchange="updateCustomCost(${idx},'costHrs',this.value)" style="width:74px;">
+    ${chip}
+  </div>`;
+}
+
+// Stores an optional numeric cost-basis field (costMat/costHrs — §3, new
+// additive item fields, in-session only) on a custom line. An empty input
+// DELETES the field rather than storing 0, so "never entered" (uncosted) can
+// be told apart from "the preparer typed a real zero." PARTNER_MODE guard is
+// belt-and-braces: the input this handler is wired to only exists in the DOM
+// when customCostGateHtml() above already agreed to render it, which never
+// happens for a partner session.
+function updateCustomCost(idx, field, val){
+  if (PARTNER_MODE) return;
+  const item=items[idx]; if(!item || item.id!=='CUSTOM') return;
+  const trimmed=String(val).trim();
+  if (trimmed==='') delete item[field];
+  else item[field]=parseFloat(trimmed)||0;
+  saveToStorage();
+  renderItems();
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  SECTIONS (custom categories)
 //  The items table groups by item.category. Renaming a group heading in place
@@ -3271,6 +3350,10 @@ function renderItems(){
       } else if(vbOff){
         volNoteHtml=`<div class="vol-note vol-note-off no-print" onclick="toggleVolumeBreak(${idx})" title="Tap to re-apply this line's volume discount">Vol discount off — tap to apply (−${formatPeso(vbOff.amt)})</div>`;
       }
+      // COSTING-PHASE1-SPEC-2026-08-26 §3 — custom-line costing gate. Own
+      // partner guard (customCostGateHtml() begins `if(PARTNER_MODE) return`)
+      // since this row lives in the items table, not inside #costMarginWrap.
+      const costGateHtml=customCostGateHtml(item,idx);
       html+=`<tr class="item-row" data-idx="${idx}" ondragover="onItemRowDragOver(event,${idx})" ondragleave="onItemRowDragLeave(event)" ondrop="onItemRowDrop(event,${idx})">
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
@@ -3278,6 +3361,7 @@ function renderItems(){
           <div class="spec-line ${specText?'':'pe-empty'}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
           <div class="spec-line ${(item.dims||'')?'':'pe-empty'}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
           <div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
+          ${costGateHtml}
         </td>
         <td style="text-align:center;">
           <div class="qty-stepper compact" style="justify-content:center;">
@@ -4224,41 +4308,197 @@ function computeLaborTotal(){
   computeMarginSummary(total);
 }
 
-// Internal cost/margin — uses per-product Materials/Labor capital synced from the
-// database. Labor is NOT double-counted: COGS uses the estimated labor table when
-// it has a value, otherwise the per-unit labor capital from the DB.
-function computeMarginSummary(laborEst){
-  const el=document.getElementById('miMaterials'); if(!el) return; // panel not present
-  if(typeof laborEst!=='number'){
-    const roles=DB.laborRoles||[]; laborEst=0;
-    roles.forEach(r=>{ const s=laborState[r.id]||{}; laborEst+=(s.days||0)*(s.people||1)*(s.rate||r.ratePerDay||0); });
+// COSTING-PHASE1-SPEC-2026-08-26 §2 — pace-band lookup for the OH loading
+// factor. `bands` is [[threshold,factor],...] ascending; the last entry's
+// threshold is null (catch-all above the highest real threshold). Falls
+// back to COSTING_DEFAULTS.sizeBands if malformed/empty. Pure math, no item
+// data — deliberately unguarded (nothing partner-sensitive flows through
+// numeric args); its only caller is computeTrueCost() below.
+function sizeBandFactor(direct, bands){
+  const list = Array.isArray(bands) && bands.length ? bands : COSTING_DEFAULTS.sizeBands;
+  for (const band of list) {
+    const threshold = band[0], factor = band[1];
+    if (threshold === null || direct <= threshold) return factor;
   }
-  const materials=items.reduce((s,i)=>s+((i.capitalMaterials||0)*(i.qty||1)),0);
-  const capLabor =items.reduce((s,i)=>s+((i.capitalLabor||0)*(i.qty||1)),0);
-  // Per-item capital + labor breakdown
+  return list[list.length-1][1];
+}
+
+// COSTING-PHASE1-SPEC-2026-08-26 §2/§4 — one item's cost inputs for the
+// true-cost engine. Catalog items (item.id !== 'CUSTOM') prefer the LIVE
+// product_costs-backed value on DB.products (looked up by id) over the
+// item's own stored capitalMaterials/capitalLabor snapshot, so a reopened
+// legacy quote reflects today's cost basis rather than the day it was filed
+// — the snapshot is only the fallback, for a product no longer in the live
+// catalog. Custom lines (§3) use their own costMat/costHrs from the Internal
+// costing gate — never capitalMaterials/capitalLabor. GENERIC_PARTNER never
+// reaches this in practice (computeMarginSummary's #marginTbl DOM-removal
+// guard, and computeTrueCost()'s own guard, both fire first) — the check
+// here is belt-and-braces, matching this file's existing posture on the
+// capitalMaterials/capitalLabor leak (see the v14 re-audit note above
+// loadDatabase()).
+function itemCostBasis(item, liveById){
+  if (GENERIC_PARTNER) return { mat:0, hrs:0, capLaborPesos:0, hasBasis:false, isCustom:item.id==='CUSTOM' };
+  if (item.id==='CUSTOM') {
+    const hasMat = item.costMat!==undefined, hasHrs = item.costHrs!==undefined;
+    return { mat:item.costMat||0, hrs:item.costHrs||0, capLaborPesos:0, hasBasis:(hasMat||hasHrs), isCustom:true };
+  }
+  const live = liveById.get(item.id);
+  const mat = (live ? live.capitalMaterials : undefined) ?? item.capitalMaterials ?? 0;
+  const capLaborPesos = (live ? live.capitalLabor : undefined) ?? item.capitalLabor ?? 0;
+  const hrs = item.laborHours ? ((item.laborHours.fabrication||0)+(item.laborHours.installation||0)) : 0;
+  return { mat, hrs, capLaborPesos, hasBasis:(mat>0||capLaborPesos>0||hrs>0), isCustom:false };
+}
+
+// COSTING-PHASE1-SPEC-2026-08-26 §1/§2 — shadow-mode true-cost engine. Pure:
+// no Firestore reads here (COSTING_SETTINGS/DB.products cost data were
+// already loaded once, at boot, by loadDatabase()'s `!PARTNER_MODE` branch).
+// Never touches computePrice()/computeTotals() — the client-facing price
+// engine is untouched by this whole phase.
+//
+// Labor is priced hours × loadedLaborRate per item where hours exist
+// (catalog item.laborHours, or a custom line's costHrs), else that item's
+// own capital-labor peso figure — summed PER ITEM, so a quote mixing
+// catalog and custom lines never double-counts labor (an item contributes
+// to exactly one of the two sums) or silently drops either source. This
+// mirrors, at item grain, the pre-v2 panel's whole-quote laborEst-vs-
+// capLabor either/or.
+//
+// GENERIC_PARTNER never calls this in practice — computeMarginSummary()
+// bails on #marginTbl being absent (removed with #costMarginWrap by
+// applyPartnerMode()) before it would. Guarded here too, so the grep-level
+// isolation proof holds even for this pure/no-DOM function.
+function computeTrueCost(){
+  if (GENERIC_PARTNER) return null;
+  const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
+  const liveById = new Map((DB.products||[]).map(p=>[p.id,p]));
+  let materials=0, laborHrsTotal=0, laborPesosFallback=0, anyMissingCatalogCost=false;
+  items.forEach(item=>{
+    const qty = item.qty||1;
+    const basis = itemCostBasis(item, liveById);
+    materials += basis.mat*qty;
+    if (basis.hrs>0) laborHrsTotal += basis.hrs*qty;
+    else laborPesosFallback += basis.capLaborPesos*qty;
+    if (!basis.isCustom && !basis.hasBasis) anyMissingCatalogCost = true;
+  });
+  const matWaste = materials*cs.wastePct;
+  const labor = laborHrsTotal*cs.loadedLaborRate + laborPesosFallback;
+  const consumables = labor*cs.consumablesPct;
+  const direct = materials+matWaste+labor+consumables;              // = FLOOR
+  const sizeF = sizeBandFactor(direct, cs.sizeBands);
+  const ohPct = Math.min(cs.ohMax, Math.max(cs.ohMin, cs.baseOH*sizeF));
+  const ohAmt = direct*ohPct;
+  const trueCost = direct+ohAmt;
+  const target = trueCost/(1-cs.targetMargin);
+  const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
+  const marginPct = sell>0 ? (sell-trueCost)/sell : 0;
+  return {
+    materials, matWaste, laborHrsTotal, laborPesosFallback, labor, consumables,
+    direct, sizeF, ohPct, ohAmt, trueCost, target, sell, marginPct,
+    anyMissingCatalogCost, liveById, cs,
+  };
+}
+
+// Internal cost/margin — COSTING-PHASE1-SPEC-2026-08-26 §2 v2 panel.
+// External contract preserved: same function name, same optional-number
+// `laborEst` signature, still callable with no args or with a peso total.
+// That day-rate figure is Barro's STAFFING/scheduling estimate (Labor &
+// Timeline table) — kept deliberately separate from the true-cost engine
+// above, which prices labor off item hours × loadedLaborRate instead, so
+// `laborEst` is accepted here for call-site back-compat but no longer drives
+// the rendered figures (extending the contract, not breaking it).
+function computeMarginSummary(laborEst){
+  // #marginTbl lives inside #costMarginWrap, which applyPartnerMode() fully
+  // .remove()s for GENERIC_PARTNER at boot — this DOM-presence check is the
+  // same guard mechanism the pre-v2 panel used (was `#miMaterials`), so a
+  // generic partner session never runs the true-cost math at all, not even
+  // to throw the result away.
+  const wrap = document.getElementById('marginTbl'); if (!wrap) return;
+  const cost = computeTrueCost();
+  if (!cost) return; // GENERIC_PARTNER — unreachable given the DOM guard above; belt-and-braces
+  const cs = cost.cs;
+
+  // Per-item capital + labor breakdown — same table as before, now sourced
+  // from the same live-product_costs-first basis as the buildup below.
+  // Flags a catalog item with zero cost data instead of a silent ₱0/₱0 that
+  // would otherwise read as "this item genuinely costs nothing."
   const piBody=document.getElementById('perItemBody');
   if(piBody){
     piBody.innerHTML = items.length ? items.map(i=>{
-      const qty=i.qty||1, mat=(i.capitalMaterials||0)*qty, lab=(i.capitalLabor||0)*qty;
-      return `<tr><td style="font-size:12px;">${txtEsc(i.name||'')}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
+      const qty=i.qty||1;
+      const basis=itemCostBasis(i, cost.liveById);
+      const mat=basis.mat*qty;
+      const lab=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : basis.capLaborPesos)*qty;
+      const noBasisNote=(!basis.isCustom && !basis.hasBasis)
+        ? '<div style="font-size:10px;color:var(--gray-dark);font-style:italic;">no cost basis on this item</div>' : '';
+      return `<tr><td style="font-size:12px;">${txtEsc(i.name||'')}${noBasisNote}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
     }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-dark);padding:8px;">Add items to see the capital &amp; labor breakdown.</td></tr>';
-    const pm=document.getElementById('piMatTotal'); if(pm) pm.textContent=formatPeso(materials);
-    const pl=document.getElementById('piLabTotal'); if(pl) pl.textContent=formatPeso(capLabor);
-    const pg=document.getElementById('piGrand'); if(pg) pg.textContent=formatPeso(materials+capLabor);
+    const pm=document.getElementById('piMatTotal'); if(pm) pm.textContent=formatPeso(cost.materials);
+    const pl=document.getElementById('piLabTotal'); if(pl) pl.textContent=formatPeso(cost.labor);
+    const pg=document.getElementById('piGrand'); if(pg) pg.textContent=formatPeso(cost.materials+cost.labor);
   }
-  const laborForCogs = laborEst>0 ? laborEst : capLabor;
-  const cogs=materials+laborForCogs;
-  const sell=(typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT revenue
-  const margin=sell-cogs;
-  const pct=sell>0 ? Math.round(margin/sell*100) : 0;
-  document.getElementById('miMaterials').textContent=formatPeso(materials);
-  document.getElementById('miLabor').textContent=formatPeso(laborEst);
-  document.getElementById('miCapLabor').textContent=formatPeso(capLabor)+(laborEst>0?' (not counted — using estimate)':' (used)');
-  document.getElementById('miCogs').textContent=formatPeso(cogs);
-  document.getElementById('miSell').textContent=formatPeso(sell);
-  const mEl=document.getElementById('miMargin');
-  mEl.textContent=formatPeso(margin)+(sell>0?`  (${pct}%)`:'');
-  mEl.style.color = margin>=0 ? '#1b7e3c' : '#c0392b';
+
+  wrap.innerHTML = renderTrueCostPanelHtml(cost);
+
+  // Below-floor auto-tick — §2: "auto-tick #reqApprovalCheck if present and
+  // unticked." The checkbox only exists once Verify & File has been opened
+  // at least once this session (buildVerifyModal() creates it inside
+  // #verifyModal, which stays in the DOM — just display:none — after the
+  // modal is closed). A 'change' event is dispatched so the Submit/File
+  // button label (wired to 'change' at buildVerifyModal() time) stays in
+  // sync without needing a full modal rebuild.
+  if (cost.sell < cost.direct) {
+    const rac=document.getElementById('reqApprovalCheck');
+    if (rac && !rac.checked) { rac.checked=true; rac.dispatchEvent(new Event('change')); }
+  }
+}
+
+// COSTING-PHASE1-SPEC-2026-08-26 §2 — builds the buildup/ladder/margin HTML
+// for #marginTbl. Split out of computeMarginSummary() for readability only;
+// it renders nothing itself (returns a string), so it carries no partner
+// guard of its own — its one caller is already gated above.
+function renderTrueCostPanelHtml(cost){
+  const cs=cost.cs;
+  let laborLabel;
+  if (cost.laborHrsTotal>0 && cost.laborPesosFallback>0) laborLabel=`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate} + capital labor`;
+  else if (cost.laborHrsTotal>0) laborLabel=`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate}`;
+  else if (cost.laborPesosFallback>0) laborLabel='capital labor';
+  else laborLabel='no labor basis yet';
+
+  const buildup=`<table class="labor-tbl" style="margin-bottom:10px;"><tbody>
+    <tr><td>Materials</td><td style="text-align:right;">${formatPeso(cost.materials)}</td></tr>
+    <tr><td>+ Waste (${Math.round(cs.wastePct*100)}%)</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
+    <tr><td>+ Labor (${laborLabel})</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
+    <tr><td>+ Consumables (${Math.round(cs.consumablesPct*100)}%)</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
+    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
+    <tr><td>+ OH (base ${Math.round(cs.baseOH*100)}% × size ${cost.sizeF.toFixed(2)}, <span title="live pace lands with the Overhead dashboard phase">pace —</span>)</td><td style="text-align:right;">${formatPeso(cost.ohAmt)}</td></tr>
+    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>TRUE COST</td><td style="text-align:right;">${formatPeso(cost.trueCost)}</td></tr>
+  </tbody></table>`;
+
+  const ladderCell=(label,val)=>`<div style="flex:1;min-width:96px;background:#fff5e0;border-radius:6px;padding:7px 8px;text-align:center;">
+    <div style="font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);font-weight:700;">${label}</div>
+    <div style="font-size:13px;font-weight:700;">${formatPeso(val)}</div>
+  </div>`;
+  const ladder=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+    ${ladderCell('Floor',cost.direct)}
+    ${ladderCell('True Cost',cost.trueCost)}
+    ${ladderCell(`Target (${Math.round(cs.targetMargin*100)}%)`,cost.target)}
+    ${ladderCell('Quoted (net)',cost.sell)}
+  </div>`;
+
+  const belowFloor = cost.sell < cost.direct;
+  const belowTrueCost = !belowFloor && cost.sell < cost.trueCost;
+  const belowTarget = !belowFloor && !belowTrueCost && cost.marginPct < cs.targetMargin;
+  const marginColor = belowFloor ? 'var(--red)' : belowTrueCost ? 'var(--orange)' : belowTarget ? 'var(--accent)' : 'var(--green)';
+  const noCostBasis = cost.direct<=0 && items.length>0;
+  const marginLine = noCostBasis
+    ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;">No cost basis on these items yet — set Materials/Labor in the President's Product Database, or cost custom lines in this view, to see a real margin.</div>`
+    : `<div style="font-weight:700;color:${marginColor};">Margin at quoted price: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCost)})</div>`;
+
+  const belowFloorNote = belowFloor
+    ? `<div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600;">⚠️ Below floor — President approval required</div>`
+    : '';
+
+  return buildup+ladder+marginLine+belowFloorNote;
 }
 
 function computeTimeline(){
@@ -5003,11 +5243,27 @@ const VERIFY_CHECKS=[
   {id:'items',     label:'Quote Items',     req:true,  get:()=>items.length?`${items.length} item(s) added`:''},
 ];
 
+// COSTING-PHASE1-SPEC-2026-08-26 §3 — '' when every custom line is costed
+// (or there are none); otherwise the block reason. Mirrors
+// milestoneBlockReason()'s shape exactly: a HARD, non-waivable gate,
+// deliberately outside VERIFY_CHECKS (a preparer can't "Mark as N/A" their
+// way past missing cost data). PARTNER_MODE always passes — a partner
+// session never rendered the Materials ₱/Labor hrs inputs in the first
+// place (customCostGateHtml() above), so it has no way to fix an "uncosted"
+// line and must never be blocked by one.
+function uncostedCustomLinesReason(){
+  if (PARTNER_MODE) return '';
+  const n = items.filter(i=>i.id==='CUSTOM' && i.costMat===undefined && i.costHrs===undefined).length;
+  if (!n) return '';
+  return `${n} custom line(s) have no cost basis — cost them in Internal view before filing.`;
+}
+
 function canFile(){
   // Milestone arithmetic is a HARD gate, deliberately outside VERIFY_CHECKS:
   // every check in that list is waivable ("Mark as N/A"), and a quote whose
   // stages don't add up to the contract price must never be waivable.
   if(milestoneBlockReason()) return false;
+  if(uncostedCustomLinesReason()) return false;
   return VERIFY_CHECKS.every(c=>!!c.get()||waiveFlags[c.id]);
 }
 
@@ -5097,6 +5353,21 @@ function buildVerifyModal(){
       </div>
     </div>`;
   }
+  // COSTING-PHASE1-SPEC-2026-08-26 §3 — uncosted custom lines. Same visual
+  // pattern as the milestone block above: canFile() already returns false
+  // via uncostedCustomLinesReason(); this is the message, not the gate.
+  // Never rendered for a partner session (the reason string is always ''
+  // there — see uncostedCustomLinesReason()).
+  const costReason=uncostedCustomLinesReason();
+  if(costReason){
+    html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+      <div class="verify-icon">⚠️</div>
+      <div class="verify-info">
+        <div class="verify-label" style="font-size:13px;font-weight:700">Custom Line Costing</div>
+        <div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600">${txtEsc(costReason)}</div>
+      </div>
+    </div>`;
+  }
   // Grand total summary (audit: "Verify & File modal never shows the grand
   // total before submission") — display-only, pulled straight from the same
   // computeTotals() every other total on screen already uses.
@@ -5126,7 +5397,18 @@ function buildVerifyModal(){
   </div>`;
   }
   // Approval option
-  const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
+  // COSTING-PHASE1-SPEC-2026-08-26 §2 — below-floor auto-tick, creation-time
+  // half. computeMarginSummary()'s own auto-tick (near its `wrap.innerHTML=`
+  // line) only fires on a render AFTER #reqApprovalCheck already exists in
+  // the DOM — so a below-floor quote whose FIRST-EVER Verify & File open is
+  // right here would otherwise render the checkbox unchecked (nothing else
+  // re-renders the margin panel between the checkbox being created and this
+  // html string being built). Checking computeTrueCost() directly here closes
+  // that gap. computeTrueCost() returns null for GENERIC_PARTNER (never
+  // reached in practice — partners never see #reqApprovalCheck's true state
+  // change this implies — but the null-check keeps this line safe either way).
+  const belowFloorAtOpen = (typeof computeTrueCost==='function') && (()=>{ const c=computeTrueCost(); return !!c && c.sell<c.direct; })();
+  const reqApproval = document.getElementById('reqApprovalCheck')?.checked || belowFloorAtOpen || false;
   html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
     <div class="verify-icon">📋</div>
     <div class="verify-info">
@@ -5206,6 +5488,11 @@ async function fileQuotation(){
   // whose milestones don't total the contract price reach Firestore.
   const msBlock=milestoneBlockReason();
   if(msBlock){ showToast(msBlock,'error'); return; }
+  // COSTING-PHASE1-SPEC-2026-08-26 §3 — same belt-and-braces treatment for
+  // uncosted custom lines: canFile() already covers it, this is the second
+  // gate for a programmatic call. '' (no block) in any PARTNER_MODE session.
+  const costBlock=uncostedCustomLinesReason();
+  if(costBlock){ showToast(costBlock,'error'); return; }
   if(!canFile()) return;
   _isFiling=true;
   flushSaveToStorageNow(); // ensure the local draft is consistent before this quote is filed
@@ -5283,6 +5570,18 @@ function buildQuotePayload(){
     if(b){ i.volumeBreakPct=b.pct; i.volumeBreakAmt=b.amt; }
     else { delete i.volumeBreakPct; delete i.volumeBreakAmt; }
   });
+  // COSTING-PHASE1-SPEC-2026-08-26 §4 — close the cost-field leak into filed
+  // payloads. capitalMaterials/capitalLabor (catalog cost snapshot) and
+  // costMat/costHrs (§3 custom-line entry) stay on the IN-SESSION `items`
+  // array — the Cost & Margin panel and a same-session Verify & File retry
+  // both still need them — only this OUTBOUND copy is cleaned. Both
+  // `editableState.items` and the top-level `items` below are built from
+  // THIS array (not the live `items`), so the leak can't ride back out
+  // through a reopened quote, a saved template, or a cloud draft either —
+  // every postMessage send in this file (QUOTE_FILED/QUOTE_UPDATE/
+  // QUOTE_APPROVAL_REQUESTED/QUOTE_DRAFT/QUOTE_STATE, and QUOTE_SAVE_TEMPLATE
+  // via stripTemplateState()) funnels through this one buildQuotePayload().
+  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, ...rest }) => rest);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed
@@ -5321,7 +5620,7 @@ function buildQuotePayload(){
   // to localStorage anywhere else either — both now ride along. (overallLead
   // already round-trips via `pricing`, which is PRICING_IDS-driven.)
   const editableState = {
-    items, termsContent, termsEnabled, currentCo:co, quoteNo, filedAt,
+    items: strippedItems, termsContent, termsEnabled, currentCo:co, quoteNo, filedAt,
     clientName:    document.getElementById('clientName')?.value||'',
     clientCompany: document.getElementById('clientCompany')?.value||'',
     clientAddress: document.getElementById('clientAddress')?.value||'',
@@ -5353,7 +5652,7 @@ function buildQuotePayload(){
     location:      document.getElementById('qnoLoc')?.value||'',
     leadSource:    document.getElementById('qnoMethod')?.value||'',
     quoteDate:     document.getElementById('quoteDate')?.value||'',
-    items:         items,
+    items:         strippedItems,
     subtotal:      t.subtotal,
     volumeBreakTotal: t.volumeBreakTotal,  // PRICING-TIERS-SPEC.md §2.5 — always present, 0 when off
     deliveryInstall:{ amount:t.diAmount, includedInTotal:t.diInclude,

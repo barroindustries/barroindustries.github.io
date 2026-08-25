@@ -5571,6 +5571,340 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
   });
 };
 
+// ══════════════════════════════════════════════════════════════════
+//  MATERIAL PRICE LIST — Purchasing-owned supplier prices, synced everywhere
+//  MATERIAL-PRICELIST-SPEC-2026-08-26. One live, editable supplier price
+//  list that Purchasing maintains and every costing surface reads via the
+//  `material_prices` collection (one doc per category, catId = slug(cat)).
+//
+//  ⚠ WIRING NOTE — NOT DONE HERE, on purpose. The spec assumed
+//  window.renderPurchasing lived in this file ("Purchasing screen lives
+//  there"); it doesn't — it moved to js/screens/production.js (Wave 7 Pass 4,
+//  see the comment block right below this one) along with the PO receive
+//  flow (receivePurchaseIntoInventory/receiveLineIntoItem). This build was
+//  scoped to js/departments.js ONLY, so the actual chip-tab + PO-hook call
+//  sites could not be wired in. Everything below is self-contained and
+//  ready to call the moment a follow-up (in-scope for production.js/
+//  config.js) adds:
+//    1. js/screens/production.js, window.renderPurchasing's `tabs` array —
+//       add 'Price List' alongside 'Request for Quotation'/'Purchase
+//       Requests'/'Budgeting'/'Tasks'.
+//    2. js/screens/production.js, loadPurchasingContent's dispatch — add
+//       `if (sub === 'Price List') return await window.renderMaterialPriceList(content, currentUser, currentRole);`
+//    3. js/config.js, DEPARTMENTS.Purchasing.subtabs — add 'Price List' so
+//       it matches production.js's tabs array (config.js is also out of
+//       this file's scope).
+//    4. js/screens/production.js, receivePurchaseIntoInventory's per-line
+//       loop (around receiveLineIntoItem's caller) — after a line lands with
+//       a unit price, call
+//       `window.materialPriceListPOHook(it.desc, it.unitPrice, currentUser)`.
+//  New collection also means firestore.rules + backup exports need a
+//  `material_prices` entry — also out of scope here (main session handles
+//  rules/backup/deploy per the spec).
+// ══════════════════════════════════════════════════════════════════
+
+// catId = slug(cat): lowercase, alnum+dashes, ≤60 chars. Verified collision-
+// free across all 37 categories in the 2025 seed file.
+function mplSlugCat(cat) {
+  return String(cat || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'cat';
+}
+// Spec names this canPurchasing()/canFinance()/isAdmin() — the real
+// equivalents in this file are canEditDept('Purchasing') (dept members +
+// admin roles), isFinancePriv() (Finance dept/role), isAdminPriv()
+// (president/manager/secretary). Read-only for anyone else who can reach
+// the Purchasing screen at all.
+function mplCanEdit() { return canEditDept('Purchasing') || isFinancePriv() || isAdminPriv(); }
+function mplStamp() { return today() + ' ' + new Date().toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }); }
+function mplUserName(currentUser) { return (window.userProfile && userProfile.displayName) || currentUser?.email || 'Unknown'; }
+
+// ── Seed / re-seed from the 2025 Kingsway file (spec §3) ──────────────────
+// Fetches data/material-pricelist-2025.json (same-origin), groups the flat
+// item list by `cat`, writes one doc per category. Idempotent by doc id
+// (catId = mplSlugCat(cat)), so re-running it is always safe to CALL — the
+// UI only offers it unprompted when the collection is empty, or behind a
+// president-only "this overwrites edits" confirm otherwise (spec §3).
+window.materialPriceListSeed = async function(currentUser) {
+  const r = await fetch('data/material-pricelist-2025.json?v=' + Date.now());
+  if (!r.ok) throw new Error('Could not load the price list file (HTTP ' + r.status + ')');
+  const data = await r.json();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const byCat = {};
+  items.forEach(it => {
+    const cat = it.cat || 'Uncategorized';
+    (byCat[cat] = byCat[cat] || []).push({
+      id: it.id, sec: it.sec || '', desc: it.desc || '', grade: it.grade || '',
+      price: Number(it.price) || 0, source: 'pricelist-2025'
+    });
+  });
+  const cats = Object.keys(byCat);
+  const stamp = mplStamp();
+  const byName = mplUserName(currentUser);
+  // Firestore caps a batch at 500 ops — 37 categories fits in one, but chunk
+  // defensively so this keeps working if the source file grows.
+  const CHUNK = 450;
+  for (let i = 0; i < cats.length; i += CHUNK) {
+    const batch = db.batch();
+    cats.slice(i, i + CHUNK).forEach(cat => {
+      batch.set(db.collection('material_prices').doc(mplSlugCat(cat)), {
+        cat, supplier: data.supplier || 'KINGSWAY STEEL ENTERPRISES', year: data.year || 2025,
+        items: byCat[cat], updatedAt: stamp, updatedBy: byName
+      });
+    });
+    await batch.commit();
+  }
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('material-prices');
+  return cats.length;
+};
+
+// ── Inline price edit (spec §2) — whole-doc update inside a transaction so
+// two concurrent edits to the same category never clobber each other's
+// OTHER items. Returns the fields the caller needs to patch its own local
+// copy of `docs` without a re-fetch (prevPrice → price, "subtly" per spec).
+window.materialPriceListUpdatePrice = async function(catId, itemId, newPrice, currentUser, source) {
+  const price = Number(newPrice);
+  if (!(price >= 0)) throw new Error('Price must be a non-negative number.');
+  const stamp = mplStamp();
+  const byName = mplUserName(currentUser);
+  const ref = db.collection('material_prices').doc(catId);
+  let prevPrice = null;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new Error('Category not found.');
+    const items = (snap.data().items || []).map((it) => {
+      if (it.id !== itemId) return it;
+      prevPrice = Number(it.price) || 0;
+      return Object.assign({}, it, { prevPrice, price, updatedAt: stamp, updatedBy: byName, source: source || 'manual' });
+    });
+    tx.update(ref, { items, updatedAt: stamp, updatedBy: byName });
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('material-prices');
+  return { prevPrice, price, updatedAt: stamp, updatedBy: byName };
+};
+
+// ── PO price hook (spec §4) — NOT wired to a call site (see the note atop
+// this section); the receive flow that would call this lives in
+// js/screens/production.js, out of this file's edit scope. Ready to call
+// once per received line that carries a unit price:
+//   window.materialPriceListPOHook(line.desc, line.unitPrice, currentUser)
+// Fuzzy-matches (case-insensitive substring, either direction) the line's
+// name against every pricelist item's desc AND sec. Zero or multiple
+// matches → no-op. A single confident match whose price differs → a
+// non-blocking confirm (confirmDialog, not the native blocking confirm())
+// before writing, source:'po'.
+window.materialPriceListPOHook = async function(lineDesc, unitPrice, currentUser) {
+  const needle = String(lineDesc || '').trim().toLowerCase();
+  const price = Number(unitPrice);
+  if (!needle || !(price > 0)) return { matched: false };
+
+  let docs;
+  try {
+    const snap = await dbCachedGet('material-prices', () => db.collection('material_prices').get(), 45000);
+    docs = (snap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) { return { matched: false }; }
+
+  const fuzzy = (hay) => {
+    const h = String(hay || '').trim().toLowerCase();
+    return !!h && (h.includes(needle) || needle.includes(h));
+  };
+  const seen = new Set();
+  const hits = [];
+  docs.forEach(d => (d.items || []).forEach(it => {
+    if (!fuzzy(it.desc) && !fuzzy(it.sec)) return;
+    const k = d.id + '|' + it.id;
+    if (seen.has(k)) return;               // an item can match on BOTH desc and sec
+    seen.add(k);
+    hits.push({ catId: d.id, item: it });
+  }));
+
+  if (hits.length !== 1) return { matched: false, count: hits.length };
+  const { catId, item } = hits[0];
+  const oldPrice = Number(item.price) || 0;
+  if (oldPrice === price) return { matched: true, changed: false };
+
+  const label = [item.sec, item.desc].filter(Boolean).join(' — ') || 'this item';
+  const ok = await confirmDialog({
+    title: 'Update price list?',
+    message: `Update price list: ${label} ₱${fmt(oldPrice)} → ₱${fmt(price)}?`,
+    confirmLabel: 'Update'
+  });
+  if (!ok) return { matched: true, changed: false, declined: true };
+
+  await window.materialPriceListUpdatePrice(catId, item.id, price, currentUser, 'po');
+  return { matched: true, changed: true };
+};
+
+// ── Purchasing → "Price List" chip-tab (spec §1) ───────────────────────────
+// Signature mirrors the other Purchasing sub-renderers in production.js
+// (renderRFQs(content, currentUser, currentRole) etc.) so wiring it into
+// loadPurchasingContent's dispatch is a one-line add — see the wiring note
+// atop this section.
+window.renderMaterialPriceList = async function(content, currentUser, currentRole) {
+  content.innerHTML = window.skeletonHtml('table');
+  const canEdit = mplCanEdit();
+  let docs = [];
+  try {
+    const snap = await dbCachedGet('material-prices', () => db.collection('material_prices').get(), 45000).catch(() => ({ docs: [] }));
+    docs = (snap.docs || []).map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️', 44)}</div><h4>Couldn't load the price list</h4><p>${escHtml(e.message || String(e))}</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
+    return;
+  }
+  mplRenderList(content, docs, currentUser, currentRole, canEdit);
+};
+
+function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
+  if (!docs.length) {
+    content.innerHTML = window.renderEmptyState({
+      icon: '📋', title: 'No price list yet',
+      hint: 'Import the 2025 Kingsway Steel price list to get started.',
+      action: canEdit ? { id: 'mpl-seed-btn', label: `Import 2025 price list (Kingsway)` } : null
+    });
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
+    document.getElementById('mpl-seed-btn')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget; btn.disabled = true; const label = btn.textContent; btn.textContent = 'Importing…';
+      try {
+        const n = await window.materialPriceListSeed(currentUser);
+        Notifs.success(`Imported ${n} categor${n === 1 ? 'y' : 'ies'}.`);
+        window.renderMaterialPriceList(content, currentUser, currentRole);
+      } catch (err) {
+        Notifs.error('Import failed: ' + (err.message || err));
+        btn.disabled = false; btn.textContent = label;
+      }
+    });
+    return;
+  }
+
+  const isPresident = currentRole === 'president' || currentRole === 'owner';
+  const state = { cat: 'all', q: '', showAll: false };
+  const allRows = () => {
+    const rows = [];
+    docs.forEach(d => (d.items || []).forEach(it => rows.push(Object.assign({}, it, { catId: d.id, cat: d.cat }))));
+    return rows;
+  };
+  const catChips = () => docs.map(d => ({ key: d.id, label: d.cat, count: (d.items || []).length }))
+    .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <input id="mpl-search" placeholder="Search item, section, or grade…" class="ms-input" style="max-width:320px;flex:1 1 220px"/>
+      ${isPresident ? `<button type="button" class="btn-secondary btn-sm" id="mpl-reseed-btn">${emojiIcon('🔄', 14)} Re-seed from 2025 file</button>` : ''}
+    </div>
+    ${window.chipTabs([{ key: 'all', label: 'All', count: allRows().length }].concat(catChips()), 'all', { cls: 'mpl-cat-tabs' })}
+    <div class="table-wrap" style="margin-top:10px"><table class="data-table">
+      <thead><tr><th>Section</th><th>Item</th><th>Grade</th><th>Price</th><th>Updated</th></tr></thead>
+      <tbody id="mpl-tbody"></tbody>
+    </table></div>
+    <div id="mpl-showall-wrap"></div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
+
+  const MPL_CAP = 150;
+  function renderRows() {
+    const rows = allRows();
+    const q = state.q.trim().toLowerCase();
+    const visible = q
+      ? rows.filter(r => [r.desc, r.sec, r.grade].some(v => String(v || '').toLowerCase().includes(q)))
+      : (state.cat === 'all' ? rows : rows.filter(r => r.catId === state.cat));
+    const capped = state.showAll ? visible : visible.slice(0, MPL_CAP);
+    const tbody = content.querySelector('#mpl-tbody');
+    tbody.innerHTML = !capped.length
+      ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No matching items.</td></tr>`
+      : capped.map(r => mplRowHtml(r, canEdit)).join('');
+    const wrap = content.querySelector('#mpl-showall-wrap');
+    wrap.innerHTML = (!state.showAll && visible.length > MPL_CAP)
+      ? `<div style="text-align:center;margin:10px 0"><button type="button" class="btn-secondary btn-sm" id="mpl-show-all">Show all ${visible.length}</button></div>` : '';
+    wrap.querySelector('#mpl-show-all')?.addEventListener('click', () => { state.showAll = true; renderRows(); });
+    if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+    if (canEdit) mplBindPriceEdits(tbody, docs, currentUser, renderRows);
+  }
+
+  content.querySelector('#mpl-search').addEventListener('input', (e) => {
+    state.q = e.target.value; state.showAll = false; renderRows();
+  });
+  window.bindChipTabs(content.querySelector('.mpl-cat-tabs'), (key) => {
+    state.cat = key; state.showAll = false;
+    const s = content.querySelector('#mpl-search'); if (s) s.value = '';
+    state.q = '';
+    renderRows();
+  });
+  content.querySelector('#mpl-reseed-btn')?.addEventListener('click', async () => {
+    const ok = await confirmDialog({
+      title: 'Re-seed price list?',
+      message: 'This overwrites the price list with the 2025 file and discards any manual edits made since. This cannot be undone. Continue?',
+      confirmLabel: 'Re-seed', danger: true
+    });
+    if (!ok) return;
+    try {
+      const n = await window.materialPriceListSeed(currentUser);
+      Notifs.success(`Re-imported ${n} categor${n === 1 ? 'y' : 'ies'}.`);
+      window.renderMaterialPriceList(content, currentUser, currentRole);
+    } catch (err) { Notifs.error('Re-seed failed: ' + (err.message || err)); }
+  });
+
+  renderRows();
+}
+
+function mplRowHtml(r, canEdit) {
+  const priceDisplay = '₱' + fmt(r.price || 0);
+  const prevNote = (r.prevPrice != null && Number(r.prevPrice) !== Number(r.price))
+    ? ` <span style="font-size:10px;color:var(--text-muted)">(₱${fmt(r.prevPrice)} → ₱${fmt(r.price)})</span>` : '';
+  const updated = r.updatedAt
+    ? `${escHtml(String(r.updatedAt))}${r.updatedBy ? `<div style="color:var(--text-muted)">${escHtml(r.updatedBy)}</div>` : ''}`
+    : '—';
+  return `<tr>
+    <td>${escHtml(r.sec || '—')}</td>
+    <td>${escHtml(r.desc || '—')}</td>
+    <td>${escHtml(r.grade || '—')}</td>
+    <td>${canEdit
+      ? `<span class="mpl-price" data-cat="${escHtml(r.catId)}" data-item="${escHtml(r.id)}" data-price="${Number(r.price) || 0}" style="cursor:pointer;text-decoration:underline dotted" title="Click to edit">${priceDisplay}</span>${prevNote}`
+      : `${priceDisplay}${prevNote}`}</td>
+    <td style="font-size:11px">${updated}</td>
+  </tr>`;
+}
+
+function mplBindPriceEdits(tbody, docs, currentUser, onSaved) {
+  tbody.querySelectorAll('.mpl-price').forEach(span => {
+    span.addEventListener('click', () => {
+      const td = span.closest('td');
+      if (td.querySelector('.mpl-price-input')) return;   // already editing
+      const catId = span.dataset.cat, itemId = span.dataset.item;
+      const cur = Number(span.dataset.price) || 0;
+      td.innerHTML = `<div style="display:flex;gap:4px;align-items:center">
+        <input type="number" inputmode="decimal" step="0.01" min="0" class="mpl-price-input" value="${cur}" style="width:90px"/>
+        <button type="button" class="btn-primary btn-sm mpl-price-save">${emojiIcon('check', 14)}</button>
+        <button type="button" class="btn-secondary btn-sm mpl-price-cancel">${emojiIcon('x', 14)}</button>
+      </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [td] });
+      const input = td.querySelector('.mpl-price-input');
+      input.focus(); input.select();
+      td.querySelector('.mpl-price-cancel').addEventListener('click', () => onSaved());
+      const save = async () => {
+        const val = parseFloat(input.value);
+        if (!(val >= 0)) { Notifs.error('Enter a valid price.'); return; }
+        const saveBtn = td.querySelector('.mpl-price-save'); saveBtn.disabled = true;
+        try {
+          const doc = docs.find(d => d.id === catId);
+          const item = doc && (doc.items || []).find(i => i.id === itemId);
+          const res = await window.materialPriceListUpdatePrice(catId, itemId, val, currentUser, 'manual');
+          if (item) { item.prevPrice = res.prevPrice; item.price = res.price; item.updatedAt = res.updatedAt; item.updatedBy = res.updatedBy; item.source = 'manual'; }
+          if (doc) { doc.updatedAt = res.updatedAt; doc.updatedBy = res.updatedBy; }
+          Notifs.success('Price updated.');
+          onSaved();
+        } catch (err) {
+          Notifs.error('Update failed: ' + (err.message || err));
+          saveBtn.disabled = false;
+        }
+      };
+      td.querySelector('.mpl-price-save').addEventListener('click', save);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') onSaved();
+      });
+    });
+  });
+}
+
 // PRODUCTION DEPARTMENT + PROJECT LIFECYCLE + PURCHASING DEPARTMENT — moved
 // verbatim to js/screens/production.js (Wave 7 Pass 4, 2026-08-03). This was
 // the entire tail of the file (PROD_STAGES/QC/Delivery Receipt through

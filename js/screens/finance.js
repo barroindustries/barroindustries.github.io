@@ -1018,6 +1018,49 @@ window.openFinCategoryDrill = function(category, kind, rows, periodLabel) {
 const BE_DEFAULT_FIXED_KW    = ['rent','utilit','salar','payroll','insuran','subscri','internet','lease'];
 const BE_DEFAULT_VARIABLE_KW = ['material','cos','cost of sales','freight','deliver','commission'];
 
+// ── BREAKEVEN-EDITABLE-OH-SPEC-2026-08-26 §2 — payroll split (direct labor
+// vs office overhead) ─────────────────────────────────────────────────────
+// The default keyword classification above (BE_DEFAULT_FIXED_KW's 'payroll'
+// substring) tags the ENTIRE 'Payroll Expense' ledger category as Fixed —
+// correct for office salaries, wrong for fabricator wages, which scale with
+// production and belong in Variable. Weekly/worker pay runs
+// (js/payroll-weekly.js's WRC.LEDGER_KINDS) and the standalone worker-payslip
+// submit poster (js/screens/hr.js ~3949) post distinct refNumber prefixes
+// from the monthly office run (js/departments.js's disbursePayRun, 'PAY-'/
+// 'NETPAY-'/etc.) specifically so the two can be told apart after the fact —
+// this is that read. Only entries actually filed under category === 'Payroll
+// Expense' are ever inspected (see beComputePayrollSplit below), so a
+// statutory-remittance leg like 'SSSPAYW-' — which posts under its OWN
+// liability category ('SSS Payable'), not 'Payroll Expense' — never reaches
+// this list in practice; it's included anyway for defensiveness against a
+// future category change.
+const BE_WEEKLY_PAYROLL_PREFIXES = [
+  'PAYW-', 'WPAY-', 'NETPAYW-', 'SSSPAYW-', 'PHPAYW-', 'HDMFPAYW-', 'WHTPAYW-', 'EMPDEDW-', 'CADEDUCTW-'
+];
+function beIsDirectLaborRef(refNumber) {
+  const ref = String(refNumber || '');
+  return BE_WEEKLY_PAYROLL_PREFIXES.some(p => ref.startsWith(p));
+}
+// Splits the ALREADY-fetched, ALREADY period-bounded `expense` rows (the
+// same array loadFinStatement returned from window.ledgerForPeriod/
+// gjForPeriod — no second ledger read) into {directPesos, officePesos}.
+// Deliberately reads from `expense`, not a raw unfiltered ledger fetch: only
+// rows loadFinStatement already classified as ledgerKind()==='expense' feed
+// byCategory's 'Payroll Expense' bucket (see renderBreakevenTab's `bump`
+// below), so directPesos+officePesos always sums to EXACTLY the same figure
+// that bucket already contributes — the split reclassifies existing money,
+// it can never create or drop a peso relative to the unsplit total.
+function beComputePayrollSplit(expenseRows) {
+  let directPesos = 0, officePesos = 0;
+  expenseRows.forEach(e => {
+    if ((e.category || 'Other') !== 'Payroll Expense') return;
+    const amt = +e.amount || 0;
+    if (beIsDirectLaborRef(e.refNumber)) directPesos += amt;
+    else officePesos += amt;
+  });
+  return { directPesos: +directPesos.toFixed(2), officePesos: +officePesos.toFixed(2) };
+}
+
 function beDefaultGuess(cat) {
   const lower = String(cat||'').toLowerCase();
   if (BE_DEFAULT_FIXED_KW.some(k => lower.includes(k))) return 'fixed';
@@ -1078,8 +1121,15 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
   const cfg = (cfgSnap && cfgSnap.exists) ? (cfgSnap.data() || {}) : {};
   const classification = beResolveClassification(cfg, categories);
   const manualFixed = Array.isArray(cfg.manualFixed) ? cfg.manualFixed : [];
+  const profitGoal = +cfg.profitGoal || 0;
 
-  const r = window.computeBreakeven({ income: totIncome, byCategory, classification, manualFixed });
+  // BREAKEVEN-EDITABLE-OH-SPEC-2026-08-26 §2 — always computed, always passed:
+  // both legs are 0 when there's no payroll this period, which computeBreakeven
+  // treats identically to omitting payrollSplit entirely (see its "zero leg is
+  // omitted" contract), so this is safe even on a payroll-free period.
+  const payrollSplit = beComputePayrollSplit(expense);
+
+  const r = window.computeBreakeven({ income: totIncome, byCategory, classification, manualFixed, payrollSplit });
 
   // Per-day-needed only makes sense for a single calendar month. Days-in-a-
   // month is plain calendar-length math (timezone-invariant), NOT the same
@@ -1158,6 +1208,60 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
       </div>
     </div>
 
+    <!-- BREAKEVEN-EDITABLE-OH-SPEC-2026-08-26 — editable Overhead card. Neil's
+         ask verbatim: "allow me to edit the overhead". Ledger-derived Fixed
+         rows (incl. the payroll-split 'Payroll — Office' synthetic row) are
+         read-only — they come straight from the ledger, editing them here
+         would just get overwritten next render; only manualFixed rows (costs
+         that never post to the ledger, e.g. externally-tracked rent) are
+         editable. canWrite reuses the exact same finance-permission gate
+         the Classify button above already reads from (isFinancePriv()). -->
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>${emojiIcon('🏗',18)} Overhead${canWrite ? ' — Edit' : ''}</h3></div>
+      <div class="card-body">
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Fabricator payroll is auto-classified as direct labor via ledger refs (weekly pay runs), not overhead — only office/admin payroll counts below.${(payrollSplit.directPesos>0||payrollSplit.officePesos>0) ? ` This period: ₱${fmt(payrollSplit.officePesos)} office payroll included, ₱${fmt(payrollSplit.directPesos)} fabricator direct labor excluded.` : ''}</p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Category</th><th style="text-align:right">Amount</th>${canWrite?'<th></th>':''}</tr></thead>
+          <tbody id="bke-oh-ledger-rows">${(r.classifiedFixed.filter(x=>!x.manual).length
+            ? r.classifiedFixed.filter(x=>!x.manual).map(x=>`<tr><td>${escHtml(x.cat)}</td><td style="text-align:right">₱${fmt(x.amt)}</td>${canWrite?'<td></td>':''}</tr>`).join('')
+            : `<tr><td colspan="${canWrite?3:2}" style="color:var(--text-muted)">No ledger-classified fixed costs for ${escHtml(label)}</td></tr>`)}</tbody>
+          <tbody id="bke-oh-manual-rows"></tbody>
+        </table></div>
+        ${canWrite ? `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button type="button" class="btn-secondary btn-sm" id="bke-oh-add">${emojiIcon('➕',14)} Add Manual Cost</button>
+          <button type="button" class="btn-primary btn-sm" id="bke-oh-save">Save Overhead</button>
+        </div>` : ''}
+        <div style="margin-top:12px;padding-top:10px;border-top:2px solid var(--border);font-size:15px;font-weight:800">
+          Total monthly overhead: <span id="bke-oh-total">₱${fmt(r.fixedTotal)}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>${emojiIcon('💰',18)} Contribution</h3></div>
+      <div class="card-body">
+        <div class="kpi-row">
+          <div class="kpi-card"><div class="kpi-label">Contribution (₱)</div><div class="kpi-value">₱${fmt(r.contributionPesos)}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Contribution Margin %</div><div class="kpi-value">${cmrDisplay}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>${emojiIcon('🎯',18)} Profit Goal</h3></div>
+      <div class="card-body">
+        <div class="form-row" style="margin-bottom:12px">
+          <div class="form-group" style="max-width:220px">
+            <label>Monthly profit goal (₱)</label>
+            <input id="bke-profit-goal" type="number" step="0.01" inputmode="decimal" value="${profitGoal}" ${canWrite?'':'disabled'}/>
+          </div>
+        </div>
+        <div id="bke-profit-result" style="font-size:15px;font-weight:800;margin-bottom:8px"></div>
+        <div class="progress-bar-wrap" style="margin-bottom:8px"><div class="progress-bar-fill" id="bke-profit-bar" style="width:0%"></div></div>
+        <div id="bke-profit-sub" style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);flex-wrap:wrap;gap:8px"></div>
+      </div>
+    </div>
+
     <!-- .bke-row2: mobile finance pass 2026-08-08. The inline
          grid-template-columns below outranks .form-row's 768px 1-col collapse,
          so these two tables sat side by side at ~165px each on a 375px phone.
@@ -1195,6 +1299,129 @@ async function renderBreakevenTab(container, currentUser, currentRole, periodKey
     <div class="bke-print-lh">${_beLh ? _beLh.footerHTML : ''}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+
+  // ── Overhead card — inline manualFixed edit (BREAKEVEN-EDITABLE-OH-SPEC-
+  // 2026-08-26 §2). Same local-mutable-array + bind()/render() shape as
+  // openBreakevenClassifyEditor's manual-row editor above, just scoped to
+  // this tab's own DOM instead of a modal panel, and merge:true on write so
+  // saving overhead here can never clobber the fixed/variable/none/profitGoal
+  // fields the Classify editor (or the profit-goal input below) also lives
+  // on in the SAME finance_config/breakeven doc.
+  let ohManualRows = manualFixed.map(m => ({ label: m.label || '', amount: +m.amount || 0 }));
+  const ohLedgerFixedTotal = +(r.classifiedFixed.filter(x => !x.manual).reduce((s, x) => s + x.amt, 0)).toFixed(2);
+
+  function ohManualRowHtml(m, i) {
+    return canWrite
+      ? `<tr>
+          <td><input class="bke-oh-m-label" data-i="${i}" value="${escHtml(m.label)}" placeholder="e.g. Rent — HQ" style="width:100%"/></td>
+          <td style="text-align:right"><input class="bke-oh-m-amount" data-i="${i}" type="number" step="0.01" inputmode="decimal" value="${m.amount || 0}" style="width:110px;text-align:right"/></td>
+          <td><button type="button" class="btn-danger btn-sm bke-oh-m-del" data-i="${i}" aria-label="Remove manual overhead row">${emojiIcon('trash-2', 14)}</button></td>
+        </tr>`
+      : `<tr><td>${escHtml(m.label)} <span class="badge badge-gray" style="font-size:9px">manual</span></td><td style="text-align:right">₱${fmt(m.amount || 0)}</td></tr>`;
+  }
+
+  function ohRender() {
+    const tbody = container.querySelector('#bke-oh-manual-rows');
+    if (!tbody) return;
+    tbody.innerHTML = ohManualRows.length
+      ? ohManualRows.map(ohManualRowHtml).join('')
+      : (canWrite ? `<tr><td colspan="3" style="color:var(--text-muted);font-size:11px">No manual overhead costs added.</td></tr>` : '');
+    const total = +(ohLedgerFixedTotal + ohManualRows.reduce((s, m) => s + (+m.amount || 0), 0)).toFixed(2);
+    const totalEl = container.querySelector('#bke-oh-total');
+    if (totalEl) totalEl.textContent = '₱' + fmt(total);
+    if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+    ohBind();
+  }
+  function ohBind() {
+    container.querySelectorAll('.bke-oh-m-label,.bke-oh-m-amount').forEach(inp => inp.addEventListener('change', () => {
+      const i = +inp.dataset.i;
+      if (!ohManualRows[i]) return;
+      if (inp.classList.contains('bke-oh-m-label')) ohManualRows[i].label = inp.value.trim();
+      else ohManualRows[i].amount = parseFloat(inp.value) || 0;
+      ohRender();
+    }));
+    container.querySelectorAll('.bke-oh-m-del').forEach(b => b.addEventListener('click', () => {
+      ohManualRows.splice(+b.dataset.i, 1);
+      ohRender();
+    }));
+  }
+  ohRender();
+  if (canWrite) {
+    container.querySelector('#bke-oh-add')?.addEventListener('click', () => {
+      ohManualRows.push({ label: '', amount: 0 });
+      ohRender();
+    });
+    container.querySelector('#bke-oh-save')?.addEventListener('click', () => window.busy(container.querySelector('#bke-oh-save'), async () => {
+      const manualFixedOut = ohManualRows.filter(m => m.label && m.amount).map(m => ({ label: m.label.trim(), amount: +(+m.amount).toFixed(2) }));
+      try {
+        await db.collection('finance_config').doc('breakeven').set({
+          manualFixed: manualFixedOut,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedBy: (window.currentUser && window.currentUser.uid) || '',
+          updatedByName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || ''
+        }, { merge: true });
+        Notifs.success('Overhead saved.');
+        renderBreakevenTab(container, currentUser, currentRole, periodKey);
+      } catch (e) {
+        Notifs.error('Save failed: ' + (e.message || e));
+      }
+    }));
+  }
+
+  // ── Profit Goal card (§2) — "how much do we need to sell to make profits".
+  // Required-sales math lives in computeBreakeven (money-core.js); this is
+  // display + persistence only. Per-day uses REAL today (bizDate(), per
+  // CLAUDE.md's Manila-time-helpers rule) and the actual current calendar
+  // month's remaining days — independent of whichever period is selected in
+  // the picker above, since "days left this month" always means the real
+  // month regardless of which report period is being reviewed. The
+  // month-to-date/progress figures below it, by contrast, intentionally
+  // reuse this tab's own already-fetched `totIncome`/`label` for the
+  // SELECTED period (zero extra fetch), same as the Progress-to-Break-even
+  // card above.
+  function beProfitCalc(target) {
+    const req = r.requiredSales(target);
+    const todayIso = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+    const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayIso);
+    let daysRemaining = null;
+    if (dm) {
+      const y = +dm[1], mo = +dm[2], d = +dm[3];
+      const daysInMonth = new Date(y, mo, 0).getDate();
+      daysRemaining = Math.max(1, daysInMonth - d + 1);
+    }
+    const perDayGoal = (typeof req === 'number' && daysRemaining) ? +(req / daysRemaining).toFixed(2) : null;
+    const pct = (typeof req !== 'number') ? 0 : (req <= 0 ? 100 : Math.max(0, Math.min(100, +((totIncome / req) * 100).toFixed(2))));
+    return { req, perDayGoal, pct, daysRemaining };
+  }
+  function beRenderProfitResult(target) {
+    const { req, perDayGoal, pct, daysRemaining } = beProfitCalc(target);
+    const resultEl = container.querySelector('#bke-profit-result');
+    const barEl = container.querySelector('#bke-profit-bar');
+    const subEl = container.querySelector('#bke-profit-sub');
+    if (resultEl) resultEl.textContent = (typeof req === 'number')
+      ? `Sell ₱${fmt(req)}/month to make ₱${fmt(target)} profit`
+      : `n/a — contribution margin is ${cmrDisplay}, no amount of extra sales reaches any profit target at today's cost mix`;
+    if (barEl) { barEl.style.width = pct + '%'; barEl.style.background = (pct >= 100 ? 'var(--success)' : 'var(--warning)'); }
+    if (subEl) subEl.innerHTML = `
+      <span>Income so far (${escHtml(label)}): <strong style="color:var(--text)">₱${fmt(totIncome)}</strong></span>
+      ${typeof req === 'number' ? `<span>Gap to goal: <strong style="color:var(--text)">₱${fmt(Math.max(0, +(req - totIncome).toFixed(2)))}</strong></span>` : ''}
+      ${perDayGoal != null ? `<span>Needed per day (${daysRemaining} day${daysRemaining === 1 ? '' : 's'} left this month): <strong style="color:var(--text)">₱${fmt(perDayGoal)}</strong></span>` : ''}
+    `;
+  }
+  const profitInput = container.querySelector('#bke-profit-goal');
+  if (profitInput) {
+    beRenderProfitResult(+profitInput.value || 0);
+    profitInput.addEventListener('input', () => beRenderProfitResult(parseFloat(profitInput.value) || 0));
+    if (canWrite) profitInput.addEventListener('change', () => {
+      const val = +(parseFloat(profitInput.value) || 0).toFixed(2);
+      db.collection('finance_config').doc('breakeven').set({
+        profitGoal: val,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedBy: (window.currentUser && window.currentUser.uid) || '',
+        updatedByName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || ''
+      }, { merge: true }).then(() => Notifs.success('Profit goal saved.')).catch(e => Notifs.error('Save failed: ' + (e.message || e)));
+    });
+  }
 
   window.bindPeriodPicker(document.getElementById('bke-period'), (newKey) => {
     renderBreakevenTab(container, currentUser, currentRole, newKey);
@@ -1323,12 +1550,16 @@ function openBreakevenClassifyEditor(categories, cfg, onSaved) {
     });
     const manualFixedOut = manualRows.filter(m => m.label && m.amount).map(m => ({ label: m.label.trim(), amount: +(+m.amount).toFixed(2) }));
     try {
+      // BREAKEVEN-EDITABLE-OH-SPEC-2026-08-26 — merge:true added. This doc now
+      // also carries `profitGoal` (Profit Goal card, renderBreakevenTab) which
+      // this save never touches; without merge, this plain overwrite would
+      // silently drop it every time Classify is saved.
       await db.collection('finance_config').doc('breakeven').set({
         fixed: Array.from(fixed), variable: Array.from(variable), none: Array.from(none), manualFixed: manualFixedOut,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         updatedBy: (window.currentUser&&window.currentUser.uid)||'',
         updatedByName: (window.userProfile&&window.userProfile.displayName)||(window.currentUser&&window.currentUser.email)||''
-      });
+      }, { merge: true });
       closeModal();
       Notifs.success('Break-even classification saved.');
       onSaved && onSaved();

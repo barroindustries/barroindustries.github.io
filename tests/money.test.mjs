@@ -555,6 +555,147 @@ describe('computeBreakeven', () => {
     assert.equal(r.variableTotal, 20000);
     assert.deepEqual(r.unclassified, []); // NOT [{ cat: 'Sales Revenue', amt: 0 }]
   });
+
+  // ═══════════════════════════════════════════════════════════
+  // BREAKEVEN-EDITABLE-OH-SPEC-2026-08-26 — requiredSales/contributionPesos/
+  // payrollSplit. All three are additive; every test above this point must
+  // keep passing unmodified (backward compatibility is the spec's own
+  // guardrail: "extend, never rename or change existing fields").
+  // ═══════════════════════════════════════════════════════════
+
+  it('requiredSales(0): worked example from the spec — 550000 fixed, 0.30 CMR, 0 profit -> 1,833,333.33', () => {
+    const r = computeBreakeven({
+      income: 1000000,
+      byCategory: { 'Payroll Expense': { expense: 550000 }, 'Materials': { expense: 700000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+    });
+    assert.equal(r.fixedTotal, 550000);
+    assert.equal(r.contributionMarginRatio, 0.3);
+    // 550000 / 0.3 = 1833333.3333... -> 1833333.33
+    assert.equal(r.requiredSales(0), 1833333.33);
+    // requiredSales(0) with no profit target must equal breakEvenRevenue exactly.
+    assert.equal(r.requiredSales(0), r.breakEvenRevenue);
+  });
+
+  it('requiredSales(profitTarget): a positive profit goal is added to fixed costs before dividing by CMR', () => {
+    const r = computeBreakeven({
+      income: 1000000,
+      byCategory: { 'Payroll Expense': { expense: 550000 }, 'Materials': { expense: 700000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+    });
+    // (550000 + 100000) / 0.3 = 2166666.6666... -> 2166666.67
+    assert.equal(r.requiredSales(100000), 2166666.67);
+  });
+
+  it('requiredSales: a negative profitTarget is clamped to 0, not subtracted from fixed costs', () => {
+    const r = computeBreakeven({
+      income: 1000000,
+      byCategory: { 'Payroll Expense': { expense: 550000 }, 'Materials': { expense: 700000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+    });
+    assert.equal(r.requiredSales(-50000), r.requiredSales(0));
+  });
+
+  it('requiredSales: same "n/a" guard as breakEvenRevenue — null (never Infinity/NaN) when CMR is null or <= 0', () => {
+    const zeroIncome = computeBreakeven({
+      income: 0,
+      byCategory: { 'Payroll Expense': { expense: 20000 } },
+      classification: { fixed: ['Payroll Expense'] },
+    });
+    assert.equal(zeroIncome.contributionMarginRatio, null);
+    assert.equal(zeroIncome.requiredSales(0), null);
+    assert.equal(zeroIncome.requiredSales(100000), null);
+
+    const negMargin = computeBreakeven({
+      income: 10000,
+      byCategory: { 'Payroll Expense': { expense: 5000 }, 'Materials': { expense: 15000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+    });
+    assert.equal(negMargin.contributionMarginRatio, -0.5);
+    assert.equal(negMargin.requiredSales(0), null);
+  });
+
+  it('contributionPesos = income - variableTotal, in pesos (normal case)', () => {
+    const r = computeBreakeven({
+      income: 100000,
+      byCategory: { 'Payroll Expense': { expense: 20000 }, 'Materials': { expense: 20000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+    });
+    assert.equal(r.contributionPesos, 80000); // 100000 - 20000
+  });
+
+  it('contributionPesos is null-safe: always a number (never null/NaN) even at zero income or missing input', () => {
+    const zeroIncome = computeBreakeven({
+      income: 0,
+      byCategory: { 'Materials': { expense: 5000 } },
+      classification: { variable: ['Materials'] },
+    });
+    assert.equal(zeroIncome.contributionPesos, -5000); // 0 - 5000, still a plain number
+    assert.equal(typeof zeroIncome.contributionPesos, 'number');
+
+    const empty = computeBreakeven({});
+    assert.equal(empty.contributionPesos, 0);
+    assert.equal(typeof empty.contributionPesos, 'number');
+  });
+
+  it('payrollSplit: replaces the single "Payroll Expense" category with two synthetic fixed/variable rows', () => {
+    const r = computeBreakeven({
+      income: 200000,
+      byCategory: { 'Payroll Expense': { expense: 100000 }, 'Materials': { expense: 20000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+      payrollSplit: { officePesos: 60000, directPesos: 40000 },
+    });
+    // 'Payroll Expense' itself must NOT appear in classifiedFixed anymore.
+    assert.deepEqual(r.classifiedFixed, [{ cat: 'Payroll — Office', amt: 60000 }]);
+    assert.deepEqual(r.classifiedVariable, [
+      { cat: 'Materials', amt: 20000 },
+      { cat: 'Payroll — Fabricators (direct labor)', amt: 40000 },
+    ]);
+    // Totals: fixed = 60000 (office only), variable = 20000 (Materials) + 40000 (direct labor)
+    assert.equal(r.fixedTotal, 60000);
+    assert.equal(r.variableTotal, 60000);
+  });
+
+  it('payrollSplit: office/direct totals sum to the same figure the unsplit "Payroll Expense" category would have contributed', () => {
+    const withoutSplit = computeBreakeven({
+      income: 200000,
+      byCategory: { 'Payroll Expense': { expense: 100000 } },
+      classification: { fixed: ['Payroll Expense'] },
+    });
+    const withSplit = computeBreakeven({
+      income: 200000,
+      byCategory: { 'Payroll Expense': { expense: 100000 } },
+      classification: { fixed: ['Payroll Expense'] },
+      payrollSplit: { officePesos: 60000, directPesos: 40000 },
+    });
+    assert.equal(withoutSplit.fixedTotal, 100000);
+    // Same combined payroll money, just reclassified: 60000 stays fixed,
+    // 40000 moves to variable — fixedTotal + variableTotal is unchanged.
+    assert.equal(withSplit.fixedTotal + withSplit.variableTotal, withoutSplit.fixedTotal);
+  });
+
+  it('payrollSplit: a zero leg (e.g. no direct labor this period) is omitted, not pushed as a ₱0 row', () => {
+    const r = computeBreakeven({
+      income: 200000,
+      byCategory: { 'Payroll Expense': { expense: 60000 } },
+      classification: { fixed: ['Payroll Expense'] },
+      payrollSplit: { officePesos: 60000, directPesos: 0 },
+    });
+    assert.deepEqual(r.classifiedFixed, [{ cat: 'Payroll — Office', amt: 60000 }]);
+    assert.deepEqual(r.classifiedVariable, []);
+  });
+
+  it('payrollSplit absent (undefined/null): zero behavior change — "Payroll Expense" still classifies normally via fixedSet', () => {
+    const r = computeBreakeven({
+      income: 100000,
+      byCategory: { 'Payroll Expense': { expense: 20000 }, 'Materials': { expense: 20000 } },
+      classification: { fixed: ['Payroll Expense'], variable: ['Materials'] },
+      payrollSplit: null,
+    });
+    assert.deepEqual(r.classifiedFixed, [{ cat: 'Payroll Expense', amt: 20000 }]);
+    assert.equal(r.fixedTotal, 20000);
+    assert.equal(r.variableTotal, 20000);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════

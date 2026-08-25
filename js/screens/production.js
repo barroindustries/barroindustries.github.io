@@ -3655,7 +3655,7 @@ function purchTotal(items) {
 
 window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Request for Quotation') {
   const c = deptContainer();
-  const tabs = ['Request for Quotation', 'Purchase Requests', 'Budgeting', 'Tasks'];
+  const tabs = ['Request for Quotation', 'Purchase Requests', 'Price List', 'Budgeting', 'Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('🛒',20)} Purchasing</h2></div>
     ${window.sopPanel('How Purchasing works', [
@@ -3677,6 +3677,7 @@ async function loadPurchasingContent(currentUser, currentRole, sub) {
     if (sub === 'Tasks') return await renderDeptTasks(content, 'Purchasing', currentUser, currentRole);
     if (sub === 'Budgeting') return await window.renderBudgeting(content, currentUser, currentRole, 'Purchasing');
     if (sub === 'Purchase Requests') return await renderPurchaseRequests(content, currentUser, currentRole);
+    if (sub === 'Price List') return await window.renderMaterialPriceList(content, currentUser, currentRole);
     return await renderRFQs(content, currentUser, currentRole);
   } catch (e) {
     console.error('Purchasing load error', e);
@@ -4320,6 +4321,19 @@ async function receivePurchaseIntoInventory(p) {
     else matched++;
   }
   if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+  // COSTING PHASE 1 (2026-08-26): received supplier prices can refresh the
+  // Material Price List. Detached on purpose — receive must never wait on
+  // (or fail because of) the offer dialogs; hook is one confirm per
+  // confident match, sequential to avoid stacked dialogs.
+  const priced = all.filter(it => it && it.desc && (Number(it.unitPrice) || 0) > 0);
+  if (priced.length && typeof window.materialPriceListPOHook === 'function') {
+    (async () => {
+      for (const it of priced) {
+        try { await window.materialPriceListPOHook(it.desc, Number(it.unitPrice), window.currentUser || null); }
+        catch (e) { console.warn('[pricelist hook]', e); }
+      }
+    })();
+  }
   return { matched, unmatched };
 }
 

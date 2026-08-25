@@ -2392,6 +2392,17 @@ service cloud.firestore {
       allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
     }
 
+    // ── Material Price List (COSTING PHASE 1, 2026-08-26) ──────────────
+    // Supplier price list (Kingsway 2025 seed) — the live material-price feed
+    // for costing. Same sensitivity class as /product_costs (supplier cost
+    // basis), same secretary/partner exclusions. Deliberately does NOT use
+    // canPurchasing(): that helper routes through isAdmin(), which includes
+    // the secretary — the exact leak the 2026-08-09 fix above closed.
+    // Purchasing-dept staff get read+write via isPurchasingDept() directly.
+    match /material_prices/{docId} {
+      allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance() || isPurchasingDept());
+    }
+
     // ── Reference materials ────────────────────────────
     // v12 WS19: read locked to internal staff (!isPartner()) on all four — were
     // bare isAuth(). Write stays isAdmin() (secretary keeps this surface).

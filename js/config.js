@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.190';
+window.APP_VERSION = '14.0.191';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -277,7 +277,7 @@ window.DEPARTMENTS = {
   },
   'Purchasing': {
     key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#099268',
-    subtabs: ['Request for Quotation', 'Purchase Requests', 'Budgeting', 'Tasks'], navOrder: 10
+    subtabs: ['Request for Quotation', 'Purchase Requests', 'Price List', 'Budgeting', 'Tasks'], navOrder: 10
   },
   'Ventures': {
     key: 'Ventures', icon: '🚀', lucideIcon: 'rocket', color: '#5F3DC4',

@@ -297,6 +297,36 @@ window.computePayLine = function(emp, ctx) {
 //     SURFACED, never silently folded into fixed or variable (guessing
 //     cost behavior would be dishonest; the screen renders these as a
 //     warning row instead).
+//
+// ── BREAKEVEN-EDITABLE-OH-SPEC-2026-08-26 additions (backward compatible —
+//    every field/behavior above is unchanged when the new inputs are absent) ──
+//   contributionPesos = income - variableTotal, in pesos (not a ratio, so
+//     unlike contributionMarginRatio it never needs an income>0 guard —
+//     income and variableTotal are already coerced to numbers above, so this
+//     is null-safe by construction: always a number, never null/NaN).
+//   requiredSales(profitTarget) — a FUNCTION on the return object, same shape
+//     as perDayNeeded: (fixedTotal + max(0,profitTarget)) / contributionMarginRatio,
+//     rounded to cents. null when contributionMarginRatio is null or <= 0
+//     (same "can't ever break even at this cost mix" case breakEvenRevenue
+//     already guards against — never divide and surface Infinity/NaN). A
+//     negative profitTarget is clamped to 0 (asking "how much to sell to
+//     lose money" isn't a real question this function answers).
+//   payrollSplit ({directPesos, officePesos}, OPTIONAL) — correctness fix for
+//     the fact that the keyword default (BE_DEFAULT_FIXED_KW in js/screens/
+//     finance.js) classifies the WHOLE 'Payroll Expense' ledger category as
+//     fixed overhead, which wrongly treats fabricator direct labor as
+//     overhead instead of a cost that scales with production. When provided,
+//     the byCategory 'Payroll Expense' entry (if any) is skipped entirely in
+//     the normal fixed/variable/unclassified walk below and replaced by two
+//     synthetic classified rows built from payrollSplit's own numbers (not
+//     re-derived from byCategory — the caller, which already has ledger-row-
+//     level refNumber detail this function is never handed, is the source of
+//     truth for the split):
+//       officePesos > 0 -> classifiedFixed:    {cat:'Payroll — Office', amt:officePesos}
+//       directPesos > 0 -> classifiedVariable: {cat:'Payroll — Fabricators (direct labor)', amt:directPesos}
+//     Absent/falsy payrollSplit -> zero behavior change: 'Payroll Expense'
+//     flows through the pre-existing fixedSet/variableSet/keyword-default path
+//     exactly as before this spec.
 window.computeBreakeven = function(input) {
   const inp = input || {};
   const income = +inp.income || 0;
@@ -305,6 +335,10 @@ window.computeBreakeven = function(input) {
   const fixedSet = new Set(classification.fixed || []);
   const variableSet = new Set(classification.variable || []);
   const manualFixed = Array.isArray(inp.manualFixed) ? inp.manualFixed : [];
+  // Only an actual object opts in — a stray `payrollSplit: null/undefined`
+  // (the overwhelming common case, every call site before this spec) must
+  // fall straight through to the pre-existing per-category classification.
+  const payrollSplit = (inp.payrollSplit && typeof inp.payrollSplit === 'object') ? inp.payrollSplit : null;
 
   const classifiedFixed = [];
   const classifiedVariable = [];
@@ -313,6 +347,12 @@ window.computeBreakeven = function(input) {
   let variableTotal = 0;
 
   Object.keys(byCategory).forEach(cat => {
+    // Payroll split active: 'Payroll Expense' is fully replaced by the two
+    // synthetic office/direct-labor rows appended after this loop — it must
+    // not ALSO run through fixedSet/variableSet/unclassified below (that
+    // would double-count it once under its own category and again as the
+    // split), regardless of what finance_config/breakeven says about it.
+    if (payrollSplit && cat === 'Payroll Expense') return;
     const row = byCategory[cat] || {};
     const amt = +(+row.expense || 0).toFixed(2);
     // v14 fix: a category with zero expense this period (e.g. a pure-income
@@ -345,10 +385,27 @@ window.computeBreakeven = function(input) {
     manualTotal += amt;
   });
 
+  // Payroll split synthetic rows — appended after manualFixed so the visible
+  // order is "real ledger categories, then manual, then the payroll split",
+  // matching the screen's existing top-to-bottom read order for Fixed Costs.
+  if (payrollSplit) {
+    const officePesos = +(+(payrollSplit.officePesos || 0)).toFixed(2);
+    const directPesos = +(+(payrollSplit.directPesos || 0)).toFixed(2);
+    if (officePesos > 0) {
+      classifiedFixed.push({ cat: 'Payroll — Office', amt: officePesos });
+      categoryFixedTotal += officePesos;
+    }
+    if (directPesos > 0) {
+      classifiedVariable.push({ cat: 'Payroll — Fabricators (direct labor)', amt: directPesos });
+      variableTotal += directPesos;
+    }
+  }
+
   const fixedTotal = +(categoryFixedTotal + manualTotal).toFixed(2);
   variableTotal = +variableTotal.toFixed(2);
 
   const contributionMarginRatio = income > 0 ? (income - variableTotal) / income : null;
+  const contributionPesos = +(income - variableTotal).toFixed(2);
 
   let breakEvenRevenue;
   if (contributionMarginRatio === null || contributionMarginRatio <= 0) {
@@ -376,9 +433,18 @@ window.computeBreakeven = function(input) {
     return +(breakEvenRevenue / d).toFixed(2);
   }
 
+  // Same "n/a" guard as breakEvenRevenue — a CMR of 0 or negative means no
+  // amount of extra revenue at today's cost mix ever recovers fixed costs,
+  // let alone a profit on top of them.
+  function requiredSales(profitTarget) {
+    if (contributionMarginRatio === null || contributionMarginRatio <= 0) return null;
+    const target = Math.max(0, +profitTarget || 0);
+    return +((fixedTotal + target) / contributionMarginRatio).toFixed(2);
+  }
+
   return {
-    fixedTotal, variableTotal, contributionMarginRatio,
-    breakEvenRevenue, coveragePct, gapToBreakEven, perDayNeeded,
+    fixedTotal, variableTotal, contributionMarginRatio, contributionPesos,
+    breakEvenRevenue, coveragePct, gapToBreakEven, perDayNeeded, requiredSales,
     classifiedFixed, classifiedVariable, unclassified
   };
 };
