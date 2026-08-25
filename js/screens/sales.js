@@ -238,15 +238,25 @@ async function qeLoadDB() {
   // loadDatabase(), so the two tools can never disagree on a live price.
   try {
     if (typeof db === 'undefined') throw new Error('firestore not initialized');
-    const [snap, metaSnap] = await Promise.all([
+    // product_costs is finance/admin-only (cost basis was migrated OFF the
+    // products doc — see migrateProductCostsOut + firestore.rules). These
+    // items flow into the Quote Builder via qeCreateFormalQuote(), whose
+    // margin panel reads item.capitalMaterials/capitalLabor — without this
+    // read a Quick-Estimate-originated quote showed ₱0 COGS. A session the
+    // rules deny (plain sales staff) just gets costs of 0, same as before.
+    const [snap, metaSnap, costSnap] = await Promise.all([
       db.collection('products').limit(1000).get(),
       db.collection('productMeta').doc('config').get(),
+      db.collection('product_costs').limit(1000).get().catch(() => null),
     ]);
     if (snap.empty) throw new Error('no products in firestore yet');
     const meta = metaSnap.exists ? metaSnap.data() : {};
+    const costMap = {};
+    if (costSnap) costSnap.docs.forEach(cd => { costMap[cd.id] = cd.data(); });
     window._qeDB = {
       products: snap.docs.map(d => {
         const p = d.data();
+        const c = costMap[d.id];
         return {
           id: d.id,
           category: p.category,
@@ -256,8 +266,8 @@ async function qeLoadDB() {
           defaultDimensions: p.measurement || p.defaultDimensions || {},
           formula: p.formula || {},
           specs: Array.isArray(p.specs) ? p.specs : [],
-          capitalMaterials: p.capitalMaterials || 0,
-          capitalLabor: p.capitalLabor || 0,
+          capitalMaterials: (c && c.capitalMaterials) ?? p.capitalMaterials ?? 0,
+          capitalLabor: (c && c.capitalLabor) ?? p.capitalLabor ?? 0,
           laborHours: p.laborHours || null,
           leadTime: p.leadTime || '',
           unit: p.unit || 'pc',

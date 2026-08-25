@@ -654,14 +654,38 @@ async function renderProductDatabase() {
 
     // Build the payload first, then only touch photoUrl if THIS session actually
     // uploaded one — merge:true otherwise keeps the existing photo untouched.
+    //
+    // Cost basis (capitalMaterials/capitalLabor/bom) may NOT go on the products
+    // doc: firestore.rules rejects any /products write that (re)introduces a
+    // cost field (productCostFieldsLocked — a partner-readable doc must never
+    // carry cost basis), and post-migrateProductCostsOut that denial would sink
+    // the WHOLE save, title and price included. Split the write: catalog fields
+    // → products, cost fields → product_costs/{code} (finance/admin-only doc,
+    // same shape migrateProductCostsOut writes).
     const payload = {
-      title, category, unit, basePrice, capitalMaterials, capitalLabor,
-      measurement, specifications, formulaType, formula, bom: bom || [],
+      title, category, unit, basePrice,
+      measurement, specifications, formulaType, formula,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       ...(existingId ? {} : { createdAt: firebase.firestore.FieldValue.serverTimestamp() }),
     };
     if (pdbPhoto[prefix] !== undefined) payload.photoUrl = pdbPhoto[prefix];
     await db.collection('products').doc(code).set(payload, { merge: true });
+    try {
+      await db.collection('product_costs').doc(code).set({
+        capitalMaterials, capitalLabor, bom: bom || [],
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      // Keep the in-memory cost cache current so the re-render (normalizeProduct
+      // merges this cache) shows the new values immediately.
+      window._productCostsCache = window._productCostsCache || {};
+      window._productCostsCache[code] = { ...(window._productCostsCache[code] || {}), capitalMaterials, capitalLabor, bom: bom || [] };
+    } catch (e) {
+      // product_costs is finance/admin-only. This screen is president-gated so
+      // a denial here shouldn't happen, but if it does the catalog save above
+      // already stuck — say exactly what was and wasn't saved.
+      console.warn('[products] cost-basis save rejected', e && (e.code || e.message));
+      Notifs.showToast('Product saved, but cost basis (materials/labor/BOM) was rejected — finance/admin only', 'error');
+    }
     window.logAudit && window.logAudit(existingId ? 'update' : 'create', 'product', code, { title, basePrice });
     return true;
   }
