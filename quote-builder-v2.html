@@ -1874,6 +1874,12 @@ const COSTING_DEFAULTS = Object.freeze({
   sizeBands: [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]],
   ohMin: 0.10, ohMax: 0.45,
   targetMargin: 0.20,
+  // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — crew-day labor rate for custom
+  // lines: ₱30,000/6 days = ₱5,000/day. Read from product_costs/_settings
+  // when present (same doc/merge as every other COSTING_DEFAULTS field
+  // above); falls back to these numbers otherwise.
+  crewWeekRate: 30000,
+  crewWeekDays: 6,
   updatedAt: null,
 });
 
@@ -1889,6 +1895,20 @@ const COSTING_DEFAULTS = Object.freeze({
 // computeTrueCost()'s section) treats null/stale (>7 days old) the same way
 // — pace 1, i.e. Phase 1's baseOH×sizeF behavior, unchanged.
 let COSTING_PACE = null;
+
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — flat, in-memory copy of the
+// Purchasing-owned `material_prices` collection (MATERIAL-PRICELIST-SPEC),
+// fetched ONCE by loadDatabase()'s `!PARTNER_MODE` branch below (own
+// try/catch, independent of the COSTING_SETTINGS/COSTING_PACE trio — see
+// that block for why) and never refetched per keystroke. Each entry is
+// `{plId, name, price, catId}`. Stays [] until that read completes/fails —
+// same "degrade to empty, manual entry still works" posture as
+// COSTING_SETTINGS/COSTING_PACE, and for the identical reason: never
+// fetched for ANY PARTNER_MODE session (BS included), and firestore.rules
+// restricts read/write to isSeniorAdmin()/canFinance()/isPurchasingDept()
+// even for internal staff — a plain sales session gets permission-denied on
+// this read too, same graceful empty-list fallback.
+let MATERIAL_PRICE_LIST = [];
 
 // COSTING-QB-UX-SPEC-2026-08-26 §3 — manual OH% override. Quote-level (NOT
 // per item), in-session only: deliberately NOT written to saveToStorage()/
@@ -1907,6 +1927,36 @@ let ohOverridePct = null;
 // the "Per-item computation" chip (toggleOhPerItem()). Session/UI state
 // only, same non-persistence posture as ohOverridePct above.
 let ohPerItemOpen = false;
+
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — flattens every material_prices
+// doc's `items[]` (one doc per category — MATERIAL-PRICELIST-SPEC) into one
+// flat array the BOM type-ahead searches by contains-match on `name`. Pure,
+// no DOM/Firestore — its only caller is loadDatabase()'s `!PARTNER_MODE`
+// branch above.
+//
+// ESCALATION (main-session decision, not this file's to fix — quote-
+// builder-v2.html is the only file this build is scoped to): `name` is
+// meant to be the seed's own normalized field (data/material-pricelist-
+// 2025.json, 738 items, e.g. "SS304 Sheet 1.2mm (2B, 4×8ft)"), but
+// js/departments.js's materialPriceListSeed() does NOT currently persist
+// `name` onto the Firestore doc — it only writes {id, sec, desc, grade,
+// price, source}. So every live doc seeded by that function lacks `name`
+// today. Falls back to a `sec desc grade` composite (e.g. "S/S SHEETS 2B
+// (4' x 8') 0.3 T304") so the type-ahead still has a real, matchable label
+// against today's actual data instead of a blank/"Item" placeholder; once
+// the seeder is widened to persist `name`, this fallback simply stops
+// triggering (no further change needed here).
+function flattenMaterialPriceList(snap){
+  const out=[];
+  (snap.docs||[]).forEach(d=>{
+    const data=d.data()||{};
+    (Array.isArray(data.items)?data.items:[]).forEach(it=>{
+      const name = it.name || [it.sec,it.desc,it.grade].filter(Boolean).join(' ') || 'Item';
+      out.push({ plId:it.id, name, price:Number(it.price)||0, catId:d.id });
+    });
+  });
+  return out;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  DATABASE LOADING
@@ -1976,6 +2026,26 @@ async function loadDatabase(force) {
         console.warn('[quote-builder] product_costs load skipped (finance/admin only)', ce);
         COSTING_SETTINGS = { ...COSTING_DEFAULTS };
         COSTING_PACE = null;
+      }
+
+      // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — material price list for the
+      // custom-item BOM type-ahead. Deliberately its OWN try/catch, not
+      // folded into the product_costs/_settings/_pace Promise.all above:
+      // firestore.rules grants material_prices to isPurchasingDept() as well
+      // as isSeniorAdmin()/canFinance() — a broader set than product_costs —
+      // so a Purchasing-dept preparer could succeed on this read even where
+      // the trio above is denied (or vice versa for a finance-only session
+      // if material_prices rules ever narrow independently). Bundling them
+      // would let one collection's permission-denied reject the whole
+      // Promise.all and silently discard a result the other read actually
+      // earned. Fetched once here, never refetched per keystroke — the BOM
+      // type-ahead below reads the in-memory MATERIAL_PRICE_LIST only.
+      try {
+        const materialsSnap = await db.collection('material_prices').get();
+        MATERIAL_PRICE_LIST = flattenMaterialPriceList(materialsSnap);
+      } catch (me) {
+        console.warn('[quote-builder] material_prices load skipped (senior-admin/finance/purchasing only)', me);
+        MATERIAL_PRICE_LIST = [];
       }
     }
 
@@ -3358,6 +3428,7 @@ function addCustomItem(){
     leadTime:'',
     laborHours:null,
     formulaType:'fixed',
+    bom:[],   // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — starts empty; customCostGateHtml()/itemCostBasis() fall back to costMat when it stays empty.
   });
   saveToStorage();
   renderItems();
@@ -3380,30 +3451,126 @@ function addCustomItem(){
 // laborTimelineWrap/miLaborRow for every PARTNER_MODE session, not just
 // GENERIC_PARTNER) — partners see the computed results, never the inputs.
 // Absent from the DOM entirely (not display:none) for every other case:
-// client view, catalog items, any partner session.
+// client view, catalog items, any partner session. Since this whole
+// function returns '' before rendering ANYTHING for PARTNER_MODE, every
+// addition below (BOM rows, type-ahead, crew-day input) inherits that same
+// "zero new DOM for a partner session" guarantee for free — no per-element
+// guard needed inside.
+//
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 — grows the single "Materials ₱ /
+// Labor hrs" lump gate into: a small BOM list (§1, type-ahead against
+// MATERIAL_PRICE_LIST) with the old costMat field kept as an explicit
+// lump-sum FALLBACK (never deleted — reused whenever bom is empty/absent),
+// and a "Labor time (days)" crew-rate input (§2) with the old costHrs field
+// kept as a legacy fallback for quotes that already have hours entered.
+// Every element the preparer can add/remove/type into here carries
+// `no-print` (directly or via an ancestor) — `.qb-doc-sheet .no-print{
+// display:none!important}` in the <style> block is what keeps this whole
+// gate (and everything new in it) out of the Client-tab preview and the
+// printed PDF, same mechanism the original gate already relied on.
 function customCostGateHtml(item, idx){
   if (PARTNER_MODE) return '';
   if (typeof currentView==='undefined' || currentView!=='internal') return '';
   if (item.id!=='CUSTOM') return '';
-  const uncosted = item.costMat===undefined && item.costHrs===undefined;
+  const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
+  const weekRate = cs.crewWeekRate || COSTING_DEFAULTS.crewWeekRate;
+  const weekDays = cs.crewWeekDays || COSTING_DEFAULTS.crewWeekDays;
+  const dayRate = weekRate / weekDays;
+
+  const bomRows = Array.isArray(item.bom) ? item.bom : [];
+  const hasBom = bomRows.length > 0;
+  const uncosted = !customLineHasMaterialsBasis(item);
   const chip = uncosted
-    ? '<span class="ms-chip warn" title="No cost basis entered for this custom line — cost it here before filing.">needs costing</span>'
+    ? '<span class="ms-chip warn" title="No materials cost entered for this custom line — cost it here before filing.">needs costing</span>'
     : '';
-  return `<div class="spec-line cost-gate-row no-print">
-    <span class="spec-tag no-print">Cost</span>
-    <input type="number" min="0" step="1" class="cell-unit" placeholder="Materials ₱" title="Materials cost for this custom line" value="${item.costMat??''}" onchange="updateCustomCost(${idx},'costMat',this.value)" style="width:84px;">
-    <input type="number" min="0" step="0.5" class="cell-unit" placeholder="Labor hrs" title="Labor hours for this custom line" value="${item.costHrs??''}" onchange="updateCustomCost(${idx},'costHrs',this.value)" style="width:74px;">
-    ${chip}
+
+  // §1 — BOM rows. Each row's own name input drives a small filtered
+  // suggestion list (bomNameInput()/pickBomMaterial() below) against
+  // MATERIAL_PRICE_LIST — empty for a session the material_prices rules deny
+  // (see the escalation on flattenMaterialPriceList()), which degrades to
+  // exactly the free-typed manual-entry path (src:'manual') and nothing else
+  // breaks.
+  const bomRowsHtml = bomRows.map((row,bi)=>{
+    const lineTotal = (Number(row.qty)||0) * (Number(row.unitPrice)||0);
+    const badge = row.src==='pricelist'
+      ? `<span class="ms-chip ok" style="padding:2px 7px;font-size:9px;" title="Price from the Material Price List">list</span>` : '';
+    return `<div class="bom-row no-print" style="display:flex;gap:4px;align-items:center;margin:2px 0;flex-wrap:wrap;">
+      <div style="position:relative;flex:1;min-width:150px;">
+        <input type="text" class="cell-unit bom-name-input" placeholder="Material name" value="${attrEsc(row.name||'')}"
+          oninput="bomNameInput(${idx},${bi},this.value)"
+          onchange="updateBomField(${idx},${bi},'name',this.value)"
+          onblur="bomHideSuggest(${idx},${bi})"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+          autocomplete="off" style="width:100%;">
+        <div class="bom-suggest no-print" id="bomSuggest-${idx}-${bi}" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:#fff;border:1.5px solid var(--mid-blue);border-radius:6px;max-height:170px;overflow-y:auto;box-shadow:0 6px 16px rgba(0,0,0,.15);"></div>
+      </div>
+      <input type="number" min="0" step="0.01" class="cell-unit" placeholder="Qty" title="Quantity (decimals allowed)" value="${row.qty??''}" onchange="updateBomField(${idx},${bi},'qty',this.value)" style="width:56px;">
+      <input type="number" min="0" step="0.01" class="cell-unit" placeholder="₱/unit" title="Unit price" value="${row.unitPrice??''}" onchange="updateBomField(${idx},${bi},'unitPrice',this.value)" style="width:74px;">
+      ${badge}
+      <span style="font-size:11px;color:var(--gray-dark);min-width:58px;text-align:right;">${formatPeso(lineTotal)}</span>
+      <button type="button" class="del-btn" onclick="removeBomRow(${idx},${bi})" title="Remove this material">✕</button>
+    </div>`;
+  }).join('');
+  const bomTotal = bomRows.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.unitPrice)||0),0);
+  const bomTotalHtml = hasBom
+    ? `<div class="no-print" style="font-size:11px;font-weight:700;text-align:right;margin:2px 2px;">Materials total: ${formatPeso(bomTotal)}</div>` : '';
+
+  // §1 — lump-sum fallback, kept (never deleted) so a quote filed under
+  // Phase 1 (costMat, no bom) keeps working exactly as before.
+  const lumpNote = hasBom
+    ? `<span style="font-size:10px;color:var(--gray-dark);font-style:italic;">(ignored — BOM rows above are used instead)</span>` : '';
+
+  // §2 — crew-day labor, plus the legacy hours field kept working. Uses
+  // formatPeso() (comma-grouped, e.g. "₱5,000") for the rate figures, same
+  // as every other peso figure on this panel — matches the spec's own
+  // "2.5 d × ₱5,000 = ₱12,500 · ₱30k/6d crew rate" example.
+  const laborDaysPesos = (Number(item.costLaborDays)||0) * dayRate;
+  const laborLiveNote = item.costLaborDays!==undefined
+    ? `<span style="font-size:10px;color:var(--gray-dark);">${fmtNum(item.costLaborDays,2)} d × ${formatPeso(dayRate)} = ${formatPeso(laborDaysPesos)} · ${formatPeso(weekRate)}/${weekDays}d crew rate</span>`
+    : `<span style="font-size:10px;color:var(--gray-dark);">${formatPeso(weekRate)}/${weekDays}d crew rate = ${formatPeso(dayRate)}/day</span>`;
+
+  return `<div class="spec-line cost-gate-row no-print" style="display:block;">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span class="spec-tag no-print">Cost</span>${chip}
+    </div>
+    <div class="no-print" style="margin:3px 0 2px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--gray-dark);">Materials (BOM)</div>
+      ${bomRowsHtml}
+      ${bomTotalHtml}
+      <button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:2px 9px;font-size:11px;" onclick="addBomRow(${idx})">➕ Add material</button>
+    </div>
+    <div class="no-print" style="margin:4px 0 2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <input type="number" min="0" step="1" class="cell-unit" placeholder="or lump-sum materials ₱" title="Fallback materials cost, used only when no BOM rows are listed above" value="${item.costMat??''}" onchange="updateCustomCost(${idx},'costMat',this.value)" style="width:160px;">
+      ${lumpNote}
+    </div>
+    <div class="no-print" style="margin:4px 0 2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <input type="number" min="0" step="0.5" class="cell-unit" placeholder="Labor time (days)" title="Labor time in days, priced at the crew rate" value="${item.costLaborDays??''}" onchange="updateCustomCost(${idx},'costLaborDays',this.value)" style="width:100px;">
+      ${laborLiveNote}
+    </div>
+    <div class="no-print" style="margin:2px 0 2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <input type="number" min="0" step="0.5" class="cell-unit" placeholder="Labor hrs (legacy)" title="Legacy labor-hours entry — still honored if already set; new lines should use Labor time (days) above" value="${item.costHrs??''}" onchange="updateCustomCost(${idx},'costHrs',this.value)" style="width:110px;">
+    </div>
   </div>`;
 }
 
-// Stores an optional numeric cost-basis field (costMat/costHrs — §3, new
-// additive item fields, in-session only) on a custom line. An empty input
-// DELETES the field rather than storing 0, so "never entered" (uncosted) can
-// be told apart from "the preparer typed a real zero." PARTNER_MODE guard is
-// belt-and-braces: the input this handler is wired to only exists in the DOM
-// when customCostGateHtml() above already agreed to render it, which never
-// happens for a partner session.
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — shared "does this custom line have
+// a MATERIALS basis" check: BOM rows OR a lump-sum costMat. Labor (days/hrs)
+// never factors in — "labor optional (some customs are materials-only)" per
+// spec. The one source of truth for customCostGateHtml()'s chip above,
+// itemCostBasis()'s hasBasis (further below), and uncostedCustomLinesReason()
+// (the filing gate) so all three can never drift out of sync with each
+// other.
+function customLineHasMaterialsBasis(item){
+  return (Array.isArray(item.bom) && item.bom.length>0) || item.costMat!==undefined;
+}
+
+// Stores an optional numeric cost-basis field (costMat/costHrs/costLaborDays
+// — §3/§2, additive item fields, in-session only) on a custom line. An empty
+// input DELETES the field rather than storing 0, so "never entered"
+// (uncosted) can be told apart from "the preparer typed a real zero."
+// PARTNER_MODE guard is belt-and-braces: the input this handler is wired to
+// only exists in the DOM when customCostGateHtml() above already agreed to
+// render it, which never happens for a partner session.
 function updateCustomCost(idx, field, val){
   if (PARTNER_MODE) return;
   const item=items[idx]; if(!item || item.id!=='CUSTOM') return;
@@ -3412,6 +3579,132 @@ function updateCustomCost(idx, field, val){
   else item[field]=parseFloat(trimmed)||0;
   saveToStorage();
   renderItems();
+}
+
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — appends a blank, manually-entered
+// BOM row (src:'manual' until/unless the preparer picks a pricelist match).
+// PARTNER_MODE guard is belt-and-braces, matching updateCustomCost() above —
+// the "Add material" button this is wired to only ever renders inside
+// customCostGateHtml(), which already returns '' for every PARTNER_MODE
+// session.
+function addBomRow(idx){
+  if (PARTNER_MODE) return;
+  const item=items[idx]; if(!item || item.id!=='CUSTOM') return;
+  if(!Array.isArray(item.bom)) item.bom=[];
+  item.bom.push({ name:'', plId:null, qty:1, unitPrice:0, src:'manual' });
+  saveToStorage();
+  renderItems();
+  // Focus the new row's name input for immediate typing (mirrors
+  // addCustomItem()'s own focus-the-new-thing courtesy above).
+  setTimeout(()=>{
+    const inputs=document.querySelectorAll(`#itemsTbody tr[data-idx="${idx}"] .bom-name-input`);
+    const last=inputs[inputs.length-1];
+    if(last) last.focus();
+  },30);
+}
+
+// Removes one BOM row and regenerates the managed "Materials: …" spec line
+// (syncCustomItemMaterialsSpec() below) to match what's left — deleting the
+// last row removes that line entirely, per spec §3.
+function removeBomRow(idx, bomIdx){
+  if (PARTNER_MODE) return;
+  const item=items[idx]; if(!item || item.id!=='CUSTOM' || !Array.isArray(item.bom)) return;
+  item.bom.splice(bomIdx,1);
+  syncCustomItemMaterialsSpec(item);
+  saveToStorage();
+  renderItems();
+}
+
+// Live (oninput) filter against MATERIAL_PRICE_LIST as the preparer types a
+// BOM row's material name — simple case-insensitive "contains", capped at 8
+// suggestions per spec §1. Writes straight into the row's own suggestion box
+// (id `bomSuggest-{idx}-{bomIdx}`) rather than going through a full
+// renderItems() pass, so a keystroke never steals focus/cursor position from
+// the input the preparer is actively typing into.
+function bomNameInput(idx, bomIdx, val){
+  if (PARTNER_MODE) return;
+  const dd=document.getElementById(`bomSuggest-${idx}-${bomIdx}`);
+  if(!dd) return;
+  const q=String(val||'').trim().toLowerCase();
+  if(!q || !MATERIAL_PRICE_LIST.length){ dd.style.display='none'; dd.innerHTML=''; return; }
+  const matches=MATERIAL_PRICE_LIST.filter(m=>m.name.toLowerCase().includes(q)).slice(0,8);
+  if(!matches.length){ dd.style.display='none'; dd.innerHTML=''; return; }
+  dd.innerHTML=matches.map(m=>`<div class="bom-sugg-item" onmousedown="event.preventDefault();pickBomMaterial(${idx},${bomIdx},'${attrEsc(m.plId)}')" style="padding:5px 8px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #eee;">
+    <span>${txtEsc(m.name)}</span><span style="color:var(--gray-dark);white-space:nowrap;">${formatPeso(m.price)}</span>
+  </div>`).join('');
+  dd.style.display='block';
+}
+
+// Closes a BOM row's suggestion box on blur. Short setTimeout so a genuine
+// pick (pickBomMaterial(), wired to onmousedown+preventDefault so the input
+// never actually blurs during that click) always has time to run first —
+// this is only reached when focus really did move elsewhere without a pick.
+function bomHideSuggest(idx, bomIdx){
+  setTimeout(()=>{
+    const dd=document.getElementById(`bomSuggest-${idx}-${bomIdx}`);
+    if(dd){ dd.style.display='none'; dd.innerHTML=''; }
+  },120);
+}
+
+// Commits a type-ahead pick: fills name/plId/unitPrice from the live
+// MATERIAL_PRICE_LIST entry and marks src:'pricelist' (small "list" badge in
+// customCostGateHtml() above). onmousedown+preventDefault on the suggestion
+// item (not onclick) is what gets this to run — it stops the browser's
+// default focus-move-then-blur sequence, so the row's name input never fires
+// its own onchange (which would otherwise re-commit the raw, still-partial
+// typed query text as a MANUAL row a half-beat after this handler fills it
+// in properly).
+function pickBomMaterial(idx, bomIdx, plId){
+  if (PARTNER_MODE) return;
+  const item=items[idx]; if(!item || item.id!=='CUSTOM' || !Array.isArray(item.bom) || !item.bom[bomIdx]) return;
+  const m=MATERIAL_PRICE_LIST.find(x=>String(x.plId)===String(plId));
+  if(!m) return;
+  item.bom[bomIdx]=Object.assign({}, item.bom[bomIdx], { name:m.name, plId:m.plId, unitPrice:m.price, src:'pricelist' });
+  syncCustomItemMaterialsSpec(item);
+  saveToStorage();
+  renderItems();
+}
+
+// Manual edits to a BOM row's qty/unitPrice/name. Editing the name field
+// specifically breaks any existing pricelist link (plId→null, src→'manual')
+// since the typed text is no longer guaranteed to match what plId pointed
+// at — qty/unitPrice edits leave plId/src alone (still the same material,
+// just a different quantity or a hand-adjusted price).
+function updateBomField(idx, bomIdx, field, val){
+  if (PARTNER_MODE) return;
+  const item=items[idx]; if(!item || item.id!=='CUSTOM' || !Array.isArray(item.bom) || !item.bom[bomIdx]) return;
+  const row=item.bom[bomIdx];
+  if(field==='name'){
+    const trimmed=String(val).trim();
+    if(row.name!==trimmed){ row.plId=null; row.src='manual'; }
+    row.name=trimmed;
+  } else {
+    row[field]=parseFloat(val)||0;
+  }
+  syncCustomItemMaterialsSpec(item);
+  saveToStorage();
+  renderItems();
+}
+
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §3 — regenerates the managed
+// "Materials: …" line inside a custom item's specEdit text (the same
+// free-text field editSpecs()/the Specs cell already own — item.specEdit,
+// printed on the quotation in Internal, Client, and print, exactly like
+// every other spec line). Owns exactly ONE line: any existing line whose
+// trimmed text starts with the literal prefix "Materials:" is replaced;
+// every other line the preparer typed by hand is left byte-for-byte
+// untouched, in its original position. Names + quantities only — NEVER
+// prices, since this text is client-visible by design. Deleting every BOM
+// row removes the line entirely rather than leaving a bare "Materials:".
+function syncCustomItemMaterialsSpec(item){
+  if (!item || item.id!=='CUSTOM') return;
+  const rows=(Array.isArray(item.bom)?item.bom:[]).filter(r=>r && String(r.name||'').trim());
+  const kept=String(item.specEdit||'').split('\n').filter(l=>!/^Materials:\s/.test(l.trim()) && l.trim()!=='Materials:');
+  if(rows.length){
+    const summary='Materials: '+rows.map(r=>`${String(r.name).trim()} ×${fmtNum(Number(r.qty)||0,2)}`).join(' · ');
+    kept.push(summary);
+  }
+  item.specEdit=kept.join('\n').trim();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4590,11 +4883,39 @@ function paceFactor(){
 // here is belt-and-braces, matching this file's existing posture on the
 // capitalMaterials/capitalLabor leak (see the v14 re-audit note above
 // loadDatabase()).
+//
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1/§2 — custom-line materials now prefer
+// the BOM total (Σ row qty × unitPrice) over the costMat lump when bom has
+// rows (same fallback direction spec §1 describes); labor prefers crew-day
+// pesos (costLaborDays × dayRate) over the legacy hours×loadedLaborRate path
+// when costLaborDays is present — crew-day pesos ride the SAME
+// already-in-pesos `capLaborPesos` bucket a catalog item's capitalLabor
+// uses, since (like capitalLabor) it's a pesos-in/pesos-out figure, not an
+// hours figure computeTrueCost() would multiply by loadedLaborRate. `mat`/
+// `hrs`/`capLaborPesos` here are PER UNIT — computeTrueCost() and
+// renderOhPerItemTableHtml() both multiply by item.qty themselves, same as
+// every other item type. `hasBasis` is customLineHasMaterialsBasis(item) —
+// materials only, labor optional — per spec §2: "A line is COSTED when it
+// has (bom rows OR costMat) — labor optional." This is an intentional
+// tightening from Phase 1 (which also accepted costHrs alone): a custom
+// line with ONLY labor entered and no materials now shows "needs costing"
+// here, in customCostGateHtml()'s chip, and in uncostedCustomLinesReason()'s
+// filing gate — its labor pesos still flow into the aggregate totals below
+// (computeTrueCost() sums hrs/capLaborPesos unconditionally, same as it
+// always has for a catalog item missing capitalMaterials), it just won't get
+// a reconciled row in the per-item table until materials are added too.
 function itemCostBasis(item, liveById){
   if (GENERIC_PARTNER) return { mat:0, hrs:0, capLaborPesos:0, hasBasis:false, isCustom:item.id==='CUSTOM' };
   if (item.id==='CUSTOM') {
-    const hasMat = item.costMat!==undefined, hasHrs = item.costHrs!==undefined;
-    return { mat:item.costMat||0, hrs:item.costHrs||0, capLaborPesos:0, hasBasis:(hasMat||hasHrs), isCustom:true };
+    const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
+    const dayRate = (cs.crewWeekRate||COSTING_DEFAULTS.crewWeekRate) / (cs.crewWeekDays||COSTING_DEFAULTS.crewWeekDays);
+    const bomRows = Array.isArray(item.bom) ? item.bom : [];
+    const hasBom = bomRows.length>0;
+    const mat = hasBom ? bomRows.reduce((s,r)=>s+(Number(r.qty)||0)*(Number(r.unitPrice)||0),0) : (item.costMat||0);
+    const hasDays = item.costLaborDays!==undefined;
+    const hrs = (!hasDays && item.costHrs!==undefined) ? (item.costHrs||0) : 0;
+    const capLaborPesos = hasDays ? (item.costLaborDays||0)*dayRate : 0;
+    return { mat, hrs, capLaborPesos, hasBasis:customLineHasMaterialsBasis(item), isCustom:true };
   }
   const live = liveById.get(item.id);
   const mat = (live ? live.capitalMaterials : undefined) ?? item.capitalMaterials ?? 0;
@@ -5652,9 +5973,15 @@ const VERIFY_CHECKS=[
 // session never rendered the Materials ₱/Labor hrs inputs in the first
 // place (customCostGateHtml() above), so it has no way to fix an "uncosted"
 // line and must never be blocked by one.
+//
+// COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — "costed" now means
+// customLineHasMaterialsBasis(item) (bom rows OR costMat) instead of
+// costMat-OR-costHrs — labor alone no longer clears this gate. Shared helper
+// keeps this in lockstep with itemCostBasis()'s hasBasis and
+// customCostGateHtml()'s chip; see the comment there for the full rationale.
 function uncostedCustomLinesReason(){
   if (PARTNER_MODE) return '';
-  const n = items.filter(i=>i.id==='CUSTOM' && i.costMat===undefined && i.costHrs===undefined).length;
+  const n = items.filter(i=>i.id==='CUSTOM' && !customLineHasMaterialsBasis(i)).length;
   if (!n) return '';
   return `${n} custom line(s) have no cost basis — cost them in Internal view before filing.`;
 }
@@ -5982,7 +6309,13 @@ function buildQuotePayload(){
   // every postMessage send in this file (QUOTE_FILED/QUOTE_UPDATE/
   // QUOTE_APPROVAL_REQUESTED/QUOTE_DRAFT/QUOTE_STATE, and QUOTE_SAVE_TEMPLATE
   // via stripTemplateState()) funnels through this one buildQuotePayload().
-  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, ...rest }) => rest);
+  // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §4 — extends the same strip to `bom`
+  // (per-row unitPrice is a cost figure, same sensitivity class as
+  // capitalMaterials/costMat) and `costLaborDays`. The names+quantities
+  // summary those BOM rows produce (syncCustomItemMaterialsSpec() →
+  // item.specEdit) is NOT stripped — it carries no prices and already prints
+  // on the quotation by design, same as any other spec line.
+  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, ...rest }) => rest);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed

@@ -5633,6 +5633,9 @@ window.materialPriceListSeed = async function(currentUser) {
     const cat = it.cat || 'Uncategorized';
     (byCat[cat] = byCat[cat] || []).push({
       id: it.id, sec: it.sec || '', desc: it.desc || '', grade: it.grade || '',
+      // Normalized display name ("SS304 Sheet 1.2mm (2B, 4×8ft)") — the Price
+      // List screen and the quote builder's BOM type-ahead both prefer it.
+      name: it.name || '',
       price: Number(it.price) || 0, source: 'pricelist-2025'
     });
   });
