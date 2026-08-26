@@ -5792,7 +5792,7 @@ function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
     </div>
     ${window.chipTabs([{ key: 'all', label: 'All', count: allRows().length }].concat(catChips()), 'all', { cls: 'mpl-cat-tabs' })}
     <div class="table-wrap" style="margin-top:10px"><table class="data-table">
-      <thead><tr><th>Section</th><th>Item</th><th>Grade</th><th>Price</th><th>Updated</th></tr></thead>
+      <thead><tr><th>Item</th><th style="min-width:120px">Source entry</th><th>Price</th><th>Updated</th></tr></thead>
       <tbody id="mpl-tbody"></tbody>
     </table></div>
     <div id="mpl-showall-wrap"></div>
@@ -5804,7 +5804,7 @@ function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
     const rows = allRows();
     const q = state.q.trim().toLowerCase();
     const visible = q
-      ? rows.filter(r => [r.desc, r.sec, r.grade].some(v => String(v || '').toLowerCase().includes(q)))
+      ? rows.filter(r => [r.name, r.desc, r.sec, r.grade].some(v => String(v || '').toLowerCase().includes(q)))
       : (state.cat === 'all' ? rows : rows.filter(r => r.catId === state.cat));
     const capped = state.showAll ? visible : visible.slice(0, MPL_CAP);
     const tbody = content.querySelector('#mpl-tbody');
@@ -5852,10 +5852,13 @@ function mplRowHtml(r, canEdit) {
   const updated = r.updatedAt
     ? `${escHtml(String(r.updatedAt))}${r.updatedBy ? `<div style="color:var(--text-muted)">${escHtml(r.updatedBy)}</div>` : ''}`
     : '—';
+  // Display name: normalized 'name' from the 2025 seed (e.g. "SS304 Sheet
+  // 1.2mm (2B, 4×8ft)"); rows without one (hand-added/legacy) compose from
+  // the raw supplier cells so nothing renders blank.
+  const dispName = r.name || [r.grade, r.desc].filter(Boolean).join(' ') || r.sec || '—';
   return `<tr>
-    <td>${escHtml(r.sec || '—')}</td>
-    <td>${escHtml(r.desc || '—')}</td>
-    <td>${escHtml(r.grade || '—')}</td>
+    <td><b>${escHtml(dispName)}</b></td>
+    <td style="font-size:11px;color:var(--text-muted)">${escHtml([r.sec, r.desc, r.grade].filter(Boolean).join(' · ') || '—')}</td>
     <td>${canEdit
       ? `<span class="mpl-price" data-cat="${escHtml(r.catId)}" data-item="${escHtml(r.id)}" data-price="${Number(r.price) || 0}" style="cursor:pointer;text-decoration:underline dotted" title="Click to edit">${priceDisplay}</span>${prevNote}`
       : `${priceDisplay}${prevNote}`}</td>
