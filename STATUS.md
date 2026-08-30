@@ -26,7 +26,7 @@ what the script prints.
 - [ ] **Seed the Material Price List** — President → costing screen seed button (shipped v14.0.191, never clicked). Costing math reads placeholder prices until then.
 - [ ] **Phase-9 president one-time buttons** (pending since July): Finance → Reports → "🔄 Sync to ledger"; Projects → "🔖 Tag"; `remapDesignProjectClients` (browser console). All idempotent.
 - [ ] **Verify `backfillUserClaims` was run** after the V11.1 storage-claims deploy (president, browser console). If unsure, run again — idempotent. Until it runs, Storage role-scoping treats un-stamped accounts wrong.
-- [ ] **Record the deploy baseline** — confirm firestore.rules / storage.rules / functions currently deployed match the repo, then `bash scripts/release.sh record all`. Until recorded, release.sh can only warn, not verify.
+- [x] **Record the deploy baseline** — done 2026-08-30 (owner-confirmed): all 14 deployed functions diffed clean against repo exports; firestore/storage/functions hashes recorded. `release.sh push` now enforces, not warns.
 <!-- PENDING-OPS:END -->
 
 ## Open rulings — decisions only the President can make
