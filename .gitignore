@@ -8,6 +8,9 @@ scripts/node_modules/
 **/.DS_Store
 *.log
 
+# release.sh's per-machine record of what was last deployed to Firebase
+.deploy-state
+
 # Local env / secrets — never commit service-account keys
 .env
 .env.*

@@ -1,0 +1,69 @@
+# STATUS — Barro Industries Operations System
+
+> **This is the one page that is always current.** Read it first, every session.
+> Update it before ending any session that changes state (same discipline as the version bump).
+> History lives in [ROADMAP.md](ROADMAP.md) (frozen), plans in [docs/plans/](docs/plans/), audits in
+> [docs/reviews/](docs/reviews/), feature specs in [specs/](specs/).
+
+_Last updated: **2026-08-30**_
+
+## Where the project is
+
+| | |
+|---|---|
+| **Production** | v14.0.195 (auto-bumps each commit — live check: `curl -sL https://barroindustries-operatingsystem.ravenmails.com/js/config.js \| grep APP_VERSION`) |
+| **Deploy** | `git push origin master` → GitHub Pages (custom domain above; the github.io URL 301s to it). Firebase surfaces deploy separately — use `scripts/release.sh`. |
+| **Active program** | V14 overhaul ([docs/plans/V14-OVERHAUL-PLAN.md](docs/plans/V14-OVERHAUL-PLAN.md)) — Wave 1 + 2A live. Current build thread: **costing system** (phases 1–2 shipped: true-cost panel, material price list, custom-item BOM, break-even v2, pace dashboard). |
+| **Blocked on owner** | Office/monthly payroll disbursement — waiting on verified 2026 statutory rates (ruling #1 below). Everything else about office pay is built. |
+| **Commit gates** | `node --test tests/*.test.mjs && bash scripts/ci-invariants.sh && node scripts/check-ui-wiring.js` — all three, before every commit. |
+
+## Pending deploys & one-time actions
+
+Run `scripts/release.sh` for the live drift report. Tick items here when done — this register is
+what the script prints.
+
+<!-- PENDING-OPS:BEGIN -->
+- [ ] **Seed the Material Price List** — President → costing screen seed button (shipped v14.0.191, never clicked). Costing math reads placeholder prices until then.
+- [ ] **Phase-9 president one-time buttons** (pending since July): Finance → Reports → "🔄 Sync to ledger"; Projects → "🔖 Tag"; `remapDesignProjectClients` (browser console). All idempotent.
+- [ ] **Verify `backfillUserClaims` was run** after the V11.1 storage-claims deploy (president, browser console). If unsure, run again — idempotent. Until it runs, Storage role-scoping treats un-stamped accounts wrong.
+- [ ] **Record the deploy baseline** — confirm firestore.rules / storage.rules / functions currently deployed match the repo, then `bash scripts/release.sh record all`. Until recorded, release.sh can only warn, not verify.
+<!-- PENDING-OPS:END -->
+
+## Open rulings — decisions only the President can make
+
+Ten-minute review at the start of any working session. Oldest first within severity.
+
+| # | Raised | Decision needed | Blocks |
+|---|---|---|---|
+| 1 | 2026-08-10 | Enter + attest the **2026 SSS / PhilHealth / Pag-IBIG / withholding rates** at Finance → Taxes & BIR → Gov Rates (accountant's figures — never invented; the app refuses to disburse on placeholders by design). | **All office/monthly payroll.** |
+| 2 | 2026-08-24 | Activate the **office pay split+flip** (₱10k base + KPI incentive, attendance retired) — after #1. | New office pay model going live. |
+| 3 | 2026-07-12 | **D4/D5 quote math**: per-length pricing activation, commission basis, rounding rule. | Quote-math build (V13 Ph 19). |
+| 4 | 2026-07-12 | **D9 secretary two-tier scope**: kpi_evals delete tier + minor-approvals UI. | V13 Ph 25/60. |
+| 5 | 2026-08-10 | **HR gating**: should HR screens follow *department* rather than role? May HR staff create logins? | HR dept usability; onboarding ownership. |
+| 6 | 2026-07-12 | **Password-reset flow** design (replaces the old plaintext-token idea, V13 Ph 28). | Password hygiene closure. |
+| 7 | 2026-07-12 | **Leave policy + production-pay rulings** (V13 Ph 69–72). | Leave & PH holidays reaching either pay run. |
+| 8 | 2026-08-10 | **Meetings**: add a `department` field (schema change)? Secretary calendar read scope. | Calendar privacy. |
+
+Smaller pending rulings live in V13-PLAN Part F2 (D-registry) — none block money.
+
+## Backlog — one ranked list (merged from V13 leftovers, V14, PERF wave-2, payroll review, handoffs)
+
+1. **Statutory rates → payroll activation** (rulings #1–2; owner action, not a build).
+2. **Costing cutover**: seed the price list, adopt the pace dashboard in daily use, enforce the custom-item gate end-to-end.
+3. **Payroll correctness tail** (payroll review Ph 1–2): pro-rating for mid-period hires/leavers, effective-dated raises (running June must pay June's rate), leave + PH holidays into both runs, past-day attendance correction, layoff SoA final-pay + ledger entry.
+4. **V14 remaining waves**: window-system leftovers, inline-style sweep batches, A4/print unification (see V14-OVERHAUL-PLAN).
+5. **Release ritual owed from V13 (Ph 96–100)**: full-role QA + security re-verification + decision clearance — run as V14's closing wave.
+6. **President "Pending ops" in-app panel** — surface the one-time-actions register above inside the app so unclicked buttons are visible where they live.
+7. **PERF wave 2**: split hr.js / chat.js / dashboards.js payslip renderer; slim production.js out of 8 bundles; Lucide subset; CSS dedupe.
+8. **Weekly-run parity steps 8–11**: adjust-panel hardening, batch payslip printing with per-worker receipt, Workers sub-view.
+9. **Test breadth**: route-smoke test (render every route headlessly, fail on console errors) + Firestore rules emulator tests for the enumerated-collection coverage.
+10. **Mobile one-window-at-a-time completion** (visual-viewport work shipped; true single-window model still owed).
+11. **V13 module splits 32–50, CSS 52–55, finance_rollup 85** — *proposed KILL* as superseded by V14 + PERF work. Neil to confirm keep/kill.
+12. **Accounting depth** (chart of accounts, balance sheet, cash flow, BIR forms) — accountant-gated (D6 entity/TIN pending).
+
+## Maintenance contract for this file
+
+- **Version/date header** — refresh on any session that ships.
+- **Pending ops** — add a checkbox the moment a change needs a deploy or a one-time action; tick it only after verifying in prod.
+- **Open rulings** — add with the date raised; delete only when ruled (record the ruling in a spec or memory).
+- **Backlog** — re-rank freely; delete only when shipped or ruled dead.

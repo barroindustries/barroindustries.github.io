@@ -1,4 +1,10 @@
-# Barro Industries Ops System — Roadmap & Handoff
+# Barro Industries Ops System — Roadmap & Handoff (FROZEN)
+
+> **🧊 FROZEN 2026-08-30 — historical log only. Current state lives in [STATUS.md](STATUS.md).**
+> STATUS.md carries the live version, active program, open rulings, pending deploys/one-time
+> actions, and the single ranked backlog. This file is the v10→v14-era session log, kept for
+> history; nothing below is updated anymore, and its banners and "last updated" lines describe
+> the past, not the present.
 
 > **⚡ v12 REBUILD IN PROGRESS — read [`docs/plans/V12-PLAN.md`](docs/plans/V12-PLAN.md) FIRST.** It is the approved
 > 40-workstream master plan (2026-07-09) + build log for the rename to **Barro Industries

@@ -8,22 +8,30 @@ Barro Industries' internal **Operations System** — a vanilla-JS Progressive We
 
 The app is an internal tool for a Philippine steel/appliance manufacturer: employees, managers, the president, and an external partner (Brilliant Steel) sign in to role- and department-scoped tabs covering tasks, finance/payroll, attendance, cash advances, sales quotes, government biddings, and more.
 
+**Start every session at [STATUS.md](STATUS.md)** — the one always-current page: live version, active program, open owner rulings, pending deploys/one-time actions, and the single ranked backlog. Update it before ending any session that changes state. (ROADMAP.md is frozen history.)
+
 ## Critical workflow rules
 
 - **NEVER run `git stash`, `git reset --hard`, `git checkout -- <file>`, or `git clean` in this repo.** Multiple agents/sessions edit this working tree LIVE and concurrently. `git stash` internally does a hard reset, so stashing to "isolate" your own change silently WIPES every other in-flight agent's uncommitted work (this happened 2026-08-03: a ~300-line uncommitted test addition and six other files were destroyed mid-run). To verify your change in isolation, COPY the files to a scratch dir and diff there — never mutate the shared tree. If you need a clean baseline, read it with `git show HEAD:<path>`.
 
-- **Bump `CACHE_VER` in [sw.js](sw.js) on every JS/CSS edit.** The service worker caches static assets aggressively (cache-first / stale-while-revalidate). If you edit a `.js`/`.css` file without bumping `CACHE_VER` (e.g. `bi-ops-v16` → `v17`), users get stale code and the change appears broken/not deployed.
-- **Version is auto-bumped on commit.** A `.git/hooks/pre-commit` hook increments the patch in `window.APP_VERSION` in [js/config.js](js/config.js) and rewrites the `vX.Y.Z` strings in [index.html](index.html), then re-stages both. Do not hand-edit the version. (The comment in config.js referencing `scripts/bump-version.sh` is stale — the live hook is `.git/hooks/pre-commit`.) `CACHE_VER` in sw.js is now derived from `APP_VERSION` (`bi-ops-vX.Y.Z`) rather than bumped as an independent counter. A tracked copy of the hook lives at [.githooks/pre-commit](.githooks/pre-commit) with hardening (loud `exit 1` on grep misses, amend-safe skip guard) — run `git config core.hooksPath .githooks` once per clone to use it.
+- **Versions are hook-owned — never hand-edit them, never commit `--no-verify`.** The pre-commit hook increments `window.APP_VERSION` in [js/config.js](js/config.js), rewrites the `vX.Y.Z` strings in [index.html](index.html), derives `CACHE_VER` in [sw.js](sw.js) from it (`bi-ops-vX.Y.Z`), regenerates `precache-manifest.json`, and re-stages those files. Skipping the hook ships stale-cached code under a mismatched version banner (ci-invariants check 3 fails loud). A tracked, hardened copy of the hook lives at [.githooks/pre-commit](.githooks/pre-commit) — run `git config core.hooksPath .githooks` once per clone.
 - **Script load order is load-bearing.** [index.html](index.html) loads all scripts with `defer` in a fixed order: Firebase SDK + Chart.js + Lucide → `firebase-config.js` → `config.js` → `drive.js` → `notifications.js` → `departments.js` → `app.js` → `modules.js`. Everything communicates through `window.*` globals; there are no ES module imports. A function must be defined (attached to `window`) before a later script calls it. If you add a file, add it to both index.html and the `PRECACHE` list in sw.js.
 
 ## Commands
 
-There is no build or test suite. This is a static site.
+There is no bundler or build step — files ship as-is. There **is** a test suite and three commit gates; run them before **every** commit:
+
+```bash
+node --test tests/*.test.mjs && bash scripts/ci-invariants.sh && node scripts/check-ui-wiring.js
+```
+
+The tests are money/payroll suites (12 files, 315+ pinned assertions). [js/money-core.js](js/money-core.js) is **frozen/additive-only**; every money change needs a test, mutation-tested (break the fix in a scratch copy, confirm the tests fail). A money fix without a test is not done.
 
 - **Run locally:** `npx serve -p 3838 .` (serves the app) or `npx serve -p 3737 .` (quote-builder). See [.claude/launch.json](.claude/launch.json). A real server is required — `file://` breaks the service worker, Firebase auth domains, and module fetches.
-- **Deploy the app:** `git push origin master`. Auto-deploys to **GitHub Pages** at `barroindustries.github.io` (remote: `https://github.com/barroindustries/barroindustries.github.io.git`). The current branch is `master`. No CI gate. **Not Netlify.**
-- **Deploy Firestore rules/indexes:** `firebase deploy --only firestore` (project `barro-industries`, see [.firebaserc](.firebaserc)).
-- **Deploy Cloud Functions:** `cd functions && npm run deploy` (= `firebase deploy --only functions`, Node 22).
+- **Ship a release:** `bash scripts/release.sh` (drift report + pending one-time actions), `release.sh rules|storage|functions` (deploy a Firebase surface + record it), `release.sh push` (guarded push — refuses when rules drifted), `release.sh verify` (live-vs-local version). **Rules land BEFORE the code that needs them.**
+- **Deploy the app:** `git push origin master` (or `release.sh push`). Auto-deploys to **GitHub Pages** at `barroindustries.github.io` → custom domain `barroindustries-operatingsystem.ravenmails.com` (remote: `https://github.com/barroindustries/barroindustries.github.io.git`). Branch `master`. **Not Netlify.**
+- **Deploy Firestore rules/indexes:** `firebase deploy --only firestore` (project `barro-industries`, see [.firebaserc](.firebaserc)) — or `release.sh rules`. CLI lives at `~/.npm-global/bin/firebase` if not on PATH.
+- **Deploy Cloud Functions:** `cd functions && npm run deploy` (= `firebase deploy --only functions`, Node 22) — or `release.sh functions`.
 - **Sync/backup scripts** (normally run by GitHub Actions, not locally): `cd scripts && npm run sync` / `npm run backup`. They need service-account env vars (`FIREBASE_SERVICE_ACCOUNT`, `GOOGLE_SERVICE_ACCOUNT`, `DRIVE_FOLDER_ID`, etc.).
 
 ## Architecture
