@@ -13,9 +13,9 @@ _Last updated: **2026-08-31**_
 
 | | |
 |---|---|
-| **Production** | v14.0.195 (auto-bumps each commit — live check: `curl -sL https://barroindustries-operatingsystem.ravenmails.com/js/config.js \| grep APP_VERSION`) |
+| **Production** | v14.0.202 (auto-bumps each commit — live check: `curl -sL https://barroindustries-operatingsystem.ravenmails.com/js/config.js \| grep APP_VERSION`) |
 | **Deploy** | `git push origin master` → GitHub Pages (custom domain above; the github.io URL 301s to it). Firebase surfaces deploy separately — use `scripts/release.sh`. |
-| **Active program** | V14 overhaul ([docs/plans/V14-OVERHAUL-PLAN.md](docs/plans/V14-OVERHAUL-PLAN.md)) — Wave 1 + 2A live. Current build thread: **costing system** (phases 1–2 shipped: true-cost panel, material price list, custom-item BOM, break-even v2, pace dashboard). |
+| **Active program** | V14 overhaul ([docs/plans/V14-OVERHAUL-PLAN.md](docs/plans/V14-OVERHAUL-PLAN.md)) — Wave 1 + 2A live. Current build thread: **costing system** (phases 1–2 shipped: true-cost panel, material price list, custom-item BOM, break-even v2, pace dashboard). NEW 2026-08-31: **Inventory department** ([specs/INVENTORY-DEPT-SPEC-2026-08-31.md](specs/INVENTORY-DEPT-SPEC-2026-08-31.md)) — Stock / Raw Materials (price list, moved from Purchasing) / Finished Products (catalog view) / Movements / Count Form (moved from Production); Production slimmed 8→5 tabs, Purchasing 5→4; `inventory_items`/`stock_movements` write rules tightened to Inventory/Purchasing/Production/Finance + senior admins (was: any internal staff; secretary now view-only). |
 | **Blocked on owner** | Office/monthly payroll disbursement — waiting on verified 2026 statutory rates (ruling #1 below). Everything else about office pay is built. |
 | **Commit gates** | `node --test tests/*.test.mjs && bash scripts/ci-invariants.sh && node scripts/check-ui-wiring.js` — all three, before every commit. |
 
@@ -25,6 +25,7 @@ Run `scripts/release.sh` for the live drift report. Tick items here when done �
 what the script prints.
 
 <!-- PENDING-OPS:BEGIN -->
+- [x] **PUSH HELD — commit fce2637 (v14.0.200) local-only** — resolved 2026-08-31: the Inventory-department commit (v14.0.202) landed `js/screens/inventory.js` and both were pushed together; rules deployed first.
 - [ ] **Seed the Material Price List** — President → costing screen seed button (shipped v14.0.191, never clicked). Costing math reads placeholder prices until then.
 - [ ] **Phase-9 president one-time buttons** (pending since July): Finance → Reports → "🔄 Sync to ledger"; Projects → "🔖 Tag"; `remapDesignProjectClients` (browser console). All idempotent.
 - [ ] **Verify `backfillUserClaims` was run** after the V11.1 storage-claims deploy (president, browser console). If unsure, run again — idempotent. Until it runs, Storage role-scoping treats un-stamped accounts wrong.

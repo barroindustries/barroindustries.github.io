@@ -5600,31 +5600,11 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
 //  MATERIAL-PRICELIST-SPEC-2026-08-26. One live, editable supplier price
 //  list that Purchasing maintains and every costing surface reads via the
 //  `material_prices` collection (one doc per category, catId = slug(cat)).
-//
-//  ⚠ WIRING NOTE — NOT DONE HERE, on purpose. The spec assumed
-//  window.renderPurchasing lived in this file ("Purchasing screen lives
-//  there"); it doesn't — it moved to js/screens/production.js (Wave 7 Pass 4,
-//  see the comment block right below this one) along with the PO receive
-//  flow (receivePurchaseIntoInventory/receiveLineIntoItem). This build was
-//  scoped to js/departments.js ONLY, so the actual chip-tab + PO-hook call
-//  sites could not be wired in. Everything below is self-contained and
-//  ready to call the moment a follow-up (in-scope for production.js/
-//  config.js) adds:
-//    1. js/screens/production.js, window.renderPurchasing's `tabs` array —
-//       add 'Price List' alongside 'Request for Quotation'/'Purchase
-//       Requests'/'Budgeting'/'Tasks'.
-//    2. js/screens/production.js, loadPurchasingContent's dispatch — add
-//       `if (sub === 'Price List') return await window.renderMaterialPriceList(content, currentUser, currentRole);`
-//    3. js/config.js, DEPARTMENTS.Purchasing.subtabs — add 'Price List' so
-//       it matches production.js's tabs array (config.js is also out of
-//       this file's scope).
-//    4. js/screens/production.js, receivePurchaseIntoInventory's per-line
-//       loop (around receiveLineIntoItem's caller) — after a line lands with
-//       a unit price, call
-//       `window.materialPriceListPOHook(it.desc, it.unitPrice, currentUser)`.
-//  New collection also means firestore.rules + backup exports need a
-//  `material_prices` entry — also out of scope here (main session handles
-//  rules/backup/deploy per the spec).
+//  This block stays here (departments.js is eager-loaded, unlike the lazy
+//  screens files that call into it) — see js/screens/inventory.js (Raw
+//  Materials tab, INVENTORY-DEPT-SPEC-2026-08-31, this doc's primary home
+//  now) and js/screens/production.js (receivePurchaseIntoInventory's PO-price hook
+//  call site, materialPriceListPOHook) for the two live callers.
 // ══════════════════════════════════════════════════════════════════
 
 // catId = slug(cat): lowercase, alnum+dashes, ≤60 chars. Verified collision-
@@ -5632,12 +5612,20 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
 function mplSlugCat(cat) {
   return String(cat || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'cat';
 }
-// Spec names this canPurchasing()/canFinance()/isAdmin() — the real
-// equivalents in this file are canEditDept('Purchasing') (dept members +
-// admin roles), isFinancePriv() (Finance dept/role), isAdminPriv()
-// (president/manager/secretary). Read-only for anyone else who can reach
-// the Purchasing screen at all.
-function mplCanEdit() { return canEditDept('Purchasing') || isFinancePriv() || isAdminPriv(); }
+// INVENTORY-DEPT-SPEC-2026-08-31 fix — this used to be
+// `canEditDept('Purchasing') || isFinancePriv() || isAdminPriv()`, and
+// isAdminPriv() includes 'secretary'. firestore.rules' actual write rule
+// (firestore.rules:~2403, material_prices update) is isSeniorAdmin() ||
+// canFinance() || isPurchasingDept() — no secretary carve-in — so a
+// Corporate Secretary got editable price cells here that the rules then
+// silently refused. Rewritten as an explicit mirror of the rule instead of
+// routing through isAdminPriv().
+const mplCanEdit = () => {
+  const r = window.currentRole;
+  if (r === 'president' || r === 'manager' || r === 'finance') return true;
+  if (r === 'secretary' || r === 'partner') return false;
+  return ['Purchasing', 'Finance'].some(d => (window.currentDepts || []).includes(d));
+};
 function mplStamp() { return today() + ' ' + new Date().toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }); }
 function mplUserName(currentUser) { return (window.userProfile && userProfile.displayName) || currentUser?.email || 'Unknown'; }
 
@@ -5804,9 +5792,12 @@ function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
 
   const isPresident = currentRole === 'president' || currentRole === 'owner';
   const state = { cat: 'all', q: '', showAll: false };
+  // supplier/year carried onto each row (INVENTORY-DEPT-SPEC-2026-08-31 —
+  // "where raw materials can be found") so the search haystack and the
+  // per-category supplier line below both have it without a second lookup.
   const allRows = () => {
     const rows = [];
-    docs.forEach(d => (d.items || []).forEach(it => rows.push(Object.assign({}, it, { catId: d.id, cat: d.cat }))));
+    docs.forEach(d => (d.items || []).forEach(it => rows.push(Object.assign({}, it, { catId: d.id, cat: d.cat, supplier: d.supplier, year: d.year }))));
     return rows;
   };
   const catChips = () => docs.map(d => ({ key: d.id, label: d.cat, count: (d.items || []).length }))
@@ -5814,14 +5805,12 @@ function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <input id="mpl-search" placeholder="Search item, section, or grade…" class="ms-input" style="max-width:320px;flex:1 1 220px"/>
+      <input id="mpl-search" placeholder="Search item, section, grade, or supplier…" class="ms-input" style="max-width:320px;flex:1 1 220px"/>
       ${isPresident ? `<button type="button" class="btn-secondary btn-sm" id="mpl-reseed-btn">${emojiIcon('🔄', 14)} Re-seed from 2025 file</button>` : ''}
     </div>
     ${window.chipTabs([{ key: 'all', label: 'All', count: allRows().length }].concat(catChips()), 'all', { cls: 'mpl-cat-tabs' })}
-    <div class="table-wrap" style="margin-top:10px"><table class="data-table">
-      <thead><tr><th>Item</th><th style="min-width:120px">Source entry</th><th>Price</th><th>Updated</th></tr></thead>
-      <tbody id="mpl-tbody"></tbody>
-    </table></div>
+    <div id="mpl-supplier-line"></div>
+    <div class="table-wrap" style="margin-top:10px" id="mpl-table-wrap"></div>
     <div id="mpl-showall-wrap"></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [content] });
@@ -5831,13 +5820,29 @@ function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
     const rows = allRows();
     const q = state.q.trim().toLowerCase();
     const visible = q
-      ? rows.filter(r => [r.name, r.desc, r.sec, r.grade].some(v => String(v || '').toLowerCase().includes(q)))
+      ? rows.filter(r => [r.name, r.desc, r.sec, r.grade, r.supplier].some(v => String(v || '').toLowerCase().includes(q)))
       : (state.cat === 'all' ? rows : rows.filter(r => r.catId === state.cat));
     const capped = state.showAll ? visible : visible.slice(0, MPL_CAP);
-    const tbody = content.querySelector('#mpl-tbody');
-    tbody.innerHTML = !capped.length
-      ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No matching items.</td></tr>`
-      : capped.map(r => mplRowHtml(r, canEdit)).join('');
+    // Supplier column ONLY on the "All"/searched view — a single-category
+    // view shows the supplier once, as the line below the chips, instead of
+    // repeating it on every row.
+    const showSupplierCol = state.cat === 'all' || !!q;
+    const colCount = showSupplierCol ? 5 : 4;
+    const tableWrap = content.querySelector('#mpl-table-wrap');
+    tableWrap.innerHTML = `<table class="data-table">
+      <thead><tr><th>Item</th><th style="min-width:120px">Source entry</th>${showSupplierCol ? '<th>Supplier</th>' : ''}<th>Price</th><th>Updated</th></tr></thead>
+      <tbody>${!capped.length
+        ? `<tr><td colspan="${colCount}" style="text-align:center;color:var(--text-muted);padding:20px">No matching items.</td></tr>`
+        : capped.map(r => mplRowHtml(r, canEdit, showSupplierCol)).join('')}</tbody>
+    </table>`;
+    const tbody = tableWrap.querySelector('tbody');
+    const supplierLine = content.querySelector('#mpl-supplier-line');
+    if (supplierLine) {
+      const cat = (!q && state.cat !== 'all') ? docs.find(d => d.id === state.cat) : null;
+      supplierLine.innerHTML = cat
+        ? `<div style="font-size:12px;color:var(--text-muted);margin:0 0 8px">Supplier: ${escHtml(cat.supplier || '—')}${cat.year ? ' · ' + escHtml(String(cat.year)) : ''}</div>`
+        : '';
+    }
     const wrap = content.querySelector('#mpl-showall-wrap');
     wrap.innerHTML = (!state.showAll && visible.length > MPL_CAP)
       ? `<div style="text-align:center;margin:10px 0"><button type="button" class="btn-secondary btn-sm" id="mpl-show-all">Show all ${visible.length}</button></div>` : '';
@@ -5872,7 +5877,7 @@ function mplRenderList(content, docs, currentUser, currentRole, canEdit) {
   renderRows();
 }
 
-function mplRowHtml(r, canEdit) {
+function mplRowHtml(r, canEdit, showSupplierCol) {
   const priceDisplay = '₱' + fmt(r.price || 0);
   const prevNote = (r.prevPrice != null && Number(r.prevPrice) !== Number(r.price))
     ? ` <span style="font-size:10px;color:var(--text-muted)">(₱${fmt(r.prevPrice)} → ₱${fmt(r.price)})</span>` : '';
@@ -5886,6 +5891,7 @@ function mplRowHtml(r, canEdit) {
   return `<tr>
     <td><b>${escHtml(dispName)}</b></td>
     <td style="font-size:11px;color:var(--text-muted)">${escHtml([r.sec, r.desc, r.grade].filter(Boolean).join(' · ') || '—')}</td>
+    ${showSupplierCol ? `<td style="font-size:11px;color:var(--text-muted)">${escHtml(r.supplier || '—')}</td>` : ''}
     <td>${canEdit
       ? `<span class="mpl-price" data-cat="${escHtml(r.catId)}" data-item="${escHtml(r.id)}" data-price="${Number(r.price) || 0}" style="cursor:pointer;text-decoration:underline dotted" title="Click to edit">${priceDisplay}</span>${prevNote}`
       : `${priceDisplay}${prevNote}`}</td>

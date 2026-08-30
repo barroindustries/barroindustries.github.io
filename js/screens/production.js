@@ -23,9 +23,14 @@
      openProjectBillingModal, openJobBillingInvoiceModal.
    - Production Department screen: window.renderProductionDept/
      loadProdContent/renderProdOrders, syncJobFromProdStage,
-     consumeProductionMaterials, prodOrderModal, the Inventory Count Form
-     (PROD_COUNT_DRAFT_KEY/loadCountDraft/saveCountDraft/
-     renderProdInventoryForm/openInventoryCountForm), renderProdMaterials.
+     consumeProductionMaterials, prodOrderModal. (The Inventory Count Form —
+     PROD_COUNT_DRAFT_KEY/loadCountDraft/saveCountDraft/
+     renderProdInventoryForm→renderCountForm/openInventoryCountForm — and
+     renderProdMaterials MOVED OUT to js/screens/inventory.js,
+     INVENTORY-DEPT-SPEC-2026-08-31; see that file's header. The 8-point
+     conversion notes and the "DELIBERATELY LEFT IN departments.js" section
+     below describe this file as it stood at Wave 7 Pass 4, before that
+     later move — left as historical record, not current contents.)
    - Purchasing Department screen: purchTotal, window.renderPurchasing/
      loadPurchasingContent, RFQs (renderRFQs/purchRfqCard/bindRfqCard/
      openRfqModal), Purchase Requests (poState/poApproved/PURCH_STAT/
@@ -114,9 +119,12 @@
        canEditDept, deptContainer, dbCachedGet/dbCacheInvalidate,
        fetchUsersWithPayroll-style generic app helpers — untouched,
        called as window.* / bare-global at runtime like every other pass.
-     - window.renderInventory (Inventory screen) lives in js/modules.js —
-       explicitly out of scope for this pass; loadProdContent and
-       loadFinanceContent both still call it as `window.renderInventory`.
+     - window.renderInventory no longer exists (INVENTORY-DEPT-SPEC-2026-08-31
+       retired it along with the js/modules.js IIFE it lived in) — Inventory
+       is now its own department, js/screens/inventory.js's
+       window.renderInventoryDept. loadProdContent's old 'Inventory' case
+       and departments.js's loadFinanceContent 'Inventory' case were both
+       updated off the dead call at the same time.
      - Approvals (renderApprovals, still in departments.js) calls this
        file's window.approvePurchaseOrder/window.rejectPurchaseOrder via
        js/svc-approvals.js's poApprove/poReject wrappers — same
@@ -140,11 +148,13 @@
        top-level function declaration in any deferred classic script
        becomes a `window` property, so the bare-identifier call resolves
        regardless of load order once both scripts have parsed).
-     - PROD_STAGES/JOB_STAGES/QC_CHECKLIST/PURCH_STAT/PROD_COUNT_DRAFT_KEY
+     - PROD_STAGES/JOB_STAGES/QC_CHECKLIST/PURCH_STAT
        are plain top-level `const`s (script-scoped, NOT window properties
        in a browser — same caveat design.js/tasks.js/hr.js document for
        their own top-level consts) and must stay in THIS file alongside
-       their only readers. CORRECTION (v14 prod-fixlist audit — the note
+       their only readers. (PROD_COUNT_DRAFT_KEY, formerly listed here too,
+       moved to js/screens/inventory.js with the Count Form it belongs to —
+       INVENTORY-DEPT-SPEC-2026-08-31.) CORRECTION (v14 prod-fixlist audit — the note
        that used to live here was wrong): js/ui-status-meta.js reads
        `window.PROD_STAGES` / `window.PURCH_STAT` (for its generic
        statusBadge2() lookup), and BOTH names ARE assigned onto `window`
@@ -2431,7 +2441,10 @@ async function openJobBillingInvoiceModal(p){
 
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
   const c = deptContainer();
-  const subs = ['Orders','Job Orders','Materials','Inventory','Count Form','Budgeting','Tasks','Files'];
+  // INVENTORY-DEPT-SPEC-2026-08-31 — Materials/Inventory/Count Form moved
+  // out to the new Inventory department; Orders links there instead (see
+  // the 📦 Inventory button in renderProdOrders's header).
+  const subs = ['Orders','Job Orders','Budgeting','Tasks','Files'];
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -2445,9 +2458,9 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
       `${emojiIcon('✏️',16)} Edit on a Job Order is the sheet itself — header, dates, site, scope and the four checklists. ${emojiIcon('✅',16)} Progress ticks the nine shop-floor stages per item, and those ticks print on the next copy. Neither re-prices the quotation; the sheet warns when the scope no longer matches it.`,
       `Quality Checking requires a passed ${emojiIcon('🔍',16)} QC checklist before an order can go Out for Delivery.`,
       `Marking Delivered requires a ${emojiIcon('🧾',16)} Delivery Receipt (received-by + date) — printable on letterhead.`,
-      'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
+      `"Consume → stock & COS" on an order deducts raw-material stock and posts material cost — browse, edit and count stock in the ${emojiIcon('📦',16)} Inventory department (button above the Orders list).`,
       `${emojiIcon('👷',16)} Labor on an order logs the hours worked on its current stage — costed at the shop rate (settings, President-set) and posted to COS – Direct Labor. No rate on file means hours are still recorded, with no cost invented.`,
-      'Count Form records physical counts; Tasks and Files hold the department board and documents.'
+      'Tasks and Files hold the department board and documents.'
     ])}
     ${window.chipTabs(subs.map(s=>({key:s,label:s})), subtab)}
     <div id="prod-content">${window.skeletonHtml('rows')}</div>`;
@@ -2460,13 +2473,14 @@ async function loadProdContent(currentUser, currentRole, sub) {
   const el = document.getElementById('prod-content');
   try {
     if (sub==='Job Orders') return await renderProdJobOrders(el, currentUser, currentRole);
-    if (sub==='Materials') return await renderProdMaterials(el, currentRole);
-    if (sub==='Inventory') return await window.renderInventory(el, 'Stock');
-    if (sub==='Count Form') return await renderProdInventoryForm(el, currentRole);
     if (sub==='Budgeting') return await window.renderBudgeting(el, currentUser, currentRole, 'Production');
     if (sub==='Tasks')     return await renderDeptTasks(el, 'Production', currentUser, currentRole);
     if (sub==='Files')   { el.innerHTML = renderFileCollection('Production Files', 'production-files', currentRole);
                            bindFileCollection('production-files', currentUser, 'Production', 'Files'); return; }
+    // Materials/Inventory/Count Form moved to the Inventory department
+    // (INVENTORY-DEPT-SPEC-2026-08-31) — any of those keys, or any other
+    // unknown/legacy subtab (old deep links like #/dept/Production/Inventory),
+    // falls through to Orders rather than blank-screening.
     return await renderProdOrders(el, currentUser, currentRole);
   } catch (e) {
     console.error('Production load error', e);
@@ -2582,6 +2596,7 @@ async function renderProdOrders(el, currentUser, currentRole, showAll=false) {
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:180px">Pipeline: ${PROD_STAGES.map(s=>s.label).join(' → ')}</span>
+      <button class="btn-secondary btn-sm" id="prod-inv-btn" style="flex-shrink:0;white-space:nowrap">${emojiIcon('📦',16)} Inventory</button>
       <button class="btn-secondary btn-sm" id="prod-csv" style="flex-shrink:0;white-space:nowrap">${emojiIcon('⬇',16)} CSV</button>
       ${canEdit?'<button class="btn-primary btn-sm" id="prod-add-btn" style="flex-shrink:0;white-space:nowrap">＋ New Order</button>':''}
     </div>
@@ -2635,6 +2650,7 @@ async function renderProdOrders(el, currentUser, currentRole, showAll=false) {
   }));
   window.bindPriorityStars(el);
 
+  document.getElementById('prod-inv-btn')?.addEventListener('click', ()=>navigateTo('dept:Inventory'));
   document.getElementById('prod-csv')?.addEventListener('click', ()=>window.exportCSV('production-orders', orders, [
     {key:'orderNo',label:'Order #'},{key:'title',label:'Product'},{key:'client',label:'Client'},{key:'qty',label:'Qty'},
     {key:'stage',label:'Stage',get:o=>prodStage(o.stage).label},{key:'priority',label:'Priority'},
@@ -3323,322 +3339,12 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   }, { skeleton:'rows' });
 }
 
-// ── Inventory Count Form — editable, printable physical stock-take sheet ──
-// Pre-fills one row per inventory_items doc (with its system on-hand qty) and
-// lets the team key the physical count → live variance + remarks on screen,
-// then print a clean A4 form (filled, or blank to count by hand). Entries
-// autosave to localStorage so a long count survives a refresh or subtab switch.
-// Print stays non-mutating; since v12 WS29 the ✓ Post Variances action
-// (president/manager/finance only) corrects on-hand qty to the physical count
-// and logs an 'adjust'/'count' stock movement per corrected item.
-const PROD_COUNT_DRAFT_KEY = 'bi-prod-count-draft';
-// v14 prod-fixlist — namespaced per signed-in user. The key used to be one
-// fixed global string, so a shared shop-floor device/kiosk used by more than
-// one person during the same count cycle had one person's in-progress counts
-// silently overwritten by the next person opening the Count Form. Falls back
-// to a shared 'anon' bucket if no user is signed in yet (shouldn't happen —
-// this form is behind auth).
-function prodCountDraftKey(){
-  const uid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || 'anon';
-  return PROD_COUNT_DRAFT_KEY + '-' + uid;
-}
-function loadCountDraft(){ try { return JSON.parse(localStorage.getItem(prodCountDraftKey()) || '{}') || {}; } catch(e){ return {}; } }
-function saveCountDraft(d){ try { localStorage.setItem(prodCountDraftKey(), JSON.stringify(d)); } catch(e){} }
-
-async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
-  el.innerHTML = window.skeletonHtml('rows');
-  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
-  const items = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
-  const shown = items.filter(i=> kindFilter==='all' || (i.kind||'material')===kindFilter);
-
-  const draft  = loadCountDraft();
-  draft.header = draft.header || {};
-  draft.counts = draft.counts || {};
-  draft.extras = Array.isArray(draft.extras) ? draft.extras : [];
-  const h = draft.header, counts = draft.counts;
-  const todayStr = (window.bizDate ? window.bizDate() : today());
-  if (!h.formNo)        h.formNo = 'IC-' + todayStr.replace(/-/g,'');
-  if (h.date == null)   h.date = todayStr;
-  if (h.countedBy==null)h.countedBy = (typeof userProfile!=='undefined' && userProfile?.displayName) || currentUser?.email || '';
-  saveCountDraft(draft);
-
-  const varOf = (sys, phys) => (phys==='' || phys==null || isNaN(parseFloat(phys))) ? null : (parseFloat(phys) - Number(sys||0));
-  const varHtml = v => v==null ? '<span style="color:var(--text-muted)">—</span>'
-    : `<span style="font-weight:700;color:${v===0?'var(--success)':v<0?'var(--danger)':'var(--warning)'}">${v>0?'+':''}${Number(v).toLocaleString('en-PH')}</span>`;
-  const counted = shown.filter(i=>{ const c=counts[i.id]; return c && c.physical!=='' && c.physical!=null; }).length;
-  const withVar = shown.filter(i=>{ const c=counts[i.id]; const v=c?varOf(i.qty,c.physical):null; return v!=null && v!==0; }).length;
-  const canPost = ['president','manager','finance'].includes(currentRole);
-
-  const inEl = (cls,id,val,ph='',type='text') =>
-    `<input class="${cls}" data-id="${id}" type="${type}" ${type==='number'?'inputmode="decimal" step="any"':''} value="${escHtml(val==null?'':val)}" placeholder="${ph}" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"/>`;
-
-  el.innerHTML = `
-    <div class="kpi-row" style="margin-bottom:12px">
-      <div class="kpi-card"><div class="kpi-label">Items</div><div class="kpi-value">${shown.length}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Counted</div><div class="kpi-value">${counted}</div></div>
-      <div class="kpi-card ${withVar?'red':''}"><div class="kpi-label">With Variance</div><div class="kpi-value">${withVar}</div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:12px"><div class="card-body">
-      <div class="form-row">
-        <div class="form-group"><label>Form No.</label><input id="cf-formno" value="${escHtml(h.formNo)}"/></div>
-        <div class="form-group"><label>Count Date</label><input id="cf-date" type="date" value="${escHtml(h.date||'')}"/></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Warehouse / Location</label><input id="cf-loc" value="${escHtml(h.location||'')}" placeholder="e.g. Main Warehouse — Bulacan"/></div>
-        <div class="form-group"><label>Counted By</label><input id="cf-by" value="${escHtml(h.countedBy||'')}"/></div>
-      </div>
-      <div class="form-group"><label>Verified By</label><input id="cf-verified" value="${escHtml(h.verifiedBy||'')}" placeholder="Supervisor / checker"/></div>
-    </div></div>
-
-    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-      ${window.chipTabs([{key:'all',label:'All'},{key:'material',label:'Raw Materials'},{key:'product',label:'Finished Goods'}], kindFilter)}
-      <button class="btn-secondary btn-sm" id="cf-clear" style="margin-left:auto">↺ Clear</button>
-      <button class="btn-secondary btn-sm" id="cf-addrow">＋ Blank row</button>
-      ${canPost?`<button class="btn-primary btn-sm" id="cf-post">${emojiIcon('✓',16)} Post Variances</button>`:''}
-      <button class="btn-secondary btn-sm" id="cf-print">${emojiIcon('🖨',16)} Print / PDF</button>
-    </div>
-
-    <div class="card"><div class="card-body" style="padding:0">
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr>
-          <th style="width:32px">#</th><th>Item</th><th>Unit</th>
-          <th style="text-align:right">System Qty</th><th style="width:120px">Physical Count</th>
-          <th style="text-align:right;width:90px">Variance</th><th style="width:24%">Remarks</th>
-        </tr></thead>
-        <tbody>
-          ${!shown.length && !draft.extras.length ? `<tr><td colspan="7">${window.renderEmptyState({icon:'📦',title:'No items in inventory',hint:'Add items in the Inventory module, or use “＋ Blank row” for a write-in sheet.'})}</td></tr>` :
-          shown.map((i,idx)=>{
-            const c = counts[i.id] || {};
-            return `<tr>
-              <td style="color:var(--text-muted)">${idx+1}</td>
-              <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
-              <td style="font-size:12px">${escHtml(i.unit||'')}</td>
-              <td style="text-align:right;font-weight:600">${Number(i.qty||0).toLocaleString('en-PH')}</td>
-              <td>${inEl('cf-pc',i.id,c.physical,'',  'number')}</td>
-              <td style="text-align:right"><span class="cf-var" data-id="${i.id}">${varHtml(varOf(i.qty,c.physical))}</span></td>
-              <td>${inEl('cf-rm',i.id,c.remarks||'','note')}</td>
-            </tr>`;
-          }).join('')}
-          ${draft.extras.map((r,ei)=>`<tr>
-              <td style="color:var(--text-muted)">${shown.length+ei+1}</td>
-              <td>${inEl('cf-ex-name',ei,r.name||'','Item name')}</td>
-              <td>${inEl('cf-ex-unit',ei,r.unit||'','unit')}</td>
-              <td style="text-align:right;color:var(--text-muted)">—</td>
-              <td>${inEl('cf-ex-pc',ei,r.physical||'','','number')}</td>
-              <td style="text-align:right;color:var(--text-muted)">—</td>
-              <td>${inEl('cf-ex-rm',ei,r.remarks||'','note')}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table></div>
-    </div></div>
-    <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Entries autosave on this device. “Print / PDF” opens a clean A4 form with whatever you’ve entered — print it blank to count by hand, or fill it in first.</p>`;
-  if (window.lucide) lucide.createIcons({ nodes: [el] });
-
-  const persist = () => saveCountDraft(draft);
-  const hb = (id,key)=>{ const n=document.getElementById(id); n && n.addEventListener('input',()=>{ draft.header[key]=n.value; persist(); }); };
-  hb('cf-formno','formNo'); hb('cf-date','date'); hb('cf-loc','location'); hb('cf-by','countedBy'); hb('cf-verified','verifiedBy');
-
-  el.querySelectorAll('.cf-pc').forEach(n=>n.addEventListener('input',()=>{
-    const id=n.dataset.id; (draft.counts[id] ||= {}).physical = n.value; persist();
-    const item = shown.find(x=>x.id===id), cell = el.querySelector(`.cf-var[data-id="${id}"]`);
-    if (cell && item) cell.innerHTML = varHtml(varOf(item.qty, n.value));
-  }));
-  el.querySelectorAll('.cf-rm').forEach(n=>n.addEventListener('input',()=>{ (draft.counts[n.dataset.id] ||= {}).remarks = n.value; persist(); }));
-
-  const exBind=(cls,key)=>el.querySelectorAll(cls).forEach(n=>n.addEventListener('input',()=>{ (draft.extras[n.dataset.id] ||= {})[key]=n.value; persist(); }));
-  exBind('.cf-ex-name','name'); exBind('.cf-ex-unit','unit'); exBind('.cf-ex-pc','physical'); exBind('.cf-ex-rm','remarks');
-
-  window.bindChipTabs(el, (key)=>renderProdInventoryForm(el,currentRole,key));
-  document.getElementById('cf-addrow')?.addEventListener('click',()=>{ draft.extras.push({}); persist(); renderProdInventoryForm(el,currentRole,kindFilter); });
-  document.getElementById('cf-clear')?.addEventListener('click', async ()=>{
-    if(!(await confirmDialog({message:'Clear all counts, remarks and header fields on this form?', danger:true}))) return;
-    localStorage.removeItem(prodCountDraftKey()); Notifs.success('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
-  });
-  document.getElementById('cf-print')?.addEventListener('click',()=>openInventoryCountForm(shown, loadCountDraft(), kindFilter));
-
-  document.getElementById('cf-post')?.addEventListener('click', async () => {
-    const d = loadCountDraft();
-    // v14 prod-fixlist — post against the FULL item list, not `shown` (which is
-    // scoped to whichever kind-filter tab happens to be active). Posting used to
-    // silently skip any Finished-Goods variance while viewing the Raw Materials
-    // tab (or vice versa) with no on-screen indication anything was excluded.
-    const lines = items.map(i => {
-      const c = (d.counts || {})[i.id] || {};
-      const phys = parseFloat(c.physical);
-      return { item: i, phys, remarks: c.remarks || '', v: varOf(i.qty, c.physical) };
-    }).filter(l => l.v != null && l.v !== 0);
-    if (!lines.length) { Notifs.error('No non-zero variances to post.'); return; }
-    const formNo = String(d.header?.formNo || 'IC').replace(/[^A-Za-z0-9-]/g, '') || 'IC';
-    if (!(await confirmDialog({ message:
-      `Post ${lines.length} variance correction${lines.length>1?'s':''}? On-hand quantities will be set to the physical count and each correction logged in the movement history. Write-in blank rows are not posted — add those items in Inventory first.`,
-      danger: true }))) return;
-    let posted = 0, dupCount = 0, noChangeCount = 0; const failed = [];
-    for (const l of lines) {
-      const itemRef = db.collection('inventory_items').doc(l.item.id);
-      const movRef  = db.collection('stock_movements').doc(`CNT_${formNo}_${l.item.id}`);
-      try {
-        const outcome = await db.runTransaction(async tx => {
-          const mov = await tx.get(movRef);
-          if (mov.exists) return 'dup';                  // this Form No already posted this item
-          const cur = await tx.get(itemRef);
-          if (!cur.exists) return 'gone';
-          const sysNow = Number(cur.data().qty) || 0;    // recompute vs LIVE qty, not render-time
-          if (Math.abs(l.phys - sysNow) < 1e-9) return 'nochange'; // someone already fixed it
-          tx.update(itemRef, { qty: l.phys, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-          tx.set(movRef, window.buildStockMovement({
-            itemId: l.item.id, itemName: l.item.name || '', type: 'adjust',
-            qty: Math.abs(l.phys - sysNow), source: 'count',
-            refNumber: d.header?.formNo || '',
-            note: `Count ${d.header?.date || ''}: system ${sysNow} → physical ${l.phys}${l.remarks ? ' — ' + l.remarks : ''}`,
-            unitCost: Number(cur.data().unitCost) || null, qtyAfter: l.phys
-          }));
-          return 'posted';
-        });
-        if (outcome === 'posted') posted++;
-        else if (outcome === 'dup') dupCount++;
-        else if (outcome === 'nochange') noChangeCount++;
-      } catch (ex) { failed.push(l.item.name || l.item.id); }
-    }
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
-    window.logAudit && window.logAudit('adjust', 'inventory_count', formNo, { posted, failed: failed.length });
-    // v14 prod-fixlist — distinguish a genuine same-day re-count blocked by this
-    // Form No's idempotency guard (CNT_<formNo>_<itemId>) from an ordinary
-    // "nothing changed" skip, instead of both silently vanishing into a lower
-    // `posted` count with no explanation of what happened to the rest.
-    const parts = [];
-    if (posted) parts.push(`Posted ${posted} variance correction${posted===1?'':'s'}`);
-    if (dupCount) parts.push(`${dupCount} already recorded under Form No. "${formNo}" — change the Form No. above (e.g. add "-2") to post a same-day re-count`);
-    if (noChangeCount) parts.push(`${noChangeCount} already matched system qty`);
-    if (failed.length) parts.push(`failed: ${failed.join(', ')}`);
-    Notifs.showToast(parts.join(' · ') || 'Nothing to post.', failed.length ? 'error' : (posted ? 'success' : undefined));
-    renderProdInventoryForm(el, currentRole, kindFilter);
-  });
-}
-
-// Open the filled (or blank) inventory count form in a clean, printable window.
-function openInventoryCountForm(items, draft, kindFilter){
-  const h = draft.header||{}, counts = draft.counts||{}, extras = Array.isArray(draft.extras)?draft.extras:[];
-  const e = s => escHtml(s);
-  const num = n => Number(n||0).toLocaleString('en-PH');
-  const fmtDate = s => { if(!s) return ''; const dt=new Date(s+'T00:00:00'); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
-  const kindLabel = kindFilter==='material'?'Raw Materials':kindFilter==='product'?'Finished Goods':'All Items';
-  const varCell = (sys,phys)=>{ if(phys===''||phys==null||isNaN(parseFloat(phys))) return ''; const v=parseFloat(phys)-Number(sys||0); return (v>0?'+':'')+num(v); };
-  const _lh = window.buildLetterhead ? window.buildLetterhead({
-    orientation: 'landscape',
-    docTitle: 'INVENTORY COUNT FORM',
-    docNumber: h.formNo || '',
-    dateLabel: 'Count Date: ' + fmtDate(h.date),
-    extraMeta: [kindLabel],
-    signatures: [
-      { label: 'Counted by',  name: h.countedBy || '', title: '' },
-      { label: 'Verified by', name: h.verifiedBy || '', title: '' },
-      { label: 'Approved by', name: '', title: '' }
-    ],
-    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH') + ' · Physical count supersedes system quantity upon approval.'
-  }) : null;
-
-  const rows = items.map((i,idx)=>{ const c=counts[i.id]||{}; return `<tr>
-      <td class="c">${idx+1}</td>
-      <td>${e(i.name||'')}${i.category?`<div class="sub">${e(i.category)}</div>`:''}</td>
-      <td class="c">${e(i.unit||'')}</td>
-      <td class="r">${num(i.qty||0)}</td>
-      <td class="r b">${c.physical!=null&&c.physical!==''?num(c.physical):''}</td>
-      <td class="r">${varCell(i.qty,c.physical)}</td>
-      <td>${e(c.remarks||'')}</td></tr>`; }).join('');
-  const extraRows = extras.map((r,ei)=>`<tr>
-      <td class="c">${items.length+ei+1}</td>
-      <td>${e(r.name||'')}</td>
-      <td class="c">${e(r.unit||'')}</td>
-      <td class="r">—</td>
-      <td class="r b">${r.physical!=null&&r.physical!==''?num(r.physical):''}</td>
-      <td class="r"></td>
-      <td>${e(r.remarks||'')}</td></tr>`).join('');
-  const filled = items.length + extras.length;
-  const pad = filled < 12 ? 12 - filled : 2;
-  let blanks=''; for(let k=0;k<pad;k++) blanks += `<tr class="blank"><td class="c">${filled+k+1}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
-
-  const pageCss = `
-  .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:12mm}
-  .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
-  .mbox{border:1px solid #999;border-radius:5px;padding:6px 9px}
-  .mbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.5px;color:#888;font-weight:700}
-  .mbox .v{font-size:12px;font-weight:700;margin-top:2px;min-height:15px}
-  th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
-  td .sub{font-size:9px;color:#777}
-  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:34px}
-  .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
-  .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
-  @media print{ .page{padding:0;width:auto;min-height:0} }
-${_lh ? _lh.printCSS : ''}`;
-  const bodyHtml = `
-  ${_lh ? _lh.headerHTML : ''}
-  <div class="meta">
-    <div class="mbox"><div class="l">Form No.</div><div class="v">${e(h.formNo||'')}</div></div>
-    <div class="mbox"><div class="l">Count Date</div><div class="v">${e(fmtDate(h.date))}</div></div>
-    <div class="mbox"><div class="l">Warehouse / Location</div><div class="v">${e(h.location||'')}</div></div>
-    <div class="mbox"><div class="l">Counted By</div><div class="v">${e(h.countedBy||'')}</div></div>
-  </div>
-  <table>
-    <thead><tr>
-      <th style="width:30px">#</th><th>Item / Description</th><th style="width:60px">Unit</th>
-      <th style="width:80px">System Qty</th><th style="width:90px">Physical Count</th>
-      <th style="width:70px">Variance</th><th style="width:24%">Remarks</th>
-    </tr></thead>
-    <tbody>${rows}${extraRows}${blanks}</tbody>
-  </table>
-  ${_lh ? _lh.footerHTML : `
-  <div class="sign">
-    <div class="sline">Counted by${h.countedBy?` — ${e(h.countedBy)}`:''}</div>
-    <div class="sline">Verified by${h.verifiedBy?` — ${e(h.verifiedBy)}`:''}</div>
-    <div class="sline">Approved by</div>
-  </div>
-  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')} · Physical count supersedes system quantity upon approval.</div>`}`;
-
-  window.openPrintableDoc({
-    title: `Inventory Count Form — ${h.formNo||''}`,
-    barLabel: `${emojiIcon('📋',16)} Inventory Count Form — ${e(h.formNo||'')}`,
-    bodyHtml, pageCss,
-    accent: '#1E3A5F',
-    winFeatures: 'width=1000,height=720'
-  });
-}
-
-async function renderProdMaterials(el, currentRole) {
-  el.innerHTML = window.skeletonHtml('rows');
-  // Primary data — no swallow here; a real failure now surfaces via
-  // loadProdContent's error-with-retry instead of rendering as "no materials".
-  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get(), 45000);
-  const mats = snap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
-  const low = mats.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
-  const stockValue = mats.reduce((s,i)=>s+(Number(i.qty)||0)*(Number(i.unitCost)||0),0);
-  el.innerHTML = `
-    <div class="kpi-row" style="margin-bottom:12px">
-      <div class="kpi-card"><div class="kpi-label">Raw Materials</div><div class="kpi-value">${mats.length}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Stock Value</div><div class="kpi-value" style="font-size:15px">₱${fmt(stockValue)}</div></div>
-      <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
-    </div>
-    ${low.length?`<div class="alert-banner alert-warn"><span>${emojiIcon('⚠️',16)} <strong>${low.length} material${low.length>1?'s':''}</strong> at or below reorder level — flag Purchasing.</span></div>`:''}
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-      <button class="btn-secondary btn-sm" onclick="navigateTo('inventory')">Open full Inventory →</button>
-    </div>
-    <div class="card"><div class="card-body" style="padding:0">
-      ${!mats.length?window.renderEmptyState({icon:'📦',title:'No materials in inventory yet',hint:'Add raw materials in the Inventory module.'}):
-      `<div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Material</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Supplier</th></tr></thead>
-        <tbody>${mats.map(i=>{
-          const lowItem=(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0);
-          return `<tr>
-            <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
-            <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')}${lowItem?` ${emojiIcon('⚠️',16)}`:''}</td>
-            <td style="font-size:12px;color:var(--text-muted)">${Number(i.reorderLevel||0).toLocaleString('en-PH')}</td>
-            <td>₱${fmt(i.unitCost||0)}</td>
-            <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
-          </tr>`;}).join('')}</tbody>
-      </table></div>`}
-    </div></div>`;
-  if (window.lucide) lucide.createIcons({ nodes: [el] });
-}
+// Inventory Count Form (PROD_COUNT_DRAFT_KEY/loadCountDraft/saveCountDraft/
+// renderProdInventoryForm/openInventoryCountForm) and renderProdMaterials
+// MOVED OUT to js/screens/inventory.js (INVENTORY-DEPT-SPEC-2026-08-31),
+// renamed renderCountForm — see that file's header. The Orders tab's
+// header links to the new Inventory department instead (📦 Inventory
+// button, right below renderProdOrders' KPI row).
 
 // ══════════════════════════════════════════════════
 //  PURCHASING DEPARTMENT
@@ -3655,7 +3361,9 @@ function purchTotal(items) {
 
 window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Request for Quotation') {
   const c = deptContainer();
-  const tabs = ['Request for Quotation', 'Purchase Requests', 'Price List', 'Budgeting', 'Tasks'];
+  // Price List moved out to the Inventory department's Raw Materials tab
+  // (INVENTORY-DEPT-SPEC-2026-08-31) — the RFQ tab links there instead.
+  const tabs = ['Request for Quotation', 'Purchase Requests', 'Budgeting', 'Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('🛒',20)} Purchasing</h2></div>
     ${window.sopPanel('How Purchasing works', [
@@ -3677,7 +3385,6 @@ async function loadPurchasingContent(currentUser, currentRole, sub) {
     if (sub === 'Tasks') return await renderDeptTasks(content, 'Purchasing', currentUser, currentRole);
     if (sub === 'Budgeting') return await window.renderBudgeting(content, currentUser, currentRole, 'Purchasing');
     if (sub === 'Purchase Requests') return await renderPurchaseRequests(content, currentUser, currentRole);
-    if (sub === 'Price List') return await window.renderMaterialPriceList(content, currentUser, currentRole);
     return await renderRFQs(content, currentUser, currentRole);
   } catch (e) {
     console.error('Purchasing load error', e);
@@ -3699,13 +3406,20 @@ async function renderRFQs(content, currentUser, currentRole) {
   const rfqs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => (d.stage||'rfq') === 'rfq');
 
   content.innerHTML = `
-    ${canEdit ? `<div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px;flex-wrap:wrap"><button class="btn-secondary btn-sm" id="rfq-lowstock-btn">${emojiIcon('📉',16)} From low stock</button><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button></div>` : ''}
+    <div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px;flex-wrap:wrap">
+      <button class="btn-secondary btn-sm" id="rfq-pricelist-btn">${emojiIcon('📋',16)} Price List</button>
+      ${canEdit ? `<button class="btn-secondary btn-sm" id="rfq-lowstock-btn">${emojiIcon('📉',16)} From low stock</button><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button>` : ''}
+    </div>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Create a Request for Quotation, enter the supplier's prices, then convert it into a Purchase Request.</p>
     ${!rfqs.length
       ? window.renderEmptyState({icon:'📋',title:'No open RFQs',hint:'Create one to request supplier pricing.'})
       : rfqs.map(r => purchRfqCard(r, canEdit)).join('')}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [content] });
+  // Price List (raw-material supplier prices) moved to the Inventory
+  // department's Raw Materials tab — INVENTORY-DEPT-SPEC-2026-08-31.
+  document.getElementById('rfq-pricelist-btn')?.addEventListener('click', () =>
+    navigateTo('dept:Inventory', { subtab: 'Raw Materials' }));
   if (canEdit) {
     document.getElementById('new-rfq-btn')?.addEventListener('click', () =>
       openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole)));
@@ -4039,6 +3753,11 @@ window.exportPurchasesCSV = function() {
 
 async function renderPurchaseRequests(content, currentUser, currentRole, opts = {}) {
   const canEdit = !opts.viewOnly && canEditDept('Purchasing');
+  // Receiving writes inventory_items + stock_movements, which the rules deny
+  // the secretary (view-only oversight) — mirror that here, or "Mark Received"
+  // dies permission-denied per line yet still toasts success and mis-stamps
+  // the PR (INVENTORY-DEPT-SPEC-2026-08-31 §6).
+  const canReceive = canEdit && currentRole !== 'secretary';
   const canRecord = !!opts.financeView && isFinancePriv(); // Finance/admin may post to the books
   const canApprovePO = ['president','manager'].includes(currentRole);   // mirrors APPROVAL_CAPS['po-approval']
   // v13 review: client-side stage filter retained (see renderRFQs note) — a
@@ -4132,8 +3851,8 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             ${canEdit && poState(p) === 'rejected' ? `<button class="btn-secondary btn-sm po-revert" data-id="${p.id}">↩ Revert to RFQ</button>` : ''}
             ${canEdit && poApproved(p) ? `
               ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
-              ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
-              ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">${emojiIcon('⚠',16)} Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
+              ${canReceive && p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+              ${canReceive && (p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">${emojiIcon('⚠',16)} Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
               ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">${emojiIcon('📩',16)} Submit to Finance</button>` : ''}
             ` : ''}
             ${canRecord && !p.recordedToFinance && poApproved(p) ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">${emojiIcon('🧾',16)} Record as Disbursement</button>` : ''}
@@ -4235,6 +3954,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   }));
 
   if (canEdit) content.querySelectorAll('.pr-stat').forEach(btn => btn.addEventListener('click', async () => {
+    if (btn.dataset.stat === 'received' && !canReceive) { Notifs.showToast('Receiving posts to stock — view-only for the Secretary.', 'error'); return; }
     const p0 = prs.find(x => x.id === btn.dataset.id);
     if (p0 && !poApproved(p0)) { Notifs.showToast('This PO needs President/Manager approval first.', 'error'); btn.disabled = false; return; }
     btn.disabled = true;
@@ -4281,7 +4001,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
     } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
 
-  if (canEdit) content.querySelectorAll('.pr-resolve').forEach(btn => btn.addEventListener('click', () => {
+  if (canReceive) content.querySelectorAll('.pr-resolve').forEach(btn => btn.addEventListener('click', () => {
     openReceiveResolver(prs.find(x => x.id === btn.dataset.id), currentUser, redo);
   }));
 }

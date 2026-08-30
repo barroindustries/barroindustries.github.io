@@ -3570,17 +3570,25 @@ service cloud.firestore {
     }
 
     // ── Inventory (raw materials + finished goods) ─────
-    // Operational data for internal staff. Item costs are visible to staff;
-    // external partners are excluded from reading/writing.
+    // INVENTORY-DEPT-SPEC-2026-08-31 — tightened from "any internal staff
+    // can write" to the people who actually move stock: senior admins,
+    // Finance, and members of Inventory / Purchasing / Production. Reads
+    // stay open to all internal staff (Production pickers, dashboards).
+    // Secretary is view-only (ruling 2026-08-09 pattern). Deletes are
+    // senior-admin only — an item row anchors its movement history.
     match /inventory_items/{docId} {
-      allow read:  if isAuth() && !isPartner();
-      allow write: if isAuth() && !isPartner();
+      allow read:   if isAuth() && !isPartner();
+      allow create, update: if isAuth() && !isPartner() && !isSecretary()
+        && (isSeniorAdmin() || canFinance() || inDept('Inventory') || isPurchasingDept() || isProductionDept());
+      allow delete: if isAuth() && isSeniorAdmin();
     }
-    // Stock movement log — anyone internal can record in/out; only admins edit/delete history.
+    // Stock movement log — append-only for the same writer set; history is
+    // never rewritten except by senior admins.
     match /stock_movements/{docId} {
       allow read:   if isAuth() && !isPartner();
-      allow create: if isAuth() && !isPartner();
-      allow update, delete: if isAuth() && isAdmin();
+      allow create: if isAuth() && !isPartner() && !isSecretary()
+        && (isSeniorAdmin() || canFinance() || inDept('Inventory') || isPurchasingDept() || isProductionDept());
+      allow update, delete: if isAuth() && isSeniorAdmin();
     }
     // Job costing carries revenue/margin per project — finance/admin only.
     match /job_costs/{docId} {

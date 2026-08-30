@@ -2410,7 +2410,7 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
 // Single source of truth for the quote builders. Seeded once from
 // products-database.json, then lives entirely in Firestore so president
 // edits (title, measurement, specs, price, capital) sync live everywhere.
-// One-time, additive: imports the full 153-item catalog (with measurement/
+// One-time, additive: imports the products-database.json catalog (with measurement/
 // formula data) the first time the page loads. Gated on productMeta/config
 // rather than the products collection being empty, since older builds had
 // already seeded a handful of placeholder products (Steel Fabrication, etc.)
@@ -2681,6 +2681,10 @@ const _SKELETON_KIND = {
   // Everything else (tasks, approvals, posts, memos, chat, files, leave,
   // notifications, search, help, sops, submissions, progress, dept:* …)
   // is genuinely list-shaped and keeps 'rows' via the default below.
+  // 'dept:Inventory' is spelled out explicitly (INVENTORY-DEPT-SPEC-2026-08-31)
+  // even though it is already the default for dept:* pages — its landing
+  // tab (Stock) really is list-shaped, same as every other department.
+  'dept:Inventory': 'rows',
 };
 function _skeletonKindFor(page) {
   return _SKELETON_KIND[page] || 'rows';
@@ -2865,7 +2869,7 @@ async function navigateTo(page, opts) {
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
     case 'leave':            window.renderLeavePage?.(); break;
     case 'holidays':         window.renderHolidaysAdmin?.(); break;
-    case 'inventory':        window.renderInventory?.(); break;
+    case 'inventory':        window.renderInventoryDept?.(currentUser, currentRole); break;
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
     case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
     case 'system-health':    (isPresident() || currentRole==='finance') ? renderSystemHealth() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
@@ -3284,6 +3288,7 @@ function renderDeptModule(dept) {
     case 'Design':                     renderDesign(currentUser, currentRole); break;
     case 'Production':                 window.renderProductionDept?.(currentUser, currentRole); break;
     case 'Purchasing':                 window.renderPurchasing?.(currentUser, currentRole); break;
+    case 'Inventory':                  window.renderInventoryDept?.(currentUser, currentRole); break;
     case 'Brilliant Steel':            renderBrilliantSteel(currentUser, currentRole); break;
     case 'Government Biddings':        renderGovBiddings(); break;
     case 'Partners':                   renderPartnersDept(); break;

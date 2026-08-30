@@ -442,7 +442,24 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;
     case 'Cash Disbursements':  await renderCashDisbursementJournal(content, currentUser, currentRole); break;
     case 'Sales Orders':        await window.renderSalesOrders(content); break;
-    case 'Inventory':           await window.renderInventory(content, 'Stock'); break;
+    // INVENTORY-DEPT-SPEC-2026-08-31 — Inventory (Stock/Raw Materials/
+    // Finished Products/Movements/Job Costing) is now its own department
+    // (js/screens/inventory.js), not embeddable into a container the way
+    // the old js/modules.js window.renderInventory(container, sub) was.
+    // This chip (Finance → Purchases & Inventory → Inventory) was a caller
+    // the move spec's known-callers list did not enumerate; rather than
+    // leave it calling a function that no longer exists, it now redirects
+    // — same "Open full Inventory →" pattern production.js's old
+    // renderProdMaterials used for the same legacy route.
+    case 'Inventory':
+      content.innerHTML = window.renderEmptyState({
+        icon: '📦', title: 'Inventory moved',
+        hint: 'Stock, Raw Materials, Finished Products, Movements and Job Costing now live in their own Inventory department.',
+        action: { id: 'fin-open-inventory-btn', label: 'Open Inventory →' }
+      });
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
+      document.getElementById('fin-open-inventory-btn')?.addEventListener('click', () => navigateTo('inventory'));
+      break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
     case 'Dept Budgets': await window.renderDeptBudgetsAdmin(content, currentUser, currentRole); break;
     case 'Purchases':

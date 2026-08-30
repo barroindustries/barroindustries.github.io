@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.200';
+window.APP_VERSION = '14.0.202';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1623,6 +1623,12 @@ window.PAGE_SCRIPTS = {
   'dept:Production':    ['js/screens/production.js', 'js/letterhead.js', 'js/migrations.js', 'js/screens/tasks.js'],
   'dept:Purchasing':    ['js/screens/production.js', 'js/letterhead.js', 'js/migrations.js', 'js/screens/tasks.js'],
   'projects-lifecycle': ['js/screens/production.js', 'js/letterhead.js', 'js/migrations.js'],
+
+  // ── Inventory — new department (INVENTORY-DEPT-SPEC-2026-08-31). Its Count
+  // Form tab calls js/letterhead.js's buildLetterhead/openPrintableDoc
+  // unguarded (moved in from production.js's Count Form, same reach). ──
+  'dept:Inventory': ['js/screens/inventory.js', 'js/letterhead.js'],
+  'inventory':      ['js/screens/inventory.js', 'js/letterhead.js'],   // legacy standalone route
 
   'dept:Ventures': ['js/screens/ventures.js'],
 
