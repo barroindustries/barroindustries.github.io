@@ -10,7 +10,8 @@
     "backup":            "node monthly-backup.js",
     "restore":           "node restore-from-backup.js",
     "migrate-files-hub": "node migrate-files-hub.js",
-    "digest":            "node daily-digest.js"
+    "digest":            "node daily-digest.js",
+    "meta-insights":     "node meta-insights.js"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",

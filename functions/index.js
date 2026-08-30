@@ -1,5 +1,6 @@
 const functions = require('firebase-functions');
 const admin     = require('firebase-admin');
+const crypto    = require('crypto');
 admin.initializeApp();
 
 // v14 re-audit fix — real per-sender enforcement (see the block inside
@@ -2263,3 +2264,294 @@ exports.recordAttendancePunch = functions.https.onCall(async (data, context) => 
     ...(claimDegraded ? { claimDegraded } : {})
   };
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+//  META (FACEBOOK) LEAD ADS WEBHOOK — specs/META-ADS-SPEC-2026-08-30.md
+//
+//  Meta calls this on every new Lead Ad submission (Page → leadgen webhook
+//  subscription, set up per docs/META-ADS-SETUP.md). It also calls it once,
+//  as a plain GET, to verify the subscription at setup time.
+//
+//  Three secrets, set via `firebase functions:secrets:set <NAME>` (never
+//  committed — this repo is PUBLIC):
+//    META_APP_SECRET   — the Meta app's secret, used to verify the
+//                         X-Hub-Signature-256 HMAC on every POST delivery.
+//    META_PAGE_TOKEN    — a Page access token with leads_retrieval, used to
+//                         fetch the actual lead fields (Meta's webhook
+//                         payload carries only a leadgen_id, never the PII).
+//    META_VERIFY_TOKEN  — an arbitrary string Meta echoes back on the GET
+//                         subscribe handshake; proves the callback URL is
+//                         under our control. Generated at deploy time and
+//                         handed to Neil out of band — see the setup doc.
+//
+//  Idempotency: meta_leads/{leadgenId}.create() is the ONLY claim on a given
+//  delivery — a concurrent or Meta-retried redelivery of the same leadgen_id
+//  loses the create() race (ALREADY_EXISTS) and is skipped. A processing
+//  error after the claim is taken deletes the claim doc so a genuine Meta
+//  retry (same leadgen_id, non-2xx response) can reprocess it from scratch.
+//
+//  PII handling: the claim/audit doc (meta_leads) never stores field_data —
+//  only status + the resulting clientId. The clients doc IS the record.
+// ──────────────────────────────────────────────────────────────────────────
+
+const GRAPH_VER = 'v22.0';
+
+/** HMAC-SHA256 hex digest — verifies Meta's X-Hub-Signature-256 header. */
+function metaHmacHex(buf, secret) {
+  return crypto.createHmac('sha256', secret).update(buf).digest('hex');
+}
+
+/** Constant-time string compare (length check first — timingSafeEqual throws
+ *  on mismatched buffer lengths, which would itself leak a length signal). */
+function metaSafeEqual(a, b) {
+  const bufA = Buffer.from(String(a || ''), 'utf8');
+  const bufB = Buffer.from(String(b || ''), 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Extracts name/email/phone/notes from Meta's field_data array
+ * ([{name, values:[...]}, ...]) — mirrors the shape openLeadCaptureModal
+ * (js/departments.js ~1493) builds by hand for a manually-captured lead.
+ * Every field Meta sends that isn't name/email/phone becomes a "Label: value"
+ * line in notes instead of being dropped.
+ */
+function parseMetaLeadFields(fieldData, leadgenId, formId, adName, campaignName) {
+  const byName = {};
+  (Array.isArray(fieldData) ? fieldData : []).forEach((f) => {
+    const key = f && f.name;
+    if (!key) return;
+    const val = (f.values && f.values.length) ? String(f.values[0]) : '';
+    byName[key] = val;
+  });
+
+  let name = byName.full_name
+    || [byName.first_name, byName.last_name].filter(Boolean).join(' ').trim()
+    || `Facebook Lead ${leadgenId}`;
+  name = name.trim().slice(0, 200);
+
+  const email = (byName.email || '').trim().slice(0, 120);
+  const phone = (byName.phone_number || byName.phone || '').trim().slice(0, 120);
+
+  const HANDLED = new Set(['full_name', 'first_name', 'last_name', 'email', 'phone_number', 'phone']);
+  const extraLines = Object.keys(byName)
+    .filter((k) => !HANDLED.has(k))
+    .map((k) => `${k}: ${byName[k]}`);
+
+  const prefix = `Facebook Lead Ad — form ${formId || '—'}, ad "${adName || '—'}", campaign "${campaignName || '—'}"`;
+  const notes = [prefix, ...extraLines].join('\n').slice(0, 2000);
+
+  return { name, email, phone, notes };
+}
+
+/**
+ * Processes one leadgen change entry AFTER its meta_leads claim doc has been
+ * created: fetches the lead's real fields from the Graph API, maps it onto an
+ * app campaign (if the campaign's metaCampaignId matches), upserts the
+ * clients doc (mirroring openLeadCaptureModal's dedupe/first-touch rules),
+ * notifies Sales, and finalizes the claim doc. Throws on any failure so the
+ * caller can roll back the claim for a retry.
+ */
+async function processMetaLead(db, leadgenId, claimRef) {
+  const FieldValue = admin.firestore.FieldValue;
+
+  // 4. Fetch the lead. NEVER log this URL — it embeds META_PAGE_TOKEN.
+  const url = `https://graph.facebook.com/${GRAPH_VER}/${leadgenId}?fields=created_time,field_data,campaign_id,campaign_name,ad_id,ad_name,form_id&access_token=${process.env.META_PAGE_TOKEN}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    console.error('[metaLeadWebhook] lead fetch failed — status', resp.status, 'leadgenId', leadgenId);
+    throw new Error(`Graph API lead fetch returned ${resp.status}`);
+  }
+  const lead = await resp.json();
+
+  // 5. Parse field_data into name/email/phone/notes.
+  const { name, email, phone, notes: newNotes } = parseMetaLeadFields(
+    lead.field_data, leadgenId, lead.form_id, lead.ad_name, lead.campaign_name);
+
+  // 6. Campaign mapping (guard campaign_id absent).
+  const metaCampaignId = lead.campaign_id != null ? String(lead.campaign_id) : '';
+  let appCampaignId = null;
+  let appCampaignName = '';
+  if (metaCampaignId) {
+    const campSnap = await db.collection('campaigns')
+      .where('metaCampaignId', '==', metaCampaignId).limit(1).get();
+    if (!campSnap.empty) {
+      appCampaignId = campSnap.docs[0].id;
+      appCampaignName = campSnap.docs[0].data().name || '';
+    }
+  }
+
+  // 7. Client upsert — mirrors openLeadCaptureModal (js/departments.js ~1493).
+  const nameKey = name.trim().toLowerCase().replace(/\s+/g, ' ');
+  const clientsRef = db.collection('clients');
+  const existingSnap = await clientsRef.where('nameKey', '==', nameKey).limit(1).get();
+
+  let clientId;
+  let company = '';
+  if (!existingSnap.empty) {
+    const existingDoc = existingSnap.docs[0];
+    const existing = existingDoc.data() || {};
+    const upd = {
+      updatedAt: FieldValue.serverTimestamp(),
+      leadOrigin: existing.leadOrigin || 'marketing',
+      source: existing.source || 'FB',
+      brands: FieldValue.arrayUnion('sales'),
+    };
+    if (!existing.campaignId && appCampaignId) upd.campaignId = appCampaignId;   // first-touch only
+    // Fill-empty-only, same rule as openLeadCaptureModal. A Meta lead form's
+    // field_data never yields a structured "company" value here (anything
+    // beyond name/email/phone lands in notes instead), so there is nothing
+    // to fill for company on this path.
+    if (!existing.phone && phone) upd.phone = phone;
+    if (!existing.email && email) upd.email = email;
+    const merged = existing.notes ? (existing.notes + '\n\n' + newNotes) : newNotes;
+    upd.notes = merged.slice(0, 4000);
+    await existingDoc.ref.update(upd);
+    clientId = existingDoc.id;
+    company = existing.company || '';
+  } else {
+    const ref = await clientsRef.add({
+      name, nameKey, brands: ['sales'], stage: 'lead', company: '', phone, email,
+      address: '', notes: newNotes, followUpDate: '', lastContact: '', contactLog: [],
+      leadOrigin: 'marketing', source: 'FB', campaignId: appCampaignId || null,
+      handedOffAt: null, addedBy: 'meta-webhook', createdBy: 'meta-webhook',
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    clientId = ref.id;
+  }
+
+  // 8. Notify Sales — server-side sendToDept equivalent (legacy `department`
+  // string field + current `departments` array field both queried and
+  // merged/deduped by uid, same as every other department-wide notify).
+  const [byLegacyDept, byDeptArray] = await Promise.all([
+    db.collection('users').where('department', '==', 'Sales').get(),
+    db.collection('users').where('departments', 'array-contains', 'Sales').get(),
+  ]);
+  const salesUids = new Set();
+  byLegacyDept.docs.forEach((d) => salesUids.add(d.id));
+  byDeptArray.docs.forEach((d) => salesUids.add(d.id));
+
+  const body = `${name}${company ? ' · ' + company : ''} — Facebook Lead Ad`
+    + `${appCampaignName ? ' · ' + appCampaignName : ''}. Open the Sales CRM to follow up.`;
+  const toNotify = [];
+  salesUids.forEach((uid) => {
+    toNotify.push({
+      ref: db.collection('notifications').doc(uid).collection('items').doc(),
+      notifData: {
+        title: '📥 New Facebook lead',
+        body,
+        icon: '📥',
+        type: 'lead_handoff',
+        link: 'dept:Sales',
+        dedupKey: `meta_lead_${leadgenId}_${uid}`,
+        // NO senderUid — this is a system send, deliberately exempt from the
+        // per-sender push quota enforced in sendPushOnNotification above.
+      },
+    });
+  });
+  if (toNotify.length) await commitInChunks(db, toNotify, null);
+
+  // 9. Finalize the claim doc. Never store field_data — the clients doc is
+  // the record (PII duplication avoided).
+  await claimRef.update({
+    status: 'done',
+    clientId,
+    name,
+    campaignId: appCampaignId || null,
+    metaCampaignId: metaCampaignId || null,
+    processedAt: FieldValue.serverTimestamp(),
+  });
+}
+
+exports.metaLeadWebhook = functions
+  .region('asia-east1')
+  .runWith({ secrets: ['META_APP_SECRET', 'META_PAGE_TOKEN', 'META_VERIFY_TOKEN'] })
+  .https.onRequest(async (req, res) => {
+    // ── GET — subscription verification handshake ──
+    if (req.method === 'GET') {
+      const mode = req.query['hub.mode'];
+      const token = req.query['hub.verify_token'];
+      if (mode === 'subscribe' && typeof token === 'string' && metaSafeEqual(token, process.env.META_VERIFY_TOKEN)) {
+        res.status(200).send(req.query['hub.challenge']);
+      } else {
+        // Never log the expected token — even on a failed handshake.
+        console.warn('[metaLeadWebhook] GET handshake rejected (mode/verify_token mismatch)');
+        res.status(403).send('Forbidden');
+      }
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
+    }
+
+    // ── POST — signature verification (req.rawBody is the v1 https runtime's
+    // raw request buffer, needed for an exact HMAC over the wire bytes) ──
+    const signatureHeader = req.get('x-hub-signature-256') || '';
+    const expected = 'sha256=' + metaHmacHex(req.rawBody, process.env.META_APP_SECRET);
+    if (!signatureHeader || !metaSafeEqual(signatureHeader, expected)) {
+      console.warn('[metaLeadWebhook] signature missing or mismatched — rejecting delivery (body not logged)');
+      res.status(401).send('Invalid signature');
+      return;
+    }
+
+    const db = admin.firestore();
+    // Meta ONLY redelivers on a non-2xx response — a 200 is a final ack. So a
+    // per-entry failure (transient Graph blip, Firestore hiccup) must surface
+    // as a 500 or the lead is silently lost forever. Safe to fail the WHOLE
+    // delivery for one bad entry: successfully processed entries keep their
+    // meta_leads claim doc, so the redelivery's create() loses ALREADY_EXISTS
+    // and skips them — only the rolled-back entry actually reprocesses.
+    let anyFailure = false;
+    try {
+      if (req.body && req.body.object === 'page' && Array.isArray(req.body.entry)) {
+        for (const entry of req.body.entry) {
+          const changes = Array.isArray(entry && entry.changes) ? entry.changes : [];
+          for (const change of changes) {
+            if (!change || change.field !== 'leadgen') continue;
+            const value = change.value || {};
+            const leadgenId = value.leadgen_id != null ? String(value.leadgen_id) : '';
+            const pageId = value.page_id != null ? String(value.page_id) : '';
+            if (!leadgenId) continue;
+
+            const claimRef = db.collection('meta_leads').doc(leadgenId);
+            try {
+              await claimRef.create({
+                status: 'processing',
+                pageId,
+                receivedAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            } catch (claimErr) {
+              // ALREADY_EXISTS (grpc status code 6) — a concurrent/retried
+              // delivery already claimed this leadgen_id. Skip silently.
+              if (claimErr && claimErr.code === 6) continue;
+              console.error('[metaLeadWebhook] claim write failed for', leadgenId, claimErr && (claimErr.code || claimErr.message));
+              anyFailure = true;
+              continue;
+            }
+
+            try {
+              await processMetaLead(db, leadgenId, claimRef);
+            } catch (procErr) {
+              console.error('[metaLeadWebhook] processing failed for', leadgenId, '—', procErr && procErr.message);
+              await claimRef.delete().catch(() => {});
+              anyFailure = true;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Defensive — an unexpected top-level error must never leave Meta
+      // without a response.
+      console.error('[metaLeadWebhook] unexpected error processing delivery:', err && err.message);
+      anyFailure = true;
+    }
+
+    // 10. Ack 2xx only when every entry landed; a 500 makes Meta redeliver
+    // (with backoff), and the claim docs above make that redelivery exactly-
+    // once per lead.
+    if (anyFailure) res.status(500).send('Retry');
+    else res.status(200).send('OK');
+  });

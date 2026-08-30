@@ -1,0 +1,46 @@
+name: Meta Ads Nightly Insights
+
+# specs/META-ADS-SPEC-2026-08-30.md — pulls the last 7 days of per-campaign
+# Meta ad spend/impressions/clicks/leads into the server-only `ad_insights`
+# Firestore collection, which Marketing → Insights reads. Same free Actions
+# minutes precedent as sync-to-drive.yml / daily-digest.yml — not a Firebase
+# Scheduled Function. No-ops (exit 0) until Neil sets the META_SYSTEM_TOKEN /
+# META_AD_ACCOUNT_ID repo secrets — see docs/META-ADS-SETUP.md.
+
+on:
+  schedule:
+    - cron: '30 15 * * *'   # 11:30 PM Philippine Time (UTC+8) every day
+  workflow_dispatch:         # Manual trigger from GitHub Actions tab
+
+jobs:
+  meta-insights:
+    runs-on: ubuntu-latest
+    name: Pull Meta Ads insights
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: scripts
+
+      - name: Run Meta insights pull
+        run: node meta-insights.js
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          META_SYSTEM_TOKEN:        ${{ secrets.META_SYSTEM_TOKEN }}
+          META_AD_ACCOUNT_ID:       ${{ secrets.META_AD_ACCOUNT_ID }}
+
+      - name: Report failure to system_health
+        if: failure()
+        run: node report-failure.js meta_insights
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

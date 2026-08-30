@@ -1094,7 +1094,7 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Camp
     ${window.sopPanel('How Marketing works', [
       'Campaigns tracks each push: budget vs actual, dates, channels, and its materials.',
       'Leads is the capture inbox — new prospects land here, then hand off to Sales.',
-      'Promos is the promotions calendar; Insights shows spend vs leads vs quotes vs wins.',
+      'Promos is the promotions calendar; Insights shows spend vs leads vs quotes vs wins — Facebook ad spend imports automatically overnight for campaigns with a Meta campaign ID.',
       'Advertising and Marketing Designs hold the creative asset libraries.',
       'Plan, Strategy and Proposals store playbooks and pitches; Tasks is the department board.'
     ])}
@@ -1253,6 +1253,8 @@ async function openCampaignModal(camp, onChange) {
       <div class="form-group"><label>Budget (₱)</label><input id="mc-budget" type="number" step="0.01" min="0" value="${camp?.budget||0}" inputmode="decimal"/></div>
     </div>
     <div class="form-group"><label>Channels</label><div>${chBoxes}</div></div>
+    <div class="form-group"><label>Meta campaign ID <span style="font-weight:400;color:var(--text-muted)">(optional — links Facebook ad spend + lead attribution)</span></label>
+      <input id="mc-metaid" inputmode="numeric" placeholder="e.g. 120210000000000000" value="${escHtml(camp?.metaCampaignId||'')}"/></div>
     ${canMoneyTier ? `<div class="form-group"><label>Budget line (optional — links actual spend)</label>
       <select id="mc-line"><option value="">— none —</option>${lineOptions}</select></div>` : ''}
     ${spendHtml}
@@ -1283,6 +1285,7 @@ async function openCampaignModal(camp, onChange) {
       startDate, endDate,
       budget: Math.max(0, parseFloat($('mc-budget').value) || 0),
       budgetLineId: canMoneyTier ? ($('mc-line').value || null) : (camp?.budgetLineId ?? null),
+      metaCampaignId: $('mc-metaid').value.trim() || null,
       updatedAt: FV.serverTimestamp()
     };
     try {
@@ -1663,7 +1666,7 @@ function openPromoModal(promo, camps, onSaved) {
 // ── Spec 8 — Insights (live rollup, no cache collection) ────────────────
 async function renderMktInsights(content, currentUser, currentRole) {
   const canSpend = ['president','owner','manager','finance'].includes(currentRole);
-  const [camps, clientsAll, qSnap, ledgerSnap] = await Promise.all([
+  const [camps, clientsAll, qSnap, ledgerSnap, adSnap] = await Promise.all([
     fetchCampaigns(),
     window.Clients.listAll(),                                   // 'clients' cache key (WS32)
     (typeof getAllQuotes === 'function' ? getAllQuotes() : Promise.resolve({ docs: [] })),  // 'all-quotes'
@@ -1671,10 +1674,14 @@ async function renderMktInsights(content, currentUser, currentRole) {
       ? (typeof dbCachedGet === 'function'
           ? dbCachedGet('ledger-marketing', () => db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})), 60000)
           : db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})))
-      : Promise.resolve({ docs: [] })
+      : Promise.resolve({ docs: [] }),
+    (typeof dbCachedGet === 'function'                           // ad_insights: server-written, readable by any non-partner (specs/META-ADS-SPEC-2026-08-30.md)
+      ? dbCachedGet('ad_insights', () => db.collection('ad_insights').get().catch(()=>({docs:[]})), 60000)
+      : db.collection('ad_insights').get().catch(()=>({docs:[]})))
   ]);
   const quotes = qSnap.docs.map(d => ({ id:d.id, ...d.data() }));
   const ledger = ledgerSnap.docs.map(d => d.data());
+  const adInsights = adSnap.docs.map(d => d.data());
   const rows = camps.map(camp => {
     const leads = clientsAll.filter(c0 => c0.campaignId === camp.id);
     const seen = {}; const cQuotes = [];
@@ -1685,18 +1692,33 @@ async function renderMktInsights(content, currentUser, currentRole) {
       ? ledger.filter(e => e.budgetLineId === camp.budgetLineId && ledgerKind(e) === 'expense')
               .reduce((s,e) => s + (e.amount||0), 0)
       : null;                                                     // null ⇒ render '—', never ₱0
+    let adSpend = null, adLeads = null;                            // Meta ad spend — not money-gated (specs/META-ADS-SPEC-2026-08-30.md)
+    if (camp.metaCampaignId) {
+      const adMatches = adInsights.filter(a => String(a.metaCampaignId) === String(camp.metaCampaignId));
+      // A linked campaign with NO synced rows yet (ID set today, nightly pull
+      // hasn't run) stays null ⇒ '—', matching the ledger-spend convention —
+      // a ₱0 here would read as "ads ran free", not "no data yet".
+      if (adMatches.length) {
+        adSpend = adMatches.reduce((s,a) => s + (a.spend||0), 0);
+        adLeads = adMatches.reduce((s,a) => s + (a.leads||0), 0);
+      }
+    }
+    const cplBase = (spend != null) ? spend : adSpend;             // ledger spend preferred; Meta ad spend is the fallback
     return { camp, leads: leads.length,
       converted: leads.filter(c0 => crmStageOf(c0) === 'won').length,
       quotes: cQuotes.length,
       quoted: cQuotes.reduce((s,q) => s + (q.total||q.grandTotal||0), 0),
       wins: wins.length,
       wonVal: wins.reduce((s,q) => s + (q.total||q.grandTotal||0), 0),
-      spend, cpl: (spend != null && leads.length) ? spend / leads.length : null };
+      spend, adSpend, adLeads,
+      cpl: (cplBase != null && leads.length) ? cplBase / leads.length : null };
   });
   const unattributed = clientsAll.filter(c0 => c0.leadOrigin === 'marketing' && !c0.campaignId).length;
   const totalSpend = canSpend ? rows.reduce((s,r) => s + (r.spend||0), 0) : null;
   const totalLeads = rows.reduce((s,r) => s + r.leads, 0);
   const totalWonVal = rows.reduce((s,r) => s + r.wonVal, 0);
+  const adSpendRows = rows.filter(r => r.adSpend != null);
+  const totalAdSpend = adSpendRows.length ? adSpendRows.reduce((s,r) => s + r.adSpend, 0) : null;
   const stBadge = st => ({ planned:['badge-gray',`${emojiIcon('🗓',16)} Planned`], active:['badge-green','▶ Active'],
     done:['badge-blue',`✔ Done`], cancelled:['badge-red',`${emojiIcon('✖',16)} Cancelled`] })[st] || ['badge-gray', st||'—'];
 
@@ -1705,11 +1727,12 @@ async function renderMktInsights(content, currentUser, currentRole) {
       <div class="kpi-card red"><div class="kpi-label">Total Spend</div><div class="kpi-value">${totalSpend!=null?'₱'+fmt(totalSpend):'—'}</div></div>
       <div class="kpi-card"><div class="kpi-label">Total Leads</div><div class="kpi-value">${totalLeads}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Total Wins ₱</div><div class="kpi-value">₱${fmt(totalWonVal)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Meta Ad Spend</div><div class="kpi-value">${totalAdSpend!=null?'₱'+fmt(totalAdSpend):'—'}</div></div>
     </div>
     ${!camps.length ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📈',44)}</div><p>No campaigns yet.</p></div>` : `
     <div class="table-wrap" style="overflow-x:auto">
       <table class="data-table table-cards">
-        <thead><tr><th>Campaign</th><th>Status</th><th>Spend</th><th>Leads</th><th>CPL</th><th>Quotes</th><th>Quoted ₱</th><th>Wins</th><th>Won ₱</th></tr></thead>
+        <thead><tr><th>Campaign</th><th>Status</th><th>Spend</th><th>Ad Spend</th><th>Leads</th><th>CPL</th><th>Quotes</th><th>Quoted ₱</th><th>Wins</th><th>Won ₱</th></tr></thead>
         <tbody>
           ${rows.map(r => { const [bc,bl] = stBadge(r.camp.status);
             const overBudget = (r.spend!=null && (r.camp.budget||0)>0 && r.spend > r.camp.budget);
@@ -1717,6 +1740,7 @@ async function renderMktInsights(content, currentUser, currentRole) {
               <td class="tc-name" style="font-weight:600">${escHtml(r.camp.name||'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
               <td class="tc-detail" data-label="Status"><span class="badge ${bc}" style="font-size:9px">${bl}</span></td>
               <td class="tc-detail" data-label="Spend" style="${overBudget?'color:var(--danger)':''}">${r.spend!=null?'₱'+fmt(r.spend):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
+              <td class="tc-detail" data-label="Ad Spend">${r.adSpend!=null?'₱'+fmt(r.adSpend):'—'}</td>
               <td class="tc-detail" data-label="Leads">${r.leads}</td>
               <td class="tc-detail" data-label="CPL">${r.cpl!=null?'₱'+fmt(r.cpl):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
               <td class="tc-detail" data-label="Quotes">${r.quotes}</td>

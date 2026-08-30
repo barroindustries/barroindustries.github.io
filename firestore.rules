@@ -2637,6 +2637,24 @@ service cloud.firestore {
         && request.resource.data.get('createdBy', '') == request.auth.uid;
       allow update, delete: if isAuth() && canDept('Marketing');
     }
+
+    // ── Meta Ads integration (specs/META-ADS-SPEC-2026-08-30.md) ─────────
+    // ad_insights: per-campaign per-day Meta spend/impressions/clicks/leads,
+    // written ONLY server-side (nightly GitHub Action via admin SDK, which
+    // bypasses rules). Readable by any signed-in non-partner — it feeds the
+    // Marketing → Insights table, and the external ads freelancer (a plain
+    // employee) legitimately needs it. write:false keeps clients out entirely.
+    match /ad_insights/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow write: if false;
+    }
+    // meta_leads: the lead-webhook's claim/audit ledger (Cloud Function only).
+    // Admin-readable for debugging; no client writes ever.
+    match /meta_leads/{docId} {
+      allow read: if isAuth() && isAdmin();
+      allow write: if false;
+    }
+
     match /marketing_templates/{docId} {
       allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Marketing');
