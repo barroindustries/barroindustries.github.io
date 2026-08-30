@@ -31,6 +31,12 @@ Find the three fenced blocks by grepping for:
    cleanly, restore the starting view), open Help, confirm the What's New entry renders and the
    gold dot clears after opening.
 
+## Standing owner rulings
+- **2026-08-31 (Neil):** the first Inventory-department change that touches the quote builder
+  (e.g. items/materials/stock wired into quoting) is pre-ruled tutorial-worthy — bump
+  `TUTORIAL_VERSION` to **2** (or the next integer if another QB change landed first) and give it
+  its own `WHATS_NEW` entry. Delete this ruling once done.
+
 ## Never
 - Rename/clear localStorage keys `qbTutSeenVer` / `qbTutDismissedVer`.
 - Interpolate quote/user data into tutorial markup.
