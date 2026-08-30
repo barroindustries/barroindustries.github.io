@@ -886,6 +886,53 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 .qb-doc-sheet .section:last-child{border-bottom:none;}
 .qb-doc-sheet .sec-title{font-size:12.5px;}
 .qb-doc-sheet .totals-tbl{margin-left:auto;}
+
+/* ── HELP & TUTORIAL (QB-TUTORIAL-SPEC-2026-08-31 · .claude/skills/quote-builder-tutorial) ── */
+#btnHelp{position:relative;}
+.help-dot{display:none;position:absolute;top:-3px;right:-3px;width:8px;height:8px;
+  border-radius:50%;background:var(--accent);border:1.5px solid var(--dark-blue);}
+.help-dot.show{display:block;}
+
+/* display toggled directly (style.display) by initTutorial()/hideTutBanner()
+   below, matching #helpModal's own show/hide mechanism — not a .show class. */
+.qb-tut-banner{background:#FFF4E0;border:1.5px solid #F0A500;border-radius:10px;
+  padding:10px 14px;margin:0 0 12px;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.qb-tut-text{font-size:13px;color:#7a5300;}
+.qb-tut-actions{display:flex;gap:8px;}
+
+/* Help modal body copy (reuses .modal-overlay/.modal-box/.modal-hdr/.modal-body/.modal-footer) */
+#helpBody h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--mid-blue);margin:16px 0 8px;border-bottom:1.5px solid var(--light-blue);padding-bottom:4px;}
+#helpBody h4:first-child{margin-top:0;}
+#helpBody ol,#helpBody ul{margin:0 0 10px 20px;font-size:12.5px;line-height:1.7;}
+#helpBody p{font-size:12.5px;line-height:1.6;margin-bottom:6px;}
+#helpWhatsNew .wn-entry{padding:9px 0;border-bottom:1px solid var(--gray-mid);}
+#helpWhatsNew .wn-entry:last-child{border-bottom:none;}
+#helpWhatsNew .wn-ver{font-weight:700;font-size:12.5px;color:var(--mid-blue);}
+#helpWhatsNew .wn-date{font-size:11px;color:var(--gray-dark);margin-left:6px;}
+#helpWhatsNew ul{margin:6px 0 0 18px;font-size:12.5px;line-height:1.6;}
+
+/* Spotlight demo tour — highlight ring + floating step card. Positioned
+   entirely from JS (positionTour() in the script below); the fixed values
+   here are just the visual chrome. */
+#qbTourHighlight{position:fixed;z-index:2400;pointer-events:none;border-radius:10px;
+  box-shadow:0 0 0 9999px rgba(15,23,42,.55), 0 0 0 3px var(--accent);transition:all .25s ease;}
+#qbTourCard{position:fixed;z-index:2450;background:white;border-radius:12px;padding:16px 18px;
+  max-width:340px;box-shadow:0 8px 30px rgba(0,0,0,.35);}
+.qb-tour-step{font-size:11px;font-weight:700;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+.qb-tour-title{font-size:14px;font-weight:700;color:var(--dark-blue);margin-bottom:6px;}
+.qb-tour-body{font-size:13px;color:var(--text);line-height:1.55;margin-bottom:14px;}
+.qb-tour-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.qb-tour-skip{margin-left:auto;background:none;border:none;color:var(--gray-dark);font-size:11.5px;
+  font-weight:600;cursor:pointer;padding:4px 2px;}
+.qb-tour-skip:hover{color:var(--red);}
+@media(max-width:520px){
+  /* !important: overrides the inline top/left/transform positionTour() sets
+     per-step, so every step — targeted or centered — renders as one
+     consistent bottom sheet on a phone. */
+  #qbTourCard{left:8px!important;right:8px!important;bottom:8px!important;top:auto!important;
+    max-width:none!important;transform:none!important;}
+}
 </style>
 </head>
 <body class="body-client-view">
@@ -916,6 +963,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <button class="btn" id="btnQuick" onclick="toggleQuickMode()">⚡ Quick Quote</button>
   </div>
   <div class="topbar-right">
+    <button class="btn btn-outline no-print" id="btnHelp" onclick="openHelpModal()" title="Help & guided demo">❓ Help<span class="help-dot" id="helpDot"></span></button>
     <span class="draft-save-chip no-print" id="draftSaveChip"></span>
     <span class="filed-badge" id="filedBadge">✓ FILED</span>
     <button class="btn btn-outline" id="btnNew" onclick="clearForm()">🗑 New</button>
@@ -941,6 +989,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <button class="mtb-sheet-x" onclick="closeMobileSheet()" aria-label="Close menu">✕</button>
     </div>
     <button class="mtb-row" id="mtbQuick" onclick="mtbRun('toggleQuickMode')">⚡ Quick Quote</button>
+    <button class="mtb-row" id="mtbHelp" onclick="mtbRun('openHelpModal')">❓ Help &amp; demo</button>
     <button class="mtb-row" onclick="mtbRun('clearForm')">🗑 New</button>
     <button class="mtb-row" onclick="mtbRun('doPrint')">🖨 Print / PDF</button>
     <button class="mtb-row" id="mtbAgentPrint" onclick="mtbRun('doPrintAgent')" style="color:var(--purple);">🧾 Agent Copy</button>
@@ -966,6 +1015,18 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <div class="main">
+
+<!-- ── HELP & TUTORIAL UI (QB-TUTORIAL-SPEC-2026-08-31) ── first-run/update
+     banner. Outside #internalWorkspace so it shows in every view (Client,
+     Internal, Admin) — see initTutorial()/dismissTutBanner() at the JS
+     marker near the end of this file's <script>. ── -->
+<div class="no-print qb-tut-banner" id="qbTutBanner" style="display:none;">
+  <div class="qb-tut-text" id="qbTutBannerText"></div>
+  <div class="qb-tut-actions">
+    <button class="btn btn-outline" id="qbTutBannerNo" style="padding:6px 14px;font-size:12px;"></button>
+    <button class="btn btn-accent" id="qbTutBannerYes" style="padding:6px 14px;font-size:12px;"></button>
+  </div>
+</div>
 
 <!-- ── INTERNAL WORKSPACE (COSTING-QB-UX-SPEC-2026-08-26 §1) — pure structural
      wrap around every pre-existing section below (no logic change): this is
@@ -1177,7 +1238,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── CLIENT INFO ── -->
-<div class="section no-print">
+<div class="section no-print" id="clientInfoSection">
   <div class="sec-title">Client Information</div>
   <div class="fg-grid">
     <div class="fg full"><label>Client Name</label>
@@ -1616,6 +1677,63 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <button class="btn btn-outline no-print" id="templatesBtn" onclick="requestTemplates()" disabled style="background:var(--dark-blue);opacity:.5;">📋 Templates</button>
       <button class="btn btn-green" id="fileBtn" onclick="fileQuotation()" disabled style="opacity:.5;">📁 File Quotation</button>
     </div>
+  </div>
+</div>
+
+<!-- ── HELP & TUTORIAL UI (QB-TUTORIAL-SPEC-2026-08-31) ── Help modal +
+     spotlight demo tour DOM. See openHelpModal()/closeHelpModal()/startTour()/
+     tourGo()/endTour() at the JS marker near the end of this file's <script>.
+     z-index: helpModal 2600 (opens above an active tour, whose highlight/card
+     sit at 2400/2450) — see the QB-TUTORIAL-SPEC §1 z-index map. ── -->
+<div class="modal-overlay no-print" id="helpModal" style="display:none;z-index:2600;" onclick="if(event.target===this)closeHelpModal()">
+  <div class="modal-box" style="max-width:640px;" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3>❓ Quote Builder — Help</h3><button class="modal-x" onclick="closeHelpModal()">✕</button></div>
+    <div class="modal-body" id="helpBody">
+      <h4>How a quote gets made</h4>
+      <ol>
+        <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
+        <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
+        <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
+        <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty → live price). ➕ Custom item for non-catalog work, ＋ Section for Option A / Option B quotes.</li>
+        <li><strong>Pricing</strong> — VAT 12%, discount (percent or ₱), agent commission, Options mode.</li>
+        <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
+        <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
+        <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
+      </ol>
+
+      <h4>The three views</h4>
+      <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
+      <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even.</p>
+      <p><strong>Admin</strong> — the product database and price coefficients.</p>
+      <p>Some views may be hidden depending on your account.</p>
+
+      <h4>Good to know</h4>
+      <ul>
+        <li>⚡ <strong>Quick Quote</strong> — a 3-step wizard (client → products → review) that fills the builder for you.</li>
+        <li>📝 Your work <strong>auto-saves as a draft</strong>; an unfiled quote offers to resume next time.</li>
+        <li>🧾 <strong>Agent Copy</strong> is confidential — never send it to the client.</li>
+        <li>🔗 <strong>Share</strong> requires the quote to be filed first — it will prompt you.</li>
+      </ul>
+
+      <h4>What's new</h4>
+      <div id="helpWhatsNew"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" style="background:var(--dark-blue);" onclick="closeHelpModal()">Close</button>
+      <button class="btn btn-green" onclick="closeHelpModal();startTour();">▶ Start guided demo</button>
+    </div>
+  </div>
+</div>
+
+<div class="no-print" id="qbTourHighlight" style="display:none;"></div>
+<div class="no-print" id="qbTourCard" style="display:none;" role="dialog" aria-label="Guided demo">
+  <div class="qb-tour-step" id="qbTourStepNo"></div>
+  <div class="qb-tour-title" id="qbTourTitle"></div>
+  <div class="qb-tour-body" id="qbTourBody"></div>
+  <div class="qb-tour-btns">
+    <button class="btn btn-outline" id="qbTourBack" onclick="tourGo(-1)" style="background:var(--dark-blue);">‹ Back</button>
+    <button class="btn btn-green" id="qbTourNext" onclick="tourGo(1)">Next ›</button>
+    <button class="qb-tour-skip" onclick="endTour()">Skip demo ✕</button>
   </div>
 </div>
 
@@ -2257,6 +2375,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // #mtbOverlay onclick in the HTML).
   document.addEventListener('keydown', e=>{
     if(e.key==='Escape' && document.getElementById('mtbOverlay')?.classList.contains('show')) closeMobileSheet();
+    // QB-TUTORIAL-SPEC-2026-08-31 — Esc also closes the Help modal. The
+    // guided tour's own Escape handling is a separate, dedicated listener
+    // (added/removed in startTour()/endTour()) so it never touches this one.
+    else if(e.key==='Escape' && document.getElementById('helpModal')?.style.display==='flex') closeHelpModal();
   });
   document.getElementById('searchInput').addEventListener('keydown', e=>{
     if(e.key==='ArrowDown'){e.preventDefault();moveFocus(1);}
@@ -2277,6 +2399,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // Client # auto-suggestion: mark manual edits, then suggest once auth is ready.
   document.getElementById('qnoSeq')?.addEventListener('input',()=>{_seqTouched=true;});
   if(typeof auth!=='undefined'&&auth.onAuthStateChanged) auth.onAuthStateChanged(u=>{ if(u){ autoClientSeq(); populateClientDatalist(); } });
+  // QB-TUTORIAL-SPEC-2026-08-31 — Help/tutorial boot (banner + gold dot +
+  // What's New render). initTutorial() is defined at the JS marker near the
+  // end of this <script>; function declarations are hoisted, and this
+  // DOMContentLoaded callback only runs once the whole script has finished
+  // executing, so the call is safe here regardless of definition order.
+  if(typeof initTutorial==='function') initTutorial();
 });
 
 function initUI(){
@@ -6748,6 +6876,304 @@ function getEmbeddedDB(){
     ],
     constants:{vat:0.12,materialPriceIndexMultiplier:1.0,workHoursPerDay:8,travelDayRate:3500}
   };
+}
+
+// ══ HELP & TUTORIAL — TUTORIAL_VERSION / WHATS_NEW / TOUR_STEPS (update via .claude/skills/quote-builder-tutorial) ══
+// QB-TUTORIAL-SPEC-2026-08-31 — in-app Help modal, first-run/update banner,
+// and a read-only spotlight demo tour. Maintenance contract (bump
+// TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
+// quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
+
+const TUTORIAL_VERSION = 1;   // integer; bump on every user-visible quote-builder change
+const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:1, date:'2026-08-31', items:[
+    '❓ Help & guided demo — this guide, the Help button, and the welcome banner.',
+  ]},
+  { ver:0, date:'2026-08-26', items:[
+    'Custom items now carry a real bill of materials — pricelist materials, crew-day labor and auto-generated specs.',
+    'Internal view: true-cost panel and break-even v2 on every quote.',
+    'Client view is now a live preview of the exact printed document.',
+  ]},
+];
+
+// Read-only by contract: no step here may mutate quote state, drafts, or
+// call any filing/printing function. `needsWorkspace` steps live inside
+// #internalWorkspace and require switching to Internal view first (see
+// showTourStep() below). Every step must resolve or be skipped gracefully —
+// BS-partner lock mode hides the whole company toggle-pills wrapper and may
+// have no #btnAdmin; GENERIC_PARTNER has no #btnInternal/#btnAdmin at all.
+const TOUR_STEPS = [
+ { title:'Welcome to the Quote Builder 👋',
+   body:'This is where Barro Kitchens, Barro Industries and Brilliant Steel quotes are built, priced, filed and shared. This demo takes about 2 minutes and changes nothing in your quote.' },
+ { target:'#coBK', closest:'.toggle-pills', title:'Pick the company',
+   body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
+ { target:'#btnClient', closest:'.toggle-pills', title:'Three views',
+   body:'Client shows the finished document exactly as the customer will see it. Internal is the editing workspace with costs and margins. Admin manages the product database. Some views may be hidden for your account.' },
+ { target:'#btnQuick', title:'Quick Quote',
+   body:'In a hurry? Quick Quote is a 3-step wizard — client → products → review — that fills the full builder for you. Everything it creates can still be fine-tuned afterwards.' },
+ { target:'.qno-builder-section', needsWorkspace:true, title:'Quote number',
+   body:'Auto mode builds the official number from company, location and date. Switch to Manual only when re-issuing an existing number.' },
+ { target:'#clientInfoSection', needsWorkspace:true, title:'Who is this quote for',
+   body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
+ { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
+   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity, and the price computes live. ➕ Custom item prices non-catalog work, and ＋ Section splits the quote into Option A / Option B.' },
+ { target:'#itemsSection', needsWorkspace:true, title:'Items, discounts & totals',
+   body:'Every line lands here. Below the table: VAT (12%), discounts (percent or peso), agent commission, and Options mode — pricing each section separately with no grand total.' },
+ { target:'#diSection', needsWorkspace:true, title:'Delivery, timeline & payments',
+   body:'Below the items: delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote.' },
+ { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
+   body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
+ { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
+   body:'Internal view adds labor & timeline planning plus the cost & margin panel — true cost, break-even and margin for this quote. Clients never see any of this.' },
+ { target:'#btnVerify', title:'Verify & File',
+   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
+ { target:'#btnShare', title:'Print, Agent Copy & Share',
+   body:'Print/PDF produces the client document. Agent Copy prints a confidential internal version with commission details. Share creates a client link — the quote must be filed first.' },
+ { title:'That\'s the whole flow 🎉',
+   body:'Your work auto-saves as a draft while you type — an unfiled quote offers to resume next time you open the builder. Tap ❓ Help any time for the written guide and What\'s New.' },
+];
+
+// ── What's New / Help modal ──────────────────────────────────────────
+function renderWhatsNew(){
+  const host=document.getElementById('helpWhatsNew');
+  if(!host) return;
+  try{
+    host.innerHTML=WHATS_NEW.map(entry=>{
+      const li=(entry.items||[]).map(t=>`<li>${t}</li>`).join('');
+      return `<div class="wn-entry"><span class="wn-ver">v${entry.ver}</span><span class="wn-date">${entry.date}</span><ul>${li}</ul></div>`;
+    }).join('');
+  }catch(e){}
+}
+
+function openHelpModal(section){
+  const m=document.getElementById('helpModal');
+  if(!m) return;
+  // Note: intentionally does NOT end an active tour — helpModal (z-index
+  // 2600) is designed to be able to open above one (the tour highlight uses
+  // pointer-events:none, so the ❓ Help button stays clickable mid-tour); see
+  // the z-index map comment on the HTML block above.
+  m.style.display='flex';
+  try{ localStorage.setItem('qbTutSeenVer', String(TUTORIAL_VERSION)); }catch(e){}
+  document.getElementById('helpDot')?.classList.remove('show');
+  hideTutBanner();
+  if(section==='whatsnew'){
+    setTimeout(()=>{ document.getElementById('helpWhatsNew')?.scrollIntoView({block:'start',behavior:'smooth'}); }, 50);
+  }
+}
+function closeHelpModal(){
+  const m=document.getElementById('helpModal');
+  if(m) m.style.display='none';
+}
+
+// ── First-run / updated banner ───────────────────────────────────────
+function hideTutBanner(){
+  const b=document.getElementById('qbTutBanner');
+  if(b) b.style.display='none';
+}
+function dismissTutBanner(){
+  try{ localStorage.setItem('qbTutDismissedVer', String(TUTORIAL_VERSION)); }catch(e){}
+  hideTutBanner();
+}
+
+// ── Spotlight demo tour ──────────────────────────────────────────────
+// Read-only: never touches items/drafts/quote state, and never calls a
+// filing/printing function. Every DOM lookup below is null-guarded so a
+// missing/hidden target (partner lock mode, GENERIC_PARTNER, mobile-hidden
+// topbar buttons) skips the step instead of breaking the tour.
+let tourActive=false, tourIdx=0, tourSavedView='client', tourChangedView=false,
+    tourCurrentTarget=null, _tourRAF=null;
+
+function tourKeyHandler(e){
+  if(!tourActive) return;
+  if(e.key==='Escape'){ e.preventDefault(); endTour(); }
+  else if(e.key==='ArrowRight'){ tourGo(1); }
+  else if(e.key==='ArrowLeft'){ tourGo(-1); }
+}
+function tourReposition(){
+  if(_tourRAF) return;
+  _tourRAF=requestAnimationFrame(()=>{ _tourRAF=null; positionTour(); });
+}
+
+function startTour(){
+  if(tourActive) return;
+  hideTutBanner();
+  const help=document.getElementById('helpModal');
+  if(help && help.style.display==='flex') closeHelpModal();
+  if(document.getElementById('mtbOverlay')?.classList.contains('show')) closeMobileSheet();
+  tourActive=true;
+  tourChangedView=false;
+  tourSavedView=(typeof currentView!=='undefined' && currentView) ? currentView : 'client';
+  try{ localStorage.setItem('qbTutSeenVer', String(TUTORIAL_VERSION)); }catch(e){}
+  document.getElementById('helpDot')?.classList.remove('show');
+  document.addEventListener('keydown', tourKeyHandler);
+  window.addEventListener('resize', tourReposition);
+  window.addEventListener('scroll', tourReposition, {capture:true, passive:true});
+  showTourStep(0, 1);
+}
+
+function tourGo(delta){
+  if(!tourActive) return;
+  showTourStep(tourIdx+delta, delta);
+}
+
+function showTourStep(i, dir){
+  if(!tourActive) return;
+  if(i<0 || i>=TOUR_STEPS.length){ endTour(); return; }
+  const step=TOUR_STEPS[i];
+  if(step.needsWorkspace){
+    const ws=document.getElementById('internalWorkspace');
+    if(ws && ws.offsetParent===null){
+      const btnInt=document.getElementById('btnInternal');
+      if(btnInt && btnInt.offsetParent!==null && typeof setView==='function'){
+        setView('internal');
+        tourChangedView=true;
+      }
+      if(document.getElementById('internalWorkspace')?.offsetParent===null){
+        showTourStep(i+dir, dir);
+        return;
+      }
+    }
+  }
+  let target=null;
+  if(step.target){
+    target=document.querySelector(step.target);
+    if(target && step.closest) target=target.closest(step.closest)||target;
+    if(!target || target.offsetParent===null){ showTourStep(i+dir, dir); return; }
+    const rect=target.getBoundingClientRect();
+    if(rect.width===0 && rect.height===0){ showTourStep(i+dir, dir); return; }
+  }
+  tourIdx=i;
+  tourCurrentTarget=target;
+  renderTourCard(step, i);
+  if(target){
+    target.scrollIntoView({block:'center', behavior:'smooth'});
+    setTimeout(positionTour, 350);
+  } else {
+    positionTour();
+  }
+}
+
+function renderTourCard(step, i){
+  const card=document.getElementById('qbTourCard');
+  if(!card) return;
+  const stepNo=document.getElementById('qbTourStepNo');
+  const title=document.getElementById('qbTourTitle');
+  const body=document.getElementById('qbTourBody');
+  if(stepNo) stepNo.textContent=(i+1)+' / '+TOUR_STEPS.length;
+  if(title) title.textContent=step.title||'';
+  if(body) body.textContent=step.body||'';
+  const back=document.getElementById('qbTourBack');
+  if(back) back.style.display=(i===0)?'none':'inline-flex';
+  const next=document.getElementById('qbTourNext');
+  if(next) next.textContent=(i===TOUR_STEPS.length-1)?'Finish ✓':'Next ›';
+  card.style.display='block';
+}
+
+function positionTour(){
+  if(!tourActive) return;
+  const hl=document.getElementById('qbTourHighlight');
+  const card=document.getElementById('qbTourCard');
+  if(!hl || !card) return;
+  if(!tourCurrentTarget){
+    // Centered variant (steps with no target) — highlight collapses to a
+    // zero-size point at the viewport centre with a plain dim backdrop (no
+    // accent ring, since nothing specific is being pointed at).
+    hl.style.left='50%'; hl.style.top='50%'; hl.style.width='0px'; hl.style.height='0px';
+    hl.style.boxShadow='0 0 0 9999px rgba(15,23,42,.55)';
+    hl.style.display='block';
+    card.style.left='50%'; card.style.top='50%';
+    card.style.right='auto'; card.style.bottom='auto';
+    card.style.transform='translate(-50%,-50%)';
+    card.style.display='block';
+    return;
+  }
+  if(tourCurrentTarget.offsetParent===null){ endTour(); return; }
+  const r=tourCurrentTarget.getBoundingClientRect();
+  const pad=6;
+  hl.style.left=(r.left-pad)+'px';
+  hl.style.top=(r.top-pad)+'px';
+  hl.style.width=(r.width+pad*2)+'px';
+  hl.style.height=(r.height+pad*2)+'px';
+  hl.style.boxShadow='0 0 0 9999px rgba(15,23,42,.55), 0 0 0 3px var(--accent)';
+  hl.style.display='block';
+  card.style.display='block';
+  card.style.transform='none';
+  card.style.right='auto'; card.style.bottom='auto';
+  const cardRect=card.getBoundingClientRect();
+  const vw=window.innerWidth, vh=window.innerHeight;
+  let top=r.bottom+pad+10;
+  if(top+cardRect.height > vh-8) top=r.top-pad-10-cardRect.height;
+  top=Math.max(8, Math.min(top, vh-cardRect.height-8));
+  let left=Math.max(8, Math.min(r.left, vw-cardRect.width-8));
+  card.style.top=top+'px';
+  card.style.left=left+'px';
+}
+
+function endTour(){
+  if(!tourActive) return;
+  tourActive=false;
+  const hl=document.getElementById('qbTourHighlight'), card=document.getElementById('qbTourCard');
+  if(hl) hl.style.display='none';
+  if(card) card.style.display='none';
+  document.removeEventListener('keydown', tourKeyHandler);
+  window.removeEventListener('resize', tourReposition);
+  window.removeEventListener('scroll', tourReposition, true);
+  // Restore the view the tour started in — only when a needsWorkspace step
+  // actually switched it (tourChangedView), the pill for that view still
+  // exists, and this isn't a GENERIC_PARTNER restoring 'client' (setView()
+  // documents that trap: it would permanently hide their workspace since
+  // they have no #btnInternal to undo it with). GENERIC_PARTNER never sets
+  // tourChangedView in the first place (their workspace is always visible,
+  // so the needsWorkspace branch above never calls setView) — this is
+  // belt-and-braces on top of that.
+  if(tourChangedView && typeof setView==='function'){
+    const pillId='btn'+tourSavedView.charAt(0).toUpperCase()+tourSavedView.slice(1);
+    const pillOk=!!document.getElementById(pillId);
+    const genericPartnerTrap=(typeof GENERIC_PARTNER!=='undefined' && GENERIC_PARTNER && tourSavedView==='client');
+    if(pillOk && !genericPartnerTrap) setView(tourSavedView);
+  }
+  tourCurrentTarget=null;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────
+// Fully defensive: every DOM lookup null-guarded, every localStorage
+// read/write in try/catch — this must never break boot (called from the
+// DOMContentLoaded handler above).
+function initTutorial(){
+  try{
+    let seenVer=0, dismissedVer=-1;
+    try{ const sv=parseInt(localStorage.getItem('qbTutSeenVer'),10); seenVer=isNaN(sv)?0:sv; }catch(e){}
+    try{ const dv=parseInt(localStorage.getItem('qbTutDismissedVer'),10); dismissedVer=isNaN(dv)?-1:dv; }catch(e){}
+
+    document.getElementById('helpDot')?.classList.toggle('show', seenVer < TUTORIAL_VERSION);
+
+    renderWhatsNew();
+
+    const banner=document.getElementById('qbTutBanner');
+    const textEl=document.getElementById('qbTutBannerText');
+    const noBtn=document.getElementById('qbTutBannerNo');
+    const yesBtn=document.getElementById('qbTutBannerYes');
+    if(banner && textEl && noBtn && yesBtn){
+      const notDismissedAtThisVersion=(dismissedVer!==TUTORIAL_VERSION);
+      if(seenVer < TUTORIAL_VERSION && notDismissedAtThisVersion){
+        if(seenVer===0){
+          // First-run — never opened Help / taken the tour.
+          textEl.innerHTML='👋 <strong>New to the quote builder?</strong> Take a 2-minute guided demo of how a quote gets built, priced and filed.';
+          noBtn.textContent='Maybe later';
+          yesBtn.textContent='▶ Start the demo';
+          yesBtn.onclick=startTour;
+        } else {
+          // Updated — has seen an older version.
+          textEl.innerHTML='✨ <strong>The quote builder was updated.</strong> See what changed since you last looked.';
+          noBtn.textContent='Dismiss';
+          yesBtn.textContent="What's new";
+          yesBtn.onclick=function(){ openHelpModal('whatsnew'); };
+        }
+        noBtn.onclick=dismissTutBanner;
+        banner.style.display='flex';
+      }
+    }
+  }catch(e){}
 }
 </script>
 </body>

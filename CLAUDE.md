@@ -75,3 +75,4 @@ Roles (`president`, `manager`, `employee`, `agent`, `finance`, `partner`) and de
 - Currency/dates are Philippine-locale (`en-PH`, PHP). Helpers `fmt()`/`fmtN()` format peso amounts; `today()` returns ISO date.
 - Icons are [Lucide](https://lucide.dev) via `<i data-lucide="name">` (call `lucide.createIcons()` after injecting). Charts use Chart.js.
 - New department screens follow the existing pattern: a `window.renderX` function that renders into `deptContainer()` (`#page-content`), gated by `canEditDept`, wired into the `navigateTo` switch in app.js and the nav builders.
+- **Quote-builder changes must update its built-in tutorial** — bump `TUTORIAL_VERSION`, add a `WHATS_NEW` entry, and sync the Help/tour copy in [quote-builder-v2.html](quote-builder-v2.html). Contract: [.claude/skills/quote-builder-tutorial/SKILL.md](.claude/skills/quote-builder-tutorial/SKILL.md).
