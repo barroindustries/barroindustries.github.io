@@ -1867,8 +1867,13 @@ let draftSaveTimer=null, draftAckTimer=null;
 // of scope here — read-only.
 let COSTING_SETTINGS = null;
 const COSTING_DEFAULTS = Object.freeze({
-  wastePct: 0.06,          // materials waste allowance
-  consumablesPct: 0.08,    // of direct labor
+  wastePct: 0.06,          // materials waste allowance — stock comes in fixed
+                           // sheet/tube sizes; offcuts, kerf and edge damage
+                           // mean a cutting plan never uses 100% (5–10% is
+                           // normal steel-fab scrap; 6% assumes tight nesting)
+  consumablesPct: 0.08,    // of MATERIALS (owner ruling 2026-08-31; was labor)
+                           // — rods, discs, gas, bits burn in proportion to
+                           // the steel processed, not to the days it takes
   loadedLaborRate: 150,    // ₱/h — wage grossed up for utilization; NOT settings/laborRates
   baseOH: 0.25,            // OH pool ÷ target monthly direct cost
   sizeBands: [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]],
@@ -4957,7 +4962,7 @@ function computeTrueCost(){
   });
   const matWaste = materials*cs.wastePct;
   const labor = laborHrsTotal*cs.loadedLaborRate + laborPesosFallback;
-  const consumables = labor*cs.consumablesPct;
+  const consumables = materials*cs.consumablesPct; // 8% of materials (owner ruling 2026-08-31)
   const direct = materials+matWaste+labor+consumables;              // = FLOOR
   const sizeF = sizeBandFactor(direct, cs.sizeBands);
   const pf = paceFactor();                                          // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B
@@ -5083,9 +5088,9 @@ function renderTrueCostPanelHtml(cost){
 
   const buildup=`<table class="labor-tbl" style="margin-bottom:10px;"><tbody>
     <tr><td>Materials</td><td style="text-align:right;">${formatPeso(cost.materials)}</td></tr>
-    <tr><td>+ Waste (${Math.round(cs.wastePct*100)}%)</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
+    <tr><td title="Why ${Math.round(cs.wastePct*100)}%: steel comes in fixed sheet and tube sizes — offcuts, kerf (the material the cut itself eats) and edge damage mean a job never uses 100% of bought stock. Steel-fab scrap normally runs 5–10%; ${Math.round(cs.wastePct*100)}% assumes tight cutting plans.">+ Waste (${Math.round(cs.wastePct*100)}%) ⓘ</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
     <tr><td>+ Labor (${laborLabel})</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
-    <tr><td>+ Consumables (${Math.round(cs.consumablesPct*100)}%)</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
+    <tr><td title="Why ${Math.round(cs.consumablesPct*100)}% of materials: welding rods and wire, cutting and flap discs, gas, drill bits and polish are burned in proportion to the steel processed — more sheets cut and welded means more consumables, regardless of how many days the job takes.">+ Consumables (${Math.round(cs.consumablesPct*100)}% of materials) ⓘ</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
     <tr><td>+ OH (base ${Math.round(cs.baseOH*100)}% × size ${cost.sizeF.toFixed(2)}, ${paceChip})<br>
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
@@ -5186,7 +5191,7 @@ function renderOhPerItemTableHtml(cost){
     }
     const materials_i=basis.mat*qty, matWaste_i=materials_i*cs.wastePct;
     const labor_i=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : basis.capLaborPesos)*qty;
-    const consumables_i=labor_i*cs.consumablesPct;
+    const consumables_i=materials_i*cs.consumablesPct;
     const direct_i=materials_i+matWaste_i+labor_i+consumables_i;
     const oh_i=direct_i*cost.ohPct;
     const true_i=direct_i+oh_i;

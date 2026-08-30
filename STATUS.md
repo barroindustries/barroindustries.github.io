@@ -5,7 +5,9 @@
 > History lives in [ROADMAP.md](ROADMAP.md) (frozen), plans in [docs/plans/](docs/plans/), audits in
 > [docs/reviews/](docs/reviews/), feature specs in [specs/](specs/).
 
-_Last updated: **2026-08-30**_
+_Last updated: **2026-08-31**_
+
+> **2026-08-31 owner rulings (costing):** consumables are **8% of MATERIALS** (was 8% of labor) — shipped in quote-builder-v2's true-cost engine, with why-tooltips on the waste/consumables rows. Real overhead entered in `finance_config/breakeven.manualFixed`: rent 50k + owner 100k + admin 75k + barracks 10k + travel 20k + marketing 30k = **₱285,000/mo pool**. Direction set: fixed OH% + fixed markup, price varies only with measurements/specs; crew-week rate is really ₱40,000 (engine still charges 30k — pending `product_costs/_settings` seed).
 
 ## Where the project is
 

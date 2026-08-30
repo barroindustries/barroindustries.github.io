@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.199';
+window.APP_VERSION = '14.0.200';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -271,13 +271,27 @@ window.DEPARTMENTS = {
   },
   'Production': {
     key: 'Production', icon: '🏭', lucideIcon: 'factory', color: '#A05A2C',
-    // renderProductionDept's real subs (departments.js:13667) — Inventory and
-    // Count Form were missing, Files was there but out of place vs runtime order.
-    subtabs: ['Orders', 'Materials', 'Inventory', 'Count Form', 'Budgeting', 'Tasks', 'Files'], navOrder: 9
+    // INVENTORY-DEPT-SPEC-2026-08-31 — Materials/Inventory/Count Form moved
+    // out to the new Inventory department (js/screens/inventory.js); Orders
+    // now links there instead. Job Orders was previously missing from this
+    // list despite being a real runtime tab (js/screens/production.js).
+    subtabs: ['Orders', 'Job Orders', 'Budgeting', 'Tasks', 'Files'], navOrder: 9
+  },
+  'Inventory': {
+    key: 'Inventory', icon: '📦', lucideIcon: 'package', color: '#f59f00',
+    // New department (2026-08-31, INVENTORY-DEPT-SPEC-2026-08-31) —
+    // consolidates the stock ledger (moved from js/modules.js), the raw-
+    // material supplier price list (js/departments.js's
+    // renderMaterialPriceList, called from here), a new Finished Products
+    // catalog browse, and Count Form/Job Costing (moved from
+    // js/screens/production.js / js/modules.js). js/screens/inventory.js.
+    subtabs: ['Stock', 'Raw Materials', 'Finished Products', 'Movements', 'Count Form'], navOrder: 9.5
   },
   'Purchasing': {
     key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#099268',
-    subtabs: ['Request for Quotation', 'Purchase Requests', 'Price List', 'Budgeting', 'Tasks'], navOrder: 10
+    // Price List moved out to the new Inventory department's Raw Materials
+    // tab (INVENTORY-DEPT-SPEC-2026-08-31); RFQ tab links there instead.
+    subtabs: ['Request for Quotation', 'Purchase Requests', 'Budgeting', 'Tasks'], navOrder: 10
   },
   'Ventures': {
     key: 'Ventures', icon: '🚀', lucideIcon: 'rocket', color: '#5F3DC4',
