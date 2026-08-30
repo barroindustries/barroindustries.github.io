@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.197';
+window.APP_VERSION = '14.0.198';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -494,6 +494,7 @@ window.TEAM_TYPES = {
   office:     { label: 'Office Team',            sub: 'Monthly payroll',  color: '#0A84FF' },
   operations: { label: 'Fabricator · Operations', sub: 'Weekly payroll',   color: '#FF9F0A' },
   agent:      { label: 'Sales Agent',            sub: 'Commission-based', color: '#FFD60A' },
+  freelancer: { label: 'Freelancer',             sub: 'External · project-based', color: '#BF5AF2' },
   partner:    { label: 'Partner',                sub: 'External company', color: '#FF6B6B' },
 };
 // Classify a users/{uid} doc into a TEAM_TYPES key. Priority order (first hit
@@ -519,6 +520,14 @@ window.teamTypeOf = function(u) {
 // The TEAM_TYPES entry for a user — never undefined, falls back to office.
 window.teamTypeMeta = function(u) {
   return window.TEAM_TYPES[window.teamTypeOf(u)] || window.TEAM_TYPES.office;
+};
+// Freelancers sit outside the attendance system: no morning time-in reminder
+// and no Attendance tab (app.js gates both through this ONE predicate).
+// Deliberately keyed off `team` — a frozen, senior-admin-only field in
+// firestore.rules — so exemption can never be self-granted the way a loose
+// per-user boolean could be.
+window.isAttendanceExempt = function(u) {
+  return window.teamTypeOf(u) === 'freelancer';
 };
 
 // ── Account admin — the "designated personnel" predicate (owner ruling

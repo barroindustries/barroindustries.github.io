@@ -203,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       if (!(window.isLaidOff && window.isLaidOff())) Notifs.checkDeadlines(user.uid);
-      if (userProfile.role !== 'partner' && !(window.isLaidOff && window.isLaidOff())) Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
+      if (userProfile.role !== 'partner' && !(window.isLaidOff && window.isLaidOff()) && !window.isAttendanceExempt(userProfile)) Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
       Notifs.checkLowStock?.(user.uid, userProfile.role);
       Notifs.checkAECFollowups?.(user.uid, userProfile.role);
       checkPayrollDuties(user);
@@ -1736,7 +1736,11 @@ function getSidebarItems() {
     }
     items.push(item);
   });
-  return items;
+  // Freelancers have no attendance duty — drop the tab rather than render a
+  // punch clock nobody expects them to use (same predicate gates the 7–9 AM
+  // reminder in onAuthStateChanged and the bottom nav in _primaryNavItems).
+  return window.isAttendanceExempt(window.userProfile)
+    ? items.filter(i => i.page !== 'attendance') : items;
 }
 
 function _navIcon(icon) {
@@ -1806,7 +1810,9 @@ function buildSidebarNav() {
 // including computed `window[...]` access), so NAV_REGISTRY is the only source.
 function _primaryNavItems() {
   const items = (window.NAV_REGISTRY.bottom[_navVariant()] || []);
-  return items.filter(item => item.page !== 'my-profile');
+  const attExempt = window.isAttendanceExempt(window.userProfile);
+  return items.filter(item => item.page !== 'my-profile'
+    && !(attExempt && item.page === 'attendance'));
 }
 
 // v14 mobile-shell batch (ruled decision N3, never implemented until now) —

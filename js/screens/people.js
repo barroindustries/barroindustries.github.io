@@ -735,6 +735,7 @@ window.renderTeamTab = async function() {
         <div class="form-group"><label>Role</label>
           <select id="inv-role" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
             ${roleOptions.map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+            <option value="__freelancer">Freelancer (external)</option>
           </select>
         </div>
         <div class="form-group" id="inv-company-group" style="display:none"><label>Company <span style="font-weight:400;color:var(--text-muted)">(partner's own company)</span></label>
@@ -780,7 +781,13 @@ window.renderTeamTab = async function() {
             t.set(counterRef, { count: next }, { merge: true });
             return `BI-${window.bizYear()}-${String(next).padStart(3,'0')}`;
           });
-          const invRoleVal = _panel.querySelector('#inv-role').value;
+          // '__freelancer' is a TEAM classification, not a permission role: the
+          // account signs in and is permissioned as a plain employee (so the
+          // firestore.rules role whitelist is untouched), but is born
+          // team:'freelancer' — Team-page pill + attendance exemption.
+          const invRolePick = _panel.querySelector('#inv-role').value;
+          const isFreelancer = invRolePick === '__freelancer';
+          const invRoleVal = isFreelancer ? 'employee' : invRolePick;
           await db.collection('users').doc(uid).set({
             uid, email,
             displayName: _panel.querySelector('#inv-name').value.trim() || email.split('@')[0],
@@ -793,7 +800,8 @@ window.renderTeamTab = async function() {
             // TEAM-PAGE-ORG-SPEC 2026-08-25 §2e — stamp the Team-page employment
             // type at creation time (window.teamTypeOf reads this first, ahead of
             // every legacy fallback).
-            team: invRoleVal === 'partner' ? 'partner' : invRoleVal === 'agent' ? 'agent' : 'office',
+            team: isFreelancer ? 'freelancer' : invRoleVal === 'partner' ? 'partner' : invRoleVal === 'agent' ? 'agent' : 'office',
+            ...(isFreelancer ? { employmentType: 'Project-based' } : {}),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
