@@ -894,7 +894,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      shows the terms section; the Terms view shows ONLY it. */
   body.body-client-view:not(.client-previewing) #termsSection{display:none!important;}
   body.body-terms-view #qbDocSheet{display:none!important;}
-  body.body-terms-view #internalWorkspace .section:not(#termsSection){display:none!important;}
+  body.body-terms-view #internalWorkspace > .section:not(#termsSection){display:none!important;}
   body.body-terms-view #internalWorkspace .int-panel{display:none!important;}
 }
 @media print{ #qbDocSheet{display:none!important;} }
@@ -1516,7 +1516,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="fg"><label>Overall Lead Time (calendar days)</label>
       <input type="number" id="overallLead" min="0" step="1" placeholder="auto from items" oninput="renderTimeline();renderTotals();"></div>
     <div class="fg"><label>&nbsp;</label>
-      <button class="btn btn-outline" style="background:var(--dark-blue);" onclick="autoFillLead()">↻ Auto-estimate from items</button></div>
+      <button class="btn btn-outline" style="background:var(--dark-blue);" onclick="autoFillLead()" title="Minimum 2 weeks (12 working days) + 3 working days per ₱20,000 of materials — Sundays not counted.">↻ Auto (2 wks + 3d/₱20k, no Sundays)</button></div>
   </div>
   <div id="timelineSummary" class="payment-summary"></div>
 </div>
@@ -2514,6 +2514,7 @@ function initUI(){
   // totals controls, so additional costs sit directly under the item lines.
   // Idempotent (initUI re-runs on Reload DB); listeners/ids move with the node.
   unifyMiscIntoItems();
+  unifyPaymentIntoTerms();
   // Numbers-first Internal: start with the document sections collapsed for
   // internal staff; partners keep them open (their editing surface).
   if (typeof PARTNER_MODE!=='undefined' && !PARTNER_MODE && !document.body.classList.contains('doc-details-collapsed')) {
@@ -4218,6 +4219,19 @@ function moveItemToSection(idx){
 // misc wrap lives inside #itemsSection, right before the pricing controls.
 // Idempotent; called from initUI and every renderItems so it holds no
 // matter which boot path ran first.
+// Owner ruling 2026-09-01: payment terms & schedule and payment details are
+// TERMS — both sections move into #termsSection (before the T&C grid), so
+// the Terms tab carries them and Client Data no longer does. They keep
+// printing in the document flow, now just ahead of the terms text.
+function unifyPaymentIntoTerms(){
+  const terms=document.getElementById('termsSection');
+  const grid=document.getElementById('termsGrid');
+  if(!terms || !grid) return;
+  ['paymentSection','paymentDetailsSection'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el && el.parentElement!==terms) terms.insertBefore(el, grid);
+  });
+}
 function unifyMiscIntoItems(){
   const sec=document.getElementById('itemsSection');
   if(!sec) return;
@@ -4238,6 +4252,7 @@ function unifyMiscIntoItems(){
 }
 function renderItems(){
   unifyMiscIntoItems();
+  unifyPaymentIntoTerms();
   const tbody=document.getElementById('itemsTbody');
   if(!items.length){
     tbody.innerHTML='<tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
@@ -5003,12 +5018,18 @@ function renderPaymentDetails(){
 
 // ── Project timeline / completion ──
 function autoLeadDays(){
-  let max=0;
-  items.forEach(it=>{
-    const m=(it.leadTime||'').match(/(\d+)\s*(?:[-–to]+\s*(\d+))?/);
-    if(m){ const v=parseInt(m[2]||m[1])||0; if(v>max) max=v; }
-  });
-  return max;
+  // Owner ruling 2026-09-01: minimum 2 six-day weeks (12 working days),
+  // +3 working days per ₱20,000 of materials, Sundays never counted.
+  // Returns CALENDAR days (the Sunday-skipping walk from the start date),
+  // which is what #overallLead stores and the document prints.
+  const c=(typeof computeTrueCost==='function')?computeTrueCost():null;
+  const materials=c?c.materials:0;
+  const workingDays=12 + 3*Math.floor(materials/20000);
+  const startStr=getStartDate();
+  const start=new Date(startStr+'T12:00:00');
+  let d=new Date(start), left=workingDays;
+  while(left>0){ d.setDate(d.getDate()+1); if(d.getDay()!==0) left--; }
+  return Math.round((d-start)/86400000);
 }
 function getStartDate(){
   return document.getElementById('projStart')?.value
@@ -5037,7 +5058,7 @@ function renderTimeline(){
   html+=`<tr><td>Overall Lead Time</td><td>${lead} calendar days (~${(lead/7).toFixed(1)} weeks)</td></tr>`;
   html+=`<tr class="pay-head"><td>Estimated Completion</td><td>${fmtDate(comp)}</td></tr>`;
   html+='</tbody></table>';
-  html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Calendar days; subject to site readiness and unforeseen supply delays.</div>';
+  html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. Subject to site readiness and unforeseen supply delays.</div>';
   box.innerHTML=html;
 }
 
@@ -5696,6 +5717,7 @@ function renderTrueCostPanelHtml(cost){
     ${row('SELLING (total)',cost.target,'grand')}
     <div class="calc-row grand quoted"><span>QUOTED (net) ${deltaChip}</span><span class="peso">${formatPeso(cost.sell)}</span></div>
     <div class="calc-row sub" style="border-bottom:none;"><span title="Never quote below true cost without President approval; below the floor is a cash loss.">Floors: true cost ${formatPeso(cost.trueCostTotal)} · absolute ${formatPeso(cost.floorTotal)}</span><span></span></div>
+    <div class="calc-row sub" style="border-bottom:none;"><span title="Minimum 2 six-day weeks + 3 working days per ₱20,000 of materials; Sundays never counted.">Timeline: ${12+3*Math.floor(cost.materials/20000)} working days (no Sundays) ≈ ${((12+3*Math.floor(cost.materials/20000))/6).toFixed(1)} weeks</span><span></span></div>
     ${marginLine}
     ${belowFloorNote}
   </div>`;
@@ -7455,8 +7477,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 20;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 21;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:21, date:'2026-09-01', items:[
+    'The project timeline computes itself: minimum 2 weeks, plus 3 working days for every ₱20,000 of materials — and Sundays are never counted. The ↻ Auto button by Overall Lead Time applies it; the calculator shows it live.',
+    'Payment terms & schedule and the bank payment details moved to the 📜 Terms tab — they print just ahead of the terms text.',
+  ]},
   { ver:20, date:'2026-09-01', items:[
     '✨ Auto beside the Subject field writes it for you — "Supply, Fabrication, Delivery & Installation of …" built from the quote\'s own categories, with Delivery/Installation included only when those additional costs are stated.',
     'The old Delivery & Installation charge fields left Client Data — the money lives in the Estimator\'s Additional costs table. The method and notes stay (they print as document text). Old quotes with the legacy amount still compute and print unchanged.',
@@ -7554,9 +7580,9 @@ const TOUR_STEPS = [
  { target:'#clientInfoSection', needsForm:true, title:'Who is this quote for',
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
  { target:'#diSection', needsForm:true, title:'Delivery, timeline & payments',
-   body:'Delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote — all part of the document form.' },
+   body:'Delivery & installation notes and the project timeline — the ↻ Auto button computes the lead: minimum 2 weeks plus 3 working days per ₱20,000 of materials, Sundays excluded. Payment schedule and bank details now live in the Terms tab.' },
  { target:'#termsSection', needsTerms:true, title:'The Terms tab',
-   body:'Terms & conditions get their own tab. Standard terms are pre-loaded per company — including the ±5mm measurement tolerance — toggle or adjust them per quote; they print at the end of the document with the signature blocks (the conforme).' },
+   body:'Terms & conditions get their own tab — together with the payment terms & schedule and the bank / e-wallet payment details, which print just ahead of the terms text. Standard terms are pre-loaded per company, including the ±5mm measurement tolerance; toggle or adjust per quote. The conforme signature blocks close the document.' },
  { target:'#docDetailsBar', needsWorkspace:true, title:'Estimator = the numbers',
    body:'The Estimator keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
