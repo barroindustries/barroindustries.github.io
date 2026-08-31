@@ -1694,8 +1694,8 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
         <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
-        <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty → live price). ➕ Custom item for non-catalog work, ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing</strong> — VAT 12%, discount (percent or ₱), agent commission, Options mode.</li>
+        <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — give it a bill of materials and labor days and it prices itself. ＋ Section for Option A / Option B quotes.</li>
+        <li><strong>Pricing is automatic</strong> — every costed line sells at direct cost + 25% overhead + 25% markup (× 1.50), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it — the override sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
@@ -1703,7 +1703,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
       <h4>The three views</h4>
       <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
-      <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even.</p>
+      <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even. The OH% and MK% dials live here — they always total 50%, so raising one lowers the other.</p>
       <p><strong>Admin</strong> — the product database and price coefficients.</p>
       <p>Some views may be hidden depending on your account.</p>
 
@@ -1713,6 +1713,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li>📝 Your work <strong>auto-saves as a draft</strong>; an unfiled quote offers to resume next time.</li>
         <li>🧾 <strong>Agent Copy</strong> is confidential — never send it to the client.</li>
         <li>🔗 <strong>Share</strong> requires the quote to be filed first — it will prompt you.</li>
+        <li>💯 <strong>Prices end in two zeros</strong> — each computed line rounds to the nearest ₱100 (₱85,500, ₱7,500); the markup quietly absorbs the difference. "↺ re-apply computed prices" in the cost panel clears any hand-typed overrides.</li>
       </ul>
 
       <h4>What's new</h4>
@@ -7018,15 +7019,15 @@ const TOUR_STEPS = [
  { target:'#clientInfoSection', needsWorkspace:true, title:'Who is this quote for',
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
-   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity, and the price computes live. ➕ Custom item prices non-catalog work, and ＋ Section splits the quote into Option A / Option B.' },
- { target:'#itemsSection', needsWorkspace:true, title:'Items, discounts & totals',
-   body:'Every line lands here. Below the table: VAT (12%), discounts (percent or peso), agent commission, and Options mode — pricing each section separately with no grand total.' },
+   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, enter its bill of materials and labor days and it prices itself. ＋ Section splits the quote into Option A / Option B.' },
+ { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
+   body:'Every line lands here — and every costed line\'s price is computed for you: direct cost + 25% overhead + 25% markup (× 1.50), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the cost panel then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#diSection', needsWorkspace:true, title:'Delivery, timeline & payments',
    body:'Below the items: delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote.' },
  { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
    body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
-   body:'Internal view adds labor & timeline planning plus the cost & margin panel — true cost, break-even and margin for this quote. Clients never see any of this.' },
+   body:'The engine room: materials → waste 6% → consumables 8% → labor = DIRECT (the floor), then OH 25% and MK 25% — the two dials always total 50%, so raising one lowers the other — and the selling price that lands on the quote. Per line you can see the floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
  { target:'#btnShare', title:'Print, Agent Copy & Share',
