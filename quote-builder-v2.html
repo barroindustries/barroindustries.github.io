@@ -1697,7 +1697,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — give it a bill of materials and labor days and it prices itself. ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing is automatic</strong> — every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. A line with no labor entered assumes labor at 80% of its materials. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Pricing is automatic</strong> — every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. A line with no labor entered adds labor at +80% of its materials cost. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
@@ -2010,9 +2010,9 @@ const COSTING_DEFAULTS = Object.freeze({
                            // sheet/tube sizes; offcuts, kerf and edge damage
                            // mean a cutting plan never uses 100% (5–10% is
                            // normal steel-fab scrap; 6% assumes tight nesting)
-  consumablesPct: 0.08,    // of MATERIALS (owner ruling 2026-08-31; was labor)
-                           // — rods, discs, gas, bits burn in proportion to
-                           // the steel processed, not to the days it takes
+  consumablesPct: 0.10,    // of MATERIALS (owner ruling 2026-08-31 v2: +10%,
+                           // was 8%) — rods, discs, gas, bits burn in
+                           // proportion to the steel processed, not the days
   loadedLaborRate: 150,    // ₱/h — wage grossed up for utilization; NOT settings/laborRates
   // Owner ruling 2026-08-31 (final of the day): the selling peso splits
   // 40¢ direct · 30¢ OH · 30¢ MK. In loading-on-direct terms: OH 75% +
@@ -3731,7 +3731,7 @@ function customCostParts(item, idx){
       ${compRow('Materials'+(hasBom?' (BOM)':' (lump sum)'),matUnit)}
       ${compRow('+ Waste '+Math.round(cs.wastePct*100)+'%',wasteUnit)}
       ${compRow('+ Consumables '+Math.round(cs.consumablesPct*100)+'% of materials',consUnit)}
-      ${compRow('+ Labor'+(laborAssumedHere?' (assumed '+Math.round(laborPctG*100)+'% of materials — enter days for real time)':''),laborUnit)}
+      ${compRow('+ Labor'+(laborAssumedHere?' (added: +'+Math.round(laborPctG*100)+'% of materials cost — enter days for real time)':''),laborUnit)}
       ${compRow('DIRECT = floor',directUnit,1)}
       ${compRow('+ OH '+(ohP*100).toFixed(1)+'%',ohUnit)}
       ${compRow('+ MK '+(mkP*100).toFixed(1)+'%',mkUnit)}
@@ -5458,7 +5458,7 @@ function renderTrueCostPanelHtml(cost){
   const laborParts=[];
   if (cost.laborHrsTotal>0) laborParts.push(`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate}`);
   if (cost.laborPesosFallback>0) laborParts.push('capital labor');
-  if (cost.laborAssumedPesos>0) laborParts.push(`assumed ${laborPctLbl}% of materials — no labor entered`);
+  if (cost.laborAssumedPesos>0) laborParts.push(`added: +${laborPctLbl}% of materials cost — none entered`);
   const laborLabel = laborParts.length ? laborParts.join(' + ') : 'no labor basis yet';
 
   // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — pace chip. Live (fresh
@@ -7263,8 +7263,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 7;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 8;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:8, date:'2026-08-31', items:[
+    'Consumables are now +10% of materials cost (was 8%). The full buildup: materials + 6% waste + 10% consumables + 80% labor (when none entered) = direct cost, × 2.50 = selling.',
+  ]},
   { ver:7, date:'2026-08-31', items:[
     'The labor & timeline estimate is replaced by a Miscellaneous Costs table — delivery, permits, crane rental go here. Each entry prices like everything else (cost × 2.50, rounded to ₱100).',
     'Tick "On quote?" and the entry shows as its own line on the quotation; untick it and its price is quietly distributed into the item prices you choose (→ distribute).',
@@ -7326,7 +7329,7 @@ const TOUR_STEPS = [
  { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
    body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
-   body:'The engine room: materials → waste 6% → consumables 8% of materials → labor (entered, or assumed at 80% of materials) = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
+   body:'The engine room: materials + 6% waste + 10% consumables + labor (entered, or +80% of materials cost when none is) = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
  { target:'#btnShare', title:'Print, Agent Copy & Share',

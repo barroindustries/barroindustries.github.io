@@ -6243,7 +6243,7 @@ async function renderAnalytics() {
     const ohMax  = (typeof settingsData.ohMax  === 'number') ? settingsData.ohMax  : 1.20;
     const targetMargin = (typeof settingsData.targetMargin === 'number') ? settingsData.targetMargin : 0.20;
     const wastePct = (typeof settingsData.wastePct === 'number') ? settingsData.wastePct : 0.06;
-    const consumablesPct = (typeof settingsData.consumablesPct === 'number') ? settingsData.consumablesPct : 0.08;
+    const consumablesPct = (typeof settingsData.consumablesPct === 'number') ? settingsData.consumablesPct : 0.10;
     // Owner ruling 2026-08-31: standard cost model assumes labor ≈ 80% of
     // materials spend — used to ESTIMATE variable cost while the ledger has
     // no classified variable categories for the month.
