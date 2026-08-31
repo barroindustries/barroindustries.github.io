@@ -1007,7 +1007,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <span class="filed-badge" id="filedBadge">✓ FILED</span>
     <button class="btn btn-outline" id="btnNew" onclick="clearForm()">🗑 New</button>
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
-    <button class="btn btn-outline" id="btnPrint" onclick="doPrint()">🖨 Print/PDF</button>
+    <button class="btn btn-outline" id="btnPrint" onclick="doPrint()" title="Save the quotation as a PDF — the file name is the client name + quote number">📄 Save PDF</button>
     <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
   </div>
 </div>
@@ -1028,7 +1028,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     </div>
     <button class="mtb-row" id="mtbHelp" onclick="mtbRun('openHelpModal')">❓ Help &amp; demo</button>
     <button class="mtb-row" onclick="mtbRun('clearForm')">🗑 New</button>
-    <button class="mtb-row" onclick="mtbRun('doPrint')">🖨 Print / PDF</button>
+    <button class="mtb-row" onclick="mtbRun('doPrint')">📄 Save PDF</button>
     <button class="mtb-row" id="mtbAgentPrint" onclick="mtbRun('doPrintAgent')" style="color:var(--purple);">🧾 Agent Copy</button>
     <div class="mtb-divider"></div>
     <div class="mtb-seg-group" id="mtbCoGroup">
@@ -1688,7 +1688,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
-        <li><strong>Print</strong> — Print/PDF for the client, Agent Copy (confidential, with commission). A quotation is always shared as the printed/PDF document.</li>
+        <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately. A quotation is always shared as the PDF.</li>
       </ol>
 
       <h4>The three tabs</h4>
@@ -7228,9 +7228,13 @@ function sanitizeFile(s){
   return (s||'').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
 }
 function quoteFileName(suffix){
-  const no=document.getElementById('quoteNo')?.value?.trim()||'Quotation';
+  // Owner ruling 2026-09-01: the saved PDF is titled by the CLIENT NAME plus
+  // the LAST SEGMENT of the quote number — "Juan Dela Cruz - 001R1" — not the
+  // full BKLUFB…-serial (that stays printed on the document itself).
+  const no=document.getElementById('quoteNo')?.value?.trim()||'';
+  const seg=no?no.split('-').pop():'';
   const cn=document.getElementById('clientName')?.value?.trim()||'';
-  let base=sanitizeFile(no+(cn?' - '+cn:''));
+  let base=sanitizeFile((cn||'Quotation')+(seg?' - '+seg:''));
   return base+(suffix?' ('+suffix+')':'');
 }
 
@@ -7281,8 +7285,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 26;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 27;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:27, date:'2026-09-01', items:[
+    '🖨 Print/PDF is now 📄 Save PDF — the save dialog opens with the file name already filled in as "<client name> - <quote no. last segment>" (e.g. "Juan Dela Cruz - 001R1"). Choose Save as PDF once; the browser remembers it.',
+  ]},
   { ver:26, date:'2026-09-01', items:[
     'The 🔗 Share button is gone — a quotation is always shared as the printed/PDF document (Print/PDF, or Agent Copy internally). Links that were already sent out still open.',
   ]},
@@ -7417,8 +7424,8 @@ const TOUR_STEPS = [
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official.' },
- { target:'#btnPrint', title:'Print & Agent Copy',
-   body:'Print/PDF produces the client document — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details.' },
+ { target:'#btnPrint', title:'Save PDF & Agent Copy',
+   body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
    body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here. Partners never see this button.' },
  { title:'That\'s the whole flow 🎉',
