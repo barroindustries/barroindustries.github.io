@@ -395,6 +395,11 @@ input.term-cb{cursor:pointer;accent-color:var(--mid-blue);flex-shrink:0;}
 .sig-box small{color:var(--gray-dark);font-size:11px;line-height:1.5;display:block;}
 .sig-filed{color:var(--green);font-weight:600;margin-top:2px;}
 
+/* ── BRILLIANT STEEL company (owner 2026-09-01): no internal calculator,
+      no BOM, no commission — BS prices by its own model ── */
+body.co-bs #costMarginWrap{display:none!important;}
+body.co-bs #commissionRow{display:none!important;}
+
 /* ── PRICELIST PICKER (read-only) ── */
 .pl-cat{position:sticky;top:0;background:var(--light-blue);color:var(--dark-blue);font-weight:700;font-size:12px;padding:6px 10px;border-radius:6px;margin:10px 0 4px;z-index:1;}
 .pl-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:1px solid var(--gray-mid);cursor:pointer;border-radius:6px;}
@@ -1194,7 +1199,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <label id="qnoLabel">Quote Number <span style="color:var(--gray-dark);font-weight:400;text-transform:none;">(auto)</span></label>
       <input type="text" id="quoteNo" placeholder="Auto-generated" readonly style="background:var(--gray-light);" oninput="updatePrintHeader()">
     </div>
-    <div class="fg"><label>Salesperson</label><input type="text" id="salesperson" placeholder="Name" oninput="updatePrintHeader()"></div>
+    <div class="fg"><label>Salesperson</label><input type="text" id="salesperson" placeholder="Name" oninput="updatePrintHeader();if(typeof autoCommissionSync==='function')autoCommissionSync();"></div>
     <div class="fg"><label>Valid For</label>
       <select id="quoteValidDays" onchange="updatePrintHeader();renderTerms();saveToStorage();">
         <option value="15">15 days</option>
@@ -1367,20 +1372,20 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       </select>
       <input type="number" id="discountAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="renderTotals()">
     </div>
-    <div class="pc-row">
+    <div class="pc-row" id="commissionRow">
       <label class="pc-lbl">Referral / Agent commission</label>
-      <select id="commissionMode" onchange="onCommissionModeChange()" style="max-width:110px;">
+      <select id="commissionMode" onchange="_commAuto=false;onCommissionModeChange()" style="max-width:110px;">
         <option value="pct">Percent %</option>
         <option value="amount">Amount ₱</option>
       </select>
-      <select id="commissionPct" onchange="renderTotals()">
+      <select id="commissionPct" onchange="_commAuto=false;renderTotals()">
         <option value="0">None</option>
         <option value="3">3%</option>
         <option value="5">5%</option>
         <option value="10">10%</option>
       </select>
-      <input type="number" id="commissionAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="renderTotals()">
-      <span class="pc-hint">computed on the quote total — on an options quote, on each option's own total</span>
+      <input type="number" id="commissionAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="_commAuto=false;renderTotals()">
+      <span class="pc-hint">computed on the quote total — on an options quote, on each option's own total. Auto-sets to 3% when the salesperson isn't Neil Barro (never on Brilliant Steel); your manual choice wins.</span>
     </div>
     <div class="pc-row">
       <label class="pc-check"><input type="checkbox" id="optionsMode" onchange="onOptionsModeChange()"> Options quote — price each section separately, no grand total</label>
@@ -2496,6 +2501,12 @@ function setCompany(co){
   const c=_known?CO[co]:CO.BK;
   currentCo=_known?co:'BK';
   co=currentCo;
+  // Owner ruling 2026-09-01: "when brilliant steel is toggled, they should
+  // not see the calculator and the bom" — BS quotes price by Brilliant
+  // Steel's own model (50/50 split), not Barro's ×2.50 build, so the whole
+  // internal costing surface hides on the BS company (CSS on body.co-bs;
+  // compute/gate guards below match). Commission never applies to BS either.
+  document.body.classList.toggle('co-bs', co==='BS');
   document.getElementById('coBK').classList.toggle('active',co==='BK');
   // The Barro Industries pill is internal-only — applyPartnerMode() removes it
   // for partner sessions, so guard the lookup rather than assuming it's there.
@@ -2525,6 +2536,10 @@ function setCompany(co){
   // Guarded on qbDocSheet existing since setCompany() also runs pre-boot,
   // before the DOM below it has necessarily settled.
   if (typeof renderClientPreview==='function' && document.getElementById('qbDocSheet')) renderClientPreview();
+  // Repaint the items table so the per-line 🧮 BOM gates appear/disappear
+  // with the company, and re-run the commission auto-rule (never on BS).
+  if (typeof renderItems==='function' && document.getElementById('itemsTbody')) renderItems();
+  if (typeof autoCommissionSync==='function') autoCommissionSync();
 }
 
 // v12 WS31 Spec 7 — shared letterhead engine for the printed quote. Renders
@@ -3687,6 +3702,7 @@ function customCostGateHtml(item, idx){
 function customCostParts(item, idx){
   const EMPTY = { rowHtml:'', workspaceHtml:'' };
   if (PARTNER_MODE) return EMPTY;
+  if (typeof currentCo!=='undefined' && currentCo==='BS') return EMPTY;   // BS: no BOM surface (owner 2026-09-01)
   if (typeof currentView==='undefined' || currentView!=='internal') return EMPTY;
   if (item.id!=='CUSTOM') return EMPTY;
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
@@ -3836,6 +3852,7 @@ function toggleDocDetails(){
   if (b) b.textContent = collapsed ? '📄 Quote details ▸' : '📄 Quote details ▾';
 }
 function openBomModal(idx){
+  if (typeof currentCo!=='undefined' && currentCo==='BS') return;   // BS: no BOM (owner 2026-09-01)
   if (!items[idx] || items[idx].id!=='CUSTOM') return;
   bomModalIdx = idx;
   renderBomModal();
@@ -4388,7 +4405,8 @@ function computeTotals(subset){
   const vatAmt=showVat?(net+rushFee)*vatRate:0;
   const grand=net+rushFee+vatAmt;
   // Commission computed on the grand total — same position for both modes.
-  const commissionAmt=commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100);
+  const commissionAmt=(typeof currentCo!=='undefined' && currentCo==='BS') ? 0
+    : (commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100));
 
   _inComputeTotals=_prevIn;
   return {subtotal,miscFeeTotal,miscLines,discBase,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
@@ -4939,6 +4957,30 @@ function onDiscountModeChange(){
   if(pctEl) pctEl.style.display=mode==='amount'?'none':'';
   if(amtEl) amtEl.style.display=mode==='amount'?'':'none';
   renderTotals();
+}
+// Owner ruling 2026-09-01: when the salesperson is anyone other than Neil
+// Barro, commission auto-sets to 3% — never on Brilliant Steel (BS is the
+// 50/50 split model; commission does not apply there at all — computeTotals
+// zeroes it and the row is hidden on body.co-bs). The auto only ever moves
+// an UNTOUCHED control (0% percent mode, or a value it set itself): any
+// manual change clears _commAuto and wins from then on.
+let _commAuto=false;
+function isNeilName(n){ n=(n||'').toLowerCase(); return n.includes('neil')&&n.includes('barro'); }
+function autoCommissionSync(){
+  if (typeof PARTNER_MODE!=='undefined' && PARTNER_MODE) return;
+  const spEl=document.getElementById('salesperson');
+  const pctEl=document.getElementById('commissionPct');
+  const modeEl=document.getElementById('commissionMode');
+  if(!spEl||!pctEl||!modeEl) return;
+  const sp=spEl.value.trim();
+  const untouched=_commAuto||((modeEl.value||'pct')==='pct'&&(parseFloat(pctEl.value)||0)===0);
+  const wantAuto=!!sp&&!isNeilName(sp)&&currentCo!=='BS'&&currentCo!=='PT';
+  if(wantAuto&&untouched){
+    if(pctEl.value!=='3'){ modeEl.value='pct'; pctEl.value='3'; onCommissionModeChange(); }
+    _commAuto=true;
+  } else if(!wantAuto&&_commAuto){
+    pctEl.value='0'; _commAuto=false; onCommissionModeChange();
+  }
 }
 // #5 — Agent commission: percent (existing) vs a custom flat peso amount,
 // still computed/shown on the grand total basis, same position as today.
@@ -5675,6 +5717,10 @@ function computeMarginSummary(laborEst){
   // pass is a no-op (₱100 rounding is stable), so this cannot loop.
   ensureItemUids();
   if (syncMiscItems(cost)) { saveToStorage(); renderItems(); return; }
+  // Brilliant Steel (owner 2026-09-01): keep misc lines syncing, but never
+  // reprice a BS quote by Barro's ×2.50 build and never paint the calculator
+  // — the whole internal costing surface is hidden on the BS company.
+  if (typeof currentCo!=='undefined' && currentCo==='BS') { wrap.innerHTML=''; return; }
   if (applyComputedPricing(cost)) { saveToStorage(); renderItems(); return; }
   const cs = cost.cs;
 
@@ -6552,6 +6598,7 @@ function clearForm(){
   // can change it to any tier, including none).
   try{ const _sd=paceSuggestedDiscount(); if(_sd.live&&_sd.tier>0){ const el=document.getElementById('discountPct'); if(el) el.value=String(_sd.tier); } }catch(e){}
   _msStash=null;         // and drop the toggle-off stash so it can't resurrect on the next quote
+  _commAuto=false;       // commission auto-rule starts fresh with the new quote
   document.getElementById('quoteDate').value=today;
   document.getElementById('filedBadge').classList.remove('show');
   document.getElementById('filedBadge').textContent='✓ FILED';
@@ -6594,6 +6641,7 @@ const VERIFY_CHECKS=[
 // customCostGateHtml()'s chip; see the comment there for the full rationale.
 function uncostedCustomLinesReason(){
   if (PARTNER_MODE) return '';
+  if (typeof currentCo!=='undefined' && currentCo==='BS') return '';   // BS quotes never require a Barro cost basis
   const n = items.filter(i=>i.id==='CUSTOM' && !customLineHasMaterialsBasis(i)).length;
   if (!n) return '';
   return `${n} custom line(s) have no cost basis — cost them in Internal view before filing.`;
@@ -7360,8 +7408,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 29;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 30;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:30, date:'2026-09-01', items:[
+    'Brilliant Steel quotes: the internal calculator and 🧮 BOM are hidden while the BS company is toggled — BS prices by its own model, never Barro\'s ×2.50 build — and commission does not apply to Brilliant Steel at all.',
+    'Commission auto-sets to 3% when the salesperson is anyone other than Neil Barro (Barro Kitchens / Barro Industries quotes). Change or zero it any time — a manual choice always wins.',
+  ]},
   { ver:29, date:'2026-09-01', items:[
     'Additional costs now print AFTER the Subtotal — the Subtotal is the quoted items only, then each shown charge (Delivery & Installation, etc.) gets its own line before the discount and grand total.',
     'FOC — a new tick in the Additional costs table: the charge prints on the quotation as FREE (great for "free delivery") while the cost still counts against our margin internally.',
