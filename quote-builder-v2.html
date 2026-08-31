@@ -724,7 +724,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      Screen-only and scoped to the workspace originals, so print and the
      Client-tab preview (cloned into #qbDocSheet) are untouched. ── */
 @media screen{
-  body.doc-details-collapsed #internalWorkspace .doc-details{display:none!important;}
+  body.doc-details-collapsed:not(.body-client-view) #internalWorkspace .doc-details{display:none!important;}
 }
 
 /* ── CALCULATOR — Internal redesign (owner ruling 2026-08-31): one surface,
@@ -881,8 +881,16 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
    before — is completely unaffected by which one is visible on screen. ── */
 #qbDocSheet{display:none;}
 @media screen{
-  body.body-client-view #internalWorkspace{display:none!important;}
-  body.body-client-view #qbDocSheet{display:block!important;}
+  /* Owner ruling 2026-08-31: the Client tab is a FORM (the document
+     sections, editable) with a 👁 Preview button; the rendered document
+     shows only while body.client-previewing. Internal stays numbers-only. */
+  body.body-client-view.client-previewing #internalWorkspace{display:none!important;}
+  body.body-client-view.client-previewing #qbDocSheet{display:block!important;}
+  body.body-client-view:not(.client-previewing) #qbDocSheet{display:none!important;}
+  body.body-client-view:not(.client-previewing) #internalWorkspace .section:not(.doc-details):not(#clientFormBar){display:none!important;}
+  body.body-client-view:not(.client-previewing) #internalWorkspace .int-panel{display:none!important;}
+  body.body-client-view:not(.client-previewing) #internalWorkspace #docDetailsBar{display:none!important;}
+  body:not(.body-client-view) #clientFormBar{display:none!important;}
 }
 @media print{ #qbDocSheet{display:none!important;} }
 
@@ -1062,6 +1070,13 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 <!-- Internal-deals-with-the-numbers toggle (owner ruling 2026-08-31). Hidden
      for partners (applyPartnerMode removes it; partners always see the
      document sections since client info is their editing surface). -->
+<!-- Client-tab form bar (owner ruling 2026-08-31): the Client tab is the
+     document FORM; this bar carries the 👁 Preview toggle. Visible only in
+     client view (CSS above hides it elsewhere via .client-only). -->
+<div class="section no-print client-only" id="clientFormBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+  <button type="button" class="btn btn-green btn-sm" id="clientPreviewBtn" onclick="toggleClientPreview()">👁 Preview document</button>
+  <span style="font-size:11px;color:var(--gray-dark);">This is the document form — everything here prints on the quotation. Preview shows it exactly as the client will see it; the numbers live in Internal.</span>
+</div>
 <div class="section no-print" id="docDetailsBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
   <button type="button" class="btn btn-outline btn-sm" id="docDetailsToggle" style="background:var(--dark-blue);" onclick="toggleDocDetails()">📄 Quote details ▸</button>
   <span style="font-size:11px;color:var(--gray-dark);">Internal deals with the numbers — open this to edit what prints on the document: quote number · client · photos · delivery &amp; timeline · payment · remarks · terms &amp; conforme.</span>
@@ -1731,7 +1746,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       </ol>
 
       <h4>The two views</h4>
-      <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
+      <p><strong>Client</strong> — the document form: everything that prints on the quotation, with a 👁 Preview button that shows the finished document exactly as the customer sees it.</p>
       <p><strong>Internal</strong> — the editing workspace plus the calculator: the build waterfall, the OH% and MK% dials (together always 150% of direct), the misc-costs table, and a per-line experiment table with editable prices.</p>
       <p>The Internal view may be hidden depending on your account.</p>
 
@@ -2613,6 +2628,12 @@ function setView(v){
   // display:none their #internalWorkspace with literally no button left to
   // undo that — they'd lose the ability to add/edit a line item permanently.
   if (!GENERIC_PARTNER) document.body.classList.toggle('body-client-view', v==='client');
+  // Client tab always lands on the FORM first; Preview is a click away.
+  if (v==='client') {
+    document.body.classList.remove('client-previewing');
+    const pb=document.getElementById('clientPreviewBtn');
+    if (pb) pb.textContent='👁 Preview document';
+  }
   if (v==='client') renderClientPreview();
   mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
 }
@@ -3819,6 +3840,15 @@ let bomModalIdx = null;
 // document sections collapse behind the 📄 Quote details toggle. Collapsed
 // by default for internal staff (set in initUI, where PARTNER_MODE is
 // known); partners never collapse.
+// Owner ruling 2026-08-31 — the Client tab is the document form; 👁 Preview
+// swaps to the rendered document and back. Entering client view always
+// starts at the form (setView clears the flag).
+function toggleClientPreview(){
+  const previewing = document.body.classList.toggle('client-previewing');
+  const b = document.getElementById('clientPreviewBtn');
+  if (b) b.textContent = previewing ? '✎ Back to the form' : '👁 Preview document';
+  if (previewing && typeof renderClientPreview==='function') renderClientPreview();
+}
 function toggleDocDetails(){
   const collapsed = document.body.classList.toggle('doc-details-collapsed');
   const b = document.getElementById('docDetailsToggle');
@@ -7304,8 +7334,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 13;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 14;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:14, date:'2026-08-31', items:[
+    'The Client tab is now the document form — quote number, client, photos, delivery & timeline, payment, remarks, terms — with a 👁 Preview button that shows the finished document. Internal stays pure numbers: items, misc costs and the calculator.',
+  ]},
   { ver:13, date:'2026-08-31', items:[
     'Internal now deals only with the numbers: items, miscellaneous costs and the calculator. The document sections — quote number, client, photos, delivery & timeline, payment, remarks, terms & conforme — tuck behind the 📄 Quote details button at the top (they stay on the client document as always).',
   ]},
@@ -7370,7 +7403,7 @@ const TOUR_STEPS = [
  { target:'#coBK', closest:'.toggle-pills', title:'Pick the company',
    body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
  { target:'#btnClient', closest:'.toggle-pills', title:'Two views',
-   body:'Client shows the finished document exactly as the customer will see it. Internal is the editing workspace with costs, margins and the pricing dials. Internal may be hidden for your account.' },
+   body:'Client is the document form — quote number, client, delivery, terms, photos — with a 👁 Preview button that shows the finished document exactly as the customer will see it. Internal deals with the numbers: items, misc costs and the calculator.' },
  { target:'#docDetailsBar', needsWorkspace:true, title:'Internal = the numbers',
    body:'The Internal view keeps only the numbers: items, misc costs and the calculator. Everything that prints on the document — quote number, client, photos, delivery & timeline, payment, remarks, terms — tucks behind this 📄 Quote details button. Open it when you need to fill those in.' },
  { target:'.qno-builder-section', needsWorkspace:true, title:'Quote number',
