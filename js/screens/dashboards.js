@@ -6301,6 +6301,23 @@ async function renderAnalytics() {
     const suggestedOH = Math.min(ohMax, Math.max(ohMin, baseOH));
     const priceMult = priceMultB;   // ×1.50 at 25 OH + 25 MK on direct
 
+    // ── Owner ruling 2026-09-01: markup varies with month performance, but
+    // it is EXPRESSED AS A DISCOUNT off the fixed ×2.50 list price (list
+    // prices never move — his own 08-31 revision-consistency worry), snapped
+    // to the allowed ladder. 30% off = ×1.75 = true cost exactly: the whole
+    // 75% MK given away, OH still intact. Behind pace → deeper suggested
+    // offers; on/ahead of pace → hold the full price. First ~4 days of a
+    // month carry no signal, so no discount is suggested yet. ──────────────
+    const DISC_LADDER = [5, 8, 10, 13, 15, 18, 20, 23, 25, 28, 30];
+    const perfRaw = (targetContribution > 0 && elapsed > 0)
+      ? (effContribution / (targetContribution * elapsed)) : 1;
+    const perf = Math.max(0, Math.min(1, perfRaw));
+    let suggestedDiscount = 0;
+    if (elapsed >= 0.15) {
+      const rawDisc = 30 * (1 - perf);
+      for (const t of DISC_LADDER) if (t <= rawDisc + 0.001) suggestedDiscount = t;
+    }
+
     // ── Card 5 — 6-month trend (finance_rollup/{YYYY-MM}, catch → denied) ──
     const rollupResults = await Promise.all(months6.map(m =>
       db.collection('finance_rollup').doc(m.ym).get()
@@ -6328,6 +6345,11 @@ async function renderAnalytics() {
         // OPTION B: published flat (= clamped baseOH) so ANY consumer —
         // including a stale-cached quote builder — prices at the fixed rate.
         suggestedOH: +suggestedOH.toFixed(4),
+        // Discount-ladder feed (owner 2026-09-01) — the quote builder defaults
+        // NEW quotes to this tier and shows it as the month-pace guide.
+        suggestedDiscount,
+        discLadder: DISC_LADDER,
+        perf: +perf.toFixed(4),
         regime: 'fixed-b',
         computedAt: new Date().toISOString(),
         byUid: (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || ''
@@ -6345,6 +6367,7 @@ async function renderAnalytics() {
         <div class="kpi-card ${effContribution>=0?'green':'warn'}"><div class="kpi-label">Contribution MTD${usingEstimate?' (est.)':''}</div><div class="kpi-value">₱${fmt(effContribution)}</div></div>
         <div class="kpi-card"><div class="kpi-label">Pace (advisory)</div><div class="kpi-value">×${pace.toFixed(2)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">OH% — Fixed (Option B)</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
+        <div class="kpi-card ${suggestedDiscount>0?'warn':'green'}"><div class="kpi-label">Suggested discount (pace)</div><div class="kpi-value">${suggestedDiscount>0?suggestedDiscount+'%':'none'}</div></div>
       </div>
 
       <div class="card" style="margin-bottom:16px">
@@ -6403,7 +6426,7 @@ async function renderAnalytics() {
             <div class="kpi-card accent"><div class="kpi-label">OH% on direct cost</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
             <div class="kpi-card"><div class="kpi-label">Price multiplier on direct</div><div class="kpi-value">×${priceMult.toFixed(4)}</div></div>
           </div>
-          <div style="font-size:12px;color:var(--text-muted)">Fixed-rate ruling (31 Aug 2026): OH ${(suggestedOH*100).toFixed(0)}% + MK ${(mkPct*100).toFixed(0)}% on direct cost — together always ${((suggestedOH+mkPct)*100).toFixed(0)}%, so selling = direct × ${priceMult.toFixed(2)}, rounded per line to the nearest ₱100. Same specs, same price, any month, any size. Pace and the old size bands are advisory signals only.</div>
+          <div style="font-size:12px;color:var(--text-muted)">Fixed-rate ruling (31 Aug 2026): OH ${(suggestedOH*100).toFixed(0)}% + MK ${(mkPct*100).toFixed(0)}% on direct cost — together always ${((suggestedOH+mkPct)*100).toFixed(0)}%, so selling = direct × ${priceMult.toFixed(2)}, rounded per line to the nearest ₱100. Same specs, same price, any month, any size. Markup flexes with the month AS A DISCOUNT (owner 2026-09-01): behind pace → the builder suggests a deeper tier from the allowed ladder 5·8·10·13·15·18·20·23·25·28·30%; 30% = true cost exactly (the whole markup given, overhead intact). On pace → no discount, full ×2.50.</div>
         </div>
       </div>
 

@@ -1346,15 +1346,24 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <label class="pc-lbl">Discount</label>
       <select id="discountMode" onchange="onDiscountModeChange()" style="max-width:110px;">
         <option value="pct">Percent %</option>
-        <option value="amount">Amount ₱</option>
+        <option value="amount" hidden>Amount ₱ (legacy)</option>
       </select>
+      <!-- Owner ruling 2026-09-01: discounts only from this ladder, 30% max
+           (30% off ×2.50 = ×1.75 = true cost — full markup given, OH intact).
+           Hidden legacy tiers stay JS-settable so reopened old quotes keep
+           their filed value; they are not offered for new quotes. -->
       <select id="discountPct" onchange="renderTotals()">
         <option value="0">No discount</option>
-        <option value="10">10%</option><option value="15">15%</option>
-        <option value="20">20%</option><option value="25">25%</option>
-        <option value="30">30%</option><option value="35">35%</option>
-        <option value="40">40%</option><option value="45">45%</option>
-        <option value="50">50%</option>
+        <option value="5">5%</option><option value="8">8%</option>
+        <option value="10">10%</option><option value="13">13%</option>
+        <option value="15">15%</option><option value="18">18%</option>
+        <option value="20">20%</option><option value="23">23%</option>
+        <option value="25">25%</option><option value="28">28%</option>
+        <option value="30">30%</option>
+        <option value="35" hidden>35% (legacy)</option>
+        <option value="40" hidden>40% (legacy)</option>
+        <option value="45" hidden>45% (legacy)</option>
+        <option value="50" hidden>50% (legacy)</option>
       </select>
       <input type="number" id="discountAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="renderTotals()">
     </div>
@@ -5442,6 +5451,20 @@ function paceFactor(){
   return { pace, live, computedAt:computedMs };
 }
 
+// Owner ruling 2026-09-01 — markup varies with the month, EXPRESSED AS A
+// DISCOUNT: list prices stay at the fixed ×2.50; the costing dashboard
+// publishes a suggested tier from the allowed ladder (behind pace → deeper,
+// on pace → none; 30% = true cost exactly). New quotes default to the live
+// suggestion; sales may pick any ladder tier, and the true-cost cap in
+// computeTotals() stays the hard wall either way.
+const DISC_LADDER = [5, 8, 10, 13, 15, 18, 20, 23, 25, 28, 30];
+function paceSuggestedDiscount(){
+  const pf = paceFactor();
+  if (!pf.live || !COSTING_PACE) return { tier: 0, live: false };
+  const t = Math.round(Number(COSTING_PACE.suggestedDiscount) || 0);
+  return { tier: DISC_LADDER.includes(t) ? t : 0, live: true };
+}
+
 // COSTING-PHASE1-SPEC-2026-08-26 §2/§4 — one item's cost inputs for the
 // true-cost engine. Catalog items (item.id !== 'CUSTOM') prefer the LIVE
 // product_costs-backed value on DB.products (looked up by id) over the
@@ -5707,6 +5730,12 @@ function renderTrueCostPanelHtml(cost){
     <div class="calc-row total" style="color:var(--red);" title="The deepest total you may offer a client: every peso of markup given away, overhead and direct cost fully intact. The discount cap enforces this automatically — no discount can go below it."><span>🛑 Maximum allowable offer</span><span class="peso">${formatPeso(cost.trueCostTotal)}</span></div>
     <div class="calc-row sub" style="border-bottom:none;"><span>${(()=>{const ref=cost.sell>0?cost.sell:cost.target; const off=Math.max(0,ref-cost.trueCostTotal); return off>0?`= room to give up to −${formatPeso(off)} (${(off/ref*100).toFixed(1)}% off the ${cost.sell>0?'quoted':'computed'} ${formatPeso(ref)})`:'no discount room — already at or below the maximum offer';})()}</span><span></span></div>
     <div class="calc-row sub" style="border-bottom:none;"><span title="Never quote below true cost without President approval; below the absolute floor is a cash loss.">Floors: true cost ${formatPeso(cost.trueCostTotal)} · absolute ${formatPeso(cost.floorTotal)}</span><span></span></div>
+    ${(()=>{ const _sd=paceSuggestedDiscount(); const _cur=parseFloat(document.getElementById('discountPct')?.value||0)||0;
+      const _lad='ladder 5·8·10·13·15·18·20·23·25·28·30% — 30% = true cost';
+      if(!_sd.live) return `<div class="calc-row sub" style="border-bottom:none;"><span title="Allowed discount tiers (owner 2026-09-01). The live month-pace suggestion appears when the Analytics costing dashboard has been opened this week.">Discounts: ${_lad}.</span><span></span></div>`;
+      return _sd.tier>0
+        ? `<div class="calc-row sub" style="border-bottom:none;color:var(--orange);"><span title="Month behind pace — markup flexes as a visible discount; list prices never move. ${_lad}.">📉 Month pace: offer up to ${_sd.tier}% discount${_cur>0?` (this quote: ${_cur}%)`:''}</span><span></span></div>`
+        : `<div class="calc-row sub" style="border-bottom:none;color:var(--green);"><span title="Month on pace — hold the full ×2.50 price. ${_lad}.">📈 Month on pace — no discount suggested${_cur>0?` (this quote carries ${_cur}%)`:''}</span><span></span></div>`; })()}
     <div class="calc-row sub" style="border-bottom:none;"><span title="Minimum 2 six-day weeks + 3 working days per ₱20,000 of materials; Sundays never counted.">Timeline: ${12+3*Math.floor(cost.materials/20000)} working days (no Sundays) ≈ ${((12+3*Math.floor(cost.materials/20000))/6).toFixed(1)} weeks</span><span></span></div>
     ${marginLine}
     ${belowFloorNote}
@@ -6310,6 +6339,15 @@ function applyPricingFields(o){
   optionsBasisKey = o.optionsBasis || '';
   renderMilestoneEditor();
   if(document.getElementById('discountMode')) onDiscountModeChange();
+  // Boot-path twin of the clearForm hook (owner 2026-09-01): a fresh open
+  // with no discount chosen gets the pace suggestion. Runs BEFORE draft
+  // resume / reopen / #quote= loads — any of those overwrite it with the
+  // quote's own saved value, which is exactly right.
+  try{
+    const _sd=paceSuggestedDiscount();
+    const _de=document.getElementById('discountPct');
+    if(_sd.live&&_sd.tier>0&&_de&&(_de.value==='0'||!_de.value)) _de.value=String(_sd.tier);
+  }catch(e){}
   if(document.getElementById('commissionMode')) onCommissionModeChange();
   if(document.getElementById('diFree')) onFreeDeliveryChange();
   if(document.getElementById('dpMode')) onDpModeChange();
@@ -6476,6 +6514,10 @@ function clearForm(){
     interestRate:'0',remarks:'',bankDetails:'',showPaymentDetails:true,quoteValidDays:'30',
     optionsMode:false,optionsBasis:'',
     milestones:null});   // back to LEGACY dpMode/balMode mode on a brand-new quote
+  // Owner ruling 2026-09-01: a weak month reflects as a DISCOUNT on new
+  // quotes — default the ladder select to the live pace suggestion (sales
+  // can change it to any tier, including none).
+  try{ const _sd=paceSuggestedDiscount(); if(_sd.live&&_sd.tier>0){ const el=document.getElementById('discountPct'); if(el) el.value=String(_sd.tier); } }catch(e){}
   _msStash=null;         // and drop the toggle-off stash so it can't resurrect on the next quote
   document.getElementById('quoteDate').value=today;
   document.getElementById('filedBadge').classList.remove('show');
@@ -7285,8 +7327,13 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 27;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 28;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:28, date:'2026-09-01', items:[
+    'Markup now flexes with the month — as a DISCOUNT, never a price change: list prices stay at the fixed ×2.50; when the month is behind pace the builder suggests (and pre-selects on new quotes) a deeper discount so we give better offers, and on a strong month it holds the full price.',
+    'Discounts come only from the allowed ladder: 5, 8, 10, 13, 15, 18, 20, 23, 25, 28, 30%. 30% is the maximum — it equals true cost exactly (the whole markup given away, overhead still covered). Old quotes with other values still open unchanged.',
+    'The calculator shows the month-pace guide line (📉 offer up to X% / 📈 hold the price) under the floors.',
+  ]},
   { ver:27, date:'2026-09-01', items:[
     '🖨 Print/PDF is now 📄 Save PDF — the save dialog opens with the file name already filled in as "<client name> - <quote no. last segment>" (e.g. "Juan Dela Cruz - 001R1"). Choose Save as PDF once; the browser remembers it.',
   ]},
