@@ -2146,11 +2146,18 @@ function renderQuoteBuilderIframe() {
   // navigation stay visible (navigateTo replaces this when leaving the builder).
   const c = document.getElementById('page-content');
   if (!c) return;
-  // Partners / Brilliant-Steel-only users get a locked-down builder (no Admin/labor).
-  // BS partners stay locked to Brilliant Steel pricing; a generic company partner
-  // gets a builder branded to THEIR company with a Barro Kitchens header toggle.
-  const partnerMode = (typeof isPartner === 'function' && isPartner()) ||
-                      (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+  // Only PARTNER-role accounts (external people) get the locked-down builder.
+  // Owner ruling 2026-09-01: internal staff whose only department is Brilliant
+  // Steel are Barro employees — they get the full builder (calculator, BOM,
+  // Estimator) like any other internal user; the old isBrilliantOnly() lock
+  // wrongly caught them ("when brilliant steel is toggled, they cant see the
+  // calculator … they also cant see bom"). External BS accounts are role
+  // 'partner', so nothing leaks: the portal lock, the BI-pill refusal in the
+  // save bridge below, and firestore.rules all still key on isPartner().
+  // Catalog capital costs stay rules-gated regardless (product_costs is
+  // senior-admin/finance) — a plain employee sees the calculator and their
+  // own per-quote BOMs, not the protected catalog cost basis.
+  const partnerMode = (typeof isPartner === 'function' && isPartner());
   let qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
   if (typeof isGenericPartner === 'function' && isGenericPartner()) {
     const p = window.userProfile || {};
@@ -4956,14 +4963,12 @@ window.addEventListener('message', async (e) => {
   // than let a forged/stale partner payload reach a write that would just fail
   // silently at the rules layer.
   const _payloadCo = (payload && (payload.company || payload.co)) || '';
-  // Must match the condition that LAUNCHES the locked builder (`isPartner() ||
-  // isBrilliantOnly()`, ~line 1791) — not just isPartner(). A user with role
-  // 'employee' whose only department is Brilliant Steel gets the partner-locked
-  // builder but is NOT isPartner(), so a narrower test here would let them drop
-  // ?portal=partner, unlock the BI pill, and file a BI quote past all three
-  // layers — the rules backstop keys on isPartner() too.
-  const _qbPartner = (typeof isPartner === 'function' && isPartner()) ||
-                     (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+  // Must match the condition that LAUNCHES the locked builder (see
+  // renderQuoteBuilderIframe): isPartner() ONLY, since the owner's 2026-09-01
+  // ruling un-locked internal Brilliant-Steel-department staff — they are
+  // Barro employees and may quote as any internal company. External accounts
+  // are role 'partner' and still hit this refusal + the rules backstop.
+  const _qbPartner = (typeof isPartner === 'function' && isPartner());
   if (_payloadCo === 'BI' && _qbPartner) {
     console.warn('[QB bridge] partner session attempted to file as Barro Industries — refused');
     Notifs?.showToast && Notifs.showToast('Partners cannot quote as Barro Industries.', 'error');
