@@ -1286,7 +1286,10 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
     <div class="fg full" style="flex:1;">
       <label>Subject <span style="color:var(--gray-dark);font-weight:400;text-transform:none;">(shown on the quotation)</span></label>
-      <input type="text" id="subject" placeholder="e.g. Supply &amp; installation of commercial kitchen equipment" oninput="updatePrintHeader();saveToStorage();">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="subject" placeholder="e.g. Supply &amp; installation of commercial kitchen equipment" oninput="updatePrintHeader();saveToStorage();" style="flex:1;">
+        <button type="button" class="btn btn-outline btn-sm no-print" style="background:var(--dark-blue);white-space:nowrap;" onclick="autoGenerateSubject()" title="Builds the subject from what the quote states: Supply, Fabrication — plus Delivery and/or Installation when those additional costs exist — of the item categories on the quote.">✨ Auto</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1481,17 +1484,23 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <option value="Other">Other</option>
       </select>
     </div>
-    <div class="fg"><label>Free Delivery?</label>
+    <!-- Owner ruling 2026-09-01: the delivery/installation MONEY lives in the
+         Estimator's Additional costs table now — these legacy charge fields
+         are hidden (not removed) so old filed quotes with diAmount keep
+         computing and printing exactly as filed. Method + notes stay: they
+         are document text, not money. -->
+    <div class="fg" style="display:none;"><label>Free Delivery?</label>
       <label class="pc-check" style="padding-top:7px;"><input type="checkbox" id="diFree" onchange="onFreeDeliveryChange()"> FREE delivery (FOC)</label>
     </div>
-    <div class="fg" id="diAmountWrap"><label>Delivery &amp; Installation Amount (₱)</label>
+    <div class="fg" id="diAmountWrap" style="display:none;"><label>Delivery &amp; Installation Amount (₱)</label>
       <input type="number" id="diAmount" min="0" step="100" placeholder="0" oninput="renderTotals();updateDiPrint();"></div>
-    <div class="fg" id="diIncludeWrap"><label>Include in Grand Total?</label>
+    <div class="fg" id="diIncludeWrap" style="display:none;"><label>Include in Grand Total?</label>
       <select id="diInclude" onchange="renderTotals();updateDiPrint();">
         <option value="yes">Yes — add to total</option>
         <option value="no">No — show as separate / FOC</option>
       </select>
     </div>
+    <div class="fg no-print"><label>&nbsp;</label><span style="font-size:11px;color:var(--gray-dark);">💡 Delivery &amp; installation charges are priced in the <strong>Estimator → Additional costs</strong> table.</span></div>
     <div class="fg full"><label>Delivery &amp; Installation Notes / Terms</label>
       <textarea id="diNotes" rows="2" placeholder="e.g. Delivery within Metro Manila. Installation includes positioning, leveling, and leak-testing of gas lines. Hauling above 2nd floor not included." oninput="updateDiPrint()"></textarea></div>
   </div>
@@ -4079,6 +4088,34 @@ function sectionLabel(catId){
   if(named) return named.catLabel;
   const c=dbCategory(catId);
   return c?c.label:String(catId||'Uncategorised');
+}
+// Owner ruling 2026-09-01 — auto-generated Subject:
+// "Supply, Fabrication[, Delivery][ & Installation] of <categories>".
+// Delivery/Installation join the verb list when the additional-costs table
+// states them (any entry of that type with a cost); categories come from the
+// quote's own sections, emoji stripped, in render order.
+function autoGenerateSubject(){
+  const verbs=['Supply','Fabrication'];
+  const mc=(typeof miscCosts!=='undefined')?miscCosts:[];
+  if (mc.some(m=>(m.type||'other')==='delivery' && (+m.cost||0)>0)) verbs.push('Delivery');
+  if (mc.some(m=>(m.type||'other')==='installation' && (+m.cost||0)>0)) verbs.push('Installation');
+  const seen=new Set(), cats=[];
+  items.forEach(i=>{
+    if(i.id==='MISCFEE') return;
+    const cid=i.category;
+    if(cid==null || seen.has(cid)) return;
+    seen.add(cid);
+    const raw=sectionLabel(cid)||'';
+    let clean=raw.replace(/^[^A-Za-z0-9]+/,'').trim();
+    // fallback prettifier: a raw id like 'cooking_line' reads as 'Cooking Line'
+    if(clean.includes('_')) clean=clean.split('_').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+    if(clean) cats.push(clean);
+  });
+  const joinNat=a=>a.length<=1?(a[0]||''):a.slice(0,-1).join(', ')+' & '+a[a.length-1];
+  const subj=joinNat(verbs)+' of '+(cats.length?joinNat(cats):'Commercial Kitchen Equipment');
+  const el=document.getElementById('subject');
+  if(el){ el.value=subj; updatePrintHeader(); saveToStorage(); }
+  if(typeof showToast==='function') showToast('✨ Subject generated');
 }
 // A renamed section drops the database emoji — "🔥 Option A" reads wrong.
 function sectionIcon(catId){
@@ -7418,8 +7455,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 19;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 20;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:20, date:'2026-09-01', items:[
+    '✨ Auto beside the Subject field writes it for you — "Supply, Fabrication, Delivery & Installation of …" built from the quote\'s own categories, with Delivery/Installation included only when those additional costs are stated.',
+    'The old Delivery & Installation charge fields left Client Data — the money lives in the Estimator\'s Additional costs table. The method and notes stay (they print as document text). Old quotes with the legacy amount still compute and print unchanged.',
+  ]},
   { ver:19, date:'2026-09-01', items:[
     'Additional costs are now typed: 🚚 Delivery, 🔧 Installation and 📦 Other are pass-throughs (cost + 25% OH); 👷 Additional labor carries the full OH+MK load (× 2.50). When both delivery and installation are on the quote, they present as one combined "Delivery & Installation" line.',
   ]},
