@@ -2381,6 +2381,21 @@ service cloud.firestore {
     // explicitly NOT partner, even though isAdmin()/canFinance() would never
     // naturally include that role; the `!isPartner()` is defense-in-depth so
     // this stays true even if a future edit widens either helper.
+    // Owner ruling 2026-09-01 ("sales dep should have analytics… it should
+    // show if oh for the month is covered"): the AGGREGATE pace/coverage feed
+    // (_pace) and the pricing constants (_settings) are readable by ALL
+    // internal staff — they carry the month's pace, OH coverage and the same
+    // ×2.50 constants every internal quote-builder session already displays.
+    // Per-product capital costs stay in the sibling {docId} match below
+    // (senior-admin/finance only). Writes still come only from that block.
+    // Overlapping matches OR together, so these widen reads without touching
+    // the write path.
+    match /product_costs/_pace {
+      allow read: if isAuth() && !isPartner();
+    }
+    match /product_costs/_settings {
+      allow read: if isAuth() && !isPartner();
+    }
     match /product_costs/{docId} {
       // ⚠ 2026-08-09 SECRETARY LEAK — isAdmin() -> isSeniorAdmin(). This doc is
       // capital material/labour and BOM unit costs; it was split out of

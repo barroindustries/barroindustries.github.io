@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.246';
+window.APP_VERSION = '14.0.247';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -713,6 +713,9 @@ window.NAV_REGISTRY = {
   predicates: {
     isPresident:        () => typeof isPresident === 'function' && isPresident(),
     hasProductionDept:  () => (window.currentDepts||[]).includes('Production'),
+    // Owner ruling 2026-09-01: Sales-department staff get Analytics (the
+    // sales-scoped view — see renderSalesAnalytics in dashboards.js).
+    hasSalesDept:       () => (window.currentDepts||[]).includes('Sales'),
     // The project folder is the one record the whole quote→production flow
     // shares, so every department in that flow reaches it — Design and
     // Marketing were missing, which is why Design could only see a job from
@@ -861,6 +864,7 @@ window.NAV_REGISTRY = {
       // here (owner: "Allow accountant access to hr").
       { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', section:true, sectionLabel:'Operations', when:'hasProjectsDept' },
       { key:'sales-orders',icon:'receipt',     label:'Sales Orders', page:'sales-orders',  when:'hasSalesOrdersDept' },
+      { key:'analytics',   icon:'bar-chart-2', label:'Analytics',    page:'analytics',     when:'hasSalesDept' },
       { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory',     when:'hasProductionDept' },
       { key:'hr',          icon:'user-cog',    label:'HR',           page:'dept:HR',       when:'isFinanceRole' },
       { key:'sys-health',  icon:'activity',    label:'System Health',page:'system-health', when:'isFinanceRole' }

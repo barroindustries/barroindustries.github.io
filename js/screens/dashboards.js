@@ -5523,8 +5523,88 @@ function destroyChartsIn(el) {
   el.querySelectorAll('canvas').forEach(cv => { const ex = Chart.getChart(cv); if (ex) ex.destroy(); });
 }
 
+// ── SALES ANALYTICS (owner ruling 2026-09-01) ────────────────────────────
+// "sales dep should have analytics — it should show if oh for the month is
+// covered as well." A scoped page for Sales-department staff, fed ONLY by
+// product_costs/_pace (published each time management opens the full costing
+// dashboard; rules opened _pace to internal staff the same day). No ledger,
+// payroll or job-cost reads — the money tier stays closed to non-finance.
+async function renderSalesAnalytics(){
+  const c=document.getElementById('page-content');
+  c.innerHTML=window.skeletonHtml('cards');
+  let p=null, deniedMsg='';
+  try{
+    const snap=await db.collection('product_costs').doc('_pace').get();
+    p=snap.exists?snap.data():null;
+  }catch(e){
+    deniedMsg=(e&&e.code==='permission-denied')
+      ? 'Your account can\'t read the pace feed yet — ask the President to check the rules deploy.'
+      : 'Could not load the pace feed ('+escHtml((e&&e.message)||'error')+').';
+  }
+  const P=v=>'₱'+fmt(+v||0);
+  let inner;
+  if(!p){
+    inner=`<div class="card" style="padding:22px;text-align:center;color:var(--text-muted)">
+      ${deniedMsg?escHtml(deniedMsg):'No figures published yet this month — they appear after management opens Analytics → Costing (which computes and publishes the month\'s pace).'}
+    </div>`;
+  }else{
+    const income=+p.incomeMTD||0, pool=+p.ohPool||0, contrib=+p.contribMTD||0;
+    const quota=+p.quotaSales||0, floorS=+p.floorSales||0;
+    const covPct=pool>0?Math.min(1,Math.max(0,contrib/pool)):0;
+    const covered=pool>0&&contrib>=pool;
+    const toGo=Math.max(0,pool-contrib);
+    const disc=Math.round(+p.suggestedDiscount||0);
+    const quotaPct=quota>0?Math.min(100,Math.round(income/quota*100)):0;
+    const asOf=p.computedAt?new Date(p.computedAt):null;
+    const stale=!asOf||!isFinite(asOf.getTime())||(Date.now()-asOf.getTime())>7*24*60*60*1000;
+    inner=`
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-label">Sales — ${escHtml(p.month||'this month')}</div><div class="kpi-value">${P(income)}</div></div>
+        <div class="kpi-card ${covered?'green':'warn'}"><div class="kpi-label">Overhead this month</div><div class="kpi-value">${covered?'✓ COVERED':Math.round(covPct*100)+'%'}</div></div>
+        <div class="kpi-card ${disc>0?'warn':'green'}"><div class="kpi-label">Suggested discount</div><div class="kpi-value">${disc>0?disc+'%':'none'}</div></div>
+      </div>
+      <div class="card" style="padding:16px 18px;margin-top:12px">
+        <div style="font-weight:700;margin-bottom:6px">Overhead coverage — ${P(contrib)} of ${P(pool)}</div>
+        <div style="height:10px;border-radius:6px;background:var(--gray-mid,#e3e8ef);overflow:hidden">
+          <div style="height:100%;width:${Math.round(covPct*100)}%;background:${covered?'var(--green,#27ae60)':'var(--warning,#ff9f0a)'}"></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:6px">
+          ${covered
+            ? 'The month\'s ₱'+fmt(pool)+' overhead pool is fully covered — sales from here build profit.'
+            : P(toGo)+' of contribution still needed to cover this month\'s overhead pool.'}
+        </div>
+      </div>
+      <div class="card" style="padding:16px 18px;margin-top:12px">
+        <div style="font-weight:700;margin-bottom:6px">Quota pace — ${quotaPct}% of ${P(quota)}</div>
+        <div style="height:10px;border-radius:6px;background:var(--gray-mid,#e3e8ef);overflow:hidden">
+          <div style="height:100%;width:${quotaPct}%;background:var(--mid-blue,#2f6fb2)"></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:6px">
+          Floor (overhead break-even) ${P(floorS)} · quota ${P(quota)} — at quota the month lands its profit goal.
+          ${disc>0
+            ? ' The month is behind pace, so the quote builder is suggesting discounts up to '+disc+'% from the allowed ladder.'
+            : ' On pace — hold the full ×2.50 price; no discount suggested.'}
+        </div>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-top:10px">
+        ${asOf&&isFinite(asOf.getTime())?'Figures as of '+escHtml(asOf.toLocaleString('en-PH')):'Publish time unknown'}${stale?' — <b>stale</b>: they refresh when management opens Analytics → Costing.':'.'}
+      </div>`;
+  }
+  c.innerHTML=`
+    <div style="max-width:860px;margin:0 auto">
+      <h2 style="font-size:17px;font-weight:800;margin-bottom:2px">📊 Sales Analytics</h2>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:14px">The live pricing signals behind the quote builder — company-wide financial analytics is a management view.</div>
+      ${inner}
+    </div>`;
+}
+
 async function renderAnalytics() {
-  if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
+  if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){
+    // Owner ruling 2026-09-01: Sales-department staff get Analytics — the
+    // scoped view below (pace/OH-coverage feed only, no money-tier reads).
+    if ((window.currentDepts||[]).includes('Sales') && !(typeof isPartner==='function' && isPartner())) { renderSalesAnalytics(); return; }
+    document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;
+  }
   const c=document.getElementById('page-content');
   c.innerHTML=window.skeletonHtml('cards');
   // ⚠ SILENT ZEROS (2026-08-09). This screen admits the Corporate Secretary by
@@ -6350,6 +6430,17 @@ async function renderAnalytics() {
         suggestedDiscount,
         discLadder: DISC_LADDER,
         perf: +perf.toFixed(4),
+        // Sales-analytics feed (owner ruling 2026-09-01: "sales dep should
+        // have analytics… show if oh for the month is covered") — aggregate
+        // month figures only; the ledger itself stays finance-tier.
+        month,
+        incomeMTD: +(+income || 0).toFixed(2),
+        contribMTD: +(+effContribution || 0).toFixed(2),
+        ohPool: +(+r.fixedTotal || 0).toFixed(2),
+        ohCoveredPct: r.fixedTotal > 0 ? +Math.min(1, Math.max(0, effContribution / r.fixedTotal)).toFixed(4) : 0,
+        ohCovered: r.fixedTotal > 0 ? effContribution >= r.fixedTotal : false,
+        floorSales: (typeof floorSales === 'number' && isFinite(floorSales)) ? +floorSales.toFixed(2) : null,
+        quotaSales: (typeof quotaSales === 'number' && isFinite(quotaSales)) ? +quotaSales.toFixed(2) : null,
         regime: 'fixed-b',
         computedAt: new Date().toISOString(),
         byUid: (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || ''
