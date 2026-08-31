@@ -1572,7 +1572,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   <div id="laborTimelineWrap">
   <div class="sec-title">🔒 Internal — Miscellaneous Costs</div>
   <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
-    Delivery, permits, crane rental, mobilization — cost them here. Each entry prices like everything else: cost × 2.50, rounded to ₱100. <strong>On quote ✓</strong> shows it as its own line on the quotation; unticked, its price is quietly distributed into the item prices you choose.
+    Delivery, permits, crane rental, subcontractors — cost them here. <strong>No markup on pass-through costs:</strong> each entry quotes at cost + 25% OH, rounded to ₱100. <strong>On quote ✓</strong> shows it as its own line on the quotation; unticked, its price is quietly distributed into the item prices you choose.
   </p>
   <div class="table-wrap" style="overflow-x:auto;">
   <table class="labor-tbl" id="miscTbl" style="min-width:640px;">
@@ -1580,7 +1580,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <tr>
         <th>Description</th>
         <th style="text-align:right;">Cost (₱)</th>
-        <th style="text-align:right;">OH &amp; MK (150%)</th>
+        <th style="text-align:right;">OH (25%)</th>
         <th style="text-align:right;">Quoted price (₱)</th>
         <th style="text-align:center;">On quote?</th>
         <th></th>
@@ -1697,7 +1697,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
         <li><strong>Pricing is automatic</strong> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
-        <li><strong>Miscellaneous costs</strong> — delivery, permits, crane rental go in the Internal misc table; each prices at cost × 2.50, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
+        <li><strong>Miscellaneous costs</strong> — delivery, permits, subcontractors go in the Internal misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
@@ -5048,10 +5048,14 @@ function _miscRates(){
   const ohP = Math.min(cs.ohMax, Math.max(cs.ohMin,
     (ohOverridePct!=null && Number.isFinite(ohOverridePct)) ? ohOverridePct : cs.baseOH));
   const total = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 1.50;
-  return { ohP, mkP: Math.max(0, total-ohP), mult: 1+total };
+  // Owner ruling 2026-08-31: misc entries carry NO markup — just a flat
+  // +25% OH on the cost (pass-through economics for subcontractors,
+  // delivery, permits). Settings-tunable via product_costs/_settings.miscOhPct.
+  const miscOh = (typeof cs.miscOhPct==='number') ? cs.miscOhPct : 0.25;
+  return { ohP, mkP: Math.max(0, total-ohP), mult: 1+total, miscOh, miscMult: 1+miscOh };
 }
 function miscQuotedOf(m){
-  return Math.round(((+m.cost||0) * _miscRates().mult)/100)*100;
+  return Math.round(((+m.cost||0) * _miscRates().miscMult)/100)*100;
 }
 function addMiscCost(){
   miscCosts.push({ id:'m'+Date.now().toString(36)+(_miscUidSeq++), desc:'', cost:0, reflect:true, distTo:[] });
@@ -5079,10 +5083,10 @@ function miscChanged(){
 }
 function renderMiscCosts(){
   const tbody = document.getElementById('miscTbody'); if(!tbody) return;
-  const load150 = _miscRates().mult - 1;
+  const miscOhP = _miscRates().miscOh;
   let tc=0, tl=0, tq=0;
   tbody.innerHTML = miscCosts.length ? miscCosts.map(m=>{
-    const cost=+m.cost||0, loadAmt=cost*load150, q=miscQuotedOf(m);
+    const cost=+m.cost||0, loadAmt=cost*miscOhP, q=miscQuotedOf(m);
     tc+=cost; tl+=loadAmt; tq+=q;
     const nDist = Array.isArray(m.distTo)?m.distTo.length:0;
     const distBtn = m.reflect ? '' :
@@ -5109,7 +5113,7 @@ function syncMiscItems(cost){
     items.forEach(it => {
       if (it.id==='MISCFEE') {
         const m = { id:'m'+Date.now().toString(36)+(_miscUidSeq++), desc: it.name||'Misc cost',
-          cost: +(((it.unitPrice||0)/_miscRates().mult).toFixed(2)), reflect:true, distTo:[] };
+          cost: +(((it.unitPrice||0)/_miscRates().miscMult).toFixed(2)), reflect:true, distTo:[] };
         it._miscId = m.id;
         miscCosts.push(m);
       }
@@ -5345,12 +5349,14 @@ function computeTrueCost(){
   const matWaste = materials*cs.wastePct;
   const labor = laborHrsTotal*cs.loadedLaborRate + laborPesosFallback + laborAssumedPesos;
   const consumables = materials*cs.consumablesPct; // 8% of materials (owner ruling 2026-08-31)
-  // Misc costs (delivery, permits…) are direct cost at face value — no
-  // waste/consumables/labor loadings, but OH & MK load on them like on
-  // everything else, so a reflected line (cost × 2.5) and a distributed
-  // share reconcile exactly with this aggregate.
+  // Owner ruling 2026-08-31: misc costs (delivery, subcontractors, permits)
+  // carry NO markup — only a flat +25% OH — so they stay OUT of the
+  // OH/MK-loaded base and are added back per-path below, using the same
+  // per-entry ₱100 rounding the lines use, so aggregate = Σ lines exactly.
   const miscCost = (typeof miscCosts!=='undefined' ? miscCosts : []).reduce((t,m)=>t+(+m.cost||0),0);
-  const direct = materials+matWaste+labor+consumables+miscCost;              // = FLOOR
+  const miscOhPctv = (typeof cs.miscOhPct==='number') ? cs.miscOhPct : 0.25;
+  const miscQuoted = (typeof miscCosts!=='undefined' ? miscCosts : []).reduce((t,m)=>t+Math.round(((+m.cost||0)*(1+miscOhPctv))/100)*100,0);
+  const direct = materials+matWaste+labor+consumables;              // items-only loadable base = items FLOOR
   const sizeF = sizeBandFactor(direct, cs.sizeBands);
   const pf = paceFactor();                                          // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B
   // COSTING-QB-UX-SPEC-2026-08-26 §3 — suggestedOhPct is exactly the old
@@ -5376,11 +5382,13 @@ function computeTrueCost(){
   const totalLoad = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 1.50;
   const mkPct = Math.max(0, totalLoad - ohPct);
   const mkAmt = direct*mkPct;
-  const target = trueCost + mkAmt;
+  const floorTotal = direct + miscCost;                       // absolute floor incl. misc at face value
+  const trueCostTotal = trueCost + miscCost*(1+miscOhPctv);   // OH covered on both paths
+  const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + misc ×1.25 (per-entry rounded)
   const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
-  const marginPct = sell>0 ? (sell-trueCost)/sell : 0;
+  const marginPct = sell>0 ? (sell-trueCostTotal)/sell : 0;
   return {
-    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost,
+    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost, miscQuoted, miscOhPctv, floorTotal, trueCostTotal,
     direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
     ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, marginPct,
     anyMissingCatalogCost, liveById, cs,
@@ -5443,7 +5451,7 @@ function computeMarginSummary(laborEst){
   // modal is closed). A 'change' event is dispatched so the Submit/File
   // button label (wired to 'change' at buildVerifyModal() time) stays in
   // sync without needing a full modal rebuild.
-  if (cost.sell < cost.direct) {
+  if (cost.sell < cost.floorTotal) {
     const rac=document.getElementById('reqApprovalCheck');
     if (rac && !rac.checked) { rac.checked=true; rac.dispatchEvent(new Event('change')); }
   }
@@ -5514,8 +5522,7 @@ function renderTrueCostPanelHtml(cost){
     <tr><td title="Why ${Math.round(cs.wastePct*100)}%: steel comes in fixed sheet and tube sizes — offcuts, kerf (the material the cut itself eats) and edge damage mean a job never uses 100% of bought stock. Steel-fab scrap normally runs 5–10%; ${Math.round(cs.wastePct*100)}% assumes tight cutting plans.">+ Waste (${Math.round(cs.wastePct*100)}%) ⓘ</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
     <tr><td title="Labor is a formula line — ${Math.round(((typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.80)*100)}% of materials cost — unless real crew-days or hours are entered on the lines, which then take over.">+ Labor (${laborLabel}) ⓘ</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
     <tr><td title="Why ${Math.round(cs.consumablesPct*100)}% of materials: welding rods and wire, cutting and flap discs, gas, drill bits and polish are burned in proportion to the steel processed — more sheets cut and welded means more consumables, regardless of how many days the job takes.">+ Consumables (${Math.round(cs.consumablesPct*100)}% of materials) ⓘ</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
-    ${cost.miscCost>0?`<tr><td>+ Misc costs (delivery, permits…)</td><td style="text-align:right;">${formatPeso(cost.miscCost)}</td></tr>`:''}
-    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
+    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT${cost.miscCost>0?' (items)':' = FLOOR'}</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
     <tr><td title="Option B — fixed-rate pricing (31 Aug 2026): OH is a flat ${Math.round(cs.baseOH*100)}% on direct cost — every job, every month, every size. The size and pace figures shown are advisory signals from the costing dashboard and no longer move the price.">+ OH (fixed ${Math.round(cs.baseOH*100)}% — Option B) <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">advisory: size ×${cost.sizeF.toFixed(2)} · ${paceChip}</span><br>
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
     <td style="text-align:right;vertical-align:top;">${formatPeso(cost.ohAmt)}</td></tr>
@@ -5523,7 +5530,9 @@ function renderTrueCostPanelHtml(cost){
     <tr><td title="MK (markup) loads on direct cost, exactly like OH — and the two always total ${Math.round(cost.totalLoad*100)}% of direct: raise one and the other gives way. The selling price is direct × ${(1+cost.totalLoad).toFixed(2)}, rounded per line to the nearest ₱100 — so of every selling peso, ${Math.round(100/(1+cost.totalLoad))}¢ is direct cost and the rest splits between OH and MK.">+ MK (${(cost.mkPct*100).toFixed(1)}% of direct — balances OH to ${Math.round(cost.totalLoad*100)}%) ⓘ<br>
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${mkControl}${mkNote}</span></td>
     <td style="text-align:right;vertical-align:top;">${formatPeso(cost.mkAmt)}</td></tr>
-    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING (direct × ${(1+cost.totalLoad).toFixed(2)})</td><td style="text-align:right;">${formatPeso(cost.target)}</td></tr>
+    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING${cost.miscCost>0?' (items × '+(1+cost.totalLoad).toFixed(2)+')':' (direct × '+(1+cost.totalLoad).toFixed(2)+')'}</td><td style="text-align:right;">${formatPeso(cost.target-cost.miscQuoted)}</td></tr>
+    ${cost.miscCost>0?`<tr><td title="Misc costs carry no markup — cost + ${Math.round(cost.miscOhPctv*100)}% OH, rounded per entry to ₱100 (pass-through economics for delivery, subcontractors, permits).">+ Misc costs (cost + ${Math.round(cost.miscOhPctv*100)}% OH, no MK) ⓘ</td><td style="text-align:right;">${formatPeso(cost.miscQuoted)}</td></tr>
+    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING (total)</td><td style="text-align:right;">${formatPeso(cost.target)}</td></tr>`:''}
   </tbody></table>`;
 
   const ladderCell=(label,val)=>`<div style="flex:1;min-width:96px;background:#fff5e0;border-radius:6px;padding:7px 8px;text-align:center;">
@@ -5531,20 +5540,20 @@ function renderTrueCostPanelHtml(cost){
     <div style="font-size:13px;font-weight:700;">${formatPeso(val)}</div>
   </div>`;
   const ladder=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-    ${ladderCell('Floor',cost.direct)}
-    ${ladderCell('True Cost',cost.trueCost)}
+    ${ladderCell('Floor',cost.floorTotal)}
+    ${ladderCell('True Cost',cost.trueCostTotal)}
     ${ladderCell(`Selling (OH+MK ${Math.round(cost.totalLoad*100)}%)`,cost.target)}
     ${ladderCell('Quoted (net)',cost.sell)}
   </div>`;
 
-  const belowFloor = cost.sell < cost.direct;
-  const belowTrueCost = !belowFloor && cost.sell < cost.trueCost;
+  const belowFloor = cost.sell < cost.floorTotal;
+  const belowTrueCost = !belowFloor && cost.sell < cost.trueCostTotal;
   const belowTarget = !belowFloor && !belowTrueCost && cost.sell < cost.target;
   const marginColor = belowFloor ? 'var(--red)' : belowTrueCost ? 'var(--orange)' : belowTarget ? 'var(--accent)' : 'var(--green)';
   const noCostBasis = cost.direct<=0 && items.length>0;
   const marginLine = noCostBasis
     ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;">No cost basis on these items yet — set Materials/Labor in the President's Product Database, or cost custom lines in this view, to see a real margin.</div>`
-    : `<div style="font-weight:700;color:${marginColor};">Margin at quoted price: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCost)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCost)/cost.direct*100:0).toFixed(1)}% of direct</div>`;
+    : `<div style="font-weight:700;color:${marginColor};">Margin at quoted price: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCostTotal)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCostTotal)/cost.direct*100:0).toFixed(1)}% of direct</div>`;
 
   const belowFloorNote = belowFloor
     ? `<div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600;">⚠️ Below floor — President approval required</div>`
@@ -5633,7 +5642,7 @@ function applyComputedPricing(cost){
   const addByUid = {};
   (typeof miscCosts!=='undefined' ? miscCosts : []).forEach(m => {
     if (m.reflect) return;
-    const Q = Math.round(((+m.cost||0)*mult)/100)*100;
+    const Q = miscQuotedOf(m);   // cost + 25% OH, no MK
     if (Q<=0 || !autos.length) return;
     let targets = (Array.isArray(m.distTo) && m.distTo.length)
       ? autos.filter(a => m.distTo.includes(a.item._uid)) : autos;
@@ -7265,8 +7274,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 10;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 11;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:11, date:'2026-08-31', items:[
+    'Miscellaneous costs carry no markup — each entry now quotes at cost + 25% OH, rounded to ₱100 (a ₱150,000 subcontractor quotes ₱187,500, not ₱375,000). The cost panel shows items and misc on their own lines, then SELLING (total).',
+  ]},
   { ver:10, date:'2026-08-31', items:[
     'The cost buildup now reads in order: + Waste 6% · + Labor 80% of materials · + Consumables 10%. Labor always applies at 80% unless real crew-days or hours are entered — a blank or zero entry no longer drops it to ₱0.',
   ]},
@@ -7336,7 +7348,7 @@ const TOUR_STEPS = [
  { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
    body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
-   body:'Delivery, permits, crane rental — cost them here and they price like everything else: cost × 2.50, rounded to ₱100. Ticked "On quote?" puts the entry on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
+   body:'Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
    body:'The engine room: materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
  { target:'#btnVerify', title:'Verify & File',
