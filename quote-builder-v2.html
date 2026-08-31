@@ -1565,37 +1565,41 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      Pure section reorder from its old spot right after Remarks — no logic
      change. ── -->
 <div class="int-panel" id="internalPanel" style="display:none;">
-  <!-- Labor & Timeline: internal staffing/day-rates — hidden in the partner portal -->
+  <!-- Miscellaneous costs (owner ruling 2026-08-31, replaces the labor &
+       timeline estimate): delivery, permits, rentals — anything outside the
+       per-item BOMs. Ticked rows land on the quotation as their own line;
+       unticked rows spread their quoted price into chosen item prices.
+       Hidden in the partner portal, same as the section it replaced. -->
   <div id="laborTimelineWrap">
-  <div class="sec-title">🔒 Internal — Labor &amp; Timeline Estimate</div>
+  <div class="sec-title">🔒 Internal — Miscellaneous Costs</div>
   <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
-    Labor hours are auto-estimated from product formulas. Adjust days/people per role below.
+    Delivery, permits, crane rental, mobilization — cost them here. Each entry prices like everything else: cost × 2.50, rounded to ₱100. <strong>On quote ✓</strong> shows it as its own line on the quotation; unticked, its price is quietly distributed into the item prices you choose.
   </p>
-
-  <table class="labor-tbl" id="laborTbl">
+  <div class="table-wrap" style="overflow-x:auto;">
+  <table class="labor-tbl" id="miscTbl" style="min-width:640px;">
     <thead>
       <tr>
-        <th>Role</th>
-        <th>Days</th>
-        <th>People</th>
-        <th>Day Rate (₱)</th>
-        <th>Total (₱)</th>
+        <th>Description</th>
+        <th style="text-align:right;">Cost (₱)</th>
+        <th style="text-align:right;">OH &amp; MK (150%)</th>
+        <th style="text-align:right;">Quoted price (₱)</th>
+        <th style="text-align:center;">On quote?</th>
+        <th></th>
       </tr>
     </thead>
-    <tbody id="laborTbody"></tbody>
+    <tbody id="miscTbody"></tbody>
     <tfoot>
-      <tr>
-        <td colspan="4" style="text-align:right;font-weight:700;">Total Labor Cost</td>
-        <td id="laborTotal" style="text-align:right;font-weight:700;">₱0</td>
+      <tr style="font-weight:700;background:#fff5e0;">
+        <td>Total</td>
+        <td id="miscTotCost" style="text-align:right;">₱0</td>
+        <td id="miscTotLoad" style="text-align:right;">₱0</td>
+        <td id="miscTotQuoted" style="text-align:right;">₱0</td>
+        <td colspan="2"></td>
       </tr>
     </tfoot>
   </table>
-
-  <div class="timeline-box" id="timelineBox">
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);margin-bottom:4px;">Timeline Estimate</div>
-    <strong id="timelineEstimate">—</strong>
-    <div id="timelineDetail" style="font-size:12px;color:var(--gray-dark);margin-top:4px;"></div>
   </div>
+  <button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:3px 10px;font-size:11.5px;margin-top:6px;" onclick="addMiscCost()">➕ Add cost</button>
   </div><!-- /laborTimelineWrap -->
 
   <!-- Cost of goods + margin (uses per-product Materials/Labor capital from the database) -->
@@ -1701,7 +1705,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
       <h4>The two views</h4>
       <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
-      <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even. The OH% and MK% dials live here — together they always total 150% of direct (30¢ + 30¢ of the selling peso), so raising one lowers the other.</p>
+      <p><strong>Internal</strong> — the editing workspace plus miscellaneous costs (delivery, permits…), cost &amp; margin and break-even. The OH% and MK% dials live here — together they always total 150% of direct (30¢ + 30¢ of the selling peso), so raising one lowers the other.</p>
       <p>The Internal view may be hidden depending on your account.</p>
 
       <h4>Good to know</h4>
@@ -1730,6 +1734,15 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="modal-hdr"><h3 id="bomModalTitle">🧮 BOM &amp; computation</h3><button class="modal-x" onclick="closeBomModal()">✕</button></div>
     <div class="modal-body" id="bomModalBody"></div>
     <div class="modal-footer"><button class="btn btn-green" onclick="closeBomModal()">Done</button></div>
+  </div>
+</div>
+
+<!-- Misc-cost distribution picker (owner ruling 2026-08-31) -->
+<div class="modal-overlay no-print" id="miscDistModal" style="display:none;z-index:2550;" onclick="if(event.target===this)closeMiscDistModal()">
+  <div class="modal-box" style="max-width:460px;" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3>→ Distribute cost into items</h3><button class="modal-x" onclick="closeMiscDistModal()">✕</button></div>
+    <div class="modal-body" id="miscDistBody"></div>
+    <div class="modal-footer"><button class="btn btn-green" onclick="closeMiscDistModal()">Done</button></div>
   </div>
 </div>
 
@@ -5015,30 +5028,152 @@ function onItemRowDrop(e,idx){
 // ═══════════════════════════════════════════════════════════════════
 //  LABOR & TIMELINE
 // ═══════════════════════════════════════════════════════════════════
-let laborState={};
-function buildLaborTable(){
-  const roles=DB.laborRoles||[];
-  const tbody=document.getElementById('laborTbody');
-  if(!laborState._init){
-    roles.forEach(r=>{laborState[r.id]={days:0,people:1,rate:r.ratePerDay};});
-    // Auto-estimate from items
-    autoEstimateLabor();
-    laborState._init=true;
-  }
-  let html='';
-  roles.forEach(r=>{
-    const s=laborState[r.id]||{days:0,people:1,rate:r.ratePerDay};
-    const total=(s.days||0)*(s.people||1)*(s.rate||0);
-    html+=`<tr>
-      <td>${r.label}</td>
-      <td><input type="number" min="0" step="0.5" value="${s.days||0}" onchange="updateLabor('${r.id}','days',this.value)"></td>
-      <td><input type="number" min="1" step="1" value="${s.people||1}" onchange="updateLabor('${r.id}','people',this.value)"></td>
-      <td style="text-align:right;">${formatPeso(s.rate||0)}/day</td>
-      <td style="text-align:right;">${formatPeso(total)}</td>
+let laborState={};   // legacy draft field, kept so old drafts resume cleanly
+
+// ═══ MISCELLANEOUS COSTS (owner ruling 2026-08-31) ═══════════════════════
+// miscCosts = [{id, desc, cost, reflect, distTo:[item _uid]}]. Quoted price
+// per entry = cost × (1 + OH% + MK%) rounded to ₱100 — the same rule as any
+// direct cost. reflect:true materializes the entry as a MISCFEE quote line
+// (syncMiscItems); reflect:false spreads its quoted price into the chosen
+// items' auto prices (applyComputedPricing phase 2).
+let miscCosts = [];
+let _miscUidSeq = 1;
+function ensureItemUids(){
+  items.forEach(it => { if (!it._uid) it._uid = 'u' + Date.now().toString(36) + (_miscUidSeq++); });
+}
+function _miscRates(){
+  const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
+  const ohP = Math.min(cs.ohMax, Math.max(cs.ohMin,
+    (ohOverridePct!=null && Number.isFinite(ohOverridePct)) ? ohOverridePct : cs.baseOH));
+  const total = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 1.50;
+  return { ohP, mkP: Math.max(0, total-ohP), mult: 1+total };
+}
+function miscQuotedOf(m){
+  return Math.round(((+m.cost||0) * _miscRates().mult)/100)*100;
+}
+function addMiscCost(){
+  miscCosts.push({ id:'m'+Date.now().toString(36)+(_miscUidSeq++), desc:'', cost:0, reflect:true, distTo:[] });
+  miscChanged();
+}
+function updateMiscField(id, field, val){
+  const m = miscCosts.find(x=>x.id===id); if(!m) return;
+  if (field==='cost') m.cost = parseFloat(val)||0;
+  else m.desc = val;
+  miscChanged();
+}
+function toggleMiscReflect(id){
+  const m = miscCosts.find(x=>x.id===id); if(!m) return;
+  m.reflect = !m.reflect;
+  miscChanged();
+}
+function removeMiscCost(id){
+  miscCosts = miscCosts.filter(x=>x.id!==id);
+  miscChanged();
+}
+function miscChanged(){
+  saveToStorage();
+  renderMiscCosts();
+  if (typeof currentView!=='undefined' && currentView==='internal') computeMarginSummary();
+}
+function renderMiscCosts(){
+  const tbody = document.getElementById('miscTbody'); if(!tbody) return;
+  const load150 = _miscRates().mult - 1;
+  let tc=0, tl=0, tq=0;
+  tbody.innerHTML = miscCosts.length ? miscCosts.map(m=>{
+    const cost=+m.cost||0, loadAmt=cost*load150, q=miscQuotedOf(m);
+    tc+=cost; tl+=loadAmt; tq+=q;
+    const nDist = Array.isArray(m.distTo)?m.distTo.length:0;
+    const distBtn = m.reflect ? '' :
+      `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:1px 8px;font-size:10.5px;" onclick="openMiscDistModal('${m.id}')" title="Choose which quoted items quietly absorb this cost">→ distribute${nDist?` (${nDist})`:' (all)'}</button>`;
+    return `<tr>
+      <td><input type="text" class="cell-unit" placeholder="e.g. Delivery — Manila" value="${attrEsc(m.desc||'')}" onchange="updateMiscField('${m.id}','desc',this.value)" style="width:100%;min-width:150px;"></td>
+      <td style="text-align:right;"><input type="number" min="0" step="0.01" class="cell-unit" value="${m.cost||''}" placeholder="0" onchange="updateMiscField('${m.id}','cost',this.value)" style="width:100px;text-align:right;"></td>
+      <td style="text-align:right;">${formatPeso(loadAmt)}</td>
+      <td style="text-align:right;font-weight:700;">${formatPeso(q)}</td>
+      <td style="text-align:center;"><input type="checkbox" ${m.reflect?'checked':''} onchange="toggleMiscReflect('${m.id}')" title="Ticked: shows as its own line on the quotation. Unticked: distributed into item prices."> ${distBtn}</td>
+      <td><button type="button" class="del-btn" onclick="removeMiscCost('${m.id}')" title="Remove">✕</button></td>
     </tr>`;
+  }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--gray-dark);padding:8px;">No miscellaneous costs — add delivery, permits or rentals with ➕ Add cost.</td></tr>`;
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=formatPeso(v); };
+  set('miscTotCost',tc); set('miscTotLoad',tl); set('miscTotQuoted',tq);
+}
+// Materializes ticked entries as MISCFEE quote lines and removes stale ones.
+// A reopened filed quote has MISCFEE lines but an empty table — those are
+// ADOPTED back into miscCosts instead of being deleted.
+function syncMiscItems(cost){
+  if (PARTNER_MODE) return false;
+  let changed = false;
+  if (!miscCosts.length) {
+    items.forEach(it => {
+      if (it.id==='MISCFEE') {
+        const m = { id:'m'+Date.now().toString(36)+(_miscUidSeq++), desc: it.name||'Misc cost',
+          cost: +(((it.unitPrice||0)/_miscRates().mult).toFixed(2)), reflect:true, distTo:[] };
+        it._miscId = m.id;
+        miscCosts.push(m);
+      }
+    });
+    if (miscCosts.length) renderMiscCosts();
+  }
+  const byId = {}; miscCosts.forEach(m => { byId[m.id]=m; });
+  for (let i=items.length-1; i>=0; i--){
+    const it = items[i];
+    if (it.id==='MISCFEE' && (!it._miscId || !byId[it._miscId] || !byId[it._miscId].reflect)) { items.splice(i,1); changed = true; }
+  }
+  miscCosts.forEach(m => {
+    if (!m.reflect) return;
+    const q = miscQuotedOf(m);
+    let it = items.find(x => x.id==='MISCFEE' && x._miscId===m.id);
+    if (!it) {
+      it = { id:'MISCFEE', _miscId:m.id, category:'miscellaneous', name:m.desc||'Misc cost', dims:'', specs:[],
+             qty:1, unit:'lot', unitPrice:q, amount:q, leadTime:'', laborHours:null, formulaType:'fixed', priceManual:true };
+      items.push(it); changed = true;
+    } else if (it.name!==(m.desc||'Misc cost') || it.unitPrice!==q) {
+      it.name = m.desc||'Misc cost'; it.unitPrice = q; it.amount = q*(it.qty||1); changed = true;
+    }
   });
-  tbody.innerHTML=html;
-  computeLaborTotal();
+  return changed;
+}
+// Distribution picker modal
+let miscDistId = null;
+function openMiscDistModal(id){
+  miscDistId = id;
+  renderMiscDistModal();
+  const m = document.getElementById('miscDistModal'); if (m) m.style.display='flex';
+}
+function closeMiscDistModal(){
+  miscDistId = null;
+  const m = document.getElementById('miscDistModal'); if (m) m.style.display='none';
+}
+function renderMiscDistModal(){
+  const m = miscCosts.find(x=>x.id===miscDistId); if(!m) { closeMiscDistModal(); return; }
+  ensureItemUids();
+  const body = document.getElementById('miscDistBody'); if(!body) return;
+  const rows = items.filter(it => it.id!=='MISCFEE').map(it=>{
+    const manual = !!it.priceManual;
+    const on = Array.isArray(m.distTo) && m.distTo.includes(it._uid);
+    return `<label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;${manual?'opacity:.5;':''}">
+      <input type="checkbox" ${on?'checked':''} ${manual?'disabled':''} onchange="toggleMiscDistItem('${it._uid}')">
+      <span>${txtEsc(it.name||'')}${manual?' <em style="font-size:10.5px;">(manual price — cannot absorb)</em>':''}</span>
+      <span style="margin-left:auto;font-family:inherit;">${formatPeso(it.amount||0)}</span>
+    </label>`;
+  }).join('');
+  body.innerHTML = `<p style="font-size:12px;color:var(--gray-dark);margin-bottom:8px;">Tick the items that quietly absorb <strong>${txtEsc(m.desc||'this cost')}</strong> (${formatPeso(miscQuotedOf(m))}), split in proportion to their value. Nothing ticked = spread over every auto-priced item.</p>${rows || '<div style="font-size:12px;color:var(--gray-dark);">No items on the quote yet.</div>'}`;
+}
+function toggleMiscDistItem(uid){
+  const m = miscCosts.find(x=>x.id===miscDistId); if(!m) return;
+  if (!Array.isArray(m.distTo)) m.distTo = [];
+  const i = m.distTo.indexOf(uid);
+  if (i>=0) m.distTo.splice(i,1); else m.distTo.push(uid);
+  saveToStorage(); renderMiscCosts();
+  if (typeof currentView!=='undefined' && currentView==='internal') computeMarginSummary();
+}
+
+function buildLaborTable(){
+  // Labor & timeline estimate retired (owner ruling 2026-08-31) — this alias
+  // keeps the old call sites (setView/renderItems) repainting the misc-costs
+  // table that replaced it.
+  renderMiscCosts();
+  if (typeof currentView!=='undefined' && currentView==='internal') computeMarginSummary();
 }
 
 function autoEstimateLabor(){
@@ -5196,6 +5331,7 @@ function computeTrueCost(){
   const laborPct = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
   let materials=0, laborHrsTotal=0, laborPesosFallback=0, laborAssumedPesos=0, anyMissingCatalogCost=false;
   items.forEach(item=>{
+    if (item.id==='MISCFEE') return;   // misc entries carry their own cost below — never material/labor loadings
     const qty = item.qty||1;
     const basis = itemCostBasis(item, liveById);
     materials += basis.mat*qty;
@@ -5207,7 +5343,12 @@ function computeTrueCost(){
   const matWaste = materials*cs.wastePct;
   const labor = laborHrsTotal*cs.loadedLaborRate + laborPesosFallback + laborAssumedPesos;
   const consumables = materials*cs.consumablesPct; // 8% of materials (owner ruling 2026-08-31)
-  const direct = materials+matWaste+labor+consumables;              // = FLOOR
+  // Misc costs (delivery, permits…) are direct cost at face value — no
+  // waste/consumables/labor loadings, but OH & MK load on them like on
+  // everything else, so a reflected line (cost × 2.5) and a distributed
+  // share reconcile exactly with this aggregate.
+  const miscCost = (typeof miscCosts!=='undefined' ? miscCosts : []).reduce((t,m)=>t+(+m.cost||0),0);
+  const direct = materials+matWaste+labor+consumables+miscCost;              // = FLOOR
   const sizeF = sizeBandFactor(direct, cs.sizeBands);
   const pf = paceFactor();                                          // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B
   // COSTING-QB-UX-SPEC-2026-08-26 §3 — suggestedOhPct is exactly the old
@@ -5237,7 +5378,7 @@ function computeTrueCost(){
   const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
   const marginPct = sell>0 ? (sell-trueCost)/sell : 0;
   return {
-    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables,
+    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost,
     direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
     ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, marginPct,
     anyMissingCatalogCost, liveById, cs,
@@ -5265,6 +5406,8 @@ function computeMarginSummary(laborEst){
   // INTO the quote. If any costed line's price just changed, repaint the
   // items/totals first — renderItems() re-enters here once and the second
   // pass is a no-op (₱100 rounding is stable), so this cannot loop.
+  ensureItemUids();
+  if (syncMiscItems(cost)) { saveToStorage(); renderItems(); return; }
   if (applyComputedPricing(cost)) { saveToStorage(); renderItems(); return; }
   const cs = cost.cs;
 
@@ -5274,7 +5417,7 @@ function computeMarginSummary(laborEst){
   // would otherwise read as "this item genuinely costs nothing."
   const piBody=document.getElementById('perItemBody');
   if(piBody){
-    piBody.innerHTML = items.length ? items.map(i=>{
+    piBody.innerHTML = items.length ? items.filter(i=>i.id!=='MISCFEE').map(i=>{
       const qty=i.qty||1;
       const basis=itemCostBasis(i, cost.liveById);
       const mat=basis.mat*qty;
@@ -5369,6 +5512,7 @@ function renderTrueCostPanelHtml(cost){
     <tr><td title="Why ${Math.round(cs.wastePct*100)}%: steel comes in fixed sheet and tube sizes — offcuts, kerf (the material the cut itself eats) and edge damage mean a job never uses 100% of bought stock. Steel-fab scrap normally runs 5–10%; ${Math.round(cs.wastePct*100)}% assumes tight cutting plans.">+ Waste (${Math.round(cs.wastePct*100)}%) ⓘ</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
     <tr><td>+ Labor (${laborLabel})</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
     <tr><td title="Why ${Math.round(cs.consumablesPct*100)}% of materials: welding rods and wire, cutting and flap discs, gas, drill bits and polish are burned in proportion to the steel processed — more sheets cut and welded means more consumables, regardless of how many days the job takes.">+ Consumables (${Math.round(cs.consumablesPct*100)}% of materials) ⓘ</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
+    ${cost.miscCost>0?`<tr><td>+ Misc costs (delivery, permits…)</td><td style="text-align:right;">${formatPeso(cost.miscCost)}</td></tr>`:''}
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
     <tr><td title="Option B — fixed-rate pricing (31 Aug 2026): OH is a flat ${Math.round(cs.baseOH*100)}% on direct cost — every job, every month, every size. The size and pace figures shown are advisory signals from the costing dashboard and no longer move the price.">+ OH (fixed ${Math.round(cs.baseOH*100)}% — Option B) <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">advisory: size ×${cost.sizeF.toFixed(2)} · ${paceChip}</span><br>
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
@@ -5468,19 +5612,41 @@ function resetPricesToComputed(){
 function applyComputedPricing(cost){
   if (PARTNER_MODE || !cost) return false;
   let changed = false;
+  const laborPctA = (typeof cost.cs.laborPctOfMaterials==='number') ? cost.cs.laborPctOfMaterials : 0.80;
+  const mult = 1 + cost.ohPct + cost.mkPct;
+  // Phase 1 — each auto-priceable line's own computed selling (per unit).
+  const autos = [];
   items.forEach(item => {
-    if (item.priceManual) return;
+    if (item.id==='MISCFEE' || item.priceManual) return;
     const qty = item.qty||1;
     const basis = itemCostBasis(item, cost.liveById);
     if (!basis.hasBasis) return;
-    const laborPctA = (typeof cost.cs.laborPctOfMaterials==='number') ? cost.cs.laborPctOfMaterials : 0.80;
     const directPerUnit = basis.mat*(1 + cost.cs.wastePct + cost.cs.consumablesPct)
       + (basis.hrs>0 ? basis.hrs*cost.cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*laborPctA : basis.capLaborPesos));
     if (directPerUnit <= 0) return;
-    const auto = Math.round(directPerUnit*(1 + cost.ohPct + cost.mkPct)/100)*100;
-    if (auto > 0 && item.unitPrice !== auto) {
-      item.unitPrice = auto;
-      item.amount = auto*qty;
+    autos.push({ item, qty, perUnit: directPerUnit*mult });
+  });
+  // Phase 2 — every unticked misc entry's quoted price is spread over its
+  // chosen items (proportional to line value); no choice = all auto lines.
+  const addByUid = {};
+  (typeof miscCosts!=='undefined' ? miscCosts : []).forEach(m => {
+    if (m.reflect) return;
+    const Q = Math.round(((+m.cost||0)*mult)/100)*100;
+    if (Q<=0 || !autos.length) return;
+    let targets = (Array.isArray(m.distTo) && m.distTo.length)
+      ? autos.filter(a => m.distTo.includes(a.item._uid)) : autos;
+    if (!targets.length) targets = autos;
+    const totalVal = targets.reduce((t,a)=>t+a.perUnit*a.qty,0);
+    if (totalVal<=0) return;
+    targets.forEach(a => {
+      addByUid[a.item._uid] = (addByUid[a.item._uid]||0) + Q*(a.perUnit*a.qty/totalVal)/a.qty;
+    });
+  });
+  autos.forEach(a => {
+    const auto = Math.round((a.perUnit + (addByUid[a.item._uid]||0))/100)*100;
+    if (auto > 0 && a.item.unitPrice !== auto) {
+      a.item.unitPrice = auto;
+      a.item.amount = auto*a.qty;
       changed = true;
     }
   });
@@ -5509,6 +5675,7 @@ function renderOhPerItemTableHtml(cost){
   }
   const needsCostingChip='<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">needs costing</span>';
   const rows=items.map(item=>{
+    if(item.id==='MISCFEE') return '';   // fees are priced in the misc table, not costed here
     const qty=item.qty||1;
     const basis=itemCostBasis(item, cost.liveById);
     const unitPrice = qty ? (item.amount||0)/qty : (item.unitPrice||0);
@@ -6046,6 +6213,7 @@ function _flushSaveToStorage(){
     localStorage.setItem('bkqb_pricing',JSON.stringify(getPricingFields()));
     localStorage.setItem('bkqb_photos',JSON.stringify(quotePhotos.map(({dataUrl,...p})=>p)));
     localStorage.setItem('bkqb_labor',JSON.stringify(laborState));
+    localStorage.setItem('bkqb_misc',JSON.stringify(miscCosts));
   }catch(e){}
 }
 // Flush any pending debounced write before the tab/iframe might be torn down —
@@ -6199,6 +6367,7 @@ function captureDraftSnapshot(){
       termsContent:JSON.parse(localStorage.getItem('bkqb_terms_content')||'{}'),
       termsEnabled:JSON.parse(localStorage.getItem('bkqb_terms_enabled')||'{}'),
       laborState:JSON.parse(localStorage.getItem('bkqb_labor')||'{}'),
+      misc:JSON.parse(localStorage.getItem('bkqb_misc')||'[]'),
       photos:JSON.parse(localStorage.getItem('bkqb_photos')||'[]'),
       status:localStorage.getItem('bkqb_status')||'draft',
       filedAt:localStorage.getItem('bkqb_filedAt')||'',
@@ -6224,6 +6393,7 @@ function resumeDraft(){
     termsContent=_draftSnapshot.termsContent||{};
     termsEnabled=_draftSnapshot.termsEnabled||{};
     laborState=_draftSnapshot.laborState||{};
+    miscCosts=Array.isArray(_draftSnapshot.misc)?_draftSnapshot.misc:[];
     quotePhotos=_draftSnapshot.photos||[];
     quoteStatus=_draftSnapshot.status||'draft';
     filedAt=_draftSnapshot.filedAt||'';
@@ -6260,7 +6430,7 @@ function clearForm(){
   if(!confirm('Start a new quote? Current data will be cleared.')) return;
   items=[];termsContent={};quotePhotos=[];
   termsEnabled={tc_completion:true,tc_payment:true,tc_warranty:true,tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true};
-  laborState={};quoteStatus='draft';waiveFlags={};filedAt='';
+  laborState={};miscCosts=[];quoteStatus='draft';waiveFlags={};filedAt='';
   // COSTING-QB-UX-SPEC-2026-08-26 §3 — a brand-new quote starts with the OH%
   // un-overridden (follows the live suggested value) and the per-item table
   // collapsed, same as any other quote-level state reset above.
@@ -6657,7 +6827,7 @@ function buildQuotePayload(){
   // summary those BOM rows produce (syncCustomItemMaterialsSpec() →
   // item.specEdit) is NOT stripped — it carries no prices and already prints
   // on the quotation by design, same as any other spec line.
-  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, ...rest }) => rest);
+  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, ...rest }) => rest);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed
@@ -7093,8 +7263,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 6;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 7;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:7, date:'2026-08-31', items:[
+    'The labor & timeline estimate is replaced by a Miscellaneous Costs table — delivery, permits, crane rental go here. Each entry prices like everything else (cost × 2.50, rounded to ₱100).',
+    'Tick "On quote?" and the entry shows as its own line on the quotation; untick it and its price is quietly distributed into the item prices you choose (→ distribute).',
+  ]},
   { ver:6, date:'2026-08-31', items:[
     '🧮 BOM & computation now opens as a popup window — the items table stays clean, and the popup follows your edits live.',
     'The Admin view is retired — the builder now has just Client and Internal.',
