@@ -2040,8 +2040,9 @@ let MATERIAL_PRICE_LIST = [];
 // page reload, "New" quote, or opening/reopening any quote all naturally
 // (or explicitly, see clearForm()/loadEditableState()) drop back to null,
 // meaning "follow the live suggested value." null = un-overridden (the
-// suggested base×pace×size value keeps auto-updating with live pace, same
-// as before this spec); a number = the rep's manual override, in the 0..1
+// suggested value is the flat base OH% since the Option B fixed-rate ruling
+// of 2026-08-31 — pace/size no longer price); a number = the rep's manual
+// override, in the 0..1
 // fraction form computeTrueCost() already uses internally (e.g. 0.345 for
 // "34.5%"), pre-clamped to [ohMin, ohMax] by onOhOverrideChange() below.
 let ohOverridePct = null;
@@ -5101,7 +5102,12 @@ function computeTrueCost(){
   // OH% input itself doesn't render for a partner session — see
   // renderTrueCostPanelHtml()), so a partner's ohPct is always the live
   // suggested value, exactly like before this spec.
-  const suggestedOhPct = Math.min(cs.ohMax, Math.max(cs.ohMin, cs.baseOH*pf.pace*sizeF));
+  // OPTION B — fixed-rate pricing (owner ruling 2026-08-31): the suggested
+  // OH% is the flat base rate. pace/sizeF are still computed above but are
+  // ADVISORY display signals only — they no longer touch the price, so the
+  // same specs price the same in any month at any job size. The clamped
+  // manual override below remains the one sanctioned deviation path.
+  const suggestedOhPct = Math.min(cs.ohMax, Math.max(cs.ohMin, cs.baseOH));
   const ohOverridden = ohOverridePct!=null && Number.isFinite(ohOverridePct);
   const ohPct = Math.min(cs.ohMax, Math.max(cs.ohMin, ohOverridden ? ohOverridePct : suggestedOhPct));
   const ohAmt = direct*ohPct;
@@ -5220,7 +5226,7 @@ function renderTrueCostPanelHtml(cost){
     <tr><td>+ Labor (${laborLabel})</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
     <tr><td title="Why ${Math.round(cs.consumablesPct*100)}% of materials: welding rods and wire, cutting and flap discs, gas, drill bits and polish are burned in proportion to the steel processed — more sheets cut and welded means more consumables, regardless of how many days the job takes.">+ Consumables (${Math.round(cs.consumablesPct*100)}% of materials) ⓘ</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
-    <tr><td>+ OH (base ${Math.round(cs.baseOH*100)}% × size ${cost.sizeF.toFixed(2)}, ${paceChip})<br>
+    <tr><td title="Option B — fixed-rate pricing (31 Aug 2026): OH is a flat ${Math.round(cs.baseOH*100)}% on direct cost — every job, every month, every size. The size and pace figures shown are advisory signals from the costing dashboard and no longer move the price.">+ OH (fixed ${Math.round(cs.baseOH*100)}% — Option B) <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">advisory: size ×${cost.sizeF.toFixed(2)} · ${paceChip}</span><br>
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
     <td style="text-align:right;vertical-align:top;">${formatPeso(cost.ohAmt)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>TRUE COST</td><td style="text-align:right;">${formatPeso(cost.trueCost)}</td></tr>
