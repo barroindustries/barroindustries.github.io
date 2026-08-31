@@ -1696,7 +1696,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing is automatic</strong> — direct cost = materials + 6% waste + 10% consumables + labor (entered, or +80% of materials cost when none is), and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Pricing is automatic</strong> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> — delivery, permits, crane rental go in the Internal misc table; each prices at cost × 2.50, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
@@ -3715,12 +3715,10 @@ function customCostParts(item, idx){
   // comes from. Rendered only when the gate is open and a basis exists.
   const matUnit = hasBom ? bomTotal : (Number(item.costMat)||0);
   const laborPctG = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
-  const laborAssumedHere = item.costLaborDays===undefined && item.costHrs===undefined;
-  const laborUnit = item.costLaborDays!==undefined
-    ? (Number(item.costLaborDays)||0)*dayRate
-    : (item.costHrs!==undefined
-        ? (Number(item.costHrs)||0)*(cs.loadedLaborRate||COSTING_DEFAULTS.loadedLaborRate)
-        : matUnit*laborPctG);   // owner ruling 2026-08-31: nothing entered → 80% of materials
+  const laborExplicit = (Number(item.costLaborDays)||0)*dayRate
+    || (Number(item.costHrs)||0)*(cs.loadedLaborRate||COSTING_DEFAULTS.loadedLaborRate);
+  const laborAssumedHere = !(laborExplicit>0);
+  const laborUnit = laborAssumedHere ? matUnit*laborPctG : laborExplicit;   // 80% of materials unless real time is entered
   const wasteUnit = matUnit*cs.wastePct, consUnit = matUnit*cs.consumablesPct;
   const directUnit = matUnit+wasteUnit+consUnit+laborUnit;
   const ohP = Math.min(cs.ohMax, Math.max(cs.ohMin,
@@ -3734,8 +3732,8 @@ function customCostParts(item, idx){
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--gray-dark);margin-bottom:3px;">Computation (per unit)</div>
       ${compRow('Materials'+(hasBom?' (BOM)':' (lump sum)'),matUnit)}
       ${compRow('+ Waste '+Math.round(cs.wastePct*100)+'%',wasteUnit)}
+      ${compRow('+ Labor '+(laborAssumedHere?Math.round(laborPctG*100)+'% of materials (enter days to override)':'(entered)'),laborUnit)}
       ${compRow('+ Consumables '+Math.round(cs.consumablesPct*100)+'% of materials',consUnit)}
-      ${compRow('+ Labor'+(laborAssumedHere?' (added: +'+Math.round(laborPctG*100)+'% of materials cost — enter days for real time)':''),laborUnit)}
       ${compRow('DIRECT = floor',directUnit,1)}
       ${compRow('+ OH '+(ohP*100).toFixed(1)+'%',ohUnit)}
       ${compRow('+ MK '+(mkP*100).toFixed(1)+'%',mkUnit)}
@@ -5296,10 +5294,10 @@ function itemCostBasis(item, liveById){
     const hasDays = item.costLaborDays!==undefined;
     const hrs = (!hasDays && item.costHrs!==undefined) ? (item.costHrs||0) : 0;
     const capLaborPesos = hasDays ? (item.costLaborDays||0)*dayRate : 0;
-    // Owner ruling 2026-08-31: nothing entered for labor at all → the line
-    // assumes labor at cs.laborPctOfMaterials (80%) of its materials. A
-    // deliberately typed 0 days/hrs is honored as real zero, not assumed.
-    const laborAbsent = !hasDays && item.costHrs===undefined;
+    // Owner ruling 2026-08-31 (v2): labor is a formula line — 80% of
+    // materials — unless a POSITIVE crew-days/hours entry overrides it. A
+    // typed zero no longer suppresses the assumption.
+    const laborAbsent = !(hrs>0) && !(capLaborPesos>0);
     return { mat, hrs, capLaborPesos, laborAbsent, hasBasis:customLineHasMaterialsBasis(item), isCustom:true };
   }
   const live = liveById.get(item.id);
@@ -5462,7 +5460,7 @@ function renderTrueCostPanelHtml(cost){
   const laborParts=[];
   if (cost.laborHrsTotal>0) laborParts.push(`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate}`);
   if (cost.laborPesosFallback>0) laborParts.push('capital labor');
-  if (cost.laborAssumedPesos>0) laborParts.push(`added: +${laborPctLbl}% of materials cost — none entered`);
+  if (cost.laborAssumedPesos>0) laborParts.push(`${laborPctLbl}% of materials`);
   const laborLabel = laborParts.length ? laborParts.join(' + ') : 'no labor basis yet';
 
   // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — pace chip. Live (fresh
@@ -5514,7 +5512,7 @@ function renderTrueCostPanelHtml(cost){
   const buildup=`<table class="labor-tbl" style="margin-bottom:10px;"><tbody>
     <tr><td>Materials</td><td style="text-align:right;">${formatPeso(cost.materials)}</td></tr>
     <tr><td title="Why ${Math.round(cs.wastePct*100)}%: steel comes in fixed sheet and tube sizes — offcuts, kerf (the material the cut itself eats) and edge damage mean a job never uses 100% of bought stock. Steel-fab scrap normally runs 5–10%; ${Math.round(cs.wastePct*100)}% assumes tight cutting plans.">+ Waste (${Math.round(cs.wastePct*100)}%) ⓘ</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
-    <tr><td>+ Labor (${laborLabel})</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
+    <tr><td title="Labor is a formula line — ${Math.round(((typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.80)*100)}% of materials cost — unless real crew-days or hours are entered on the lines, which then take over.">+ Labor (${laborLabel}) ⓘ</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
     <tr><td title="Why ${Math.round(cs.consumablesPct*100)}% of materials: welding rods and wire, cutting and flap discs, gas, drill bits and polish are burned in proportion to the steel processed — more sheets cut and welded means more consumables, regardless of how many days the job takes.">+ Consumables (${Math.round(cs.consumablesPct*100)}% of materials) ⓘ</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
     ${cost.miscCost>0?`<tr><td>+ Misc costs (delivery, permits…)</td><td style="text-align:right;">${formatPeso(cost.miscCost)}</td></tr>`:''}
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT = FLOOR</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
@@ -7267,8 +7265,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 9;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 10;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:10, date:'2026-08-31', items:[
+    'The cost buildup now reads in order: + Waste 6% · + Labor 80% of materials · + Consumables 10%. Labor always applies at 80% unless real crew-days or hours are entered — a blank or zero entry no longer drops it to ₱0.',
+  ]},
   { ver:9, date:'2026-08-31', items:[
     '📦 The product database opens right from the builder — the button beside the database status bar. Add or edit products and capital costs, then ← Back to the quote.',
     '⚡ Quick Quote is retired — the builder itself is the one way to make a quote.',
@@ -7337,7 +7338,7 @@ const TOUR_STEPS = [
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    body:'Delivery, permits, crane rental — cost them here and they price like everything else: cost × 2.50, rounded to ₱100. Ticked "On quote?" puts the entry on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
-   body:'The engine room: materials + 6% waste + 10% consumables + labor (entered, or +80% of materials cost when none is) = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
+   body:'The engine room: materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
  { target:'#btnShare', title:'Print, Agent Copy & Share',
