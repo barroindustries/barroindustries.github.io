@@ -5764,7 +5764,9 @@ function renderTrueCostPanelHtml(cost){
     ${hasMisc?row('+ Additional costs (typed)',cost.miscQuoted,'sub','Delivery/Installation/Other at cost + 25% OH; Additional labor at the full × 2.50 — see the Additional costs table above'):''}
     ${row('SELLING (total)',cost.target,'grand')}
     <div class="calc-row grand quoted"><span>QUOTED (net) ${deltaChip}</span><span class="peso">${formatPeso(cost.sell)}</span></div>
-    <div class="calc-row sub" style="border-bottom:none;"><span title="Never quote below true cost without President approval; below the floor is a cash loss.">Floors: true cost ${formatPeso(cost.trueCostTotal)} · absolute ${formatPeso(cost.floorTotal)}</span><span></span></div>
+    <div class="calc-row total" style="color:var(--red);" title="The deepest total you may offer a client: every peso of markup given away, overhead and direct cost fully intact. The discount cap enforces this automatically — no discount can go below it."><span>🛑 Maximum allowable offer</span><span class="peso">${formatPeso(cost.trueCostTotal)}</span></div>
+    <div class="calc-row sub" style="border-bottom:none;"><span>${(()=>{const ref=cost.sell>0?cost.sell:cost.target; const off=Math.max(0,ref-cost.trueCostTotal); return off>0?`= room to give up to −${formatPeso(off)} (${(off/ref*100).toFixed(1)}% off the ${cost.sell>0?'quoted':'computed'} ${formatPeso(ref)})`:'no discount room — already at or below the maximum offer';})()}</span><span></span></div>
+    <div class="calc-row sub" style="border-bottom:none;"><span title="Never quote below true cost without President approval; below the absolute floor is a cash loss.">Floors: true cost ${formatPeso(cost.trueCostTotal)} · absolute ${formatPeso(cost.floorTotal)}</span><span></span></div>
     <div class="calc-row sub" style="border-bottom:none;"><span title="Minimum 2 six-day weeks + 3 working days per ₱20,000 of materials; Sundays never counted.">Timeline: ${12+3*Math.floor(cost.materials/20000)} working days (no Sundays) ≈ ${((12+3*Math.floor(cost.materials/20000))/6).toFixed(1)} weeks</span><span></span></div>
     ${marginLine}
     ${belowFloorNote}
@@ -7525,8 +7527,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 23;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 24;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:24, date:'2026-09-01', items:[
+    'The calculator now shows the 🛑 Maximum allowable offer — the deepest total you may offer (true cost: all markup given away, overhead intact) with the discount room in pesos and percent. The discount cap enforces it automatically.',
+  ]},
   { ver:23, date:'2026-09-01', items:[
     'The auto timeline can be overridden — and cutting it by more than a third of the standard makes the quote a ⚡ SPECIAL RUSH / PRIORITY ORDER: +2% on the grand total, charged before VAT and counted as additional overhead (never markup).',
   ]},
