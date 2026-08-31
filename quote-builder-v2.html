@@ -6890,8 +6890,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 1;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 2;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:2, date:'2026-08-31', items:[
+    'Fixed-rate pricing: overhead is now a flat 25% on every quote — the same item prices the same in any month, at any size. The size and pace figures still show on the OH row, but only as information.',
+    'Custom-item labor now uses the real crew cost — ₱6,667 per crew-day (₱40,000 per 6-day week). Labor-day prices on custom lines went up accordingly.',
+  ]},
   { ver:1, date:'2026-08-31', items:[
     '❓ Help & guided demo — this guide, the Help button, and the welcome banner.',
   ]},
