@@ -1587,6 +1587,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <th style="text-align:right;">Cost (₱)</th>
         <th style="text-align:right;">Load</th>
         <th style="text-align:right;">Quoted price (₱)</th>
+        <th style="text-align:center;" title="Free of charge — shown on the quotation as FREE; the cost still counts against our margin">FOC</th>
         <th style="text-align:center;">On quote?</th>
         <th></th>
       </tr>
@@ -1598,7 +1599,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <td id="miscTotCost" style="text-align:right;">₱0</td>
         <td id="miscTotLoad" style="text-align:right;">₱0</td>
         <td id="miscTotQuoted" style="text-align:right;">₱0</td>
-        <td colspan="2"></td>
+        <td colspan="3"></td>
       </tr>
     </tfoot>
   </table>
@@ -4207,16 +4208,19 @@ function renderItems(){
   // the way to the grand total. One shared factor keeps every line
   // proportional to the quote-level discount.
   let _discFactor=0;
-  try{ const _t=computeTotals(); if(_t.discountAmt>0 && _t.preDiscount>0) _discFactor=_t.discountAmt/_t.preDiscount; }catch(e){}
+  try{ const _t=computeTotals(); if(_t.discountAmt>0 && _t.discBase>0) _discFactor=_t.discountAmt/_t.discBase; }catch(e){}
   const tbody=document.getElementById('itemsTbody');
   if(!items.length){
     tbody.innerHTML='<tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
     renderTotals(); renderQuotePhotos(); return;
   }
 
-  // Group by category
+  // Group by category. MISCFEE lines are NOT table rows any more (owner
+  // 2026-09-01) — they present as ladder rows after the Subtotal instead
+  // (computeTotals().miscLines → totalsLines); they stay in items[] for
+  // persistence/adoption compatibility with filed quotes.
   const catMap={};
-  items.forEach((item,idx)=>{(catMap[item.category]=catMap[item.category]||[]).push({item,idx});});
+  items.forEach((item,idx)=>{ if(item.id==='MISCFEE') return; (catMap[item.category]=catMap[item.category]||[]).push({item,idx});});
 
   let html=''; let globalN=1;
   // In options mode each section is a standalone offer, so its line numbering
@@ -4317,11 +4321,20 @@ let _inComputeTotals=false;
 function computeTotals(subset){
   const _prevIn=_inComputeTotals; _inComputeTotals=true;   // computeTrueCost skips its totals lookup while we run
   const list=subset||items;
-  const subtotal=list.reduce((s,i)=>s+i.amount,0);
+  // Owner ruling 2026-09-01: additional costs (MISCFEE lines) present AFTER
+  // the Subtotal on the document — so the Subtotal is the QUOTED ITEMS only,
+  // each fee gets its own ladder row (FOC entries show as FREE), and the
+  // percent discount applies to the items base, never to the pass-through
+  // charges (they carry only +25% OH — a discount there would eat overhead).
+  const feeItems=list.filter(i=>i.id==='MISCFEE');
+  const goodsItems=list.filter(i=>i.id!=='MISCFEE');
+  const subtotal=goodsItems.reduce((s,i)=>s+i.amount,0);
+  const miscFeeTotal=feeItems.reduce((s,i)=>s+(+i.amount||0),0);
+  const miscLines=feeItems.map(i=>({name:i.name||'Additional cost', amt:+i.amount||0, foc:!!i._foc}));
   // PRICING-TIERS-SPEC.md §2.3 — NEW. With VOLUME_TIERS=[] (no tiers
   // configured) volumeBreakFor always returns null, so this reduces to 0 and
   // preDiscount below is float-exact-identical to subtotal+diAdded (§1.4).
-  const volumeBreakTotal=list.reduce((s,i)=>{
+  const volumeBreakTotal=goodsItems.reduce((s,i)=>{
     const b=volumeBreakFor(i); return s+(b?b.amt:0);
   },0);
   const consts=DB.constants||{};
@@ -4342,9 +4355,12 @@ function computeTotals(subset){
   // PRICING-TIERS-SPEC.md §2.3 — CHANGED. was: subtotal+diAdded. VAT and
   // commission below are UNCHANGED TEXT — they derive from preDiscount, so
   // both land on post-break figures automatically.
-  const preDiscount=subtotal-volumeBreakTotal+diAdded;
+  const preDiscount=subtotal+miscFeeTotal-volumeBreakTotal+diAdded;
+  // Percent discounts bite the ITEMS base only (owner 2026-09-01); the legacy
+  // flat-amount mode keeps its old whole-quote clamp for reopened quotes.
+  const discBase=Math.max(0,subtotal-volumeBreakTotal);
   // Discount applied BELOW items, before VAT — same position for both modes.
-  let discountAmt=discMode==='amount' ? Math.max(0,Math.min(discAmtCustom,preDiscount)) : preDiscount*(discPct/100);
+  let discountAmt=discMode==='amount' ? Math.max(0,Math.min(discAmtCustom,preDiscount)) : discBase*(discPct/100);
   // Cap at TRUE COST (owner ruling 2026-09-01): the discount may consume the
   // markup, never the overhead or the direct cost. Whole-quote path only —
   // options subsets are presentation slices of the same capped quote.
@@ -4375,7 +4391,7 @@ function computeTotals(subset){
   const commissionAmt=commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100);
 
   _inComputeTotals=_prevIn;
-  return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
+  return {subtotal,miscFeeTotal,miscLines,discBase,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4435,8 +4451,13 @@ function renderOptionsBasisPicker(opts){
 function totalsLines(t,grandLabel){
   const out=[];
   out.push({label:'Subtotal', amt: (t.discountAmt>0
-    ? `<span class="disc-old">${formatPeso(t.subtotal)}</span> <span class="disc-new">${formatPeso(t.subtotal*(1-(t.discountAmt/(t.preDiscount||t.subtotal||1))))}</span>`
+    ? `<span class="disc-old">${formatPeso(t.subtotal)}</span> <span class="disc-new">${formatPeso(t.subtotal*(1-(t.discountAmt/(t.discBase||t.preDiscount||t.subtotal||1))))}</span>`
     : formatPeso(t.subtotal))});
+  // Owner ruling 2026-09-01: additional costs land AFTER the Subtotal, one
+  // row each; FOC entries print FREE (the cost stays ours internally).
+  (t.miscLines||[]).forEach(f=>{
+    out.push({label:txtEsc(f.name)+(f.foc?' — FOC':''), amt: f.foc?'FREE':formatPeso(f.amt)});
+  });
   if(t.discountCapped) out.push({label:'<span style="font-size:10px;color:var(--orange);">Discount capped — a discount never goes below true cost (it may eat the markup, never the overhead)</span>', amt:'', cls:'discount'});
   // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
   // D&I. With t.volumeBreakTotal===0 (no tiers configured) this renders
@@ -4476,7 +4497,9 @@ function renderTotals(){
   const opts=optOn?computeOptions():null;
   const useOpts=optOn&&opts&&opts.length>0;
   const t=useOpts?basisTotals():computeTotals();
-  const _iq=items.reduce((s,i)=>s+(Number(i.qty)||0),0);
+  // Count quoted GOODS only — MISCFEE ladder lines are charges, not items.
+  const _goods=items.filter(i=>i.id!=='MISCFEE');
+  const _iq=_goods.reduce((s,i)=>s+(Number(i.qty)||0),0);
   let html='';
   if(useOpts){
     // Deliberately NO figures here: each option's ladder is printed inside the
@@ -4487,7 +4510,7 @@ function renderTotals(){
   } else {
     html+=totalsRowsHtml(t,'GRAND TOTAL','grand');
   }
-  html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${items.length} line item${items.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}${useOpts?` across ${opts.length} option${opts.length===1?'':'s'}`:''}</td></tr>`;
+  html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${_goods.length} line item${_goods.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}${useOpts?` across ${opts.length} option${opts.length===1?'':'s'}`:''}</td></tr>`;
   html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}. All fabricated dimensions ±5mm tolerance.</td></tr>`;
   const commLabel=t.commMode==='amount' ? 'Referral/Agent Commission (flat)' : `Referral/Agent Commission (${t.commPct}%)`;
   if(useOpts){
@@ -5233,7 +5256,14 @@ function miscMultOf(m){
   return (m && m.type==='labor') ? r.mult : r.miscMult;
 }
 function miscQuotedOf(m){
+  if (m && m.foc) return 0;   // FOC (owner 2026-09-01): shown on the quote as FREE, charged nothing
   return Math.round(((+m.cost||0) * miscMultOf(m))/100)*100;
+}
+function toggleMiscFoc(id){
+  const m = miscCosts.find(x=>x.id===id); if(!m) return;
+  m.foc = !m.foc;
+  if (m.foc) m.reflect = true;   // a freebie nobody sees is just a cost — force it onto the quote
+  miscChanged();
 }
 function addMiscCost(){
   miscCosts.push({ id:'m'+Date.now().toString(36)+(_miscUidSeq++), type:'delivery', desc:'', cost:0, reflect:true, distTo:[] });
@@ -5279,12 +5309,13 @@ function renderMiscCosts(){
       </select></td>
       <td><input type="text" class="cell-unit" placeholder="${attrEsc(MISC_TYPE_LABEL[ty])} — details" value="${attrEsc(m.desc||'')}" onchange="updateMiscField('${m.id}','desc',this.value)" style="width:100%;min-width:130px;"></td>
       <td style="text-align:right;"><input type="number" min="0" step="0.01" class="cell-unit" value="${m.cost||''}" placeholder="0" onchange="updateMiscField('${m.id}','cost',this.value)" style="width:100px;text-align:right;"></td>
-      <td style="text-align:right;">${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${ty==='labor'?'OH+MK 150%':'OH 25%'}</span></td>
-      <td style="text-align:right;font-weight:700;">${formatPeso(q)}</td>
-      <td style="text-align:center;"><input type="checkbox" ${m.reflect?'checked':''} onchange="toggleMiscReflect('${m.id}')" title="Ticked: shows as its own line on the quotation. Unticked: distributed into item prices."> ${distBtn}</td>
+      <td style="text-align:right;">${m.foc?'<span style="color:var(--gray-dark);">—</span>':`${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${ty==='labor'?'OH+MK 150%':'OH 25%'}</span>`}</td>
+      <td style="text-align:right;font-weight:700;">${m.foc?'<span style="color:var(--green);">FREE</span>':formatPeso(q)}</td>
+      <td style="text-align:center;"><input type="checkbox" ${m.foc?'checked':''} onchange="toggleMiscFoc('${m.id}')" title="Free of charge — shown on the quotation as FREE after the Subtotal; the cost still counts against our margin"></td>
+      <td style="text-align:center;"><input type="checkbox" ${m.reflect?'checked':''} ${m.foc?'disabled':''} onchange="toggleMiscReflect('${m.id}')" title="Ticked: shows as its own line after the Subtotal on the quotation. Unticked: distributed into item prices."> ${m.foc?'':distBtn}</td>
       <td><button type="button" class="del-btn" onclick="removeMiscCost('${m.id}')" title="Remove">✕</button></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--gray-dark);padding:8px;">No additional costs — add delivery, installation or extra labor with ➕ Add cost.</td></tr>`;
+  }).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--gray-dark);padding:8px;">No additional costs — add delivery, installation or extra labor with ➕ Add cost.</td></tr>`;
   const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=formatPeso(v); };
   set('miscTotCost',tc); set('miscTotLoad',tl); set('miscTotQuoted',tq);
 }
@@ -5308,7 +5339,7 @@ function syncMiscItems(cost){
   // Desired presented lines (owner ruling 2026-09-01): reflected Delivery +
   // Installation entries COMBINE into one line; labor/other stay per-entry.
   const defs=[];
-  const din = miscCosts.filter(m=>m.reflect && ((m.type||'other')==='delivery' || (m.type||'other')==='installation'));
+  const din = miscCosts.filter(m=>m.reflect && !m.foc && ((m.type||'other')==='delivery' || (m.type||'other')==='installation'));
   if (din.length){
     const q = din.reduce((t,m)=>t+miscQuotedOf(m),0);
     const hasD=din.some(m=>(m.type||'other')==='delivery'), hasI=din.some(m=>(m.type||'other')==='installation');
@@ -5317,6 +5348,7 @@ function syncMiscItems(cost){
   miscCosts.forEach(m=>{
     if (!m.reflect) return;
     const ty=m.type||'other';
+    if (m.foc) { defs.push({ key:m.id, name:m.desc||MISC_TYPE_LABEL[ty]||'Misc cost', quoted:0, foc:true }); return; }
     if (ty==='delivery' || ty==='installation') return;
     defs.push({ key:m.id, name:m.desc||MISC_TYPE_LABEL[ty]||'Misc cost', quoted:miscQuotedOf(m) });
   });
@@ -5331,9 +5363,10 @@ function syncMiscItems(cost){
       it = { id:'MISCFEE', _miscId:d.key, category:'miscellaneous', name:d.name, dims:'', specs:[],
              qty:1, unit:'lot', unitPrice:d.quoted, amount:d.quoted, leadTime:'', laborHours:null, formulaType:'fixed', priceManual:true };
       items.push(it); changed = true;
-    } else if (it.name!==d.name || it.unitPrice!==d.quoted) {
+    } else if (it.name!==d.name || it.unitPrice!==d.quoted || !!it._foc!==!!d.foc) {
       it.name = d.name; it.unitPrice = d.quoted; it.amount = d.quoted*(it.qty||1); changed = true;
     }
+    it._foc = !!d.foc;
   });
   return changed;
 }
@@ -5602,8 +5635,8 @@ function computeTrueCost(){
     const c = +m.cost||0;
     const isLabor = (m.type||'other')==='labor';
     const mult = isLabor ? (1+ohPct+mkPct) : (1+miscOhPctv);
-    miscQuoted += Math.round((c*mult)/100)*100;
-    miscTrueAdd += c*(1 + (isLabor ? ohPct : miscOhPctv));
+    miscQuoted += m.foc ? 0 : Math.round((c*mult)/100)*100;   // FOC: shown FREE, charged nothing
+    miscTrueAdd += c*(1 + (isLabor ? ohPct : miscOhPctv));    // …but the cost (and its OH share) is still ours
   });
   const trueCostTotal = trueCost + miscTrueAdd;               // OH covered on both paths
   const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + typed misc (per-entry rounded)
@@ -7327,8 +7360,13 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 28;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 29;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:29, date:'2026-09-01', items:[
+    'Additional costs now print AFTER the Subtotal — the Subtotal is the quoted items only, then each shown charge (Delivery & Installation, etc.) gets its own line before the discount and grand total.',
+    'FOC — a new tick in the Additional costs table: the charge prints on the quotation as FREE (great for "free delivery") while the cost still counts against our margin internally.',
+    'Discounts now apply to the quoted items only — every item line shows the crossed-out old price with the discounted one beside it, and pass-through charges (cost + 25% OH) are never discounted.',
+  ]},
   { ver:28, date:'2026-09-01', items:[
     'Markup now flexes with the month — as a DISCOUNT, never a price change: list prices stay at the fixed ×2.50; when the month is behind pace the builder suggests (and pre-selects on new quotes) a deeper discount so we give better offers, and on a strong month it holds the full price.',
     'Discounts come only from the allowed ladder: 5, 8, 10, 13, 15, 18, 20, 23, 25, 28, 30%. 30% is the maximum — it equals true cost exactly (the whole markup given away, overhead still covered). Old quotes with other values still open unchanged.',
