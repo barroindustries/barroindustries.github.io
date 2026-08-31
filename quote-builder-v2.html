@@ -1009,7 +1009,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
     <button class="btn btn-outline" id="btnPrint" onclick="doPrint()">🖨 Print/PDF</button>
     <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
-    <button class="btn btn-accent" id="btnShare" onclick="doShare()">🔗 Share</button>
   </div>
 </div>
 
@@ -1031,7 +1030,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <button class="mtb-row" onclick="mtbRun('clearForm')">🗑 New</button>
     <button class="mtb-row" onclick="mtbRun('doPrint')">🖨 Print / PDF</button>
     <button class="mtb-row" id="mtbAgentPrint" onclick="mtbRun('doPrintAgent')" style="color:var(--purple);">🧾 Agent Copy</button>
-    <button class="mtb-row" onclick="mtbRun('doShare')">🔗 Share</button>
     <div class="mtb-divider"></div>
     <div class="mtb-seg-group" id="mtbCoGroup">
       <div class="mtb-seg-label">Company</div>
@@ -1690,7 +1688,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
-        <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
+        <li><strong>Print</strong> — Print/PDF for the client, Agent Copy (confidential, with commission). A quotation is always shared as the printed/PDF document.</li>
       </ol>
 
       <h4>The three tabs</h4>
@@ -1702,7 +1700,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <ul>
         <li>📝 Your work <strong>auto-saves as a draft</strong>; an unfiled quote offers to resume next time.</li>
         <li>🧾 <strong>Agent Copy</strong> is confidential — never send it to the client.</li>
-        <li>🔗 <strong>Share</strong> requires the quote to be filed first — it will prompt you.</li>
         <li>💯 <strong>Prices end in two zeros</strong> — each computed line rounds to the nearest ₱100 (₱85,500, ₱7,500); the markup quietly absorbs the difference. "↺ re-apply computed prices" in the cost panel clears any hand-typed overrides.</li>
         <li>📦 <strong>Pricelist</strong> — the button beside the database status opens the full catalog in a popup: scroll or search, tap a product and it lands on the quote. Adding or editing products happens in the Inventory department's Product Pricelist, not in the builder.</li>
       </ul>
@@ -2680,7 +2677,7 @@ function toggleQuickMode(){
 // ═══════════════════════════════════════════════════════════════════
 //  MOBILE COMPACT HEADER (≤768px) — hamburger sheet
 //  Every row/segmented button below calls the SAME global function the
-//  desktop topbar buttons call (clearForm/doPrint/doPrintAgent/doShare/
+//  desktop topbar buttons call (clearForm/doPrint/doPrintAgent/
 //  toggleQuickMode/setCompany/setView) — no business logic is duplicated
 //  here, this is purely an alternate trigger + a compact summary pill.
 //  mtbSync() never decides gating on its own; it mirrors the live DOM
@@ -6005,32 +6002,9 @@ function renderTerms(){
 function toggleTerm(id,cb){termsEnabled[id]=cb.checked;renderTerms();saveToStorage();}
 function saveTerm(id,el){termsContent[id]=el.innerHTML;saveToStorage();}
 
-// ═══════════════════════════════════════════════════════════════════
-//  SHARE
-// ═══════════════════════════════════════════════════════════════════
-function shareQuote(){
-  const state={
-    items,
-    clientName:document.getElementById('clientName').value,
-    clientCompany:document.getElementById('clientCompany').value,
-    clientAddress:document.getElementById('clientAddress').value,
-    clientPhone:document.getElementById('clientPhone').value,
-    clientEmail:document.getElementById('clientEmail').value,
-    quoteNo:document.getElementById('quoteNo').value,
-    salesperson:document.getElementById('salesperson').value,
-    quoteDate:document.getElementById('quoteDate').value,
-    purpose:document.getElementById('purpose').value,
-    subject:document.getElementById('subject').value,
-    termsContent,termsEnabled,currentCo,
-    pricing:getPricingFields()
-  };
-  const json=JSON.stringify(state);
-  const compressed=btoa(encodeURIComponent(json));
-  const url=location.href.split('#')[0]+'#quote='+compressed;
-  if(url.length>100000){showToast('Quote too large to share via URL — use Print/PDF instead.','error');return;}
-  navigator.clipboard.writeText(url).then(()=>showToast('🔗 Share link copied to clipboard!'))
-    .catch(()=>prompt('Copy this link:',url));
-}
+// Share-link CREATION removed 2026-09-01 (owner: "it must always be printed
+// to share") — the #quote= hash LOADER further below is kept so links that
+// were already sent out keep opening read-only.
 
 // ═══════════════════════════════════════════════════════════════════
 //  PHOTOS (reference / item photos — see specs/quote-builder-photos-spec.md)
@@ -7227,14 +7201,6 @@ function doPrintAgent(){
   },800);
 }
 
-function doShare(){
-  if(quoteStatus!=='filed'){
-    showToast('Please file this quote before sharing — tap "Verify & File" first.','error');
-    doVerifyAndFile(); return;
-  }
-  shareQuote();
-}
-
 // ═══════════════════════════════════════════════════════════════════
 //  HELPERS
 // ═══════════════════════════════════════════════════════════════════
@@ -7315,8 +7281,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 25;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 26;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:26, date:'2026-09-01', items:[
+    'The 🔗 Share button is gone — a quotation is always shared as the printed/PDF document (Print/PDF, or Agent Copy internally). Links that were already sent out still open.',
+  ]},
   { ver:25, date:'2026-09-01', items:[
     '📦 The Product Database button is now a Pricelist — scroll or search the whole catalog in a popup and tap a product to add it straight to the quote. Adding or editing products moved to the Inventory department\'s Product Pricelist screen.',
     'The "Recently used" chip row above the category tabs is gone — the pricelist and search cover it.',
@@ -7447,9 +7416,9 @@ const TOUR_STEPS = [
  { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
- { target:'#btnShare', title:'Print, Agent Copy & Share',
-   body:'Print/PDF produces the client document. Agent Copy prints a confidential internal version with commission details. Share creates a client link — the quote must be filed first.' },
+   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official.' },
+ { target:'#btnPrint', title:'Print & Agent Copy',
+   body:'Print/PDF produces the client document — the ONLY way a quotation is shared. Agent Copy prints a confidential internal version with commission details.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
    body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here. Partners never see this button.' },
  { title:'That\'s the whole flow 🎉',
