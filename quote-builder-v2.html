@@ -718,6 +718,25 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   #lhPrintHeader{display:block!important;}
 }
 
+/* ── CALCULATOR — Internal redesign (owner ruling 2026-08-31): one surface,
+     the build waterfall + a per-line experiment table ── */
+.calc-grid{display:grid;grid-template-columns:minmax(330px,440px) 1fr;gap:14px;align-items:start;}
+@media(max-width:900px){.calc-grid{grid-template-columns:1fr;}}
+.calc-card{background:#fffdf7;border:1.5px solid #f0c060;border-radius:10px;padding:12px 14px;}
+.calc-card-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);margin-bottom:6px;}
+.calc-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 2px;font-size:13px;border-bottom:1px dashed #f0e2c0;}
+.calc-row.sub{color:var(--gray-dark);}
+.calc-row.sub>span:first-child{padding-left:10px;}
+.calc-row.total{font-weight:700;border-top:2px solid #f0c060;border-bottom:none;margin-top:2px;padding-top:6px;}
+.calc-row.grand{font-weight:800;font-size:15px;border-top:2px solid var(--dark-blue);border-bottom:none;margin-top:4px;padding-top:6px;}
+.calc-row.quoted{border-top:none;}
+.calc-row .peso{font-variant-numeric:tabular-nums;white-space:nowrap;}
+.calc-note{font-size:10px;font-weight:400;font-style:normal;color:var(--gray-dark);display:inline-block;}
+.calc-note a{color:var(--mid-blue);font-weight:700;text-decoration:none;}
+.calc-dial{width:64px;text-align:right;border:1.5px dashed var(--orange);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;}
+.calc-price{width:100px;text-align:right;border:1.5px dashed var(--mid-blue);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;}
+.exp-tbl td,.exp-tbl th{white-space:nowrap;}
+
 /* Quick Quote wizard (v12 WS31) */
 /* Scoped to #internalWorkspace — COSTING-QB-UX-SPEC-2026-08-26 §1: this used
    to be a bare `.body-quick .section` before #qbDocSheet existed, so it never
@@ -1603,22 +1622,14 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
   <!-- Cost of goods + margin (uses per-product Materials/Labor capital from the database) -->
   <div id="costMarginWrap">
-  <div class="sec-title" style="margin-top:14px;">💰 Cost &amp; Margin (Internal)</div>
-  <!-- COSTING-PHASE1-SPEC-2026-08-26 §2 — static shadow-mode label (doesn't
-       depend on any computed value, so it's plain HTML, not re-rendered on
-       every computeMarginSummary() pass). -->
-  <span class="ms-chip shadow" title="Reference only — filing, pricing, and totals are untouched by this panel.">SHADOW — reference only, does not change quote prices</span>
+  <div class="sec-title" style="margin-top:14px;">🧮 Calculator (Internal)</div>
+  <!-- Internal redesign (owner ruling 2026-08-31): the cost surface is ONE
+       calculator — the build waterfall + a per-line experiment table. It is
+       LIVE: computed prices flow onto the quote. -->
+  <span class="ms-chip" style="background:#2e7d32;color:#fff;" title="This panel computes the quote — every costed line's price comes from here, live. Type any price to experiment; the MK column shows what your price really gives.">LIVE — this calculator prices the quote</span>
   <p style="font-size:11px;color:var(--gray-dark);margin:6px 0 8px;">
-    Materials &amp; per-unit labor pull from each product's <em>capital cost</em> in the database (live where available). Edit them in the President's Product Database.
+    Materials come from each line's BOM or the product's capital cost (📦 Product Database edits them). The build adds waste, labor and consumables, the dials load OH &amp; MK, and the result lands on the quotation — rounded to ₱100. Type any price in the experiment table to override a line.
   </p>
-
-  <!-- Per-item capital + labor breakdown -->
-  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin-bottom:4px;">Capital &amp; Labor per Item</div>
-  <table class="labor-tbl" id="perItemTbl" style="margin-bottom:12px;">
-    <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Capital ₱</th><th style="text-align:right;">Labor ₱</th><th style="text-align:right;">Total ₱</th></tr></thead>
-    <tbody id="perItemBody"></tbody>
-    <tfoot><tr style="font-weight:700;background:#fff5e0;"><td colspan="2">Totals</td><td id="piMatTotal" style="text-align:right;">₱0</td><td id="piLabTotal" style="text-align:right;">₱0</td><td id="piGrand" style="text-align:right;">₱0</td></tr></tfoot>
-  </table>
 
   <!-- COSTING-PHASE1-SPEC-2026-08-26 §2 — v2 true-cost buildup/ladder/margin
        panel. Was a static <table> of fixed <tr id="mi*"> rows; now fully
@@ -1705,7 +1716,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
       <h4>The two views</h4>
       <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
-      <p><strong>Internal</strong> — the editing workspace plus miscellaneous costs (delivery, permits…), cost &amp; margin and break-even. The OH% and MK% dials live here — together they always total 150% of direct (30¢ + 30¢ of the selling peso), so raising one lowers the other.</p>
+      <p><strong>Internal</strong> — the editing workspace plus the calculator: the build waterfall, the OH% and MK% dials (together always 150% of direct), the misc-costs table, and a per-line experiment table with editable prices.</p>
       <p>The Internal view may be hidden depending on your account.</p>
 
       <h4>Good to know</h4>
@@ -5421,27 +5432,8 @@ function computeMarginSummary(laborEst){
   if (applyComputedPricing(cost)) { saveToStorage(); renderItems(); return; }
   const cs = cost.cs;
 
-  // Per-item capital + labor breakdown — same table as before, now sourced
-  // from the same live-product_costs-first basis as the buildup below.
-  // Flags a catalog item with zero cost data instead of a silent ₱0/₱0 that
-  // would otherwise read as "this item genuinely costs nothing."
-  const piBody=document.getElementById('perItemBody');
-  if(piBody){
-    piBody.innerHTML = items.length ? items.filter(i=>i.id!=='MISCFEE').map(i=>{
-      const qty=i.qty||1;
-      const basis=itemCostBasis(i, cost.liveById);
-      const mat=basis.mat*qty;
-      const labPct=(typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.70;
-      const lab=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*labPct : basis.capLaborPesos))*qty;
-      const noBasisNote=(!basis.isCustom && !basis.hasBasis)
-        ? '<div style="font-size:10px;color:var(--gray-dark);font-style:italic;">no cost basis on this item</div>' : '';
-      return `<tr><td style="font-size:12px;">${txtEsc(i.name||'')}${noBasisNote}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
-    }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-dark);padding:8px;">Add items to see the capital &amp; labor breakdown.</td></tr>';
-    const pm=document.getElementById('piMatTotal'); if(pm) pm.textContent=formatPeso(cost.materials);
-    const pl=document.getElementById('piLabTotal'); if(pl) pl.textContent=formatPeso(cost.labor);
-    const pg=document.getElementById('piGrand'); if(pg) pg.textContent=formatPeso(cost.materials+cost.labor);
-  }
-
+  // The old separate Capital & Labor table is retired — the calculator's
+  // experiment table (renderTrueCostPanelHtml) carries per-line figures now.
   wrap.innerHTML = renderTrueCostPanelHtml(cost);
 
   // Below-floor auto-tick — §2: "auto-tick #reqApprovalCheck if present and
@@ -5464,87 +5456,33 @@ function computeMarginSummary(laborEst){
 // guard of its own — its one caller is already gated above.
 function renderTrueCostPanelHtml(cost){
   const cs=cost.cs;
-  const laborPctLbl = Math.round(((typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.70)*100);
+  // ── the CALCULATOR (Internal redesign, owner ruling 2026-08-31) ─────────
+  // One surface, two cards: the build waterfall (materials → direct → dials
+  // → selling → quoted) and a per-line experiment table with editable
+  // prices. All figures come from the one `cost` object, so the two cards
+  // can never disagree with each other or with the quote.
+  const laborPctLbl = Math.round(((typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.80)*100);
   const laborParts=[];
   if (cost.laborHrsTotal>0) laborParts.push(`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate}`);
-  if (cost.laborPesosFallback>0) laborParts.push('capital labor');
+  if (cost.laborPesosFallback>0) laborParts.push('crew-days entered');
   if (cost.laborAssumedPesos>0) laborParts.push(`${laborPctLbl}% of materials`);
-  const laborLabel = laborParts.length ? laborParts.join(' + ') : 'no labor basis yet';
+  const laborLabel = laborParts.length ? laborParts.join(' + ') : 'no basis yet';
+  const paceChip = cost.paceLive ? `pace ×${cost.pace.toFixed(3)}` : 'pace —';
 
-  // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — pace chip. Live (fresh
-  // ≤7-day product_costs/_pace doc) shows the published multiplier + when it
-  // was computed; stale/absent keeps the original Phase 1 "pace —" text
-  // byte-identical. Same tooltip either way per spec.
-  const paceChip = cost.paceLive
-    ? `<span title="published by the Analytics costing dashboard">pace ×${cost.pace.toFixed(3)} · as of ${fmtShortDate(new Date(cost.paceComputedAt))}</span>`
-    : `<span title="published by the Analytics costing dashboard">pace —</span>`;
-
-  // COSTING-QB-UX-SPEC-2026-08-26 §3 — the OH line is now an editable percent
-  // input (internal staff + BS partner sessions view/compute; only non-BS
-  // PARTNER_MODE — i.e. no partner session ever reaches an editable OH% at
-  // all here, since GENERIC_PARTNER never calls this function in the first
-  // place — renders plain text). BS gets read-only OH% text, same
-  // cost-entry-carve-out principle as the rest of this panel: BS views,
-  // internal decides. onchange (not oninput) so typing a digit doesn't
-  // self-destruct the field mid-keystroke — wrap.innerHTML is fully replaced
-  // on every computeMarginSummary() pass (see the comment above #marginTbl in
-  // the HTML), same reason the milestone editor above uses its own node.
   const ohMinPct=cs.ohMin*100, ohMaxPct=cs.ohMax*100;
   const ohPctVal=cost.ohPct*100, ohSuggestedVal=cost.suggestedOhPct*100;
   const ohControl = PARTNER_MODE
     ? `<strong>${ohPctVal.toFixed(1)}%</strong>`
-    : `<input type="number" id="ohOverrideInput" min="${ohMinPct}" max="${ohMaxPct}" step="0.1"
-         value="${ohPctVal.toFixed(1)}" onchange="onOhOverrideChange(this.value)"
-         title="Override the OH%. Clamped to ${ohMinPct.toFixed(0)}–${ohMaxPct.toFixed(0)}%."
-         style="width:62px;text-align:right;border:1.5px dashed var(--orange);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;">%`;
-  // Always shows "suggested X% · reset" beside the control (COSTING-QB-UX-SPEC
-  // §3) — reset is a harmless no-op when nothing is overridden yet.
-  const ohSuggestedNote = PARTNER_MODE ? ''
-    : ` <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">suggested ${ohSuggestedVal.toFixed(1)}% · <a href="javascript:void(0)" onclick="resetOhOverride()" style="color:var(--mid-blue);font-weight:700;text-decoration:none;">reset</a></span>`;
-
-  // OPTION B v2 (owner ruling 2026-08-31) — MK% input. MK loads on DIRECT
-  // like OH, and the two always total cs.totalLoadPct (50%): the MK input is
-  // the other handle on the same split, so committing an MK% just sets OH%
-  // to the balance and re-renders.
+    : `<input type="number" id="ohOverrideInput" min="${ohMinPct}" max="${ohMaxPct}" step="0.5" value="${ohPctVal.toFixed(1)}" onchange="onOhOverrideChange(this.value)" title="Override the OH%. Clamped ${ohMinPct.toFixed(0)}–${ohMaxPct.toFixed(0)}%; MK adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
   const mkMinPct=Math.max(0,(cost.totalLoad-cs.ohMax))*100, mkMaxPct=(cost.totalLoad-cs.ohMin)*100;
   const mkPctVal=cost.mkPct*100;
   const mkControl = PARTNER_MODE
     ? `<strong>${mkPctVal.toFixed(1)}%</strong>`
-    : `<input type="number" id="mkOverrideInput" min="${mkMinPct.toFixed(0)}" max="${mkMaxPct.toFixed(0)}" step="0.1"
-         value="${mkPctVal.toFixed(1)}" onchange="onMkOverrideChange(this.value)"
-         title="Override the MK%. OH adjusts so OH + MK always total ${Math.round(cost.totalLoad*100)}%."
-         style="width:62px;text-align:right;border:1.5px dashed var(--orange);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;">%`;
-  const mkNote = PARTNER_MODE ? ''
-    : ` <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">OH+MK = ${Math.round(cost.totalLoad*100)}% · <a href="javascript:void(0)" onclick="resetPricesToComputed()" style="color:var(--mid-blue);font-weight:700;text-decoration:none;" title="Clear hand-typed prices — every costed line goes back to the computed selling price (rounded to ₱100)">↺ re-apply computed prices</a></span>`;
+    : `<input type="number" id="mkOverrideInput" min="${mkMinPct.toFixed(0)}" max="${mkMaxPct.toFixed(0)}" step="0.5" value="${mkPctVal.toFixed(1)}" onchange="onMkOverrideChange(this.value)" title="Override the MK%. OH adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
 
-  const buildup=`<table class="labor-tbl" style="margin-bottom:10px;"><tbody>
-    <tr><td>Materials</td><td style="text-align:right;">${formatPeso(cost.materials)}</td></tr>
-    <tr><td title="Why ${Math.round(cs.wastePct*100)}%: steel comes in fixed sheet and tube sizes — offcuts, kerf (the material the cut itself eats) and edge damage mean a job never uses 100% of bought stock. Steel-fab scrap normally runs 5–10%; ${Math.round(cs.wastePct*100)}% assumes tight cutting plans.">+ Waste (${Math.round(cs.wastePct*100)}%) ⓘ</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
-    <tr><td title="Labor is a formula line — ${Math.round(((typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.80)*100)}% of materials cost — unless real crew-days or hours are entered on the lines, which then take over.">+ Labor (${laborLabel}) ⓘ</td><td style="text-align:right;">${formatPeso(cost.labor)}</td></tr>
-    <tr><td title="Why ${Math.round(cs.consumablesPct*100)}% of materials: welding rods and wire, cutting and flap discs, gas, drill bits and polish are burned in proportion to the steel processed — more sheets cut and welded means more consumables, regardless of how many days the job takes.">+ Consumables (${Math.round(cs.consumablesPct*100)}% of materials) ⓘ</td><td style="text-align:right;">${formatPeso(cost.consumables)}</td></tr>
-    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>DIRECT${cost.miscCost>0?' (items)':' = FLOOR'}</td><td style="text-align:right;">${formatPeso(cost.direct)}</td></tr>
-    <tr><td title="Option B — fixed-rate pricing (31 Aug 2026): OH is a flat ${Math.round(cs.baseOH*100)}% on direct cost — every job, every month, every size. The size and pace figures shown are advisory signals from the costing dashboard and no longer move the price.">+ OH (fixed ${Math.round(cs.baseOH*100)}% — Option B) <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">advisory: size ×${cost.sizeF.toFixed(2)} · ${paceChip}</span><br>
-      <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
-    <td style="text-align:right;vertical-align:top;">${formatPeso(cost.ohAmt)}</td></tr>
-    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>TRUE COST</td><td style="text-align:right;">${formatPeso(cost.trueCost)}</td></tr>
-    <tr><td title="MK (markup) loads on direct cost, exactly like OH — and the two always total ${Math.round(cost.totalLoad*100)}% of direct: raise one and the other gives way. The selling price is direct × ${(1+cost.totalLoad).toFixed(2)}, rounded per line to the nearest ₱100 — so of every selling peso, ${Math.round(100/(1+cost.totalLoad))}¢ is direct cost and the rest splits between OH and MK.">+ MK (${(cost.mkPct*100).toFixed(1)}% of direct — balances OH to ${Math.round(cost.totalLoad*100)}%) ⓘ<br>
-      <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${mkControl}${mkNote}</span></td>
-    <td style="text-align:right;vertical-align:top;">${formatPeso(cost.mkAmt)}</td></tr>
-    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING${cost.miscCost>0?' (items × '+(1+cost.totalLoad).toFixed(2)+')':' (direct × '+(1+cost.totalLoad).toFixed(2)+')'}</td><td style="text-align:right;">${formatPeso(cost.target-cost.miscQuoted)}</td></tr>
-    ${cost.miscCost>0?`<tr><td title="Misc costs carry no markup — cost + ${Math.round(cost.miscOhPctv*100)}% OH, rounded per entry to ₱100 (pass-through economics for delivery, subcontractors, permits).">+ Misc costs (cost + ${Math.round(cost.miscOhPctv*100)}% OH, no MK) ⓘ</td><td style="text-align:right;">${formatPeso(cost.miscQuoted)}</td></tr>
-    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING (total)</td><td style="text-align:right;">${formatPeso(cost.target)}</td></tr>`:''}
-  </tbody></table>`;
-
-  const ladderCell=(label,val)=>`<div style="flex:1;min-width:96px;background:#fff5e0;border-radius:6px;padding:7px 8px;text-align:center;">
-    <div style="font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);font-weight:700;">${label}</div>
-    <div style="font-size:13px;font-weight:700;">${formatPeso(val)}</div>
-  </div>`;
-  const ladder=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-    ${ladderCell('Floor',cost.floorTotal)}
-    ${ladderCell('True Cost',cost.trueCostTotal)}
-    ${ladderCell(`Selling (OH+MK ${Math.round(cost.totalLoad*100)}%)`,cost.target)}
-    ${ladderCell('Quoted (net)',cost.sell)}
-  </div>`;
+  const hasMisc = cost.miscCost>0;
+  const itemsSelling = cost.target - cost.miscQuoted;
+  const row=(label,val,cls,tip)=>`<div class="calc-row ${cls||''}"${tip?` title="${tip}"`:''}><span>${label}</span><span class="peso">${formatPeso(val)}</span></div>`;
 
   const belowFloor = cost.sell < cost.floorTotal;
   const belowTrueCost = !belowFloor && cost.sell < cost.trueCostTotal;
@@ -5552,28 +5490,88 @@ function renderTrueCostPanelHtml(cost){
   const marginColor = belowFloor ? 'var(--red)' : belowTrueCost ? 'var(--orange)' : belowTarget ? 'var(--accent)' : 'var(--green)';
   const noCostBasis = cost.direct<=0 && items.length>0;
   const marginLine = noCostBasis
-    ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;">No cost basis on these items yet — set Materials/Labor in the President's Product Database, or cost custom lines in this view, to see a real margin.</div>`
-    : `<div style="font-weight:700;color:${marginColor};">Margin at quoted price: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCostTotal)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCostTotal)/cost.direct*100:0).toFixed(1)}% of direct</div>`;
-
+    ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;margin-top:6px;">No cost basis on these items yet — give each line a BOM (🧮 on the line) or capital costs in 📦 Product Database.</div>`
+    : `<div style="font-weight:700;color:${marginColor};margin-top:6px;font-size:12.5px;">Margin at quoted: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCostTotal)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCostTotal)/cost.direct*100:0).toFixed(1)}% of direct</div>`;
   const belowFloorNote = belowFloor
-    ? `<div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600;">⚠️ Below floor — President approval required</div>`
+    ? `<div style="margin-top:6px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:600;">⚠️ Below floor — President approval required</div>`
     : '';
+  const deltaP = cost.sell - cost.target;
+  const deltaChip = Math.abs(deltaP) < 1
+    ? `<span class="ms-chip ok" style="font-size:9.5px;">= computed</span>`
+    : `<span class="ms-chip" style="font-size:9.5px;background:${deltaP<0?'#fdecea':'#e8f2e8'};color:${deltaP<0?'#b03024':'#2e7d32'};">${deltaP<0?'−':'+'}${formatPeso(Math.abs(deltaP))} vs computed</span>`;
 
-  // COSTING-QB-UX-SPEC-2026-08-26 §3 — per-item computation table. Renders for
-  // any session that reaches this function at all (GENERIC_PARTNER never
-  // does — see the guards on computeTrueCost()/computeMarginSummary()), incl.
-  // BS partners: they get the table (computed results) same as internal
-  // staff, just without the editable OH% input above. Auto-opens the first
-  // time OH% is edited (onOhOverrideChange() sets ohPerItemOpen=true);
-  // toggleable after that via this chip.
-  const ohPerItemToggle=`<div style="margin-top:10px;">
-    <span class="ms-chip" style="cursor:pointer;background:${ohPerItemOpen?'var(--mid-blue)':'#eef2f8'};color:${ohPerItemOpen?'#fff':'var(--dark-blue)'};" onclick="toggleOhPerItem()" title="Per-item breakdown of the buildup above">
-      📊 Per-item computation ${ohPerItemOpen?'▾':'▸'}
-    </span>
+  const build = `<div class="calc-card">
+    <div class="calc-card-title">The build</div>
+    ${row('Materials',cost.materials)}
+    ${row('+ Waste '+Math.round(cs.wastePct*100)+'%',cost.matWaste,'sub','Fixed sheet and tube sizes — offcuts, kerf and edge damage')}
+    ${row('+ Labor ('+laborLabel+')',cost.labor,'sub','Labor is '+laborPctLbl+'% of materials unless real crew-days or hours are entered on the lines')}
+    ${row('+ Consumables '+Math.round(cs.consumablesPct*100)+'%',cost.consumables,'sub','Rods, discs, gas — burned in proportion to the steel processed')}
+    ${row(hasMisc?'DIRECT (items)':'DIRECT = FLOOR',cost.direct,'total')}
+    <div class="calc-row dial"><span>+ OH ${ohControl} <em class="calc-note">suggested ${ohSuggestedVal.toFixed(1)}% · <a href="javascript:void(0)" onclick="resetOhOverride()">reset</a> · size ×${cost.sizeF.toFixed(2)} · ${paceChip} (advisory)</em></span><span class="peso">${formatPeso(cost.ohAmt)}</span></div>
+    ${row('TRUE COST'+(hasMisc?' (items)':''),cost.trueCost,'total')}
+    <div class="calc-row dial"><span>+ MK ${mkControl} <em class="calc-note">OH+MK = ${Math.round(cost.totalLoad*100)}% · <a href="javascript:void(0)" onclick="resetPricesToComputed()" title="Clear hand-typed prices — every costed line returns to its computed price">↺ re-apply</a></em></span><span class="peso">${formatPeso(cost.mkAmt)}</span></div>
+    ${row('SELLING (items × '+(1+cost.totalLoad).toFixed(2)+')',itemsSelling,'total')}
+    ${hasMisc?row('+ Misc (cost + '+Math.round(cost.miscOhPctv*100)+'% OH, no MK)',cost.miscQuoted,'sub','Pass-through costs — priced in the Miscellaneous Costs table above'):''}
+    ${row('SELLING (total)',cost.target,'grand')}
+    <div class="calc-row grand quoted"><span>QUOTED (net) ${deltaChip}</span><span class="peso">${formatPeso(cost.sell)}</span></div>
+    <div class="calc-row sub" style="border-bottom:none;"><span title="Never quote below true cost without President approval; below the floor is a cash loss.">Floors: true cost ${formatPeso(cost.trueCostTotal)} · absolute ${formatPeso(cost.floorTotal)}</span><span></span></div>
+    ${marginLine}
+    ${belowFloorNote}
   </div>`;
-  const ohPerItemSection = ohPerItemOpen ? (ohPerItemToggle+renderOhPerItemTableHtml(cost)) : ohPerItemToggle;
 
-  return buildup+ladder+marginLine+belowFloorNote+ohPerItemSection;
+  // ── experiment table — per line: computed vs typed price ────────────────
+  const laborPctN = (typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.80;
+  const expRows = items.map((item,idx)=>{
+    if(item.id==='MISCFEE'){
+      return `<tr><td style="font-size:12px;color:var(--gray-dark);">${txtEsc(item.name||'')} <span class="ms-chip" style="font-size:9px;background:#eee;color:var(--gray-dark);">misc</span></td><td style="text-align:center;">1</td><td colspan="3" style="text-align:right;font-style:italic;color:var(--gray-dark);">priced in the misc table above</td><td style="text-align:right;font-weight:600;">${formatPeso(item.unitPrice||0)}</td></tr>`;
+    }
+    const qty=item.qty||1;
+    const basis=itemCostBasis(item, cost.liveById);
+    const unitPrice = item.unitPrice||0;
+    if(!basis.hasBasis){
+      return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')}</td><td style="text-align:center;">${qty}</td>
+        <td colspan="3" style="text-align:center;"><span class="ms-chip warn" title="Give this line a BOM (🧮) or capital costs in the Product Database">needs costing</span></td>
+        <td style="text-align:right;">${formatPeso(unitPrice)}</td></tr>`;
+    }
+    const directPerUnit = basis.mat*(1+cs.wastePct+cs.consumablesPct)
+      + (basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*laborPctN : basis.capLaborPesos));
+    const sellPerUnit = directPerUnit*(1+cost.ohPct+cost.mkPct);
+    const truePerUnit = directPerUnit*(1+cost.ohPct);
+    const effMk = directPerUnit>0 ? (unitPrice-truePerUnit)/directPerUnit : 0;
+    const bF = unitPrice < directPerUnit;
+    const bT = !bF && unitPrice < truePerUnit;
+    const bS = !bF && !bT && unitPrice < Math.round(sellPerUnit/100)*100;
+    const color = bF?'var(--red)':bT?'var(--orange)':bS?'var(--accent)':'var(--green)';
+    const chip = item.priceManual
+      ? `<span class="ms-chip" style="font-size:9px;background:#eee;color:var(--gray-dark);" title="Hand-typed price — auto-pricing leaves it alone. ↺ re-apply clears it.">manual</span>`
+      : `<span class="ms-chip ok" style="font-size:9px;" title="Computed price — follows the build and the dials automatically">auto</span>`;
+    const priceCell = PARTNER_MODE
+      ? `<strong>${formatPeso(unitPrice)}</strong>`
+      : `<input type="number" class="calc-price" min="0" step="100" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Type any price to experiment — it sticks as a manual override and the MK column shows what it really gives.">`;
+    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${chip}</td><td style="text-align:center;">${qty}</td>
+      <td style="text-align:right;">${formatPeso(directPerUnit)}</td>
+      <td style="text-align:right;font-weight:600;">${formatPeso(sellPerUnit)}</td>
+      <td style="text-align:right;">${priceCell}</td>
+      <td style="text-align:right;font-weight:700;color:${color};" title="Effective MK at this price — (price − true cost) ÷ direct">${(effMk*100).toFixed(1)}%</td></tr>`;
+  }).join('');
+  const effMkTotal = cost.direct>0 ? (cost.sell-cost.trueCostTotal)/cost.direct : 0;
+  const experiment = `<div class="calc-card">
+    <div class="calc-card-title">Experiment — type any price, MK adjusts</div>
+    <div style="overflow-x:auto;"><table class="labor-tbl exp-tbl" style="min-width:560px;">
+      <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Direct/u</th><th style="text-align:right;">Sell/u</th><th style="text-align:right;">Price/u</th><th style="text-align:right;">MK eff</th></tr></thead>
+      <tbody>${expRows || `<tr><td colspan="6" style="text-align:center;color:var(--gray-dark);padding:10px;">Add items — each line becomes a row you can experiment on.</td></tr>`}</tbody>
+      <tfoot><tr style="font-weight:700;background:#fff5e0;">
+        <td colspan="2">Totals</td>
+        <td style="text-align:right;">${formatPeso(cost.direct)}</td>
+        <td style="text-align:right;">${formatPeso(cost.target)}</td>
+        <td style="text-align:right;">${formatPeso(cost.sell)}</td>
+        <td style="text-align:right;">${(effMkTotal*100).toFixed(1)}%</td>
+      </tr></tfoot>
+    </table></div>
+    <div class="calc-note" style="margin-top:6px;">Computed prices round to the nearest ₱100 (prices end in two zeros). A typed price sticks as <em>manual</em> until ↺ re-apply. Section headers and the misc lines aren't costed rows; the Totals reconcile to the build card, not a re-sum of rounded rows.</div>
+  </div>`;
+
+  return `<div class="calc-grid">${build}${experiment}</div>`;
 }
 
 // COSTING-QB-UX-SPEC-2026-08-26 §3 — commits a manual OH% override. onchange
@@ -7274,8 +7272,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 11;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 12;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:12, date:'2026-08-31', items:[
+    'The Internal cost panel is redesigned as one calculator: the build waterfall (materials → waste → labor → consumables → DIRECT → OH & MK dials → SELLING → QUOTED) beside an experiment table where every line has an editable price — type anything and see the markup it really gives. The old Capital & Labor table is retired; everything lives in the calculator now.',
+  ]},
   { ver:11, date:'2026-08-31', items:[
     'Miscellaneous costs carry no markup — each entry now quotes at cost + 25% OH, rounded to ₱100 (a ₱150,000 subcontractor quotes ₱187,500, not ₱375,000). The cost panel shows items and misc on their own lines, then SELLING (total).',
   ]},
@@ -7350,7 +7351,7 @@ const TOUR_STEPS = [
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    body:'Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
-   body:'The engine room: materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
+   body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
  { target:'#btnShare', title:'Print, Agent Copy & Share',
