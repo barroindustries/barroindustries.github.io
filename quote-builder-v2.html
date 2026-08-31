@@ -742,6 +742,8 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 .calc-note{font-size:10px;font-weight:400;font-style:normal;color:var(--gray-dark);display:inline-block;}
 .calc-note a{color:var(--mid-blue);font-weight:700;text-decoration:none;}
 .calc-dial{width:64px;text-align:right;border:1.5px dashed var(--orange);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;}
+.disc-old{text-decoration:line-through;color:#8a8a8a;font-weight:400;font-size:.92em;}
+.disc-new{font-weight:700;}
 .calc-price{width:100px;text-align:right;border:1.5px dashed var(--mid-blue);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;}
 .exp-tbl td,.exp-tbl th{white-space:nowrap;}
 
@@ -4253,6 +4255,12 @@ function unifyMiscIntoItems(){
 function renderItems(){
   unifyMiscIntoItems();
   unifyPaymentIntoTerms();
+  // Owner ruling 2026-09-01: an applied discount shows PER ITEM on the
+  // document — old price struck through, discounted price beside it — all
+  // the way to the grand total. One shared factor keeps every line
+  // proportional to the quote-level discount.
+  let _discFactor=0;
+  try{ const _t=computeTotals(); if(_t.discountAmt>0 && _t.preDiscount>0) _discFactor=_t.discountAmt/_t.preDiscount; }catch(e){}
   const tbody=document.getElementById('itemsTbody');
   if(!items.length){
     tbody.innerHTML='<tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
@@ -4324,8 +4332,8 @@ function renderItems(){
           </div>
         </td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
-        <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
-        <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}${volNoteHtml}</td>
+        <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${_discFactor>0?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-_discFactor))}</span>`:formatPeso(item.unitPrice)}</span></td>
+        <td style="text-align:right;font-weight:600;">${_discFactor>0?`<span class="disc-old">${formatPeso(item.amount)}</span> <span class="disc-new">${formatPeso(item.amount*(1-_discFactor))}</span>`:formatPeso(item.amount)}${volNoteHtml}</td>
         <td class="no-print" style="text-align:center;">
           <div class="row-actions">
             ${dragHandle}
@@ -4354,6 +4362,11 @@ function renderItems(){
 
 // `subset` scopes the whole computation to one section (options quote).
 // Called with no argument everywhere else — identical behaviour to before.
+// Owner ruling 2026-09-01: a discount may eat MARKUP, never overhead or
+// direct cost — it is capped so the net never goes below TRUE COST. The
+// re-entrancy flag lets computeTrueCost (whose floor we need) skip its own
+// computeTotals lookup while we're inside one.
+let _inComputeTotals=false;
 function computeTotals(subset){
   const list=subset||items;
   const subtotal=list.reduce((s,i)=>s+i.amount,0);
@@ -4383,14 +4396,26 @@ function computeTotals(subset){
   // both land on post-break figures automatically.
   const preDiscount=subtotal-volumeBreakTotal+diAdded;
   // Discount applied BELOW items, before VAT — same position for both modes.
-  const discountAmt=discMode==='amount' ? Math.max(0,Math.min(discAmtCustom,preDiscount)) : preDiscount*(discPct/100);
+  let discountAmt=discMode==='amount' ? Math.max(0,Math.min(discAmtCustom,preDiscount)) : preDiscount*(discPct/100);
+  // Cap at TRUE COST (owner ruling 2026-09-01): the discount may consume the
+  // markup, never the overhead or the direct cost. Whole-quote path only —
+  // options subsets are presentation slices of the same capped quote.
+  let discountCapped=false;
+  if(!subset && discountAmt>0){
+    _inComputeTotals=true;
+    let floor=0;
+    try{ const tc=(typeof computeTrueCost==='function')?computeTrueCost():null; floor=tc?tc.trueCostTotal:0; }catch(e){}
+    _inComputeTotals=false;
+    const maxDisc=Math.max(0,preDiscount-floor);
+    if(discountAmt>maxDisc+0.005){ discountAmt=maxDisc; discountCapped=true; }
+  }
   const net=preDiscount-discountAmt;
   const vatAmt=showVat?net*vatRate:0;
   const grand=net+vatAmt;
   // Commission computed on the grand total — same position for both modes.
   const commissionAmt=commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100);
 
-  return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
+  return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4449,7 +4474,10 @@ function renderOptionsBasisPicker(opts){
 // drift apart, so the row list is defined exactly once, here.
 function totalsLines(t,grandLabel){
   const out=[];
-  out.push({label:'Subtotal', amt:formatPeso(t.subtotal)});
+  out.push({label:'Subtotal', amt: (t.discountAmt>0
+    ? `<span class="disc-old">${formatPeso(t.subtotal)}</span> <span class="disc-new">${formatPeso(t.subtotal*(1-(t.discountAmt/(t.preDiscount||t.subtotal||1))))}</span>`
+    : formatPeso(t.subtotal))});
+  if(t.discountCapped) out.push({label:'<span style="font-size:10px;color:var(--orange);">Discount capped — a discount never goes below true cost (it may eat the markup, never the overhead)</span>', amt:'', cls:'discount'});
   // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
   // D&I. With t.volumeBreakTotal===0 (no tiers configured) this renders
   // nothing (§1.4).
@@ -5598,7 +5626,7 @@ function computeTrueCost(){
   });
   const trueCostTotal = trueCost + miscTrueAdd;               // OH covered on both paths
   const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + typed misc (per-entry rounded)
-  const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
+  const sell = (!_inComputeTotals && typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT; 0 while the totals engine is asking us for the floor
   const marginPct = sell>0 ? (sell-trueCostTotal)/sell : 0;
   return {
     materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost, miscQuoted, miscOhPctv, floorTotal, trueCostTotal,
@@ -7477,8 +7505,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 21;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 22;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:22, date:'2026-09-01', items:[
+    'Discounts are protected and honest: a discount can never take the quote below TRUE COST (it may eat the markup, never the overhead), and when one applies, the document shows it per item — old price struck through, discounted price beside it — all the way to the grand total.',
+  ]},
   { ver:21, date:'2026-09-01', items:[
     'The project timeline computes itself: minimum 2 weeks, plus 3 working days for every ₱20,000 of materials — and Sundays are never counted. The ↻ Auto button by Overall Lead Time applies it; the calculator shows it live.',
     'Payment terms & schedule and the bank payment details moved to the 📜 Terms tab — they print just ahead of the terms text.',
