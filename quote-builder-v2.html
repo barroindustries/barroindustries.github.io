@@ -1696,8 +1696,9 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
         <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
-        <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — give it a bill of materials and labor days and it prices itself. ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing is automatic</strong> — every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. A line with no labor entered adds labor at +80% of its materials cost. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
+        <li><strong>Pricing is automatic</strong> — direct cost = materials + 6% waste + 10% consumables + labor (entered, or +80% of materials cost when none is), and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Miscellaneous costs</strong> — delivery, permits, crane rental go in the Internal misc table; each prices at cost × 2.50, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
@@ -7321,13 +7322,15 @@ const TOUR_STEPS = [
  { target:'#clientInfoSection', needsWorkspace:true, title:'Who is this quote for',
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
-   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, enter its bill of materials and labor days and it prices itself. ＋ Section splits the quote into Option A / Option B.' },
+   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section splits the quote into Option A / Option B.' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the cost panel then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#diSection', needsWorkspace:true, title:'Delivery, timeline & payments',
    body:'Below the items: delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote.' },
  { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
    body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
+ { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
+   body:'Delivery, permits, crane rental — cost them here and they price like everything else: cost × 2.50, rounded to ₱100. Ticked "On quote?" puts the entry on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
    body:'The engine room: materials + 6% waste + 10% consumables + labor (entered, or +80% of materials cost when none is) = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
  { target:'#btnVerify', title:'Verify & File',
