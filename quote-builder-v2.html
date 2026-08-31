@@ -4168,11 +4168,21 @@ function moveItemToSection(idx){
 // Idempotent; called from initUI and every renderItems so it holds no
 // matter which boot path ran first.
 function unifyMiscIntoItems(){
-  const wrap=document.getElementById('laborTimelineWrap');
   const sec=document.getElementById('itemsSection');
-  if(wrap && sec && wrap.parentElement!==sec){
+  if(!sec) return;
+  const wrap=document.getElementById('laborTimelineWrap');
+  if(wrap && wrap.parentElement!==sec){
     const tc=sec.querySelector('.pricing-controls') || sec.querySelector('.totals-controls');
     if(tc) sec.insertBefore(wrap,tc); else sec.appendChild(wrap);
+  }
+  // Owner ruling 2026-09-01 (later same day): the CALCULATOR joins the item
+  // list too — items → additional costs → pricing/totals → calculator, one
+  // section. no-print added since it leaves the int-panel's print shield;
+  // applyPartnerMode still removes it by id wherever it lives.
+  const calc=document.getElementById('costMarginWrap');
+  if(calc && calc.parentElement!==sec){
+    calc.classList.add('no-print');
+    sec.appendChild(calc);
   }
 }
 function renderItems(){
@@ -4421,7 +4431,7 @@ function renderTotals(){
     html+=totalsRowsHtml(t,'GRAND TOTAL','grand');
   }
   html+=`<tr class="qty-line"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;padding-top:1px;">${items.length} line item${items.length===1?'':'s'} · ${_iq} total unit${_iq===1?'':'s'}${useOpts?` across ${opts.length} option${opts.length===1?'':'s'}`:''}</td></tr>`;
-  html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}.</td></tr>`;
+  html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}. All fabricated dimensions ±5mm tolerance.</td></tr>`;
   const commLabel=t.commMode==='amount' ? 'Referral/Agent Commission (flat)' : `Referral/Agent Commission (${t.commPct}%)`;
   if(useOpts){
     opts.forEach(o=>{
@@ -5853,6 +5863,8 @@ const TERMS_DEF=[
   {id:'tc_payment',title:'Payment Terms',content:'Down payment due upon confirmation; balance settled per the Payment Schedule above. All payments are non-refundable once fabrication has commenced.'},
   {id:'tc_warranty',title:'Warranty',content:'12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.'},
   {id:'tc_scope',title:'Scope of Work',content:'Price covers fabrication, delivery, and installation as specified. Electrical works, gas connections, and civil works are excluded unless stated.'},
+  // Owner ruling 2026-09-01 — standard fabrication tolerance clause.
+  {id:'tc_tolerance',title:'Measurement Tolerance',content:'All fabricated dimensions are subject to a measurement tolerance of ±5mm, standard for stainless steel fabrication. Variations within this tolerance are not grounds for rework or rejection.'},
   // Default content is a function of the selected "Valid For" days (audit:
   // "hardcoded to 30 days... even a rep who manually retypes the terms text
   // still sees a mismatched Valid-Until date") — renderTerms() below calls
@@ -7353,8 +7365,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 16;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 17;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:17, date:'2026-09-01', items:[
+    'A Measurement Tolerance term (±5mm, standard for stainless fabrication) is now part of the default Terms & Conditions, and the items table carries a one-line ±5mm note. Toggle or edit the term per quote like any other.',
+    'The calculator now lives inside the item list too — items, additional costs, totals and the calculator are one continuous section.',
+  ]},
   { ver:16, date:'2026-09-01', items:[
     'The Lead Time column is gone from the items table — the overall lead time in the Client-tab details covers scheduling.',
   ]},
@@ -7449,7 +7465,7 @@ const TOUR_STEPS = [
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    body:'Right under the quote items — one layout. Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
- { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
+ { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Internal only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
