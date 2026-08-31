@@ -36,6 +36,7 @@ what the script prints.
 - [ ] **Phase-9 president one-time buttons** (pending since July): Finance → Reports → "🔄 Sync to ledger"; Projects → "🔖 Tag"; `remapDesignProjectClients` (browser console). All idempotent.
 - [ ] **Verify `backfillUserClaims` was run** after the V11.1 storage-claims deploy (president, browser console). If unsure, run again — idempotent. Until it runs, Storage role-scoping treats un-stamped accounts wrong.
 - [x] **Record the deploy baseline** — done 2026-08-30 (owner-confirmed): all 14 deployed functions diffed clean against repo exports; firestore/storage/functions hashes recorded. `release.sh push` now enforces, not warns.
+- [ ] **Deploy functions commit 1eb1494 (Meta Lead Ads webhook + nightly ad-insights pull)** — committed but never deployed (drift flagged 2026-09-01 by a drift check; deliberately NOT auto-deployed — may await Meta secrets/config). Owner or the authoring session: `release.sh functions` when ready, or record why it holds.
 <!-- PENDING-OPS:END -->
 
 ## Open rulings — decisions only the President can make
