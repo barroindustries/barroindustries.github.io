@@ -4501,7 +4501,9 @@ function totalsLines(t,grandLabel){
   // widened §3.3 — was: t.discountAmt>0||t.diAdded>0 — otherwise a
   // break-only quote prints Subtotal → VAT → Grand with an unexplained gap.
   if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) out.push({label:'Net Amount', amt:formatPeso(t.net)});
-  if(t.rushFee>0) out.push({label:'⚡ Rush order — priority scheduling (+2%, additional OH)', amt:'+'+formatPeso(t.rushFee)});
+  // Client-facing label (owner ruling 2026-09-01): never mention overhead on
+  // the printed quote — the OH framing lives in the Estimator only.
+  if(t.rushFee>0) out.push({label:'⚡ Priority Order Charge (+2%)', amt:'+'+formatPeso(t.rushFee)});
   if(t.showVat) out.push({label:'VAT (12%)', amt:formatPeso(t.vatAmt)});
   out.push({label:grandLabel, amt:formatPeso(t.grand), grand:true});
   return out;
