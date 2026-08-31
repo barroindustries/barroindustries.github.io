@@ -4855,6 +4855,20 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
     background: #f5f6fa;
   }
 }
+/* Desktop Quote Builder (owner ruling 2026-09-01): the builder brings its own
+   header and padding, so the shell gets out of the way — .main-content's 20px
+   goes to 0 and the iframe fills the content area edge-to-edge. Applied by
+   renderQuoteBuilderIframe(), cleared by every navigateTo(). The review
+   banner / reopen strip keep a small inset so they don't touch the edges. */
+body.qb-desktop .main-content { padding: 0; }
+body.qb-desktop #page-content > * { animation: none; }
+body.qb-desktop #qb-review-bar { margin: 10px 12px; }
+body.qb-desktop #qb-frame {
+  display: block; width: 100%; border: none; border-radius: 0;
+  height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top, 0px));
+  min-height: 460px; background: #f5f6fa;
+}
+
 /* Floating exit pill (top-left, safe-area aware) — built/torn down by
    js/app.js alongside the body class, so its presence in the DOM already
    gates its visibility; no body.qb-fullscreen scoping needed here. Tapping it

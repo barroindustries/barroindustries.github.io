@@ -729,6 +729,8 @@ try {
 // ── Screens ───────────────────────────────────────
 function showLogin() {
   hideSplash();
+  document.title = 'Barro Industries Operating System';
+  document.body.classList.remove('qb-desktop');
   // 2026-08-08 — LOCKOUT FIX. The mandatory-photo gate was appearing OVER the
   // login screen, and since it has no dismiss control the user was trapped on a
   // screen they could not sign in from; the upload then failed regardless,
@@ -2185,19 +2187,22 @@ function renderQuoteBuilderIframe() {
       <button class="btn-primary btn-sm" id="qb-return-edit">${emojiIcon('↩',16)} Save edits &amp; Return to Partner</button>
       <button class="btn-success btn-sm" id="qb-approve-edit">${emojiIcon('✅',16)} Save edits &amp; Approve</button>
     </div>` : '';
-  // On phones/tablets (≤768px), drop the redundant "Quote Builder" heading (the
-  // builder shows its own header) and go fullscreen via body.qb-fullscreen —
-  // no inline sizing needed there, styles.css covers the viewport edge-to-edge.
-  // Desktop keeps the heading + the old inline-sized layout.
+  // On phones/tablets (≤768px) the builder goes fullscreen via
+  // body.qb-fullscreen (styles.css covers the viewport edge-to-edge).
+  // Desktop (owner ruling 2026-09-01): no in-page "Quote Builder" heading and
+  // no shell padding either — the window title bar names the page now and the
+  // builder has its own chrome, so body.qb-desktop zeroes .main-content's
+  // padding and the iframe takes the whole content area (sizing in styles.css).
+  // A reopened quote keeps a one-line strip so "editing a copy" vs "new
+  // revision" stays visible; a partner review keeps its banner.
   const isMobile = _qbIsMobile();
-  const chrome = (reviewCtx ? 60 : 0) + 200;
+  const reopenStrip = (!reviewCtx && reopenState)
+    ? `<div style="font-size:12px;font-weight:600;color:var(--text-muted);padding:6px 12px">${emojiIcon('🧮',14)} Quote Builder — ${reopenAsRevision?'new revision':'editing a copy'}</div>` : '';
+  document.body.classList.toggle('qb-desktop', !isMobile);
   c.innerHTML = `
     ${reviewBanner}
-    ${isMobile ? '' : `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <h2 style="font-size:16px;font-weight:800;color:var(--text)">${emojiIcon('🧮',16)} Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?` <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(${reopenAsRevision?'new revision':'editing a copy'})</span>`:''}</h2>
-    </div>`}
-    <iframe id="qb-frame" src="${qbSrc}" allow="print"
-      style="${isMobile ? '' : `width:100%;height:calc(100dvh - ${chrome}px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa`}"></iframe>`;
+    ${isMobile ? '' : reopenStrip}
+    <iframe id="qb-frame" src="${qbSrc}" allow="print"></iframe>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   // Enter/exit fullscreen fresh on every render — navigateTo() always tears
   // down any previous Overlay entry (Overlay.clearAll()) before this runs, so
@@ -2690,6 +2695,33 @@ function _skeletonKindFor(page) {
   return _SKELETON_KIND[page] || 'rows';
 }
 
+// Owner ruling 2026-09-01: the window/PWA title bar shows the CURRENT page —
+// the installed app centers document.title in its title bar, and a static
+// "Barro Industries Operating System" there wasted the whole strip. Labels
+// come from NAV_REGISTRY (any array of {page,label} entries, however nested);
+// 'dept:X' pages title as the department name; unknown keys get prettified.
+function pageWindowTitle(page) {
+  const APP = 'Barro Industries Operating System';
+  if (!page) return APP;
+  if (String(page).startsWith('dept:')) return String(page).slice(5);
+  let found = null;
+  const scan = (v) => {
+    if (found || !v) return;
+    if (Array.isArray(v)) {
+      for (const e of v) {
+        if (e && e.page === page && e.label) { found = e.label; return; }
+        if (e && Array.isArray(e.children)) scan(e.children);
+      }
+    } else if (typeof v === 'object') {
+      for (const k in v) { if (typeof v[k] !== 'function') scan(v[k]); if (found) return; }
+    }
+  };
+  try { scan(window.NAV_REGISTRY || {}); } catch (e) {}
+  if (found) return found;
+  const pretty = String(page).replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return pretty || APP;
+}
+
 async function navigateTo(page, opts) {
   opts = opts || {};
   // PERF-WAVE1 WP1 §1f — same-page short-circuit. Only bottom-nav/drawer/
@@ -2742,6 +2774,10 @@ async function navigateTo(page, opts) {
   currentPage = page;
   window.currentPage = page;
   window.currentSubtab = subtab;          // screens read this via initialSubtab()
+  try { document.title = pageWindowTitle(page); } catch (e) {}
+  // qb-desktop (edge-to-edge Quote Builder shell) is page-scoped — clear it on
+  // every navigation; renderQuoteBuilderIframe() re-adds it when appropriate.
+  document.body.classList.remove('qb-desktop');
   setActiveNav(page);
   updateNavBackBtn();
   // A floating action button is a sibling of <body>, not of #page-content, so
