@@ -1695,7 +1695,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — give it a bill of materials and labor days and it prices itself. ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing is automatic</strong> — every costed line sells at direct cost + 25% overhead + 25% markup (× 1.50), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it — the override sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Pricing is automatic</strong> — every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. A line with no labor entered assumes labor at 80% of its materials. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
@@ -1703,7 +1703,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
       <h4>The three views</h4>
       <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
-      <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even. The OH% and MK% dials live here — they always total 50%, so raising one lowers the other.</p>
+      <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even. The OH% and MK% dials live here — together they always total 150% of direct (30¢ + 30¢ of the selling peso), so raising one lowers the other.</p>
       <p><strong>Admin</strong> — the product database and price coefficients.</p>
       <p>Some views may be hidden depending on your account.</p>
 
@@ -1994,20 +1994,27 @@ const COSTING_DEFAULTS = Object.freeze({
                            // — rods, discs, gas, bits burn in proportion to
                            // the steel processed, not to the days it takes
   loadedLaborRate: 150,    // ₱/h — wage grossed up for utilization; NOT settings/laborRates
-  baseOH: 0.25,            // OH pool ÷ target monthly direct cost
+  // Owner ruling 2026-08-31 (final of the day): the selling peso splits
+  // 40¢ direct · 30¢ OH · 30¢ MK. In loading-on-direct terms: OH 75% +
+  // MK 75% = 150% total load → selling = direct × 2.50.
+  baseOH: 0.75,
   sizeBands: [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]],
-  ohMin: 0.10, ohMax: 0.45,
-  targetMargin: 0.20,      // legacy margin-on-price; target pricing now uses mkPct below
-  // OPTION B v2 (owner ruling 2026-08-31): MK is a loading on DIRECT cost,
-  // like OH, and the two always total totalLoadPct — selling = direct ×
-  // (1 + OH% + MK%) = ×1.50 at the 25/25 defaults.
-  mkPct: 0.25,
-  totalLoadPct: 0.50,
+  ohMin: 0.30, ohMax: 1.20,   // clamp for the OH override input (MK balances within 0.30–1.20)
+  targetMargin: 0.20,      // legacy margin-on-price; target pricing uses mkPct below
+  // OPTION B (owner ruling 2026-08-31, final): MK is a loading on DIRECT
+  // cost, like OH, and the two always total totalLoadPct (150%) — selling =
+  // direct × (1 + OH% + MK%) = ×2.50 at the 75/75 defaults, i.e. the selling
+  // peso is 40¢ direct · 30¢ OH · 30¢ MK.
+  mkPct: 0.75,
+  totalLoadPct: 1.50,
+  // Owner ruling 2026-08-31: a line with NO labor entered assumes labor at
+  // 80% of its materials cost. Explicit crew-days/hours always win.
+  laborPctOfMaterials: 0.80,
   // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — crew-day labor rate for custom
   // lines: ₱30,000/6 days = ₱5,000/day. Read from product_costs/_settings
   // when present (same doc/merge as every other COSTING_DEFAULTS field
   // above); falls back to these numbers otherwise.
-  crewWeekRate: 30000,
+  crewWeekRate: 40000,   // real crew cost (owner 2026-08-31); ₱6,667/day
   crewWeekDays: 6,
   updatedAt: null,
 });
@@ -3681,9 +3688,13 @@ function customCostGateHtml(item, idx){
   // shown line by line so the preparer sees exactly where the auto price
   // comes from. Rendered only when the gate is open and a basis exists.
   const matUnit = hasBom ? bomTotal : (Number(item.costMat)||0);
+  const laborPctG = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
+  const laborAssumedHere = item.costLaborDays===undefined && item.costHrs===undefined;
   const laborUnit = item.costLaborDays!==undefined
     ? (Number(item.costLaborDays)||0)*dayRate
-    : (Number(item.costHrs)||0)*(cs.loadedLaborRate||COSTING_DEFAULTS.loadedLaborRate);
+    : (item.costHrs!==undefined
+        ? (Number(item.costHrs)||0)*(cs.loadedLaborRate||COSTING_DEFAULTS.loadedLaborRate)
+        : matUnit*laborPctG);   // owner ruling 2026-08-31: nothing entered → 80% of materials
   const wasteUnit = matUnit*cs.wastePct, consUnit = matUnit*cs.consumablesPct;
   const directUnit = matUnit+wasteUnit+consUnit+laborUnit;
   const ohP = Math.min(cs.ohMax, Math.max(cs.ohMin,
@@ -3698,7 +3709,7 @@ function customCostGateHtml(item, idx){
       ${compRow('Materials'+(hasBom?' (BOM)':' (lump sum)'),matUnit)}
       ${compRow('+ Waste '+Math.round(cs.wastePct*100)+'%',wasteUnit)}
       ${compRow('+ Consumables '+Math.round(cs.consumablesPct*100)+'% of materials',consUnit)}
-      ${compRow('+ Labor',laborUnit)}
+      ${compRow('+ Labor'+(laborAssumedHere?' (assumed '+Math.round(laborPctG*100)+'% of materials — enter days for real time)':''),laborUnit)}
       ${compRow('DIRECT = floor',directUnit,1)}
       ${compRow('+ OH '+(ohP*100).toFixed(1)+'%',ohUnit)}
       ${compRow('+ MK '+(mkP*100).toFixed(1)+'%',mkUnit)}
@@ -5102,7 +5113,7 @@ function paceFactor(){
 // always has for a catalog item missing capitalMaterials), it just won't get
 // a reconciled row in the per-item table until materials are added too.
 function itemCostBasis(item, liveById){
-  if (GENERIC_PARTNER) return { mat:0, hrs:0, capLaborPesos:0, hasBasis:false, isCustom:item.id==='CUSTOM' };
+  if (GENERIC_PARTNER) return { mat:0, hrs:0, capLaborPesos:0, laborAbsent:false, hasBasis:false, isCustom:item.id==='CUSTOM' };
   if (item.id==='CUSTOM') {
     const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
     const dayRate = (cs.crewWeekRate||COSTING_DEFAULTS.crewWeekRate) / (cs.crewWeekDays||COSTING_DEFAULTS.crewWeekDays);
@@ -5112,13 +5123,18 @@ function itemCostBasis(item, liveById){
     const hasDays = item.costLaborDays!==undefined;
     const hrs = (!hasDays && item.costHrs!==undefined) ? (item.costHrs||0) : 0;
     const capLaborPesos = hasDays ? (item.costLaborDays||0)*dayRate : 0;
-    return { mat, hrs, capLaborPesos, hasBasis:customLineHasMaterialsBasis(item), isCustom:true };
+    // Owner ruling 2026-08-31: nothing entered for labor at all → the line
+    // assumes labor at cs.laborPctOfMaterials (80%) of its materials. A
+    // deliberately typed 0 days/hrs is honored as real zero, not assumed.
+    const laborAbsent = !hasDays && item.costHrs===undefined;
+    return { mat, hrs, capLaborPesos, laborAbsent, hasBasis:customLineHasMaterialsBasis(item), isCustom:true };
   }
   const live = liveById.get(item.id);
   const mat = (live ? live.capitalMaterials : undefined) ?? item.capitalMaterials ?? 0;
   const capLaborPesos = (live ? live.capitalLabor : undefined) ?? item.capitalLabor ?? 0;
   const hrs = item.laborHours ? ((item.laborHours.fabrication||0)+(item.laborHours.installation||0)) : 0;
-  return { mat, hrs, capLaborPesos, hasBasis:(mat>0||capLaborPesos>0||hrs>0), isCustom:false };
+  const laborAbsent = !(hrs>0) && !(capLaborPesos>0);
+  return { mat, hrs, capLaborPesos, laborAbsent, hasBasis:(mat>0||capLaborPesos>0||hrs>0), isCustom:false };
 }
 
 // COSTING-PHASE1-SPEC-2026-08-26 §1/§2 — shadow-mode true-cost engine. Pure:
@@ -5143,17 +5159,19 @@ function computeTrueCost(){
   if (GENERIC_PARTNER) return null;
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
   const liveById = new Map((DB.products||[]).map(p=>[p.id,p]));
-  let materials=0, laborHrsTotal=0, laborPesosFallback=0, anyMissingCatalogCost=false;
+  const laborPct = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
+  let materials=0, laborHrsTotal=0, laborPesosFallback=0, laborAssumedPesos=0, anyMissingCatalogCost=false;
   items.forEach(item=>{
     const qty = item.qty||1;
     const basis = itemCostBasis(item, liveById);
     materials += basis.mat*qty;
     if (basis.hrs>0) laborHrsTotal += basis.hrs*qty;
+    else if (basis.laborAbsent) laborAssumedPesos += basis.mat*qty*laborPct;   // 80%-of-materials assumption
     else laborPesosFallback += basis.capLaborPesos*qty;
     if (!basis.isCustom && !basis.hasBasis) anyMissingCatalogCost = true;
   });
   const matWaste = materials*cs.wastePct;
-  const labor = laborHrsTotal*cs.loadedLaborRate + laborPesosFallback;
+  const labor = laborHrsTotal*cs.loadedLaborRate + laborPesosFallback + laborAssumedPesos;
   const consumables = materials*cs.consumablesPct; // 8% of materials (owner ruling 2026-08-31)
   const direct = materials+matWaste+labor+consumables;              // = FLOOR
   const sizeF = sizeBandFactor(direct, cs.sizeBands);
@@ -5178,14 +5196,14 @@ function computeTrueCost(){
   // OPTION B v2 (owner ruling 2026-08-31): MK% loads on DIRECT cost and
   // always balances OH% to cs.totalLoadPct (50%) — one split, two handles.
   // selling (target) = direct × (1 + OH% + MK%) = ×1.50 at 25/25.
-  const totalLoad = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 0.50;
+  const totalLoad = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 1.50;
   const mkPct = Math.max(0, totalLoad - ohPct);
   const mkAmt = direct*mkPct;
   const target = trueCost + mkAmt;
   const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
   const marginPct = sell>0 ? (sell-trueCost)/sell : 0;
   return {
-    materials, matWaste, laborHrsTotal, laborPesosFallback, labor, consumables,
+    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables,
     direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
     ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, marginPct,
     anyMissingCatalogCost, liveById, cs,
@@ -5226,7 +5244,8 @@ function computeMarginSummary(laborEst){
       const qty=i.qty||1;
       const basis=itemCostBasis(i, cost.liveById);
       const mat=basis.mat*qty;
-      const lab=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : basis.capLaborPesos)*qty;
+      const labPct=(typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.70;
+      const lab=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*labPct : basis.capLaborPesos))*qty;
       const noBasisNote=(!basis.isCustom && !basis.hasBasis)
         ? '<div style="font-size:10px;color:var(--gray-dark);font-style:italic;">no cost basis on this item</div>' : '';
       return `<tr><td style="font-size:12px;">${txtEsc(i.name||'')}${noBasisNote}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
@@ -5257,11 +5276,12 @@ function computeMarginSummary(laborEst){
 // guard of its own — its one caller is already gated above.
 function renderTrueCostPanelHtml(cost){
   const cs=cost.cs;
-  let laborLabel;
-  if (cost.laborHrsTotal>0 && cost.laborPesosFallback>0) laborLabel=`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate} + capital labor`;
-  else if (cost.laborHrsTotal>0) laborLabel=`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate}`;
-  else if (cost.laborPesosFallback>0) laborLabel='capital labor';
-  else laborLabel='no labor basis yet';
+  const laborPctLbl = Math.round(((typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.70)*100);
+  const laborParts=[];
+  if (cost.laborHrsTotal>0) laborParts.push(`${fmtNum(cost.laborHrsTotal,1)}h × ₱${cs.loadedLaborRate}`);
+  if (cost.laborPesosFallback>0) laborParts.push('capital labor');
+  if (cost.laborAssumedPesos>0) laborParts.push(`assumed ${laborPctLbl}% of materials — no labor entered`);
+  const laborLabel = laborParts.length ? laborParts.join(' + ') : 'no labor basis yet';
 
   // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — pace chip. Live (fresh
   // ≤7-day product_costs/_pace doc) shows the published multiplier + when it
@@ -5319,7 +5339,7 @@ function renderTrueCostPanelHtml(cost){
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
     <td style="text-align:right;vertical-align:top;">${formatPeso(cost.ohAmt)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>TRUE COST</td><td style="text-align:right;">${formatPeso(cost.trueCost)}</td></tr>
-    <tr><td title="MK (markup) loads on direct cost, exactly like OH — and the two always total ${Math.round(cost.totalLoad*100)}%: raise one and the other gives way. At 25/25 the selling price is direct × 1.50, rounded per line to the nearest ₱100.">+ MK (${(cost.mkPct*100).toFixed(1)}% of direct — balances OH to ${Math.round(cost.totalLoad*100)}%) ⓘ<br>
+    <tr><td title="MK (markup) loads on direct cost, exactly like OH — and the two always total ${Math.round(cost.totalLoad*100)}% of direct: raise one and the other gives way. The selling price is direct × ${(1+cost.totalLoad).toFixed(2)}, rounded per line to the nearest ₱100 — so of every selling peso, ${Math.round(100/(1+cost.totalLoad))}¢ is direct cost and the rest splits between OH and MK.">+ MK (${(cost.mkPct*100).toFixed(1)}% of direct — balances OH to ${Math.round(cost.totalLoad*100)}%) ⓘ<br>
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${mkControl}${mkNote}</span></td>
     <td style="text-align:right;vertical-align:top;">${formatPeso(cost.mkAmt)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING (direct × ${(1+cost.totalLoad).toFixed(2)})</td><td style="text-align:right;">${formatPeso(cost.target)}</td></tr>
@@ -5390,7 +5410,7 @@ function resetOhOverride(){
 // re-derives on render, so OH + MK always total cs.totalLoadPct.
 function onMkOverrideChange(val){
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
-  const total = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 0.50;
+  const total = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 1.50;
   const n = parseFloat(val);
   if (Number.isFinite(n)) {
     ohOverridePct = Math.min(cs.ohMax, Math.max(cs.ohMin, total - n/100));
@@ -5418,8 +5438,9 @@ function applyComputedPricing(cost){
     const qty = item.qty||1;
     const basis = itemCostBasis(item, cost.liveById);
     if (!basis.hasBasis) return;
+    const laborPctA = (typeof cost.cs.laborPctOfMaterials==='number') ? cost.cs.laborPctOfMaterials : 0.80;
     const directPerUnit = basis.mat*(1 + cost.cs.wastePct + cost.cs.consumablesPct)
-      + (basis.hrs>0 ? basis.hrs*cost.cs.loadedLaborRate : basis.capLaborPesos);
+      + (basis.hrs>0 ? basis.hrs*cost.cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*laborPctA : basis.capLaborPesos));
     if (directPerUnit <= 0) return;
     const auto = Math.round(directPerUnit*(1 + cost.ohPct + cost.mkPct)/100)*100;
     if (auto > 0 && item.unitPrice !== auto) {
@@ -5462,7 +5483,8 @@ function renderOhPerItemTableHtml(cost){
         <td colspan="5" style="text-align:center;">${needsCostingChip}</td></tr>`;
     }
     const materials_i=basis.mat*qty, matWaste_i=materials_i*cs.wastePct;
-    const labor_i=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : basis.capLaborPesos)*qty;
+    const laborPct_i=(typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.70;
+    const labor_i=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*laborPct_i : basis.capLaborPesos))*qty;
     const consumables_i=materials_i*cs.consumablesPct;
     const direct_i=materials_i+matWaste_i+labor_i+consumables_i;
     const oh_i=direct_i*cost.ohPct;
@@ -7036,8 +7058,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 4;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 5;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:5, date:'2026-08-31', items:[
+    'New pricing split: selling = direct cost × 2.50 — of every selling peso, 40¢ is direct cost, 30¢ overhead and 30¢ markup (OH and MK balance at 75% + 75% of direct). Prices still round to the nearest ₱100.',
+    'A line with no labor entered now assumes labor at 80% of its materials cost — enter real crew days and they take over.',
+  ]},
   { ver:4, date:'2026-08-31', items:[
     'Custom items are tidier: the bill of materials and the full computation now sit behind a 🧮 BOM & computation button on the line. Open it to cost the item and see the whole chain — materials, waste, consumables, labor, OH, MK, and the selling price that lands on the quote. Closed, the line just shows "direct → sells" at a glance.',
   ]},
@@ -7081,13 +7107,13 @@ const TOUR_STEPS = [
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
    body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, enter its bill of materials and labor days and it prices itself. ＋ Section splits the quote into Option A / Option B.' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
-   body:'Every line lands here — and every costed line\'s price is computed for you: direct cost + 25% overhead + 25% markup (× 1.50), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the cost panel then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
+   body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the cost panel then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#diSection', needsWorkspace:true, title:'Delivery, timeline & payments',
    body:'Below the items: delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote.' },
  { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
    body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
-   body:'The engine room: materials → waste 6% → consumables 8% → labor = DIRECT (the floor), then OH 25% and MK 25% — the two dials always total 50%, so raising one lowers the other — and the selling price that lands on the quote. Per line you can see the floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
+   body:'The engine room: materials → waste 6% → consumables 8% of materials → labor (entered, or assumed at 80% of materials) = DIRECT (the floor), then OH and MK — balanced at 75% + 75% of direct, so selling = direct × 2.50 — and that price lands on the quote. Per line: floor, true cost, computed sell, and the effective markup of any hand-typed price. Clients never see any of this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
  { target:'#btnShare', title:'Print, Agent Copy & Share',

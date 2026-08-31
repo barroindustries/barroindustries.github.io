@@ -6238,9 +6238,9 @@ async function renderAnalytics() {
     // ratios below. ───────────────────────────────────────────────────────
     const settingsSnap = await db.collection('product_costs').doc('_settings').get().catch(() => null);
     const settingsData = (settingsSnap && settingsSnap.exists) ? (settingsSnap.data() || {}) : {};
-    const baseOH = (typeof settingsData.baseOH === 'number') ? settingsData.baseOH : 0.25;
-    const ohMin  = (typeof settingsData.ohMin  === 'number') ? settingsData.ohMin  : 0.10;
-    const ohMax  = (typeof settingsData.ohMax  === 'number') ? settingsData.ohMax  : 0.45;
+    const baseOH = (typeof settingsData.baseOH === 'number') ? settingsData.baseOH : 0.75;
+    const ohMin  = (typeof settingsData.ohMin  === 'number') ? settingsData.ohMin  : 0.30;
+    const ohMax  = (typeof settingsData.ohMax  === 'number') ? settingsData.ohMax  : 1.20;
     const targetMargin = (typeof settingsData.targetMargin === 'number') ? settingsData.targetMargin : 0.20;
     const wastePct = (typeof settingsData.wastePct === 'number') ? settingsData.wastePct : 0.06;
     const consumablesPct = (typeof settingsData.consumablesPct === 'number') ? settingsData.consumablesPct : 0.08;
@@ -6261,10 +6261,10 @@ async function renderAnalytics() {
 
     // ── Option B fixed-regime targets (derived from settings, not
     // hardcoded). OPTION B v2 (owner ruling 2026-08-31): MK loads on DIRECT
-    // like OH and the two total 50% — selling = direct × (1 + OH + MK) =
-    // ×1.50 at 25/25, so ohShare = 1/6 of every sales peso, contribution =
-    // 1/3, floor = pool × 3 (₱1.5M) and quota = pool × 6 (₱3.0M). ─────────
-    const mkPct = (typeof settingsData.mkPct === 'number') ? settingsData.mkPct : 0.25;
+    // like OH and the two total 150% of direct — selling = direct × 2.50 at
+    // 75/75, so the selling peso is 40¢ direct · 30¢ OH · 30¢ MK: floor =
+    // pool ÷ 0.60 (₱833k at 500k) and quota = pool ÷ 0.30 (₱1.667M). ──────
+    const mkPct = (typeof settingsData.mkPct === 'number') ? settingsData.mkPct : 0.75;
     const priceMultB = 1 + baseOH + mkPct;
     const ohShare = baseOH / priceMultB;
     const contribShare = (baseOH + mkPct) / priceMultB;
