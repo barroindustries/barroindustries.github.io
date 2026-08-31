@@ -723,7 +723,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      Screen-only and scoped to the workspace originals, so print and the
      Client-tab preview (cloned into #qbDocSheet) are untouched. ── */
 @media screen{
-  body.doc-details-collapsed:not(.body-client-view) #internalWorkspace .doc-details{display:none!important;}
+  body.doc-details-collapsed:not(.body-client-view):not(.body-terms-view) #internalWorkspace .doc-details{display:none!important;}
 }
 
 /* ── CALCULATOR — Internal redesign (owner ruling 2026-08-31): one surface,
@@ -890,6 +890,12 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   body.body-client-view:not(.client-previewing) #internalWorkspace .int-panel{display:none!important;}
   body.body-client-view:not(.client-previewing) #internalWorkspace #docDetailsBar{display:none!important;}
   body:not(.body-client-view) #clientFormBar{display:none!important;}
+  /* Owner ruling 2026-09-01 — Terms is its own tab: Client Data no longer
+     shows the terms section; the Terms view shows ONLY it. */
+  body.body-client-view:not(.client-previewing) #termsSection{display:none!important;}
+  body.body-terms-view #qbDocSheet{display:none!important;}
+  body.body-terms-view #internalWorkspace .section:not(#termsSection){display:none!important;}
+  body.body-terms-view #internalWorkspace .int-panel{display:none!important;}
 }
 @media print{ #qbDocSheet{display:none!important;} }
 
@@ -991,8 +997,9 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <button id="coBS" onclick="setCompany('BS')">⚙ Brilliant Steel</button>
     </div>
     <div class="toggle-pills">
-      <button id="btnClient" class="active" onclick="setView('client')">📄 Client</button>
-      <button id="btnInternal" onclick="setView('internal')">🔒 Internal</button>
+      <button id="btnClient" class="active" onclick="setView('client')">📋 Client Data</button>
+      <button id="btnInternal" onclick="setView('internal')">🧮 Estimator</button>
+      <button id="btnTerms" onclick="setView('terms')">📜 Terms</button>
     </div>
   </div>
   <div class="topbar-right">
@@ -1038,8 +1045,9 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="mtb-seg-group">
       <div class="mtb-seg-label">Mode</div>
       <div class="mtb-seg">
-        <button class="mtb-seg-btn" id="mtbViewClient" onclick="mtbSetView('client')">📄 Client</button>
-        <button class="mtb-seg-btn" id="mtbViewInternal" onclick="mtbSetView('internal')">🔒 Internal</button>
+        <button class="mtb-seg-btn" id="mtbViewClient" onclick="mtbSetView('client')">📋 Client Data</button>
+        <button class="mtb-seg-btn" id="mtbViewInternal" onclick="mtbSetView('internal')">🧮 Estimator</button>
+        <button class="mtb-seg-btn" id="mtbViewTerms" onclick="mtbSetView('terms')">📜 Terms</button>
       </div>
     </div>
   </div>
@@ -1074,11 +1082,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      client view (CSS above hides it elsewhere via .client-only). -->
 <div class="section no-print client-only" id="clientFormBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
   <button type="button" class="btn btn-green btn-sm" id="clientPreviewBtn" onclick="toggleClientPreview()">👁 Preview document</button>
-  <span style="font-size:11px;color:var(--gray-dark);">This is the document form — everything here prints on the quotation. Preview shows it exactly as the client will see it; the numbers live in Internal.</span>
+  <span style="font-size:11px;color:var(--gray-dark);">This is the document form — everything here prints on the quotation. Preview shows it exactly as the client will see it; the numbers live in the Estimator, the terms in the Terms tab.</span>
 </div>
 <div class="section no-print" id="docDetailsBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
   <button type="button" class="btn btn-outline btn-sm" id="docDetailsToggle" style="background:var(--dark-blue);" onclick="toggleDocDetails()">📄 Quote details ▸</button>
-  <span style="font-size:11px;color:var(--gray-dark);">Internal deals with the numbers — open this to edit what prints on the document: quote number · client · photos · delivery &amp; timeline · payment · remarks · terms &amp; conforme.</span>
+  <span style="font-size:11px;color:var(--gray-dark);">The Estimator deals with the numbers — open this to edit the document fields without leaving it: quote number · client · photos · delivery &amp; timeline · payment · remarks.</span>
 </div>
 
 <!-- ── DRAFT RESUME BANNER (Wave 3 Q1) — localStorage had a non-empty unfiled
@@ -1624,15 +1632,16 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
        it internal (it used to inherit that from the int-panel). -->
   <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin-bottom:4px;">➕ Additional costs — misc (delivery · permits · subcontractors)</div>
   <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
-    <strong>No markup on pass-through costs:</strong> each entry quotes at cost + 25% OH, rounded to ₱100. <strong>On quote ✓</strong> shows it as its own line above; unticked, its price is quietly distributed into the item prices you choose.
+    Delivery, Installation and Other are pass-throughs — cost + 25% OH, no markup. <strong>Additional labor</strong> is real work and carries the full OH+MK load (× 2.50). Delivery and Installation present as <strong>one combined line</strong> on the quotation. <strong>On quote ✓</strong> shows an entry above; unticked, its price is quietly distributed into the item prices you choose.
   </p>
   <div class="table-wrap" style="overflow-x:auto;">
   <table class="labor-tbl" id="miscTbl" style="min-width:640px;">
     <thead>
       <tr>
+        <th>Type</th>
         <th>Description</th>
         <th style="text-align:right;">Cost (₱)</th>
-        <th style="text-align:right;">OH (25%)</th>
+        <th style="text-align:right;">Load</th>
         <th style="text-align:right;">Quoted price (₱)</th>
         <th style="text-align:center;">On quote?</th>
         <th></th>
@@ -1641,7 +1650,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <tbody id="miscTbody"></tbody>
     <tfoot>
       <tr style="font-weight:700;background:#fff5e0;">
-        <td>Total</td>
+        <td colspan="2">Total</td>
         <td id="miscTotCost" style="text-align:right;">₱0</td>
         <td id="miscTotLoad" style="text-align:right;">₱0</td>
         <td id="miscTotQuoted" style="text-align:right;">₱0</td>
@@ -1655,7 +1664,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
   <!-- Cost of goods + margin (uses per-product Materials/Labor capital from the database) -->
   <div id="costMarginWrap">
-  <div class="sec-title" style="margin-top:14px;">🧮 Calculator (Internal)</div>
+  <div class="sec-title" style="margin-top:14px;">🧮 Calculator — Estimator</div>
   <!-- Internal redesign (owner ruling 2026-08-31): the cost surface is ONE
        calculator — the build waterfall + a per-line experiment table. It is
        LIVE: computed prices flow onto the quote. -->
@@ -1676,7 +1685,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   <div id="marginTbl"></div>
 
   <div style="margin-top:10px;font-size:12px;color:var(--orange);">
-    ⚠️ This panel is hidden in the client view and in print mode.
+    ⚠️ This panel is hidden in Client Data and in print mode.
   </div>
   </div><!-- /costMarginWrap -->
 </div>
@@ -1737,20 +1746,20 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <h4>How a quote gets made</h4>
       <ol>
         <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
-        <li><strong>Quote number</strong> <em>(Client tab)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
-        <li><strong>Client information</strong> <em>(Client tab)</em> — type the name; existing clients autocomplete.</li>
-        <li><strong>Add items</strong> <em>(Internal)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing is automatic</strong> <em>(Internal calculator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
-        <li><strong>Miscellaneous costs</strong> <em>(Internal)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
-        <li><strong>Details</strong> <em>(Client tab)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
+        <li><strong>Quote number</strong> <em>(Client Data)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
+        <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
+        <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
+        <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
+        <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
       </ol>
 
-      <h4>The two views</h4>
-      <p><strong>Client</strong> — the document form: everything that prints on the quotation, with a 👁 Preview button that shows the finished document exactly as the customer sees it.</p>
-      <p><strong>Internal</strong> — the editing workspace plus the calculator: the build waterfall, the OH% and MK% dials (together always 150% of direct), the misc-costs table, and a per-line experiment table with editable prices.</p>
-      <p>The Internal view may be hidden depending on your account.</p>
+      <h4>The three tabs</h4>
+      <p><strong>Client Data</strong> — the document form: everything that prints on the quotation, with a 👁 Preview button that shows the finished document exactly as the customer sees it.</p>
+      <p><strong>Estimator</strong> — the numbers: items, additional costs, and the calculator — the build waterfall, the OH% and MK% dials (together always 150% of direct), and a per-line experiment table with editable prices.</p><p><strong>Terms</strong> — the terms &amp; conditions, per quote, including the ±5mm measurement tolerance.</p>
+      <p>The Estimator may be hidden depending on your account.</p>
 
       <h4>Good to know</h4>
       <ul>
@@ -2395,6 +2404,8 @@ function applyPartnerMode(){
   // display:none) so the data never round-trips into the page for that session.
   if(GENERIC_PARTNER){
     document.getElementById('btnInternal')?.remove();
+    document.getElementById('btnTerms')?.remove();
+    document.getElementById('mtbViewTerms')?.remove();
     document.getElementById('costMarginWrap')?.remove();
   }
   // COSTING-QB-UX-SPEC-2026-08-26 §1 ESCALATION (see the implementation report
@@ -2617,7 +2628,7 @@ function setView(v){
   currentView=v;
   // Null-guarded: in partner mode the Admin button/panel are removed, so a bare
   // .classList here used to throw and silently abort switching to Internal.
-  ['client','internal','admin'].forEach(x=>{
+  ['client','internal','terms','admin'].forEach(x=>{
     document.getElementById('btn'+x.charAt(0).toUpperCase()+x.slice(1))?.classList.toggle('active',v===x);
   });
   const ip=document.getElementById('internalPanel'); if(ip) ip.style.display=(v==='internal')?'block':'none';
@@ -2635,6 +2646,9 @@ function setView(v){
   // display:none their #internalWorkspace with literally no button left to
   // undo that — they'd lose the ability to add/edit a line item permanently.
   if (!GENERIC_PARTNER) document.body.classList.toggle('body-client-view', v==='client');
+  // Owner ruling 2026-09-01 — third tab: Terms is its own view showing only
+  // the Terms & Conditions section (form). Class works for every session.
+  document.body.classList.toggle('body-terms-view', v==='terms');
   // Client tab always lands on the FORM first; Preview is a click away.
   if (v==='client') {
     document.body.classList.remove('client-previewing');
@@ -2762,7 +2776,7 @@ function mtbSetView(v){ setView(v); closeMobileSheet(); }
 function mtbSync(){
   const pillMode=document.getElementById('mtbPillMode');
   const pillCo=document.getElementById('mtbPillCo');
-  if(pillMode) pillMode.textContent = {client:'Client',internal:'Internal',admin:'Admin'}[currentView] || 'Client';
+  if(pillMode) pillMode.textContent = {client:'Client Data',internal:'Estimator',terms:'Terms',admin:'Estimator'}[currentView] || 'Client Data';
   if(pillCo) pillCo.textContent = currentCo || 'BK';
 
   // Quick Quote row mirrors #btnQuick's active state
@@ -2793,7 +2807,7 @@ function mtbSync(){
 
   // Mode segmented rows — mirror #btnClient/#btnInternal/#btnAdmin one-for-one;
   // a removed button (partner mode) hides its sheet row the same way.
-  ['Client','Internal','Admin'].forEach(x=>{
+  ['Client','Internal','Terms','Admin'].forEach(x=>{
     const orig=document.getElementById('btn'+x);
     const proxy=document.getElementById('mtbView'+x);
     if(!proxy) return;
@@ -5156,16 +5170,26 @@ function _miscRates(){
   const miscOh = (typeof cs.miscOhPct==='number') ? cs.miscOhPct : 0.25;
   return { ohP, mkP: Math.max(0, total-ohP), mult: 1+total, miscOh, miscMult: 1+miscOh };
 }
+// Owner ruling 2026-09-01: additional costs are TYPED, with different
+// pricing per type — Delivery/Installation/Other are pass-throughs at
+// cost + 25% OH (no MK); ADDITIONAL LABOR is real direct work and carries
+// the full OH+MK load (× 2.50), same as item labor.
+const MISC_TYPE_LABEL = { delivery:'Delivery', installation:'Installation', labor:'Additional labor', other:'Misc cost' };
+function miscMultOf(m){
+  const r = _miscRates();
+  return (m && m.type==='labor') ? r.mult : r.miscMult;
+}
 function miscQuotedOf(m){
-  return Math.round(((+m.cost||0) * _miscRates().miscMult)/100)*100;
+  return Math.round(((+m.cost||0) * miscMultOf(m))/100)*100;
 }
 function addMiscCost(){
-  miscCosts.push({ id:'m'+Date.now().toString(36)+(_miscUidSeq++), desc:'', cost:0, reflect:true, distTo:[] });
+  miscCosts.push({ id:'m'+Date.now().toString(36)+(_miscUidSeq++), type:'delivery', desc:'', cost:0, reflect:true, distTo:[] });
   miscChanged();
 }
 function updateMiscField(id, field, val){
   const m = miscCosts.find(x=>x.id===id); if(!m) return;
   if (field==='cost') m.cost = parseFloat(val)||0;
+  else if (field==='type') m.type = val;
   else m.desc = val;
   miscChanged();
 }
@@ -5185,23 +5209,29 @@ function miscChanged(){
 }
 function renderMiscCosts(){
   const tbody = document.getElementById('miscTbody'); if(!tbody) return;
-  const miscOhP = _miscRates().miscOh;
   let tc=0, tl=0, tq=0;
   tbody.innerHTML = miscCosts.length ? miscCosts.map(m=>{
-    const cost=+m.cost||0, loadAmt=cost*miscOhP, q=miscQuotedOf(m);
+    const ty=m.type||'other';
+    const mult=miscMultOf(m), cost=+m.cost||0, loadAmt=cost*(mult-1), q=miscQuotedOf(m);
     tc+=cost; tl+=loadAmt; tq+=q;
     const nDist = Array.isArray(m.distTo)?m.distTo.length:0;
     const distBtn = m.reflect ? '' :
       `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:1px 8px;font-size:10.5px;" onclick="openMiscDistModal('${m.id}')" title="Choose which quoted items quietly absorb this cost">→ distribute${nDist?` (${nDist})`:' (all)'}</button>`;
     return `<tr>
-      <td><input type="text" class="cell-unit" placeholder="e.g. Delivery — Manila" value="${attrEsc(m.desc||'')}" onchange="updateMiscField('${m.id}','desc',this.value)" style="width:100%;min-width:150px;"></td>
+      <td style="white-space:nowrap;"><select class="cell-unit" onchange="updateMiscField('${m.id}','type',this.value)" title="Type sets the pricing: Delivery/Installation/Misc are pass-throughs at cost + 25% OH; Additional labor carries the full OH+MK load (× 2.50). Delivery and Installation present as ONE combined line on the quotation." style="width:120px;">
+        <option value="delivery" ${ty==='delivery'?'selected':''}>🚚 Delivery</option>
+        <option value="installation" ${ty==='installation'?'selected':''}>🔧 Installation</option>
+        <option value="labor" ${ty==='labor'?'selected':''}>👷 Add'l labor</option>
+        <option value="other" ${ty==='other'?'selected':''}>📦 Other</option>
+      </select></td>
+      <td><input type="text" class="cell-unit" placeholder="${attrEsc(MISC_TYPE_LABEL[ty])} — details" value="${attrEsc(m.desc||'')}" onchange="updateMiscField('${m.id}','desc',this.value)" style="width:100%;min-width:130px;"></td>
       <td style="text-align:right;"><input type="number" min="0" step="0.01" class="cell-unit" value="${m.cost||''}" placeholder="0" onchange="updateMiscField('${m.id}','cost',this.value)" style="width:100px;text-align:right;"></td>
-      <td style="text-align:right;">${formatPeso(loadAmt)}</td>
+      <td style="text-align:right;">${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${ty==='labor'?'OH+MK 150%':'OH 25%'}</span></td>
       <td style="text-align:right;font-weight:700;">${formatPeso(q)}</td>
       <td style="text-align:center;"><input type="checkbox" ${m.reflect?'checked':''} onchange="toggleMiscReflect('${m.id}')" title="Ticked: shows as its own line on the quotation. Unticked: distributed into item prices."> ${distBtn}</td>
       <td><button type="button" class="del-btn" onclick="removeMiscCost('${m.id}')" title="Remove">✕</button></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--gray-dark);padding:8px;">No miscellaneous costs — add delivery, permits or rentals with ➕ Add cost.</td></tr>`;
+  }).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--gray-dark);padding:8px;">No additional costs — add delivery, installation or extra labor with ➕ Add cost.</td></tr>`;
   const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.textContent=formatPeso(v); };
   set('miscTotCost',tc); set('miscTotLoad',tl); set('miscTotQuoted',tq);
 }
@@ -5222,21 +5252,34 @@ function syncMiscItems(cost){
     });
     if (miscCosts.length) renderMiscCosts();
   }
-  const byId = {}; miscCosts.forEach(m => { byId[m.id]=m; });
+  // Desired presented lines (owner ruling 2026-09-01): reflected Delivery +
+  // Installation entries COMBINE into one line; labor/other stay per-entry.
+  const defs=[];
+  const din = miscCosts.filter(m=>m.reflect && ((m.type||'other')==='delivery' || (m.type||'other')==='installation'));
+  if (din.length){
+    const q = din.reduce((t,m)=>t+miscQuotedOf(m),0);
+    const hasD=din.some(m=>(m.type||'other')==='delivery'), hasI=din.some(m=>(m.type||'other')==='installation');
+    defs.push({ key:'group:delin', name: hasD&&hasI ? 'Delivery & Installation' : (hasD?'Delivery':'Installation'), quoted:q });
+  }
+  miscCosts.forEach(m=>{
+    if (!m.reflect) return;
+    const ty=m.type||'other';
+    if (ty==='delivery' || ty==='installation') return;
+    defs.push({ key:m.id, name:m.desc||MISC_TYPE_LABEL[ty]||'Misc cost', quoted:miscQuotedOf(m) });
+  });
+  const byKey={}; defs.forEach(d=>{ byKey[d.key]=d; });
   for (let i=items.length-1; i>=0; i--){
     const it = items[i];
-    if (it.id==='MISCFEE' && (!it._miscId || !byId[it._miscId] || !byId[it._miscId].reflect)) { items.splice(i,1); changed = true; }
+    if (it.id==='MISCFEE' && (!it._miscId || !byKey[it._miscId])) { items.splice(i,1); changed = true; }
   }
-  miscCosts.forEach(m => {
-    if (!m.reflect) return;
-    const q = miscQuotedOf(m);
-    let it = items.find(x => x.id==='MISCFEE' && x._miscId===m.id);
+  defs.forEach(d => {
+    let it = items.find(x => x.id==='MISCFEE' && x._miscId===d.key);
     if (!it) {
-      it = { id:'MISCFEE', _miscId:m.id, category:'miscellaneous', name:m.desc||'Misc cost', dims:'', specs:[],
-             qty:1, unit:'lot', unitPrice:q, amount:q, leadTime:'', laborHours:null, formulaType:'fixed', priceManual:true };
+      it = { id:'MISCFEE', _miscId:d.key, category:'miscellaneous', name:d.name, dims:'', specs:[],
+             qty:1, unit:'lot', unitPrice:d.quoted, amount:d.quoted, leadTime:'', laborHours:null, formulaType:'fixed', priceManual:true };
       items.push(it); changed = true;
-    } else if (it.name!==(m.desc||'Misc cost') || it.unitPrice!==q) {
-      it.name = m.desc||'Misc cost'; it.unitPrice = q; it.amount = q*(it.qty||1); changed = true;
+    } else if (it.name!==d.name || it.unitPrice!==d.quoted) {
+      it.name = d.name; it.unitPrice = d.quoted; it.amount = d.quoted*(it.qty||1); changed = true;
     }
   });
   return changed;
@@ -5457,7 +5500,6 @@ function computeTrueCost(){
   // per-entry ₱100 rounding the lines use, so aggregate = Σ lines exactly.
   const miscCost = (typeof miscCosts!=='undefined' ? miscCosts : []).reduce((t,m)=>t+(+m.cost||0),0);
   const miscOhPctv = (typeof cs.miscOhPct==='number') ? cs.miscOhPct : 0.25;
-  const miscQuoted = (typeof miscCosts!=='undefined' ? miscCosts : []).reduce((t,m)=>t+Math.round(((+m.cost||0)*(1+miscOhPctv))/100)*100,0);
   const direct = materials+matWaste+labor+consumables;              // items-only loadable base = items FLOOR
   const sizeF = sizeBandFactor(direct, cs.sizeBands);
   const pf = paceFactor();                                          // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B
@@ -5485,8 +5527,19 @@ function computeTrueCost(){
   const mkPct = Math.max(0, totalLoad - ohPct);
   const mkAmt = direct*mkPct;
   const floorTotal = direct + miscCost;                       // absolute floor incl. misc at face value
-  const trueCostTotal = trueCost + miscCost*(1+miscOhPctv);   // OH covered on both paths
-  const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + misc ×1.25 (per-entry rounded)
+  // Per-type misc pricing (owner ruling 2026-09-01): labor-type entries load
+  // OH+MK like item labor (× 2.50); pass-throughs (delivery/installation/
+  // other) carry OH only (× 1.25). Per-entry ₱100 rounding matches the lines.
+  let miscQuoted = 0, miscTrueAdd = 0;
+  (typeof miscCosts!=='undefined' ? miscCosts : []).forEach(m => {
+    const c = +m.cost||0;
+    const isLabor = (m.type||'other')==='labor';
+    const mult = isLabor ? (1+ohPct+mkPct) : (1+miscOhPctv);
+    miscQuoted += Math.round((c*mult)/100)*100;
+    miscTrueAdd += c*(1 + (isLabor ? ohPct : miscOhPctv));
+  });
+  const trueCostTotal = trueCost + miscTrueAdd;               // OH covered on both paths
+  const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + typed misc (per-entry rounded)
   const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
   const marginPct = sell>0 ? (sell-trueCostTotal)/sell : 0;
   return {
@@ -5602,7 +5655,7 @@ function renderTrueCostPanelHtml(cost){
     ${row('TRUE COST'+(hasMisc?' (items)':''),cost.trueCost,'total')}
     <div class="calc-row dial"><span>+ MK ${mkControl} <em class="calc-note">OH+MK = ${Math.round(cost.totalLoad*100)}% · <a href="javascript:void(0)" onclick="resetPricesToComputed()" title="Clear hand-typed prices — every costed line returns to its computed price">↺ re-apply</a></em></span><span class="peso">${formatPeso(cost.mkAmt)}</span></div>
     ${row('SELLING (items × '+(1+cost.totalLoad).toFixed(2)+')',itemsSelling,'total')}
-    ${hasMisc?row('+ Misc (cost + '+Math.round(cost.miscOhPctv*100)+'% OH, no MK)',cost.miscQuoted,'sub','Pass-through costs — priced in the Miscellaneous Costs table above'):''}
+    ${hasMisc?row('+ Additional costs (typed)',cost.miscQuoted,'sub','Delivery/Installation/Other at cost + 25% OH; Additional labor at the full × 2.50 — see the Additional costs table above'):''}
     ${row('SELLING (total)',cost.target,'grand')}
     <div class="calc-row grand quoted"><span>QUOTED (net) ${deltaChip}</span><span class="peso">${formatPeso(cost.sell)}</span></div>
     <div class="calc-row sub" style="border-bottom:none;"><span title="Never quote below true cost without President approval; below the floor is a cash loss.">Floors: true cost ${formatPeso(cost.trueCostTotal)} · absolute ${formatPeso(cost.floorTotal)}</span><span></span></div>
@@ -7365,8 +7418,14 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 17;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 19;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:19, date:'2026-09-01', items:[
+    'Additional costs are now typed: 🚚 Delivery, 🔧 Installation and 📦 Other are pass-throughs (cost + 25% OH); 👷 Additional labor carries the full OH+MK load (× 2.50). When both delivery and installation are on the quote, they present as one combined "Delivery & Installation" line.',
+  ]},
+  { ver:18, date:'2026-09-01', items:[
+    'The tabs are renamed and there are now three: 📋 Client Data (the document form + Preview), 🧮 Estimator (the numbers — items, additional costs, calculator), and 📜 Terms (terms & conditions on their own tab).',
+  ]},
   { ver:17, date:'2026-09-01', items:[
     'A Measurement Tolerance term (±5mm, standard for stainless fabrication) is now part of the default Terms & Conditions, and the items table carries a one-line ±5mm note. Toggle or edit the term per quote like any other.',
     'The calculator now lives inside the item list too — items, additional costs, totals and the calculator are one continuous section.',
@@ -7445,8 +7504,8 @@ const TOUR_STEPS = [
    body:'This is where Barro Kitchens, Barro Industries and Brilliant Steel quotes are built, priced, filed and shared. This demo takes about 2 minutes and changes nothing in your quote.' },
  { target:'#coBK', closest:'.toggle-pills', title:'Pick the company',
    body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
- { target:'#btnClient', closest:'.toggle-pills', title:'Two views',
-   body:'Client is the document form — quote number, client, delivery, terms, photos — with a 👁 Preview button that shows the finished document exactly as the customer will see it. Internal deals with the numbers: items, misc costs and the calculator.' },
+ { target:'#btnClient', closest:'.toggle-pills', title:'Three tabs',
+   body:'Client Data is the document form — quote number, client, delivery, photos — with a 👁 Preview button that shows the finished document. Estimator deals with the numbers: items, additional costs and the calculator. Terms holds the terms & conditions.' },
  { target:'#clientFormBar', needsForm:true, title:'The document form',
    body:'This is the Client tab — the form for everything that prints. Fill it in, then 👁 Preview shows the finished quotation exactly as the customer will see it, and ✎ Back to the form returns.' },
  { target:'.qno-builder-section', needsForm:true, title:'Quote number',
@@ -7455,17 +7514,17 @@ const TOUR_STEPS = [
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
  { target:'#diSection', needsForm:true, title:'Delivery, timeline & payments',
    body:'Delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote — all part of the document form.' },
- { target:'#termsSection', needsForm:true, title:'Terms & conditions',
-   body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks (the conforme).' },
- { target:'#docDetailsBar', needsWorkspace:true, title:'Internal = the numbers',
-   body:'The Internal view keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
+ { target:'#termsSection', needsTerms:true, title:'The Terms tab',
+   body:'Terms & conditions get their own tab. Standard terms are pre-loaded per company — including the ±5mm measurement tolerance — toggle or adjust them per quote; they print at the end of the document with the signature blocks (the conforme).' },
+ { target:'#docDetailsBar', needsWorkspace:true, title:'Estimator = the numbers',
+   body:'The Estimator keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
    body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section splits the quote into Option A / Option B.' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
-   body:'Right under the quote items — one layout. Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
- { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Internal only)',
+   body:'Right under the quote items — one layout. Pick a type per entry: Delivery, Installation and Other are pass-throughs at cost + 25% OH; Additional labor carries the full × 2.50 like item labor. Delivery and Installation present as one combined line on the quotation. Ticked "On quote?" puts an entry on the document; unticked, its price is quietly distributed into the item prices you choose.' },
+ { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official and shareable.' },
@@ -7573,6 +7632,12 @@ function showTourStep(i, dir){
       if(!document.body.classList.contains('body-client-view') || document.body.classList.contains('client-previewing')){
         if(typeof setView==='function'){ setView('client'); tourChangedView=true; }
       }
+    }
+  }
+  if(step.needsTerms){
+    if(!document.body.classList.contains('body-terms-view') && typeof setView==='function'){
+      const bt=document.getElementById('btnTerms');
+      if(bt){ setView('terms'); tourChangedView=true; }
     }
   }
   if(step.needsWorkspace){
