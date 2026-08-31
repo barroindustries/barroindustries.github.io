@@ -3559,6 +3559,7 @@ function addCustomItem(){
     category:currentCatFilter!=='all'?currentCatFilter:'miscellaneous',
     name:'New custom item',
     dims:'',
+    _bomOpen:true,   // fresh custom line opens its BOM & computation workspace
     specs:[],
     specEdit:'',
     qty:1,
@@ -3669,10 +3670,49 @@ function customCostGateHtml(item, idx){
     ? `<span style="font-size:10px;color:var(--gray-dark);">${fmtNum(item.costLaborDays,2)} d × ${formatPeso(dayRate)} = ${formatPeso(laborDaysPesos)} · ${formatPeso(weekRate)}/${weekDays}d crew rate</span>`
     : `<span style="font-size:10px;color:var(--gray-dark);">${formatPeso(weekRate)}/${weekDays}d crew rate = ${formatPeso(dayRate)}/day</span>`;
 
-  return `<div class="spec-line cost-gate-row no-print" style="display:block;">
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-      <span class="spec-tag no-print">Cost</span>${chip}
-    </div>
+  // Owner ruling 2026-08-31 (screenshot feedback): the BOM inputs and the
+  // computation live BEHIND a button on the line — the items table stays
+  // clean, one click opens the full cost workspace. UI flag `_bomOpen` is
+  // per-item, stripped from the filed payload; a freshly added custom item
+  // opens it automatically.
+  const open = !!item._bomOpen;
+
+  // Per-unit computation chain — the same math applyComputedPricing() uses,
+  // shown line by line so the preparer sees exactly where the auto price
+  // comes from. Rendered only when the gate is open and a basis exists.
+  const matUnit = hasBom ? bomTotal : (Number(item.costMat)||0);
+  const laborUnit = item.costLaborDays!==undefined
+    ? (Number(item.costLaborDays)||0)*dayRate
+    : (Number(item.costHrs)||0)*(cs.loadedLaborRate||COSTING_DEFAULTS.loadedLaborRate);
+  const wasteUnit = matUnit*cs.wastePct, consUnit = matUnit*cs.consumablesPct;
+  const directUnit = matUnit+wasteUnit+consUnit+laborUnit;
+  const ohP = Math.min(cs.ohMax, Math.max(cs.ohMin,
+    (ohOverridePct!=null && Number.isFinite(ohOverridePct)) ? ohOverridePct : cs.baseOH));
+  const loadTot = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 0.50;
+  const mkP = Math.max(0, loadTot - ohP);
+  const ohUnit = directUnit*ohP, mkUnit = directUnit*mkP;
+  const sellUnit = Math.round((directUnit+ohUnit+mkUnit)/100)*100;
+  const compRow = (label,val,strong)=>`<div style="display:flex;justify-content:space-between;gap:10px;${strong?'font-weight:700;border-top:1.5px solid #f0c060;margin-top:2px;padding-top:2px;':''}"><span>${label}</span><span>${formatPeso(val)}</span></div>`;
+  const compHtml = (!uncosted && directUnit>0) ? `<div class="no-print" style="margin:6px 0 2px;max-width:340px;background:#fff9ec;border:1px solid #f0c060;border-radius:6px;padding:7px 10px;font-size:11.5px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--gray-dark);margin-bottom:3px;">Computation (per unit)</div>
+      ${compRow('Materials'+(hasBom?' (BOM)':' (lump sum)'),matUnit)}
+      ${compRow('+ Waste '+Math.round(cs.wastePct*100)+'%',wasteUnit)}
+      ${compRow('+ Consumables '+Math.round(cs.consumablesPct*100)+'% of materials',consUnit)}
+      ${compRow('+ Labor',laborUnit)}
+      ${compRow('DIRECT = floor',directUnit,1)}
+      ${compRow('+ OH '+(ohP*100).toFixed(1)+'%',ohUnit)}
+      ${compRow('+ MK '+(mkP*100).toFixed(1)+'%',mkUnit)}
+      ${compRow('SELLING (rounded to ₱100)',sellUnit,1)}
+      <div style="font-size:10px;color:var(--gray-dark);margin-top:3px;">${item.priceManual
+        ? 'Manual price on this line — it overrides the computed selling; the MK (eff.) column in the cost panel shows what it gives.'
+        : 'This lands on the quote as the unit price automatically.'}</div>
+    </div>` : '';
+
+  const gateBtn = `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:2px 10px;font-size:11px;" onclick="toggleBomGate(${idx})">${open?'▾ Hide BOM &amp; computation':'🧮 BOM &amp; computation'}</button>`;
+  const closedSummary = (!open && !uncosted && directUnit>0)
+    ? `<span style="font-size:11px;color:var(--gray-dark);">direct ${formatPeso(directUnit)} → sells ${formatPeso(sellUnit)}/unit</span>` : '';
+
+  const openBody = !open ? '' : `
     <div class="no-print" style="margin:3px 0 2px;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--gray-dark);">Materials (BOM)</div>
       ${bomRowsHtml}
@@ -3690,7 +3730,24 @@ function customCostGateHtml(item, idx){
     <div class="no-print" style="margin:2px 0 2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
       <input type="number" min="0" step="0.5" class="cell-unit" placeholder="Labor hrs (legacy)" title="Legacy labor-hours entry — still honored if already set; new lines should use Labor time (days) above" value="${item.costHrs??''}" onchange="updateCustomCost(${idx},'costHrs',this.value)" style="width:110px;">
     </div>
+    ${compHtml}`;
+
+  return `<div class="spec-line cost-gate-row no-print" style="display:block;">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      <span class="spec-tag no-print">Cost</span>${chip}${gateBtn}${closedSummary}
+    </div>
+    ${openBody}
   </div>`;
+}
+
+// Owner ruling 2026-08-31 — toggles a custom line's BOM & computation
+// workspace open/closed. Session/draft UI state only (stripped from the
+// filed payload alongside the other cost fields).
+function toggleBomGate(idx){
+  if (!items[idx]) return;
+  items[idx]._bomOpen = !items[idx]._bomOpen;
+  saveToStorage();
+  renderItems();
 }
 
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — shared "does this custom line have
@@ -6543,7 +6600,7 @@ function buildQuotePayload(){
   // summary those BOM rows produce (syncCustomItemMaterialsSpec() →
   // item.specEdit) is NOT stripped — it carries no prices and already prints
   // on the quotation by design, same as any other spec line.
-  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, ...rest }) => rest);
+  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, ...rest }) => rest);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed
@@ -6979,8 +7036,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 3;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 4;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:4, date:'2026-08-31', items:[
+    'Custom items are tidier: the bill of materials and the full computation now sit behind a 🧮 BOM & computation button on the line. Open it to cost the item and see the whole chain — materials, waste, consumables, labor, OH, MK, and the selling price that lands on the quote. Closed, the line just shows "direct → sells" at a glance.',
+  ]},
   { ver:3, date:'2026-08-31', items:[
     'Prices now compute themselves: every costed line\'s unit price is set automatically — direct cost + 25% overhead + 25% markup (selling = direct × 1.50), rounded to the nearest ₱100 so prices end in two zeros. Type a price yourself and it sticks (marked "manual"); the MK column shows what markup your price really gives.',
     'New MK% input beside OH% in the cost panel. The two always total 50% — raise one and the other gives way.',
