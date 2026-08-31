@@ -1,8 +1,9 @@
 rules_version = '2';
+// NOTE 2026-09-01: ruleset is near Firestore's 256KB source cap — keep comments terse.
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Auth helpers ───────────────────────────────────
+    // ── Auth helpers ─
     function isAuth()         { return request.auth != null; }
     function isOwner(uid)     { return request.auth.uid == uid; }
 
@@ -46,7 +47,7 @@ service cloud.firestore {
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
 
-    // ── isAccountAdminFlag() — the "designated personnel" predicate ─────────
+    // ── isAccountAdminFlag() — the "designated personnel" predicate ─
     // TEAM-PAGE-ORG-SPEC-2026-08-25: fabricators need real logins, and account
     // creation/management must live IN THE APP, "controlled by designated
     // personnel, preferably HR and IT" — but owner ruling 2026-08-08 (see
@@ -62,7 +63,7 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountAdmin', false) == true;
     }
 
-    // ── isOpsAdmin() — THE SPLIT OF THE OLD 4-ROLE HELPER (2026-08-09) ───────
+    // ── isOpsAdmin() — THE SPLIT OF THE OLD 4-ROLE HELPER (2026-08-09) ─
     // The deleted helper (president|manager|secretary|finance — see
     // SECRETARY-SCOPE-SPEC.md for its name and full history) was ONE NAME FOR
     // TWO UNRELATED TIERS. Of its 42 call
@@ -141,7 +142,7 @@ service cloud.firestore {
     }
     function canProduction() { return isAdmin() || isProductionDept(); }
 
-    // ── Member of the HR DEPARTMENT ─────────────────────────────────────────
+    // ── Member of the HR DEPARTMENT ─
     // PAYROLL-AUDIT-2026-08.md §1: HR is a DEPARTMENT, but every HR screen was
     // gated on ROLE (`['president','manager','secretary','finance']`), so a real
     // person assigned to HR could not open HR — while the Accountant had a
@@ -199,7 +200,7 @@ service cloud.firestore {
     }
     function canDept(d) { return isAdmin() || inDept(d); }
 
-    // ── canIt() — IT boundary for the Corporate Secretary (owner ruling) ──────
+    // ── canIt() — IT boundary for the Corporate Secretary (owner ruling) ─
     // canDept('IT') resolves through isAdmin(), which INCLUDES 'secretary', so it
     // can never express "everyone but the secretary". A dedicated predicate can.
     // Ruling 3 again: the exclusion is on the ROLE, so it also holds for a
@@ -209,7 +210,7 @@ service cloud.firestore {
     // Bidding buckets, i.e. departments the secretary KEEPS.
     function canIt() { return !isSecretary() && canDept('IT'); }
 
-    // ── IDENTITY BINDING (v14 re-audit ROUND 2 — critical) ─────────────
+    // ── IDENTITY BINDING (v14 re-audit ROUND 2 — critical) ─
     // `email` + `pendingPasswordSetup` are together the KEY that
     // createUserDocOnAuthCreate (functions/index.js, Admin SDK — bypasses every
     // rule in this file) uses to decide that a users doc is an unclaimed
@@ -317,7 +318,7 @@ service cloud.firestore {
           && userIdentityBindingUnchanged();
     }
 
-    // ── Shape validators (Phase 92) ─────────────────────
+    // ── Shape validators (Phase 92) ─
     // Shared primitives for the repeated "number, non-negative" and
     // "string, capped length" shape checks scattered across create/update
     // rules below. Callers must pass a value already extracted via
@@ -327,7 +328,7 @@ service cloud.firestore {
     function isNonNegNumber(v) { return v is number && v >= 0; }
     function isBoundedString(v, max) { return v is string && v.size() <= max; }
 
-    // ── Users ──────────────────────────────────────────
+    // ── Users ─
     match /users/{uid} {
       // v14 re-audit fix — `read` covers BOTH get and list, so the old bare
       // `allow read: if isAuth()` let ANY signed-in principal (an external
@@ -622,7 +623,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Username → email lookup (v12 WS19) ─────────────
+    // ── Username → email lookup (v12 WS19) ─
     // Worker login is by username; the client must resolve a username to an
     // email BEFORE calling signInWithEmailAndPassword — i.e. while
     // request.auth is still null. /users read requires isAuth(), so that
@@ -641,7 +642,7 @@ service cloud.firestore {
       allow update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Sequence counters (employees, workers, etc.) ────
+    // ── Sequence counters (employees, workers, etc.) ─
     // Widened from admin-only to the ops/finance tier (WS27) so HR/finance can
     // mint BI-W-### worker IDs. Safe: docs here are opaque monotonic integers
     // — the worst a finance user can do is advance a sequence number.
@@ -666,7 +667,7 @@ service cloud.firestore {
         ));
     }
 
-    // ── Posts ──────────────────────────────────────────
+    // ── Posts ─
     // v12 WS19: read locked to !isPartner() — internal company feed, was bare
     // isAuth() (the audit separately flagged that published-post NOTIFICATIONS
     // also fan out to partners; that's a different, notification-side fix).
@@ -745,13 +746,29 @@ service cloud.firestore {
     // enforced here, keyed by uid. The president-only part is the NAV entry;
     // these rules are deliberately per-owner so opening the feature to staff
     // later is a UI change, not a rules change.
+    // 2026-09-01 board parity: items carry area/rush/note/sub-steps (ported
+    // from the Barro Kitchens job-board artifact). The {uid} parent doc
+    // exists ONLY so monthly-backup's collection .get() surfaces the uid and
+    // walks the items subcollection (missing parents are invisible to .get()).
+    match /personal_todos/{uid} {
+      allow read, delete: if isAuth() && request.auth.uid == uid;
+      allow create, update: if isAuth() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['owner','createdAt']);
+    }
     match /personal_todos/{uid}/items/{itemId} {
       allow read, delete: if isAuth() && request.auth.uid == uid;
       allow create, update: if isAuth() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['text','done','createdAt','doneAt','updatedAt'])
+        && request.resource.data.keys().hasOnly(
+             ['text','done','createdAt','doneAt','updatedAt','cat','rush','note','subs'])
         && request.resource.data.get('text', '') is string
         && request.resource.data.get('text', '').size() >= 1
-        && request.resource.data.get('text', '').size() <= 500;
+        && request.resource.data.get('text', '').size() <= 500
+        && request.resource.data.get('note', '') is string
+        && request.resource.data.get('note', '').size() <= 2000
+        && request.resource.data.get('cat', 'general') in
+             ['production','sales','design','purchasing','delivery','general']
+        && request.resource.data.get('subs', []) is list
+        && request.resource.data.get('subs', []).size() <= 60;
     }
 
     match /notes/{noteId} {
@@ -899,7 +916,7 @@ service cloud.firestore {
             || request.resource.data.get('senderUid', '') == request.auth.uid);
     }
 
-    // ── Attendance ─────────────────────────────────────
+    // ── Attendance ─
     // v12 WS19: split from a single `{document=**}` wildcard (plain isOwner(uid),
     // no field constraints at all) into a per-doc records/{date} block, because
     // the client itself writes attendanceScore directly with no server
@@ -931,7 +948,7 @@ service cloud.firestore {
         && (resource == null || resource.data.get('editedBy', null) == null);
     }
 
-    // ── Worker kiosk attendance (WS26) ──────────────────
+    // ── Worker kiosk attendance (WS26) ─
     // Factory worker_profiles staff have no Firebase Auth yet, so there is no
     // owner clause — every record is HR-kiosk-written. When WS27/WS20's
     // worker_profiles.linkedUid lands, an additive owner-read clause can be
@@ -1010,14 +1027,14 @@ service cloud.firestore {
       ));
     }
 
-    // ── Geofence work sites (v14 Type-B) ───────────────
+    // ── Geofence work sites (v14 Type-B) ─
     match /geo_sites/{docId} {
       allow read: if isAuth() && !isPartner();
       allow create, update: if isAuth() && isOpsAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Attendance extension requests ──────────────────
+    // ── Attendance extension requests ─
     match /attendance_extensions/{docId} {
       // Internal HR data — external Brilliant Steel partners excluded from reading.
       // getRole() is null-safe: null (no/missing role) is treated as "not partner"
@@ -1041,7 +1058,7 @@ service cloud.firestore {
       allow update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Cash advances ──────────────────────────────────
+    // ── Cash advances ─
     // ⚠ OWNER RULING 1 (2026-08-08) — MONEY REQUESTS STAY VISIBLE, READ-ONLY.
     // The Corporate Secretary keeps SEEING cash advances in Approvals so they can
     // flag them to the President; that escalation workflow already exists
@@ -1082,7 +1099,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Layoff (LAYOFF-SPEC 2026-08-19) ─────────────────────────────────
+    // ── Layoff (LAYOFF-SPEC 2026-08-19) ─
     // Owner ruling: HR-department members + president/manager place and lift
     // layoffs, no approval step. The Corporate Secretary / Accountant keep
     // SIGHT via canHrView() (same split as leave_requests/attendance above)
@@ -1128,7 +1145,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Layoff expenses — the Statement of Account lines ─────────────────
+    // ── Layoff expenses — the Statement of Account lines ─
     // Mirrors cash_advances: the employee files their OWN line as 'pending';
     // only the layoff-write tier moves status/money. Employee may edit or
     // withdraw a line ONLY while it is still pending; after HR has decided,
@@ -1193,7 +1210,7 @@ service cloud.firestore {
       );
     }
 
-    // ── Layoff file requests — HR asks, the employee delivers ────────────
+    // ── Layoff file requests — HR asks, the employee delivers ─
     match /layoff_file_requests/{docId} {
       allow read: if isAuth() && (
         resource.data.get('uid', '') == request.auth.uid || canHrView()
@@ -1228,7 +1245,7 @@ service cloud.firestore {
       allow delete: if isAuth() && (isSeniorAdmin() || isHrDept());
     }
 
-    // ── Tasks ──────────────────────────────────────────
+    // ── Tasks ─
     match /tasks/{taskId} {
       // v12 WS19: was bare isAuth() — a partner could browse EVERY internal task
       // across every department. BUT a partner's dashboard has a real, shipped
@@ -1546,7 +1563,7 @@ service cloud.firestore {
       }
     }
 
-    // ── KPI evaluations ────────────────────────────────
+    // ── KPI evaluations ─
     match /kpi_evals/{uid} {
       // The president's grade lives in the SAME doc as the employee's self-
       // assessment. The owner may write their self-assessment but must NOT be able
@@ -1570,13 +1587,13 @@ service cloud.firestore {
       allow delete: if isAuth() && isOpsAdmin();
     }
 
-    // ── KPI targets ────────────────────────────────────
+    // ── KPI targets ─
     match /kpi_targets/{uid} {
       allow read: if isAuth() && (isOwner(uid) || isAdmin());
       allow write: if isAuth() && isAdmin();
     }
 
-    // ── Settings ───────────────────────────────────────
+    // ── Settings ─
     // v12 WS19: read locked to internal staff on the internal docs (sales_sop,
     // employeeOfMonth) — was bare isAuth(). 'system' stays universally readable:
     // EVERY session (incl. partner) listens to settings/system via onSnapshot
@@ -1589,7 +1606,7 @@ service cloud.firestore {
       allow write: if isAuth() && isPresident();
     }
 
-    // ── Holidays admin overrides (WS26) ─────────────────
+    // ── Holidays admin overrides (WS26) ─
     // Dedicated collection so the looser finance/admin write does NOT touch
     // the president-only settings/{docId} match above (which also gates
     // employeeOfMonth/sales_sop — loosening it would loosen those too).
@@ -1598,7 +1615,7 @@ service cloud.firestore {
       allow write: if isAuth() && isOpsAdmin();
     }
 
-    // ── Strategy / market-research notes (v12 WS40) ──────────────────
+    // ── Strategy / market-research notes (v12 WS40) ─
     // docId ∈ {general,sales,marketing,production,finance,gov}. Read scoped to the
     // Analytics tier (president/manager/secretary/finance); entries appended via
     // arrayUnion. .get() defaults per missing-field-throws memory.
@@ -1633,7 +1650,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── System health (backup/sync heartbeat) ──────────
+    // ── System health (backup/sync heartbeat) ─
     // Written ONLY by the GitHub Actions backup/sync jobs via the Admin SDK
     // (which bypasses these rules). No client ever writes it.
     match /system_health/{jobId} {
@@ -1641,13 +1658,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // ── President message ──────────────────────────────
+    // ── President message ─
     match /president_message/{docId} {
       allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isPresident();
     }
 
-    // ── SOPs — readable by internal staff, editable by admins ────────────
+    // ── SOPs — readable by internal staff, editable by admins ─
     // v12 WS19: read locked to !isPartner() — was bare isAuth(). Write stays
     // isAdmin() (secretary keeps this oversight/coordination surface).
     match /sops/{docId} {
@@ -1690,7 +1707,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Salary history ─────────────────────────────────
+    // ── Salary history ─
     match /salary_history/{docId} {
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isMoneyAdmin()
@@ -1699,7 +1716,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Salary raises (audit log of pay increases) ─────
+    // ── Salary raises (audit log of pay increases) ─
     // Finance/admin grant & manage; the affected app-user may read their own.
     // v14 re-audit ROUND 2 — the "subject may read their own" branch was HALF
     // dead, exactly like the payslips one just fixed. There are two writers:
@@ -1725,7 +1742,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Pending / scheduled raises (v12 WS23 — approval-routed schedule) ────
+    // ── Pending / scheduled raises (v12 WS23 — approval-routed schedule) ─
     // Non-president finance may only FILE a request (status pending_approval —
     // filing is a safe escalation, not itself money-moving, matching the
     // secretary's existing "request President approval" pattern elsewhere).
@@ -1761,7 +1778,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Payroll CA overrides ───────────────────────────
+    // ── Payroll CA overrides ─
     match /payroll_ca_overrides/{docId} {
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isMoneyAdmin()
@@ -1769,7 +1786,7 @@ service cloud.firestore {
       allow write: if isAuth() && isMoneyAdmin();
     }
 
-    // ── Payroll delete requests ────────────────────────
+    // ── Payroll delete requests ─
     // ⚠ OWNER RULING 1 — the Corporate Secretary keeps the READ (this is the
     // Approvals "Finance Requests" queue) but loses CREATE: filing a payroll
     // deletion is a money-surface action. Approve/reject was already President-
@@ -1790,7 +1807,7 @@ service cloud.firestore {
     // payroll surface the owner's ruling 2 takes away from the secretary.
     // 'disbursed' is reachable ONLY by the president, ONLY from 'verified', and
     // is immutable afterward — no clause below permits updating a disbursed doc.
-    // ── WEEKLY (Operations Team) PAY RUN ──────────────────────────────────
+    // ── WEEKLY (Operations Team) PAY RUN ─
     // pay_weeks/{YYYY-MM-DD} — the doc id is the week's MONDAY DATE, not an ISO
     // week number. Week numbering collides at a year boundary in a way that
     // silently merges two different weeks into one id, and the Monday date is
@@ -1808,7 +1825,7 @@ service cloud.firestore {
     // This block ships BEFORE the screen that reads it, on purpose. Every denied
     // read in this app collapses into an empty list, and on a pay run an empty
     // list is indistinguishable from "nobody is owed anything".
-    // ── STATUTORY RATE TABLES ─────────────────────────────────────────────
+    // ── STATUTORY RATE TABLES ─
     // statutory_tables/{year} — the SSS / PhilHealth / Pag-IBIG / withholding
     // figures every payslip is computed from, and the `verified` flag that
     // disbursePayRun blocks on.
@@ -1830,7 +1847,7 @@ service cloud.firestore {
       allow delete: if false;   // a superseded year stays, for the audit trail
     }
 
-    // ══ ONE PAYROLL, TWO PERIOD SHAPES (PAYROLL-REDESIGN-BRIEF.md) ══════════
+    // ══ ONE PAYROLL, TWO PERIOD SHAPES (PAYROLL-REDESIGN-BRIEF.md) ─
     // The owner's keystone ruling — "unify it as well, treat disbursement of
     // office and operations the same, the difference is just the system of
     // computing their pay" — puts ONE screen, ONE release and ONE verb set in
@@ -1901,7 +1918,7 @@ service cloud.firestore {
       );
 
       allow update: if isAuth() && (
-        // ── BACKFILL over an untouched draft ────────────────────────────────
+        // ── BACKFILL over an untouched draft ─
         // The only clause allowed to SET the marker. A draft is a period
         // somebody opened and never prepared — no lines, no money — so it is
         // still history's to claim. Anything further along (computed/verified/
@@ -1909,7 +1926,7 @@ service cloud.firestore {
         ( isMoneyAdmin() && stPrev() == 'draft' && backfillMarked() )
         ||
         ( markerHeld() && (
-          // ── PERIOD-SCOPED HOLD ────────────────────────────────────────────
+          // ── PERIOD-SCOPED HOLD ─
           // "Hold or adjust one person", scoped to THIS period only. The state
           // must not move, and a paid week is frozen: once money has moved, who
           // was on that payroll is history, not a setting.
@@ -1919,7 +1936,7 @@ service cloud.firestore {
             touched().hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy',
                                'holdReasons','heldReasons','state']) )
           ||
-          // ── RECEIPTS, SAVED AS THEY ARE ATTACHED ──────────────────────────
+          // ── RECEIPTS, SAVED AS THEY ARE ATTACHED ─
           // A transfer receipt is EVIDENCE, not money: it changes no figure and
           // cannot move the state. Letting it be saved on a checked run is what
           // makes "a dropped call costs nothing" true — before this, thirty
@@ -1929,7 +1946,7 @@ service cloud.firestore {
             stNext() == stPrev() &&
             touched().hasOnly(['receipts','receiptsUpdatedAt','receiptsUpdatedBy','state']) )
           ||
-          // ── PER-LINE ADJUSTMENTS AND ONE-OFF AMOUNTS ──────────────────────
+          // ── PER-LINE ADJUSTMENTS AND ONE-OFF AMOUNTS ─
           // The owner's "one-off amounts" (a bonus, 13th month, a penalty) and
           // per-line edits, as actions on a roster row. Only up to CHECKED:
           // after HR says the hours are right the figures lock, and the way
@@ -1947,7 +1964,7 @@ service cloud.firestore {
             stPrev() in ['draft','computed'] &&
             stNext() in ['computed','verified'] )
           ||
-          // ── RELEASE ───────────────────────────────────────────────────────
+          // ── RELEASE ─
           // OWNER RULING 2026-08-10: Finance may release a verified week. The
           // transactional lock (verified -> disbursing -> disbursed) is the
           // two-step that stops a second press re-entering a run already in
@@ -1957,7 +1974,7 @@ service cloud.firestore {
               ( stPrev()=='disbursing' && stNext()=='disbursed' )
           ))
           ||
-          // ── REOPEN — PRESIDENT ONLY ───────────────────────────────────────
+          // ── REOPEN — PRESIDENT ONLY ─
           // Reopening, and unsticking a half-finished release, stay President-
           // only: those are the paths that can un-say something. (The FUNCTION
           // behind this was hardcoded to pay_runs and could never touch a week —
@@ -1969,7 +1986,7 @@ service cloud.firestore {
               ( stPrev()=='disbursing' && stNext()=='computed' )
           ))
           ||
-          // ── CORRECTION AFTER PAYMENT ──────────────────────────────────────
+          // ── CORRECTION AFTER PAYMENT ─
           // The owner's "fix something after paying". DISBURSED-IS-FROZEN IS
           // NOT WEAKENED: lines, totals, receipts and every figure that was paid
           // stay immutable forever, and the state cannot move. All this admits
@@ -2020,7 +2037,7 @@ service cloud.firestore {
         ( isMoneyAdmin() && stPrev() == 'draft' && backfillMarked() )
         ||
         ( markerHeld() && (
-        // ── PERIOD-SCOPED PAYROLL EXCLUSION (owner ruling 2026-08-10) ────────
+        // ── PERIOD-SCOPED PAYROLL EXCLUSION (owner ruling 2026-08-10) ─
         // "removing of certain members on payroll is strictly applied on that
         // payroll period only unless said member is removed from system."
         // The exclusion therefore lives on THIS MONTH'S run document, not on the
@@ -2064,7 +2081,7 @@ service cloud.firestore {
           stPrev() in ['draft','computed'] &&
           stNext() in ['computed','verified'] )
         ||
-        // ── RELEASE ─────────────────────────────────────────────────────────
+        // ── RELEASE ─
         // ⚠ THIS IS THE ONE WIDENING IN THIS PASS. It used to be isPresident().
         // The keystone ruling is that a month and a week are the same job, and
         // the weekly rule already reads "Finance may release" (owner ruling
@@ -2100,7 +2117,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Expenses ───────────────────────────────────────
+    // ── Expenses ─
     match /expenses/{docId} {
       // v14 re-audit ROUND 2 — PERIOD-CLOSE GATE (see the ledger block's own
       // gate further down, and the identical gate cash_receipt_journal /
@@ -2174,7 +2191,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Submissions ────────────────────────────────────
+    // ── Submissions ─
     match /submissions/{docId} {
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
@@ -2201,7 +2218,7 @@ service cloud.firestore {
       }
     }
 
-    // ── Quotes (internal) ──────────────────────────────
+    // ── Quotes (internal) ─
     // NOTE: was incorrectly named 'quotations' in previous rules — fixed
     // v12 WS19: read locked to !isPartner() — this is the INTERNAL Sales quotes
     // collection (distinct from bk_quotes/bs_quotes, which already correctly
@@ -2211,7 +2228,7 @@ service cloud.firestore {
       allow write: if isAuth() && isAdmin();
     }
 
-    // ── BS Quotes (Brilliant Steel partner) ────────────
+    // ── BS Quotes (Brilliant Steel partner) ─
     // One-way visibility: partner quotes ARE visible to internal staff (Sales,
     // etc.) so they can coordinate; a partner only ever sees their OWN quotes.
     // (The reverse — partner reading internal bk_quotes — is denied below.)
@@ -2235,7 +2252,7 @@ service cloud.firestore {
       allow delete: if isAuth() && (isAdmin() || docId == 'draft_' + request.auth.uid);
     }
 
-    // ── BK Quotes (Barro Kitchens / internal Sales) ────
+    // ── BK Quotes (Barro Kitchens / internal Sales) ─
     // Internal sales quotes are NOT visible to external partners — only the
     // creator or an admin may read. A partner has no bk_quotes of their own,
     // so this collection is effectively invisible to them.
@@ -2261,7 +2278,7 @@ service cloud.firestore {
         || (!isPartner() && docId == 'draft_' + request.auth.uid));
     }
 
-    // ── Quote Templates (QUOTE-TEMPLATES-SPEC.md) ──────
+    // ── Quote Templates (QUOTE-TEMPLATES-SPEC.md) ─
     // Reusable product/pricing/terms configs saved from the quote builder —
     // client/identity fields are stripped client-side before this is ever
     // written, so this collection never carries a specific client's contact
@@ -2274,7 +2291,7 @@ service cloud.firestore {
                     && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
     }
 
-    // ── Approval requests ──────────────────────────────
+    // ── Approval requests ─
     match /approval_requests/{docId} {
       // Internal workflow data — external partners excluded from reading.
       allow read: if isAuth() && !isPartner();
@@ -2334,7 +2351,7 @@ service cloud.firestore {
       allow read, update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Partner deals (50/50 profit split) ────────────
+    // ── Partner deals (50/50 profit split) ─
     match /partner_deals/{docId} {
       // Partners can read their own deals; admins can read all.
       allow read: if isAuth() && (
@@ -2347,7 +2364,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Products catalog ───────────────────────────────
+    // ── Products catalog ─
     // v14 re-audit HIGH fix — Firestore has no field-level read security, so
     // this doc's cost-basis fields (capitalMaterials, capitalLabor, and the
     // BOM's per-line unitCost) were readable by ANY authenticated user,
@@ -2421,7 +2438,7 @@ service cloud.firestore {
       allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
     }
 
-    // ── Material Price List (COSTING PHASE 1, 2026-08-26) ──────────────
+    // ── Material Price List (COSTING PHASE 1, 2026-08-26) ─
     // Supplier price list (Kingsway 2025 seed) — the live material-price feed
     // for costing. Same sensitivity class as /product_costs (supplier cost
     // basis), same secretary/partner exclusions. Deliberately does NOT use
@@ -2432,7 +2449,7 @@ service cloud.firestore {
       allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance() || isPurchasingDept());
     }
 
-    // ── Reference materials ────────────────────────────
+    // ── Reference materials ─
     // v12 WS19: read locked to internal staff (!isPartner()) on all four — were
     // bare isAuth(). Write stays isAdmin() (secretary keeps this surface).
     match /resources/{docId} {
@@ -2475,7 +2492,7 @@ service cloud.firestore {
       );
     }
 
-    // ── Projects ───────────────────────────────────────
+    // ── Projects ─
     // v12 WS19: read locked to !isPartner() — was bare isAuth(). NOTE: this is
     // DIFFERENT from /job_projects (which already correctly partner-scopes) —
     // the unified Projects view already skips this collection for partners
@@ -2562,7 +2579,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
-    // ── IT collections ─────────────────────────────────
+    // ── IT collections ─
     // v12 WS19: read locked to !isPartner() on all three — were bare isAuth().
     // ⚠ 2026-08-10 — it_tickets was MISSED by the 2026-08-09 canIt() sweep below.
     // That pass converted it_assets/it_software writes and both it_access and
@@ -2625,7 +2642,7 @@ service cloud.firestore {
       allow write: if isAuth() && canIt();
     }
 
-    // ── Per-department document collections (renderDocCollection) ───────
+    // ── Per-department document collections (renderDocCollection) ─
     // These were unruled → silent permission-denied (blank screens). Internal
     // staff read; the owning department (or an admin) writes. Partners excluded.
     match /work_plans/{docId} {
@@ -2667,7 +2684,7 @@ service cloud.firestore {
       allow update, delete: if isAuth() && canDept('Marketing');
     }
 
-    // ── Meta Ads integration (specs/META-ADS-SPEC-2026-08-30.md) ─────────
+    // ── Meta Ads integration (specs/META-ADS-SPEC-2026-08-30.md) ─
     // ad_insights: per-campaign per-day Meta spend/impressions/clicks/leads,
     // written ONLY server-side (nightly GitHub Action via admin SDK, which
     // bypasses rules). Readable by any signed-in non-partner — it feeds the
@@ -2775,7 +2792,7 @@ service cloud.firestore {
     // Ventures department. Fixing that belongs in storage.rules, not here — do
     // not "fix" it by widening this block. A matching note is on the audit
     // handoff; the zero-code workaround is to assign them the Ventures dept.
-    // ── MEETINGS (owner request — in-system calendar + chat invites) ──────
+    // ── MEETINGS (owner request — in-system calendar + chat invites) ─
     // Read is invitee-or-oversight. There is no LIST-safe blanket read: the
     // calendar's non-admin query carries `invitees array-contains uid`, which
     // is exactly what makes the first disjunct provable from the query alone.
@@ -2886,7 +2903,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
-    // ── Finance journals & records ─────────────────────
+    // ── Finance journals & records ─
     // Finance may create + edit every line. DELETE is President-only: finance
     // staff file a finance_delete_requests doc that the President approves in the
     // Approvals tab (the actual delete then runs in the President's context). This
@@ -2953,7 +2970,7 @@ service cloud.firestore {
       allow read, write: if isAuth() && canFinance();
     }
 
-    // ── Finance rollups (v14 wave4 F2) ─────────────────
+    // ── Finance rollups (v14 wave4 F2) ─
     // Client-maintained monthly aggregates (finance_rollup/{yyyymm} + 'undated').
     // Best-effort writes fired after every Ledger mutation; Rebuild-rollups in
     // Finance Tools is the reconciliation authority. Writers = anyone who can
@@ -3301,7 +3318,7 @@ service cloud.firestore {
         || (canPurchasing() && resource.data.get('stage', 'rfq') == 'rfq'));
     }
 
-    // ── Finance delete requests ────────────────────────
+    // ── Finance delete requests ─
     // Finance staff file a request to delete any finance record; the President
     // approves/denies it (and performs the real delete) in the Approvals tab.
     // ⚠ OWNER RULING 1 (applied here 2026-08-10) — this was the FOURTH money-request
@@ -3322,7 +3339,7 @@ service cloud.firestore {
       allow update, delete: if isAuth() && isPresident();
     }
 
-    // ── Bank accounts registry (v12 WS36) ──────────────
+    // ── Bank accounts registry (v12 WS36) ─
     // Master data for the company's cash locations (bank / e-wallet / petty cash).
     // Balances are DERIVED client-side (opening anchor + tagged ledger flows) — no
     // balance field lives here, so nothing a buggy writer could drift. Reads are
@@ -3339,7 +3356,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Department budgets (DEPT-BUDGETS-SPEC-2026-08-11) ──────────────
+    // ── Department budgets (DEPT-BUDGETS-SPEC-2026-08-11) ─
     // Three literal-named collections, deliberately NOT prefixed budgets_/
     // files_: the wildcard blocks below union-grant their looser semantics to
     // ANY same-prefixed name (see the union-permit trap note there), and
@@ -3432,7 +3449,7 @@ service cloud.firestore {
           && resource.data.get('status', '') == 'pending' ) );
     }
 
-    // ── Payslips & Worker profiles (Brilliant Steel) ───
+    // ── Payslips & Worker profiles (Brilliant Steel) ─
     match /payslips/{docId} {
       // v14 re-audit fix — the two owner branches here were BOTH dead, so a
       // Type-B (weekly, production) worker could never read their own payslip:
@@ -3583,7 +3600,7 @@ service cloud.firestore {
       allow delete:         if isAuth() && isMoneyAdmin();
     }
 
-    // ── Government biddings ────────────────────────────
+    // ── Government biddings ─
     match /gov_biddings/{docId} {
       // Government bidding pipeline is internal-only — external partners excluded
       // from reading (null-safe getRole(): null is treated as "not partner").
@@ -3591,14 +3608,14 @@ service cloud.firestore {
       allow write: if isAuth() && isAdmin();
     }
 
-    // ── Departments config ─────────────────────────────
+    // ── Departments config ─
     // v12 WS19: read locked to !isPartner() — was bare isAuth().
     match /departments/{docId} {
       allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
 
-    // ── Inventory (raw materials + finished goods) ─────
+    // ── Inventory (raw materials + finished goods) ─
     // INVENTORY-DEPT-SPEC-2026-08-31 — tightened from "any internal staff
     // can write" to the people who actually move stock: senior admins,
     // Finance, and members of Inventory / Purchasing / Production. Reads
@@ -3624,7 +3641,7 @@ service cloud.firestore {
       allow read, write: if isAuth() && isMoneyAdmin();
     }
 
-    // ── Production orders (shop-floor pipeline) ─────────
+    // ── Production orders (shop-floor pipeline) ─
     // v12 WS28: writes scoped to the people who run the pipeline — Production
     // dept (or admins) manage orders; Sales may CREATE one (the "Job Order"
     // button on a project). Two transition gates are enforced server-side so a
@@ -3664,7 +3681,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
-    // ── Audit log (append-only) ─────────────────────────
+    // ── Audit log (append-only) ─
     // Who-changed-what trail on sensitive mutations. A signed-in user may APPEND
     // an entry, but ONLY describing THEMSELVES (actorUid == their uid) with their
     // real role (actorRole == getRole()) and a server timestamp (no backdating) —
@@ -3714,7 +3731,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Client error log (v13 Phase 8) ──────────────────
+    // ── Client error log (v13 Phase 8) ─
     // window.onerror/onunhandledrejection (js/errlog.js) write here so production
     // errors surface without a user report. Any signed-in client may append (the
     // client is often broken/mid-error when it writes, so we don't gate on role),
@@ -3758,7 +3775,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Leave requests ──────────────────────────────────
+    // ── Leave requests ─
     // Employees file their own request (pending only) and read their own;
     // finance/admin read all + approve/reject; only the president deletes.
     match /leave_requests/{docId} {
@@ -3862,7 +3879,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
-    // ── Public client-facing quote mirror (share-with-client) ───────────
+    // ── Public client-facing quote mirror (share-with-client) ─
     // Each doc id is a 12-char unguessable token; /q/?<token> resolves it.
     // Holds ONLY the sanitized client-safe projection built by
     // buildPublicQuoteDoc() (js/screens/sales.js) — NEVER capital/labor costs,
@@ -3904,7 +3921,7 @@ service cloud.firestore {
         && (!isPartner() || srcIsMine(resource.data));
     }
 
-    // ── Public ID verification (QR scan target, WS27) ───
+    // ── Public ID verification (QR scan target, WS27) ─
     // Each doc id is an unguessable token; the public /v/?<token> page resolves
     // it. Holds ONLY a public-safe projection (name/photo/id-no/dept/title/
     // status) — NEVER SSS/PhilHealth/TIN/rates/CA/address/phone/email, which
@@ -3972,14 +3989,14 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Suggestions ────────────────────────────────────
+    // ── Suggestions ─
     match /suggestions/{docId} {
       allow read: if isAuth() && isAdmin();
       allow create: if isAuth();
       allow update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Client CRM — UNIFIED (v12 WS32) ────────────────
+    // ── Client CRM — UNIFIED (v12 WS32) ─
     // ONE `clients` collection (brands[] tags Sales/Design/BS membership); the
     // three per-brand books below are read-only archives kept for the audit
     // trail. INTERNAL-ONLY: partners never read/write the client book — their
@@ -4003,7 +4020,7 @@ service cloud.firestore {
     match /design_clients/{docId} { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
     match /bs_clients/{docId}      { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
 
-    // ── Dynamic / runtime-named collections ────────────
+    // ── Dynamic / runtime-named collections ─
     // The app creates per-scope and per-dept collections at runtime whose names
     // are not known ahead of time, so they can't be matched by literal name:
     //   files_<scope>  — uploaded documents (every Files tab, all depts)
@@ -4059,7 +4076,7 @@ service cloud.firestore {
           || (!isPartner() && inDept(resource.data.get('dept',''))) );
     }
 
-    // ── Files Hub (WS38) — unified file metadata + folder tree ─────────
+    // ── Files Hub (WS38) — unified file metadata + folder tree ─
     // Deliberately NOT named files_*: the files_.* wildcard above would
     // union-grant all-internal read and defeat per-file visibility/sharing.
     // Sharing enforcement uses ONLY uid arrays (sharedUserIds/editorUserIds)

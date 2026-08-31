@@ -55,7 +55,7 @@ const BASELINE = [
   'notif_quota', 'notifications',
   'order_tracking', 'partner_deals', 'pay_runs', 'payroll',
   'payroll_ca_overrides', 'payroll_delete_requests', 'payslips',
-  'pending_raises', 'policies', 'posts', 'productMeta',
+  'pending_raises', 'personal_todos', 'policies', 'posts', 'productMeta',
   'production_orders', 'products', 'projects', 'promotions',
   'purchase_requisitions', 'quotes', 'resources', 'roc_leads', 'salary_history',
   'salary_raises', 'sales_clients', 'sales_orders', 'settings',

@@ -297,7 +297,7 @@ const SUBCOLLECTION_SKIP = new Set(['typing', 'readers']);
 // Names we already know about — used only to annotate the console/summary
 // output ("(new)" tag on anything unexpected) so a human notices drift.
 // NOT a filter: unrecognized subcollection names are still exported.
-const KNOWN_SUBCOLLECTIONS = ['comments', 'messages', 'records'];
+const KNOWN_SUBCOLLECTIONS = ['comments', 'messages', 'records', 'items'];
 
 // Loud, not silent: per (root, subcollection) pair across the whole run.
 const SUBCOLLECTION_DOC_CAP = 50000;
