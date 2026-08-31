@@ -103,7 +103,11 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
-  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Budgeting','Tasks'];
+  // 'Analytics' (owner ruling 2026-09-01: "in addition to it being in their
+  // drawer it should also be in sales department page") embeds the same
+  // sales-scoped view renderSalesAnalytics() serves on the Analytics page —
+  // quota to meet, OH to cover, floor, pace and the discount signal.
+  const salesTabs = ['Clients','Quotes','Analytics','Partner','Files','SOP','Budgeting','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
                   'Partner Quotes':'Partner', 'Partner Files':'Partner',
@@ -158,6 +162,11 @@ async function loadSalesContent(currentUser, currentRole, sub) {
   switch(sub) {
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
+      break;
+
+    case 'Analytics':
+      // dashboards.js is an eager bundle, so this global is always present.
+      await window.renderSalesAnalytics(content);
       break;
 
     case 'Quotes': {

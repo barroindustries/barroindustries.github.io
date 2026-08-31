@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.249';
+window.APP_VERSION = '14.0.250';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -238,7 +238,7 @@ window.DEPARTMENTS = {
     // 'Quick Estimate' are dead aliases that resolve to 'Quotes' — removed here.
     // 'AEC' moved out to the CRM department (2026-08-04) — the architect/
     // engineer/contractor prospecting directory now lives under CRM > AEC Leads.
-    subtabs: ['Clients', 'Quotes', 'Partner', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
+    subtabs: ['Clients', 'Quotes', 'Analytics', 'Partner', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
   },
   'CRM': {
     key: 'CRM', icon: '🎯', lucideIcon: 'target', color: '#F59F00',

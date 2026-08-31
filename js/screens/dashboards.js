@@ -5529,8 +5529,10 @@ function destroyChartsIn(el) {
 // product_costs/_pace (published each time management opens the full costing
 // dashboard; rules opened _pace to internal staff the same day). No ledger,
 // payroll or job-cost reads — the money tier stays closed to non-finance.
-async function renderSalesAnalytics(){
-  const c=document.getElementById('page-content');
+async function renderSalesAnalytics(hostEl){
+  // hostEl: the Sales department page embeds this same view in its
+  // Analytics tab (owner 2026-09-01); with no host it owns #page-content.
+  const c=hostEl||document.getElementById('page-content');
   c.innerHTML=window.skeletonHtml('cards');
   let p=null, deniedMsg='';
   try{
@@ -5559,9 +5561,14 @@ async function renderSalesAnalytics(){
     const stale=!asOf||!isFinite(asOf.getTime())||(Date.now()-asOf.getTime())>7*24*60*60*1000;
     inner=`
       <div class="kpi-row">
-        <div class="kpi-card"><div class="kpi-label">Sales — ${escHtml(p.month||'this month')}</div><div class="kpi-value">${P(income)}</div></div>
-        <div class="kpi-card ${covered?'green':'warn'}"><div class="kpi-label">Overhead this month</div><div class="kpi-value">${covered?'✓ COVERED':Math.round(covPct*100)+'%'}</div></div>
-        <div class="kpi-card ${disc>0?'warn':'green'}"><div class="kpi-label">Suggested discount</div><div class="kpi-value">${disc>0?disc+'%':'none'}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Sales — ${escHtml(p.month||'this month')}</div><div class="kpi-value">${P(income)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">floor ${P(floorS)} · quota ${P(quota)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Quota to meet</div><div class="kpi-value">${P(quota)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${income>=quota&&quota>0?'✓ quota met':P(Math.max(0,quota-income))+' to go'}</div></div>
+        <div class="kpi-card ${covered?'green':'warn'}"><div class="kpi-label">Overhead to cover</div><div class="kpi-value">${covered?'✓ COVERED':P(pool)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${covered?P(pool)+' pool fully covered':Math.round(covPct*100)+'% covered · '+P(toGo)+' to go'}</div></div>
+        <div class="kpi-card ${disc>0?'warn':'green'}"><div class="kpi-label">Suggested discount</div><div class="kpi-value">${disc>0?disc+'%':'none'}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${disc>0?'behind pace — offer deeper':'on pace — hold price'}</div></div>
       </div>
       <div class="card" style="padding:16px 18px;margin-top:12px">
         <div style="font-weight:700;margin-bottom:6px">Overhead coverage — ${P(contrib)} of ${P(pool)}</div>
