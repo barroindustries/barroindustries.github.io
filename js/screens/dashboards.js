@@ -6260,10 +6260,14 @@ async function renderAnalytics() {
     const effContribution = usingEstimate ? +((income - estVariable)).toFixed(2) : r.contributionPesos;
 
     // ── Option B fixed-regime targets (derived from settings, not
-    // hardcoded): ohShare = OH centavos of every sales peso at target
-    // pricing; floor = profit-zero sales; quota = pool fully recovered. ───
-    const ohShare = baseOH * (1 - targetMargin) / (1 + baseOH);
-    const contribShare = ohShare + targetMargin;
+    // hardcoded). OPTION B v2 (owner ruling 2026-08-31): MK loads on DIRECT
+    // like OH and the two total 50% — selling = direct × (1 + OH + MK) =
+    // ×1.50 at 25/25, so ohShare = 1/6 of every sales peso, contribution =
+    // 1/3, floor = pool × 3 (₱1.5M) and quota = pool × 6 (₱3.0M). ─────────
+    const mkPct = (typeof settingsData.mkPct === 'number') ? settingsData.mkPct : 0.25;
+    const priceMultB = 1 + baseOH + mkPct;
+    const ohShare = baseOH / priceMultB;
+    const contribShare = (baseOH + mkPct) / priceMultB;
     const floorSales = contribShare > 0 ? r.fixedTotal / contribShare : null;
     const quotaSales = ohShare > 0 ? r.fixedTotal / ohShare : null;
 
@@ -6295,7 +6299,7 @@ async function renderAnalytics() {
     // flat base rate, clamped; pace and size no longer touch it. The settings
     // doc was fetched above. ──────────────────────────────────────────────
     const suggestedOH = Math.min(ohMax, Math.max(ohMin, baseOH));
-    const priceMult = (1 + suggestedOH) / (1 - targetMargin);   // ×1.5625 at 25/20
+    const priceMult = priceMultB;   // ×1.50 at 25 OH + 25 MK on direct
 
     // ── Card 5 — 6-month trend (finance_rollup/{YYYY-MM}, catch → denied) ──
     const rollupResults = await Promise.all(months6.map(m =>
@@ -6399,7 +6403,7 @@ async function renderAnalytics() {
             <div class="kpi-card accent"><div class="kpi-label">OH% on direct cost</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
             <div class="kpi-card"><div class="kpi-label">Price multiplier on direct</div><div class="kpi-value">×${priceMult.toFixed(4)}</div></div>
           </div>
-          <div style="font-size:12px;color:var(--text-muted)">Fixed-rate ruling (31 Aug 2026): overhead is a flat ${(suggestedOH*100).toFixed(0)}% on direct cost and margin ${(targetMargin*100).toFixed(0)}% of the price — the same specs price the same in any month, at any job size. Pace and the old size bands are advisory signals only.</div>
+          <div style="font-size:12px;color:var(--text-muted)">Fixed-rate ruling (31 Aug 2026): OH ${(suggestedOH*100).toFixed(0)}% + MK ${(mkPct*100).toFixed(0)}% on direct cost — together always ${((suggestedOH+mkPct)*100).toFixed(0)}%, so selling = direct × ${priceMult.toFixed(2)}, rounded per line to the nearest ₱100. Same specs, same price, any month, any size. Pace and the old size bands are advisory signals only.</div>
         </div>
       </div>
 

@@ -1996,7 +1996,12 @@ const COSTING_DEFAULTS = Object.freeze({
   baseOH: 0.25,            // OH pool ÷ target monthly direct cost
   sizeBands: [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]],
   ohMin: 0.10, ohMax: 0.45,
-  targetMargin: 0.20,
+  targetMargin: 0.20,      // legacy margin-on-price; target pricing now uses mkPct below
+  // OPTION B v2 (owner ruling 2026-08-31): MK is a loading on DIRECT cost,
+  // like OH, and the two always total totalLoadPct — selling = direct ×
+  // (1 + OH% + MK%) = ×1.50 at the 25/25 defaults.
+  mkPct: 0.25,
+  totalLoadPct: 0.50,
   // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — crew-day labor rate for custom
   // lines: ₱30,000/6 days = ₱5,000/day. Read from product_costs/_settings
   // when present (same doc/merge as every other COSTING_DEFAULTS field
@@ -4800,7 +4805,7 @@ function bumpQty(idx,delta){
   saveToStorage();renderItems();flashItemSaved();
 }
 function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();flashItemSaved();}
-function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
+function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;items[idx].priceManual=true;/* OPTION B v2: a hand-typed price sticks — auto-pricing skips it and MK is read as the balancing figure */saveToStorage();renderItems();flashItemSaved();}
 function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
 // Duplicate a line item (audit: "no duplicate/clone-line-item action") —
 // inserts an identical copy directly after the original; the copy is then
@@ -5112,13 +5117,19 @@ function computeTrueCost(){
   const ohPct = Math.min(cs.ohMax, Math.max(cs.ohMin, ohOverridden ? ohOverridePct : suggestedOhPct));
   const ohAmt = direct*ohPct;
   const trueCost = direct+ohAmt;
-  const target = trueCost/(1-cs.targetMargin);
+  // OPTION B v2 (owner ruling 2026-08-31): MK% loads on DIRECT cost and
+  // always balances OH% to cs.totalLoadPct (50%) — one split, two handles.
+  // selling (target) = direct × (1 + OH% + MK%) = ×1.50 at 25/25.
+  const totalLoad = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 0.50;
+  const mkPct = Math.max(0, totalLoad - ohPct);
+  const mkAmt = direct*mkPct;
+  const target = trueCost + mkAmt;
   const sell = (typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT, unchanged
   const marginPct = sell>0 ? (sell-trueCost)/sell : 0;
   return {
     materials, matWaste, laborHrsTotal, laborPesosFallback, labor, consumables,
     direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
-    ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, target, sell, marginPct,
+    ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, marginPct,
     anyMissingCatalogCost, liveById, cs,
   };
 }
@@ -5140,6 +5151,11 @@ function computeMarginSummary(laborEst){
   const wrap = document.getElementById('marginTbl'); if (!wrap) return;
   const cost = computeTrueCost();
   if (!cost) return; // GENERIC_PARTNER — unreachable given the DOM guard above; belt-and-braces
+  // OPTION B v2 (owner ruling 2026-08-31): the computed selling price flows
+  // INTO the quote. If any costed line's price just changed, repaint the
+  // items/totals first — renderItems() re-enters here once and the second
+  // pass is a no-op (₱100 rounding is stable), so this cannot loop.
+  if (applyComputedPricing(cost)) { saveToStorage(); renderItems(); return; }
   const cs = cost.cs;
 
   // Per-item capital + labor breakdown — same table as before, now sourced
@@ -5220,6 +5236,21 @@ function renderTrueCostPanelHtml(cost){
   const ohSuggestedNote = PARTNER_MODE ? ''
     : ` <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">suggested ${ohSuggestedVal.toFixed(1)}% · <a href="javascript:void(0)" onclick="resetOhOverride()" style="color:var(--mid-blue);font-weight:700;text-decoration:none;">reset</a></span>`;
 
+  // OPTION B v2 (owner ruling 2026-08-31) — MK% input. MK loads on DIRECT
+  // like OH, and the two always total cs.totalLoadPct (50%): the MK input is
+  // the other handle on the same split, so committing an MK% just sets OH%
+  // to the balance and re-renders.
+  const mkMinPct=Math.max(0,(cost.totalLoad-cs.ohMax))*100, mkMaxPct=(cost.totalLoad-cs.ohMin)*100;
+  const mkPctVal=cost.mkPct*100;
+  const mkControl = PARTNER_MODE
+    ? `<strong>${mkPctVal.toFixed(1)}%</strong>`
+    : `<input type="number" id="mkOverrideInput" min="${mkMinPct.toFixed(0)}" max="${mkMaxPct.toFixed(0)}" step="0.1"
+         value="${mkPctVal.toFixed(1)}" onchange="onMkOverrideChange(this.value)"
+         title="Override the MK%. OH adjusts so OH + MK always total ${Math.round(cost.totalLoad*100)}%."
+         style="width:62px;text-align:right;border:1.5px dashed var(--orange);border-radius:4px;padding:2px 4px;font-size:12.5px;font-weight:700;background:#fff;">%`;
+  const mkNote = PARTNER_MODE ? ''
+    : ` <span style="font-size:10px;font-weight:400;color:var(--gray-dark);">OH+MK = ${Math.round(cost.totalLoad*100)}% · <a href="javascript:void(0)" onclick="resetPricesToComputed()" style="color:var(--mid-blue);font-weight:700;text-decoration:none;" title="Clear hand-typed prices — every costed line goes back to the computed selling price (rounded to ₱100)">↺ re-apply computed prices</a></span>`;
+
   const buildup=`<table class="labor-tbl" style="margin-bottom:10px;"><tbody>
     <tr><td>Materials</td><td style="text-align:right;">${formatPeso(cost.materials)}</td></tr>
     <tr><td title="Why ${Math.round(cs.wastePct*100)}%: steel comes in fixed sheet and tube sizes — offcuts, kerf (the material the cut itself eats) and edge damage mean a job never uses 100% of bought stock. Steel-fab scrap normally runs 5–10%; ${Math.round(cs.wastePct*100)}% assumes tight cutting plans.">+ Waste (${Math.round(cs.wastePct*100)}%) ⓘ</td><td style="text-align:right;">${formatPeso(cost.matWaste)}</td></tr>
@@ -5230,6 +5261,10 @@ function renderTrueCostPanelHtml(cost){
       <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${ohControl}${ohSuggestedNote}</span></td>
     <td style="text-align:right;vertical-align:top;">${formatPeso(cost.ohAmt)}</td></tr>
     <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>TRUE COST</td><td style="text-align:right;">${formatPeso(cost.trueCost)}</td></tr>
+    <tr><td title="MK (markup) loads on direct cost, exactly like OH — and the two always total ${Math.round(cost.totalLoad*100)}%: raise one and the other gives way. At 25/25 the selling price is direct × 1.50, rounded per line to the nearest ₱100.">+ MK (${(cost.mkPct*100).toFixed(1)}% of direct — balances OH to ${Math.round(cost.totalLoad*100)}%) ⓘ<br>
+      <span style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px;">${mkControl}${mkNote}</span></td>
+    <td style="text-align:right;vertical-align:top;">${formatPeso(cost.mkAmt)}</td></tr>
+    <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>SELLING (direct × ${(1+cost.totalLoad).toFixed(2)})</td><td style="text-align:right;">${formatPeso(cost.target)}</td></tr>
   </tbody></table>`;
 
   const ladderCell=(label,val)=>`<div style="flex:1;min-width:96px;background:#fff5e0;border-radius:6px;padding:7px 8px;text-align:center;">
@@ -5239,18 +5274,18 @@ function renderTrueCostPanelHtml(cost){
   const ladder=`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
     ${ladderCell('Floor',cost.direct)}
     ${ladderCell('True Cost',cost.trueCost)}
-    ${ladderCell(`Target (${Math.round(cs.targetMargin*100)}%)`,cost.target)}
+    ${ladderCell(`Selling (OH+MK ${Math.round(cost.totalLoad*100)}%)`,cost.target)}
     ${ladderCell('Quoted (net)',cost.sell)}
   </div>`;
 
   const belowFloor = cost.sell < cost.direct;
   const belowTrueCost = !belowFloor && cost.sell < cost.trueCost;
-  const belowTarget = !belowFloor && !belowTrueCost && cost.marginPct < cs.targetMargin;
+  const belowTarget = !belowFloor && !belowTrueCost && cost.sell < cost.target;
   const marginColor = belowFloor ? 'var(--red)' : belowTrueCost ? 'var(--orange)' : belowTarget ? 'var(--accent)' : 'var(--green)';
   const noCostBasis = cost.direct<=0 && items.length>0;
   const marginLine = noCostBasis
     ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;">No cost basis on these items yet — set Materials/Labor in the President's Product Database, or cost custom lines in this view, to see a real margin.</div>`
-    : `<div style="font-weight:700;color:${marginColor};">Margin at quoted price: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCost)})</div>`;
+    : `<div style="font-weight:700;color:${marginColor};">Margin at quoted price: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCost)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCost)/cost.direct*100:0).toFixed(1)}% of direct</div>`;
 
   const belowFloorNote = belowFloor
     ? `<div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600;">⚠️ Below floor — President approval required</div>`
@@ -5292,6 +5327,51 @@ function resetOhOverride(){
   ohOverridePct = null;
   computeMarginSummary();
 }
+// OPTION B v2 (owner ruling 2026-08-31) — MK is the other handle on the same
+// 50% split: committing an MK% sets OH% to the balance (clamped) and MK
+// re-derives on render, so OH + MK always total cs.totalLoadPct.
+function onMkOverrideChange(val){
+  const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
+  const total = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 0.50;
+  const n = parseFloat(val);
+  if (Number.isFinite(n)) {
+    ohOverridePct = Math.min(cs.ohMax, Math.max(cs.ohMin, total - n/100));
+  }
+  ohPerItemOpen = true;
+  computeMarginSummary();
+}
+// Clears hand-typed prices so every costed line snaps back to the computed
+// selling price (direct/unit × (1+OH+MK), rounded to the nearest ₱100).
+function resetPricesToComputed(){
+  items.forEach(i => { delete i.priceManual; });
+  computeMarginSummary();
+}
+// OPTION B v2 — computed selling → quote price. Each costed line's unit
+// price auto-sets to direct/unit × (1 + OH% + MK%), rounded to the nearest
+// ₱100 so prices end in two zeros (15,500 · 7,500 · 4,300); MK absorbs the
+// rounding. A hand-typed price sticks (updatePrice sets priceManual) and
+// simply means a different effective MK. Internal sessions only — partner
+// views never mutate quote state from this panel.
+function applyComputedPricing(cost){
+  if (PARTNER_MODE || !cost) return false;
+  let changed = false;
+  items.forEach(item => {
+    if (item.priceManual) return;
+    const qty = item.qty||1;
+    const basis = itemCostBasis(item, cost.liveById);
+    if (!basis.hasBasis) return;
+    const directPerUnit = basis.mat*(1 + cost.cs.wastePct + cost.cs.consumablesPct)
+      + (basis.hrs>0 ? basis.hrs*cost.cs.loadedLaborRate : basis.capLaborPesos);
+    if (directPerUnit <= 0) return;
+    const auto = Math.round(directPerUnit*(1 + cost.ohPct + cost.mkPct)/100)*100;
+    if (auto > 0 && item.unitPrice !== auto) {
+      item.unitPrice = auto;
+      item.amount = auto*qty;
+      changed = true;
+    }
+  });
+  return changed;
+}
 function toggleOhPerItem(){
   ohPerItemOpen = !ohPerItemOpen;
   computeMarginSummary();
@@ -5321,7 +5401,7 @@ function renderOhPerItemTableHtml(cost){
     if(!basis.hasBasis){
       return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')}</td><td style="text-align:center;">${qty}</td>
         <td style="text-align:right;">${formatPeso(unitPrice)}</td>
-        <td colspan="4" style="text-align:center;">${needsCostingChip}</td></tr>`;
+        <td colspan="5" style="text-align:center;">${needsCostingChip}</td></tr>`;
     }
     const materials_i=basis.mat*qty, matWaste_i=materials_i*cs.wastePct;
     const labor_i=(basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : basis.capLaborPesos)*qty;
@@ -5330,21 +5410,28 @@ function renderOhPerItemTableHtml(cost){
     const oh_i=direct_i*cost.ohPct;
     const true_i=direct_i+oh_i;
     const directPerUnit=direct_i/qty, ohPerUnit=oh_i/qty, truePerUnit=true_i/qty;
-    const marginPct = unitPrice>0 ? (unitPrice-truePerUnit)/unitPrice : 0;
+    // OPTION B v2 — computed selling per unit (pre-rounding) and the
+    // EFFECTIVE MK the quoted price implies: (price − true cost) ÷ direct.
+    // A hand-typed price is a different MK, read straight off this column.
+    const sellPerUnit=directPerUnit*(1+cost.ohPct+cost.mkPct);
+    const effMk = directPerUnit>0 ? (unitPrice-truePerUnit)/directPerUnit : 0;
+    const autoChip = item.priceManual ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">manual</span>' : '';
     const belowFloor = unitPrice < directPerUnit;
     const belowTrue = !belowFloor && unitPrice < truePerUnit;
-    const belowTarget = !belowFloor && !belowTrue && marginPct < cs.targetMargin;
+    const belowTarget = !belowFloor && !belowTrue && unitPrice < Math.round(sellPerUnit/100)*100;
     const color = belowFloor?'var(--red)':belowTrue?'var(--orange)':belowTarget?'var(--accent)':'var(--green)';
-    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')}</td><td style="text-align:center;">${qty}</td>
+    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${autoChip}</td><td style="text-align:center;">${qty}</td>
       <td style="text-align:right;">${formatPeso(unitPrice)}</td>
       <td style="text-align:right;">${formatPeso(directPerUnit)}</td>
       <td style="text-align:right;">${formatPeso(ohPerUnit)}</td>
       <td style="text-align:right;font-weight:600;">${formatPeso(truePerUnit)}</td>
-      <td style="text-align:right;font-weight:700;color:${color};">${(marginPct*100).toFixed(1)}%</td></tr>`;
+      <td style="text-align:right;font-weight:600;">${formatPeso(sellPerUnit)}</td>
+      <td style="text-align:right;font-weight:700;color:${color};" title="Effective MK at the quoted price — (price − true cost) ÷ direct cost">${(effMk*100).toFixed(1)}%</td></tr>`;
   }).join('');
+  const effMkTotal = cost.direct>0 ? (cost.sell-cost.trueCost)/cost.direct : 0;
   return `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin:8px 0 4px;">Per-Item Computation</div>
-  <div style="overflow-x:auto;"><table class="labor-tbl" style="min-width:520px;">
-    <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Unit price</th><th style="text-align:right;">Direct/unit</th><th style="text-align:right;">OH/unit</th><th style="text-align:right;">True cost/unit</th><th style="text-align:right;">Margin</th></tr></thead>
+  <div style="overflow-x:auto;"><table class="labor-tbl" style="min-width:560px;">
+    <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Unit price</th><th style="text-align:right;">Direct/unit</th><th style="text-align:right;">OH/unit</th><th style="text-align:right;">True cost/unit</th><th style="text-align:right;">Sell/unit</th><th style="text-align:right;">MK (eff.)</th></tr></thead>
     <tbody>${rows}</tbody>
     <tfoot><tr style="font-weight:700;background:#fff5e0;">
       <td colspan="2">Totals</td>
@@ -5352,7 +5439,8 @@ function renderOhPerItemTableHtml(cost){
       <td style="text-align:right;">${formatPeso(cost.direct)}</td>
       <td style="text-align:right;">${formatPeso(cost.ohAmt)}</td>
       <td style="text-align:right;">${formatPeso(cost.trueCost)}</td>
-      <td style="text-align:right;">${(cost.marginPct*100).toFixed(1)}%</td>
+      <td style="text-align:right;">${formatPeso(cost.target)}</td>
+      <td style="text-align:right;">${(effMkTotal*100).toFixed(1)}%</td>
     </tr></tfoot>
   </table></div>
   <div style="font-size:10.5px;color:var(--gray-dark);margin-top:4px;font-style:italic;">Section headers and the Delivery &amp; Installation charge aren't individual quote lines, so they're excluded from this table — Delivery shows in its own section above; the Totals row reconciles to the buildup above it, not to a re-sum of the rounded rows.</div>`;
@@ -6454,7 +6542,7 @@ function buildQuotePayload(){
   // summary those BOM rows produce (syncCustomItemMaterialsSpec() →
   // item.specEdit) is NOT stripped — it carries no prices and already prints
   // on the quotation by design, same as any other spec line.
-  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, ...rest }) => rest);
+  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, ...rest }) => rest);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed
@@ -6890,8 +6978,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 2;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 3;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:3, date:'2026-08-31', items:[
+    'Prices now compute themselves: every costed line\'s unit price is set automatically — direct cost + 25% overhead + 25% markup (selling = direct × 1.50), rounded to the nearest ₱100 so prices end in two zeros. Type a price yourself and it sticks (marked "manual"); the MK column shows what markup your price really gives.',
+    'New MK% input beside OH% in the cost panel. The two always total 50% — raise one and the other gives way.',
+  ]},
   { ver:2, date:'2026-08-31', items:[
     'Fixed-rate pricing: overhead is now a flat 25% on every quote — the same item prices the same in any month, at any size. The size and pace figures still show on the OH row, but only as information.',
     'Custom-item labor now uses the real crew cost — ₱6,667 per crew-day (₱40,000 per 6-day week). Labor-day prices on custom lines went up accordingly.',
