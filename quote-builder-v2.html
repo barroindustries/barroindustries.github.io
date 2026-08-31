@@ -4368,6 +4368,7 @@ function renderItems(){
 // computeTotals lookup while we're inside one.
 let _inComputeTotals=false;
 function computeTotals(subset){
+  const _prevIn=_inComputeTotals; _inComputeTotals=true;   // computeTrueCost skips its totals lookup while we run
   const list=subset||items;
   const subtotal=list.reduce((s,i)=>s+i.amount,0);
   // PRICING-TIERS-SPEC.md §2.3 — NEW. With VOLUME_TIERS=[] (no tiers
@@ -4402,20 +4403,32 @@ function computeTotals(subset){
   // options subsets are presentation slices of the same capped quote.
   let discountCapped=false;
   if(!subset && discountAmt>0){
-    _inComputeTotals=true;
     let floor=0;
     try{ const tc=(typeof computeTrueCost==='function')?computeTrueCost():null; floor=tc?tc.trueCostTotal:0; }catch(e){}
-    _inComputeTotals=false;
     const maxDisc=Math.max(0,preDiscount-floor);
     if(discountAmt>maxDisc+0.005){ discountAmt=maxDisc; discountCapped=true; }
   }
   const net=preDiscount-discountAmt;
-  const vatAmt=showVat?net*vatRate:0;
-  const grand=net+vatAmt;
+  // Owner ruling 2026-09-01: the auto timeline may be overridden — but a
+  // lead cut short by MORE than 1/3 (entered < 2/3 of the standard) makes
+  // this a SPECIAL RUSH / PRIORITY ORDER: +2% on the grand total, treated
+  // as additional overhead (it pays for the schedule disruption, not MK).
+  // Charged before VAT so the tax stays correct.
+  let rushActive=false, rushFee=0;
+  if(!subset){
+    try{
+      const autoD=(typeof autoLeadDays==='function')?autoLeadDays():0;
+      const entered=(typeof getLeadDays==='function')?getLeadDays():0;
+      if(autoD>0 && entered>0 && entered < autoD*(2/3)-0.001){ rushActive=true; rushFee=+(net*0.02).toFixed(2); }
+    }catch(e){}
+  }
+  const vatAmt=showVat?(net+rushFee)*vatRate:0;
+  const grand=net+rushFee+vatAmt;
   // Commission computed on the grand total — same position for both modes.
   const commissionAmt=commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100);
 
-  return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
+  _inComputeTotals=_prevIn;
+  return {subtotal,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4488,6 +4501,7 @@ function totalsLines(t,grandLabel){
   // widened §3.3 — was: t.discountAmt>0||t.diAdded>0 — otherwise a
   // break-only quote prints Subtotal → VAT → Grand with an unexplained gap.
   if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) out.push({label:'Net Amount', amt:formatPeso(t.net)});
+  if(t.rushFee>0) out.push({label:'⚡ Rush order — priority scheduling (+2%, additional OH)', amt:'+'+formatPeso(t.rushFee)});
   if(t.showVat) out.push({label:'VAT (12%)', amt:formatPeso(t.vatAmt)});
   out.push({label:grandLabel, amt:formatPeso(t.grand), grand:true});
   return out;
@@ -5086,7 +5100,11 @@ function renderTimeline(){
   html+=`<tr><td>Overall Lead Time</td><td>${lead} calendar days (~${(lead/7).toFixed(1)} weeks)</td></tr>`;
   html+=`<tr class="pay-head"><td>Estimated Completion</td><td>${fmtDate(comp)}</td></tr>`;
   html+='</tbody></table>';
-  html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. Subject to site readiness and unforeseen supply delays.</div>';
+  const _auto=autoLeadDays();
+  if(_auto>0 && lead>0 && lead < _auto*(2/3)-0.001){
+    html+='<div style="margin:6px 0;padding:7px 10px;background:#fdecea;border:1px solid #f3b8b1;border-radius:6px;font-size:12px;font-weight:700;color:#b03024;">⚡ SPECIAL RUSH — PRIORITY ORDER: the timeline is cut by more than a third of the standard ('+_auto+' days). A +2% rush charge applies to the grand total, treated as additional overhead.</div>';
+  }
+  html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. You may shorten the timeline; cutting it by more than a third makes the quote a priority order (+2%). Subject to site readiness and unforeseen supply delays.</div>';
   box.innerHTML=html;
 }
 
@@ -5626,12 +5644,14 @@ function computeTrueCost(){
   });
   const trueCostTotal = trueCost + miscTrueAdd;               // OH covered on both paths
   const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + typed misc (per-entry rounded)
-  const sell = (!_inComputeTotals && typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT; 0 while the totals engine is asking us for the floor
+  const _tot = (!_inComputeTotals && typeof computeTotals==='function') ? computeTotals() : null;
+  const sell = _tot ? (_tot.net||0) : 0; // ex-VAT; 0 while the totals engine is asking us for the floor
+  const rushFee = _tot ? (_tot.rushFee||0) : 0;
   const marginPct = sell>0 ? (sell-trueCostTotal)/sell : 0;
   return {
     materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost, miscQuoted, miscOhPctv, floorTotal, trueCostTotal,
     direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
-    ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, marginPct,
+    ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, rushFee, marginPct,
     anyMissingCatalogCost, liveById, cs,
   };
 }
@@ -5721,7 +5741,7 @@ function renderTrueCostPanelHtml(cost){
   const noCostBasis = cost.direct<=0 && items.length>0;
   const marginLine = noCostBasis
     ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;margin-top:6px;">No cost basis on these items yet — give each line a BOM (🧮 on the line) or capital costs in 📦 Product Database.</div>`
-    : `<div style="font-weight:700;color:${marginColor};margin-top:6px;font-size:12.5px;">Margin at quoted: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCostTotal)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCostTotal)/cost.direct*100:0).toFixed(1)}% of direct</div>`;
+    : `<div style="font-weight:700;color:${marginColor};margin-top:6px;font-size:12.5px;">Margin at quoted: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCostTotal)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCostTotal)/cost.direct*100:0).toFixed(1)}% of direct${cost.rushFee>0?` · ⚡ rush +${formatPeso(cost.rushFee)} counted as OH, not markup`:''}</div>`;
   const belowFloorNote = belowFloor
     ? `<div style="margin-top:6px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:600;">⚠️ Below floor — President approval required</div>`
     : '';
@@ -7505,8 +7525,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 22;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 23;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:23, date:'2026-09-01', items:[
+    'The auto timeline can be overridden — and cutting it by more than a third of the standard makes the quote a ⚡ SPECIAL RUSH / PRIORITY ORDER: +2% on the grand total, charged before VAT and counted as additional overhead (never markup).',
+  ]},
   { ver:22, date:'2026-09-01', items:[
     'Discounts are protected and honest: a discount can never take the quote below TRUE COST (it may eat the markup, never the overhead), and when one applies, the document shows it per item — old price struck through, discounted price beside it — all the way to the grand total.',
   ]},
