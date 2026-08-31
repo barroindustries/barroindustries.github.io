@@ -164,13 +164,12 @@ input[type="checkbox"],input[type="radio"]{
 table{width:100%;border-collapse:collapse;}
 .items-table{table-layout:fixed;width:100%;}
 .items-table th:nth-child(1){width:4%;}
-.items-table th:nth-child(2){width:36%;}
+.items-table th:nth-child(2){width:41%;}
 .items-table th:nth-child(3){width:9%;}
 .items-table th:nth-child(4){width:9%;}
-.items-table th:nth-child(5){width:12%;}
-.items-table th:nth-child(6){width:12%;}
-.items-table th:nth-child(7){width:8%;}
-.items-table th:nth-child(8){width:10%;}
+.items-table th:nth-child(5){width:13%;}
+.items-table th:nth-child(6){width:14%;}
+.items-table th:nth-child(7){width:10%;}
 th{background:var(--dark-blue);color:white;text-align:left;padding:7px 8px;
   font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
 td{padding:8px 8px;border-bottom:1px solid var(--gray-mid);font-size:13px;vertical-align:middle;}
@@ -1392,12 +1391,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
           <th>Unit</th>
           <th>Unit Price</th>
           <th>Amount</th>
-          <th>Lead Time</th>
           <th class="no-print">Actions</th>
         </tr>
       </thead>
       <tbody id="itemsTbody">
-        <tr><td colspan="8" class="empty-state">No items yet. Use the search above to add products.</td></tr>
+        <tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1619,10 +1617,14 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
        per-item BOMs. Ticked rows land on the quotation as their own line;
        unticked rows spread their quoted price into chosen item prices.
        Hidden in the partner portal, same as the section it replaced. -->
-  <div id="laborTimelineWrap">
-  <div class="sec-title">🔒 Internal — Miscellaneous Costs</div>
+  <div id="laborTimelineWrap" class="no-print" style="margin-top:14px;border-top:2px solid #f0c060;padding-top:10px;">
+  <!-- Owner ruling 2026-09-01: unified with the quote items — initUI() moves
+       this wrap INTO #itemsSection (before .totals-controls) so items and
+       additional costs read as one cohesive numbers layout. no-print keeps
+       it internal (it used to inherit that from the int-panel). -->
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin-bottom:4px;">➕ Additional costs — misc (delivery · permits · subcontractors)</div>
   <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
-    Delivery, permits, crane rental, subcontractors — cost them here. <strong>No markup on pass-through costs:</strong> each entry quotes at cost + 25% OH, rounded to ₱100. <strong>On quote ✓</strong> shows it as its own line on the quotation; unticked, its price is quietly distributed into the item prices you choose.
+    <strong>No markup on pass-through costs:</strong> each entry quotes at cost + 25% OH, rounded to ₱100. <strong>On quote ✓</strong> shows it as its own line above; unticked, its price is quietly distributed into the item prices you choose.
   </p>
   <div class="table-wrap" style="overflow-x:auto;">
   <table class="labor-tbl" id="miscTbl" style="min-width:640px;">
@@ -2487,6 +2489,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
 });
 
 function initUI(){
+  // Owner ruling 2026-09-01: quote items + misc costs are ONE layout — the
+  // misc wrap moves from the int-panel into #itemsSection, right before the
+  // totals controls, so additional costs sit directly under the item lines.
+  // Idempotent (initUI re-runs on Reload DB); listeners/ids move with the node.
+  unifyMiscIntoItems();
   // Numbers-first Internal: start with the document sections collapsed for
   // internal staff; partners keep them open (their editing surface).
   if (typeof PARTNER_MODE!=='undefined' && !PARTNER_MODE && !document.body.classList.contains('doc-details-collapsed')) {
@@ -4156,10 +4163,23 @@ function moveItemToSection(idx){
 // ═══════════════════════════════════════════════════════════════════
 //  RENDER ITEMS TABLE
 // ═══════════════════════════════════════════════════════════════════
+// Owner ruling 2026-09-01: quote items + misc costs are one layout — the
+// misc wrap lives inside #itemsSection, right before the pricing controls.
+// Idempotent; called from initUI and every renderItems so it holds no
+// matter which boot path ran first.
+function unifyMiscIntoItems(){
+  const wrap=document.getElementById('laborTimelineWrap');
+  const sec=document.getElementById('itemsSection');
+  if(wrap && sec && wrap.parentElement!==sec){
+    const tc=sec.querySelector('.pricing-controls') || sec.querySelector('.totals-controls');
+    if(tc) sec.insertBefore(wrap,tc); else sec.appendChild(wrap);
+  }
+}
 function renderItems(){
+  unifyMiscIntoItems();
   const tbody=document.getElementById('itemsTbody');
   if(!items.length){
-    tbody.innerHTML='<tr><td colspan="8" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
+    tbody.innerHTML='<tr><td colspan="7" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
     renderTotals(); renderQuotePhotos(); return;
   }
 
@@ -4183,7 +4203,7 @@ function renderItems(){
     const secTools=secOrderable
       ? `<span class="cat-tools no-print"><button onclick="moveSection('${catId}',-1)" title="Move section up" ${secPos===0?'disabled':''}>▲</button><button onclick="moveSection('${catId}',1)" title="Move section down" ${secPos===catKeys.length-1?'disabled':''}>▼</button></span>`
       : '';
-    html+=`<tr class="cat-row"><td colspan="8">${secIcon?secIcon+' ':''}<span class="cat-label-edit" contenteditable="true" onblur="editCatLabel('${catId}',this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="Click to rename this section">${txtEsc(secLabel)}</span>${secTools}</td></tr>`;
+    html+=`<tr class="cat-row"><td colspan="7">${secIcon?secIcon+' ':''}<span class="cat-label-edit" contenteditable="true" onblur="editCatLabel('${catId}',this)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" title="Click to rename this section">${txtEsc(secLabel)}</span>${secTools}</td></tr>`;
     let subtotal=0;
     const grpLen=catMap[catId].length;
     catMap[catId].forEach(({item,idx},posInCat)=>{
@@ -4230,7 +4250,6 @@ function renderItems(){
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
         <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}${volNoteHtml}</td>
-        <td style="text-align:center;"><input class="cell-unit lead-in" type="text" value="${item.leadTime||''}" placeholder="e.g. 7-14 days" onchange="updateLead(${idx},this)"></td>
         <td class="no-print" style="text-align:center;">
           <div class="row-actions">
             ${dragHandle}
@@ -4248,7 +4267,7 @@ function renderItems(){
     // its own price where the reader is already looking.
     html+= optOn
       ? optionTotalRowsHtml(computeTotals(sectionItems(catId)),`TOTAL — ${txtEsc(secLabel)}`)
-      : `<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
+      : `<tr class="subtotal-row"><td colspan="6" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
   });
 
   tbody.innerHTML=html;
@@ -4381,7 +4400,7 @@ function totalsRowsHtml(t,grandLabel,grandCls){
 function optionTotalRowsHtml(t,grandLabel){
   return totalsLines(t,grandLabel).map(r=>{
     const cls='opt-sub-row'+(r.grand?' opt-grand-row':'')+(r.cls?' '+r.cls:'');
-    return `<tr class="${cls}"><td colspan="5" style="text-align:right;">${r.label}</td><td style="text-align:right;">${r.amt}</td><td></td><td class="no-print"></td></tr>`;
+    return `<tr class="${cls}"><td colspan="4" style="text-align:right;">${r.label}</td><td style="text-align:right;">${r.amt}</td><td></td><td class="no-print"></td></tr>`;
   }).join('');
 }
 
@@ -7334,8 +7353,14 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 14;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 16;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:16, date:'2026-09-01', items:[
+    'The Lead Time column is gone from the items table — the overall lead time in the Client-tab details covers scheduling.',
+  ]},
+  { ver:15, date:'2026-09-01', items:[
+    'Quote items and additional costs are now one layout — the misc table (delivery, permits, subcontractors) sits directly under the item lines, before the totals.',
+  ]},
   { ver:14, date:'2026-08-31', items:[
     'The Client tab is now the document form — quote number, client, photos, delivery & timeline, payment, remarks, terms — with a 👁 Preview button that shows the finished document. Internal stays pure numbers: items, misc costs and the calculator.',
   ]},
@@ -7423,7 +7448,7 @@ const TOUR_STEPS = [
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
-   body:'Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
+   body:'Right under the quote items — one layout. Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
