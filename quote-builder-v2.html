@@ -1735,12 +1735,12 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <h4>How a quote gets made</h4>
       <ol>
         <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
-        <li><strong>Quote number</strong> — Auto builds the official number; Manual is only for re-issuing.</li>
-        <li><strong>Client information</strong> — type the name; existing clients autocomplete.</li>
-        <li><strong>Add items</strong> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
-        <li><strong>Pricing is automatic</strong> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
-        <li><strong>Miscellaneous costs</strong> — delivery, permits, subcontractors go in the Internal misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
-        <li><strong>Details</strong> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
+        <li><strong>Quote number</strong> <em>(Client tab)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
+        <li><strong>Client information</strong> <em>(Client tab)</em> — type the name; existing clients autocomplete.</li>
+        <li><strong>Add items</strong> <em>(Internal)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
+        <li><strong>Pricing is automatic</strong> <em>(Internal calculator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Miscellaneous costs</strong> <em>(Internal)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
+        <li><strong>Details</strong> <em>(Client tab)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
       </ol>
@@ -7392,7 +7392,9 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
 ];
 
 // Read-only by contract: no step here may mutate quote state, drafts, or
-// call any filing/printing function. `needsWorkspace` steps live inside
+// call any filing/printing function. `needsForm` steps live on the
+// Client-tab document form (showTourStep switches to client view, form
+// mode); `needsWorkspace` steps live inside
 // #internalWorkspace and require switching to Internal view first (see
 // showTourStep() below). Every step must resolve or be skipped gracefully —
 // BS-partner lock mode hides the whole company toggle-pills wrapper and may
@@ -7404,20 +7406,22 @@ const TOUR_STEPS = [
    body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
  { target:'#btnClient', closest:'.toggle-pills', title:'Two views',
    body:'Client is the document form — quote number, client, delivery, terms, photos — with a 👁 Preview button that shows the finished document exactly as the customer will see it. Internal deals with the numbers: items, misc costs and the calculator.' },
- { target:'#docDetailsBar', needsWorkspace:true, title:'Internal = the numbers',
-   body:'The Internal view keeps only the numbers: items, misc costs and the calculator. Everything that prints on the document — quote number, client, photos, delivery & timeline, payment, remarks, terms — tucks behind this 📄 Quote details button. Open it when you need to fill those in.' },
- { target:'.qno-builder-section', needsWorkspace:true, title:'Quote number',
+ { target:'#clientFormBar', needsForm:true, title:'The document form',
+   body:'This is the Client tab — the form for everything that prints. Fill it in, then 👁 Preview shows the finished quotation exactly as the customer will see it, and ✎ Back to the form returns.' },
+ { target:'.qno-builder-section', needsForm:true, title:'Quote number',
    body:'Auto mode builds the official number from company, location and date. Switch to Manual only when re-issuing an existing number.' },
- { target:'#clientInfoSection', needsWorkspace:true, title:'Who is this quote for',
+ { target:'#clientInfoSection', needsForm:true, title:'Who is this quote for',
    body:'Type the client\'s name — existing clients autocomplete from your records. Name, address and contact details flow straight onto the printed document.' },
+ { target:'#diSection', needsForm:true, title:'Delivery, timeline & payments',
+   body:'Delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote — all part of the document form.' },
+ { target:'#termsSection', needsForm:true, title:'Terms & conditions',
+   body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks (the conforme).' },
+ { target:'#docDetailsBar', needsWorkspace:true, title:'Internal = the numbers',
+   body:'The Internal view keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
    body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section splits the quote into Option A / Option B.' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
-   body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the cost panel then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
- { target:'#diSection', needsWorkspace:true, title:'Delivery, timeline & payments',
-   body:'Below the items: delivery & installation details, the project timeline, the payment schedule, and the bank / e-wallet details that print on the quote.' },
- { target:'#termsSection', needsWorkspace:true, title:'Terms & conditions',
-   body:'Standard terms are pre-loaded per company. Adjust them for this quote — they print at the end of the document with the signature blocks.' },
+   body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    body:'Delivery, permits, subcontractors — cost them here. No markup on pass-through costs: each entry quotes at cost + 25% OH, rounded to ₱100. Ticked "On quote?" puts it on the quotation as its own line; unticked, its price is quietly distributed into the item prices you choose with → distribute.' },
  { target:'#internalPanel', needsWorkspace:true, title:'Costs & margin (Internal only)',
@@ -7519,6 +7523,17 @@ function showTourStep(i, dir){
   if(!tourActive) return;
   if(i<0 || i>=TOUR_STEPS.length){ endTour(); return; }
   const step=TOUR_STEPS[i];
+  if(step.needsForm){
+    // Owner ruling 2026-08-31: these sections live on the Client-tab FORM.
+    // Switch to client view (form mode, never the preview) so they show;
+    // GENERIC_PARTNER never uses body-client-view — their workspace already
+    // shows the document sections, so no switch is needed there.
+    if(typeof GENERIC_PARTNER==='undefined' || !GENERIC_PARTNER){
+      if(!document.body.classList.contains('body-client-view') || document.body.classList.contains('client-previewing')){
+        if(typeof setView==='function'){ setView('client'); tourChangedView=true; }
+      }
+    }
+  }
   if(step.needsWorkspace){
     const ws=document.getElementById('internalWorkspace');
     if(ws && ws.offsetParent===null){
