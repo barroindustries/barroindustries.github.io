@@ -1387,6 +1387,9 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <input type="number" id="commissionAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="_commAuto=false;renderTotals()">
       <span class="pc-hint">computed on the quote total — on an options quote, on each option's own total. Auto-sets to 3% when the salesperson isn't Neil Barro (never on Brilliant Steel); your manual choice wins.</span>
     </div>
+    <div class="pc-row" id="rushFocRow" style="display:none;">
+      <label class="pc-check"><input type="checkbox" id="rushFoc" onchange="renderTotals()"> ⚡ Make the Priority Order Charge FOC — printed with its amount, given back in the consolidated FOC discount</label>
+    </div>
     <div class="pc-row">
       <label class="pc-check"><input type="checkbox" id="optionsMode" onchange="onOptionsModeChange()"> Options quote — price each section separately, no grand total</label>
       <span class="pc-hint">for Option A / Option B quotes the client picks from</span>
@@ -4389,6 +4392,12 @@ function computeTotals(subset){
     if(discountAmt>maxDisc+0.005){ discountAmt=maxDisc; discountCapped=true; }
   }
   const net=preDiscount-discountAmt;
+  // FOC consolidation (owner 2026-09-01): FOC fee lines print at FULL value
+  // after the Subtotal; their sum — plus the rush fee when it too is marked
+  // FOC — comes back as ONE 'Less: FOC — free of charge' row before VAT, so
+  // the client sees what the freebies are worth. The charged base is
+  // net − focFees (+ rush only when actually charged).
+  const focFees=feeItems.reduce((t,i)=>t+(i._foc?(+i.amount||0):0),0);
   // Owner ruling 2026-09-01: the auto timeline may be overridden — but a
   // lead cut short by MORE than 1/3 (entered < 2/3 of the standard) makes
   // this a SPECIAL RUSH / PRIORITY ORDER: +2% on the grand total, treated
@@ -4399,17 +4408,24 @@ function computeTotals(subset){
     try{
       const autoD=(typeof autoLeadDays==='function')?autoLeadDays():0;
       const entered=(typeof getLeadDays==='function')?getLeadDays():0;
-      if(autoD>0 && entered>0 && entered < autoD*(2/3)-0.001){ rushActive=true; rushFee=+(net*0.02).toFixed(2); }
+      if(autoD>0 && entered>0 && entered < autoD*(2/3)-0.001){ rushActive=true; rushFee=+((net-focFees)*0.02).toFixed(2); }
     }catch(e){}
   }
-  const vatAmt=showVat?(net+rushFee)*vatRate:0;
-  const grand=net+rushFee+vatAmt;
+  // Owner ruling 2026-09-01: the +2% may itself be FOC — the row still prints
+  // with its amount, but it joins the consolidated FOC discount instead of
+  // the charge.
+  const rushFoc=rushActive && !!document.getElementById('rushFoc')?.checked;
+  const rushCharged=rushActive&&!rushFoc?rushFee:0;
+  const focRush=rushActive&&rushFoc?rushFee:0;
+  const focTotal=focFees+focRush;
+  const vatAmt=showVat?(net-focFees+rushCharged)*vatRate:0;
+  const grand=net-focFees+rushCharged+vatAmt;
   // Commission computed on the grand total — same position for both modes.
   const commissionAmt=(typeof currentCo!=='undefined' && currentCo==='BS') ? 0
     : (commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100));
 
   _inComputeTotals=_prevIn;
-  return {subtotal,miscFeeTotal,miscLines,discBase,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
+  return {subtotal,miscFeeTotal,miscLines,discBase,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,rushFoc,rushCharged,focFees,focRush,focTotal,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4474,7 +4490,7 @@ function totalsLines(t,grandLabel){
   // Owner ruling 2026-09-01: additional costs land AFTER the Subtotal, one
   // row each; FOC entries print FREE (the cost stays ours internally).
   (t.miscLines||[]).forEach(f=>{
-    out.push({label:txtEsc(f.name)+(f.foc?' — FOC':''), amt: f.foc?'FREE':formatPeso(f.amt)});
+    out.push({label:txtEsc(f.name)+(f.foc?' — FOC':''), amt: formatPeso(f.amt)});
   });
   if(t.discountCapped) out.push({label:'<span style="font-size:10px;color:var(--orange);">Discount capped — a discount never goes below true cost (it may eat the markup, never the overhead)</span>', amt:'', cls:'discount'});
   // PRICING-TIERS-SPEC.md §3.3 — inserted directly after Subtotal, before
@@ -4489,7 +4505,10 @@ function totalsLines(t,grandLabel){
   if(t.discountAmt>0||t.diAdded>0||t.volumeBreakTotal>0) out.push({label:'Net Amount', amt:formatPeso(t.net)});
   // Client-facing label (owner ruling 2026-09-01): never mention overhead on
   // the printed quote — the OH framing lives in the Estimator only.
-  if(t.rushFee>0) out.push({label:'⚡ Priority Order Charge (+2%)', amt:'+'+formatPeso(t.rushFee)});
+  if(t.rushFee>0) out.push({label:'⚡ Priority Order Charge (+2%)'+(t.rushFoc?' — FOC':''), amt:'+'+formatPeso(t.rushFee)});
+  // ONE consolidated giveback for everything marked FOC (owner 2026-09-01:
+  // "all foc are consolidated and shown as discount").
+  if(t.focTotal>0) out.push({label:'Less: FOC — free of charge', amt:'−'+formatPeso(t.focTotal), cls:'discount'});
   if(t.showVat) out.push({label:'VAT (12%)', amt:formatPeso(t.vatAmt)});
   out.push({label:grandLabel, amt:formatPeso(t.grand), grand:true});
   return out;
@@ -4537,6 +4556,8 @@ function renderTotals(){
     });
   } else if(t.commissionAmt>0) html+=`<tr class="commission agent-only"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
   document.getElementById('totalsTbl').innerHTML=html;
+  // The rush-FOC toggle only means something while a rush is actually active.
+  const _rfr=document.getElementById('rushFocRow'); if(_rfr) _rfr.style.display=t.rushActive?'':'none';
   renderOptionsBasisPicker(opts);
   renderTimeline();
   renderPaymentSchedule(t.grand);
@@ -5116,7 +5137,8 @@ function renderTimeline(){
   html+='</tbody></table>';
   const _auto=autoLeadDays();
   if(_auto>0 && lead>0 && lead < _auto*(2/3)-0.001){
-    html+='<div style="margin:6px 0;padding:7px 10px;background:#fdecea;border:1px solid #f3b8b1;border-radius:6px;font-size:12px;font-weight:700;color:#b03024;">⚡ SPECIAL RUSH — PRIORITY ORDER: the timeline is cut by more than a third of the standard ('+_auto+' days). A +2% Priority Order Charge applies to the grand total.</div>';
+    const _rushFocOn=!!document.getElementById('rushFoc')?.checked;
+    html+='<div style="margin:6px 0;padding:7px 10px;background:#fdecea;border:1px solid #f3b8b1;border-radius:6px;font-size:12px;font-weight:700;color:#b03024;">⚡ SPECIAL RUSH — PRIORITY ORDER: the timeline is cut by more than a third of the standard ('+_auto+' days). '+(_rushFocOn?'The +2% Priority Order Charge is FOC — shown on the quote and given back as a discount.':'A +2% Priority Order Charge applies to the grand total.')+'</div>';
   }
   html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Minimum two weeks, plus 3 working days per ₱20,000 of materials — Sundays are not counted as working days. You may shorten the timeline; cutting it by more than a third makes the quote a priority order (+2%). Subject to site readiness and unforeseen supply delays.</div>';
   box.innerHTML=html;
@@ -5298,7 +5320,9 @@ function miscMultOf(m){
   return (m && m.type==='labor') ? r.mult : r.miscMult;
 }
 function miscQuotedOf(m){
-  if (m && m.foc) return 0;   // FOC (owner 2026-09-01): shown on the quote as FREE, charged nothing
+  // FOC (owner 2026-09-01, revised same day): the entry keeps its FULL quoted
+  // value — "there must still be an amount on those" — and computeTotals()
+  // consolidates every FOC amount into one 'Less: FOC' discount row instead.
   return Math.round(((+m.cost||0) * miscMultOf(m))/100)*100;
 }
 function toggleMiscFoc(id){
@@ -5351,9 +5375,9 @@ function renderMiscCosts(){
       </select></td>
       <td><input type="text" class="cell-unit" placeholder="${attrEsc(MISC_TYPE_LABEL[ty])} — details" value="${attrEsc(m.desc||'')}" onchange="updateMiscField('${m.id}','desc',this.value)" style="width:100%;min-width:130px;"></td>
       <td style="text-align:right;"><input type="number" min="0" step="0.01" class="cell-unit" value="${m.cost||''}" placeholder="0" onchange="updateMiscField('${m.id}','cost',this.value)" style="width:100px;text-align:right;"></td>
-      <td style="text-align:right;">${m.foc?'<span style="color:var(--gray-dark);">—</span>':`${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${ty==='labor'?'OH+MK 150%':'OH 25%'}</span>`}</td>
-      <td style="text-align:right;font-weight:700;">${m.foc?'<span style="color:var(--green);">FREE</span>':formatPeso(q)}</td>
-      <td style="text-align:center;"><input type="checkbox" ${m.foc?'checked':''} onchange="toggleMiscFoc('${m.id}')" title="Free of charge — shown on the quotation as FREE after the Subtotal; the cost still counts against our margin"></td>
+      <td style="text-align:right;">${formatPeso(loadAmt)} <span style="font-size:9.5px;color:var(--gray-dark);">${ty==='labor'?'OH+MK 150%':'OH 25%'}</span></td>
+      <td style="text-align:right;font-weight:700;">${formatPeso(q)}${m.foc?' <span style="font-size:9.5px;color:var(--green);font-weight:700;">FOC → discount</span>':''}</td>
+      <td style="text-align:center;"><input type="checkbox" ${m.foc?'checked':''} onchange="toggleMiscFoc('${m.id}')" title="Free of charge — printed at full value after the Subtotal, then given back inside the consolidated 'Less: FOC' discount row; the cost still counts against our margin"></td>
       <td style="text-align:center;"><input type="checkbox" ${m.reflect?'checked':''} ${m.foc?'disabled':''} onchange="toggleMiscReflect('${m.id}')" title="Ticked: shows as its own line after the Subtotal on the quotation. Unticked: distributed into item prices."> ${m.foc?'':distBtn}</td>
       <td><button type="button" class="del-btn" onclick="removeMiscCost('${m.id}')" title="Remove">✕</button></td>
     </tr>`;
@@ -5390,7 +5414,7 @@ function syncMiscItems(cost){
   miscCosts.forEach(m=>{
     if (!m.reflect) return;
     const ty=m.type||'other';
-    if (m.foc) { defs.push({ key:m.id, name:m.desc||MISC_TYPE_LABEL[ty]||'Misc cost', quoted:0, foc:true }); return; }
+    if (m.foc) { defs.push({ key:m.id, name:m.desc||MISC_TYPE_LABEL[ty]||'Misc cost', quoted:miscQuotedOf(m), foc:true }); return; }
     if (ty==='delivery' || ty==='installation') return;
     defs.push({ key:m.id, name:m.desc||MISC_TYPE_LABEL[ty]||'Misc cost', quoted:miscQuotedOf(m) });
   });
@@ -5683,8 +5707,10 @@ function computeTrueCost(){
   const trueCostTotal = trueCost + miscTrueAdd;               // OH covered on both paths
   const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + typed misc (per-entry rounded)
   const _tot = (!_inComputeTotals && typeof computeTotals==='function') ? computeTotals() : null;
-  const sell = _tot ? (_tot.net||0) : 0; // ex-VAT; 0 while the totals engine is asking us for the floor
-  const rushFee = _tot ? (_tot.rushFee||0) : 0;
+  // Charged base ex-VAT: FOC fee lines print at full value but are given
+  // back, so they never count as money in; a FOC'd rush fee likewise.
+  const sell = _tot ? ((_tot.net||0)-(_tot.focFees||0)) : 0; // 0 while the totals engine is asking us for the floor
+  const rushFee = _tot ? (_tot.rushCharged!=null?_tot.rushCharged:(_tot.rushFee||0)) : 0;
   const marginPct = sell>0 ? (sell-trueCostTotal)/sell : 0;
   return {
     materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost, miscQuoted, miscOhPctv, floorTotal, trueCostTotal,
@@ -6357,7 +6383,7 @@ document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState=
 window.addEventListener('pagehide', flushSaveToStorageNow);
 
 // Pricing / payment / delivery fields — single source for save, load, payload
-const PRICING_IDS=['showVat','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
+const PRICING_IDS=['showVat','rushFoc','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
   'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails','showPaymentDetails','quoteValidDays','optionsMode'];
 // Quote validity period (audit: "hardcoded to 30 days in two places, not
 // configurable") — a display-only helper, riding PRICING_IDS so it round-trips
@@ -7408,8 +7434,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 30;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 31;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:31, date:'2026-09-01', items:[
+    'FOC now shows its worth: an FOC charge prints at FULL value after the Subtotal, and everything marked FOC comes back as one consolidated "Less: FOC — free of charge" discount row before VAT — the client sees exactly what they were given.',
+    'The ⚡ +2% Priority Order Charge can be FOC too — a toggle appears in Pricing whenever a rush is active; the row still prints with its amount and joins the FOC discount instead of the bill.',
+  ]},
   { ver:30, date:'2026-09-01', items:[
     'Brilliant Steel quotes: the internal calculator and 🧮 BOM are hidden while the BS company is toggled — BS prices by its own model, never Barro\'s ×2.50 build — and commission does not apply to Brilliant Steel at all.',
     'Commission auto-sets to 3% when the salesperson is anyone other than Neil Barro (Barro Kitchens / Barro Industries quotes). Change or zero it any time — a manual choice always wins.',
