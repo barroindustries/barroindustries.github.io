@@ -959,7 +959,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <button id="btnClient" class="active" onclick="setView('client')">📄 Client</button>
       <button id="btnInternal" onclick="setView('internal')">🔒 Internal</button>
     </div>
-    <button class="btn" id="btnQuick" onclick="toggleQuickMode()">⚡ Quick Quote</button>
   </div>
   <div class="topbar-right">
     <button class="btn btn-outline no-print" id="btnHelp" onclick="openHelpModal()" title="Help & guided demo">❓ Help<span class="help-dot" id="helpDot"></span></button>
@@ -987,7 +986,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <span>Menu</span>
       <button class="mtb-sheet-x" onclick="closeMobileSheet()" aria-label="Close menu">✕</button>
     </div>
-    <button class="mtb-row" id="mtbQuick" onclick="mtbRun('toggleQuickMode')">⚡ Quick Quote</button>
     <button class="mtb-row" id="mtbHelp" onclick="mtbRun('openHelpModal')">❓ Help &amp; demo</button>
     <button class="mtb-row" onclick="mtbRun('clearForm')">🗑 New</button>
     <button class="mtb-row" onclick="mtbRun('doPrint')">🖨 Print / PDF</button>
@@ -1095,13 +1093,14 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   <div class="status-bar">
     <div class="status-dot loading" id="statusDot"></div>
     <span id="statusMsg">Loading product database…</span>
-    <button class="btn btn-outline btn-sm no-print" style="margin-left:auto;background:var(--dark-blue);" onclick="reloadDatabase()">↻ Reload DB</button>
+    <button class="btn btn-outline btn-sm no-print" id="btnOpenProductDb" style="margin-left:auto;background:var(--dark-blue);" onclick="setView('admin')" title="Open the product database editor — add or edit products, capital costs and coefficients">📦 Product Database</button>
+    <button class="btn btn-outline btn-sm no-print" style="background:var(--dark-blue);" onclick="reloadDatabase()">↻ Reload DB</button>
   </div>
 </div>
 
 <!-- ── ADMIN PANEL ── -->
 <div class="admin-panel" id="adminPanel">
-  <div class="sec-title">⚙ Admin — Add / Edit Product</div>
+  <div class="sec-title" style="display:flex;align-items:center;gap:10px;">⚙ Product Database — Add / Edit Product <button type="button" class="btn btn-outline btn-sm no-print" style="margin-left:auto;background:var(--dark-blue);" onclick="setView('internal')">← Back to the quote</button></div>
   <div class="admin-grid">
     <div class="fg"><label>Product ID</label><input id="aId" placeholder="e.g. CE-013"></div>
     <div class="fg"><label>Category</label>
@@ -1711,7 +1710,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 
       <h4>Good to know</h4>
       <ul>
-        <li>⚡ <strong>Quick Quote</strong> — a 3-step wizard (client → products → review) that fills the builder for you.</li>
         <li>📝 Your work <strong>auto-saves as a draft</strong>; an unfiled quote offers to resume next time.</li>
         <li>🧾 <strong>Agent Copy</strong> is confidential — never send it to the client.</li>
         <li>🔗 <strong>Share</strong> requires the quote to be filed first — it will prompt you.</li>
@@ -2339,6 +2337,7 @@ function applyPartnerMode(){
   }
   // Remove the Admin (database) view button entirely
   document.getElementById('btnAdmin')?.remove();
+  document.getElementById('btnOpenProductDb')?.remove();   // partners never open the product database
   // Hide the internal Labor & Timeline estimate (Barro's staffing/day-rates) from
   // partners — they keep the per-item Cost & Margin view for the 50/50 split.
   const lt=document.getElementById('laborTimelineWrap'); if(lt) lt.style.display='none';
@@ -2446,8 +2445,9 @@ function initUI(){
   buildCoefTable();
   renderItems();
   renderRecentProductsRow();
-  // ?mode=quick — enable the Quick Quote wizard on load (v12 WS31).
-  if (!quickMode && new URLSearchParams(location.search).get('mode') === 'quick') toggleQuickMode();
+  // Quick Quote retired (owner ruling 2026-08-31) — the ?mode=quick entry no
+  // longer activates the wizard (no app screen links to it; the code stays
+  // dormant for a possible revival).
   // COSTING-QB-UX-SPEC-2026-08-26 §1 — first real paint of the Client-tab
   // document preview, now that the product database (and any restored draft
   // items) are in. initUI() re-runs on every "Reload DB"/import too, so this
@@ -2554,7 +2554,9 @@ function applyLetterheadHeader(){
 }
 
 function setView(v){
-  if (v==='admin') v='internal';   // Admin view retired (owner ruling 2026-08-31) — product data edits move out of the builder
+  // Admin is no longer a view pill (retired 2026-08-31) but the product
+  // database opens through the 📦 button beside the DB status bar — that is
+  // the only path into setView('admin') now.
   currentView=v;
   // Null-guarded: in partner mode the Admin button/panel are removed, so a bare
   // .classList here used to throw and silently abort switching to Internal.
@@ -7264,8 +7266,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 8;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 9;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:9, date:'2026-08-31', items:[
+    '📦 The product database opens right from the builder — the button beside the database status bar. Add or edit products and capital costs, then ← Back to the quote.',
+    '⚡ Quick Quote is retired — the builder itself is the one way to make a quote.',
+  ]},
   { ver:8, date:'2026-08-31', items:[
     'Consumables are now +10% of materials cost (was 8%). The full buildup: materials + 6% waste + 10% consumables + 80% labor (when none entered) = direct cost, × 2.50 = selling.',
   ]},
@@ -7315,8 +7321,6 @@ const TOUR_STEPS = [
    body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
  { target:'#btnClient', closest:'.toggle-pills', title:'Two views',
    body:'Client shows the finished document exactly as the customer will see it. Internal is the editing workspace with costs, margins and the pricing dials. Internal may be hidden for your account.' },
- { target:'#btnQuick', title:'Quick Quote',
-   body:'In a hurry? Quick Quote is a 3-step wizard — client → products → review — that fills the full builder for you. Everything it creates can still be fine-tuned afterwards.' },
  { target:'.qno-builder-section', needsWorkspace:true, title:'Quote number',
    body:'Auto mode builds the official number from company, location and date. Switch to Manual only when re-issuing an existing number.' },
  { target:'#clientInfoSection', needsWorkspace:true, title:'Who is this quote for',
