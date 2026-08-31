@@ -6232,7 +6232,45 @@ async function renderAnalytics() {
 
     const r = window.computeBreakeven({ income, byCategory, classification, manualFixed, payrollSplit });
 
-    // ── Card 3 inputs — pace factor ────────────────────────────────────────
+    // ── Costing settings (product_costs/_settings, catch → code defaults
+    // matching quote-builder-v2.html's COSTING_DEFAULTS). Fetched BEFORE the
+    // pace math because Option B needs targetMargin and the standard-cost
+    // ratios below. ───────────────────────────────────────────────────────
+    const settingsSnap = await db.collection('product_costs').doc('_settings').get().catch(() => null);
+    const settingsData = (settingsSnap && settingsSnap.exists) ? (settingsSnap.data() || {}) : {};
+    const baseOH = (typeof settingsData.baseOH === 'number') ? settingsData.baseOH : 0.25;
+    const ohMin  = (typeof settingsData.ohMin  === 'number') ? settingsData.ohMin  : 0.10;
+    const ohMax  = (typeof settingsData.ohMax  === 'number') ? settingsData.ohMax  : 0.45;
+    const targetMargin = (typeof settingsData.targetMargin === 'number') ? settingsData.targetMargin : 0.20;
+    const wastePct = (typeof settingsData.wastePct === 'number') ? settingsData.wastePct : 0.06;
+    const consumablesPct = (typeof settingsData.consumablesPct === 'number') ? settingsData.consumablesPct : 0.08;
+    // Owner ruling 2026-08-31: standard cost model assumes labor ≈ 80% of
+    // materials spend — used to ESTIMATE variable cost while the ledger has
+    // no classified variable categories for the month.
+    const laborPctOfMat = (typeof settingsData.laborPctOfMaterials === 'number') ? settingsData.laborPctOfMaterials : 0.80;
+
+    // ── Standard-cost estimate of the month's variable cost ───────────────
+    // Materials spend = any ledger row whose category mentions materials —
+    // covers 'Inventory – Materials' (asset debits ledgerKind() does not
+    // class as expense) and 'COS – Direct Material'.
+    const matSpend = sum(monthLedger.filter(l => /material/i.test(l.category || '')), l => l.amount);
+    const stdCostMult = 1 + wastePct + consumablesPct + laborPctOfMat;
+    const estVariable = +(matSpend * stdCostMult).toFixed(2);
+    const usingEstimate = !(r.variableTotal > 0) && matSpend > 0;
+    const effContribution = usingEstimate ? +((income - estVariable)).toFixed(2) : r.contributionPesos;
+
+    // ── Option B fixed-regime targets (derived from settings, not
+    // hardcoded): ohShare = OH centavos of every sales peso at target
+    // pricing; floor = profit-zero sales; quota = pool fully recovered. ───
+    const ohShare = baseOH * (1 - targetMargin) / (1 + baseOH);
+    const contribShare = ohShare + targetMargin;
+    const floorSales = contribShare > 0 ? r.fixedTotal / contribShare : null;
+    const quotaSales = ohShare > 0 ? r.fixedTotal / ohShare : null;
+
+    // ── Card 3 inputs — pace factor. ADVISORY under Option B (owner ruling
+    // 2026-08-31): it reads how the month is going; it no longer prices
+    // quotes. Uses the standard-cost contribution estimate when the ledger
+    // has no classified variable costs, so the gauge stops overstating. ───
     const targetContribution = r.fixedTotal + profitGoal;
     const monthB = window.monthBounds ? window.monthBounds(month, todayStr) : { upToDay: 1, daysInMonth: 30 };
     const elapsed = monthB.daysInMonth > 0 ? monthB.upToDay / monthB.daysInMonth : 0;
@@ -6241,7 +6279,7 @@ async function renderAnalytics() {
       pace = 1;
       paceNote = 'set overhead/profit goal';
     } else {
-      const raw = 1 + 0.5 * (1 - (r.contributionPesos / (targetContribution * elapsed))) * elapsed;
+      const raw = 1 + 0.5 * (1 - (effContribution / (targetContribution * elapsed))) * elapsed;
       pace = Math.min(1.25, Math.max(0.85, raw));
     }
 
@@ -6253,17 +6291,11 @@ async function renderAnalytics() {
     const cmPct = (r.contributionMarginRatio != null) ? (r.contributionMarginRatio * 100).toFixed(1) + '%' : '—';
     const contribBarPct = targetContribution > 0 ? Math.max(0, Math.min(100, Math.round(r.contributionPesos / targetContribution * 100))) : 0;
 
-    // ── Card 4 — suggested OH% (product_costs/_settings, catch → code
-    // defaults matching quote-builder-v2.html's COSTING_DEFAULTS) ─────────
-    const settingsSnap = await db.collection('product_costs').doc('_settings').get().catch(() => null);
-    const settingsData = (settingsSnap && settingsSnap.exists) ? (settingsSnap.data() || {}) : {};
-    const baseOH = (typeof settingsData.baseOH === 'number') ? settingsData.baseOH : 0.25;
-    const ohMin  = (typeof settingsData.ohMin  === 'number') ? settingsData.ohMin  : 0.10;
-    const ohMax  = (typeof settingsData.ohMax  === 'number') ? settingsData.ohMax  : 0.45;
-    const suggestedOH = Math.min(ohMax, Math.max(ohMin, baseOH * pace));
-    // Same size bands as quote-builder-v2.html's COSTING_DEFAULTS.sizeBands — display-only
-    // reference table here (the per-quote factor itself is applied in the quote builder).
-    const SIZE_BANDS_REF = [[80000,1.5],[200000,1.3],[400000,1.15],[800000,1.0],[1600000,0.85],[null,0.7]];
+    // ── Card 4 — OH% under OPTION B (owner ruling 2026-08-31): fixed at the
+    // flat base rate, clamped; pace and size no longer touch it. The settings
+    // doc was fetched above. ──────────────────────────────────────────────
+    const suggestedOH = Math.min(ohMax, Math.max(ohMin, baseOH));
+    const priceMult = (1 + suggestedOH) / (1 - targetMargin);   // ×1.5625 at 25/20
 
     // ── Card 5 — 6-month trend (finance_rollup/{YYYY-MM}, catch → denied) ──
     const rollupResults = await Promise.all(months6.map(m =>
@@ -6289,7 +6321,10 @@ async function renderAnalytics() {
       await db.collection('product_costs').doc('_pace').set({
         pace: +pace.toFixed(4),
         baseOH,
+        // OPTION B: published flat (= clamped baseOH) so ANY consumer —
+        // including a stale-cached quote builder — prices at the fixed rate.
         suggestedOH: +suggestedOH.toFixed(4),
+        regime: 'fixed-b',
         computedAt: new Date().toISOString(),
         byUid: (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || ''
       }, { merge: true });
@@ -6303,9 +6338,9 @@ async function renderAnalytics() {
     wrap.innerHTML = `
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card"><div class="kpi-label">Overhead Pool (Fixed)</div><div class="kpi-value">₱${fmt(r.fixedTotal)}</div></div>
-        <div class="kpi-card ${r.contributionPesos>=0?'green':'warn'}"><div class="kpi-label">Contribution MTD</div><div class="kpi-value">₱${fmt(r.contributionPesos)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Pace Factor</div><div class="kpi-value">×${pace.toFixed(2)}</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">Suggested OH%</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
+        <div class="kpi-card ${effContribution>=0?'green':'warn'}"><div class="kpi-label">Contribution MTD${usingEstimate?' (est.)':''}</div><div class="kpi-value">₱${fmt(effContribution)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Pace (advisory)</div><div class="kpi-value">×${pace.toFixed(2)}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">OH% — Fixed (Option B)</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
       </div>
 
       <div class="card" style="margin-bottom:16px">
@@ -6314,7 +6349,7 @@ async function renderAnalytics() {
           <button class="btn-secondary btn-sm" id="cost-edit-overhead-btn">${emojiIcon('✏️',14)} Edit overhead → Finance › Break-even</button>
         </div>
         <div class="card-body">
-          <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Fabricator payroll is counted as direct labor, not overhead — only office/admin payroll is in the pool below.</p>
+          <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Fabricator payroll is direct labor on jobs — the pool's Crew Standby Reserve row is the deliberate idle-crew backup, and the Contingency buffer is the weak-month extra room (fixed ₱500k ruling, 31 Aug 2026).</p>
           <div class="table-wrap"><table class="data-table">
             <thead><tr><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
             <tbody>${top5Fixed.length ? top5Fixed.map(x=>`<tr><td>${escHtml(x.cat)}${x.manual?` <span class="badge badge-gray" style="font-size:9px">manual</span>`:''}</td><td style="text-align:right">₱${fmt(x.amt)}</td></tr>`).join('') : `<tr><td colspan="2" style="color:var(--text-muted)">No fixed costs classified this month</td></tr>`}</tbody>
@@ -6327,11 +6362,13 @@ async function renderAnalytics() {
         <div class="card-header"><h3>${emojiIcon('💰',18)} Contribution — MTD</h3></div>
         <div class="card-body">
           <div class="kpi-row" style="margin-bottom:10px">
-            <div class="kpi-card"><div class="kpi-label">Contribution (₱)</div><div class="kpi-value">₱${fmt(r.contributionPesos)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Contribution (₱)${usingEstimate?' — est.':''}</div><div class="kpi-value">₱${fmt(effContribution)}</div></div>
             <div class="kpi-card"><div class="kpi-label">Contribution Margin %</div><div class="kpi-value">${cmPct}</div></div>
           </div>
           <div class="progress-bar-wrap" style="margin-bottom:8px"><div class="progress-bar-fill" style="width:${contribBarPct}%;background:${contribBarPct>=100?'var(--success)':'var(--warning)'}"></div></div>
           <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Target (fixed + profit goal): <strong style="color:var(--text)">₱${fmt(targetContribution)}</strong> — ${contribBarPct}% reached</div>
+          ${usingEstimate ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${emojiIcon('🧮',12)} Standard-cost estimate (no variable costs classified in the ledger yet): materials ₱${fmt(matSpend)} × ${stdCostMult.toFixed(2)} (waste ${Math.round(wastePct*100)}% + consumables ${Math.round(consumablesPct*100)}% + labor ${Math.round(laborPctOfMat*100)}% of materials) → est. variable ₱${fmt(estVariable)}</div>` : ''}
+          ${(floorSales!=null && quotaSales!=null) ? `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Option B targets — floor <strong style="color:var(--text)">₱${fmt(floorSales)}</strong> · quota <strong style="color:var(--text)">₱${fmt(quotaSales)}</strong> · MTD sales <strong style="color:var(--text)">₱${fmt(income)}</strong> (${quotaSales>0?Math.round(income/quotaSales*100):0}% of quota)</div>` : ''}
           ${reqSales!=null ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);flex-wrap:wrap;gap:8px">
             <span>Required sales for goal: <strong style="color:var(--text)">₱${fmt(reqSales)}</strong></span>
             <span>Per day (${daysRemaining} day${daysRemaining===1?'':'s'} left): <strong style="color:var(--text)">${perDayGoal!=null?'₱'+fmt(perDayGoal):'—'}</strong></span>
@@ -6340,7 +6377,7 @@ async function renderAnalytics() {
       </div>
 
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h3>${emojiIcon('📈',18)} Pace Factor</h3></div>
+        <div class="card-header"><h3>${emojiIcon('📈',18)} Pace Factor — advisory</h3></div>
         <div class="card-body">
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
             <div style="font-size:28px;font-weight:800">×${pace.toFixed(2)}</div>
@@ -6350,22 +6387,19 @@ async function renderAnalytics() {
             </div>
           </div>
           ${paceNote ? `<div style="font-size:12px;color:var(--warning)">${emojiIcon('⚠️',14)} ${escHtml(paceNote)}</div>` :
-            `<div style="font-size:11px;color:var(--text-muted)">MTD contribution ₱${fmt(r.contributionPesos)} vs target ₱${fmt(targetContribution)} · ${Math.round(elapsed*100)}% of the month elapsed (day ${monthB.upToDay} of ${monthB.daysInMonth})</div>`}
+            `<div style="font-size:11px;color:var(--text-muted)">MTD contribution ₱${fmt(effContribution)} vs target ₱${fmt(targetContribution)} · ${Math.round(elapsed*100)}% of the month elapsed (day ${monthB.upToDay} of ${monthB.daysInMonth})</div>`}
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">${emojiIcon('ℹ️',12)} Under Option B (31 Aug 2026) pace reads the month — it no longer changes quote prices.</div>
         </div>
       </div>
 
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header"><h3>${emojiIcon('🎯',18)} Suggested OH%</h3></div>
+        <div class="card-header"><h3>${emojiIcon('🎯',18)} OH% — Fixed (Option B)</h3></div>
         <div class="card-body">
           <div class="kpi-row" style="margin-bottom:10px">
-            <div class="kpi-card accent"><div class="kpi-label">Suggested OH%</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
-            <div class="kpi-card"><div class="kpi-label">Base OH% × Pace</div><div class="kpi-value">${(baseOH*100).toFixed(0)}% × ${pace.toFixed(2)}</div></div>
+            <div class="kpi-card accent"><div class="kpi-label">OH% on direct cost</div><div class="kpi-value">${(suggestedOH*100).toFixed(1)}%</div></div>
+            <div class="kpi-card"><div class="kpi-label">Price multiplier on direct</div><div class="kpi-value">×${priceMult.toFixed(4)}</div></div>
           </div>
-          <div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Quote size (₱, up to)</th><th style="text-align:right">Size factor</th></tr></thead>
-            <tbody>${SIZE_BANDS_REF.map(([cap,f])=>`<tr><td>${cap==null?'Above ₱1,600,000':'₱'+fmt(cap)}</td><td style="text-align:right">×${f.toFixed(2)}</td></tr>`).join('')}</tbody>
-          </table></div>
-          <div style="margin-top:8px;font-size:11px;color:var(--text-muted)">per-quote size factor applies on top</div>
+          <div style="font-size:12px;color:var(--text-muted)">Fixed-rate ruling (31 Aug 2026): overhead is a flat ${(suggestedOH*100).toFixed(0)}% on direct cost and margin ${(targetMargin*100).toFixed(0)}% of the price — the same specs price the same in any month, at any job size. Pace and the old size bands are advisory signals only.</div>
         </div>
       </div>
 
