@@ -718,6 +718,15 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
   #lhPrintHeader{display:block!important;}
 }
 
+/* ── Internal deals with the NUMBERS (owner ruling 2026-08-31): the document
+     sections (quote number, client, photos, delivery/timeline/payment/
+     remarks, terms & conforme) collapse behind the 📄 Quote details toggle.
+     Screen-only and scoped to the workspace originals, so print and the
+     Client-tab preview (cloned into #qbDocSheet) are untouched. ── */
+@media screen{
+  body.doc-details-collapsed #internalWorkspace .doc-details{display:none!important;}
+}
+
 /* ── CALCULATOR — Internal redesign (owner ruling 2026-08-31): one surface,
      the build waterfall + a per-line experiment table ── */
 .calc-grid{display:grid;grid-template-columns:minmax(330px,440px) 1fr;gap:14px;align-items:start;}
@@ -954,7 +963,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 }
 </style>
 </head>
-<body class="body-client-view">
+<body class="body-client-view doc-details-collapsed">
 
 <!-- ── TOP BAR ── -->
 <div class="topbar no-print">
@@ -1050,6 +1059,13 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
      Client-tab document preview shown in its place — see the CSS block above
      and renderClientPreview() in the script for how the swap works. ── -->
 <div id="internalWorkspace">
+<!-- Internal-deals-with-the-numbers toggle (owner ruling 2026-08-31). Hidden
+     for partners (applyPartnerMode removes it; partners always see the
+     document sections since client info is their editing surface). -->
+<div class="section no-print" id="docDetailsBar" style="padding:8px 18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+  <button type="button" class="btn btn-outline btn-sm" id="docDetailsToggle" style="background:var(--dark-blue);" onclick="toggleDocDetails()">📄 Quote details ▸</button>
+  <span style="font-size:11px;color:var(--gray-dark);">Internal deals with the numbers — open this to edit what prints on the document: quote number · client · photos · delivery &amp; timeline · payment · remarks · terms &amp; conforme.</span>
+</div>
 
 <!-- ── DRAFT RESUME BANNER (Wave 3 Q1) — localStorage had a non-empty unfiled
      draft at boot; never auto-restore silently, always ask. Hidden again by
@@ -1186,7 +1202,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── QUOTE NUMBER ── -->
-<div class="section qno-builder-section no-print">
+<div class="section qno-builder-section no-print doc-details">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
     <div class="sec-title" style="margin-bottom:0;border:none;padding:0;">Quote Number</div>
     <div class="toggle-pills" style="background:var(--gray-mid);">
@@ -1254,7 +1270,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── CLIENT INFO ── -->
-<div class="section no-print" id="clientInfoSection">
+<div class="section no-print doc-details" id="clientInfoSection">
   <div class="sec-title">Client Information</div>
   <div class="fg-grid">
     <div class="fg full"><label>Client Name</label>
@@ -1421,7 +1437,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── PHOTOS (see specs/quote-builder-photos-spec.md) ── -->
-<div class="section no-print" id="photoSection">
+<div class="section no-print doc-details" id="photoSection">
   <div class="sec-title">
     <span>📷 Photos</span>
     <button class="btn btn-outline btn-sm" style="background:var(--dark-blue);" onclick="document.getElementById('photoInput').click();">＋ Add Photos</button>
@@ -1431,7 +1447,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── DELIVERY & INSTALLATION ── -->
-<div class="section" id="diSection">
+<div class="section doc-details" id="diSection">
   <div class="sec-title">Delivery &amp; Installation</div>
   <div class="fg-grid no-print">
     <div class="fg"><label>Delivery Method</label>
@@ -1557,7 +1573,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 </div>
 
 <!-- ── TERMS & CONDITIONS ── -->
-<div class="section terms-section" id="termsSection">
+<div class="section terms-section doc-details" id="termsSection">
   <div class="sec-title">Terms &amp; Conditions</div>
   <div class="terms-grid" id="termsGrid"></div>
   <div class="sig-row">
@@ -2350,6 +2366,8 @@ function applyPartnerMode(){
   // Remove the Admin (database) view button entirely
   document.getElementById('btnAdmin')?.remove();
   document.getElementById('btnOpenProductDb')?.remove();   // partners never open the product database
+  document.getElementById('docDetailsBar')?.remove();      // partners always see the document sections
+  document.body.classList.remove('doc-details-collapsed');
   // Hide the internal Labor & Timeline estimate (Barro's staffing/day-rates) from
   // partners — they keep the per-item Cost & Margin view for the 50/50 split.
   const lt=document.getElementById('laborTimelineWrap'); if(lt) lt.style.display='none';
@@ -2454,6 +2472,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
 });
 
 function initUI(){
+  // Numbers-first Internal: start with the document sections collapsed for
+  // internal staff; partners keep them open (their editing surface).
+  if (typeof PARTNER_MODE!=='undefined' && !PARTNER_MODE && !document.body.classList.contains('doc-details-collapsed')) {
+    document.body.classList.add('doc-details-collapsed');
+  }
   buildCoefTable();
   renderItems();
   renderRecentProductsRow();
@@ -3792,6 +3815,15 @@ function customCostParts(item, idx){
 // every BOM/cost handler funnels through renderItems → computeMarginSummary
 // in Internal view). Closes itself if its item disappears.
 let bomModalIdx = null;
+// Owner ruling 2026-08-31 — "internal only deals with the numbers": the
+// document sections collapse behind the 📄 Quote details toggle. Collapsed
+// by default for internal staff (set in initUI, where PARTNER_MODE is
+// known); partners never collapse.
+function toggleDocDetails(){
+  const collapsed = document.body.classList.toggle('doc-details-collapsed');
+  const b = document.getElementById('docDetailsToggle');
+  if (b) b.textContent = collapsed ? '📄 Quote details ▸' : '📄 Quote details ▾';
+}
 function openBomModal(idx){
   if (!items[idx] || items[idx].id!=='CUSTOM') return;
   bomModalIdx = idx;
@@ -7272,8 +7304,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 12;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 13;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:13, date:'2026-08-31', items:[
+    'Internal now deals only with the numbers: items, miscellaneous costs and the calculator. The document sections — quote number, client, photos, delivery & timeline, payment, remarks, terms & conforme — tuck behind the 📄 Quote details button at the top (they stay on the client document as always).',
+  ]},
   { ver:12, date:'2026-08-31', items:[
     'The Internal cost panel is redesigned as one calculator: the build waterfall (materials → waste → labor → consumables → DIRECT → OH & MK dials → SELLING → QUOTED) beside an experiment table where every line has an editable price — type anything and see the markup it really gives. The old Capital & Labor table is retired; everything lives in the calculator now.',
   ]},
@@ -7336,6 +7371,8 @@ const TOUR_STEPS = [
    body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
  { target:'#btnClient', closest:'.toggle-pills', title:'Two views',
    body:'Client shows the finished document exactly as the customer will see it. Internal is the editing workspace with costs, margins and the pricing dials. Internal may be hidden for your account.' },
+ { target:'#docDetailsBar', needsWorkspace:true, title:'Internal = the numbers',
+   body:'The Internal view keeps only the numbers: items, misc costs and the calculator. Everything that prints on the document — quote number, client, photos, delivery & timeline, payment, remarks, terms — tucks behind this 📄 Quote details button. Open it when you need to fill those in.' },
  { target:'.qno-builder-section', needsWorkspace:true, title:'Quote number',
    body:'Auto mode builds the official number from company, location and date. Switch to Manual only when re-issuing an existing number.' },
  { target:'#clientInfoSection', needsWorkspace:true, title:'Who is this quote for',
