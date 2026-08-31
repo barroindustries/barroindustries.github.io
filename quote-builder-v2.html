@@ -958,7 +958,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="toggle-pills">
       <button id="btnClient" class="active" onclick="setView('client')">📄 Client</button>
       <button id="btnInternal" onclick="setView('internal')">🔒 Internal</button>
-      <button id="btnAdmin" onclick="setView('admin')">⚙ Admin</button>
     </div>
     <button class="btn" id="btnQuick" onclick="toggleQuickMode()">⚡ Quick Quote</button>
   </div>
@@ -1008,7 +1007,6 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <div class="mtb-seg">
         <button class="mtb-seg-btn" id="mtbViewClient" onclick="mtbSetView('client')">📄 Client</button>
         <button class="mtb-seg-btn" id="mtbViewInternal" onclick="mtbSetView('internal')">🔒 Internal</button>
-        <button class="mtb-seg-btn" id="mtbViewAdmin" onclick="mtbSetView('admin')">⚙ Admin</button>
       </div>
     </div>
   </div>
@@ -1701,11 +1699,10 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Print / Share</strong> — Print/PDF for the client, Agent Copy (confidential, with commission), Share link (filed quotes only).</li>
       </ol>
 
-      <h4>The three views</h4>
+      <h4>The two views</h4>
       <p><strong>Client</strong> — the finished document exactly as the customer sees it.</p>
       <p><strong>Internal</strong> — the editing workspace plus labor, cost &amp; margin and break-even. The OH% and MK% dials live here — together they always total 150% of direct (30¢ + 30¢ of the selling peso), so raising one lowers the other.</p>
-      <p><strong>Admin</strong> — the product database and price coefficients.</p>
-      <p>Some views may be hidden depending on your account.</p>
+      <p>The Internal view may be hidden depending on your account.</p>
 
       <h4>Good to know</h4>
       <ul>
@@ -1723,6 +1720,16 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <button class="btn btn-outline" style="background:var(--dark-blue);" onclick="closeHelpModal()">Close</button>
       <button class="btn btn-green" onclick="closeHelpModal();startTour();">▶ Start guided demo</button>
     </div>
+  </div>
+</div>
+
+<!-- BOM & computation popup (owner ruling 2026-08-31) — content rendered by
+     renderBomModal() from customCostParts(); refreshed on every quote change. -->
+<div class="modal-overlay no-print" id="bomModal" style="display:none;z-index:2500;" onclick="if(event.target===this)closeBomModal()">
+  <div class="modal-box" style="max-width:560px;" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3 id="bomModalTitle">🧮 BOM &amp; computation</h3><button class="modal-x" onclick="closeBomModal()">✕</button></div>
+    <div class="modal-body" id="bomModalBody"></div>
+    <div class="modal-footer"><button class="btn btn-green" onclick="closeBomModal()">Done</button></div>
   </div>
 </div>
 
@@ -2533,6 +2540,7 @@ function applyLetterheadHeader(){
 }
 
 function setView(v){
+  if (v==='admin') v='internal';   // Admin view retired (owner ruling 2026-08-31) — product data edits move out of the builder
   currentView=v;
   // Null-guarded: in partner mode the Admin button/panel are removed, so a bare
   // .classList here used to throw and silently abort switching to Internal.
@@ -3566,7 +3574,6 @@ function addCustomItem(){
     category:currentCatFilter!=='all'?currentCatFilter:'miscellaneous',
     name:'New custom item',
     dims:'',
-    _bomOpen:true,   // fresh custom line opens its BOM & computation workspace
     specs:[],
     specEdit:'',
     qty:1,
@@ -3580,12 +3587,14 @@ function addCustomItem(){
   });
   saveToStorage();
   renderItems();
-  // Focus the new item's name for immediate editing
+  // Focus the new item's name for immediate editing, then open its BOM &
+  // computation popup — you're about to cost it anyway.
   setTimeout(()=>{
     const cells=document.querySelectorAll('#itemsTbody .name-cell');
     const last=cells[cells.length-1];
     if(last){last.focus();document.getSelection()?.selectAllChildren(last);}
   },30);
+  setTimeout(()=>openBomModal(items.length-1),80);
 }
 
 // COSTING-PHASE1-SPEC-2026-08-26 §3 — per-line costing gate for custom
@@ -3617,9 +3626,16 @@ function addCustomItem(){
 // gate (and everything new in it) out of the Client-tab preview and the
 // printed PDF, same mechanism the original gate already relied on.
 function customCostGateHtml(item, idx){
-  if (PARTNER_MODE) return '';
-  if (typeof currentView==='undefined' || currentView!=='internal') return '';
-  if (item.id!=='CUSTOM') return '';
+  return customCostParts(item, idx).rowHtml;
+}
+// Owner ruling 2026-08-31 (v14.0.215): the BOM & computation workspace opens
+// as a POPUP modal, not an inline expansion — one builder produces both the
+// compact row (chip + button + direct→sells summary) and the modal body.
+function customCostParts(item, idx){
+  const EMPTY = { rowHtml:'', workspaceHtml:'' };
+  if (PARTNER_MODE) return EMPTY;
+  if (typeof currentView==='undefined' || currentView!=='internal') return EMPTY;
+  if (item.id!=='CUSTOM') return EMPTY;
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
   const weekRate = cs.crewWeekRate || COSTING_DEFAULTS.crewWeekRate;
   const weekDays = cs.crewWeekDays || COSTING_DEFAULTS.crewWeekDays;
@@ -3677,13 +3693,6 @@ function customCostGateHtml(item, idx){
     ? `<span style="font-size:10px;color:var(--gray-dark);">${fmtNum(item.costLaborDays,2)} d × ${formatPeso(dayRate)} = ${formatPeso(laborDaysPesos)} · ${formatPeso(weekRate)}/${weekDays}d crew rate</span>`
     : `<span style="font-size:10px;color:var(--gray-dark);">${formatPeso(weekRate)}/${weekDays}d crew rate = ${formatPeso(dayRate)}/day</span>`;
 
-  // Owner ruling 2026-08-31 (screenshot feedback): the BOM inputs and the
-  // computation live BEHIND a button on the line — the items table stays
-  // clean, one click opens the full cost workspace. UI flag `_bomOpen` is
-  // per-item, stripped from the filed payload; a freshly added custom item
-  // opens it automatically.
-  const open = !!item._bomOpen;
-
   // Per-unit computation chain — the same math applyComputedPricing() uses,
   // shown line by line so the preparer sees exactly where the auto price
   // comes from. Rendered only when the gate is open and a basis exists.
@@ -3719,11 +3728,11 @@ function customCostGateHtml(item, idx){
         : 'This lands on the quote as the unit price automatically.'}</div>
     </div>` : '';
 
-  const gateBtn = `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:2px 10px;font-size:11px;" onclick="toggleBomGate(${idx})">${open?'▾ Hide BOM &amp; computation':'🧮 BOM &amp; computation'}</button>`;
-  const closedSummary = (!open && !uncosted && directUnit>0)
+  const gateBtn = `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:2px 10px;font-size:11px;" onclick="openBomModal(${idx})">🧮 BOM &amp; computation</button>`;
+  const closedSummary = (!uncosted && directUnit>0)
     ? `<span style="font-size:11px;color:var(--gray-dark);">direct ${formatPeso(directUnit)} → sells ${formatPeso(sellUnit)}/unit</span>` : '';
 
-  const openBody = !open ? '' : `
+  const workspaceHtml = `
     <div class="no-print" style="margin:3px 0 2px;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--gray-dark);">Materials (BOM)</div>
       ${bomRowsHtml}
@@ -3743,22 +3752,47 @@ function customCostGateHtml(item, idx){
     </div>
     ${compHtml}`;
 
-  return `<div class="spec-line cost-gate-row no-print" style="display:block;">
+  const rowHtml = `<div class="spec-line cost-gate-row no-print" style="display:block;">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
       <span class="spec-tag no-print">Cost</span>${chip}${gateBtn}${closedSummary}
     </div>
-    ${openBody}
   </div>`;
+  return { rowHtml, workspaceHtml };
 }
 
-// Owner ruling 2026-08-31 — toggles a custom line's BOM & computation
-// workspace open/closed. Session/draft UI state only (stripped from the
-// filed payload alongside the other cost fields).
-function toggleBomGate(idx){
-  if (!items[idx]) return;
-  items[idx]._bomOpen = !items[idx]._bomOpen;
-  saveToStorage();
-  renderItems();
+// ── BOM & computation popup (owner ruling 2026-08-31) ─────────────────────
+// One modal, re-rendered from customCostParts() whenever the quote state
+// changes (computeMarginSummary() calls refreshBomModal() at its end, and
+// every BOM/cost handler funnels through renderItems → computeMarginSummary
+// in Internal view). Closes itself if its item disappears.
+let bomModalIdx = null;
+function openBomModal(idx){
+  if (!items[idx] || items[idx].id!=='CUSTOM') return;
+  bomModalIdx = idx;
+  renderBomModal();
+  const m = document.getElementById('bomModal');
+  if (m) m.style.display = 'flex';
+}
+function closeBomModal(){
+  bomModalIdx = null;
+  const m = document.getElementById('bomModal');
+  if (m) m.style.display = 'none';
+}
+function renderBomModal(){
+  const item = items[bomModalIdx];
+  if (!item) { closeBomModal(); return; }
+  const t = document.getElementById('bomModalTitle');
+  if (t) t.textContent = '🧮 ' + (item.name || 'Custom item') + ' — BOM & computation';
+  const b = document.getElementById('bomModalBody');
+  if (b) b.innerHTML = customCostParts(item, bomModalIdx).workspaceHtml
+    || '<div style="font-size:12px;color:var(--gray-dark);">Switch to Internal view to cost this item.</div>';
+}
+function refreshBomModal(){
+  if (bomModalIdx == null) return;
+  const m = document.getElementById('bomModal');
+  if (!m || m.style.display === 'none') { bomModalIdx = null; return; }
+  if (!items[bomModalIdx] || items[bomModalIdx].id !== 'CUSTOM') { closeBomModal(); return; }
+  renderBomModal();
 }
 
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — shared "does this custom line have
@@ -5268,6 +5302,7 @@ function computeMarginSummary(laborEst){
     const rac=document.getElementById('reqApprovalCheck');
     if (rac && !rac.checked) { rac.checked=true; rac.dispatchEvent(new Event('change')); }
   }
+  refreshBomModal();
 }
 
 // COSTING-PHASE1-SPEC-2026-08-26 §2 — builds the buildup/ladder/margin HTML
@@ -7058,8 +7093,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 5;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 6;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:6, date:'2026-08-31', items:[
+    '🧮 BOM & computation now opens as a popup window — the items table stays clean, and the popup follows your edits live.',
+    'The Admin view is retired — the builder now has just Client and Internal.',
+  ]},
   { ver:5, date:'2026-08-31', items:[
     'New pricing split: selling = direct cost × 2.50 — of every selling peso, 40¢ is direct cost, 30¢ overhead and 30¢ markup (OH and MK balance at 75% + 75% of direct). Prices still round to the nearest ₱100.',
     'A line with no labor entered now assumes labor at 80% of its materials cost — enter real crew days and they take over.',
@@ -7096,8 +7135,8 @@ const TOUR_STEPS = [
    body:'This is where Barro Kitchens, Barro Industries and Brilliant Steel quotes are built, priced, filed and shared. This demo takes about 2 minutes and changes nothing in your quote.' },
  { target:'#coBK', closest:'.toggle-pills', title:'Pick the company',
    body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
- { target:'#btnClient', closest:'.toggle-pills', title:'Three views',
-   body:'Client shows the finished document exactly as the customer will see it. Internal is the editing workspace with costs and margins. Admin manages the product database. Some views may be hidden for your account.' },
+ { target:'#btnClient', closest:'.toggle-pills', title:'Two views',
+   body:'Client shows the finished document exactly as the customer will see it. Internal is the editing workspace with costs, margins and the pricing dials. Internal may be hidden for your account.' },
  { target:'#btnQuick', title:'Quick Quote',
    body:'In a hurry? Quick Quote is a 3-step wizard — client → products → review — that fills the full builder for you. Everything it creates can still be fine-tuned afterwards.' },
  { target:'.qno-builder-section', needsWorkspace:true, title:'Quote number',
