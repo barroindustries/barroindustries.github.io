@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.250';
+window.APP_VERSION = '14.0.251';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -771,6 +771,9 @@ window.NAV_REGISTRY = {
     admin: [
       // ── Every day (no header — the reasons the drawer gets opened)
       { key:'notes',     icon:'sticky-note',   label:'Notes',         page:'notes' },
+      // Owner ruling 2026-09-01: personal to-do, president-only drawer entry
+      // (data is owner-scoped in rules either way — see personal_todos).
+      { key:'todo',      icon:'list-checks',   label:'My To-Do',      page:'personal-todo', when:'isPresident' },
       { key:'tasks',     icon:'check-square',  label:'Tasks',         page:'tasks' },
       { key:'calendar',  icon:'calendar-days', label:'Calendar',      page:'calendar' },
       { key:'approvals', icon:'shield-check',  label:'Approvals',     page:'approvals' },
@@ -1654,6 +1657,7 @@ window.PAGE_SCRIPTS = {
   'approvals': ['js/screens/approvals.js', 'js/screens/people.js', 'js/screens/production.js'],
 
   'notes': ['js/screens/notes.js'],
+  'personal-todo': ['js/screens/todo.js'],
 
   // ── People-family pages — all render functions for these live in
   // js/screens/people.js. ──

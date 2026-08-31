@@ -1397,6 +1397,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-item[data-page="inventory"] .nav-icon         { background: linear-gradient(135deg,#00D4AA,#0A84FF); box-shadow: 0 2px 8px rgba(0,212,170,0.32); }
 .nav-item[data-page="projects-lifecycle"] .nav-icon{ background: linear-gradient(135deg,#5856D6,#32ADE6); box-shadow: 0 2px 8px rgba(88,86,214,0.32); }
 .nav-item[data-page="sales-orders"] .nav-icon      { background: linear-gradient(135deg,#FF9F0A,#FF2D78); box-shadow: 0 2px 8px rgba(255,159,10,0.32); }
+.nav-item[data-page="personal-todo"] .nav-icon     { background: linear-gradient(135deg,#12B886,#0CA678); box-shadow: 0 2px 8px rgba(18,184,134,0.32); }
 .nav-item[data-page="product-database"] .nav-icon  { background: linear-gradient(135deg,#30D158,#32ADE6); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
 .nav-item[data-page="audit-log"] .nav-icon         { background: linear-gradient(135deg,#8E8E93,#636366); box-shadow: 0 2px 8px rgba(99,99,102,0.32); }
 /* 2026-08-12, owner again: "make it a note always to add a color to new icons

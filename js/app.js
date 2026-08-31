@@ -2687,7 +2687,7 @@ const _SKELETON_KIND = {
   'partner-projects': 'cards', 'projects-lifecycle': 'cards',
   // Tabular screens — these paint a <table> or a column-aligned list.
   'bs-quotations': 'table', 'bk-quotations': 'table', 'bs-clients': 'table',
-  'sales-orders': 'table', inventory: 'table', 'cash-advances': 'table',
+  'sales-orders': 'table', inventory: 'table', 'cash-advances': 'table', 'personal-todo': 'rows',
   'product-database': 'table', 'audit-log': 'table', holidays: 'table',
   attendance: 'table', 'personal-finance': 'table',
   // Everything else (tasks, approvals, posts, memos, chat, files, leave,
@@ -2903,6 +2903,7 @@ async function navigateTo(page, opts) {
     // ── New modules ──
     case 'posts':            window.renderPosts?.(); break;
     case 'notes':            window.renderNotesPage?.(); break;
+    case 'personal-todo':    window.renderPersonalTodo?.(); break;
     case 'memos':            window.renderMemosPage?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'chat':             window.renderChatPage?.(); break;

@@ -740,6 +740,20 @@ service cloud.firestore {
     function noteLevel(note) {
       return note.data.get('sharedLevels', {}).get(request.auth.uid, 'view');
     }
+    // ── Personal To-Do (owner ruling 2026-09-01: president-only drawer entry,
+    // "add as personal to-do") — same privacy stance as Notes: OWNER ALONE,
+    // enforced here, keyed by uid. The president-only part is the NAV entry;
+    // these rules are deliberately per-owner so opening the feature to staff
+    // later is a UI change, not a rules change.
+    match /personal_todos/{uid}/items/{itemId} {
+      allow read, delete: if isAuth() && request.auth.uid == uid;
+      allow create, update: if isAuth() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['text','done','createdAt','doneAt','updatedAt'])
+        && request.resource.data.get('text', '') is string
+        && request.resource.data.get('text', '').size() >= 1
+        && request.resource.data.get('text', '').size() <= 500;
+    }
+
     match /notes/{noteId} {
       allow read: if isAuth() && ( noteIsOwner(resource) || noteIsShared(resource) );
 
