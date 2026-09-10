@@ -1271,6 +1271,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     </div>
     <button class="btn btn-outline" style="background:var(--dark-blue);white-space:nowrap;" onclick="addCustomItem()">➕ Custom item</button>
     <button class="btn btn-outline" style="background:var(--mid-blue);white-space:nowrap;" onclick="addSection()" title="Start a new named section — e.g. Option A / Option B">＋ Section</button>
+    <button class="btn btn-outline no-print" id="btnImportItems" style="background:var(--mid-blue);white-space:nowrap;" onclick="openImportModal()" title="Import items from a JSON file (ask Claude to make one — 📋 format inside)">📥 Import</button>
   </div>
 
   <!-- Calculator panel (shown after selecting product) -->
@@ -1682,6 +1683,10 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
            #fileBtn (≥1 line item), toggled from the same buildVerifyModal() pass. -->
       <button class="btn btn-outline no-print" id="saveTemplateBtn" onclick="saveAsTemplate()" disabled style="background:var(--dark-blue);opacity:.5;">💾 Save as Template</button>
       <button class="btn btn-outline no-print" id="templatesBtn" onclick="requestTemplates()" disabled style="background:var(--dark-blue);opacity:.5;">📋 Templates</button>
+      <!-- QB-DRAFTS-SPEC-2026-09-11 — always enabled, no verify gates, no
+           amount checks: unlike File, a draft can be saved with nothing
+           priced yet. -->
+      <button class="btn btn-outline no-print" id="saveDraftBtn" onclick="saveQuoteDraftNow()">💾 Save draft</button>
       <button class="btn btn-green" id="fileBtn" onclick="fileQuotation()" disabled style="opacity:.5;">📁 File Quotation</button>
     </div>
   </div>
@@ -1701,11 +1706,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
         <li><strong>Quote number</strong> <em>(Client Data)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
-        <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section for Option A / Option B quotes.</li>
+        <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself; tick <em>no costing</em> beside it for a line that genuinely has none. ＋ Section for Option A / Option B quotes. 📥 Import brings in a whole list at once — hand Claude any list and the 📋 button inside copies the exact format brief to give it.</li>
         <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
-        <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official.</li>
+        <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts.</li>
         <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately. A quotation is always shared as the PDF.</li>
       </ol>
 
@@ -1756,6 +1761,34 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="modal-hdr"><h3>→ Distribute cost into items</h3><button class="modal-x" onclick="closeMiscDistModal()">✕</button></div>
     <div class="modal-body" id="miscDistBody"></div>
     <div class="modal-footer"><button class="btn btn-green" onclick="closeMiscDistModal()">Done</button></div>
+  </div>
+</div>
+
+<!-- QB-IMPORT-SPEC-2026-09-11 — import items from a Claude-produced JSON file
+     (barro-qb-import v1, docs/QB-IMPORT-FORMAT.md). Parsed entirely client-side
+     by parseImportText()/applyImport() below; nothing round-trips through a
+     server. Strings from the file land in items[] RAW — rendering escapes via
+     txtEsc()/attrEsc() same as every other item source, never here. -->
+<div class="modal-overlay no-print" id="importModal" style="display:none;z-index:2600;" onclick="if(event.target===this)closeImportModal()">
+  <div class="modal-box" style="max-width:640px;" onclick="event.stopPropagation()">
+    <div class="modal-hdr"><h3>📥 Import items</h3><button class="modal-x" onclick="closeImportModal()">✕</button></div>
+    <div class="modal-body" id="importModalBody">
+      <p style="font-size:12.5px;color:var(--gray-dark);margin:0 0 10px;">Hand Claude any list (photo, Excel, text) with the format spec below; import the JSON file it gives back. Only the item name is required — everything else can be blank and edited after.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);" onclick="copyImportSpec()">📋 Copy format spec for Claude</button>
+        <button type="button" class="btn btn-outline no-print" style="background:var(--mid-blue);" onclick="document.getElementById('importFileInput').click()">📁 Choose file…</button>
+        <input type="file" id="importFileInput" accept=".json,application/json,.txt" style="display:none" onchange="handleImportFile(this)">
+      </div>
+      <div class="fg full">
+        <label>…or paste the JSON here</label>
+        <textarea id="importPasteBox" rows="6" placeholder="Paste the barro-qb-import JSON here…" oninput="scheduleImportParse()"></textarea>
+      </div>
+      <div id="importPreview" style="margin-top:10px;font-size:12.5px;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline no-print" style="background:var(--dark-blue);" onclick="closeImportModal()">Cancel</button>
+      <button class="btn btn-green" id="importApplyBtn" disabled onclick="applyImport()">Add items to quote</button>
+    </div>
   </div>
 </div>
 
@@ -2001,6 +2034,10 @@ let filedAt=''; // ISO timestamp set when the quote is filed/reviewed
 // Lets the File flow offer "update original" vs "file as new revision", and lets
 // every QUOTE_FILED write carry its place in the revision chain.
 let reopenSourceDocId=null, reopenSourceCollection=null, reopenRootQuoteId=null, reopenAsRevisionFlag=false;
+// QB-DRAFTS-SPEC-2026-09-11 — set once 💾 Save draft (or a resumed draft) has
+// named a real Firestore doc; every later autosave/File post rides this id so
+// they all keep updating the SAME doc instead of scattering new ones.
+let savedDraftDocId=null;
 let fileMode='revision'; // 'revision' | 'update' — chosen in the Verify & File modal
 // Wave 3 Q6 — debounced cloud draft save (5s idle) so a filed-nothing session
 // isn't lost if the tab closes; see QUOTE_DRAFT in the app.js bridge.
@@ -2350,6 +2387,7 @@ function applyPartnerMode(){
   // Remove the Admin (database) view button entirely
   document.getElementById('btnAdmin')?.remove();
   document.getElementById('btnOpenProductDb')?.remove();   // partners never open the product database
+  document.getElementById('btnImportItems')?.remove();     // QB-IMPORT-SPEC-2026-09-11 — imported costing data is internal-only; belt-and-braces alongside the PARTNER_MODE guard on every import function below
   document.getElementById('docDetailsBar')?.remove();      // partners always see the document sections
   document.body.classList.remove('doc-details-collapsed');
   // Hide the internal Labor & Timeline estimate (Barro's staffing/day-rates) from
@@ -3668,6 +3706,398 @@ function addCustomItem(){
   setTimeout(()=>openBomModal(items.length-1),80);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  IMPORT ITEMS FROM A FILE (QB-IMPORT-NOCOSTING-SPEC-2026-09-11)
+//  A `barro-qb-import` v1 JSON file (docs/QB-IMPORT-FORMAT.md;
+//  QB_IMPORT_SPEC_TEXT below is the same brief handed to Claude) becomes a
+//  batch of standard custom lines — exactly addCustomItem()'s shape, so
+//  every existing custom-line feature (🧮 BOM, no costing, section moves)
+//  works on an imported line with zero special-casing anywhere else.
+//  Two-phase: parseImportText() is pure (never touches items[]), storing its
+//  result in _importParsed for the preview; applyImport() is the only
+//  function that pushes into items[]. Strings from the file land RAW —
+//  rendering escapes via txtEsc()/attrEsc() same as every other item
+//  source, never here.
+// ═══════════════════════════════════════════════════════════════════
+const QB_IMPORT_MAX_ITEMS = 200;
+let _importParsed = null;       // {sections:[{label,items:[...]}], warnings:[...]} | {error} | null
+let _importParseTimer = null;
+
+function openImportModal(){
+  if (PARTNER_MODE) return;
+  _importParsed = null;
+  const box = document.getElementById('importPasteBox'); if (box) box.value = '';
+  const fileInput = document.getElementById('importFileInput'); if (fileInput) fileInput.value = '';
+  renderImportPreview();
+  const m = document.getElementById('importModal');
+  if (m) m.style.display = 'flex';
+}
+function closeImportModal(){
+  const m = document.getElementById('importModal');
+  if (m) m.style.display = 'none';
+}
+
+// Copies QB_IMPORT_SPEC_TEXT (the prompt-ready brief, Part 4) to the
+// clipboard for pasting straight into a Claude conversation. Modern
+// clipboard API first, execCommand('copy') textarea fallback for a context
+// where navigator.clipboard is unavailable (older WebView, non-HTTPS).
+function copyImportSpec(){
+  if (PARTNER_MODE) return;
+  const done = () => showToast('📋 Format spec copied — paste it to Claude');
+  const fail = () => showToast('Could not copy — select and copy the spec manually.', 'error');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(QB_IMPORT_SPEC_TEXT).then(done).catch(() => {
+      if (_importFallbackCopy(QB_IMPORT_SPEC_TEXT)) done(); else fail();
+    });
+  } else if (_importFallbackCopy(QB_IMPORT_SPEC_TEXT)) {
+    done();
+  } else {
+    fail();
+  }
+}
+function _importFallbackCopy(text){
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch(e) { return false; }
+}
+
+function handleImportFile(input){
+  if (PARTNER_MODE) return;
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || '');
+    const box = document.getElementById('importPasteBox');
+    if (box) box.value = text;
+    parseImportText(text);
+  };
+  reader.onerror = () => showToast('Could not read that file.', 'error');
+  reader.readAsText(file);
+  input.value = '';   // allow re-selecting the same file after a fix
+}
+
+// oninput debounce on the paste box — reparses ~300ms after typing stops.
+function scheduleImportParse(){
+  if (PARTNER_MODE) return;
+  if (_importParseTimer) clearTimeout(_importParseTimer);
+  _importParseTimer = setTimeout(() => {
+    const text = document.getElementById('importPasteBox')?.value || '';
+    if (!text.trim()) { _importParsed = null; renderImportPreview(); return; }
+    parseImportText(text);
+  }, 300);
+}
+
+// Part 1 — parses any tolerant shape (bare array / {items} / {sections} /
+// both) into _importParsed. Pure: never mutates items[]. `format`/`version`
+// are optional and unvalidated (only a present-and-mismatched `format`
+// warns). More than QB_IMPORT_MAX_ITEMS raw rows total → refuse outright, no
+// partial import.
+function parseImportText(text){
+  if (PARTNER_MODE) return;
+  const warnings = [];
+  let data;
+  try { data = JSON.parse(text); }
+  catch(e) { _importParsed = { sections:[], warnings:[], error:'Could not parse JSON — '+e.message }; renderImportPreview(); return; }
+
+  let topItems = [], namedSections = [];
+  if (Array.isArray(data)) {
+    topItems = data;
+  } else if (data && typeof data === 'object') {
+    if (data.format != null && data.format !== 'barro-qb-import') {
+      warnings.push(`Unrecognized format "${data.format}" — importing anyway.`);
+    }
+    if (Array.isArray(data.items)) topItems = topItems.concat(data.items);
+    if (Array.isArray(data.sections)) {
+      data.sections.forEach(sec => {
+        const rawLabel = (sec && sec.label != null) ? String(sec.label).trim() : '';
+        const secItems = Array.isArray(sec && sec.items) ? sec.items : [];
+        // A section with no label (or a blank one) is section-less — folded
+        // into the same label:null pseudo-section as top-level `items`.
+        if (rawLabel) namedSections.push({ label:rawLabel, items:secItems });
+        else topItems = topItems.concat(secItems);
+      });
+    }
+  } else {
+    _importParsed = { sections:[], warnings:[], error:'Expected a JSON object or array.' };
+    renderImportPreview();
+    return;
+  }
+
+  const rawSections = [];
+  if (topItems.length) rawSections.push({ label:null, items:topItems });
+  rawSections.push(...namedSections);
+
+  if (!rawSections.length) {
+    _importParsed = { sections:[], warnings:[], error:'No items found in the file.' };
+    renderImportPreview();
+    return;
+  }
+
+  const totalRaw = rawSections.reduce((s,sec) => s+sec.items.length, 0);
+  if (totalRaw > QB_IMPORT_MAX_ITEMS) {
+    _importParsed = { sections:[], warnings:[], error:`${totalRaw} items exceeds the ${QB_IMPORT_MAX_ITEMS}-item import cap — split the file and import in batches.` };
+    renderImportPreview();
+    return;
+  }
+
+  const sections = rawSections.map(sec => {
+    const secItems = [];
+    sec.items.forEach((raw, i) => {
+      const norm = normalizeImportItem(raw, warnings, sec.label, i+1);
+      if (norm) secItems.push(norm);
+    });
+    return { label:sec.label, items:secItems };
+  }).filter(sec => sec.items.length);
+
+  _importParsed = { sections, warnings };
+  renderImportPreview();
+}
+
+// One raw JSON row → a standard custom-line object (addCustomItem()'s
+// shape), or null (missing name — caller counts it in warnings and drops
+// it). Every optional numeric field follows the same undefined-means-
+// never-entered contract updateCustomCost() already enforces: only set
+// costMat/costLaborDays/costHrs when the source actually gave a coercible
+// value — never default them to 0.
+function normalizeImportItem(raw, warnings, secLabel, rowNum){
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  const where = secLabel ? ` in "${secLabel}"` : '';
+  const name = (src.name != null ? String(src.name) : '').trim();
+  if (!name) { warnings.push(`Row ${rowNum}${where}: missing name — skipped.`); return null; }
+
+  let specEdit = '';
+  if (src.specs != null) {
+    if (typeof src.specs === 'string') {
+      specEdit = src.specs.trim();
+    } else if (Array.isArray(src.specs)) {
+      specEdit = src.specs.map(s => {
+        if (s && typeof s === 'object' && !Array.isArray(s)) {
+          const label = s.label != null ? String(s.label).trim() : '';
+          const value = s.value != null ? String(s.value).trim() : '';
+          return label ? `${label}: ${value}` : value;
+        }
+        return String(s ?? '').trim();
+      }).filter(Boolean).join(' • ');
+    } else {
+      warnings.push(`"${name}": specs value ignored (must be a string or array).`);
+    }
+  }
+
+  const dims = src.dims != null ? String(src.dims).trim() : '';
+  const leadTime = src.leadTime != null ? String(src.leadTime).trim() : '';   // '' like addCustomItem, NOT '—'
+  const notes = src.notes != null ? String(src.notes).trim() : '';
+  const unit = (src.unit != null && String(src.unit).trim()) ? String(src.unit).trim() : 'pc';
+
+  let qty = 1;
+  if (src.qty != null && src.qty !== '') {
+    const pq = parseInt(src.qty, 10);
+    if (Number.isFinite(pq)) qty = Math.max(1, pq);
+    else warnings.push(`"${name}": qty "${src.qty}" is not a number — defaulted to 1.`);
+  }
+
+  // A given price must stick (a price from Neil's list is authoritative) —
+  // priceManual:true skips this line in applyComputedPricing()'s auto-pricer.
+  // Absent/blank/0 leaves unitPrice:0 with no priceManual, so a line that
+  // also carries costing data prices itself automatically (Internal view).
+  let unitPrice = 0, priceManual;
+  if (src.unitPrice != null && src.unitPrice !== '') {
+    const n = Number(src.unitPrice);
+    if (Number.isFinite(n)) { if (n > 0) { unitPrice = n; priceManual = true; } }
+    else warnings.push(`"${name}": unitPrice "${src.unitPrice}" is not a number — treated as absent.`);
+  }
+
+  const item = {
+    id:'CUSTOM', category:null,   // category set by applyImport()'s section mapping (Part 2.5)
+    name, dims, specs:[], specEdit,
+    qty, unit, unitPrice, amount: unitPrice*qty,
+    leadTime, notes, laborHours:null, formulaType:'fixed',
+    bom:[],   // always present, empty if none — matches addCustomItem()'s shape
+  };
+  if (priceManual) item.priceManual = true;
+  if (src.noCosting) item.noCosting = true;
+
+  if (src.costing && typeof src.costing === 'object' && !Array.isArray(src.costing)) {
+    const c = src.costing;
+    if (c.materialsLump != null && c.materialsLump !== '') {
+      const n = Number(c.materialsLump);
+      if (Number.isFinite(n) && n >= 0) item.costMat = n;
+      else warnings.push(`"${name}": costing.materialsLump "${c.materialsLump}" is not a valid number — ignored.`);
+    }
+    if (c.laborDays != null && c.laborDays !== '') {
+      const n = Number(c.laborDays);
+      if (Number.isFinite(n)) item.costLaborDays = n;
+      else warnings.push(`"${name}": costing.laborDays "${c.laborDays}" is not a number — ignored.`);
+    }
+    if (c.laborHours != null && c.laborHours !== '') {
+      const n = Number(c.laborHours);
+      if (Number.isFinite(n)) item.costHrs = n;
+      else warnings.push(`"${name}": costing.laborHours "${c.laborHours}" is not a number — ignored.`);
+    }
+    if (Array.isArray(c.bom)) {
+      item.bom = c.bom.map(r => ({
+        name: String((r && (r.material ?? r.name)) ?? '').trim(),
+        qty: Number(r && r.qty) || 0,
+        unitPrice: Number(r && r.unitPrice) || 0,
+        src: 'import'
+      })).filter(r => r.name);
+    }
+  }
+
+  return item;
+}
+
+function renderImportWarnings(warnings){
+  if (!warnings || !warnings.length) return '';
+  return `<div style="margin-top:8px;color:var(--orange);font-size:11.5px;"><strong>${warnings.length} warning(s):</strong><ul style="margin:2px 0 0 16px;padding:0;">${warnings.map(w=>`<li>${txtEsc(w)}</li>`).join('')}</ul></div>`;
+}
+
+function renderImportPreview(){
+  const host = document.getElementById('importPreview');
+  const btn = document.getElementById('importApplyBtn');
+  if (!host) return;
+  const p = _importParsed;
+  if (!p) { host.innerHTML = ''; if (btn) { btn.disabled = true; btn.textContent = 'Add items to quote'; } return; }
+  if (p.error) {
+    host.innerHTML = `<div style="color:var(--red);font-weight:600;">${txtEsc(p.error)}</div>`;
+    if (btn) { btn.disabled = true; btn.textContent = 'Add items to quote'; }
+    return;
+  }
+  const n = p.sections.reduce((s,sec) => s+sec.items.length, 0);
+  if (!n) {
+    host.innerHTML = `<div style="color:var(--red);">No importable items found.</div>${renderImportWarnings(p.warnings)}`;
+    if (btn) { btn.disabled = true; btn.textContent = 'Add items to quote'; }
+    return;
+  }
+  const rows = [];
+  p.sections.forEach(sec => {
+    if (sec.label) rows.push(`<div style="font-weight:700;margin-top:6px;">${txtEsc(sec.label)}</div>`);
+    sec.items.forEach(it => {
+      const hasBasis = (Array.isArray(it.bom) && it.bom.length>0) || it.costMat !== undefined;
+      const priceStr = it.unitPrice>0 ? formatPeso(it.unitPrice) : (hasBasis ? 'auto' : 'no price');
+      rows.push(`<div style="padding:2px 0;border-bottom:1px solid var(--gray-mid);">${txtEsc(it.name)} — ${it.qty} × ${txtEsc(it.unit)} — ${priceStr}</div>`);
+    });
+  });
+  host.innerHTML = `<div style="font-weight:700;margin-bottom:4px;">${n} item(s) in ${p.sections.length} section(s)</div>
+    <div style="max-height:220px;overflow:auto;border:1px solid var(--gray-mid);border-radius:6px;padding:6px 8px;">${rows.join('')}</div>
+    ${renderImportWarnings(p.warnings)}`;
+  if (btn) { btn.disabled = false; btn.textContent = `Add ${n} item${n===1?'':'s'} to quote`; }
+}
+
+// Part 2.5 — section mapping. label:null → currentCatFilter (mirrors
+// addCustomItem() exactly). A labeled section matches an EXISTING section
+// case-insensitively by trimmed sectionLabel(catId) over sectionKeys(): a
+// match reuses that catId (catLabel is set on the new items too, UNLESS the
+// match is an unrenamed database category — that already has a label via
+// dbCategory() and doesn't need one); no match creates one new section id
+// (nextSectionId(), computed once per section, before its items are pushed —
+// nextSectionId() scans items[], which grows as sections are applied).
+function applyImport(){
+  if (PARTNER_MODE) return;
+  const p = _importParsed;
+  if (!p || p.error || !p.sections || !p.sections.length) return;
+  let n = 0;
+  p.sections.forEach(sec => {
+    if (!sec.items.length) return;
+    let catId, catLabel;
+    if (sec.label) {
+      const trimmedLabel = sec.label.trim();
+      const matchKey = sectionKeys().find(k => sectionLabel(k).trim().toLowerCase() === trimmedLabel.toLowerCase());
+      if (matchKey) {
+        catId = matchKey;
+        if (!dbCategory(matchKey)) catLabel = trimmedLabel;
+      } else {
+        catId = nextSectionId();
+        catLabel = trimmedLabel;
+      }
+    } else {
+      catId = currentCatFilter !== 'all' ? currentCatFilter : 'miscellaneous';
+    }
+    sec.items.forEach(it => {
+      it.category = catId;
+      if (catLabel) it.catLabel = catLabel;
+      items.push(it);
+      n++;
+    });
+  });
+  if (!n) return;
+  ensureItemUids();
+  saveToStorage();
+  renderItems();
+  showToast(`📥 Imported ${n} item(s)`);
+  closeImportModal();
+}
+
+// Part 4.1 — prompt-ready brief handed to Claude via copyImportSpec().
+// docs/QB-IMPORT-FORMAT.md carries the same content in readable Markdown —
+// keep the two in sync on any change here.
+const QB_IMPORT_SPEC_TEXT = `Convert the list I give you into a Barro quote-builder import file.
+Output ONLY valid JSON, no markdown fences, no commentary — just the JSON object.
+
+SHAPE (compact):
+{
+  "sections": [
+    { "label": "Option A — Full Kitchen",
+      "items": [
+        { "name": "Stainless Prep Table",
+          "specs": "SS304 1.2mm top, undershelf",
+          "dims": "L1200 × W600 × H850 mm",
+          "qty": 2, "unit": "pc", "unitPrice": 25000,
+          "leadTime": "3 weeks", "notes": "client to confirm height",
+          "noCosting": false,
+          "costing": { "materialsLump": 12000, "laborDays": 1.5,
+            "bom": [ { "material": "SS sheet 4'x8' 1.2mm 304", "qty": 2, "unitPrice": 3500 } ] }
+        }
+      ]
+    }
+  ]
+}
+A bare array of items, or {"items":[...]} with no sections, both work too —
+use "sections" only when the source list is naturally grouped (e.g. Option A
+/ Option B). "format" and "version" keys are optional; leave them out.
+
+RULES:
+- "name" is the ONLY required field on an item. Everything else may be left
+  out entirely — every field left out stays editable, blank, after import.
+- NEVER invent prices, costs, dimensions, or specs. If it is not in the
+  source material, leave the field out — do not guess or estimate.
+- Put anything uncertain or worth flagging in "notes" instead of guessing.
+- Set "noCosting": true on a line that genuinely has no cost basis (a
+  pass-through item, something client-supplied) — it will not need costing.
+- Only include "costing" when real numbers exist for it. "materialsLump" is
+  a lump-sum materials cost; "bom" is an itemized materials list (use
+  either one, not both); "laborDays" is crew-days of labor.
+- Group into "sections" only when the source list itself is grouped or has
+  named options; otherwise put everything in a flat "items" array.
+- Up to 200 items total per file. Split a longer list into batches.
+
+Minimal example (name only, everything else left for the preparer to fill in):
+{"items":[{"name":"Stainless Wash Sink"}]}
+
+Full example:
+{
+  "sections": [
+    { "label": "Option A — Full Kitchen",
+      "items": [
+        { "name": "Stainless Prep Table", "specs": "SS304 1.2mm top, undershelf",
+          "dims": "L1200 × W600 × H850 mm", "qty": 2, "unit": "pc",
+          "unitPrice": 25000, "leadTime": "3 weeks",
+          "notes": "client to confirm height" },
+        { "name": "Client-supplied exhaust hood", "qty": 1, "noCosting": true,
+          "notes": "client is sourcing this themselves" }
+      ]
+    }
+  ]
+}`;
+
 // COSTING-PHASE1-SPEC-2026-08-26 §3 — per-line costing gate for custom
 // (non-catalog) items: a custom line has no product_costs row, so its
 // materials/labor basis for the true-cost engine (computeTrueCost() above)
@@ -3716,9 +4146,15 @@ function customCostParts(item, idx){
   const bomRows = Array.isArray(item.bom) ? item.bom : [];
   const hasBom = bomRows.length > 0;
   const uncosted = !customLineHasMaterialsBasis(item);
-  const chip = uncosted
-    ? '<span class="ms-chip warn" title="No materials cost entered for this custom line — cost it here before filing.">needs costing</span>'
-    : '';
+  // QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3 — three-state chip: costed →
+  // none; uncosted && flagged noCosting → neutral "no costing" (the line is
+  // DELIBERATELY uncosted, not blocking filing); uncosted && not flagged →
+  // the original warn chip. toggleNoCosting() below is the only writer of
+  // item.noCosting; uncostedCustomLinesReason() honors the same flag.
+  const chip = !uncosted ? '' : (item.noCosting
+    ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">no costing</span>'
+    : '<span class="ms-chip warn" title="No materials cost entered for this custom line — cost it here before filing.">needs costing</span>');
+  const noCostingCheckbox = `<label class="no-print" style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--gray-dark);cursor:pointer;" title="Tick when this line intentionally has no cost basis — clears the needs-costing warning and the filing block."><input type="checkbox" ${item.noCosting?'checked':''} onchange="toggleNoCosting(${idx},this.checked)">no costing</label>`;
 
   // §1 — BOM rows. Each row's own name input drives a small filtered
   // suggestion list (bomNameInput()/pickBomMaterial() below) against
@@ -3824,10 +4260,25 @@ function customCostParts(item, idx){
 
   const rowHtml = `<div class="spec-line cost-gate-row no-print" style="display:block;">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-      <span class="spec-tag no-print">Cost</span>${chip}${gateBtn}${closedSummary}
+      <span class="spec-tag no-print">Cost</span>${chip}${gateBtn}${closedSummary}${noCostingCheckbox}
     </div>
   </div>`;
   return { rowHtml, workspaceHtml };
+}
+
+// QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3 — the only writer of
+// item.noCosting. Additive flag, persists free with the rest of the item via
+// bkqb_items' wholesale serialization (saveToStorage()). PARTNER_MODE guard
+// is belt-and-braces, matching updateCustomCost() above — the checkbox this
+// is wired to only ever renders inside customCostParts(), which already
+// returns EMPTY for every PARTNER_MODE session.
+function toggleNoCosting(idx, on){
+  if (PARTNER_MODE) return;
+  const it = items[idx];
+  if (!it || it.id !== 'CUSTOM') return;
+  if (on) it.noCosting = true; else delete it.noCosting;
+  saveToStorage();
+  renderItems();   // re-runs computeMarginSummary() → refreshBomModal() in Internal view
 }
 
 // ── BOM & computation popup (owner ruling 2026-08-31) ─────────────────────
@@ -4302,7 +4753,7 @@ function renderItems(){
             <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},1)" tabindex="-1">+</button>
           </div>
         </td>
-        <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
+        <td style="text-align:center;"><input class="cell-unit" type="text" value="${attrEsc(item.unit||'')}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
         <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${_discFactor>0?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-_discFactor))}</span>`:formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${_discFactor>0?`<span class="disc-old">${formatPeso(item.amount)}</span> <span class="disc-new">${formatPeso(item.amount*(1-_discFactor))}</span>`:formatPeso(item.amount)}${volNoteHtml}</td>
         <td class="no-print" style="text-align:center;">
@@ -5856,8 +6307,15 @@ function renderTrueCostPanelHtml(cost){
     const basis=itemCostBasis(item, cost.liveById);
     const unitPrice = item.unitPrice||0;
     if(!basis.hasBasis){
+      // QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3.4 — a flagged custom line
+      // shows the neutral "no costing" chip here too; the catalog-item chip
+      // (basis.isCustom===false, pointing at Inventory → Product Pricelist)
+      // is untouched.
+      const basisChip = (basis.isCustom && item.noCosting)
+        ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);" title="Marked no costing — this line intentionally has no cost basis.">no costing</span>'
+        : '<span class="ms-chip warn" title="Give this line a BOM (🧮) or capital costs in Inventory → Product Pricelist">needs costing</span>';
       return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')}</td><td style="text-align:center;">${qty}</td>
-        <td colspan="3" style="text-align:center;"><span class="ms-chip warn" title="Give this line a BOM (🧮) or capital costs in Inventory → Product Pricelist">needs costing</span></td>
+        <td colspan="3" style="text-align:center;">${basisChip}</td>
         <td style="text-align:right;">${formatPeso(unitPrice)}</td></tr>`;
     }
     const directPerUnit = basis.mat*(1+cs.wastePct+cs.consumablesPct)
@@ -6010,15 +6468,19 @@ function renderOhPerItemTableHtml(cost){
     return `<div style="font-size:12px;color:var(--gray-dark);padding:8px 2px;">Add items to see the per-item computation.</div>`;
   }
   const needsCostingChip='<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">needs costing</span>';
+  // QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3.4 — the neutral counterpart,
+  // shown instead of needsCostingChip for a flagged custom line only.
+  const noCostingChip='<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">no costing</span>';
   const rows=items.map(item=>{
     if(item.id==='MISCFEE') return '';   // fees are priced in the misc table, not costed here
     const qty=item.qty||1;
     const basis=itemCostBasis(item, cost.liveById);
     const unitPrice = qty ? (item.amount||0)/qty : (item.unitPrice||0);
     if(!basis.hasBasis){
+      const basisChip = (basis.isCustom && item.noCosting) ? noCostingChip : needsCostingChip;
       return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')}</td><td style="text-align:center;">${qty}</td>
         <td style="text-align:right;">${formatPeso(unitPrice)}</td>
-        <td colspan="5" style="text-align:center;">${needsCostingChip}</td></tr>`;
+        <td colspan="5" style="text-align:center;">${basisChip}</td></tr>`;
     }
     const materials_i=basis.mat*qty, matWaste_i=materials_i*cs.wastePct;
     const laborPct_i=(typeof cs.laborPctOfMaterials==='number')?cs.laborPctOfMaterials:0.70;
@@ -6607,6 +7069,8 @@ function clearForm(){
   // Wave 3 Q4 — a brand new quote has no reopen lineage; don't carry a stale
   // "update original" choice over from whatever was open before.
   reopenSourceDocId=null; reopenSourceCollection=null; reopenRootQuoteId=null; reopenAsRevisionFlag=false; fileMode='revision';
+  // QB-DRAFTS-SPEC-2026-09-11 — a brand new quote has no named draft doc either.
+  savedDraftDocId=null;
   hideDraftResumeBanner();
   ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','subject'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
@@ -6668,7 +7132,7 @@ const VERIFY_CHECKS=[
 function uncostedCustomLinesReason(){
   if (PARTNER_MODE) return '';
   if (typeof currentCo!=='undefined' && currentCo==='BS') return '';   // BS quotes never require a Barro cost basis
-  const n = items.filter(i=>i.id==='CUSTOM' && !customLineHasMaterialsBasis(i)).length;
+  const n = items.filter(i=>i.id==='CUSTOM' && !customLineHasMaterialsBasis(i) && !i.noCosting).length;
   if (!n) return '';
   return `${n} custom line(s) have no cost basis — cost them in Internal view before filing.`;
 }
@@ -6922,7 +7386,8 @@ async function fileQuotation(){
     quoteStatus='pending_approval';
     document.getElementById('verifyModal').style.display='none';
     saveToStorage();
-    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
+    savedDraftDocId=null; // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
     // Show feedback
     document.getElementById('filedBadge').textContent='⏳ Pending Approval';
     document.getElementById('filedBadge').classList.add('show');
@@ -6946,11 +7411,12 @@ async function fileQuotation(){
   // Wave 3 Q4 — reopened from an existing doc AND the user picked "update in
   // place": mirror the president in-place-edit path instead of filing a copy.
   if(reopenSourceDocId && !reopenAsRevisionFlag && fileMode==='update'){
-    window.parent.postMessage({ type:'QUOTE_UPDATE', docId:reopenSourceDocId, collection:reopenSourceCollection, payload:quotePayload }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_UPDATE', docId:reopenSourceDocId, collection:reopenSourceCollection, payload:quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
   } else {
     // Notify parent app to save to Firestore (new copy / new revision)
-    window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
   }
+  savedDraftDocId=null; // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
 
   // Local log for offline/standalone use
   try{
@@ -7191,6 +7657,10 @@ function loadEditableState(state, opts){
     reopenSourceCollection=state.sourceCollection||null;
     reopenRootQuoteId=state.rootQuoteId||null;
     reopenAsRevisionFlag=!!opts.asRevision;
+    // QB-DRAFTS-SPEC-2026-09-11 — same reset-every-load posture as the
+    // reopen-lineage fields just above, so a previously-open named draft
+    // can't leak its doc id onto an unrelated quote.
+    savedDraftDocId=state.draftDocId||null;
     fileMode='revision';
     // COSTING-QB-UX-SPEC-2026-08-26 §3 — same reset-every-load posture as the
     // reopen-lineage fields just above: a previously-open quote's manual OH%
@@ -7238,6 +7708,15 @@ window.addEventListener('message',ev=>{
   if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, window.location.origin); }catch(e){} }
   // Wave 3 Q6 — parent acked a cloud draft save; flip the chip to "Saved".
   if(d.type==='QUOTE_DRAFT_SAVED') showDraftSavedChip();
+  // QB-DRAFTS-SPEC-2026-09-11 — parent acked an explicit 💾 Save draft (a
+  // NAMED doc, distinct from the silent autosave slot ack above): remember
+  // its id so every later autosave/File post targets the same doc.
+  if(d.type==='QUOTE_DRAFT_SAVED_OK'){
+    savedDraftDocId=d.docId||null;
+    showDraftSavedChip();
+    showToast('💾 Draft saved — find it under Quotes → Drafts.');
+  }
+  if(d.type==='QUOTE_DRAFT_SAVE_FAILED') showToast('Could not save draft — try again.','error');
   // QUOTE-TEMPLATES-SPEC.md — app picked a template ("Use"): load its
   // (already client-stripped) config in place. asRevision:false is what keeps
   // this a plain state-load — it skips loadEditableState's `if(opts.asRevision)`
@@ -7266,7 +7745,10 @@ function sendQuoteDraft(){
     const hasClient=!!(document.getElementById('clientName')?.value?.trim()||document.getElementById('clientCompany')?.value?.trim());
     if(!hasItems&&!hasClient) return; // nothing worth saving to the cloud yet
     const payload=buildQuotePayload();
-    window.parent.postMessage({type:'QUOTE_DRAFT', payload}, window.location.origin);
+    // QB-DRAFTS-SPEC-2026-09-11 — once this quote is a named draft, keep
+    // autosaving into THAT doc instead of the draft_{uid} slot; null (no
+    // named doc yet) preserves the old slot behavior exactly.
+    window.parent.postMessage({type:'QUOTE_DRAFT', payload, draftDocId:savedDraftDocId}, window.location.origin);
   }catch(e){}
 }
 function showDraftSavedChip(){
@@ -7276,6 +7758,21 @@ function showDraftSavedChip(){
   chip.style.display='inline-block';
   if(draftAckTimer) clearTimeout(draftAckTimer);
   draftAckTimer=setTimeout(()=>{ chip.style.display='none'; },60000);
+}
+
+// QB-DRAFTS-SPEC-2026-09-11 — explicit "Save draft" (💾 Save draft button in
+// the Verify & File modal). Unlike the autosave above, this is user-triggered
+// and always enabled — no canFile()/verify gates, and zero amounts are
+// explicitly fine (a client name/company alone is enough).
+function saveQuoteDraftNow(){
+  if(quoteStatus==='filed'||quoteStatus==='pending_approval'){ showToast('This quote is already filed — use Reopen/New Revision instead.','error'); return; }
+  const hasItems=items.length>0;
+  const hasClient=!!(document.getElementById('clientName')?.value?.trim()||document.getElementById('clientCompany')?.value?.trim());
+  if(!hasItems&&!hasClient){ showToast('Nothing to save yet — add an item or a client first.','error'); return; }
+  if(window.parent===window){ showToast('Draft saving needs the app — open the builder from the Sales tab. (Your work is still kept on this device.)','error'); return; }
+  try{
+    window.parent.postMessage({ type:'QUOTE_SAVE_DRAFT', payload:buildQuotePayload(), draftDocId:savedDraftDocId }, window.location.origin);
+  }catch(e){ showToast('Could not reach the app to save this draft.','error'); }
 }
 
 function closeVerifyModal(e){
@@ -7434,8 +7931,15 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 31;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 33;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:33, date:'2026-09-11', items:[
+    '💾 Save draft — park an unfinished quote any time, even with no prices or amounts. Drafts live in the app under Quotes → Drafts (📝), where you can resume or delete them; filing the quote later cleans its draft up automatically.',
+  ]},
+  { ver:32, date:'2026-09-11', items:[
+    '📥 Import items — hand Claude any list (photo, Excel, plain text), get back a small file, and the Import button on the Estimator adds every item to the quote in one go. Only the item name is required; blanks stay editable. The 📋 button inside copies the exact format brief to give Claude.',
+    '"No costing" tick — a custom line that genuinely has no cost basis (a pass-through, a client-supplied unit) can now be marked no costing beside its Cost gate; the needs-costing warning clears and the quote can file.',
+  ]},
   { ver:31, date:'2026-09-01', items:[
     'FOC now shows its worth: an FOC charge prints at FULL value after the Subtotal, and everything marked FOC comes back as one consolidated "Less: FOC — free of charge" discount row before VAT — the client sees exactly what they were given.',
     'The ⚡ +2% Priority Order Charge can be FOC too — a toggle appears in Pricing whenever a rush is active; the row still prints with its amount and joins the FOC discount instead of the bill.',
@@ -7582,7 +8086,7 @@ const TOUR_STEPS = [
  { target:'#docDetailsBar', needsWorkspace:true, title:'Estimator = the numbers',
    body:'The Estimator keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
-   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself. ＋ Section splits the quote into Option A / Option B.' },
+   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself — tick no costing beside it when a line genuinely has none. ＋ Section splits the quote into Option A / Option B. 📥 Import adds a whole list at once — hand Claude any list (photo, Excel, text) and the 📋 button inside copies the exact format brief.' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
    body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
@@ -7590,7 +8094,7 @@ const TOUR_STEPS = [
  { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official.' },
+   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts.' },
  { target:'#btnPrint', title:'Save PDF & Agent Copy',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',

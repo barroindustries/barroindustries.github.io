@@ -1109,7 +1109,21 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
     if (window.lucide) lucide.createIcons({ nodes: [container] });
     return;
   }
-  const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const allDocs = snap.docs.map(d=>({id:d.id,...d.data()}));
+  // QB-DRAFTS-SPEC-2026-09-11 — explicit drafts (status:'draft', createdAt
+  // set) get their own chip-tab pane below and leave the flat list/KPIs
+  // entirely; `quotes` (used everywhere else in this function) becomes the
+  // non-draft remainder.
+  const draftDocs = allDocs.filter(q=>(q.status||'draft')==='draft');
+  const quotes = allDocs.filter(q=>(q.status||'draft')!=='draft');
+  // The one-slot autosave (draft_{uid}) carries no createdAt, so the
+  // orderBy('createdAt') query above never returns it — fetch it directly so
+  // a crash-recovery draft shows up here too, even before it's ever been
+  // explicitly named via 💾 Save draft.
+  const slotDoc = await db.collection('bk_quotes').doc('draft_'+currentUser.uid).get().catch(()=>null);
+  if (slotDoc && slotDoc.exists && !draftDocs.some(d=>d.id===slotDoc.id)) {
+    draftDocs.unshift({ id: slotDoc.id, ...slotDoc.data(), _autosave:true });
+  }
 
   // KPI totals count only the LATEST revision of each quote — older revisions
   // (R1 when an R2 exists) are superseded and must not inflate the value/counts.
@@ -1121,7 +1135,9 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const accepted   = activeQuotes.filter(q=>q.status==='accepted');
   const acceptedT  = accepted.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
   const sent       = activeQuotes.filter(q=>q.status==='sent').length;
-  const draft      = activeQuotes.filter(q=>q.status==='draft').length;
+  // QB-DRAFTS-SPEC-2026-09-11 — drafts no longer live inside `quotes`/
+  // `activeQuotes`; count the dedicated bucket instead (autosave slot incl.).
+  const draft      = draftDocs.length;
   // v12 WS31 Spec 10 — "filed but no Sales Order yet" staleness, pure client-side
   // over rows this screen already fetched. Zero new reads.
   const staleDaysOf = q => (q.status==='filed' && !q.salesOrderId && q.createdAt)
@@ -1184,7 +1200,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <h4 style="font-weight:700;margin:0">All Quotations${staleCount?` <span class="badge badge-orange" style="font-size:10px;font-weight:700">${emojiIcon('⚠',10)} ${staleCount} stale</span>`:''}</h4>
-      ${window.chipTabs([{key:'list',label:'List'},{key:'customer',label:'By Customer'}],'list',{cls:'bkq-view'})}
+      ${window.chipTabs([{key:'list',label:'List'},{key:'customer',label:'By Customer'},{key:'drafts',label:'📝 Drafts'}],'list',{cls:'bkq-view'})}
     </div>
     <div id="bkq-body"></div>
   `;
@@ -1248,9 +1264,61 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       </details>`;
   };
 
+  // QB-DRAFTS-SPEC-2026-09-11 — Drafts pane card: client name (or "Untitled
+  // draft"), company tag, ₱ value when > 0, an "Auto-saved" badge for the
+  // one autosave slot doc, saved-when date, and Resume/Delete actions.
+  const draftCard = (q) => {
+    const qco = q.company || 'BK';
+    const coTag = qco === 'BK' ? '' :
+      ` <span class="badge badge-blue" style="font-size:9px" title="General fabrication quote — issued under the parent company, not Barro Kitchens">${escHtml(window.quoteCompanyLabel(qco))}</span>`;
+    const amt = Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0;
+    const savedAt = q.draftAt || q.createdAt;
+    const savedWhen = savedAt?.toDate ? savedAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '';
+    const label = q.clientName || q.clientCompany || 'Untitled draft';
+    return `
+      <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px">
+          <div class="item-title" style="font-size:13px">${escHtml(label)}${coTag}${q._autosave?' <span class="badge badge-gray" style="font-size:9px">Auto-saved</span>':''}</div>
+          <div class="item-meta" style="margin-top:4px">
+            ${savedWhen?`<span>${escHtml(savedWhen)}</span>`:''}
+          </div>
+        </div>
+        ${amt>0?`<div style="text-align:right"><div style="font-weight:700">₱${fmt(amt)}</div></div>`:''}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end;align-items:center">
+          ${q.editableState?`<button class="btn-secondary btn-sm bk-draft-resume-btn" data-id="${q.id}" title="Open this draft in the builder">↻ Resume</button>`:`<span style="font-size:10px;color:var(--text-muted)" title="No editable snapshot was saved for this draft.">no snapshot</span>`}
+          <button class="btn-secondary btn-sm bk-draft-del-btn" data-id="${q.id}" data-label="${escHtml(label)}">${emojiIcon('🗑',16)} Delete</button>
+        </div>
+      </div>`;
+  };
+  const bindDraftActions = () => {
+    container.querySelectorAll('.bk-draft-resume-btn').forEach(b=>b.addEventListener('click', e=>
+      window.resumeDraftFromDoc('bk_quotes', e.currentTarget.dataset.id)));
+    container.querySelectorAll('.bk-draft-del-btn').forEach(b=>b.addEventListener('click', async e=>{
+      const d=e.currentTarget.dataset;
+      if (!(await confirmDialog({message:`Delete draft "${escHtml(d.label)}"? This cannot be undone.`, danger:true, html:true}))) return;
+      try {
+        await db.collection('bk_quotes').doc(d.id).delete();
+        Notifs.success('Draft deleted');
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
+        renderBKQuotationsSummary(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
+    }));
+  };
+
   const renderBody = (view) => {
     const body = container.querySelector('#bkq-body');
     if (!body) return;
+    if (view === 'drafts') {
+      if (!draftDocs.length) {
+        body.innerHTML = window.renderEmptyState({ icon:'📝', title:'No drafts.', hint:'💾 Save draft in the quote builder parks an unfinished quote here — no amounts needed.' });
+        return;
+      }
+      const sorted = [...draftDocs].sort((a,b)=>((b.draftAt?.seconds||b.createdAt?.seconds||0)-(a.draftAt?.seconds||a.createdAt?.seconds||0)));
+      body.innerHTML = `<div class="item-list">${sorted.map(draftCard).join('')}</div>`;
+      bindDraftActions();
+      if (window.lucide) lucide.createIcons({ nodes: [body] });
+      return;
+    }
     if (!quotes.length) { body.innerHTML = window.renderEmptyState({ icon:'📋', title:'No quotations yet' }); return; }
     if (window.lucide) lucide.createIcons({ nodes: [body] });
     if (view === 'customer') {
@@ -1918,6 +1986,10 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
             const badge = window.statusBadgeClass('quote', status);
             const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
             const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+            // QB-DRAFTS-SPEC-2026-09-11 — a draft's own creator may delete it
+            // directly too (firestore.rules now allows this for status:'draft'
+            // docs) — no admin-approval detour for your own unfinished draft.
+            const canDeleteDraftDirect = canDeleteDirect || (status==='draft' && q.createdBy===currentUser.uid);
             const staleDays = staleDaysOf(q);
             const chain = chainByPrimaryId.get(q.id);
             const chainToggle = (chain && chain.history.length > 1)
@@ -1944,9 +2016,10 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
                 ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
                 ${(status==='filed'||status==='approved')&&!q.editableState?`<span style="font-size:10px;color:var(--text-muted);align-self:center" title="No editable snapshot was saved for this quote, so Reopen has nothing to load and New Revision isn't offered.">no snapshot</span>`:''}
+                ${status==='draft'?(q.editableState?`<button class="btn-secondary btn-sm bs-draft-resume-btn" data-id="${q.id}" title="Open this draft in the builder">↻ Resume</button>`:`<span style="font-size:10px;color:var(--text-muted);align-self:center" title="No editable snapshot was saved for this draft.">no snapshot</span>`):''}
                 ${window.QUOTE_SHAREABLE_STATUSES.includes(status)?`<button class="btn-secondary btn-sm bs-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}
                 ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
-                ${canDeleteDirect
+                ${canDeleteDraftDirect
                   ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>`
                   : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?`${emojiIcon('⏳',16)} Requested`:`${emojiIcon('🗑',16)} Request Delete`}</button>`}
               </td>
@@ -2099,6 +2172,12 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
   el.querySelectorAll('.bs-rev-btn').forEach(btn => {
     btn.addEventListener('click', e =>
       window.newRevisionFromDoc('bs_quotes', e.currentTarget.dataset.id, 'bs-quote-builder'));
+  });
+  // QB-DRAFTS-SPEC-2026-09-11 — resume a draft into the builder (no revision
+  // chain, unlike Reopen above).
+  el.querySelectorAll('.bs-draft-resume-btn').forEach(btn => {
+    btn.addEventListener('click', e =>
+      window.resumeDraftFromDoc('bs_quotes', e.currentTarget.dataset.id));
   });
   // Convert a won quote into a Sales Order (capture payment + receipt → finance)
   el.querySelectorAll('.bs-so-btn').forEach(btn => {

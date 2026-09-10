@@ -2203,8 +2203,13 @@ function renderQuoteBuilderIframe() {
   // A reopened quote keeps a one-line strip so "editing a copy" vs "new
   // revision" stays visible; a partner review keeps its banner.
   const isMobile = _qbIsMobile();
+  // QB-DRAFTS-SPEC-2026-09-11 — a draft resume (resumeDraftFromDoc) carries
+  // draftDocId but no sourceDocId — no revision chain — so it gets its own
+  // label instead of "editing a copy".
+  const isDraftResume = !!(reopenState && reopenState.draftDocId && !reopenState.sourceDocId);
+  const reopenStripLabel = reopenAsRevision ? 'new revision' : (isDraftResume ? 'resuming a saved draft' : 'editing a copy');
   const reopenStrip = (!reviewCtx && reopenState)
-    ? `<div style="font-size:12px;font-weight:600;color:var(--text-muted);padding:6px 12px">${emojiIcon('🧮',14)} Quote Builder — ${reopenAsRevision?'new revision':'editing a copy'}</div>` : '';
+    ? `<div style="font-size:12px;font-weight:600;color:var(--text-muted);padding:6px 12px">${emojiIcon('🧮',14)} Quote Builder — ${reopenStripLabel}</div>` : '';
   document.body.classList.toggle('qb-desktop', !isMobile);
   c.innerHTML = `
     ${reviewBanner}
@@ -2334,6 +2339,21 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
+};
+// QB-DRAFTS-SPEC-2026-09-11 — resume an explicit draft (Quotes → Drafts) into
+// the builder. Unlike reopenQuoteFromDoc above, a draft carries NO revision
+// chain — no sourceDocId/sourceCollection/rootQuoteId — only its own doc id,
+// so the builder's autosave/Save-draft/File paths keep updating THIS doc
+// (see savedDraftDocId in quote-builder-v2.html) instead of minting a new one.
+window.resumeDraftFromDoc = async function(collection, id){
+  try {
+    const snap = await db.collection(collection).doc(id).get();
+    const q = snap.data() || {};
+    if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this draft', 'error'); return; }
+    window._qbReopenState = { ...q.editableState, draftDocId: id };
+    window._qbReopenAsRevision = false;
+    navigateTo(collection === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder');
+  } catch (ex) { Notifs.showToast('Could not resume draft: '+(ex.message||ex.code), 'error'); }
 };
 // "New Revision" action. Opens the builder pre-filled with the client's LATEST
 // quote (latest items / pricing / terms — not necessarily the card that was
@@ -4985,7 +5005,12 @@ window.addEventListener('message', async (e) => {
   if (type === 'QUOTE_DRAFT') {
     try {
       const coll = window.quoteCollectionFor(payload.company);
-      await db.collection(coll).doc('draft_' + currentUser.uid).set({
+      // QB-DRAFTS-SPEC-2026-09-11 — once the builder has named a real draft
+      // doc (savedDraftDocId), autosave keeps updating THAT doc instead of
+      // the crash-recovery slot; null preserves the old slot behavior.
+      const namedId = e.data.draftDocId;
+      const draftRef = namedId ? db.collection(coll).doc(namedId) : db.collection(coll).doc('draft_' + currentUser.uid);
+      await draftRef.set({
         ...payload,
         status: 'draft',
         draftBy: currentUser.uid,
@@ -4994,6 +5019,46 @@ window.addEventListener('message', async (e) => {
       try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVED', at: Date.now() }, e.origin); } catch(_){}
     } catch (err) {
       console.warn('[QB bridge] QUOTE_DRAFT save failed (draft_{uid} firestore.rules likely not deployed yet)', err);
+    }
+    return;
+  }
+
+  // QB-DRAFTS-SPEC-2026-09-11 — explicit "Save draft" (💾 Save draft button,
+  // any time — even with zero items/amounts). Unlike the autosave slot above,
+  // this is an ORDINARY doc with createdAt (so the Quotes → Drafts list's
+  // orderBy('createdAt') query returns it) the user can find, resume or
+  // delete on demand. No client CRM upsert, no owner notification, no
+  // version/fileName stamping — those are filed-quote concerns only.
+  if (type === 'QUOTE_SAVE_DRAFT') {
+    try {
+      const agentName = userProfile?.displayName || currentUser.email;
+      const coll = window.quoteCollectionFor(payload.company);
+      const base = {
+        ...payload, status: 'draft',
+        agentName, createdByName: agentName,
+        draftAt: firebase.firestore.FieldValue.serverTimestamp(),
+      };
+      let id = e.data.draftDocId || null;
+      if (id) {
+        // Refuse to clobber a doc that was filed meanwhile (e.g. another tab).
+        const cur = await db.collection(coll).doc(id).get().catch(() => null);
+        if (!cur || !cur.exists || (cur.data().status || 'draft') !== 'draft') id = null;
+      }
+      if (id) {
+        await db.collection(coll).doc(id).set(base, { merge: true });
+      } else {
+        const ref = await db.collection(coll).add({
+          ...base,
+          createdBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+        id = ref.id;
+      }
+      dbCacheInvalidate && dbCacheInvalidate('all-quotes');
+      try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVED_OK', docId: id }, e.origin); } catch(_){}
+    } catch (err) {
+      console.error('[QB bridge] QUOTE_SAVE_DRAFT failed', err);
+      try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVE_FAILED' }, e.origin); } catch(_){}
     }
     return;
   }
@@ -5101,6 +5166,11 @@ window.addEventListener('message', async (e) => {
       };
       await db.collection(collection).doc(docId).update(update);
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
+      // QB-DRAFTS-SPEC-2026-09-11 — this session may have also picked up a
+      // NAMED draft doc along the way (e.g. saved a draft, then reopened and
+      // filed "update original"); clean it up now that it's superseded by
+      // the in-place update above.
+      if (e.data.draftDocId) { try { await db.collection(collection).doc(e.data.draftDocId).delete(); } catch(_){} }
       window.logAudit && window.logAudit('update', 'quote', docId, { source: 'quote-builder-v2', inPlaceEdit: true });
       if (typeof Notifs?.success === 'function') Notifs.success('Quote updated in place.');
 
@@ -5221,6 +5291,9 @@ window.addEventListener('message', async (e) => {
     // Wave 3 Q6 — filing (either path) replaces the need for the cloud draft
     // slot; best-effort cleanup, never blocks the file itself.
     const deleteDraftSlot = async () => { try { await db.collection(coll).doc('draft_' + currentUser.uid).delete(); } catch(_){} };
+    // QB-DRAFTS-SPEC-2026-09-11 — filing a NAMED draft (savedDraftDocId) also
+    // deletes ITS OWN doc, not just the slot above.
+    const deleteNamedDraft = async () => { const id0 = e.data.draftDocId; if (id0) try { await db.collection(coll).doc(id0).delete(); } catch(_){} };
 
     if (type === 'QUOTE_FILED') {
       Object.assign(data, window.quoteStateFields('filed'));
@@ -5229,6 +5302,7 @@ window.addEventListener('message', async (e) => {
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
       await deleteDraftSlot();
+      await deleteNamedDraft();
       // Notify president so they're aware of filed quotes
       await Notifs.sendToOwner({
         title: '📋 Quote Filed',
@@ -5247,6 +5321,7 @@ window.addEventListener('message', async (e) => {
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
       await deleteDraftSlot();
+      await deleteNamedDraft();
       await db.collection('approval_requests').add({
         type: 'bs_quote',            // legacy type value kept — readers filter on it
         quoteId: docRef.id,

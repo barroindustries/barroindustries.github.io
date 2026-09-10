@@ -2249,7 +2249,10 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid || isAdmin()
         || docId == 'draft_' + request.auth.uid
       );
-      allow delete: if isAuth() && (isAdmin() || docId == 'draft_' + request.auth.uid);
+      // QB-DRAFTS-SPEC-2026-09-11: creator may delete their own explicit draft.
+      allow delete: if isAuth() && (isAdmin() || docId == 'draft_' + request.auth.uid
+        || (resource.data.get('status','') == 'draft'
+            && resource.data.get('createdBy','') == request.auth.uid));
     }
 
     // ── BK Quotes (Barro Kitchens / internal Sales) ─
@@ -2274,8 +2277,11 @@ service cloud.firestore {
       );
       // v14 wave3 Q6: own draft slot deletable (deleted on File); partner
       // exclusion for bk_quotes stays absolute.
+      // QB-DRAFTS-SPEC-2026-09-11: creator may delete their own explicit draft.
       allow delete: if isAuth() && (isAdmin()
-        || (!isPartner() && docId == 'draft_' + request.auth.uid));
+        || (!isPartner() && docId == 'draft_' + request.auth.uid)
+        || (!isPartner() && resource.data.get('status','') == 'draft'
+            && resource.data.get('createdBy','') == request.auth.uid));
     }
 
     // ── Quote Templates (QUOTE-TEMPLATES-SPEC.md) ─
