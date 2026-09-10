@@ -1687,6 +1687,11 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
            amount checks: unlike File, a draft can be saved with nothing
            priced yet. -->
       <button class="btn btn-outline no-print" id="saveDraftBtn" onclick="saveQuoteDraftNow()">💾 Save draft</button>
+      <!-- QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §4 — hidden until this quote is
+           already a named draft (buildVerifyModal() toggles it); forces a
+           brand-new doc even when the client didn't change, so one client can
+           keep several drafts (e.g. Option A / Option B). -->
+      <button class="btn btn-outline no-print" id="saveDraftNewBtn" onclick="saveQuoteDraftNow(true)" style="display:none;background:var(--dark-blue);">🆕 Save as new draft</button>
       <button class="btn btn-green" id="fileBtn" onclick="fileQuotation()" disabled style="opacity:.5;">📁 File Quotation</button>
     </div>
   </div>
@@ -1710,7 +1715,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
-        <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts.</li>
+        <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
         <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately. A quotation is always shared as the PDF.</li>
       </ol>
 
@@ -2038,6 +2043,40 @@ let reopenSourceDocId=null, reopenSourceCollection=null, reopenRootQuoteId=null,
 // named a real Firestore doc; every later autosave/File post rides this id so
 // they all keep updating the SAME doc instead of scattering new ones.
 let savedDraftDocId=null;
+// QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §1 — the client identity the named
+// draft above was last saved under. Lets the autosave/explicit-save paths
+// tell "still the same client's quote" from "typed over the form to start a
+// different client's quote without 🗑 New" — the latter must never overwrite
+// the old client's draft. savedDraftDocId is the only thing that should ever
+// be written directly; every write goes through setSavedDraft() below so the
+// two always change together (and stay mirrored to localStorage).
+let savedDraftClientKey='';   // client identity the named draft was last saved under
+function draftClientKey(){
+  const norm = id => (document.getElementById(id)?.value||'').trim().replace(/\s+/g,' ').toLowerCase();
+  const k = norm('clientName')+'|'+norm('clientCompany');
+  return k==='|' ? '' : k;
+}
+// A DIFFERENT client only when both sides are non-empty and disagree — an
+// empty→named (filling the form in) or named→empty (clearing a field)
+// transition is the SAME working draft, never a fork.
+function draftClientChanged(){
+  const cur = draftClientKey();
+  return !!(savedDraftClientKey && cur && cur !== savedDraftClientKey);
+}
+function setSavedDraft(id, key){
+  savedDraftDocId = id||null;
+  savedDraftClientKey = id ? (key||'') : '';
+  try{
+    if(id){ localStorage.setItem('bkqb_draft_docid', id); localStorage.setItem('bkqb_draft_key', savedDraftClientKey); }
+    else { localStorage.removeItem('bkqb_draft_docid'); localStorage.removeItem('bkqb_draft_key'); }
+  }catch(e){}
+}
+// QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §3 — captured right before a 💾 Save
+// draft post (saveQuoteDraftNow) so the QUOTE_DRAFT_SAVED_OK ack (async,
+// arrives after that function has already returned) knows which client key
+// to stamp via setSavedDraft() and whether to toast "updated" vs "saved".
+let _pendingDraftKey='';
+let _pendingDraftIsUpdate=false;
 let fileMode='revision'; // 'revision' | 'update' — chosen in the Verify & File modal
 // Wave 3 Q6 — debounced cloud draft save (5s idle) so a filed-nothing session
 // isn't lost if the tab closes; see QUOTE_DRAFT in the app.js bridge.
@@ -2444,6 +2483,12 @@ document.addEventListener('DOMContentLoaded', ()=>{
   applyPartnerMode();
   renderTerms();
   loadFromStorage();
+  // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §1 — restore the named draft id/key
+  // across a reload so re-opening the builder keeps updating the SAME doc
+  // instead of minting a duplicate. Safe even when a LOAD_QUOTE/template/
+  // reopen is about to follow: loadEditableState() calls setSavedDraft()
+  // itself and simply overwrites whatever this restore just set.
+  try{ const _id=localStorage.getItem('bkqb_draft_docid'); if(_id){ savedDraftDocId=_id; savedDraftClientKey=localStorage.getItem('bkqb_draft_key')||''; } }catch(e){}
   // Re-assert the partner's locked/default company after restoring any saved draft.
   if(PARTNER_MODE) setCompany(GENERIC_PARTNER ? 'PT' : 'BS');
   // Default the project start basis to the quote date if not already set
@@ -7070,7 +7115,7 @@ function clearForm(){
   // "update original" choice over from whatever was open before.
   reopenSourceDocId=null; reopenSourceCollection=null; reopenRootQuoteId=null; reopenAsRevisionFlag=false; fileMode='revision';
   // QB-DRAFTS-SPEC-2026-09-11 — a brand new quote has no named draft doc either.
-  savedDraftDocId=null;
+  setSavedDraft(null);
   hideDraftResumeBanner();
   ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','subject'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
@@ -7312,6 +7357,15 @@ function buildVerifyModal(){
   if(saveTplBtn){ saveTplBtn.disabled=!hasItems; saveTplBtn.style.opacity=hasItems?'1':'0.5'; }
   const tplBtn=document.getElementById('templatesBtn');
   if(tplBtn){ tplBtn.disabled=!hasItems; tplBtn.style.opacity=hasItems?'1':'0.5'; }
+  // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §4 — 💾 Update draft vs 💾 Save draft,
+  // and the 🆕 Save as new draft button, reflect whether this quote is
+  // already a named draft doc every time the modal is (re)built, so reopening
+  // Verify & File right after a save/fork shows the correct state at once.
+  const hasNamed=!!savedDraftDocId;
+  const saveDraftBtn=document.getElementById('saveDraftBtn');
+  if(saveDraftBtn) saveDraftBtn.textContent = hasNamed ? '💾 Update draft' : '💾 Save draft';
+  const saveDraftNewBtn=document.getElementById('saveDraftNewBtn');
+  if(saveDraftNewBtn) saveDraftNewBtn.style.display = hasNamed ? '' : 'none';
   // Update button label based on approval toggle
   document.getElementById('reqApprovalCheck')?.addEventListener('change', e => {
     btn.textContent = e.target.checked ? '📤 Submit for Approval' : '📁 File Quotation';
@@ -7387,7 +7441,7 @@ async function fileQuotation(){
     document.getElementById('verifyModal').style.display='none';
     saveToStorage();
     window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
-    savedDraftDocId=null; // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
+    setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
     // Show feedback
     document.getElementById('filedBadge').textContent='⏳ Pending Approval';
     document.getElementById('filedBadge').classList.add('show');
@@ -7416,7 +7470,7 @@ async function fileQuotation(){
     // Notify parent app to save to Firestore (new copy / new revision)
     window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
   }
-  savedDraftDocId=null; // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
+  setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
 
   // Local log for offline/standalone use
   try{
@@ -7660,7 +7714,16 @@ function loadEditableState(state, opts){
     // QB-DRAFTS-SPEC-2026-09-11 — same reset-every-load posture as the
     // reopen-lineage fields just above, so a previously-open named draft
     // can't leak its doc id onto an unrelated quote.
-    savedDraftDocId=state.draftDocId||null;
+    // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §1 — stamp the client key this
+    // loaded state actually belongs to (not whatever savedDraftClientKey was
+    // left over from before), normalized identically to draftClientKey()'s
+    // DOM-read version, so a later edit of the SAME loaded client is never
+    // mistaken for a client change.
+    setSavedDraft(state.draftDocId||null, (()=>{
+      const norm=s=>String(s||'').trim().replace(/\s+/g,' ').toLowerCase();
+      const k=norm(state.clientName)+'|'+norm(state.clientCompany);
+      return k==='|' ? '' : k;
+    })());
     fileMode='revision';
     // COSTING-QB-UX-SPEC-2026-08-26 §3 — same reset-every-load posture as the
     // reopen-lineage fields just above: a previously-open quote's manual OH%
@@ -7711,10 +7774,14 @@ window.addEventListener('message',ev=>{
   // QB-DRAFTS-SPEC-2026-09-11 — parent acked an explicit 💾 Save draft (a
   // NAMED doc, distinct from the silent autosave slot ack above): remember
   // its id so every later autosave/File post targets the same doc.
+  // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §3 — stamp the client key captured
+  // at post time (_pendingDraftKey), not whatever's on the form NOW (the
+  // user may have kept typing while the round-trip was in flight), and toast
+  // "updated" vs "saved" from the flag captured the same moment.
   if(d.type==='QUOTE_DRAFT_SAVED_OK'){
-    savedDraftDocId=d.docId||null;
+    setSavedDraft(d.docId||null, _pendingDraftKey);
     showDraftSavedChip();
-    showToast('💾 Draft saved — find it under Quotes → Drafts.');
+    showToast(_pendingDraftIsUpdate ? '💾 Draft updated — find it under Quotes → Drafts.' : '💾 Draft saved — find it under Quotes → Drafts.');
   }
   if(d.type==='QUOTE_DRAFT_SAVE_FAILED') showToast('Could not save draft — try again.','error');
   // QUOTE-TEMPLATES-SPEC.md — app picked a template ("Use"): load its
@@ -7748,7 +7815,11 @@ function sendQuoteDraft(){
     // QB-DRAFTS-SPEC-2026-09-11 — once this quote is a named draft, keep
     // autosaving into THAT doc instead of the draft_{uid} slot; null (no
     // named doc yet) preserves the old slot behavior exactly.
-    window.parent.postMessage({type:'QUOTE_DRAFT', payload, draftDocId:savedDraftDocId}, window.location.origin);
+    // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §2 — EXCEPT when the client changed
+    // out from under that named draft without an explicit 💾 Save/🆕 Save as
+    // new draft: the silent 5s autosave must never rewrite another client's
+    // named draft, so it drops to the crash-recovery slot (null) instead.
+    window.parent.postMessage({type:'QUOTE_DRAFT', payload, draftDocId:(savedDraftDocId && !draftClientChanged())?savedDraftDocId:null}, window.location.origin);
   }catch(e){}
 }
 function showDraftSavedChip(){
@@ -7764,12 +7835,25 @@ function showDraftSavedChip(){
 // the Verify & File modal). Unlike the autosave above, this is user-triggered
 // and always enabled — no canFile()/verify gates, and zero amounts are
 // explicitly fine (a client name/company alone is enough).
-function saveQuoteDraftNow(){
+// QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §3 — asNew:true is the 🆕 Save as new
+// draft button; it always forks to a brand-new doc. A plain 💾 Save/Update
+// draft call (asNew falsy) still forks automatically when draftClientChanged()
+// says the form has moved on to a different client — either way the OLD
+// client's (or OLD option's) draft is left exactly as it was, never rewritten.
+function saveQuoteDraftNow(asNew){
   if(quoteStatus==='filed'||quoteStatus==='pending_approval'){ showToast('This quote is already filed — use Reopen/New Revision instead.','error'); return; }
   const hasItems=items.length>0;
   const hasClient=!!(document.getElementById('clientName')?.value?.trim()||document.getElementById('clientCompany')?.value?.trim());
   if(!hasItems&&!hasClient){ showToast('Nothing to save yet — add an item or a client first.','error'); return; }
   if(window.parent===window){ showToast('Draft saving needs the app — open the builder from the Sales tab. (Your work is still kept on this device.)','error'); return; }
+  const clientChangedFork = !asNew && draftClientChanged();
+  if(asNew || clientChangedFork) setSavedDraft(null);
+  if(clientChangedFork) showToast('💾 Saving as a NEW draft — the client changed, so the previous client\'s draft is kept.');
+  // Captured NOW (post time) — the QUOTE_DRAFT_SAVED_OK ack below is async
+  // and must stamp the key/toast this save actually targeted, not whatever
+  // the form says by the time the round-trip returns.
+  _pendingDraftKey = draftClientKey();
+  _pendingDraftIsUpdate = !!savedDraftDocId;
   try{
     window.parent.postMessage({ type:'QUOTE_SAVE_DRAFT', payload:buildQuotePayload(), draftDocId:savedDraftDocId }, window.location.origin);
   }catch(e){ showToast('Could not reach the app to save this draft.','error'); }
@@ -7931,8 +8015,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 33;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 34;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:34, date:'2026-09-11', items:[
+    'Drafts are truly per client now — starting a different client\'s quote can no longer overwrite the previous client\'s saved draft (it saves as its own new draft automatically), and 🆕 Save as new draft beside 💾 Update draft lets one client keep several drafts (e.g. Option A / Option B).',
+  ]},
   { ver:33, date:'2026-09-11', items:[
     '💾 Save draft — park an unfinished quote any time, even with no prices or amounts. Drafts live in the app under Quotes → Drafts (📝), where you can resume or delete them; filing the quote later cleans its draft up automatically.',
   ]},
@@ -8094,7 +8181,7 @@ const TOUR_STEPS = [
  { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts.' },
+   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).' },
  { target:'#btnPrint', title:'Save PDF & Agent Copy',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',

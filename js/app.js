@@ -5009,13 +5009,28 @@ window.addEventListener('message', async (e) => {
       // doc (savedDraftDocId), autosave keeps updating THAT doc instead of
       // the crash-recovery slot; null preserves the old slot behavior.
       const namedId = e.data.draftDocId;
-      const draftRef = namedId ? db.collection(coll).doc(namedId) : db.collection(coll).doc('draft_' + currentUser.uid);
-      await draftRef.set({
+      const slotRef = db.collection(coll).doc('draft_' + currentUser.uid);
+      const body = {
         ...payload,
         status: 'draft',
         draftBy: currentUser.uid,
         draftAt: firebase.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
+      };
+      if (namedId) {
+        // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §5 — update(), never set(): a
+        // set() on the named doc would RESURRECT a draft the user already
+        // deleted from Quotes → Drafts while the builder still holds its
+        // (now stale) id. If the doc is gone, or rules refuse it, fall back
+        // to the draft_{uid} crash-recovery slot exactly like the no-named-id
+        // path below — the autosave must never be lost, just re-homed.
+        try {
+          await db.collection(coll).doc(namedId).update(body);
+        } catch (updateErr) {
+          await slotRef.set(body, { merge: true });
+        }
+      } else {
+        await slotRef.set(body, { merge: true });
+      }
       try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVED', at: Date.now() }, e.origin); } catch(_){}
     } catch (err) {
       console.warn('[QB bridge] QUOTE_DRAFT save failed (draft_{uid} firestore.rules likely not deployed yet)', err);
