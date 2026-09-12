@@ -3383,7 +3383,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
 
 // Show + copy the public client order-tracking link (reuses the shared modal).
 // Short, on-brand tracking URL (own domain, short /t/ path + short code) — no
-// third-party shortener (those read as suspicious). e.g. …ravenmails.com/t/?A1b2C3d4
+// third-party shortener (those read as suspicious). e.g. …barroindustries.com/t/?A1b2C3d4
 window.orderTrackUrl = function(token){ return `${location.origin}/t/?${token}`; };
 
 // Unguessable short code for a public tracking doc id. 8 chars from a 54-char

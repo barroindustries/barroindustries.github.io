@@ -51,7 +51,7 @@ Consequence to accept: the mirror is a **snapshot** — if the quote is edited a
 
 - Minted app-side by the sharer: `makeShareToken()` = same crypto alphabet as `makeTrackCode`, **length 12** (54¹² ≈ 6.4×10²⁰). Collision-checked with a `uniqueTrackCode()`-style loop against `public_quotes` (a `get` on a public collection needs no auth, so the check always works).
 - The token **is the doc id** of the mirror. It is also stamped on the internal quote as `shareToken` (staff-visible only) so the app can find/revoke/re-sync the mirror.
-- URL: `https://<origin>/q/?<TOKEN>` (same shape as `/t/?<code>`; origin is the CNAME domain `barroindustries-operatingsystem.ravenmails.com` via `location.origin`).
+- URL: `https://<origin>/q/?<TOKEN>` (same shape as `/t/?<code>`; origin is the CNAME domain `barroindustries.com` via `location.origin`).
 
 ### 2.3 Mirror doc shape — the COMPLETE allowlist
 
