@@ -1124,7 +1124,10 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
     html += `<div class="att-cal-day ${cls} ${isToday ? 'att-today' : ''}" data-date="${dateStr}"${holidayTitle}>
       <span class="att-day-num">${day}</span>
       ${holiday ? `<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">${emojiIcon('🎌', 9)}</span>` :
-        status === 'present' ? `<span class="att-mark">${emojiIcon('check', 14)}</span>` :
+        status === 'present' ? (rec.timeIn ? `
+          <span style="font-size:8.5px;line-height:1.3;font-weight:700;color:#30d158">${escHtml(rec.timeIn)}</span>
+          <span style="font-size:8.5px;line-height:1.3;font-weight:700;color:var(--text-muted)">${rec.timeOut ? escHtml(rec.timeOut) : '—'}</span>`
+          : `<span class="att-mark">${emojiIcon('check', 14)}</span>`) :
         status === 'absent' ? `<span class="att-mark">${emojiIcon('x', 14)}</span>` : ''}
     </div>`;
   }
@@ -1194,8 +1197,18 @@ async function _loadWorkerFinance(profile) {
   }
 
   const weekHours = weekSnap.docs.reduce((s, d) => s + (d.data().hoursWorked || 0), 0);
+  // OT split mirrors payroll-weekly.js WRC.splitDayHours: per DAY, hours past
+  // the 8h threshold count again as OT at the plain rate ON TOP of the full
+  // day total (the documented 'ot-double-count' parity the payslips actually
+  // pay). WRC is finance-screen code and may not be loaded here, so the
+  // threshold falls back to the same constant.
+  const otThreshold = (window.WRC && window.WRC.OT_THRESHOLD_HOURS) || 8;
+  const weekOtHours = weekSnap.docs.reduce((s, d) => {
+    const h = d.data().hoursWorked || 0;
+    return s + (h > otThreshold ? h - otThreshold : 0);
+  }, 0);
   const rph = profile.hourlyRate || (profile.dailyRate ? profile.dailyRate / 8 : 0);
-  const weekEstimate = weekHours * rph;
+  const weekEstimate = (weekHours + weekOtHours) * rph;
   const monthDaysWorked = monthSnap.docs.filter(d => d.data().timeIn).length;
   const monthHours = monthSnap.docs.reduce((s, d) => s + (d.data().hoursWorked || 0), 0);
   const payslips = payslipSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1206,9 +1219,10 @@ async function _loadWorkerFinance(profile) {
       <div class="card-body">
         <div class="kpi-row" style="margin:0">
           <div class="kpi-card"><div class="kpi-label">Hours</div><div class="kpi-value">${weekHours.toFixed(1)}</div></div>
+          <div class="kpi-card${weekOtHours > 0 ? ' accent' : ''}"><div class="kpi-label">OT Hours</div><div class="kpi-value">${weekOtHours.toFixed(1)}</div></div>
           <div class="kpi-card green"><div class="kpi-label">Estimate</div><div class="kpi-value" style="font-size:16px">₱${fmt(weekEstimate)}</div></div>
         </div>
-        <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Projection only, based on hours logged so far — the official amount is set when Finance issues your payslip.</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Projection only, based on hours logged so far${weekOtHours > 0 ? ` — includes ${weekOtHours.toFixed(1)} OT hour${weekOtHours === 1 ? '' : 's'} (past ${otThreshold}h in a day, paid at your plain rate on top)` : ''} — the official amount is set when Finance issues your payslip.</p>
       </div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -1298,7 +1312,10 @@ window.renderWorkerHome = async function () {
   let viewMonth = parseInt(bizToday.slice(5, 7), 10) - 1;
 
   c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon('👋', 20)} Hi, ${escHtml((profile.name || '').split(' ')[0] || 'there')}!</h2></div>
+    <div class="page-header">
+      <h2>${emojiIcon('👋', 20)} Hi, ${escHtml((profile.name || '').split(' ')[0] || 'there')}!</h2>
+      <button class="btn-secondary btn-sm" onclick="navigateTo('my-profile')">${emojiIcon('👤', 16)} My Profile</button>
+    </div>
     <div id="live-clock" class="live-clock-line"></div>
     <div id="wb-clock-card" style="margin-bottom:16px"></div>
     <div class="card" style="margin-bottom:16px">
