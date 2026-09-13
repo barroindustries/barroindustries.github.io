@@ -12,9 +12,11 @@
 //                         payslip generator does. Reading the stored field
 //                         would pay every phone-punching worker an extra hour
 //                         a day, every day, against what payslips pay today.
-//   splitDayHours         overtime is paid ON TOP of the full day's hours in
-//                         the current one-worker form. Changing that quietly
-//                         would cut every long day's pay.
+//   splitDayHours         regular hours CAP at 8 a day and only the excess is
+//                         overtime (owner ruling 2026-09-13 — "hrs will max at
+//                         8hrs daily, excess goes to ot"). Uncapping it quietly
+//                         would overpay every long day; moving the threshold
+//                         quietly would re-split every payslip.
 //   buildWeekDays         a flagged day (forgotten clock-out, 22-hour phantom
 //                         shift) must pay NOTHING until a human records an
 //                         override with a reason.
@@ -90,21 +92,22 @@ describe('the lunch rule — hours come from the PUNCH TIMES, never a stored fie
   });
 });
 
-describe('the regular/overtime split — PARITY with what payslips pay today', () => {
+describe('the regular/overtime split — 8h daily cap, excess is OT', () => {
   it('leaves a normal day entirely regular', () => {
     assert.deepEqual(WRC.splitDayHours(8), { hours: 8, otHours: 0 });
     assert.deepEqual(WRC.splitDayHours(4.5), { hours: 4.5, otHours: 0 });
   });
 
-  it('reports the FULL day as hours AND the excess again as overtime', () => {
-    // PINNED DELIBERATELY. computeWeeklyLine pays hours*rate + otHours*rate, so
-    // a 10-hour day pays TWELVE hours — which is exactly what the one-worker
-    // generator does today (Hours Worked = the day total, OT Hours = the excess
-    // over 8). Emitting {hours:8, otHours:2} would be defensible arithmetic and
-    // a silent pay cut. If the owner rules otherwise, change it HERE and say so.
-    assert.deepEqual(WRC.splitDayHours(10), { hours: 10, otHours: 2 });
-    const line = MC.computeWeeklyLine({ hourlyRate: 100 }, [{ hours: 10, otHours: 2 }]);
-    assert.equal(line.gross, 1200);
+  it('caps regular at 8 and sends ONLY the excess to overtime', () => {
+    // OWNER RULING 2026-09-13, verbatim: "hrs will max at 8hrs daily, excess
+    // goes to ot". computeWeeklyLine pays hours*rate + otHours*rate, so a
+    // 10-hour day pays TEN hours (8 regular + 2 OT at the plain rate). This
+    // supersedes the pre-ruling pinned parity where the full day AND the
+    // excess were both paid (10h day paid 12h, warned as 'ot-double-count');
+    // that warning is retired with the ruling.
+    assert.deepEqual(WRC.splitDayHours(10), { hours: 8, otHours: 2 });
+    const line = MC.computeWeeklyLine({ hourlyRate: 100 }, [{ hours: 8, otHours: 2 }]);
+    assert.equal(line.gross, 1000);
   });
 
   it('clamps rubbish to zero rather than producing NaN', () => {
@@ -146,8 +149,8 @@ describe('buildWeekDays — the argument computeWeeklyLine actually receives', (
     const { days, flags } = WRC.buildWeekDays(DAYS, records, null);
     assert.equal(days[0].hours, 8);
     assert.equal(days[0].otHours, 0);
-    assert.equal(days[1].hours, 10);      // 07:00–18:00 = 11h minus lunch
-    assert.equal(days[1].otHours, 2);
+    assert.equal(days[1].hours, 8);       // 07:00–18:00 = 11h minus lunch = 10h → capped at 8
+    assert.equal(days[1].otHours, 2);     // the excess over 8 (owner ruling 2026-09-13)
     assert.equal(flags[0].source, 'punch');
     assert.equal(flags[2].source, 'none');
   });

@@ -3041,11 +3041,12 @@ window.renderMyProfile = async function() {
   const u = window.userProfile || {};
   const partner = (typeof isPartner === 'function' && isPartner()) ||
                   (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
-  // Operations Team (Type-B, weekly, attendance-paid — owner ruling
-  // 2026-09-13) gets NO KPI surfaces: the My Analytics tab is entirely
+  // Operations Team (Type-B, weekly, attendance-paid — owner rulings
+  // 2026-09-13) gets NO KPI or task surfaces: the My Analytics tab is entirely
   // office-KPI machinery (Task Completion / KPI Composite / Performance
   // Evaluation, plus office-attendance and salary_history reads that have no
-  // data for a weekly worker), so it is dropped rather than shown empty. The
+  // data for a weekly worker) and the Tasks tab was ruled off the same day
+  // ("remove tasks as well") — both dropped rather than shown empty. The
   // finance tab stays (renderPersonalFinance is team-aware) but is labeled
   // plain "Finance" — there is no "Performance" half for this team.
   const opsB = (typeof isTypeBWorker === 'function') && isTypeBWorker();
@@ -3055,8 +3056,8 @@ window.renderMyProfile = async function() {
         {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ]
     : [ {key:'id',        label:'ID',                   icon:emojiIcon('🪪',16)},
         {key:'finance',   label: opsB ? 'Finance' : 'Finance & Performance', icon:emojiIcon('💳',16)},
-        ...(opsB ? [] : [{key:'analytics', label:'My Analytics', icon:emojiIcon('📊',16)}]),
-        {key:'tasks',     label:'Tasks',                icon:emojiIcon('✅',16)},
+        ...(opsB ? [] : [{key:'analytics', label:'My Analytics', icon:emojiIcon('📊',16)},
+                         {key:'tasks',     label:'Tasks',        icon:emojiIcon('✅',16)}]),
         {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ];
   const initial = window.initialSubtab(partner ? 'account' : 'id');
   const depts = (Array.isArray(u.departments) && u.departments.length ? u.departments

@@ -4545,7 +4545,11 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       );
       const cell = $ps(`ps-dayhrs-${i}`);
       if (cell) cell.textContent = hrs.toFixed(2);
-      total += hrs;
+      // Owner ruling 2026-09-13: regular hours cap at 8/day — the excess goes
+      // to OT ONLY (ps-ot-hrs below), no longer ALSO counted in Hours Worked.
+      // Mirrors payroll-weekly.js WRC.splitDayHours; the day cell above keeps
+      // showing the full clocked figure (that is the punch record's truth).
+      total += Math.min(hrs, 8);
       if (hrs > 4) daysOver4++;
       if (hrs > 8) otHrsTotal += (hrs - 8);
     }

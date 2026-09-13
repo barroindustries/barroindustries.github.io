@@ -90,21 +90,22 @@ if (typeof window === 'undefined') {
   /**
    * How one day's clocked hours split into regular and overtime.
    *
-   * PARITY, NOT A REDESIGN — read this before "fixing" it. The one-worker
-   * generator sets Hours Worked to the FULL day total AND OT Hours to the
-   * excess over 8 (js/screens/hr.js's recomputeHours), and computeWeeklyLine
-   * pays `hours * rate + otHours * rate`. So a 10-hour day pays TWELVE hours
-   * today: ten in the regular column and two again in the OT column, both at
-   * the plain rate. Emitting {hours:8, otHours:2} instead would be defensible
-   * arithmetic and would quietly cut every long day's pay by the overtime,
-   * which is not a change an engine gets to make on its own. The run reproduces
-   * what the payslips pay and NAMES it in `warnings` (code 'ot-double-count')
-   * whenever any day exceeds 8h, so the owner decides in daylight.
+   * OWNER RULING 2026-09-13 — "hrs will max at 8hrs daily, excess goes to ot":
+   * regular hours CAP at the threshold and only the excess is overtime, so a
+   * 10-hour day pays 8 regular + 2 OT. This supersedes the pre-ruling parity
+   * behaviour (full day total AND the excess both paid — a 10-hour day paid
+   * 12 hours), which the run flagged per-run as 'ot-double-count' precisely
+   * so the owner could decide in daylight; the ruling landed, the warning is
+   * retired, and js/screens/hr.js's recomputeHours applies the same cap on
+   * the one-worker payslip form.
    */
   WRC.OT_THRESHOLD_HOURS = 8;
   WRC.splitDayHours = function (h) {
     const hours = Math.max(0, Number(h) || 0);
-    return { hours: _r2(hours), otHours: hours > WRC.OT_THRESHOLD_HOURS ? _r2(hours - WRC.OT_THRESHOLD_HOURS) : 0 };
+    return {
+      hours: _r2(Math.min(hours, WRC.OT_THRESHOLD_HOURS)),
+      otHours: hours > WRC.OT_THRESHOLD_HOURS ? _r2(hours - WRC.OT_THRESHOLD_HOURS) : 0
+    };
   };
 
   /** Any day this run refuses to auto-pay without a recorded override. */
@@ -605,7 +606,6 @@ if (typeof window === 'undefined') {
       }));
 
       const lines = [];
-      let otDoubleCountDays = 0;
 
       for (let i = 0; i < payable.length; i++) {
         const p = payable[i];
@@ -629,7 +629,6 @@ if (typeof window === 'undefined') {
           if (f.overrideMissingReason) {
             warnings.push(warn('override-no-reason', `${p.name || p.id} — the override on ${f.date} has no reason, so it pays NOTHING. An override without a record is exactly what the ruling forbids; add a reason and recompute.`, { workerId: p.id, date: f.date }));
           }
-          if (f.source === 'punch' && f.punchedHours > WRC.OT_THRESHOLD_HOURS) otDoubleCountDays++;
         });
 
         // STATUTORY-BY-STATUS-SPEC-2026-08-12 — pure derivation only; NEVER
@@ -709,10 +708,6 @@ if (typeof window === 'undefined') {
           warnings.push(warn('ca-clamped', `${line.name}'s cash-advance instalment was clamped by ₱${line.caShortfall.toFixed(2)} so the week could not pay a negative net. The balance comes down by what was actually collected.`, { workerId: p.id }));
         }
         lines.push(line);
-      }
-
-      if (otDoubleCountDays > 0) {
-        warnings.push(warn('ot-double-count', `${otDoubleCountDays} day(s) ran past ${WRC.OT_THRESHOLD_HOURS}h. Overtime is paid ON TOP of the full day's hours — a 10-hour day pays 12 hours — which is exactly what the one-worker payslip does today. Confirm with the owner before this becomes the weekly default for the whole crew.`));
       }
 
       return { lines, skipped, warnings };

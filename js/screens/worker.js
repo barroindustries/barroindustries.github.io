@@ -1103,7 +1103,7 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   let html = `<div class="att-cal-grid">${dayLabels.map(d => `<div class="att-cal-hdr">${d}</div>`).join('')}${Array(firstDay).fill('<div></div>').join('')}`;
 
-  let presentCount = 0, absentCount = 0, hoursTotal = 0;
+  let presentCount = 0, absentCount = 0, hoursTotal = 0, otTotal = 0;
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${viewYear}-${mm}-${String(day).padStart(2, '0')}`;
     const dow = window.bizDow(dateStr);
@@ -1115,7 +1115,12 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
     const rec = records[dateStr];
     let status = '';
     if (!isNoWork && isPast && !isBeforeHire) {
-      if (rec && rec.timeIn) { status = 'present'; presentCount++; hoursTotal += (rec.hoursWorked || 0); }
+      if (rec && rec.timeIn) {
+        status = 'present'; presentCount++;
+        // Owner ruling 2026-09-13: regular hours cap at 8/day, excess is OT.
+        const h = rec.hoursWorked || 0;
+        hoursTotal += Math.min(h, 8); otTotal += Math.max(0, h - 8);
+      }
       else if (dateStr < todayStr) { status = 'absent'; absentCount++; }
     }
     const cls = isSunday ? 'att-weekend' : holiday ? 'att-holiday' : status ? `att-${status}` : 'att-future';
@@ -1140,6 +1145,7 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
       <div class="kpi-card green"><div class="kpi-label">Present</div><div class="kpi-value">${presentCount}</div></div>
       <div class="kpi-card red"><div class="kpi-label">Absent</div><div class="kpi-value">${absentCount}</div></div>
       <div class="kpi-card"><div class="kpi-label">Hours</div><div class="kpi-value">${hoursTotal.toFixed(1)}</div></div>
+      <div class="kpi-card${otTotal > 0 ? ' accent' : ''}"><div class="kpi-label">OT</div><div class="kpi-value">${otTotal.toFixed(1)}</div></div>
     </div>`;
   }
 }
@@ -1196,21 +1202,25 @@ async function _loadWorkerFinance(profile) {
     return;
   }
 
-  const weekHours = weekSnap.docs.reduce((s, d) => s + (d.data().hoursWorked || 0), 0);
-  // OT split mirrors payroll-weekly.js WRC.splitDayHours: per DAY, hours past
-  // the 8h threshold count again as OT at the plain rate ON TOP of the full
-  // day total (the documented 'ot-double-count' parity the payslips actually
-  // pay). WRC is finance-screen code and may not be loaded here, so the
-  // threshold falls back to the same constant.
+  // Owner ruling 2026-09-13: regular hours CAP at 8 per day — only the excess
+  // is OT. Same split as payroll-weekly.js WRC.splitDayHours (WRC is
+  // finance-screen code and may not be loaded here, so the threshold falls
+  // back to the same constant).
   const otThreshold = (window.WRC && window.WRC.OT_THRESHOLD_HOURS) || 8;
-  const weekOtHours = weekSnap.docs.reduce((s, d) => {
+  let weekHours = 0, weekOtHours = 0, monthHours = 0, monthOtHours = 0;
+  weekSnap.docs.forEach(d => {
     const h = d.data().hoursWorked || 0;
-    return s + (h > otThreshold ? h - otThreshold : 0);
-  }, 0);
+    weekHours += Math.min(h, otThreshold);
+    weekOtHours += Math.max(0, h - otThreshold);
+  });
+  monthSnap.docs.forEach(d => {
+    const h = d.data().hoursWorked || 0;
+    monthHours += Math.min(h, otThreshold);
+    monthOtHours += Math.max(0, h - otThreshold);
+  });
   const rph = profile.hourlyRate || (profile.dailyRate ? profile.dailyRate / 8 : 0);
   const weekEstimate = (weekHours + weekOtHours) * rph;
   const monthDaysWorked = monthSnap.docs.filter(d => d.data().timeIn).length;
-  const monthHours = monthSnap.docs.reduce((s, d) => s + (d.data().hoursWorked || 0), 0);
   const payslips = payslipSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   el.innerHTML = `
@@ -1222,7 +1232,7 @@ async function _loadWorkerFinance(profile) {
           <div class="kpi-card${weekOtHours > 0 ? ' accent' : ''}"><div class="kpi-label">OT Hours</div><div class="kpi-value">${weekOtHours.toFixed(1)}</div></div>
           <div class="kpi-card green"><div class="kpi-label">Estimate</div><div class="kpi-value" style="font-size:16px">₱${fmt(weekEstimate)}</div></div>
         </div>
-        <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Projection only, based on hours logged so far${weekOtHours > 0 ? ` — includes ${weekOtHours.toFixed(1)} OT hour${weekOtHours === 1 ? '' : 's'} (past ${otThreshold}h in a day, paid at your plain rate on top)` : ''} — the official amount is set when Finance issues your payslip.</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Regular hours max out at ${otThreshold}h a day — anything past that counts as OT. Projection only, based on hours logged so far — the official amount is set when Finance issues your payslip.</p>
       </div>
     </div>
     <div class="card" style="margin-bottom:16px">
@@ -1231,6 +1241,7 @@ async function _loadWorkerFinance(profile) {
         <div class="kpi-row" style="margin:0">
           <div class="kpi-card"><div class="kpi-label">Days (mo.)</div><div class="kpi-value">${monthDaysWorked}</div></div>
           <div class="kpi-card"><div class="kpi-label">Hours (mo.)</div><div class="kpi-value">${monthHours.toFixed(1)}</div></div>
+          <div class="kpi-card${monthOtHours > 0 ? ' accent' : ''}"><div class="kpi-label">OT (mo.)</div><div class="kpi-value">${monthOtHours.toFixed(1)}</div></div>
           <div class="kpi-card accent"><div class="kpi-label">YTD Gross</div><div class="kpi-value" style="font-size:15px">₱${fmt(ytd.gross || 0)}</div></div>
           <div class="kpi-card green"><div class="kpi-label">YTD Net</div><div class="kpi-value" style="font-size:15px">₱${fmt(ytd.net || 0)}</div></div>
         </div>
