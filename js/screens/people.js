@@ -1053,6 +1053,11 @@ async function computeEomStandings(users, monthStr) {
 
     const candidates = users.filter(u =>
       u.role !== 'partner' && u.role !== 'president'
+      // Operations Team is attendance-paid and has no KPI (owner ruling
+      // 2026-09-13) — never a candidate in the KPI-scored EOM race.
+      // teamTypeOf works off the users doc alone (team stamp /
+      // hrManagedAccount fallback), so no payroll read is needed here.
+      && window.teamTypeOf(u) !== 'operations'
       && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'));
     if (!candidates.length) return [];
 
@@ -3036,13 +3041,21 @@ window.renderMyProfile = async function() {
   const u = window.userProfile || {};
   const partner = (typeof isPartner === 'function' && isPartner()) ||
                   (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+  // Operations Team (Type-B, weekly, attendance-paid — owner ruling
+  // 2026-09-13) gets NO KPI surfaces: the My Analytics tab is entirely
+  // office-KPI machinery (Task Completion / KPI Composite / Performance
+  // Evaluation, plus office-attendance and salary_history reads that have no
+  // data for a weekly worker), so it is dropped rather than shown empty. The
+  // finance tab stays (renderPersonalFinance is team-aware) but is labeled
+  // plain "Finance" — there is no "Performance" half for this team.
+  const opsB = (typeof isTypeBWorker === 'function') && isTypeBWorker();
   const tabs = partner
     ? [ {key:'account',   label:'Account',              icon:emojiIcon('👤',16)},
         {key:'tasks',     label:'Tasks',                icon:emojiIcon('✅',16)},
         {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ]
     : [ {key:'id',        label:'ID',                   icon:emojiIcon('🪪',16)},
-        {key:'finance',   label:'Finance & Performance',icon:emojiIcon('💳',16)},
-        {key:'analytics', label:'My Analytics',         icon:emojiIcon('📊',16)},
+        {key:'finance',   label: opsB ? 'Finance' : 'Finance & Performance', icon:emojiIcon('💳',16)},
+        ...(opsB ? [] : [{key:'analytics', label:'My Analytics', icon:emojiIcon('📊',16)}]),
         {key:'tasks',     label:'Tasks',                icon:emojiIcon('✅',16)},
         {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ];
   const initial = window.initialSubtab(partner ? 'account' : 'id');

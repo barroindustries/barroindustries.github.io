@@ -2712,7 +2712,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       ${(window.isLaidOff && window.isLaidOff()) ? '' : `<button class="btn-primary btn-sm" id="req-advance-btn">+ Cash Advance</button>`}
     </div>
 
-    ${isPayrollWindow && !selfDoneThisMonth ? `
+    ${!isOpsTeam && isPayrollWindow && !selfDoneThisMonth ? `
     <div style="background:linear-gradient(135deg,#b71c1c,#c62828);color:var(--white,#fff);border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
       <span style="font-size:24px">${emojiIcon('⚠️',24)}</span>
       <div style="flex:1">
@@ -2721,7 +2721,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>
     </div>` : ''}
 
-    ${presidentImprovements ? `
+    ${!isOpsTeam && presidentImprovements ? `
     <div style="background:linear-gradient(135deg,var(--surface2),var(--surface));border:2px solid var(--primary-light);border-radius:12px;padding:14px 18px;margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:6px">${emojiIcon('📝',16)} Your Development Areas — from President</div>
       <div style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap">${escHtml(presidentImprovements)}</div>
@@ -2734,11 +2734,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="kpi-value" style="font-size:15px">${earnedSoFar==null?'—':'₱'+formatNum(earnedSoFar)}</div>
         <div class="kpi-sub">${daysElapsed} of ${daysInMonth} days · YTD ₱${formatNum(ytdPay)}</div>
       </div>
+      ${isOpsTeam ? '' : `
       <div class="kpi-card">
         <div class="kpi-label">Task KPI</div>
         <div class="kpi-value" style="color:${kpiColor}">${taskPct}%</div>
         <div class="kpi-sub">${doneTasks.length}/${myTasks.length} done</div>
-      </div>
+      </div>`}
       ${dispAtt!=null ? `
       <div class="kpi-card accent">
         <div class="kpi-label">Attendance</div>
@@ -2757,7 +2758,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>
     </div>
 
-    <!-- KPI Evaluation Card -->
+    <!-- KPI Evaluation Card — Office Team only. Operations Team is paid
+         purely off attendance/hours (owner ruling 2026-09-13): no KPI
+         evaluation, no self-assessment, no task-completion scoring. -->
+    ${isOpsTeam ? '' : `
     <div class="card" style="margin-bottom:16px">
       <div class="card-header">
         <h3>${emojiIcon('📊',20)} KPI Evaluation — ${monthLabel}</h3>
@@ -2796,7 +2800,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           </div>
         </div>
       </div>
-    </div>
+    </div>`}
 
     <!-- How your pay is worked out -->
     ${payExplainHtml}
@@ -2814,6 +2818,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="payslip-row"><span>Allowances</span><span style="color:var(--success)">+₱${formatNum(u.allowance)}</span></div>
         <div class="payslip-row"><span>Deductions</span><span style="color:var(--danger)">-₱${formatNum(u.deductions)}</span></div>
         <div class="payslip-row"><span>Net Pay (Full Month)</span><strong>₱${formatNum(net)}</strong></div>
+        ${isOpsTeam ? '' : `
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
         ${isBasekpiLine ? `
         <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${isFinalMonth?'KPI Incentive (final)':'KPI Incentive'}</div>
@@ -2847,6 +2852,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           <span>Combined Multiplier</span>
           <span>${multiplier.toFixed(2)}×</span>
         </div>` : ''}
+        `}
         `}
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
         ${projUnavailable ? `
