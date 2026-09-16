@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chibab's Kitchen Zoning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F2F4F5; --surface:#FFFFFF; --ink:#1B2226; --muted:#5B676E; --line:#C9D1D6; --soft:#E6EAEC;
+  --ember:#D9661F;
+  --z-store:#2F6FB8; --z-prep:#2F8A52; --z-cook:#C93F2A; --z-disp:#B7800F; --z-dish:#1A8C92; --z-foh:#6D55A8; --z-waste:#6B7479; --gas:#C2185B; --water:#1E7FD6; --elec:#8A8A00; --fa:#00A3BF; --ex:#6D4C41;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111619; --surface:#192125; --ink:#E4EAED; --muted:#93A1A8; --line:#34424A; --soft:#222C31;
+    --ember:#F08A45;
+    --z-store:#6AA6EC; --z-prep:#5CC285; --z-cook:#F07560; --z-disp:#E5B34A; --z-dish:#4FC3C8; --z-foh:#A48BE0; --z-waste:#9AA5AB; --gas:#F06292; --water:#64B5F6; --elec:#D4E157; --fa:#4DD0E1; --ex:#BCAAA4;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111619; --surface:#192125; --ink:#E4EAED; --muted:#93A1A8; --line:#34424A; --soft:#222C31;
+  --ember:#F08A45;
+  --z-store:#6AA6EC; --z-prep:#5CC285; --z-cook:#F07560; --z-disp:#E5B34A; --z-dish:#4FC3C8; --z-foh:#A48BE0; --z-waste:#9AA5AB; --gas:#F06292; --water:#64B5F6; --elec:#D4E157; --fa:#4DD0E1; --ex:#BCAAA4;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:400 15px/1.55 Barlow,"Helvetica Neue",Arial,sans-serif;padding-inline:16px;padding-block:28px 64px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{font-family:"Barlow Semi Condensed","Arial Narrow",sans-serif;margin:0;text-wrap:balance;letter-spacing:.01em}
+h1{font-size:clamp(28px,4.4vw,42px);font-weight:700;line-height:1.08}
+h2{font-size:24px;font-weight:700}
+h3{font-size:18px;font-weight:600}
+p{margin:0;max-width:68ch}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:12.5px}
+.eyebrow{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+header{display:flex;flex-direction:column;gap:12px;border-bottom:2px solid var(--ink);padding-bottom:20px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 22px;color:var(--muted)}
+.meta b{color:var(--ink);font-weight:600}
+section{display:flex;flex-direction:column;gap:16px}
+.sec-head{display:flex;flex-direction:column;gap:6px}
+figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.scroll{overflow-x:auto}
+.scroll svg{display:block;width:100%;height:auto;min-width:760px}
+figcaption{color:var(--muted);font-size:14px;max-width:80ch}
+svg text{fill:var(--ink);font-family:Barlow,Arial,sans-serif}
+svg .t-sm{font-size:11px}
+svg .t-xs{font-size:10px;fill:var(--muted)}
+svg .t-lg{font-size:15px;font-weight:600;font-family:"Barlow Semi Condensed",Arial,sans-serif}
+svg .t-zone{font-size:12px;font-family:"JetBrains Mono",monospace;letter-spacing:.06em;fill:var(--muted)}
+.wall{fill:none;stroke:var(--ink);stroke-width:4}
+.part{stroke:var(--ink);stroke-width:2;stroke-dasharray:6 5;fill:none}
+.ghost{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:4 4}
+.dining{fill:var(--soft);stroke:var(--line);stroke-dasharray:6 6}
+.eq{stroke-width:1.5}
+.store{fill:color-mix(in srgb,var(--z-store) 16%,var(--surface));stroke:var(--z-store)}
+.prep{fill:color-mix(in srgb,var(--z-prep) 16%,var(--surface));stroke:var(--z-prep)}
+.cook{fill:color-mix(in srgb,var(--z-cook) 16%,var(--surface));stroke:var(--z-cook)}
+.disp{fill:color-mix(in srgb,var(--z-disp) 18%,var(--surface));stroke:var(--z-disp)}
+.dish{fill:color-mix(in srgb,var(--z-dish) 16%,var(--surface));stroke:var(--z-dish)}
+.foh{fill:color-mix(in srgb,var(--z-foh) 16%,var(--surface));stroke:var(--z-foh)}
+.missing{stroke-dasharray:5 3}
+.gasline{fill:none;stroke:var(--gas);stroke-width:3;stroke-dasharray:10 3 2 3}
+.gasfarm{fill:color-mix(in srgb,var(--gas) 10%,var(--surface));stroke:var(--gas);stroke-width:1.5;stroke-dasharray:5 3}
+.tank{fill:color-mix(in srgb,var(--gas) 22%,var(--surface));stroke:var(--gas);stroke-width:1.5}
+svg .t-gas{fill:var(--gas);font-size:10px;font-weight:600}
+.window{fill:var(--ember);stroke:none}
+.door{stroke:var(--surface);stroke-width:6}
+/* bubbles */
+.bub{stroke-width:2}
+.lk-strong{stroke:var(--ink);stroke-width:5;stroke-linecap:round}
+.lk-near{stroke:var(--ink);stroke-width:2}
+.lk-weak{stroke:var(--muted);stroke-width:1.6;stroke-dasharray:5 5}
+.lk-no{stroke:var(--z-cook);stroke-width:1.6;stroke-dasharray:2 5}
+/* flows */
+.flow path,.flow line{fill:none;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}
+.f-food path{stroke:var(--z-disp)}
+.f-dirty path{stroke:var(--z-dish);stroke-dasharray:8 5}
+.f-waste path{stroke:var(--z-waste);stroke-dasharray:2 5}
+.f-order path{stroke:var(--z-foh)}
+.m-food{fill:var(--z-disp)} .m-dirty{fill:var(--z-dish)} .m-waste{fill:var(--z-waste)} .m-order{fill:var(--z-foh)}
+.flow{transition:opacity .2s}
+#plan[data-active="food"] .flow:not(.f-food),
+#plan[data-active="dirty"] .flow:not(.f-dirty),
+#plan[data-active="waste"] .flow:not(.f-waste),
+#plan[data-active="order"] .flow:not(.f-order){opacity:.1}
+@media (prefers-reduced-motion:reduce){.flow{transition:none}}
+.zoombar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.zbtn{width:34px;justify-content:center;font-size:16px;padding:6px 0}
+.zhint{font-size:12.5px;color:var(--muted)}
+.zoomview{border:1px solid var(--line);border-radius:6px;background:var(--surface);overflow:hidden;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none}
+.zoomview.dragging{cursor:grabbing}
+.zoomview svg{display:block;width:100%;height:auto;aspect-ratio:1850/530;min-height:260px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:500 13px/1 Barlow,Arial,sans-serif;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:8px 13px;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.chip[aria-pressed="true"]{border-color:var(--ink);background:var(--soft)}
+.chip:focus-visible{outline:2px solid var(--ember);outline-offset:2px}
+.sw{width:22px;height:0;border-top:3px solid}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr));gap:14px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.step-head{display:flex;align-items:baseline;gap:10px}
+.step-no{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--ember);font-weight:500}
+.step-fig{border:1px solid var(--line);border-radius:4px;background:var(--surface);overflow:hidden}
+.step-fig svg{display:block;width:100%;height:auto}
+.step .base{opacity:.45}
+.hl{fill:none;stroke:var(--ember);stroke-width:5}
+.route{fill:none;stroke:var(--ember);stroke-width:7;stroke-linecap:round;stroke-linejoin:round}
+.m-step{fill:var(--ember)}
+.badge{fill:var(--ink)}
+svg .badge-t{fill:var(--surface);font:700 20px "JetBrains Mono",monospace}
+.step ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.step li{display:grid;grid-template-columns:24px 1fr;gap:8px;font-size:14px;align-items:start}
+.bn{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--ink);color:var(--surface);font:600 11px "JetBrains Mono",monospace;margin-top:1px}
+.rd-notes{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.rd-notes div{display:grid;grid-template-columns:120px 1fr;gap:10px;font-size:13.5px}
+.rd-notes b{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;padding-top:1px}
+@media (max-width:520px){.rd-notes div{grid-template-columns:1fr;gap:2px}}
+.knob{fill:var(--ink)}
+.leg{stroke:var(--z-cook);stroke-width:4}
+.shelf{fill:color-mix(in srgb,var(--z-cook) 25%,var(--surface));stroke:var(--z-cook)}
+.oven{fill:color-mix(in srgb,var(--ember) 14%,var(--surface));stroke:var(--ember);stroke-width:2}
+.handle{fill:none;stroke:var(--ink);stroke-width:2}
+.ovwin{fill:color-mix(in srgb,var(--ink) 12%,var(--surface));stroke:var(--ink);stroke-width:1}
+.sec-wall{stroke:var(--ink);stroke-width:8}
+.gasdot{fill:var(--gas)}
+.door-open{stroke:var(--ember);stroke-width:6;stroke-linecap:round}
+.swing{fill:none;stroke:var(--ember);stroke-width:1.5;stroke-dasharray:5 4}
+.dim{stroke:var(--muted);stroke-width:1.5}
+.dim.ok{stroke:var(--z-prep);stroke-width:2;stroke-dasharray:6 4}
+svg .ok-t{fill:var(--z-prep);font-weight:600}
+.elev .t-xs{font-size:19px}.elev .t-sm{font-size:20px}.elev .t-lg{font-size:26px}.elev .t-gas{font-size:18px}
+.kds{fill:var(--ink);stroke:none}
+svg .kds-t{fill:var(--surface);font-weight:700;font-size:16px}
+.route.data{stroke-dasharray:14 10}
+.wall-thin{stroke:var(--ink);stroke-width:4}
+.waterline{fill:none;stroke:var(--water);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+svg .t-water{fill:var(--water);font-size:10px;font-weight:600}
+.elecline{fill:none;stroke:var(--elec);stroke-width:3;stroke-dasharray:2 4 8 4;stroke-linecap:round}
+.elecbox{fill:var(--elec)}
+svg .t-elec{fill:var(--elec);font-size:10px;font-weight:600}
+.fa{fill:color-mix(in srgb,var(--fa) 18%,var(--surface));stroke:var(--fa);stroke-width:2}
+.fa-x{stroke:var(--fa);stroke-width:1.5}
+.ex{fill:color-mix(in srgb,var(--ex) 22%,var(--surface));stroke:var(--ex);stroke-width:2}
+svg .t-fa{fill:var(--fa);font-size:8px;font-weight:700}
+svg .t-ex{fill:var(--ex);font-size:8px;font-weight:700}
+.util-legend svg{flex:none}
+.hood{fill:color-mix(in srgb,var(--ex) 7%,transparent);stroke:var(--ex);stroke-width:2.5;stroke-dasharray:12 5}
+svg .t-hood{fill:var(--ex);font-size:10px;font-weight:700;letter-spacing:.04em}
+/* zones */
+.zones{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px}
+.zone{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--c);border-radius:6px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.zone .tag{font-family:"JetBrains Mono",monospace;font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--c)}
+.zone ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px}
+.zone li{display:grid;grid-template-columns:44px 1fr;gap:8px;font-size:14px}
+.zone li .n{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted);padding-top:2px}
+.zone li.gap .n{color:var(--ember)}
+.zone .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+.zone p{font-size:14px}
+/* tables */
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:6px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:14px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;background:var(--soft)}
+tr:last-child td{border-bottom:none}
+td.num{font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.p-add{background:color-mix(in srgb,var(--ember) 18%,var(--surface));color:var(--ember)}
+.p-chk{background:var(--soft);color:var(--muted)}
+.note{font-size:13.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <span class="eyebrow">Barro Kitchens · Layout study · Not to final area</span>
+  <h1>Chibab's Chicken Inasal — Kitchen Zoning, Bubble &amp; Circulation</h1>
+  <div class="meta">
+    <span>Client <b>Joseph Asis</b></span>
+    <span>Site <b>Cabuyao, Laguna</b></span>
+    <span>Quote ref <b class="mono">BKMLVB260914-014R1</b></span>
+    <span>Date <b>Sept 16, 2026</b></span>
+  </div>
+  <p class="note">Ideal layout while the architect's kitchen area is still undefined. Equipment sizes are taken from the quotation; item numbers (#) refer to its line items. The kitchen area and entry are not yet designated by the architect; the entry shown is the preferred position only.</p>
+</header>
+
+<!-- BUBBLE -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Diagram 1</span>
+    <h2>Bubble diagram — which zones must touch</h2>
+  </div>
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1300 640" role="img" aria-label="Bubble diagram: inside the kitchen, storage, preparation and cooking chain into plating and dispatch, which feeds the service table through the pass-thru; dishwashing has its own pass-thru to dish return. The entry sits between storage and plating. LPG tank farm feeds cooking from outside. Outside, a hallway links the service table, dish return and comfort room to the dining area, which sits right of the POS beside the halo-halo station.">
+      <rect x="120" y="40" width="760" height="330" rx="18" class="wall"/>
+      <text x="140" y="68" class="t-zone">KITCHEN · 2.5 m DEEP</text>
+      <text x="930" y="68" class="t-zone">FRONT OF HOUSE</text>
+
+      <!-- links -->
+      <path d="M55,76 V20 H570 V58" class="gasline"/>
+      <text x="300" y="14" class="t-gas">gas line along back wall</text>
+      <line x1="220" y1="200" x2="390" y2="120" class="lk-strong"/>
+      <line x1="390" y1="120" x2="570" y2="130" class="lk-strong"/>
+      <line x1="570" y1="130" x2="560" y2="290" class="lk-strong"/>
+      <line x1="220" y1="200" x2="570" y2="130" class="lk-near"/>
+      <line x1="220" y1="200" x2="390" y2="370" class="lk-near"/>
+      <line x1="390" y1="370" x2="560" y2="290" class="lk-near"/>
+      <line x1="390" y1="370" x2="390" y2="545" class="lk-near"/>
+      <line x1="560" y1="290" x2="560" y2="450" class="lk-strong"/>
+      <line x1="780" y1="210" x2="560" y2="290" class="lk-near"/>
+      <line x1="780" y1="210" x2="780" y2="450" class="lk-strong"/>
+      <line x1="570" y1="130" x2="780" y2="210" class="lk-no"/>
+      <line x1="560" y1="450" x2="560" y2="545" class="lk-strong"/>
+      <line x1="780" y1="450" x2="780" y2="545" class="lk-near"/>
+      <line x1="880" y1="455" x2="1110" y2="230" class="lk-near"/>
+      <line x1="990" y1="190" x2="1110" y2="230" class="lk-strong"/>
+      <line x1="1110" y1="230" x2="1225" y2="230" class="lk-strong"/>
+      <line x1="1150" y1="545" x2="1225" y2="300" class="lk-strong"/>
+      <line x1="990" y1="190" x2="780" y2="210" class="lk-weak"/>
+      <line x1="110" y1="570" x2="560" y2="450" class="lk-no"/>
+
+      <!-- openings -->
+      <rect x="520" y="360" width="80" height="20" rx="3" class="window"/>
+      <text x="610" y="394" class="t-xs">Pass-thru #8</text>
+      <rect x="740" y="360" width="80" height="20" rx="3" class="window"/>
+      <text x="830" y="394" class="t-xs">Dish pass-thru</text>
+      <line x1="355" y1="370" x2="425" y2="370" class="door"/>
+      <rect x="355" y="358" width="70" height="24" class="ghost"/>
+      <text x="390" y="374" text-anchor="middle" class="t-xs">Entry</text>
+      <line x1="370" y1="382" x2="250" y2="470" class="lk-near"/>
+      <rect x="150" y="458" width="100" height="26" class="ghost"/>
+      <text x="200" y="476" text-anchor="middle" class="t-sm">Back door</text>
+
+      <!-- hallway + CR -->
+      <rect x="200" y="545" width="1000" height="50" rx="10" class="dining"/>
+      <text x="220" y="575" class="t-lg">Hallway</text>
+
+      <!-- bubbles -->
+      <circle cx="55" cy="120" r="44" class="bub gasfarm" style="stroke-dasharray:none"/>
+      <text x="55" y="116" text-anchor="middle" class="t-gas" style="font-size:13px">LPG</text>
+      <text x="55" y="132" text-anchor="middle" class="t-xs">tank farm</text>
+
+      <circle cx="220" cy="200" r="72" class="bub store"/>
+      <text x="220" y="192" text-anchor="middle" class="t-lg">Storage</text>
+      <text x="220" y="209" text-anchor="middle" class="t-xs">2 chillers on end wall</text>
+      <text x="220" y="222" text-anchor="middle" class="t-xs">racks either side</text>
+
+      <circle cx="390" cy="120" r="56" class="bub prep"/>
+      <text x="390" y="117" text-anchor="middle" class="t-lg">Preparation</text>
+      <text x="390" y="134" text-anchor="middle" class="t-xs">1.5 m sink table</text>
+
+      <circle cx="570" cy="130" r="72" class="bub cook"/>
+      <text x="570" y="126" text-anchor="middle" class="t-lg">Cooking</text>
+      <text x="570" y="143" text-anchor="middle" class="t-xs">grills · 4B · stock pot</text>
+
+      <circle cx="560" cy="290" r="64" class="bub disp"/>
+      <text x="560" y="282" text-anchor="middle" class="t-lg">Plating &amp;</text>
+      <text x="560" y="299" text-anchor="middle" class="t-lg">Dispatch</text>
+      <text x="560" y="315" text-anchor="middle" class="t-xs">hot holding · steamer</text>
+
+      <circle cx="780" cy="210" r="64" class="bub dish"/>
+      <text x="780" y="206" text-anchor="middle" class="t-lg">Dishwashing</text>
+      <text x="780" y="223" text-anchor="middle" class="t-xs">sink · racks · waste</text>
+
+      <circle cx="560" cy="455" r="48" class="bub disp"/>
+      <text x="560" y="452" text-anchor="middle" class="t-lg">Service Table</text>
+      <text x="560" y="468" text-anchor="middle" class="t-xs">unli soup · rice</text>
+
+      <circle cx="780" cy="455" r="40" class="bub dish"/>
+      <text x="780" y="459" text-anchor="middle" class="t-lg">Dish Return</text>
+
+      <circle cx="880" cy="455" r="36" class="bub foh"/>
+      <text x="880" y="459" text-anchor="middle" class="t-lg">Beverage</text>
+
+      <circle cx="990" cy="190" r="56" class="bub foh"/>
+      <text x="990" y="186" text-anchor="middle" class="t-lg">Halo-Halo</text>
+      <text x="990" y="203" text-anchor="middle" class="t-xs">station #17</text>
+
+      <circle cx="1110" cy="230" r="46" class="bub foh"/>
+      <text x="1110" y="235" text-anchor="middle" class="t-lg">POS</text>
+
+      <ellipse cx="1225" cy="260" rx="58" ry="100" class="dining"/>
+      <text x="1225" y="265" text-anchor="middle" class="t-lg">Dining</text>
+
+      <circle cx="110" cy="570" r="46" class="bub foh"/>
+      <text x="110" y="566" text-anchor="middle" class="t-lg">Comfort</text>
+      <text x="110" y="583" text-anchor="middle" class="t-lg">Room</text>
+    </svg>
+    </div>
+    <div class="legend">
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="lk-strong"/></svg>Must be adjacent</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="lk-near"/></svg>Close by</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="lk-weak"/></svg>Occasional</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="lk-no"/></svg>Keep apart</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="gasline"/></svg>Gas line</span>
+      <span><svg width="22" height="10" aria-hidden="true"><rect width="22" height="10" rx="2" class="window"/></svg>Pass-thru window</span>
+    </div>
+    <figcaption>Inside the 2.5 m-deep kitchen, Storage → Preparation → Cooking → Plating runs as one chain ending at the food pass-thru; dishes return through their own pass-thru. The single entry sits between storage and plating, the LPG tank farm feeds the cook line from outside, and a hallway links the service table, dish return and comfort room to the dining area right of the POS. Keep the grill away from the dish sink, and the comfort room away from the self-serve service table.</figcaption>
+  </figure>
+</section>
+
+<!-- CIRCULATION -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Diagram 2</span>
+    <h2>Circulation plan — how food, dishes, waste and orders move</h2>
+    <p class="note">Schematic plan drawn at 1 px = 10 mm using quoted equipment sizes. Dashed outlines are items the layout needs but the quotation doesn't have yet.</p>
+  </div>
+  <figure id="plan" data-active="all">
+    <div class="chips" role="group" aria-label="Highlight a flow">
+      <button class="chip" type="button" id="f-all" data-flow="all" aria-pressed="true">All flows</button>
+      <button class="chip" type="button" id="f-food" data-flow="food" aria-pressed="false"><span class="sw" style="border-color:var(--z-disp)"></span>Food</button>
+      <button class="chip" type="button" id="f-dirty" data-flow="dirty" aria-pressed="false"><span class="sw" style="border-color:var(--z-dish);border-top-style:dashed"></span>Dirty dishes</button>
+      <button class="chip" type="button" id="f-waste" data-flow="waste" aria-pressed="false"><span class="sw" style="border-color:var(--z-waste);border-top-style:dotted"></span>Waste</button>
+      <button class="chip" type="button" id="f-order" data-flow="order" aria-pressed="false"><span class="sw" style="border-color:var(--z-foh)"></span>Orders &amp; customers</button>
+    </div>
+    <div class="zoombar">
+      <button class="chip zbtn" type="button" id="z-in" aria-label="Zoom in">+</button>
+      <button class="chip zbtn" type="button" id="z-out" aria-label="Zoom out">−</button>
+      <button class="chip" type="button" id="z-reset">Fit</button>
+      <span class="zhint">Scroll or pinch to zoom · drag to pan · double-click to zoom in</span>
+    </div>
+    <div class="legend util-legend">
+      <span><svg width="18" height="18" aria-hidden="true"><rect x="2" y="2" width="14" height="14" class="fa"/><path d="M2,2 L16,16 M16,2 L2,16" class="fa-x"/></svg>Fresh air diffuser (×5)</span>
+      <span><svg width="18" height="18" aria-hidden="true"><rect x="2" y="2" width="14" height="14" class="fa"/></svg>FA · fresh air duct (hood)</span>
+      <span><svg width="18" height="18" aria-hidden="true"><rect x="2" y="2" width="14" height="14" class="ex"/></svg>EX · exhaust duct</span>
+      <span><svg width="30" height="14" aria-hidden="true"><rect x="2" y="2" width="26" height="10" class="hood"/></svg>Range hood</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="gasline"/></svg>Gas</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="waterline"/></svg>Water</span>
+      <span><svg width="30" height="8" aria-hidden="true"><line x1="2" y1="4" x2="28" y2="4" class="elecline"/></svg>Electrical</span>
+    </div>
+    <div class="zoomview" id="planView">
+    <svg id="planSvg" viewBox="-80 0 1850 530" role="img" aria-label="Circulation plan: deliveries enter storage; food moves along the back cook line, into hot holding and dispatch tables, through the pass-thru to the service table and customers. Dirty dishes return through a separate pass-thru into the dish room, get scraped, washed and racked, then go back to dispatch. Waste leaves by a back door. Customers order at the POS beside the halo-halo station.">
+      <defs>
+        <marker id="a-food" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-food"/></marker>
+        <marker id="a-dirty" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-dirty"/></marker>
+        <marker id="a-waste" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-waste"/></marker>
+        <marker id="a-order" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-order"/></marker>
+      </defs>
+
+      <g id="basePlan"><!-- dining band -->
+      <rect x="40" y="400" width="260" height="100" rx="8" class="eq foh"/>
+      <text x="170" y="446" text-anchor="middle" class="t-zone">COMFORT ROOM</text>
+      <text x="170" y="462" text-anchor="middle" class="t-xs">CR</text>
+      <rect x="310" y="400" width="1100" height="100" rx="8" class="dining"/>
+      <text x="330" y="485" class="t-zone">HALLWAY</text>
+      <rect x="1430" y="40" width="300" height="460" rx="10" class="dining"/>
+      <text x="1580" y="247" text-anchor="middle" class="t-zone">DINING</text>
+      <text x="1580" y="265" text-anchor="middle" class="t-xs">right side of POS</text>
+
+      <!-- kitchen walls -->
+      <rect x="40" y="40" width="1150" height="250" class="wall"/>
+      <line x1="960" y1="40" x2="960" y2="136" class="part"/>
+      <line x1="960" y1="203" x2="960" y2="290" class="part"/>
+      <!-- entry -->
+      <line x1="327" y1="290" x2="397" y2="290" class="door"/>
+      <rect x="327" y="275" width="70" height="30" class="ghost"/>
+      <text x="362" y="322" text-anchor="middle" class="t-xs">Preferred entry</text>
+      <text x="362" y="334" text-anchor="middle" class="t-xs">(area TBD)</text>
+
+      <!-- gas -->
+      <rect x="-56" y="58" width="44" height="176" rx="4" class="gasfarm"/>
+      <circle cx="-34" cy="80" r="16" class="tank"/><circle cx="-34" cy="120" r="16" class="tank"/>
+      <circle cx="-34" cy="160" r="16" class="tank"/><circle cx="-34" cy="200" r="16" class="tank"/>
+      <text x="-34" y="252" text-anchor="middle" class="t-gas">LPG Tank Farm</text>
+      <text x="-34" y="265" text-anchor="middle" class="t-xs">4 tanks along wall</text>
+      <path d="M-34,58 V47 H949" class="gasline"/>
+      <path d="M541,47 V57 M676,47 V57 M786,47 V57 M889,47 V57" class="gasline" style="stroke-dasharray:none"/>
+      <text x="200" y="25" class="t-gas">Gas line enters through the end-wall corner, runs between back wall and equipment → grillers · 4-burner · stock pot</text>
+      <!-- hood -->
+      <rect x="474" y="44" width="475" height="84" rx="3" class="hood"/>
+      <text x="944" y="140" text-anchor="end" class="t-hood">RANGE HOOD #14 · ≈ 4750</text>
+      <text x="760" y="12" text-anchor="middle" class="t-xs">Range Hood #14 · one unit ≈ 4750 · grills + stoves</text>
+
+      <!-- back row -->
+      <rect x="50" y="50" width="76" height="119" class="eq store"/>
+      <text x="88" y="99" text-anchor="middle" class="t-sm">4-Door</text><text x="88" y="112" text-anchor="middle" class="t-sm">Chiller</text><text x="88" y="126" text-anchor="middle" class="t-xs">#18 · 1220</text>
+      <rect x="50" y="169" width="76" height="119" class="eq store"/>
+      <text x="88" y="218" text-anchor="middle" class="t-sm">4-Door</text><text x="88" y="231" text-anchor="middle" class="t-sm">Chiller</text><text x="88" y="245" text-anchor="middle" class="t-xs">#18 · 1220</text>
+      <rect x="128" y="65" width="72" height="202" class="ghost"/>
+      <text x="164" y="163" text-anchor="middle" class="t-xs">door</text><text x="164" y="172" text-anchor="middle" class="t-xs">clearance</text>
+      <rect x="200" y="57" width="120" height="65" class="eq store"/>
+      <text x="260" y="86" text-anchor="middle" class="t-sm">Storage Rack</text><text x="260" y="101" text-anchor="middle" class="t-xs">#7 · 1200</text>
+      <rect x="324" y="57" width="150" height="65" class="eq prep"/>
+      <text x="399" y="86" text-anchor="middle" class="t-sm">Prep Sink Table</text><text x="399" y="101" text-anchor="middle" class="t-xs">#2 · 1500 · chopping board</text>
+      <rect x="474" y="57" width="135" height="65" class="eq cook"/>
+      <text x="541" y="86" text-anchor="middle" class="t-sm">Charcoal Griller</text><text x="541" y="101" text-anchor="middle" class="t-xs">#1 · 1350</text>
+      <rect x="609" y="57" width="135" height="65" class="eq cook"/>
+      <text x="676" y="86" text-anchor="middle" class="t-sm">Charcoal Griller</text><text x="676" y="101" text-anchor="middle" class="t-xs">#1 · 1350</text>
+      <rect x="744" y="57" width="85" height="65" class="eq cook"/>
+      <text x="786" y="86" text-anchor="middle" class="t-sm">4-Burner</text><text x="786" y="101" text-anchor="middle" class="t-xs">#5 · 850</text>
+      <rect x="829" y="57" width="120" height="65" class="eq cook"/>
+      <text x="889" y="86" text-anchor="middle" class="t-sm">3B Stock Pot</text><text x="889" y="101" text-anchor="middle" class="t-xs">#6 · 1200</text>
+
+      <text x="560" y="145" text-anchor="middle" class="t-zone">WORK AISLE ≈ 1030–1150</text>
+
+      <!-- front row -->
+      <rect x="200" y="216" width="120" height="65" class="eq store"/>
+      <text x="260" y="245" text-anchor="middle" class="t-sm">Storage Rack</text><text x="260" y="260" text-anchor="middle" class="t-xs">#7 · dry + charcoal</text>
+      <rect x="652" y="216" width="90" height="65" class="eq disp"/>
+      <text x="697" y="245" text-anchor="middle" class="t-sm">Hot Holding</text><text x="697" y="260" text-anchor="middle" class="t-xs">#3 · 900</text>
+      <rect x="587" y="216" width="65" height="65" class="eq cook"/>
+      <text x="619" y="240" text-anchor="middle" class="t-sm">Rice</text><text x="619" y="253" text-anchor="middle" class="t-sm">Steamer</text><text x="619" y="268" text-anchor="middle" class="t-xs">#10</text>
+      <rect x="747" y="216" width="200" height="65" class="eq disp"/>
+      <text x="837" y="245" text-anchor="middle" class="t-sm">Dispatch Table</text><text x="837" y="260" text-anchor="middle" class="t-xs">#4 · 2000</text>
+      <rect x="915" y="221" width="25" height="25" class="eq disp"/>
+      <rect x="402" y="216" width="180" height="65" class="eq store"/>
+      <text x="492" y="245" text-anchor="middle" class="t-sm">Storage Rack</text><text x="492" y="260" text-anchor="middle" class="t-xs">#7 · plates &amp; bowls</text>
+
+      <!-- dish room -->
+      <text x="975" y="130" class="t-zone">DISH ROOM</text>
+      <rect x="975" y="45" width="65" height="65" class="eq dish"/>
+      <text x="1007" y="74" text-anchor="middle" class="t-sm">Clean</text><text x="1007" y="89" text-anchor="middle" class="t-xs">Rack #13</text>
+      <rect x="1045" y="45" width="65" height="65" class="eq dish"/>
+      <text x="1077" y="74" text-anchor="middle" class="t-sm">Clean</text><text x="1077" y="89" text-anchor="middle" class="t-xs">Rack #13</text>
+      <rect x="1125" y="45" width="65" height="242" class="eq dish"/>
+      <text x="1157" y="156" text-anchor="middle" class="t-sm">Double</text><text x="1157" y="166" text-anchor="middle" class="t-sm">Sink</text><text x="1157" y="177" text-anchor="middle" class="t-xs">#11 · 2400</text>
+      <rect x="975" y="222" width="70" height="65" class="eq dish missing"/>
+      <text x="1010" y="251" text-anchor="middle" class="t-sm">Dirty</text><text x="1010" y="266" text-anchor="middle" class="t-xs">landing</text>
+      <rect x="1052" y="222" width="26" height="65" class="eq dish missing"/>
+      <rect x="1082" y="222" width="26" height="65" class="eq dish missing"/>
+      <text x="1065" y="259" text-anchor="middle" class="t-xs">S</text><text x="1095" y="259" text-anchor="middle" class="t-xs">L</text>
+      <text x="1070" y="302" class="t-xs">bins</text>
+
+      <!-- pass-thrus -->
+      <rect x="772" y="282" width="150" height="16" class="window"/>
+      <text x="847" y="294" text-anchor="middle" class="t-xs" style="fill:#fff">Pass-thru #8 · 1500</text>
+      <rect x="980" y="282" width="70" height="16" class="window"/>
+
+      <!-- outside -->
+      <rect x="747" y="315" width="200" height="62" class="eq disp"/>
+      <text x="847" y="336" text-anchor="middle" class="t-sm">Service Table #4 · 2000</text><text x="847" y="351" text-anchor="middle" class="t-xs">unli soup · unli rice</text><text x="847" y="364" text-anchor="middle" class="t-xs">calamansi · sili · soy · chicken oil</text>
+      <rect x="975" y="315" width="80" height="50" class="eq dish missing"/>
+      <text x="1015" y="338" text-anchor="middle" class="t-sm">Dish</text><text x="1015" y="352" text-anchor="middle" class="t-sm">Return</text>
+      <rect x="1070" y="315" width="80" height="65" class="eq foh missing"/>
+      <text x="1110" y="342" text-anchor="middle" class="t-sm">Beverage</text><text x="1110" y="357" text-anchor="middle" class="t-xs">fridge</text>
+      <rect x="1220" y="45" width="65" height="242" class="eq foh"/>
+      <text x="1252" y="156" text-anchor="middle" class="t-sm">Halo-Halo</text><text x="1252" y="166" text-anchor="middle" class="t-sm">Station</text><text x="1252" y="177" text-anchor="middle" class="t-xs">#17 · 2400</text>
+      <rect x="1320" y="45" width="90" height="242" class="eq foh missing"/>
+      <text x="1365" y="163" text-anchor="middle" class="t-lg">POS</text><text x="1365" y="176" text-anchor="middle" class="t-xs">counter · 2400</text>
+
+      <line x1="40" y1="318" x2="40" y2="378" class="door"/>
+      <line x1="40" y1="300" x2="40" y2="318" class="wall-thin"/><line x1="40" y1="378" x2="40" y2="396" class="wall-thin"/>
+      <path d="M40,318 A60,60 0 0 1 100,378" class="ghost"/><line x1="40" y1="318" x2="100" y2="318" class="ghost"/>
+      <text x="108" y="352" class="t-sm" style="font-weight:600">Back door</text>
+      <!-- ventilation (positions only; duct routes TBD) -->
+      <rect x="249.0" y="159.0" width="22" height="22" class="fa"/><path d="M249.0,159.0 L271.0,181.0 M271.0,159.0 L249.0,181.0" class="fa-x"/>
+      <rect x="449.0" y="159.0" width="22" height="22" class="fa"/><path d="M449.0,159.0 L471.0,181.0 M471.0,159.0 L449.0,181.0" class="fa-x"/>
+      <rect x="649.0" y="159.0" width="22" height="22" class="fa"/><path d="M649.0,159.0 L671.0,181.0 M671.0,159.0 L649.0,181.0" class="fa-x"/>
+      <rect x="849.0" y="159.0" width="22" height="22" class="fa"/><path d="M849.0,159.0 L871.0,181.0 M871.0,159.0 L849.0,181.0" class="fa-x"/>
+      <rect x="1049.0" y="159.0" width="22" height="22" class="fa"/><path d="M1049.0,159.0 L1071.0,181.0 M1071.0,159.0 L1049.0,181.0" class="fa-x"/>
+      <rect x="478.0" y="60.0" width="18" height="18" class="fa"/><text x="487" y="72" text-anchor="middle" class="t-fa">FA</text>
+      <rect x="928.0" y="60.0" width="18" height="18" class="ex"/><text x="937" y="72" text-anchor="middle" class="t-ex">EX</text>
+      <rect x="79.0" y="160.0" width="18" height="18" class="ex"/><text x="88" y="172" text-anchor="middle" class="t-ex">EX</text>
+      <rect x="1071.0" y="151.0" width="18" height="18" class="ex"/><text x="1080" y="163" text-anchor="middle" class="t-ex">EX</text>
+      <rect x="632.0" y="218.0" width="18" height="18" class="ex"/><text x="641" y="230" text-anchor="middle" class="t-ex">EX</text>
+      <!-- electrical -->
+      <path d="M45,55 V285 H945" class="elecline"/>
+      <path d="M45,110 H50 M45,228 H50 M619,285 V281 M697,285 V281 M780,285 V281 M927,285 V281" class="elecline" style="stroke-dasharray:none"/>
+      <rect x="39" y="45" width="12" height="12" class="elecbox"/>
+      <text x="420" y="312" class="t-elec">Electrical line along end wall &amp; front wall</text>
+      <text x="420" y="324" class="t-elec">→ chillers · rice steamer · hot holding · KDS · utensil heater</text>
+      <!-- water -->
+      <path d="M1205,320 V53 H340" class="waterline"/>
+      <path d="M399,53 V57 M786,53 V57 M889,53 V57 M1205,166 H1192 M1205,166 H1218" class="waterline"/>
+      <circle cx="1205" cy="320" r="5" class="gasdot" style="fill:var(--water)"/>
+      <text x="1212" y="332" class="t-water">water supply</text>
+      <text x="960" y="25" class="t-water">Water line → prep sink · 4-burner · stock pot · dish sink · halo-halo</text>
+      </g><!-- FLOWS -->
+      <g class="flow f-food">
+        <path d="M20,336 H362 V203 H127" marker-end="url(#a-food)"/>
+        <text x="180" y="199" class="t-xs">deliveries: back door → entry</text>
+        <path d="M127,136 H385 V114" marker-end="url(#a-food)"/>
+        <path d="M420,114 V150 H480 V114" marker-end="url(#a-food)"/>
+        <path d="M700,114 V218" marker-end="url(#a-food)"/>
+        <path d="M725,220 V190 H825 V218" marker-end="url(#a-food)"/>
+        <path d="M620,220 V205 H805 V218" marker-end="url(#a-food)"/>
+        <path d="M847,289 V310" marker-end="url(#a-food)"/>
+        <path d="M847,380 V425 H1490" marker-end="url(#a-food)"/>
+        <text x="890" y="419" class="t-xs">to diners via hallway</text>
+      </g>
+      <g class="flow f-dirty">
+        <path d="M1490,480 H1015 V370" marker-end="url(#a-dirty)"/>
+        <path d="M1010,312 V275" marker-end="url(#a-dirty)"/>
+        <path d="M1022,220 V196 H1120" marker-end="url(#a-dirty)"/>
+        <path d="M1122,85 H1114" marker-end="url(#a-dirty)"/>
+        <path d="M1007,112 V209 H492 V218" marker-end="url(#a-dirty)"/>
+        <text x="890" y="205" class="t-xs">clean plates</text>
+      </g>
+      <g class="flow f-waste">
+        <path d="M1046,247 H1050"/>
+        <path d="M1095,220 V215 H375 V362 H20" marker-end="url(#a-waste)"/>
+        <text x="150" y="376" class="t-xs">waste out via back door (after service)</text>
+      </g>
+      <g class="flow f-order">
+        <path d="M1490,166 H1415" marker-end="url(#a-order)"/>
+        <text x="1420" y="159" class="t-xs">order</text>
+        <path d="M1490,452 H885 V385" marker-end="url(#a-order)"/>
+        <text x="900" y="446" class="t-xs">self-serve refills</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>Food only moves one way — chiller → prep sink → grill → hot holding / rice steamer → dispatch table → pass-thru → service table — so raw meat never doubles back past plated food. The dirty-dish loop enters on the far right and ends as clean plates next to dispatch, without crossing the cook line. The two chillers sit on the end wall with a rack on either side; the preferred entry sits between the two front-wall storage racks, and the comfort room sits at the storage end of the hallway; waste leaves through the kitchen entry and out the back door, ideally after service hours.</figcaption>
+  </figure>
+</section>
+
+<!-- PROCESS -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Diagram 3 · Process</span>
+    <h2>How an inasal order moves through the kitchen</h2>
+    <p class="note">One diagram per process, drawn on the same plan. Steps 01–08 follow one order from the chiller to the diner; 09–12 are the support routines that run alongside.</p>
+  </div>
+  <div class="steps">
+    <article class="step">
+      <div class="step-head"><span class="step-no">01</span><h3>Receiving supplies</h3></div>
+      <div class="step-fig"><svg viewBox="-80 40 860 430" role="img" aria-label="Receiving supplies: Supplies come in through the back door and the kitchen entry. Chicken and marinated meat go straight into the chillers. Rice, dry goods and charcoal go on the storage racks."><defs><marker id="a-step" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-step"/></marker></defs><use href="#basePlan" class="base"/><rect x="327" y="275" width="70" height="30" rx="4" class="hl" style="stroke-width:3.0"/><rect x="44" y="50" width="76" height="238" rx="4" class="hl" style="stroke-width:3.0"/><rect x="200" y="57" width="120" height="65" rx="4" class="hl" style="stroke-width:3.0"/><rect x="200" y="222" width="120" height="65" rx="4" class="hl" style="stroke-width:3.0"/><path d="M45,340 L362,340 L362,170 L127,170" class="route" style="stroke-width:4.0" marker-end="url(#a-step)"/><path d="M300,170 L300,127" class="route" style="stroke-width:4.0" marker-end="url(#a-step)"/><path d="M230,170 L230,217" class="route" style="stroke-width:4.0" marker-end="url(#a-step)"/><circle cx="200" cy="385" r="18.8" class="badge"/><text x="200" y="392.4" text-anchor="middle" class="badge-t" style="font-size:20.2px">1</text><circle cx="150" cy="135" r="18.8" class="badge"/><text x="150" y="142.4" text-anchor="middle" class="badge-t" style="font-size:20.2px">2</text><circle cx="300" cy="150" r="18.8" class="badge"/><text x="300" y="157.4" text-anchor="middle" class="badge-t" style="font-size:20.2px">3</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Supplies come in through the back door and the kitchen entry.</span></li><li><span class="bn">2</span><span>Chicken and marinated meat go straight into the chillers.</span></li><li><span class="bn">3</span><span>Rice, dry goods and charcoal go on the storage racks.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">02</span><h3>Take meat from the chiller</h3></div>
+      <div class="step-fig"><svg viewBox="20 30 640 320" role="img" aria-label="Take meat from the chiller: Take marinated chicken from the chiller. Skewer or portion it on the prep sink table. Bring it to the griller."><use href="#basePlan" class="base"/><rect x="44" y="50" width="76" height="119" rx="4" class="hl" style="stroke-width:2.2"/><rect x="324" y="57" width="150" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="474" y="57" width="135" height="65" rx="4" class="hl" style="stroke-width:2.2"/><path d="M124,150 L385,150 L385,127" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><path d="M440,127 L440,165 L541,165 L541,127" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><circle cx="150" cy="190" r="14.0" class="badge"/><text x="150" y="195.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">1</text><circle cx="399" cy="195" r="14.0" class="badge"/><text x="399" y="200.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">2</text><circle cx="560" cy="195" r="14.0" class="badge"/><text x="560" y="200.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">3</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Take marinated chicken from the chiller.</span></li><li><span class="bn">2</span><span>Skewer or portion it on the prep sink table.</span></li><li><span class="bn">3</span><span>Bring it to the griller.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">03</span><h3>Take charcoal from the rack</h3></div>
+      <div class="step-fig"><svg viewBox="20 30 640 320" role="img" aria-label="Take charcoal from the rack: Take charcoal from the box at the bottom of the storage rack. Load and light both grillers, with the range hood running."><use href="#basePlan" class="base"/><rect x="200" y="222" width="120" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="474" y="57" width="270" height="65" rx="4" class="hl" style="stroke-width:2.2"/><path d="M260,219 L260,170 L610,170 L610,127" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><circle cx="230" cy="195" r="14.0" class="badge"/><text x="230" y="200.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">1</text><circle cx="640" cy="160" r="14.0" class="badge"/><text x="640" y="165.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">2</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Take charcoal from the box at the bottom of the storage rack.</span></li><li><span class="bn">2</span><span>Load and light both grillers, with the range hood running.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">04</span><h3>Grill and place in hot holding</h3></div>
+      <div class="step-fig"><svg viewBox="400 30 640 320" role="img" aria-label="Grill and place in hot holding: Grill the chicken in batches ahead of the rush. Move cooked chicken into the hot holding cabinet, ready for orders."><use href="#basePlan" class="base"/><rect x="474" y="57" width="270" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="652" y="222" width="90" height="65" rx="4" class="hl" style="stroke-width:2.2"/><path d="M697,127 L697,217" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><circle cx="665" cy="170" r="14.0" class="badge"/><text x="665" y="175.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">1</text><circle cx="697" cy="305" r="14.0" class="badge"/><text x="697" y="310.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">2</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Grill the chicken in batches ahead of the rush.</span></li><li><span class="bn">2</span><span>Move cooked chicken into the hot holding cabinet, ready for orders.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">05</span><h3>Order is taken</h3></div>
+      <div class="step-fig"><svg viewBox="700 30 1060 530" role="img" aria-label="Order is taken: customer pays at the POS, the order is sent to an order printer or kitchen display at the dispatch table, dispatch calls it to the griller."><use href="#basePlan" class="base"/>
+<rect x="1320" y="45" width="90" height="242" rx="4" class="hl" style="stroke-width:3.6"/>
+<rect x="747" y="222" width="200" height="65" rx="4" class="hl" style="stroke-width:3.6"/>
+<rect x="757" y="228" width="46" height="30" rx="3" class="kds"/>
+<text x="780" y="248" text-anchor="middle" class="t-xs kds-t">KDS</text>
+<path d="M1480,166 L1415,166" class="route" style="stroke-width:5.0" marker-end="url(#a-step)"/>
+<path d="M1318,120 C1150,-10 880,40 782,222" class="route data" style="stroke-width:4.1" marker-end="url(#a-step)"/>
+<path d="M760,224 L700,150 L560,130" class="route" style="stroke-width:5.0" marker-end="url(#a-step)"/>
+<circle cx="1530" cy="125" r="23.2" class="badge"/><text x="1530" y="134.1" text-anchor="middle" class="badge-t" style="font-size:24.8px">1</text>
+<circle cx="1060" cy="60" r="23.2" class="badge"/><text x="1060" y="69.1" text-anchor="middle" class="badge-t" style="font-size:24.8px">2</text>
+<circle cx="880" cy="190" r="23.2" class="badge"/><text x="880" y="199.1" text-anchor="middle" class="badge-t" style="font-size:24.8px">3</text>
+</svg></div>
+      <ol><li><span class="bn">1</span><span>Customer orders and pays at the POS.</span></li><li><span class="bn">2</span><span>The order is sent straight to an order printer or kitchen display (KDS) at the dispatch table. Nobody has to carry a slip.</span></li><li><span class="bn">3</span><span>Dispatch reads the ticket and calls it to the griller. The ticket stays at dispatch to check the tray before it goes out.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">06</span><h3>Back to the griller</h3></div>
+      <div class="step-fig"><svg viewBox="400 30 640 320" role="img" aria-label="Back to the griller: Take the portion out of hot holding. Finish it on the griller: reheat and char so it's served hot and smoky."><use href="#basePlan" class="base"/><rect x="652" y="222" width="90" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="609" y="57" width="135" height="65" rx="4" class="hl" style="stroke-width:2.2"/><path d="M697,219 L697,127" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><circle cx="655" cy="185" r="14.0" class="badge"/><text x="655" y="190.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">1</text><circle cx="740" cy="160" r="14.0" class="badge"/><text x="740" y="165.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">2</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Take the portion out of hot holding.</span></li><li><span class="bn">2</span><span>Finish it on the griller: reheat and char so it's served hot and smoky.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">07</span><h3>Plating</h3></div>
+      <div class="step-fig"><svg viewBox="380 30 640 320" role="img" aria-label="Plating: Chicken comes off the griller. Rice from the steamer (next to hot holding). Plate or bowl from the storage rack. Assemble on the dispatch table with heated utensils."><use href="#basePlan" class="base"/><rect x="609" y="57" width="135" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="587" y="222" width="65" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="402" y="222" width="180" height="65" rx="4" class="hl" style="stroke-width:2.2"/><rect x="747" y="222" width="200" height="65" rx="4" class="hl" style="stroke-width:2.2"/><path d="M676,127 L676,168 L830,168 L830,217" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><path d="M619,219 L619,195 L800,195 L800,217" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><path d="M492,219 L492,145 L870,145 L870,217" class="route" style="stroke-width:3.0" marker-end="url(#a-step)"/><circle cx="650" cy="190" r="14.0" class="badge"/><text x="650" y="195.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">1</text><circle cx="619" cy="305" r="14.0" class="badge"/><text x="619" y="310.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">2</text><circle cx="460" cy="195" r="14.0" class="badge"/><text x="460" y="200.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">3</text><circle cx="975" cy="240" r="14.0" class="badge"/><text x="975" y="245.5" text-anchor="middle" class="badge-t" style="font-size:15.0px">4</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Chicken comes off the griller.</span></li><li><span class="bn">2</span><span>Rice from the steamer (next to hot holding).</span></li><li><span class="bn">3</span><span>Plate or bowl from the storage rack.</span></li><li><span class="bn">4</span><span>Assemble on the dispatch table with heated utensils.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">08</span><h3>Dispatch and serve</h3></div>
+      <div class="step-fig"><svg viewBox="700 40 1060 530" role="img" aria-label="Dispatch and serve: The plated order goes out through the pass-thru. At the service table, diners help themselves to unli soup, rice and condiments. The order is carried to diners through the hallway."><use href="#basePlan" class="base"/><rect x="747" y="222" width="200" height="65" rx="4" class="hl" style="stroke-width:3.6"/><rect x="772" y="282" width="150" height="16" rx="4" class="hl" style="stroke-width:3.6"/><rect x="747" y="315" width="200" height="62" rx="4" class="hl" style="stroke-width:3.6"/><path d="M847,262 L847,310" class="route" style="stroke-width:5.0" marker-end="url(#a-step)"/><path d="M847,382 L847,450 L1470,450" class="route" style="stroke-width:5.0" marker-end="url(#a-step)"/><circle cx="720" cy="300" r="23.2" class="badge"/><text x="720" y="309.1" text-anchor="middle" class="badge-t" style="font-size:24.8px">1</text><circle cx="990" cy="346" r="23.2" class="badge"/><text x="990" y="355.1" text-anchor="middle" class="badge-t" style="font-size:24.8px">2</text><circle cx="1520" cy="420" r="23.2" class="badge"/><text x="1520" y="429.1" text-anchor="middle" class="badge-t" style="font-size:24.8px">3</text></svg></div>
+      <ol><li><span class="bn">1</span><span>The plated order goes out through the pass-thru.</span></li><li><span class="bn">2</span><span>At the service table, diners help themselves to unli soup, rice and condiments.</span></li><li><span class="bn">3</span><span>The order is carried to diners through the hallway.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">09</span><h3>Unli soup and rice refill</h3></div>
+      <div class="step-fig"><svg viewBox="540 40 700 350" role="img" aria-label="Unli soup and rice refill: Soup stays hot in the stock pot. Rice comes from the steamer. Refill the service table's soup and rice pots through the pass-thru."><use href="#basePlan" class="base"/><rect x="829" y="57" width="120" height="65" rx="4" class="hl" style="stroke-width:2.4"/><rect x="587" y="222" width="65" height="65" rx="4" class="hl" style="stroke-width:2.4"/><rect x="772" y="282" width="150" height="16" rx="4" class="hl" style="stroke-width:2.4"/><rect x="747" y="315" width="200" height="62" rx="4" class="hl" style="stroke-width:2.4"/><path d="M889,127 L889,200 L905,200 L905,278" class="route" style="stroke-width:3.3" marker-end="url(#a-step)"/><path d="M619,219 L619,200 L790,200 L790,278" class="route" style="stroke-width:3.3" marker-end="url(#a-step)"/><path d="M847,300 L847,311" class="route" style="stroke-width:3.3" marker-end="url(#a-step)"/><circle cx="930" cy="160" r="15.3" class="badge"/><text x="930" y="166.0" text-anchor="middle" class="badge-t" style="font-size:16.4px">1</text><circle cx="580" cy="190" r="15.3" class="badge"/><text x="580" y="196.0" text-anchor="middle" class="badge-t" style="font-size:16.4px">2</text><circle cx="1000" cy="346" r="15.3" class="badge"/><text x="1000" y="352.0" text-anchor="middle" class="badge-t" style="font-size:16.4px">3</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Soup stays hot in the stock pot.</span></li><li><span class="bn">2</span><span>Rice comes from the steamer.</span></li><li><span class="bn">3</span><span>Refill the service table's soup and rice pots through the pass-thru.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">10</span><h3>Dish return and washing</h3></div>
+      <div class="step-fig"><svg viewBox="380 30 1100 550" role="img" aria-label="Dish return and washing: Diners leave used dishes at the dish return. Dishes pass through the dish pass-thru onto the landing. Scrape solid and liquid waste into separate bins. Wash in the double sink. Air-dry on the clean racks. Clean plates go back to the storage rack by the entry."><use href="#basePlan" class="base"/><rect x="975" y="315" width="80" height="50" rx="4" class="hl" style="stroke-width:3.8"/><rect x="980" y="282" width="70" height="16" rx="4" class="hl" style="stroke-width:3.8"/><rect x="975" y="222" width="133" height="65" rx="4" class="hl" style="stroke-width:3.8"/><rect x="1125" y="45" width="65" height="242" rx="4" class="hl" style="stroke-width:3.8"/><rect x="975" y="45" width="135" height="65" rx="4" class="hl" style="stroke-width:3.8"/><rect x="402" y="222" width="180" height="65" rx="4" class="hl" style="stroke-width:3.8"/><path d="M1430,450 L1015,450 L1015,370" class="route" style="stroke-width:5.2" marker-end="url(#a-step)"/><path d="M1015,312 L1015,292" class="route" style="stroke-width:5.2" marker-end="url(#a-step)"/><path d="M1010,219 L1010,195 L1120,195" class="route" style="stroke-width:5.2" marker-end="url(#a-step)"/><path d="M1122,78 L1114,78" class="route" style="stroke-width:5.2" marker-end="url(#a-step)"/><path d="M1007,112 L1007,160 L492,160 L492,217" class="route" style="stroke-width:5.2" marker-end="url(#a-step)"/><circle cx="1300" cy="420" r="24.1" class="badge"/><text x="1300" y="429.5" text-anchor="middle" class="badge-t" style="font-size:25.8px">1</text><circle cx="955" cy="300" r="24.1" class="badge"/><text x="955" y="309.5" text-anchor="middle" class="badge-t" style="font-size:25.8px">2</text><circle cx="1080" cy="310" r="24.1" class="badge"/><text x="1080" y="319.5" text-anchor="middle" class="badge-t" style="font-size:25.8px">3</text><circle cx="1157" cy="215" r="24.1" class="badge"/><text x="1157" y="224.5" text-anchor="middle" class="badge-t" style="font-size:25.8px">4</text><circle cx="1040" cy="135" r="24.1" class="badge"/><text x="1040" y="144.5" text-anchor="middle" class="badge-t" style="font-size:25.8px">5</text><circle cx="460" cy="195" r="24.1" class="badge"/><text x="460" y="204.5" text-anchor="middle" class="badge-t" style="font-size:25.8px">6</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Diners leave used dishes at the dish return.</span></li><li><span class="bn">2</span><span>Dishes pass through the dish pass-thru onto the landing.</span></li><li><span class="bn">3</span><span>Scrape solid and liquid waste into separate bins.</span></li><li><span class="bn">4</span><span>Wash in the double sink.</span></li><li><span class="bn">5</span><span>Air-dry on the clean racks.</span></li><li><span class="bn">6</span><span>Clean plates go back to the storage rack by the entry.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">11</span><h3>Waste out</h3></div>
+      <div class="step-fig"><svg viewBox="-60 30 1200 600" role="img" aria-label="Waste out: Tie and seal the bags at the bins. Carry them along the aisle to the kitchen entry. Out through the back door, after service or between rushes."><use href="#basePlan" class="base"/><rect x="1052" y="222" width="56" height="65" rx="4" class="hl" style="stroke-width:4.1"/><rect x="327" y="275" width="70" height="30" rx="4" class="hl" style="stroke-width:4.1"/><rect x="20" y="310" width="40" height="76" rx="4" class="hl" style="stroke-width:4.1"/><path d="M1080,219 L1080,190 L375,190 L375,360 L45,360" class="route" style="stroke-width:5.6" marker-end="url(#a-step)"/><circle cx="1095" cy="150" r="26.2" class="badge"/><text x="1095" y="160.3" text-anchor="middle" class="badge-t" style="font-size:28.1px">1</text><circle cx="420" cy="160" r="26.2" class="badge"/><text x="420" y="170.3" text-anchor="middle" class="badge-t" style="font-size:28.1px">2</text><circle cx="130" cy="420" r="26.2" class="badge"/><text x="130" y="430.3" text-anchor="middle" class="badge-t" style="font-size:28.1px">3</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Tie and seal the bags at the bins.</span></li><li><span class="bn">2</span><span>Carry them along the aisle to the kitchen entry.</span></li><li><span class="bn">3</span><span>Out through the back door, after service or between rushes.</span></li></ol>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">12</span><h3>Halo-halo and drinks</h3></div>
+      <div class="step-fig"><svg viewBox="1040 30 760 380" role="img" aria-label="Halo-halo and drinks: Customer orders at the POS. Halo-halo is made at the station behind the counter. Bottled drinks come from the beverage fridge. Handed over to the customer at the counter."><use href="#basePlan" class="base"/><rect x="1320" y="45" width="90" height="242" rx="4" class="hl" style="stroke-width:2.6"/><rect x="1220" y="45" width="65" height="242" rx="4" class="hl" style="stroke-width:2.6"/><rect x="1070" y="315" width="80" height="65" rx="4" class="hl" style="stroke-width:2.6"/><path d="M1480,166 L1415,166" class="route" style="stroke-width:3.6" marker-end="url(#a-step)"/><path d="M1318,110 L1290,110" class="route" style="stroke-width:3.6" marker-end="url(#a-step)"/><path d="M1340,292 L1340,347 L1154,347" class="route" style="stroke-width:3.6" marker-end="url(#a-step)"/><path d="M1415,240 L1480,240" class="route" style="stroke-width:3.6" marker-end="url(#a-step)"/><circle cx="1520" cy="125" r="16.6" class="badge"/><text x="1520" y="131.5" text-anchor="middle" class="badge-t" style="font-size:17.8px">1</text><circle cx="1300" cy="70" r="16.6" class="badge"/><text x="1300" y="76.5" text-anchor="middle" class="badge-t" style="font-size:17.8px">2</text><circle cx="1200" cy="300" r="16.6" class="badge"/><text x="1200" y="306.5" text-anchor="middle" class="badge-t" style="font-size:17.8px">3</text><circle cx="1520" cy="280" r="16.6" class="badge"/><text x="1520" y="286.5" text-anchor="middle" class="badge-t" style="font-size:17.8px">4</text></svg></div>
+      <ol><li><span class="bn">1</span><span>Customer orders at the POS.</span></li><li><span class="bn">2</span><span>Halo-halo is made at the station behind the counter.</span></li><li><span class="bn">3</span><span>Bottled drinks come from the beverage fridge.</span></li><li><span class="bn">4</span><span>Handed over to the customer at the counter.</span></li></ol>
+    </article>
+  </div>
+</section>
+
+<!-- FUTURE -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Future R&amp;D</span>
+    <h2>Room to grow the menu</h2>
+    <p class="note">The layout can take new menu tests without moving anything. Frying uses the 4-burner range as quoted; baking needs one spec change to the same unit.</p>
+  </div>
+  <div class="steps">
+    <article class="step">
+      <div class="step-head"><span class="step-no">R&amp;D 1</span><h3>Fried menu on the 4-burner range</h3></div>
+      <div class="step-fig"><svg viewBox="20 30 960 480" role="img" aria-label="Frying on the 4-burner: chiller, oil from rack, fry on one high-pressure burner, drain and plate at dispatch, out through pass-thru."><use href="#basePlan" class="base"/><rect x="44" y="50" width="76" height="119" rx="4" class="hl" style="stroke-width:3.3"/><rect x="200" y="222" width="120" height="65" rx="4" class="hl" style="stroke-width:3.3"/><rect x="744" y="57" width="85" height="65" rx="4" class="hl" style="stroke-width:3.3"/><rect x="747" y="222" width="200" height="65" rx="4" class="hl" style="stroke-width:3.3"/><rect x="772" y="282" width="150" height="16" rx="4" class="hl" style="stroke-width:3.3"/><path d="M124,150 L786,150 L786,127" class="route" style="stroke-width:4.5" marker-end="url(#a-step)"/><path d="M260,219 L260,190 L760,190 L760,127" class="route" style="stroke-width:4.5" marker-end="url(#a-step)"/><path d="M810,127 L810,217" class="route" style="stroke-width:4.5" marker-end="url(#a-step)"/><path d="M870,289 L870,312" class="route" style="stroke-width:4.5" marker-end="url(#a-step)"/><circle cx="160" cy="110" r="21.0" class="badge"/><text x="160" y="118.2" text-anchor="middle" class="badge-t" style="font-size:22.5px">1</text><circle cx="222" cy="190" r="21.0" class="badge"/><text x="222" y="198.2" text-anchor="middle" class="badge-t" style="font-size:22.5px">2</text><circle cx="875" cy="150" r="21.0" class="badge"/><text x="875" y="158.2" text-anchor="middle" class="badge-t" style="font-size:22.5px">3</text><circle cx="905" cy="195" r="21.0" class="badge"/><text x="905" y="203.2" text-anchor="middle" class="badge-t" style="font-size:22.5px">4</text><circle cx="950" cy="330" r="21.0" class="badge"/><text x="950" y="338.2" text-anchor="middle" class="badge-t" style="font-size:22.5px">5</text></svg></div>
+      <ol>
+        <li><span class="bn">1</span><span>Chicken, pork or fish comes from the chiller. Breaded items get coated at the prep table.</span></li>
+        <li><span class="bn">2</span><span>Cooking oil is stored on the storage rack.</span></li>
+        <li><span class="bn">3</span><span>Fry in a deep kawali or fry pot on one high-pressure burner, with the hood running. The other burners stay free for sauces and sides.</span></li>
+        <li><span class="bn">4</span><span>Drain on a wire rack at the dispatch table, then plate.</span></li>
+        <li><span class="bn">5</span><span>It goes out through the pass-thru like any other order.</span></li>
+      </ol>
+      <div class="rd-notes">
+        <div><b>Good for testing</b><span>Chicken skin, fried chicken, lumpia, tokwa, calamares: sides that pair with inasal and unli rice.</span></div>
+        <div><b>Before going live</b><span>Oil thermometer, lid and fire blanket or K-class extinguisher by the range; splash guard on the grill side; used oil collected in sealed containers, never poured into the dish sink; grease trap on the sink drain.</span></div>
+        <div><b>If frying sells</b><span>Replace the kawali with a dedicated gas deep fryer. Plan it as a separate unit under the hood so the 4-burner stays free.</span></div>
+      </div>
+    </article>
+    <article class="step">
+      <div class="step-head"><span class="step-no">R&amp;D 2</span><h3>Oven-baked option under the 4-burner</h3></div>
+      <div class="step-fig"><svg class="elev" viewBox="0 0 1080 390" role="img" aria-label="4-burner high-pressure range front views: current version with undershelf, optional version with an oven base in the same 850 by 650 by 850 footprint; side section shows the oven door opening about 450 mm into a 1030 mm aisle, leaving about 580 mm to pass.">
+  <!-- front A -->
+  <text x="146" y="40" text-anchor="middle" class="t-lg">Current · #5</text>
+  <text x="146" y="64" text-anchor="middle" class="t-xs">burners + undershelf</text>
+  <rect x="40" y="90" width="212" height="14" class="eq cook"/>
+  <g class="eq cook"><rect x="58" y="80" width="34" height="10"/><rect x="104" y="80" width="34" height="10"/><rect x="154" y="80" width="34" height="10"/><rect x="200" y="80" width="34" height="10"/></g>
+  <circle cx="75" cy="118" r="6" class="knob"/><circle cx="121" cy="118" r="6" class="knob"/><circle cx="171" cy="118" r="6" class="knob"/><circle cx="217" cy="118" r="6" class="knob"/>
+  <line x1="44" y1="104" x2="44" y2="302" class="leg"/><line x1="248" y1="104" x2="248" y2="302" class="leg"/>
+  <rect x="44" y="250" width="204" height="8" class="shelf"/>
+  <text x="146" y="236" text-anchor="middle" class="t-xs">undershelf</text>
+  <text x="146" y="330" text-anchor="middle" class="t-xs">850 × 650 × 850</text>
+  <!-- front B -->
+  <text x="420" y="40" text-anchor="middle" class="t-lg">Option · oven base</text>
+  <text x="420" y="64" text-anchor="middle" class="t-xs">same footprint</text>
+  <rect x="314" y="90" width="212" height="14" class="eq cook"/>
+  <g class="eq cook"><rect x="332" y="80" width="34" height="10"/><rect x="378" y="80" width="34" height="10"/><rect x="428" y="80" width="34" height="10"/><rect x="474" y="80" width="34" height="10"/></g>
+  <circle cx="349" cy="118" r="6" class="knob"/><circle cx="395" cy="118" r="6" class="knob"/><circle cx="445" cy="118" r="6" class="knob"/><circle cx="491" cy="118" r="6" class="knob"/>
+  <rect x="318" y="132" width="204" height="160" rx="4" class="oven"/>
+  <rect x="340" y="150" width="160" height="20" rx="3" class="handle"/>
+  <rect x="350" y="185" width="140" height="80" rx="4" class="ovwin"/>
+  <text x="420" y="230" text-anchor="middle" class="t-sm">OVEN</text>
+  <line x1="318" y1="292" x2="318" y2="302" class="leg"/><line x1="522" y1="292" x2="522" y2="302" class="leg"/>
+  <text x="420" y="330" text-anchor="middle" class="t-xs">with thermostat</text>
+  <!-- section -->
+  <text x="800" y="40" text-anchor="middle" class="t-lg">Side section · door swing</text>
+  <line x1="596" y1="60" x2="596" y2="310" class="sec-wall"/>
+  <text x="604" y="382" text-anchor="middle" class="t-xs">back wall</text>
+  <circle cx="606" cy="96" r="5" class="gasdot"/>
+  <text x="614" y="70" class="t-gas">gas pipe</text>
+  <rect x="620" y="90" width="162" height="14" class="eq cook"/>
+  <rect x="624" y="132" width="154" height="160" class="oven"/>
+  <line x1="778" y1="290" x2="890" y2="290" class="door-open"/>
+  <path d="M778,160 A130,130 0 0 1 890,288" class="swing"/>
+  <text x="834" y="316" text-anchor="middle" class="t-xs">door ≈ 450</text>
+  <rect x="1030" y="90" width="40" height="202" class="eq disp"/>
+  <text x="1075" y="330" text-anchor="end" class="t-xs">front row</text>
+  <line x1="782" y1="355" x2="1030" y2="355" class="dim"/><line x1="782" y1="348" x2="782" y2="362" class="dim"/><line x1="1030" y1="348" x2="1030" y2="362" class="dim"/>
+  <text x="906" y="382" text-anchor="middle" class="t-xs">aisle ≈ 1,030</text>
+  <line x1="890" y1="270" x2="1030" y2="270" class="dim ok"/>
+  <text x="960" y="258" text-anchor="middle" class="t-xs ok-t">≈ 580 to pass</text>
+</svg></div>
+      <ol>
+        <li><span class="bn">1</span><span>Swap the open undershelf on quote item #5 for a gas oven base. The footprint (850 × 650 × 850), gas drop and hood coverage stay the same.</span></li>
+        <li><span class="bn">2</span><span>The burners on top work as quoted, and the oven runs on its own thermostat.</span></li>
+        <li><span class="bn">3</span><span>Pans come out of the oven straight onto the dispatch table across the aisle.</span></li>
+      </ol>
+      <div class="rd-notes">
+        <div><b>Good for testing</b><span>Baked or roasted chicken, baked rice dishes, leche flan and other baked desserts.</span></div>
+        <div><b>Watch the aisle</b><span>The oven door drops about 450 mm into a 1,030 mm aisle, leaving about 580 mm to pass. Keep the front row clear while the oven is open.</span></div>
+        <div><b>Quote impact</b><span>Price #5 as an option: "4-Burner High Pressure Range with Oven Base". Decide before fabrication, because retrofitting an oven into the undershelf later is costly.</span></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ZONES -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Zone descriptions</span>
+    <h2>What each zone does and what's in it</h2>
+    <p class="note">Orange item numbers mean the layout needs it but the quotation doesn't have it yet.</p>
+  </div>
+  <div class="zones">
+    <article class="zone" style="--c:var(--z-store)">
+      <span class="tag">Zone 1 · Back of house</span>
+      <h3>Storage — cold &amp; dry</h3>
+      <p>First stop for all deliveries. Chicken and marinated meat go into the chillers; rice, charcoal, bottled goods and dry supplies go on the racks. Keep it close to the kitchen entry so crates don't travel down the cook line.</p>
+      <div class="lbl">Equipment</div>
+      <ul>
+        <li><span class="n">#18</span><span>2 × 4-Door Chiller/Freezer (1220 × 760) — stacked along the end wall, doors opening into a clear zone with a rack on either side</span></li>
+        <li><span class="n">#7</span><span>3 × SS Storage Rack, 5 layers — two flanking the chiller door zone (back and front wall, charcoal box at the bottom), one after the entry for clean plates &amp; bowls (quoted qty 1)</span></li>
+      </ul>
+      <div class="lbl">Next to</div>
+      <p>Preparation (must touch) · Cooking (chiller within one step of the grill)</p>
+    </article>
+
+    <article class="zone" style="--c:var(--z-prep)">
+      <span class="tag">Zone 2 · Back of house</span>
+      <h3>Preparation</h3>
+      <p>Washing, cutting, skewering and marinating before grilling. Table with chopping board and a sink for washing ingredients, sitting between the chiller and the grill.</p>
+      <div class="lbl">Equipment</div>
+      <ul>
+        <li><span class="n">#2</span><span>SS Sink Table lengthened to 1500 × 650 with chopping board and gooseneck faucet — beside the griller</span></li>
+        <li><span class="n">#15</span><span>SS Wall Cladding with shelves &amp; faucets behind the line</span></li>
+        <li><span class="n">#16</span><span>SS Wall Shelves on available walls</span></li>
+      </ul>
+      <div class="lbl">Next to</div>
+      <p>Storage · Cooking. Keep veggies/condiment prep away from raw chicken on the same board.</p>
+    </article>
+
+    <article class="zone" style="--c:var(--z-cook)">
+      <span class="tag">Zone 3 · Back of house</span>
+      <h3>Cooking</h3>
+      <p>The hot line along the back wall. Grills handle inasal; the range handles sides; the stock pot runs the unli soup. One continuous hood runs over the grills, range and stock pot. The back-wall row (rack, prep table and cook line) stands about 120 mm off the wall so the gas pipe, entering through the end-wall corner straight from the tank farm, runs in the gap behind it.</p>
+      <div class="lbl">Equipment</div>
+      <ul>
+        <li><span class="n">#1</span><span>2 × SS Charcoal Griller, 2 layers (1350 × 650)</span></li>
+        <li><span class="n">#5</span><span>SS 4-Burner High Pressure Range (850)</span></li>
+        <li><span class="n">#6</span><span>SS 3-Burner High Pressure Stock Pot (1200, low 475 H)</span></li>
+        <li class="gap"><span class="n">gas</span><span>LPG line from the outside tank farm, run along the back wall behind the grillers, 4-burner and stock pot</span></li>
+        <li><span class="n">#14</span><span>1 × SS Range Hood, ≈ 4750 long — over grills, range and stock pot</span></li>
+      </ul>
+      <div class="lbl">Next to</div>
+      <p>Preparation · Plating across the aisle. Keep away from the dish sink.</p>
+    </article>
+
+    <article class="zone" style="--c:var(--z-disp)">
+      <span class="tag">Zone 4 · Kitchen → counter</span>
+      <h3>Plating &amp; Dispatch</h3>
+      <p>Where every order is assembled on one 2 m dispatch table: chicken from hot holding right beside it, rice from the steamer next to that, plates from the storage rack by the entry, heated utensils. Plated food leaves only through the pass-thru. On the other side, the 2 m service table holds the self-serve unli soup, unli rice and condiments, with storage underneath.</p>
+      <div class="lbl">Equipment</div>
+      <ul>
+        <li><span class="n">#3</span><span>SS Hot Holding Cabinet, electric, 15 layers</span></li>
+        <li><span class="n">#10</span><span>SS Rice Steamer, 12 layers — beside hot holding</span></li>
+        <li><span class="n">#4</span><span>SS Preparation Table 2000, 3 layers — 1 dispatch (inside), 1 service table (outside)</span></li>
+        <li class="gap"><span class="n">new</span><span>Order printer or kitchen display (KDS) at the dispatch table, linked to the POS</span></li>
+        <li><span class="n">#19</span><span>SS Utensils Heater, 4 cups</span></li>
+        <li><span class="n">#8</span><span>SS Pass-Thru Window 1500 (open)</span></li>
+        <li class="gap"><span class="n">new</span><span>Soup/rice warmers and condiment trays for the service table</span></li>
+      </ul>
+      <div class="lbl">Next to</div>
+      <p>Cooking · Service table (through pass-thru, facing the hallway) · Clean dish racks</p>
+    </article>
+
+    <article class="zone" style="--c:var(--z-dish)">
+      <span class="tag">Zone 5 · Back of house</span>
+      <h3>Dishwashing &amp; Waste</h3>
+      <p>Dirty plates come in through their own pass-thru, get scraped and segregated (solid food waste, liquid waste, trash), washed in the double sink, then dried on the clean racks nearest dispatch. Bagged waste goes out through the kitchen entry and the back door beside the comfort room — schedule it after service or between rushes, and keep bins sealed.</p>
+      <div class="lbl">Equipment</div>
+      <ul>
+        <li><span class="n">#11</span><span>SS Double-Tub Dishwashing Sink, lengthened to ≈ 2400 with drainboards — full right wall</span></li>
+        <li><span class="n">#13</span><span>2 × SS Dish Rack, 4 layers (clean)</span></li>
+        <li class="gap"><span class="n">new</span><span>Second pass-thru window for dish return</span></li>
+        <li class="gap"><span class="n">new</span><span>Dirty-dish landing table + solid/liquid waste bins, trash bin</span></li>
+      </ul>
+      <div class="lbl">Next to</div>
+      <p>Dish return counter · Dispatch (for clean plates). Separated from the hot line.</p>
+    </article>
+
+    <article class="zone" style="--c:var(--z-foh)">
+      <span class="tag">Zone 6 · Front of house</span>
+      <h3>POS, Halo-Halo &amp; Beverage</h3>
+      <p>Customers order and pay at the POS. Behind the cashier, the halo-halo station and the bottled-beverage fridge let one counter staff serve desserts and drinks without entering the kitchen.</p>
+      <div class="lbl">Equipment</div>
+      <ul>
+        <li><span class="n">#17</span><span>SS Halo-Halo Station, lengthened to 2400 (matches sink wall), with undercounter chiller/freezer, sink, ice bin, ice maker, cup storage</span></li>
+        <li class="gap"><span class="n">new</span><span>POS counter, 2400 long</span></li>
+        <li class="gap"><span class="n">new</span><span>Beverage display fridge (or client-supplied)</span></li>
+      </ul>
+      <div class="lbl">Next to</div>
+      <p>Dining area to the right · Dish return via hallway</p>
+    </article>
+  </div>
+</section>
+
+<!-- AREA -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">For the architect</span>
+    <h2>Minimum lengths from the quoted equipment</h2>
+    <p class="note">Indicative only — sums of quoted widths, before wall clearances, columns and door swings.</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Run</th><th>Makeup</th><th>Length</th></tr></thead>
+      <tbody>
+        <tr><td>Back cook line</td><td>Chiller depth 760 + door clearance ≈800 + Rack 1200 + Prep sink table 1500 + 2 Grillers 2700 + 4B 850 + Stock pot 1200</td><td class="num">≈ 9,010 mm</td></tr>
+        <tr><td>Front line</td><td>Chiller zone ≈1,560 + Rack 1200 + Entry ≈800 + Storage rack (plates) 1800 + Steamer 650 + Hot holding 900 + Dispatch 2000</td><td class="num">≈ 8,910 mm</td></tr>
+        <tr><td>Kitchen depth</td><td>Given: equipment 650 + aisle ≈1,150 + equipment 650 + wall allowances</td><td class="num">2,500 mm</td></tr>
+        <tr><td>Dish room</td><td>Racks 1300 + landing/bins, sink 2400 along the wall</td><td class="num">≈ 2,300 × 2,500 mm</td></tr>
+        <tr><td>Whole kitchen envelope</td><td>As drawn in Diagram 2</td><td class="num">≈ 11.5 × 2.5 m ≈ 29 m²</td></tr>
+        <tr><td>Front counter</td><td>Halo-halo station and POS counter, each 2,400 long, side by side</td><td class="num">2,400 mm</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- GAPS -->
+<section>
+  <div class="sec-head">
+    <span class="eyebrow">Quotation check · 014R1</span>
+    <h2>What the layout needs vs. what's quoted</h2>
+    <p class="note">The quote has 19 items, all still at ₱0. These are the items to add or confirm before pricing.</p>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Item</th><th>Issue</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td>Dish return pass-thru</td><td>Layout has two pass-thrus; only one (#8) is quoted.</td><td><span class="pill p-add">Add</span></td></tr>
+        <tr><td>#4 Preparation Table</td><td>Change 1500 → 2000 mm. Qty 2 stays: 1 dispatch table inside, 1 service table outside the pass-thru.</td><td><span class="pill p-chk">Revise size</span></td></tr>
+        <tr><td>#11 Dishwashing Sink</td><td>Lengthen from 1350 to ≈ 2400 mm to fill the 2.5 m dish-room wall — double tub plus drainboards / dirty landing on the sink.</td><td><span class="pill p-chk">Revise size</span></td></tr>
+        <tr><td>#2 SS Sink Table</td><td>Lengthen from 900 to 1500 mm and add a chopping board.</td><td><span class="pill p-chk">Revise size</span></td></tr>
+        <tr><td>LPG tank farm &amp; gas line</td><td>Tank farm of 4 LPG tanks in a line along the outside of the storage-end wall; pipe runs along the back wall with drops at the grillers, 4-burner and stock pot. Quote terms exclude gas connections — decide whether Barro or the client's contractor does it.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>Ventilation</td><td>5 fresh air diffusers along the middle of the aisle; fresh air duct (FA) on the range hood; exhaust ducts (EX) at the range hood, above the chillers, above the dishwashing sink and above the rice steamer. Positions only, duct routes to be set with the architect/MEPF.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>Electrical line</td><td>Runs along the end wall behind the chillers and along the front (pass-thru) wall behind the front row, with outlets for both chillers, rice steamer, hot holding cabinet, KDS/order printer and utensil heater. Chillers and hot holding sit about 60 mm off their walls to clear it. Electrical works are excluded from the quote.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>Water line</td><td>Supply comes in between the dish sink and the halo-halo station, runs along the back wall (beside the gas pipe) with taps at the prep sink, 4-burner, stock pot, dish sink and halo-halo sink. The rice steamer on the front row needs its own branch across or under the aisle. Plumbing works are not in the quote.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>Order printer / KDS at dispatch</td><td>POS sends orders straight to dispatch. Needs a power and data outlet (or Wi-Fi) at the dispatch table and a small SS shelf or bracket to keep the unit off the work surface. Electrical works are excluded from the quote.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>Option · #5 with oven base</td><td>For future oven-baked R&amp;D: price the 4-burner high-pressure range with a gas oven base in place of the undershelf (same 850 × 650 × 850). Decide before fabrication.</td><td><span class="pill p-chk">Optional</span></td></tr>
+        <tr><td>#9 Sink for Rice Cooking</td><td>Removed from the layout.</td><td><span class="pill p-add">Remove</span></td></tr>
+        <tr><td>#14 Range Hood</td><td>Change from 2 × 2700 to 1 unified hood ≈ 4,750 mm (grills 2,700 + range 850 + stock pot 1,200). The rice steamer, now beside hot holding, still needs its own small vent.</td><td><span class="pill p-chk">Revise qty / size</span></td></tr>
+        <tr><td>Soup &amp; rice warmers</td><td>Self-serve unli soup and rice need hot holding at the service table (bain-marie or warmers).</td><td><span class="pill p-add">Add</span></td></tr>
+        <tr><td>Dirty-dish landing + waste segregation</td><td>Solid/liquid food waste and trash bins, scraping table. Not quoted. Consider a grease trap under the dish sink.</td><td><span class="pill p-add">Add</span></td></tr>
+        <tr><td>#7 Storage Rack</td><td>Quoted qty 1; layout has 3 racks: one each side of the chillers (back and front wall), plus one between the entry and the rice steamer for clean plates &amp; bowls (drawn ≈1800 long).</td><td><span class="pill p-add">Qty → 3</span></td></tr>
+        <tr><td>#17 Halo-Halo Station</td><td>Keep ≈ 2400–2500 mm to line up with the dish sink.</td><td><span class="pill p-chk">Revise size</span></td></tr>
+        <tr><td>POS counter</td><td>2400 mm front counter/cashier, not in quote.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>Beverage fridge</td><td>Bottled-drink fridge not in quote — may be brand or client supplied.</td><td><span class="pill p-chk">Confirm scope</span></td></tr>
+        <tr><td>#12 SS Storage Cabinet</td><td>Listed "with pre-rinse faucet" — a cabinet wouldn't need one. Clarify whether it's dry storage or a dish-area pre-rinse unit, and where it sits.</td><td><span class="pill p-chk">Fix description</span></td></tr>
+        <tr><td>#14 Range Hood, #16 Wall Shelves</td><td>Hood description carries "Adjustable Footing" copied from floor units.</td><td><span class="pill p-chk">Fix description</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+</div>
+
+<script>
+(function(){
+  var fig=document.getElementById('plan');
+  var chips=fig.querySelectorAll('.chip');
+  chips.forEach(function(c){
+    c.addEventListener('click',function(){
+      var f=c.getAttribute('data-flow');
+      fig.setAttribute('data-active',f);
+      chips.forEach(function(o){o.setAttribute('aria-pressed',o===c?'true':'false');});
+    });
+  });
+})();
+
+(function(){
+  var view=document.getElementById('planView'), svg=document.getElementById('planSvg');
+  if(!view||!svg) return;
+  var H={x:-80,y:0,w:1850,h:530}, v={x:H.x,y:H.y,w:H.w,h:H.h};
+  function apply(){svg.setAttribute('viewBox',v.x+' '+v.y+' '+v.w+' '+v.h);}
+  function clampV(){
+    var minW=H.w/8; if(v.w<minW){var k=minW/v.w;v.w*=k;v.h*=k;}
+    if(v.w>H.w){v.w=H.w;v.h=H.h;}
+    v.x=Math.min(Math.max(v.x,H.x-v.w*0.25),H.x+H.w-v.w*0.75);
+    v.y=Math.min(Math.max(v.y,H.y-v.h*0.25),H.y+H.h-v.h*0.75);
+  }
+  function toSvg(cx,cy){var r=svg.getBoundingClientRect();return {x:v.x+(cx-r.left)/r.width*v.w,y:v.y+(cy-r.top)/r.height*v.h,r:r};}
+  function zoomAt(cx,cy,f){var p=toSvg(cx,cy);var nw=v.w/f,nh=v.h/f;
+    if(nw<H.w/8){nw=H.w/8;nh=H.h/8;} if(nw>H.w){nw=H.w;nh=H.h;}
+    var fx=(p.x-v.x)/v.w, fy=(p.y-v.y)/v.h; v.x=p.x-fx*nw; v.y=p.y-fy*nh; v.w=nw; v.h=nh; clampV(); apply();}
+  function center(f){var r=svg.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,f);}
+  view.addEventListener('wheel',function(e){e.preventDefault();zoomAt(e.clientX,e.clientY,Math.exp(-e.deltaY*0.0015));},{passive:false});
+  view.addEventListener('dblclick',function(e){zoomAt(e.clientX,e.clientY,1.8);});
+  var pts=new Map(), last=null, pinch=null;
+  view.addEventListener('pointerdown',function(e){view.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pts.size===1){last={x:e.clientX,y:e.clientY};view.classList.add('dragging');}
+    if(pts.size===2){var a=Array.from(pts.values());pinch={d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)};}});
+  view.addEventListener('pointermove',function(e){if(!pts.has(e.pointerId))return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pts.size===2&&pinch){var a=Array.from(pts.values());var d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);
+      zoomAt((a[0].x+a[1].x)/2,(a[0].y+a[1].y)/2,d/pinch.d);pinch.d=d;return;}
+    if(pts.size===1&&last){var r=svg.getBoundingClientRect();v.x-=(e.clientX-last.x)/r.width*v.w;v.y-=(e.clientY-last.y)/r.height*v.h;last={x:e.clientX,y:e.clientY};clampV();apply();}});
+  function end(e){pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(pts.size===0){last=null;view.classList.remove('dragging');}
+    else{var a=Array.from(pts.values())[0];last={x:a.x,y:a.y};}}
+  view.addEventListener('pointerup',end);view.addEventListener('pointercancel',end);
+  document.getElementById('z-in').addEventListener('click',function(){center(1.5);});
+  document.getElementById('z-out').addEventListener('click',function(){center(1/1.5);});
+  document.getElementById('z-reset').addEventListener('click',function(){v={x:H.x,y:H.y,w:H.w,h:H.h};apply();});
+})();
+</script>
+
+</body>
+</html>
