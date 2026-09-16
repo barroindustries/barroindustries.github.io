@@ -4794,7 +4794,7 @@ function renderItems(){
         <td style="text-align:center;">
           <div class="qty-stepper compact" style="justify-content:center;">
             <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},-1)" tabindex="-1">−</button>
-            <input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:32px;">
+            <input class="cell-num" type="number" min="1" value="${Number(item.qty)>0?item.qty:1}" onchange="updateQty(${idx},this)" style="width:40px;">
             <button type="button" class="qty-btn no-print" onclick="bumpQty(${idx},1)" tabindex="-1">+</button>
           </div>
         </td>
@@ -6972,6 +6972,24 @@ function applyPricingFields(o){
   renderTerms();         // reflect a restored quoteValidDays in the default Validity term text
 }
 
+// Loaded-state qty guard — a filed/draft/shared quote whose items carry a
+// missing or non-numeric qty rendered a BLANK Qty box (type="number" hides
+// invalid values; owner report 2026-09-16 "can't even see the number").
+// Coerce to the same ≥1-integer rule every editor path (updateQty/bumpQty/
+// import) already enforces, recomputing amount only for the items that were
+// actually invalid so valid stored amounts are never disturbed. MISCFEE
+// lines are skipped — their money lives in cost fields, not qty×unitPrice.
+function normalizeLoadedItems(arr){
+  (arr||[]).forEach(it=>{
+    if(!it||it.id==='MISCFEE') return;
+    const q=parseInt(it.qty,10);
+    if(!Number.isFinite(q)||q<1){
+      it.qty=1;
+      it.amount=(Number(it.unitPrice)||0)*it.qty;
+    }
+  });
+  return arr||[];
+}
 function loadFromStorage(){
   // Check URL hash first
   const hash=location.hash;
@@ -6979,7 +6997,7 @@ function loadFromStorage(){
     try{
       const json=decodeURIComponent(atob(hash.slice(7)));
       const state=JSON.parse(json);
-      items=state.items||[];
+      items=normalizeLoadedItems(state.items||[]);
       document.getElementById('clientName').value=state.clientName||'';
       document.getElementById('clientCompany').value=state.clientCompany||'';
       document.getElementById('clientAddress').value=state.clientAddress||'';
@@ -7065,7 +7083,7 @@ function resumeDraft(){
   if(!_draftSnapshot){ hideDraftResumeBanner(); return; }
   try{
     const client=_draftSnapshot.client||{};
-    items=_draftSnapshot.items||[];
+    items=normalizeLoadedItems(_draftSnapshot.items||[]);
     termsContent=_draftSnapshot.termsContent||{};
     termsEnabled=_draftSnapshot.termsEnabled||{};
     laborState=_draftSnapshot.laborState||{};
@@ -7698,7 +7716,7 @@ function loadEditableState(state, opts){
   if(!state) return;
   opts=opts||{};
   try{
-    items=state.items||[];
+    items=normalizeLoadedItems(state.items||[]);
     termsContent=state.termsContent||{};
     termsEnabled=state.termsEnabled||termsEnabled;
     quotePhotos=state.photos||[];
