@@ -4360,8 +4360,13 @@ function toggleNoCosting(idx, on){
 // figure). Clearing priceManual on either flip lets applyComputedPricing()
 // immediately re-price the line for its new mode (to the supplier cost when
 // flagged, back to the ×2.50 build when cleared).
+// Same-day follow-on ruling: Brilliant Steel may mark pass-throughs too —
+// the guard blocks GENERIC partners only (they have no control rendered
+// either; belt-and-braces). On a BS quote the flag never reprices anything
+// (computeMarginSummary bails on BS before applyComputedPricing) — it only
+// tells the discount engine to skip the line, which is the point.
 function togglePassThrough(idx, on){
-  if (PARTNER_MODE) return;
+  if (GENERIC_PARTNER) return;
   const it = items[idx];
   if (!it || it.id === 'MISCFEE') return;
   const next = (on===undefined) ? !it.passThrough : !!on;
@@ -4369,6 +4374,22 @@ function togglePassThrough(idx, on){
   delete it.priceManual;
   saveToStorage();
   renderItems();
+}
+
+// Owner ruling 2026-09-21 (follow-on): the Brilliant Steel company carries
+// no Barro cost surface at all (no gate row, no calculator — BS prices by
+// its own model), so BS sessions get this slim per-line tick instead:
+// internal staff on the BS toggle and Brilliant Steel partner sessions
+// alike, never a generic partner. The flag exposes no cost data — it marks
+// "this line sells at the supplier price" so discounts skip it (and it
+// files with the quote for the record).
+function bsPassThroughRowHtml(item, idx){
+  if (typeof currentCo==='undefined' || currentCo!=='BS') return '';
+  if (GENERIC_PARTNER) return '';
+  if (item.id==='MISCFEE') return '';
+  return `<div class="spec-line no-print" style="display:flex;align-items:center;gap:6px;">
+    <label style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--gray-dark);cursor:pointer;" title="The supplier price is the client price — no markup on this line, and discounts never touch it."><input type="checkbox" ${item.passThrough?'checked':''} onchange="togglePassThrough(${idx},this.checked)">pass-through — supplier price, discounts skip this line</label>
+  </div>`;
 }
 
 // ── BOM & computation popup (owner ruling 2026-08-31) ─────────────────────
@@ -4828,6 +4849,10 @@ function renderItems(){
       // partner guard (customCostGateHtml() begins `if(PARTNER_MODE) return`)
       // since this row lives in the items table, not inside #costMarginWrap.
       const costGateHtml=customCostGateHtml(item,idx);
+      // BS quotes: the pass-through tick rides the same cell the cost gate
+      // uses on Barro quotes (customCostGateHtml is '' for BS) — see
+      // bsPassThroughRowHtml() for the ruling.
+      const bsPtRowHtml=bsPassThroughRowHtml(item,idx);
       html+=`<tr class="item-row" data-idx="${idx}" ondragover="onItemRowDragOver(event,${idx})" ondragleave="onItemRowDragLeave(event)" ondrop="onItemRowDrop(event,${idx})">
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
@@ -4835,7 +4860,7 @@ function renderItems(){
           <div class="spec-line ${specText?'':'pe-empty'}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
           <div class="spec-line ${(item.dims||'')?'':'pe-empty'}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
           <div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
-          ${costGateHtml}
+          ${costGateHtml}${bsPtRowHtml}
         </td>
         <td style="text-align:center;">
           <div class="qty-stepper compact" style="justify-content:center;">
@@ -8157,8 +8182,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 38;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 39;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:39, date:'2026-09-21', items:[
+    'Brilliant Steel quotes can mark pass-through items too — every line on a BS quote gets a "pass-through" tick (below the item name): the supplier price is the client price, and discounts skip the line. Available to Brilliant Steel partner accounts as well; it shows no cost data.',
+  ]},
   { ver:38, date:'2026-09-21', items:[
     'Discounts skip pass-through lines — a pass-through item has no markup to give, so the discount ladder now bites only the other lines: pass-through prices print plain (no crossed-out pair) and the discount percent applies to the rest, same as pass-through charges have always worked.',
   ]},
