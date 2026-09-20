@@ -4916,12 +4916,22 @@ function computeTotals(subset){
   const focTotal=focFees+focRush;
   const vatAmt=showVat?(net-focFees+rushCharged)*vatRate:0;
   const grand=net-focFees+rushCharged+vatAmt;
+  // Owner 2026-09-21: the GRAND TOTAL row shows the strike-through pair too.
+  // The crossed-out figure is the grand with NO quote-level discount — rush %
+  // and VAT recomputed on the undiscounted base so the "old" number is the
+  // one the client would really have paid, not preDiscount+the same VAT.
+  let grandNoDisc=grand;
+  if(discountAmt>0){
+    const rushND=rushActive&&!rushFoc?+((preDiscount-focFees)*0.02).toFixed(2):0;
+    const vatND=showVat?(preDiscount-focFees+rushND)*vatRate:0;
+    grandNoDisc=preDiscount-focFees+rushND+vatND;
+  }
   // Commission computed on the grand total — same position for both modes.
   const commissionAmt=(typeof currentCo!=='undefined' && currentCo==='BS') ? 0
     : (commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100));
 
   _inComputeTotals=_prevIn;
-  return {subtotal,miscFeeTotal,miscLines,discBase,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,rushFoc,rushCharged,focFees,focRush,focTotal,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
+  return {subtotal,miscFeeTotal,miscLines,discBase,volumeBreakTotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,preDiscount,discountCapped,net,rushActive,rushFee,rushFoc,rushCharged,focFees,focRush,focTotal,showVat,vatAmt,grand,grandNoDisc,commMode,commPct,commissionAmt};
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -5006,7 +5016,9 @@ function totalsLines(t,grandLabel){
   // "all foc are consolidated and shown as discount").
   if(t.focTotal>0) out.push({label:'Less: FOC — free of charge', amt:'−'+formatPeso(t.focTotal), cls:'discount'});
   if(t.showVat) out.push({label:'VAT (12%)', amt:formatPeso(t.vatAmt)});
-  out.push({label:grandLabel, amt:formatPeso(t.grand), grand:true});
+  out.push({label:grandLabel, amt:(t.discountAmt>0 && t.grandNoDisc>t.grand+0.005
+    ? `<span class="disc-old">${formatPeso(t.grandNoDisc)}</span> <span class="disc-new">${formatPeso(t.grand)}</span>`
+    : formatPeso(t.grand)), grand:true});
   return out;
 }
 // 2-column totals box.
@@ -8033,8 +8045,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 35;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 36;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:36, date:'2026-09-21', items:[
+    'The GRAND TOTAL shows the discount too — when a discount applies, the grand-total row prints the would-have-been amount crossed out (with the +2% priority charge and VAT recomputed on the undiscounted figures) beside the amount actually due.',
+  ]},
   { ver:35, date:'2026-09-21', items:[
     'Section subtotals now honor the discount — when a discount applies, each "Subtotal — SECTION" row shows the old amount crossed out with the discounted amount beside it, matching the item lines (it used to print the undiscounted sum).',
   ]},
