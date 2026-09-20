@@ -1712,7 +1712,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Quote number</strong> <em>(Client Data)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself; tick <em>no costing</em> beside it for a line that genuinely has none. ＋ Section for Option A / Option B quotes. 📥 Import brings in a whole list at once — hand Claude any list and the 📋 button inside copies the exact format brief to give it.</li>
-        <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. A line ticked <strong>pass-through</strong> skips all of it: the supplier price is the client price (no OH, no MK), counted at cost in the calculator. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
@@ -3969,6 +3969,7 @@ function normalizeImportItem(raw, warnings, secLabel, rowNum){
   };
   if (priceManual) item.priceManual = true;
   if (src.noCosting) item.noCosting = true;
+  if (src.passThrough) item.passThrough = true;   // owner 2026-09-21 — supplier price = client price
 
   if (src.costing && typeof src.costing === 'object' && !Array.isArray(src.costing)) {
     const c = src.costing;
@@ -4115,8 +4116,12 @@ RULES:
 - NEVER invent prices, costs, dimensions, or specs. If it is not in the
   source material, leave the field out — do not guess or estimate.
 - Put anything uncertain or worth flagging in "notes" instead of guessing.
-- Set "noCosting": true on a line that genuinely has no cost basis (a
-  pass-through item, something client-supplied) — it will not need costing.
+- Set "noCosting": true on a line that genuinely has no cost basis
+  (something client-supplied) — it will not need costing.
+- Set "passThrough": true on a line sold at the supplier's price — no
+  markup, no overhead: the price we buy at is the price we give. Its
+  supplier cost goes in "costing" (or, absent that, its quoted price is
+  taken as the cost).
 - Only include "costing" when real numbers exist for it. "materialsLump" is
   a lump-sum materials cost; "bom" is an itemized materials list (use
   either one, not both); "laborDays" is crew-days of labor.
@@ -4196,10 +4201,17 @@ function customCostParts(item, idx){
   // DELIBERATELY uncosted, not blocking filing); uncosted && not flagged →
   // the original warn chip. toggleNoCosting() below is the only writer of
   // item.noCosting; uncostedCustomLinesReason() honors the same flag.
-  const chip = !uncosted ? '' : (item.noCosting
+  // Pass-through (owner 2026-09-21): its own chip always shows while flagged,
+  // and an uncosted PT line never warns — its quoted price IS its cost, so
+  // there is nothing left to cost (and filing is not blocked; see
+  // uncostedCustomLinesReason()).
+  const ptChip = item.passThrough
+    ? '<span class="ms-chip" style="background:#dcecfb;color:#1E5A8A;" title="Supplier price = client price — no OH, no markup; the calculator counts this line at cost, never as a negative.">pass-through</span>' : '';
+  const chip = (!uncosted || item.passThrough) ? '' : (item.noCosting
     ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">no costing</span>'
     : '<span class="ms-chip warn" title="No materials cost entered for this custom line — cost it here before filing.">needs costing</span>');
   const noCostingCheckbox = `<label class="no-print" style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--gray-dark);cursor:pointer;" title="Tick when this line intentionally has no cost basis — clears the needs-costing warning and the filing block."><input type="checkbox" ${item.noCosting?'checked':''} onchange="toggleNoCosting(${idx},this.checked)">no costing</label>`;
+  const ptCheckbox = `<label class="no-print" style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--gray-dark);cursor:pointer;" title="The price we buy from the supplier is the price we give — no OH, no markup; the line auto-prices at exactly the supplier cost and the calculator counts it at cost, never as a negative."><input type="checkbox" ${item.passThrough?'checked':''} onchange="togglePassThrough(${idx},this.checked)">pass-through</label>`;
 
   // §1 — BOM rows. Each row's own name input drives a small filtered
   // suggestion list (bomNameInput()/pickBomMaterial() below) against
@@ -4264,7 +4276,19 @@ function customCostParts(item, idx){
   const ohUnit = directUnit*ohP, mkUnit = directUnit*mkP;
   const sellUnit = Math.round((directUnit+ohUnit+mkUnit)/100)*100;
   const compRow = (label,val,strong)=>`<div style="display:flex;justify-content:space-between;gap:10px;${strong?'font-weight:700;border-top:1.5px solid #f0c060;margin-top:2px;padding-top:2px;':''}"><span>${label}</span><span>${formatPeso(val)}</span></div>`;
-  const compHtml = (!uncosted && directUnit>0) ? `<div class="no-print" style="margin:6px 0 2px;max-width:340px;background:#fff9ec;border:1px solid #f0c060;border-radius:6px;padding:7px 10px;font-size:11.5px;">
+  // Pass-through (owner 2026-09-21): the computation box shows the two-line
+  // truth — supplier cost = selling price — instead of the fabrication
+  // ladder; mirrors ptUnitCostOf() (materials + REAL labor only, price
+  // fallback when uncosted).
+  const ptUnitHere = matUnit + (laborAssumedHere ? 0 : laborExplicit);
+  const compHtml = item.passThrough
+    ? `<div class="no-print" style="margin:6px 0 2px;max-width:340px;background:#eef5fc;border:1px solid #9dc3e6;border-radius:6px;padding:7px 10px;font-size:11.5px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#1E5A8A;margin-bottom:3px;">Pass-through (per unit)</div>
+      ${compRow('Supplier cost'+(hasBom?' (BOM)':(matUnit>0?' (lump sum)':' (= quoted price)')), ptUnitHere>0?ptUnitHere:(item.unitPrice||0))}
+      ${compRow('SELLING = supplier price', ptUnitHere>0?Math.round(ptUnitHere):(item.unitPrice||0),1)}
+      <div style="font-size:10px;color:var(--gray-dark);margin-top:3px;">No waste, no labor assumption, no OH, no MK — this line sells at what we pay the supplier.</div>
+    </div>`
+    : (!uncosted && directUnit>0) ? `<div class="no-print" style="margin:6px 0 2px;max-width:340px;background:#fff9ec;border:1px solid #f0c060;border-radius:6px;padding:7px 10px;font-size:11.5px;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--gray-dark);margin-bottom:3px;">Computation (per unit)</div>
       ${compRow('Materials'+(hasBom?' (BOM)':' (lump sum)'),matUnit)}
       ${compRow('+ Waste '+Math.round(cs.wastePct*100)+'%',wasteUnit)}
@@ -4280,7 +4304,9 @@ function customCostParts(item, idx){
     </div>` : '';
 
   const gateBtn = `<button type="button" class="btn btn-outline no-print" style="background:var(--dark-blue);padding:2px 10px;font-size:11px;" onclick="openBomModal(${idx})">🧮 BOM &amp; computation</button>`;
-  const closedSummary = (!uncosted && directUnit>0)
+  const closedSummary = item.passThrough
+    ? `<span style="font-size:11px;color:var(--gray-dark);">sells at supplier price${ptUnitHere>0?` ${formatPeso(Math.round(ptUnitHere))}/unit`:''}</span>`
+    : (!uncosted && directUnit>0)
     ? `<span style="font-size:11px;color:var(--gray-dark);">direct ${formatPeso(directUnit)} → sells ${formatPeso(sellUnit)}/unit</span>` : '';
 
   const workspaceHtml = `
@@ -4305,7 +4331,7 @@ function customCostParts(item, idx){
 
   const rowHtml = `<div class="spec-line cost-gate-row no-print" style="display:block;">
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-      <span class="spec-tag no-print">Cost</span>${chip}${gateBtn}${closedSummary}${noCostingCheckbox}
+      <span class="spec-tag no-print">Cost</span>${ptChip}${chip}${gateBtn}${closedSummary}${noCostingCheckbox}${ptCheckbox}
     </div>
   </div>`;
   return { rowHtml, workspaceHtml };
@@ -4324,6 +4350,25 @@ function toggleNoCosting(idx, on){
   if (on) it.noCosting = true; else delete it.noCosting;
   saveToStorage();
   renderItems();   // re-runs computeMarginSummary() → refreshBomModal() in Internal view
+}
+
+// Owner ruling 2026-09-21 — the only writer of item.passThrough: "the price
+// we buy from supplier is the price we give" — no OH, no MK on this line,
+// and the calculator counts it AT COST, never as a negative margin. Works on
+// any quote line (custom or catalog); persists free with the item (survives
+// buildQuotePayload()'s cost-field strip — it is a pricing MODE, not a cost
+// figure). Clearing priceManual on either flip lets applyComputedPricing()
+// immediately re-price the line for its new mode (to the supplier cost when
+// flagged, back to the ×2.50 build when cleared).
+function togglePassThrough(idx, on){
+  if (PARTNER_MODE) return;
+  const it = items[idx];
+  if (!it || it.id === 'MISCFEE') return;
+  const next = (on===undefined) ? !it.passThrough : !!on;
+  if (next) it.passThrough = true; else delete it.passThrough;
+  delete it.priceManual;
+  saveToStorage();
+  renderItems();
 }
 
 // ── BOM & computation popup (owner ruling 2026-08-31) ─────────────────────
@@ -6131,6 +6176,20 @@ function itemCostBasis(item, liveById){
   return { mat, hrs, capLaborPesos, laborAbsent, hasBasis:(mat>0||capLaborPesos>0||hrs>0), isCustom:false };
 }
 
+// Pass-through items (owner ruling 2026-09-21): some items are resold at the
+// supplier's price — no waste/labor assumptions, no consumables, no OH, no
+// MK. Cost per unit = the explicit basis (materials + REAL labor if entered,
+// at cost; never the 80%-of-materials assumption — nothing is fabricated).
+// With no basis on the line (e.g. a reopened quote, whose cost fields are
+// deliberately stripped from filed payloads) the quoted price IS the cost —
+// a pass-through sells at cost by definition, so price and cost coincide and
+// the calculator counts the line at zero margin, never as a negative.
+function ptUnitCostOf(item, basis, cs){
+  const explicitLabor = basis.hrs>0 ? basis.hrs*cs.loadedLaborRate : (basis.laborAbsent ? 0 : basis.capLaborPesos);
+  const c = basis.hasBasis ? basis.mat + explicitLabor : 0;
+  return c>0 ? c : (item.unitPrice||0);
+}
+
 // COSTING-PHASE1-SPEC-2026-08-26 §1/§2 — shadow-mode true-cost engine. Pure:
 // no Firestore reads here (COSTING_SETTINGS/DB.products cost data were
 // already loaded once, at boot, by loadDatabase()'s `!PARTNER_MODE` branch).
@@ -6154,11 +6213,15 @@ function computeTrueCost(){
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
   const liveById = new Map((DB.products||[]).map(p=>[p.id,p]));
   const laborPct = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
-  let materials=0, laborHrsTotal=0, laborPesosFallback=0, laborAssumedPesos=0, anyMissingCatalogCost=false;
+  let materials=0, laborHrsTotal=0, laborPesosFallback=0, laborAssumedPesos=0, anyMissingCatalogCost=false, ptCost=0;
   items.forEach(item=>{
     if (item.id==='MISCFEE') return;   // misc entries carry their own cost below — never material/labor loadings
     const qty = item.qty||1;
     const basis = itemCostBasis(item, liveById);
+    // Pass-through (owner 2026-09-21): sold at the supplier price — the
+    // line's cost joins the floors below but stays OUT of the OH/MK-loadable
+    // base and every fabrication loading (waste/labor/consumables).
+    if (item.passThrough){ ptCost += ptUnitCostOf(item, basis, cs)*qty; return; }
     materials += basis.mat*qty;
     if (basis.hrs>0) laborHrsTotal += basis.hrs*qty;
     else if (basis.laborAbsent) laborAssumedPesos += basis.mat*qty*laborPct;   // 80%-of-materials assumption
@@ -6200,7 +6263,7 @@ function computeTrueCost(){
   const totalLoad = (typeof cs.totalLoadPct==='number') ? cs.totalLoadPct : 1.50;
   const mkPct = Math.max(0, totalLoad - ohPct);
   const mkAmt = direct*mkPct;
-  const floorTotal = direct + miscCost;                       // absolute floor incl. misc at face value
+  const floorTotal = direct + miscCost + ptCost;              // absolute floor incl. misc + pass-throughs at face value
   // Per-type misc pricing (owner ruling 2026-09-01): labor-type entries load
   // OH+MK like item labor (× 2.50); pass-throughs (delivery/installation/
   // other) carry OH only (× 1.25). Per-entry ₱100 rounding matches the lines.
@@ -6212,8 +6275,8 @@ function computeTrueCost(){
     miscQuoted += m.foc ? 0 : Math.round((c*mult)/100)*100;   // FOC: shown FREE, charged nothing
     miscTrueAdd += c*(1 + (isLabor ? ohPct : miscOhPctv));    // …but the cost (and its OH share) is still ours
   });
-  const trueCostTotal = trueCost + miscTrueAdd;               // OH covered on both paths
-  const target = direct*(1+ohPct+mkPct) + miscQuoted;         // items ×2.50 + typed misc (per-entry rounded)
+  const trueCostTotal = trueCost + miscTrueAdd + ptCost;      // OH covered on both paths; pass-throughs at face value
+  const target = direct*(1+ohPct+mkPct) + miscQuoted + ptCost; // items ×2.50 + typed misc (per-entry rounded) + pass-throughs at cost
   const _tot = (!_inComputeTotals && typeof computeTotals==='function') ? computeTotals() : null;
   // Charged base ex-VAT: FOC fee lines print at full value but are given
   // back, so they never count as money in; a FOC'd rush fee likewise.
@@ -6221,7 +6284,7 @@ function computeTrueCost(){
   const rushFee = _tot ? (_tot.rushCharged!=null?_tot.rushCharged:(_tot.rushFee||0)) : 0;
   const marginPct = sell>0 ? (sell-trueCostTotal)/sell : 0;
   return {
-    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost, miscQuoted, miscOhPctv, floorTotal, trueCostTotal,
+    materials, matWaste, laborHrsTotal, laborPesosFallback, laborAssumedPesos, labor, consumables, miscCost, miscQuoted, miscOhPctv, ptCost, floorTotal, trueCostTotal,
     direct, sizeF, pace:pf.pace, paceLive:pf.live, paceComputedAt:pf.computedAt,
     ohPct, suggestedOhPct, ohOverridden, ohAmt, trueCost, mkPct, mkAmt, totalLoad, target, sell, rushFee, marginPct,
     anyMissingCatalogCost, liveById, cs,
@@ -6307,14 +6370,15 @@ function renderTrueCostPanelHtml(cost){
     : `<input type="number" id="mkOverrideInput" min="${mkMinPct.toFixed(0)}" max="${mkMaxPct.toFixed(0)}" step="0.5" value="${mkPctVal.toFixed(1)}" onchange="onMkOverrideChange(this.value)" title="Override the MK%. OH adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
 
   const hasMisc = cost.miscCost>0;
-  const itemsSelling = cost.target - cost.miscQuoted;
+  const hasPt = cost.ptCost>0;
+  const itemsSelling = cost.target - cost.miscQuoted - cost.ptCost;
   const row=(label,val,cls,tip)=>`<div class="calc-row ${cls||''}"${tip?` title="${tip}"`:''}><span>${label}</span><span class="peso">${formatPeso(val)}</span></div>`;
 
   const belowFloor = cost.sell < cost.floorTotal;
   const belowTrueCost = !belowFloor && cost.sell < cost.trueCostTotal;
   const belowTarget = !belowFloor && !belowTrueCost && cost.sell < cost.target;
   const marginColor = belowFloor ? 'var(--red)' : belowTrueCost ? 'var(--orange)' : belowTarget ? 'var(--accent)' : 'var(--green)';
-  const noCostBasis = cost.direct<=0 && items.length>0;
+  const noCostBasis = cost.direct<=0 && cost.ptCost<=0 && items.length>0;
   const marginLine = noCostBasis
     ? `<div style="font-size:12px;color:var(--gray-dark);font-style:italic;margin-top:6px;">No cost basis on these items yet — give each line a BOM (🧮 on the line) or capital costs in Inventory → Product Pricelist.</div>`
     : `<div style="font-weight:700;color:${marginColor};margin-top:6px;font-size:12.5px;">Margin at quoted: ${(cost.marginPct*100).toFixed(1)}% (${formatPeso(cost.sell-cost.trueCostTotal)}) · effective MK ${(cost.direct>0?(cost.sell-cost.trueCostTotal)/cost.direct*100:0).toFixed(1)}% of direct${cost.rushFee>0?` · ⚡ rush +${formatPeso(cost.rushFee)} counted as OH, not markup`:''}</div>`;
@@ -6332,11 +6396,12 @@ function renderTrueCostPanelHtml(cost){
     ${row('+ Waste '+Math.round(cs.wastePct*100)+'%',cost.matWaste,'sub','Fixed sheet and tube sizes — offcuts, kerf and edge damage')}
     ${row('+ Labor ('+laborLabel+')',cost.labor,'sub','Labor is '+laborPctLbl+'% of materials unless real crew-days or hours are entered on the lines')}
     ${row('+ Consumables '+Math.round(cs.consumablesPct*100)+'%',cost.consumables,'sub','Rods, discs, gas — burned in proportion to the steel processed')}
-    ${row(hasMisc?'DIRECT (items)':'DIRECT = FLOOR',cost.direct,'total')}
+    ${row((hasMisc||hasPt)?'DIRECT (items)':'DIRECT = FLOOR',cost.direct,'total')}
     <div class="calc-row dial"><span>+ OH ${ohControl} <em class="calc-note">suggested ${ohSuggestedVal.toFixed(1)}% · <a href="javascript:void(0)" onclick="resetOhOverride()">reset</a> · size ×${cost.sizeF.toFixed(2)} · ${paceChip} (advisory)</em></span><span class="peso">${formatPeso(cost.ohAmt)}</span></div>
-    ${row('TRUE COST'+(hasMisc?' (items)':''),cost.trueCost,'total')}
+    ${row('TRUE COST'+((hasMisc||hasPt)?' (items)':''),cost.trueCost,'total')}
     <div class="calc-row dial"><span>+ MK ${mkControl} <em class="calc-note">OH+MK = ${Math.round(cost.totalLoad*100)}% · <a href="javascript:void(0)" onclick="resetPricesToComputed()" title="Clear hand-typed prices — every costed line returns to its computed price">↺ re-apply</a></em></span><span class="peso">${formatPeso(cost.mkAmt)}</span></div>
     ${row('SELLING (items × '+(1+cost.totalLoad).toFixed(2)+')',itemsSelling,'total')}
+    ${hasPt?row('+ Pass-through items (supplier price)',cost.ptCost,'sub','No OH, no markup — the supplier price is the client price (owner ruling 2026-09-21). Counted at cost in the floors: zero margin, never a negative.'):''}
     ${hasMisc?row('+ Additional costs (typed)',cost.miscQuoted,'sub','Delivery/Installation/Other at cost + 25% OH; Additional labor at the full × 2.50 — see the Additional costs table above'):''}
     ${row('SELLING (total)',cost.target,'grand')}
     <div class="calc-row grand quoted"><span>QUOTED (net) ${deltaChip}</span><span class="peso">${formatPeso(cost.sell)}</span></div>
@@ -6363,6 +6428,25 @@ function renderTrueCostPanelHtml(cost){
     const qty=item.qty||1;
     const basis=itemCostBasis(item, cost.liveById);
     const unitPrice = item.unitPrice||0;
+    // Owner ruling 2026-09-21 — per-line pass-through toggle, right where the
+    // pricing decision is made. On a PT line the row shows the supplier cost
+    // as both Direct/u and Sell/u and "at cost" instead of a negative MK.
+    const ptToggle = PARTNER_MODE ? '' : `<button type="button" class="ms-chip" style="font-size:9px;border:none;cursor:pointer;background:${item.passThrough?'#dcecfb':'#f0f0f0'};color:${item.passThrough?'#1E5A8A':'var(--gray-dark)'};" onclick="togglePassThrough(${idx})" title="${item.passThrough?'Pass-through — supplier price = client price (no OH, no MK). Click to return to normal ×2.50 pricing.':'Click to make this a pass-through line — the supplier price is the client price: no OH, no markup, counted at cost (never as a negative).'}">⇄ ${item.passThrough?'pass-through':'PT'}</button>`;
+    if(item.passThrough){
+      const pu = ptUnitCostOf(item, basis, cs);
+      const diff = unitPrice - pu;
+      const mkCell = Math.abs(diff)<1
+        ? `<span style="color:var(--gray-dark);font-weight:600;" title="Pass-through — sold at supplier cost by design: zero margin, not a negative.">at cost</span>`
+        : `<span style="color:${diff<0?'var(--red)':'var(--green)'};" title="This pass-through line is priced ${diff<0?'below':'above'} its supplier cost of ${formatPeso(pu)}.">${diff<0?'−':'+'}${formatPeso(Math.abs(diff))}</span>`;
+      const ptPriceCell = PARTNER_MODE
+        ? `<strong>${formatPeso(unitPrice)}</strong>`
+        : `<input type="number" class="calc-price" min="0" step="1" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Pass-through price — auto-set to the supplier cost; type to override.">`;
+      return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${ptToggle}</td><td style="text-align:center;">${qty}</td>
+        <td style="text-align:right;">${formatPeso(pu)}</td>
+        <td style="text-align:right;font-weight:600;">${formatPeso(pu)}</td>
+        <td style="text-align:right;">${ptPriceCell}</td>
+        <td style="text-align:right;font-weight:700;">${mkCell}</td></tr>`;
+    }
     if(!basis.hasBasis){
       // QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3.4 — a flagged custom line
       // shows the neutral "no costing" chip here too; the catalog-item chip
@@ -6371,7 +6455,7 @@ function renderTrueCostPanelHtml(cost){
       const basisChip = (basis.isCustom && item.noCosting)
         ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);" title="Marked no costing — this line intentionally has no cost basis.">no costing</span>'
         : '<span class="ms-chip warn" title="Give this line a BOM (🧮) or capital costs in Inventory → Product Pricelist">needs costing</span>';
-      return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')}</td><td style="text-align:center;">${qty}</td>
+      return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${ptToggle}</td><td style="text-align:center;">${qty}</td>
         <td colspan="3" style="text-align:center;">${basisChip}</td>
         <td style="text-align:right;">${formatPeso(unitPrice)}</td></tr>`;
     }
@@ -6390,7 +6474,7 @@ function renderTrueCostPanelHtml(cost){
     const priceCell = PARTNER_MODE
       ? `<strong>${formatPeso(unitPrice)}</strong>`
       : `<input type="number" class="calc-price" min="0" step="100" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Type any price to experiment — it sticks as a manual override and the MK column shows what it really gives.">`;
-    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${chip}</td><td style="text-align:center;">${qty}</td>
+    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${chip} ${ptToggle}</td><td style="text-align:center;">${qty}</td>
       <td style="text-align:right;">${formatPeso(directPerUnit)}</td>
       <td style="text-align:right;font-weight:600;">${formatPeso(sellPerUnit)}</td>
       <td style="text-align:right;">${priceCell}</td>
@@ -6467,10 +6551,21 @@ function applyComputedPricing(cost){
   const mult = 1 + cost.ohPct + cost.mkPct;
   // Phase 1 — each auto-priceable line's own computed selling (per unit).
   const autos = [];
+  const pts = [];   // pass-throughs price separately: supplier cost, verbatim
   items.forEach(item => {
     if (item.id==='MISCFEE' || item.priceManual) return;
     const qty = item.qty||1;
     const basis = itemCostBasis(item, cost.liveById);
+    // Pass-through (owner 2026-09-21): price = supplier cost, exactly — no
+    // ×2.50, no ₱100 rounding (peso-rounded only), and NEVER a target for
+    // misc distribution below: the client price must stay the supplier price.
+    if (item.passThrough){
+      if (basis.hasBasis){
+        const pu = Math.round(ptUnitCostOf(item, basis, cost.cs));
+        if (pu>0) pts.push({ item, qty, perUnit: pu });
+      }
+      return;
+    }
     if (!basis.hasBasis) return;
     const directPerUnit = basis.mat*(1 + cost.cs.wastePct + cost.cs.consumablesPct)
       + (basis.hrs>0 ? basis.hrs*cost.cs.loadedLaborRate : (basis.laborAbsent ? basis.mat*laborPctA : basis.capLaborPesos));
@@ -6498,6 +6593,13 @@ function applyComputedPricing(cost){
     if (auto > 0 && a.item.unitPrice !== auto) {
       a.item.unitPrice = auto;
       a.item.amount = auto*a.qty;
+      changed = true;
+    }
+  });
+  pts.forEach(p => {
+    if (p.item.unitPrice !== p.perUnit) {
+      p.item.unitPrice = p.perUnit;
+      p.item.amount = p.perUnit*p.qty;
       changed = true;
     }
   });
@@ -7207,7 +7309,9 @@ const VERIFY_CHECKS=[
 function uncostedCustomLinesReason(){
   if (PARTNER_MODE) return '';
   if (typeof currentCo!=='undefined' && currentCo==='BS') return '';   // BS quotes never require a Barro cost basis
-  const n = items.filter(i=>i.id==='CUSTOM' && !customLineHasMaterialsBasis(i) && !i.noCosting).length;
+  // A pass-through line never blocks filing either: its quoted price IS its
+  // cost (owner 2026-09-21), so there is nothing left to cost.
+  const n = items.filter(i=>i.id==='CUSTOM' && !customLineHasMaterialsBasis(i) && !i.noCosting && !i.passThrough).length;
   if (!n) return '';
   return `${n} custom line(s) have no cost basis — cost them in Internal view before filing.`;
 }
@@ -8045,8 +8149,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 36;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 37;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:37, date:'2026-09-21', items:[
+    'Pass-through items — some items sell at the supplier\'s price, no markup and no overhead. Tick "pass-through" on the line\'s Cost row (custom lines) or the ⇄ chip on the calculator\'s experiment table (any line): it auto-prices at exactly what we pay, gets its own "+ Pass-through items" row in the build, and shows "at cost" in the calculator — never a negative margin. The Import format supports "passThrough": true as well.',
+  ]},
   { ver:36, date:'2026-09-21', items:[
     'The GRAND TOTAL shows the discount too — when a discount applies, the grand-total row prints the would-have-been amount crossed out (with the +2% priority charge and VAT recomputed on the undiscounted figures) beside the amount actually due.',
   ]},

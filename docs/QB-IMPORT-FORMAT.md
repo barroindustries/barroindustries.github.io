@@ -75,6 +75,7 @@ Use `sections` only when the source list is naturally grouped — e.g. an
 | `leadTime` | string | `''` |
 | `notes` | string | `''` |
 | `noCosting` | boolean | `false` |
+| `passThrough` | boolean | `false` |
 | `costing` | object, see below | absent |
 
 **`specs`** — a plain string is used as-is. An array of strings joins with
@@ -88,11 +89,18 @@ computed price). Leave it out, blank, or `0` and the line prices itself
 automatically once it has a cost basis (see `costing` below) — or stays at
 ₱0, fully editable, if it never gets one.
 
-**`noCosting`** — set `true` on a line that genuinely has no cost basis (a
-pass-through item, something the client is supplying themselves). It shows a
-neutral "no costing" chip instead of the "needs costing" warning, and does
-not block filing the quote. It is a checkbox in the builder too — this just
-pre-ticks it.
+**`noCosting`** — set `true` on a line that genuinely has no cost basis
+(something the client is supplying themselves). It shows a neutral
+"no costing" chip instead of the "needs costing" warning, and does not block
+filing the quote. It is a checkbox in the builder too — this just pre-ticks
+it.
+
+**`passThrough`** — set `true` on a line sold at the supplier's price: no
+markup, no overhead — the price we buy at is the price we give (owner ruling
+2026-09-21). The line auto-prices at exactly its supplier cost (put that in
+`costing`; absent one, its quoted price is taken as the cost), and the
+internal calculator counts it at cost — never as a negative margin. It is a
+checkbox in the builder too — this just pre-ticks it.
 
 **`costing`** (optional object):
 
