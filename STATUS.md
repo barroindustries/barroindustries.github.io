@@ -5,7 +5,9 @@
 > History lives in [ROADMAP.md](ROADMAP.md) (frozen), plans in [docs/plans/](docs/plans/), audits in
 > [docs/reviews/](docs/reviews/), feature specs in [specs/](specs/).
 
-_Last updated: **2026-09-16**_
+_Last updated: **2026-09-21**_
+
+> **2026-09-21 owner report (QB section subtotal ignored the discount), FIXED (v14.0.269):** with a discount applied, the per-section "Subtotal — SECTION" row in the quote-builder items table still printed the bare undiscounted sum (the item lines and the totals-ladder Subtotal already showed old-struck/discounted pairs since v14.0.233/243). The section subtotal row now applies the same shared `_discFactor` presentation — old amount struck through (.disc-old), discounted amount beside it (.disc-new) — so it matches its item lines exactly (verified: discounted line amounts sum to the discounted section subtotal; no-discount rendering unchanged). Tutorial v35.
 
 > **2026-09-16: Chibab's kitchen schematic published for team/partner share (v14.0.265, BK-branded header/footer v14.0.267):** the Chibab's Chicken Inasal kitchen zoning/circulation study (quote ref BKMLVB260914-014R1, client Joseph Asis, Cabuyao) is now a public standalone page at `barroindustries.com/partners/pmtc/chibabs/schematic/` — anyone with the link opens it, no login (`/parterns/...` as-typed-by-owner redirects there). Static self-contained HTML; NOT in the SW precache; SW serves standalone paths network-first so no shell hijack. Pattern for future partner shares: drop `partners/<partner>/<project>/<doc>/index.html`.
 
@@ -27,7 +29,7 @@ _Last updated: **2026-09-16**_
 
 | | |
 |---|---|
-| **Production** | v14.0.265 (auto-bumps each commit — live check: `curl -sL https://barroindustries.com/js/config.js \| grep APP_VERSION`) |
+| **Production** | v14.0.269 (auto-bumps each commit — live check: `curl -sL https://barroindustries.com/js/config.js \| grep APP_VERSION`) |
 | **Deploy** | `git push origin master` → GitHub Pages (custom domain above; the github.io URL 301s to it). Firebase surfaces deploy separately — use `scripts/release.sh`. |
 | **Active program** | V14 overhaul ([docs/plans/V14-OVERHAUL-PLAN.md](docs/plans/V14-OVERHAUL-PLAN.md)) — Wave 1 + 2A live. Current build thread: **costing system** (phases 1–2 shipped: true-cost panel, material price list, custom-item BOM, break-even v2, pace dashboard). NEW 2026-08-31: **Inventory department** ([specs/INVENTORY-DEPT-SPEC-2026-08-31.md](specs/INVENTORY-DEPT-SPEC-2026-08-31.md)) — Stock / Raw Materials (price list, moved from Purchasing) / Finished Products (catalog view) / Movements / Count Form (moved from Production); Production slimmed 8→5 tabs, Purchasing 5→4; `inventory_items`/`stock_movements` write rules tightened to Inventory/Purchasing/Production/Finance + senior admins (was: any internal staff; secretary now view-only). ALSO 2026-08-31 (v14.0.203): quote builder ships a built-in **Help & guided demo** — ❓ Help button, first-run "New to the quote builder?" banner, 14-step read-only spotlight tour, What's New panel — under a self-updating contract: every user-visible QB change must bump `TUTORIAL_VERSION` + add a What's-New entry ([.claude/skills/quote-builder-tutorial/SKILL.md](.claude/skills/quote-builder-tutorial/SKILL.md), spec [specs/QB-TUTORIAL-SPEC-2026-08-31.md](specs/QB-TUTORIAL-SPEC-2026-08-31.md)). |
 | **Blocked on owner** | Office/monthly payroll disbursement — waiting on verified 2026 statutory rates (ruling #1 below). Everything else about office pay is built. |
