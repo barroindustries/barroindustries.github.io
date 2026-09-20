@@ -7601,13 +7601,14 @@ async function fileQuotation(){
   await reserveAtomicQnoSeq();
   const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
   const quotePayload = buildQuotePayload();
+  const quoteCostSidecar = buildCostSidecar();   // QUOTE-COSTS — rides the envelope, never the payload
 
   if(reqApproval){
     // Send for president approval — don't mark as filed yet
     quoteStatus='pending_approval';
     document.getElementById('verifyModal').style.display='none';
     saveToStorage();
-    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
     setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
     // Show feedback
     document.getElementById('filedBadge').textContent='⏳ Pending Approval';
@@ -7632,10 +7633,10 @@ async function fileQuotation(){
   // Wave 3 Q4 — reopened from an existing doc AND the user picked "update in
   // place": mirror the president in-place-edit path instead of filing a copy.
   if(reopenSourceDocId && !reopenAsRevisionFlag && fileMode==='update'){
-    window.parent.postMessage({ type:'QUOTE_UPDATE', docId:reopenSourceDocId, collection:reopenSourceCollection, payload:quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_UPDATE', docId:reopenSourceDocId, collection:reopenSourceCollection, payload:quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
   } else {
     // Notify parent app to save to Firestore (new copy / new revision)
-    window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload, draftDocId: savedDraftDocId }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload, draftDocId: savedDraftDocId, costSidecar: quoteCostSidecar }, window.location.origin);
   }
   setSavedDraft(null); // QB-DRAFTS-SPEC-2026-09-11 — filing cleans up its own named draft doc
 
@@ -7645,6 +7646,29 @@ async function fileQuotation(){
     log.push({ quoteNo: quotePayload.quoteNumber, clientName: quotePayload.clientName, filedAt: new Date().toISOString(), total: quotePayload.total });
     localStorage.setItem('bkqb_filed_log',JSON.stringify(log));
   }catch(e){}
+}
+
+// QUOTE-COSTS (owner ruling 2026-09-21): package the cost basis that
+// buildQuotePayload()'s strip removes — SEPARATELY from the payload, never
+// inside it (the bridge's draft path spreads the payload wholesale into the
+// quote doc, which is exactly the leak boundary the strip exists for). This
+// rides the postMessage ENVELOPE (e.data.costSidecar); the bridge lifts it
+// into the private quote_costs collection (internal-only rules), and the
+// reopen/resume paths graft it back so the BOM/costing survives a re-open.
+// Rows match back by index+name. Null for partner sessions and when no line
+// carries any cost field.
+function buildCostSidecar(){
+  if (PARTNER_MODE) return null;
+  const rows=[];
+  items.forEach((it,i)=>{
+    if(!it) return;
+    const r={};
+    ['costMat','costHrs','costLaborDays','capitalMaterials','capitalLabor'].forEach(k=>{ if(it[k]!==undefined && it[k]!==null) r[k]=it[k]; });
+    if(Array.isArray(it.bom)&&it.bom.length) r.bom=it.bom.map(b=>({name:String(b.name||''),qty:Number(b.qty)||0,unitPrice:Number(b.unitPrice)||0,...(b.src?{src:String(b.src)}:{})}));
+    if(it.priceManual) r.priceManual=true;
+    if(Object.keys(r).length) rows.push({i, n:String(it.name||'').slice(0,120), ...r});
+  });
+  return rows.length ? {v:1, items:rows} : null;
 }
 
 function buildQuotePayload(){
@@ -7986,7 +8010,7 @@ function sendQuoteDraft(){
     // out from under that named draft without an explicit 💾 Save/🆕 Save as
     // new draft: the silent 5s autosave must never rewrite another client's
     // named draft, so it drops to the crash-recovery slot (null) instead.
-    window.parent.postMessage({type:'QUOTE_DRAFT', payload, draftDocId:(savedDraftDocId && !draftClientChanged())?savedDraftDocId:null}, window.location.origin);
+    window.parent.postMessage({type:'QUOTE_DRAFT', payload, draftDocId:(savedDraftDocId && !draftClientChanged())?savedDraftDocId:null, costSidecar: buildCostSidecar()}, window.location.origin);
   }catch(e){}
 }
 function showDraftSavedChip(){
@@ -8022,7 +8046,7 @@ function saveQuoteDraftNow(asNew){
   _pendingDraftKey = draftClientKey();
   _pendingDraftIsUpdate = !!savedDraftDocId;
   try{
-    window.parent.postMessage({ type:'QUOTE_SAVE_DRAFT', payload:buildQuotePayload(), draftDocId:savedDraftDocId }, window.location.origin);
+    window.parent.postMessage({ type:'QUOTE_SAVE_DRAFT', payload:buildQuotePayload(), draftDocId:savedDraftDocId, costSidecar: buildCostSidecar() }, window.location.origin);
   }catch(e){ showToast('Could not reach the app to save this draft.','error'); }
 }
 
@@ -8182,8 +8206,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 39;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 40;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:40, date:'2026-09-21', items:[
+    'Costing survives reopen — the BOM, lump materials, crew-days and capital costs on a quote now come back when you reopen a filed quote, resume a draft, or start a New Revision. The cost data is stored privately (internal accounts only — it still never rides inside the quote itself, and partners still never see it). Quotes filed before today reopen without costing, same as before.',
+  ]},
   { ver:39, date:'2026-09-21', items:[
     'Brilliant Steel quotes can mark pass-through items too — every line on a BS quote gets a "pass-through" tick (below the item name): the supplier price is the client price, and discounts skip the line. Available to Brilliant Steel partner accounts as well; it shows no cost data.',
   ]},

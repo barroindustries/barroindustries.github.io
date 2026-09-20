@@ -2314,6 +2314,31 @@ async function saveReviewedPartnerQuote(ctx, action) {
   } catch (ex) { Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error'); }
 }
 
+// QUOTE-COSTS (owner ruling 2026-09-21) — re-attach the privately-stored
+// cost basis (quote_costs/<coll>_<docId>, written by the QB bridge above)
+// onto a reopened/resumed state's items BEFORE the builder loads it, so the
+// BOM/costing survives Verify & File → reopen. Rows re-attach only when
+// index AND name both still match (the quote may have been edited by an
+// older client since the sidecar was written — a half-stale graft must
+// never land costs on the wrong line). Silent no-op when the sidecar is
+// absent, or rules deny the read (partner sessions) — the reopen then
+// behaves exactly as before this feature.
+async function graftQuoteCosts(collection, docId, state){
+  try {
+    if (!state || !Array.isArray(state.items) || !state.items.length) return;
+    const snap = await db.collection('quote_costs').doc(collection + '_' + docId).get();
+    if (!snap.exists) return;
+    ((snap.data() || {}).items || []).forEach(r => {
+      if (!r || typeof r.i !== 'number') return;
+      const it = state.items[r.i];
+      if (!it || String(it.name || '') !== String(r.n || '')) return;
+      ['costMat','costHrs','costLaborDays','capitalMaterials','capitalLabor'].forEach(k => { if (r[k] !== undefined) it[k] = r[k]; });
+      if (Array.isArray(r.bom) && r.bom.length) it.bom = r.bom;
+      if (r.priceManual) it.priceManual = true;
+    });
+  } catch(_){ /* no access or not deployed yet — reopen works as before */ }
+}
+
 // Reopen a filed quote into the builder from anywhere (Quotations list, Client
 // data view, etc.). Loads the quote's editable snapshot and navigates to the
 // matching builder. Re-filing then saves a NEW versioned copy (per the SOP).
@@ -2336,6 +2361,7 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     // base number is always frozen/correct, never builder-regenerated.
     const qNo = q.editableState.quoteNo || q.quoteNumber || '';
     window._qbReopenState = { ...q.editableState, quoteNo: qNo, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
+    await graftQuoteCosts(collection, id, window._qbReopenState);   // QUOTE-COSTS
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
@@ -2351,6 +2377,7 @@ window.resumeDraftFromDoc = async function(collection, id){
     const q = snap.data() || {};
     if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this draft', 'error'); return; }
     window._qbReopenState = { ...q.editableState, draftDocId: id };
+    await graftQuoteCosts(collection, id, window._qbReopenState);   // QUOTE-COSTS
     window._qbReopenAsRevision = false;
     navigateTo(collection === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder');
   } catch (ex) { Notifs.showToast('Could not resume draft: '+(ex.message||ex.code), 'error'); }
@@ -2433,6 +2460,7 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
     // base number it bumps is never blank/stale.
     const qNo = latest.editableState.quoteNo || latest.quoteNumber || '';
     window._qbReopenState = { ...latest.editableState, quoteNo: qNo, sourceDocId: latest.id, sourceCollection: collection, rootQuoteId: latest.rootQuoteId || latest.id };
+    await graftQuoteCosts(collection, latest.id, window._qbReopenState);   // QUOTE-COSTS
     window._qbReopenAsRevision = true;
     navigateTo(navTarget || (collection === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not start revision: ' + (ex.message || ex.code), 'error'); }
@@ -4996,6 +5024,32 @@ window.addEventListener('message', async (e) => {
     return;
   }
 
+  // QUOTE-COSTS (owner ruling 2026-09-21): the builder ships the cost basis
+  // its payload strip removes (BOM rows, lump materials, crew-days, capital
+  // costs) as e.data.costSidecar — persist it PRIVATELY in
+  // quote_costs/<coll>_<docId> (internal-only firestore.rules; partners
+  // denied) so an internal reopen/resume can graft the costing back onto the
+  // quote. Best-effort by design: it never blocks or fails the quote write
+  // it rides with (pre-rules-deploy or partner sessions just skip).
+  const saveCostSidecar = async (coll, id) => {
+    const sc = e.data.costSidecar;
+    if (!sc || !Array.isArray(sc.items) || !sc.items.length || !coll || !id) return;
+    if (_qbPartner) return;   // partners never carry cost data; never write the private store
+    try {
+      await db.collection('quote_costs').doc(coll + '_' + id).set({
+        ...sc, quoteColl: coll, quoteDocId: id,
+        createdBy: currentUser.uid,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (err) { console.warn('[QB bridge] quote_costs save failed (non-blocking)', err); }
+  };
+  // Companion cleanup for the draft-deletion paths below — a deleted draft's
+  // sidecar goes with it (best-effort; an orphan is harmless but untidy).
+  const deleteCostSidecar = async (coll, id) => {
+    if (!coll || !id) return;
+    try { await db.collection('quote_costs').doc(coll + '_' + id).delete(); } catch(_){}
+  };
+
   // Wave 3 Q6 — cloud draft. Debounced (5s idle, builder-side) autosave into a
   // single deterministic slot per user per collection, so a closed tab doesn't
   // lose unfiled work. NOTE: requires firestore.rules to allow this user to
@@ -5016,6 +5070,7 @@ window.addEventListener('message', async (e) => {
         draftBy: currentUser.uid,
         draftAt: firebase.firestore.FieldValue.serverTimestamp(),
       };
+      let sidecarDocId = 'draft_' + currentUser.uid;   // QUOTE-COSTS — tracks whichever doc actually took this autosave
       if (namedId) {
         // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §5 — update(), never set(): a
         // set() on the named doc would RESURRECT a draft the user already
@@ -5025,12 +5080,14 @@ window.addEventListener('message', async (e) => {
         // path below — the autosave must never be lost, just re-homed.
         try {
           await db.collection(coll).doc(namedId).update(body);
+          sidecarDocId = namedId;
         } catch (updateErr) {
           await slotRef.set(body, { merge: true });
         }
       } else {
         await slotRef.set(body, { merge: true });
       }
+      await saveCostSidecar(coll, sidecarDocId);
       try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVED', at: Date.now() }, e.origin); } catch(_){}
     } catch (err) {
       console.warn('[QB bridge] QUOTE_DRAFT save failed (draft_{uid} firestore.rules likely not deployed yet)', err);
@@ -5069,6 +5126,7 @@ window.addEventListener('message', async (e) => {
         });
         id = ref.id;
       }
+      await saveCostSidecar(coll, id);   // QUOTE-COSTS — the named draft keeps its cost basis privately
       dbCacheInvalidate && dbCacheInvalidate('all-quotes');
       try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVED_OK', docId: id }, e.origin); } catch(_){}
     } catch (err) {
@@ -5180,6 +5238,7 @@ window.addEventListener('message', async (e) => {
         editedByName:   agentName,
       };
       await db.collection(collection).doc(docId).update(update);
+      await saveCostSidecar(collection, docId);   // QUOTE-COSTS — in-place edit refreshes the private cost basis
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
       // QB-DRAFTS-SPEC-2026-09-11 — this session may have also picked up a
       // NAMED draft doc along the way (e.g. saved a draft, then reopened and
@@ -5305,10 +5364,10 @@ window.addEventListener('message', async (e) => {
     };
     // Wave 3 Q6 — filing (either path) replaces the need for the cloud draft
     // slot; best-effort cleanup, never blocks the file itself.
-    const deleteDraftSlot = async () => { try { await db.collection(coll).doc('draft_' + currentUser.uid).delete(); } catch(_){} };
+    const deleteDraftSlot = async () => { try { await db.collection(coll).doc('draft_' + currentUser.uid).delete(); } catch(_){} await deleteCostSidecar(coll, 'draft_' + currentUser.uid); };
     // QB-DRAFTS-SPEC-2026-09-11 — filing a NAMED draft (savedDraftDocId) also
     // deletes ITS OWN doc, not just the slot above.
-    const deleteNamedDraft = async () => { const id0 = e.data.draftDocId; if (id0) try { await db.collection(coll).doc(id0).delete(); } catch(_){} };
+    const deleteNamedDraft = async () => { const id0 = e.data.draftDocId; if (id0) { try { await db.collection(coll).doc(id0).delete(); } catch(_){} await deleteCostSidecar(coll, id0); } };
 
     if (type === 'QUOTE_FILED') {
       Object.assign(data, window.quoteStateFields('filed'));
@@ -5316,6 +5375,7 @@ window.addEventListener('message', async (e) => {
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
+      await saveCostSidecar(coll, docRef.id);   // QUOTE-COSTS — the filed quote's cost basis, stored privately
       await deleteDraftSlot();
       await deleteNamedDraft();
       // Notify president so they're aware of filed quotes
@@ -5335,6 +5395,7 @@ window.addEventListener('message', async (e) => {
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
+      await saveCostSidecar(coll, docRef.id);   // QUOTE-COSTS — same private store on the approval path
       await deleteDraftSlot();
       await deleteNamedDraft();
       await db.collection('approval_requests').add({

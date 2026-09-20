@@ -2284,6 +2284,13 @@ service cloud.firestore {
             && resource.data.get('createdBy','') == request.auth.uid));
     }
 
+    // ── Quote cost sidecars (QB, owner 2026-09-21) ─ the cost basis (BOM/
+    // costMat/labor/capital) stripped from quote docs, keyed <coll>_<docId>.
+    // Internal-only: partners must never read Barro's cost basis.
+    match /quote_costs/{id} {
+      allow read, write: if isAuth() && !isPartner();
+    }
+
     // ── Quote Templates (QUOTE-TEMPLATES-SPEC.md) ─
     // Reusable product/pricing/terms configs saved from the quote builder —
     // client/identity fields are stripped client-side before this is ever
