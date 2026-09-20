@@ -4818,7 +4818,7 @@ function renderItems(){
     // its own price where the reader is already looking.
     html+= optOn
       ? optionTotalRowsHtml(computeTotals(sectionItems(catId)),`TOTAL — ${txtEsc(secLabel)}`)
-      : `<tr class="subtotal-row"><td colspan="6" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
+      : `<tr class="subtotal-row"><td colspan="6" style="text-align:right;">Subtotal — ${txtEsc(secLabel)}: ${_discFactor>0?`<span class="disc-old">${formatPeso(subtotal)}</span> <span class="disc-new">${formatPeso(subtotal*(1-_discFactor))}</span>`:formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
   });
 
   tbody.innerHTML=html;
@@ -8033,8 +8033,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 34;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 35;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:35, date:'2026-09-21', items:[
+    'Section subtotals now honor the discount — when a discount applies, each "Subtotal — SECTION" row shows the old amount crossed out with the discounted amount beside it, matching the item lines (it used to print the undiscounted sum).',
+  ]},
   { ver:34, date:'2026-09-11', items:[
     'Drafts are truly per client now — starting a different client\'s quote can no longer overwrite the previous client\'s saved draft (it saves as its own new draft automatically), and 🆕 Save as new draft beside 💾 Update draft lets one client keep several drafts (e.g. Option A / Option B).',
   ]},
