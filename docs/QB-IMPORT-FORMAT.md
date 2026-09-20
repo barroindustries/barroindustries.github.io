@@ -99,7 +99,8 @@ it.
 markup, no overhead — the price we buy at is the price we give (owner ruling
 2026-09-21). The line auto-prices at exactly its supplier cost (put that in
 `costing`; absent one, its quoted price is taken as the cost), and the
-internal calculator counts it at cost — never as a negative margin. It is a
+internal calculator counts it at cost — never as a negative margin. Quote
+discounts skip it too: there is no markup on the line to give. It is a
 checkbox in the builder too — this just pre-ticks it.
 
 **`costing`** (optional object):
