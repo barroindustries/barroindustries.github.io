@@ -720,6 +720,14 @@ body.body-workforce .items-table th:nth-child(2){width:66%!important;}
 body.body-workforce .items-table th:nth-child(3){width:15%!important;}
 body.body-workforce .items-table th:nth-child(4){width:15%!important;}
 body.body-workforce .wf-note{display:block!important;}
+/* Owner 2026-09-21: the internal cost machinery goes too — the pass-through
+   ticks (gate row + BS tick row), the Cost chips/BOM button, and the
+   calculator. All are .no-print already, so real print output never carried
+   them — this also hides them ON SCREEN while the workforce state is up, so
+   what's behind the print dialog matches the paper (belt-and-braces both). */
+body.body-workforce .cost-gate-row,
+body.body-workforce .pt-tick-row,
+body.body-workforce #costMarginWrap{display:none!important;}
 
 /* v12 WS31 Spec 7 / Wave 3 Q8 — #lhPrintHeader (shared letterhead engine) is now
    the SOLE printed header (the old body.lh-active fallback branch that let the
@@ -4416,7 +4424,7 @@ function bsPassThroughRowHtml(item, idx){
   if (typeof currentCo==='undefined' || currentCo!=='BS') return '';
   if (GENERIC_PARTNER) return '';
   if (item.id==='MISCFEE') return '';
-  return `<div class="spec-line no-print" style="display:flex;align-items:center;gap:6px;">
+  return `<div class="spec-line pt-tick-row no-print" style="display:flex;align-items:center;gap:6px;">
     <label style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--gray-dark);cursor:pointer;" title="The supplier price is the client price — no markup on this line, and discounts never touch it."><input type="checkbox" ${item.passThrough?'checked':''} onchange="togglePassThrough(${idx},this.checked)">pass-through — supplier price, discounts skip this line</label>
   </div>`;
 }
