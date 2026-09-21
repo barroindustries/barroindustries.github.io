@@ -700,6 +700,27 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
 .print-run-footer{display:none;}
 @media print{.no-print{display:none!important;}}
 
+/* ── WORKFORCE COPY (owner 2026-09-21) — body.body-workforce is set
+   transiently by doPrintWorkforce(): a crew print with NO prices. Hides the
+   UNIT PRICE + AMOUNT columns, subtotal/option-ladder rows, the totals box
+   and the terms/payment section (payment lives inside #termsSection since
+   unifyPaymentIntoTerms), re-widens the four remaining columns to fill the
+   page, and reveals the ±5mm tolerance note the hidden terms would have
+   carried. Class is only ever present during the print window. */
+body.body-workforce .items-table th:nth-child(5),
+body.body-workforce .items-table td:nth-child(5),
+body.body-workforce .items-table th:nth-child(6),
+body.body-workforce .items-table td:nth-child(6),
+body.body-workforce .subtotal-row,
+body.body-workforce .opt-sub-row,
+body.body-workforce .opt-grand-row,
+body.body-workforce .totals-box,
+body.body-workforce #termsSection{display:none!important;}
+body.body-workforce .items-table th:nth-child(2){width:66%!important;}
+body.body-workforce .items-table th:nth-child(3){width:15%!important;}
+body.body-workforce .items-table th:nth-child(4){width:15%!important;}
+body.body-workforce .wf-note{display:block!important;}
+
 /* v12 WS31 Spec 7 / Wave 3 Q8 — #lhPrintHeader (shared letterhead engine) is now
    the SOLE printed header (the old body.lh-active fallback branch that let the
    legacy #printHeader print when letterhead.js hadn't run yet is deleted).
@@ -1014,6 +1035,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
     <button class="btn btn-outline" id="btnPrint" onclick="doPrint()" title="Save the quotation as a PDF — the file name is the client name + quote number">📄 Save PDF</button>
     <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
+    <button class="btn btn-outline" id="btnWorkforcePrint" onclick="doPrintWorkforce()" title="Print/PDF a crew copy with NO prices — item details, qty and unit only" style="border-color:#4a9;color:#9fe0c5;">🛠 Workforce Copy</button>
   </div>
 </div>
 
@@ -1035,6 +1057,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <button class="mtb-row" onclick="mtbRun('clearForm')">🗑 New</button>
     <button class="mtb-row" onclick="mtbRun('doPrint')">📄 Save PDF</button>
     <button class="mtb-row" id="mtbAgentPrint" onclick="mtbRun('doPrintAgent')" style="color:var(--purple);">🧾 Agent Copy</button>
+    <button class="mtb-row" id="mtbWorkforcePrint" onclick="mtbRun('doPrintWorkforce')" style="color:#7fd1a8;">🛠 Workforce Copy</button>
     <div class="mtb-divider"></div>
     <div class="mtb-seg-group" id="mtbCoGroup">
       <div class="mtb-seg-label">Company</div>
@@ -1398,6 +1421,10 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
     <div class="pc-row" id="optionsBasisWrap" style="display:none;"></div>
   </div>
 
+  <!-- Workforce copy only (body-workforce, see doPrintWorkforce): the crew
+       still needs the fabrication tolerance even though the terms section —
+       where the clause normally prints — is hidden with the money. -->
+  <div class="wf-note" style="display:none;font-size:8pt;color:#333;margin-top:2px;">All fabricated dimensions: ±5mm measurement tolerance (standard for stainless steel fabrication).</div>
   <!-- Totals -->
   <div class="totals-box">
     <table class="totals-tbl" id="totalsTbl"></table>
@@ -1716,7 +1743,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
         <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
-        <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately. A quotation is always shared as the PDF.</li>
+        <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately, and 🛠 Workforce Copy prints the crew version with no prices — item details, qty and unit only. A quotation is always shared as the PDF.</li>
       </ol>
 
       <h4>The three tabs</h4>
@@ -1728,6 +1755,7 @@ body.body-agent .lh-docmeta{font-size:8.5pt;font-weight:800;letter-spacing:1px;c
       <ul>
         <li>📝 Your work <strong>auto-saves as a draft</strong>; an unfiled quote offers to resume next time.</li>
         <li>🧾 <strong>Agent Copy</strong> is confidential — never send it to the client.</li>
+        <li>🛠 <strong>Workforce Copy</strong> carries no prices — the safe version to hand the fabrication crew.</li>
         <li>💯 <strong>Prices end in two zeros</strong> — each computed line rounds to the nearest ₱100 (₱85,500, ₱7,500); the markup quietly absorbs the difference. "↺ re-apply computed prices" in the cost panel clears any hand-typed overrides.</li>
         <li>📦 <strong>Pricelist</strong> — the button beside the database status opens the full catalog in a popup: scroll or search, tap a product and it lands on the quote. Adding or editing products happens in the Inventory department's Product Pricelist, not in the builder.</li>
       </ul>
@@ -2648,7 +2676,8 @@ function applyLetterheadHeader(){
     // and it never knew about the legacy #phAgentTag). extraMeta is an
     // existing, already-supported buildLetterhead() option — this reuses it
     // rather than touching js/letterhead.js.
-    extraMeta: document.body.classList.contains('body-agent') ? ['AGENT COPY — CONFIDENTIAL'] : [],
+    extraMeta: document.body.classList.contains('body-agent') ? ['AGENT COPY — CONFIDENTIAL']
+      : document.body.classList.contains('body-workforce') ? ['WORKFORCE COPY — NO PRICES'] : [],
     accent: currentCo==='BS' ? '#37474F' : '#1E3A5F',
     // v14: resolve the PER-COMPANY mark; an empty one means this company has
     // no logo, so suppress it (showLogo:false) instead of inheriting the
@@ -8091,6 +8120,7 @@ function doPrint(){
   // agent-copy print (body-agent still set, e.g. its cleanup timeout hasn't
   // fired yet) can never leak the confidential tag onto a client print.
   document.body.classList.remove('body-agent');
+  document.body.classList.remove('body-workforce');   // same hygiene as body-agent — a client print right after a workforce print must show prices
   document.getElementById('phAgentTag').style.display='none';
   applyLetterheadHeader();   // v12 WS31 — refresh the shared letterhead so the doc number is current
   updatePrintRunFooter();
@@ -8104,9 +8134,31 @@ function doPrint(){
   setTimeout(()=>{document.title=prev;},800);
 }
 
+// Owner request 2026-09-21: a crew copy with NO prices — item details, qty
+// and unit only. Same transient-body-class pattern as doPrintAgent() below;
+// the body.body-workforce CSS block (see the print styles) does the hiding.
+// No filed gate (like Agent Copy — a crew sheet for a draft is useful too).
+function doPrintWorkforce(){
+  if(!items.length){ showToast('Add at least one item before printing a workforce copy.','error'); return; }
+  document.body.classList.remove('body-agent');   // never both copies' state at once
+  document.getElementById('phAgentTag').style.display='none';
+  document.body.classList.add('body-workforce');
+  applyLetterheadHeader();   // picks up the WORKFORCE COPY extraMeta tag
+  updatePrintRunFooter();
+  const prev=document.title;
+  document.title=quoteFileName('Workforce Copy');
+  window.print();
+  setTimeout(()=>{
+    document.body.classList.remove('body-workforce');
+    applyLetterheadHeader();   // restore the client-copy letterhead for next time
+    document.title=prev;
+  },800);
+}
+
 function doPrintAgent(){
   if(!items.length){ showToast('Add at least one item before printing an agent copy.','error'); return; }
   buildAgentBox();
+  document.body.classList.remove('body-workforce');   // never both copies' state at once
   document.body.classList.add('body-agent');
   document.getElementById('phAgentTag').style.display='inline-block';
   applyLetterheadHeader();   // rebuild the letterhead so it picks up the AGENT COPY extraMeta tag
@@ -8206,8 +8258,11 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 40;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 41;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:41, date:'2026-09-21', items:[
+    '🛠 Workforce Copy — a print/PDF for the fabrication crew with NO prices: item details, specs, dims, notes, qty and unit only. The price columns, subtotals, totals and payment/terms are all left off; the header is tagged "WORKFORCE COPY — NO PRICES" and the ±5mm tolerance note still prints. Find it beside Agent Copy.',
+  ]},
   { ver:40, date:'2026-09-21', items:[
     'Costing survives reopen — the BOM, lump materials, crew-days and capital costs on a quote now come back when you reopen a filed quote, resume a draft, or start a New Revision. The cost data is stored privately (internal accounts only — it still never rides inside the quote itself, and partners still never see it). Quotes filed before today reopen without costing, same as before.',
   ]},
@@ -8391,8 +8446,8 @@ const TOUR_STEPS = [
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
    body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).' },
- { target:'#btnPrint', title:'Save PDF & Agent Copy',
-   body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details.' },
+ { target:'#btnPrint', title:'Save PDF, Agent & Workforce copies',
+   body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: item details, qty and unit only — no prices anywhere.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
    body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here. Partners never see this button.' },
  { title:'That\'s the whole flow 🎉',
