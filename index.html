@@ -70,8 +70,15 @@
   <!-- Stylesheets — browser downloads in parallel with scripts below.
        tokens.css MUST load before styles.css: it defines the :root design
        tokens (Batch 2 / spec 2a) that styles.css consumes throughout. -->
-  <link rel="stylesheet" href="css/tokens.css"/>
-  <link rel="stylesheet" href="css/styles.css"/>
+  <!-- ?v= is a CACHE-BUST, rewritten by .githooks/pre-commit on every commit.
+       styles.css is ~437KB and loses sw.js's 400ms network-first race whenever
+       the service worker is a version behind (its update applies only at the
+       login screen or on a hidden tab, by design), so the browser served old
+       CSS beside new JS and a shipped CSS change looked like it never landed.
+       A new version = a new cache key, so even a stale SW must hit the network.
+       Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
+  <link rel="stylesheet" href="css/tokens.css?v=14.0.293"/>
+  <link rel="stylesheet" href="css/styles.css?v=14.0.293"/>
 </head>
 <body>
 
@@ -205,7 +212,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.291 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.293 · Barro Industries</div>
   </div>
 </div>
 

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.291';
+window.APP_VERSION = '14.0.293';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -238,7 +238,7 @@ window.DEPARTMENTS = {
     // 'Quick Estimate' are dead aliases that resolve to 'Quotes' — removed here.
     // 'AEC' moved out to the CRM department (2026-08-04) — the architect/
     // engineer/contractor prospecting directory now lives under CRM > AEC Leads.
-    subtabs: ['Clients', 'Quotes', 'Analytics', 'Partner', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
+    subtabs: ['Clients', 'Briefs', 'Quotes', 'Analytics', 'Partner', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
   },
   'CRM': {
     key: 'CRM', icon: '🎯', lucideIcon: 'target', color: '#F59F00',
@@ -1608,8 +1608,8 @@ window.PAGE_SCRIPTS = {
   // renderBSQuotationsSummary/renderBKQuotationsSummary (js/screens/sales.js
   // itself) unguarded after the order is created. Same reach applies to
   // 'bk-quotations' below (same renderSales screen). ──
-  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js'],
-  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js'],
+  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js'],
+  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js'],
 
   // ── CRM — its "AEC Leads" tab calls window.renderAECDirectory
   // (js/screens/sales.js) unguarded. ──

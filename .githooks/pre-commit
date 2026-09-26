@@ -80,6 +80,23 @@ if ! grep -q "v${NEW_VERSION} · Barro Industries" "$INDEX"; then
   exit 1
 fi
 
+# ── CSS cache-bust (deploy-delivery fix, 2026-09-26) ─────────────────────────
+# Rewrites  css/<name>.css?v=X.Y.Z  in BOTH index.html (the <link> hrefs) and
+# sw.js (the PRECACHE entries) so the two never drift — ci-invariants check 2
+# compares them literally, and the SW caches by full URL, so a mismatch would
+# silently cost offline CSS. Skipped cleanly if the ?v= markers are ever
+# removed, so this can never block a commit on its own.
+for _cssfile in "$INDEX" "$SW"; do
+  if grep -q 'css/styles.css?v=' "$_cssfile"; then
+    sed -i '' -E "s#(css/(tokens|styles)\.css)\?v=[0-9][0-9.]*#\1?v=${NEW_VERSION}#g" "$_cssfile"
+    if ! grep -q "css/styles.css?v=${NEW_VERSION}" "$_cssfile"; then
+      echo "[css] ERROR: failed to rewrite the CSS cache-bust in $_cssfile — blocking commit"
+      exit 1
+    fi
+  fi
+done
+echo "[css] Cache-bust set to ?v=${NEW_VERSION}"
+
 # Stage both files
 git add "$CONFIG" "$INDEX"
 
@@ -155,7 +172,9 @@ for entry in $PRECACHE_ENTRIES; do
     "/") target="index.html" ;;
     "/t/") target="t/index.html" ;;
     "/v/") target="v/index.html" ;;
-    *) target=$(printf '%s' "$entry" | sed 's#^/##') ;;
+    # Strip any ?v= cache-bust before resolving the on-disk target: the
+    # PRECACHE entry is a URL, the thing we hash is a file.
+    *) target=$(printf '%s' "$entry" | sed 's#^/##; s#?.*##') ;;
   esac
   if ! git cat-file -e ":$target" 2>/dev/null; then
     echo "[manifest] ERROR: PRECACHE entry '$entry' has no staged/committed target '$target' in the git index — blocking commit"
