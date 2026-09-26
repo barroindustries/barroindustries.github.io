@@ -412,6 +412,14 @@ service firebase.storage {
         && isOwnerOrAdmin();
     }
 
+    // Client portal staff-uploaded progress photos only (CLIENT-PORTAL-CHIBABS-SPEC
+    // §7.4) — 4 path segments, so the generic {department}/{subfolder}/{fileName}
+    // block above never matches this path; no proposal PDF is ever stored (D8).
+    match /client-portals/{pid}/progress/{fileName} {
+      allow read, create, update, delete: if isSignedIn() && isAdminClaim()
+        && (request.resource == null || isValidImage());
+    }
+
     // ── Deny everything else by default ──────────────
     match /{allPaths=**} {
       allow read, write: if false;

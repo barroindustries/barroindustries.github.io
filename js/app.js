@@ -2736,6 +2736,7 @@ const _SKELETON_KIND = {
   // Tabular screens — these paint a <table> or a column-aligned list.
   'bs-quotations': 'table', 'bk-quotations': 'table', 'bs-clients': 'table',
   'sales-orders': 'table', inventory: 'table', 'cash-advances': 'table', 'personal-todo': 'rows',
+  'client-portals': 'cards',
   'product-database': 'table', 'audit-log': 'table', holidays: 'table',
   attendance: 'table', 'personal-finance': 'table',
   // Everything else (tasks, approvals, posts, memos, chat, files, leave,
@@ -2952,6 +2953,7 @@ async function navigateTo(page, opts) {
     case 'posts':            window.renderPosts?.(); break;
     case 'notes':            window.renderNotesPage?.(); break;
     case 'personal-todo':    window.renderPersonalTodo?.(); break;
+    case 'client-portals':   window.renderClientPortals?.(); break;
     case 'memos':            window.renderMemosPage?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'chat':             window.renderChatPage?.(); break;

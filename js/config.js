@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.284';
+window.APP_VERSION = '14.0.285';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -774,6 +774,10 @@ window.NAV_REGISTRY = {
       // Owner ruling 2026-09-01: personal to-do, president-only drawer entry
       // (data is owner-scoped in rules either way — see personal_todos).
       { key:'todo',      icon:'list-checks',   label:'My To-Do',      page:'personal-todo', when:'isPresident' },
+      // NEW 2026-09-26 (CLIENT-PORTAL-CHIBABS-SPEC.md D9): president-only
+      // drawer entry; rules already admit managers (isSeniorAdmin) so
+      // flipping this predicate later is nav-only, no rules change.
+      { key:'client-portals', icon:'file-signature', label:'Client Portals', page:'client-portals', when:'isPresident' },
       { key:'tasks',     icon:'check-square',  label:'Tasks',         page:'tasks' },
       { key:'calendar',  icon:'calendar-days', label:'Calendar',      page:'calendar' },
       { key:'approvals', icon:'shield-check',  label:'Approvals',     page:'approvals' },
@@ -1658,6 +1662,7 @@ window.PAGE_SCRIPTS = {
 
   'notes': ['js/screens/notes.js'],
   'personal-todo': ['js/screens/todo.js'],
+  'client-portals': ['js/screens/client-portals.js'],
 
   // ── People-family pages — all render functions for these live in
   // js/screens/people.js. ──

@@ -771,6 +771,32 @@ service cloud.firestore {
         && request.resource.data.get('subs', []).size() <= 60;
     }
 
+    // Client portals — client side is callable-only (CLIENT-PORTAL-CHIBABS-SPEC).
+    // secrets/sessions/ratelimit collections have NO match block — Admin SDK only.
+    match /client_portals/{pid} {
+      allow get, list: if isAuth() && isAdmin();
+      allow create: if isAuth() && isSeniorAdmin()
+        && request.resource.data.get('acceptance', null) == null
+        && !request.resource.data.keys().hasAny(['codeHash','codeSalt']);
+      allow update: if isAuth() && isSeniorAdmin()
+        && request.resource.data.get('acceptance', null) == resource.data.get('acceptance', null)
+        && !request.resource.data.keys().hasAny(['codeHash','codeSalt']);
+      allow delete: if false;
+    }
+    match /client_portals/{pid}/acceptances/{ref} { allow read: if isAuth() && isAdmin(); allow write: if false; }
+    match /client_portals/{pid}/events/{eid} {
+      allow read: if isAuth() && isAdmin();
+      allow create: if isAuth() && isSeniorAdmin() && request.resource.data.get('actor', {}).get('uid', '') == request.auth.uid
+        && request.resource.data.get('at', null) == request.time;
+      allow update, delete: if false;
+    }
+    match /client_portals/{pid}/updates/{uid2} { allow read: if isAuth() && isAdmin(); allow create, update: if isAuth() && isSeniorAdmin(); allow delete: if false; }
+    match /client_portal_outbox/{ref} {
+      allow read: if isAuth() && isAdmin();
+      allow update: if isAuth() && isSeniorAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','sentAt','sentBy','sentVia']);
+      allow create, delete: if false;
+    }
+
     match /notes/{noteId} {
       allow read: if isAuth() && ( noteIsOwner(resource) || noteIsShared(resource) );
 

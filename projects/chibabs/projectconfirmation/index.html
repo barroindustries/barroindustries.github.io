@@ -1,0 +1,1690 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+// Applied before first paint to avoid a flash of the wrong theme on a repeat
+// visit. Mirrors the three-way pattern in the stylesheet below: an explicit
+// stored choice wins; no stored choice = follow the OS via the media query.
+try {
+  var __t = localStorage.getItem("bkportal_theme");
+  if (__t === "light" || __t === "dark") document.documentElement.setAttribute("data-theme", __t);
+} catch (_e) {}
+</script>
+<title>Project Confirmation — Barro Kitchens</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#D9661F">
+<meta name="description" content="Review, consent to, and sign your Barro Kitchens project proposal — no account needed.">
+<link rel="icon" type="image/png" href="/icons/icon-192.png">
+<!-- OG tags are deliberately generic — this file is static and served verbatim by
+     GitHub Pages, so nothing client-specific (name, price) belongs in the head. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Barro Kitchens by Barro Industries OPC">
+<meta property="og:title" content="Project Confirmation — Barro Kitchens">
+<meta property="og:description" content="Review your Barro Kitchens proposal, consent to terms, and sign — no login needed.">
+<meta property="og:image" content="https://barroindustries.com/icons/barro-kitchens.png">
+<meta property="og:url" content="https://barroindustries.com/projects/chibabs/projectconfirmation/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Project Confirmation — Barro Kitchens">
+<meta name="twitter:description" content="Review your Barro Kitchens proposal, consent to terms, and sign — no login needed.">
+<meta name="twitter:image" content="https://barroindustries.com/icons/barro-kitchens.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:ital,wght@0,500;0,600;0,700;1,600&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* ============================================================================
+   THEMING — three-state pattern copied from partners/pmtc/chibabs/schematic/index.html
+   (per CLIENT-PORTAL-CHIBABS-SPEC.md §5.2), so this page reads as the same
+   Barro Kitchens family:
+     1) bare :root                               → light values (also the default
+                                                     when the browser has no preference)
+     2) @media(prefers-color-scheme:dark)
+        guarded by :root:not([data-theme="light"]) → auto-dark, UNLESS the visitor
+                                                        explicitly forced light
+     3) :root[data-theme="dark"]                 → explicit forced-dark wins over all
+   Every token has a bare :root definition first — never defined only inside a
+   media query — so a browser with no prefers-color-scheme support still renders
+   correct light colors, and the inline head script above can apply a stored
+   choice before first paint without waiting on this stylesheet.
+   ========================================================================= */
+:root{
+  --bg:#F2F4F5; --surface:#FFFFFF; --ink:#1B2226; --muted:#5B676E; --line:#C9D1D6; --soft:#E6EAEC;
+  --ember:#D9661F; --ember-ink:#FFFFFF;
+  --z-cook:#C93F2A; --z-prep:#2F8A52; --z-store:#2F6FB8; --z-dish:#1A8C92; --z-foh:#6D55A8; --z-waste:#6B7479;
+  --ok:#2F8A52; --warn:#B98900; --danger:#C93F2A;
+  --focus:#2F6FB8;
+  --r:10px; --shadow:0 2px 10px rgba(20,24,26,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111619; --surface:#192125; --ink:#E4EAED; --muted:#93A1A8; --line:#34424A; --soft:#222C31;
+    --ember:#F08A45; --ember-ink:#1B1200;
+    --z-cook:#F07560; --z-prep:#5CC285; --z-store:#6AA6EC; --z-dish:#4FC3C8; --z-foh:#A48BE0; --z-waste:#9AA5AB;
+    --ok:#5CC285; --warn:#E5B34A; --danger:#F07560;
+    --focus:#6AA6EC;
+    --shadow:0 2px 14px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111619; --surface:#192125; --ink:#E4EAED; --muted:#93A1A8; --line:#34424A; --soft:#222C31;
+  --ember:#F08A45; --ember-ink:#1B1200;
+  --z-cook:#F07560; --z-prep:#5CC285; --z-store:#6AA6EC; --z-dish:#4FC3C8; --z-foh:#A48BE0; --z-waste:#9AA5AB;
+  --ok:#5CC285; --warn:#E5B34A; --danger:#F07560;
+  --focus:#6AA6EC;
+  --shadow:0 2px 14px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:400 15px/1.55 Barlow,"Helvetica Neue",Arial,sans-serif;
+  padding-inline:16px; /* ≥16px side gutter at every width */
+  padding-block:20px 84px;
+  min-height:100dvh;
+}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1,h2,h3,h4{font-family:"Barlow Semi Condensed","Arial Narrow",sans-serif;margin:0;text-wrap:balance;letter-spacing:.01em;color:var(--ink)}
+h1{font-size:clamp(22px,5.2vw,30px);font-weight:700;line-height:1.12}
+h2{font-size:19px;font-weight:700}
+h3{font-size:16px;font-weight:600}
+p{margin:0}
+a{color:var(--z-store)}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px;display:flex;flex-direction:column;gap:14px}
+.card > .card-head{display:flex;flex-direction:column;gap:4px}
+.hr{border:none;border-top:1px solid var(--line);margin:2px 0}
+.scrollx{overflow-x:auto} /* long tables get their own horizontal-scroll container — the page itself never scrolls sideways */
+
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible,
+select:focus-visible, summary:focus-visible, [tabindex]:focus-visible, canvas:focus-visible{
+  outline:2px solid var(--focus); outline-offset:2px;
+}
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.001ms !important; animation-iteration-count:1 !important; transition-duration:.001ms !important; scroll-behavior:auto !important}
+}
+
+/* ── brand bar + theme toggle ──────────────────────────── */
+.brandbar{display:flex;align-items:center;gap:12px;padding:4px 2px}
+.brandbar .mark{width:38px;height:38px;border-radius:8px;background:var(--ember);color:var(--ember-ink);
+  display:grid;place-items:center;font-family:"Barlow Semi Condensed",sans-serif;font-weight:700;font-size:15px;flex:0 0 auto}
+.brandbar .name{font-weight:700;font-size:15px;line-height:1.2}
+.brandbar .sub{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.theme-toggle{margin-left:auto;width:38px;height:38px;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);display:grid;place-items:center;cursor:pointer;font-size:16px;flex:0 0 auto}
+
+/* ── header / identity ─────────────────────────────────── */
+header.hd{display:flex;flex-direction:column;gap:10px;border-bottom:2px solid var(--ink);padding-bottom:16px}
+.hd-meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13.5px;color:var(--muted)}
+.hd-meta b{color:var(--ink);font-weight:600}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;padding:4px 11px;border-radius:999px;
+  background:color-mix(in srgb,var(--ember) 16%,var(--surface));color:var(--ember);border:1px solid color-mix(in srgb,var(--ember) 40%,var(--surface));width:fit-content}
+.badge.warn{background:color-mix(in srgb,var(--warn) 20%,var(--surface));color:var(--warn);border-color:var(--warn)}
+.badge.danger{background:color-mix(in srgb,var(--danger) 18%,var(--surface));color:var(--danger);border-color:var(--danger)}
+
+/* ── headline / stats ──────────────────────────────────── */
+.headline{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.headline .amt{font-family:"Barlow Semi Condensed",sans-serif;font-weight:700;font-size:clamp(34px,9vw,50px);line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.headline .amt .cur{font-size:.55em;vertical-align:.12em;color:var(--muted);margin-right:2px}
+.headline .note{font-size:13px;color:var(--muted);max-width:56ch}
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:520px){.stat-grid{grid-template-columns:repeat(4,1fr)}}
+.stat{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.stat .v{font-size:15px;font-weight:700;font-family:"Barlow Semi Condensed",sans-serif}
+
+/* ── workflow blocks ───────────────────────────────────── */
+.wf-list{display:flex;flex-direction:column;gap:10px}
+.wf{display:flex;gap:12px;border-left:4px solid var(--zc,var(--ember));background:var(--soft);border-radius:0 8px 8px 0;padding:12px 14px}
+.wf .wf-no{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--zc,var(--ember));font-weight:600;flex:0 0 auto;padding-top:2px}
+.wf .wf-title{font-weight:700;font-size:14.5px}
+.wf .wf-desc{font-size:13.5px;color:var(--muted);max-width:62ch}
+
+/* ── equipment schedule ─────────────────────────────────── */
+.eq-note{font-size:12.5px;color:var(--muted);background:var(--soft);border:1px dashed var(--line);border-radius:8px;padding:10px 12px}
+.zone-acc{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.zone-acc + .zone-acc{margin-top:8px}
+.zone-acc summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 14px;
+  border-left:5px solid var(--zc,var(--muted));background:var(--soft)}
+.zone-acc summary::-webkit-details-marker{display:none}
+.zone-acc summary .chev{margin-left:auto;font-size:13px;color:var(--muted);transition:transform .15s}
+.zone-acc[open] summary .chev{transform:rotate(90deg)}
+.zone-acc summary .zt{display:flex;flex-direction:column;gap:1px}
+.zone-acc summary .zt b{font-size:14.5px}
+.zone-acc summary .zt span{font-size:11.5px;color:var(--muted)}
+.zone-acc.optional summary{opacity:.85}
+.zone-acc .zone-items{padding:6px 14px 12px;display:flex;flex-direction:column;gap:0}
+.item{padding:10px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:none}
+.item .item-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.item .item-no{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--zc,var(--muted));font-weight:600}
+.item .item-title{font-weight:600;font-size:14px}
+.item .item-dims{font-size:12px;color:var(--muted);font-family:"JetBrains Mono",monospace}
+.item .item-notes{font-size:13px;color:var(--muted);margin-top:3px;max-width:64ch}
+.item .item-utils{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.util-chip{font-size:11px;font-family:"JetBrains Mono",monospace;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.util-chip.cost{border-color:var(--warn);color:var(--warn)}
+
+/* ── milestones table ───────────────────────────────────── */
+table.ms{width:100%;border-collapse:collapse;font-size:13px;min-width:560px}
+table.ms th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+  padding:0 8px 8px;border-bottom:2px solid var(--line)}
+table.ms td{padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.ms tr.foot td{border-bottom:none;font-weight:700;padding-top:12px}
+table.ms .num{text-align:right;white-space:nowrap;font-weight:700;font-variant-numeric:tabular-nums}
+table.ms tr.part td{padding:4px 8px 4px 20px;color:var(--muted);font-size:12.5px;border-bottom:none}
+.marker{display:inline-flex;align-items:center;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.marker.fixed{background:color-mix(in srgb,var(--ok) 18%,var(--surface));color:var(--ok)}
+.marker.restated{background:color-mix(in srgb,var(--warn) 20%,var(--surface));color:var(--warn)}
+.ms-legend{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+
+/* ── reusable timeline component ────────────────────────── */
+.timeline{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.tl-step{display:flex;gap:12px;position:relative;padding-bottom:18px}
+.tl-step:last-child{padding-bottom:0}
+.tl-line{position:absolute;left:13px;top:28px;bottom:0;width:2px;background:var(--line)}
+.tl-step:last-child .tl-line{display:none}
+.tl-step.done .tl-line, .tl-step.current .tl-line{background:var(--ember)}
+.tl-dot{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  font-size:12px;font-weight:800;background:var(--soft);color:var(--muted);border:2px solid var(--line);z-index:1;font-family:"JetBrains Mono",monospace}
+.tl-step.done .tl-dot{background:var(--ok);color:#fff;border-color:var(--ok)}
+.tl-step.current .tl-dot{background:var(--ember);color:var(--ember-ink);border-color:var(--ember);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--ember) 24%,transparent);animation:tlpulse 1.8s ease-in-out infinite}
+@keyframes tlpulse{0%,100%{box-shadow:0 0 0 4px color-mix(in srgb,var(--ember) 24%,transparent)}50%{box-shadow:0 0 0 8px color-mix(in srgb,var(--ember) 10%,transparent)}}
+@media (prefers-reduced-motion: reduce){.tl-step.current .tl-dot{animation:none}}
+.tl-body{padding-top:2px;display:flex;flex-direction:column;gap:5px;flex:1;min-width:0}
+.tl-date{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted)}
+.tl-title{font-weight:700;font-size:14.5px}
+.tl-step.pending .tl-title{color:var(--muted)}
+.tl-desc{font-size:13px;color:var(--muted);max-width:62ch}
+.tl-note{font-size:12.5px;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:6px 9px;margin-top:2px}
+.tl-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+.tl-tag{font-size:10.5px;padding:2px 7px;border-radius:5px;white-space:nowrap}
+.tl-tag.yours{color:var(--ember);border:1px solid var(--ember);font-family:Barlow,sans-serif;font-weight:600}
+.tl-tag.barro{color:var(--ink);border:1px solid var(--ink);font-family:Barlow,sans-serif;font-weight:600}
+.tl-tag.pay{color:var(--ink);background:var(--soft);font-family:"JetBrains Mono",monospace;border:1px solid var(--line)}
+
+/* ── terms ──────────────────────────────────────────────── */
+.terms-list{display:flex;flex-direction:column;gap:10px}
+.term{display:flex;flex-direction:column;gap:4px}
+.term h4{font-size:13.5px}
+.term p{font-size:13.5px;color:var(--muted);max-width:66ch}
+.terms-more{display:flex;flex-direction:column;gap:10px}
+.terms-more[hidden]{display:none}
+.btn-textlink{background:none;border:none;color:var(--z-store);font:600 13.5px Barlow,sans-serif;cursor:pointer;padding:4px 0;text-align:left}
+
+/* ── included / not included ────────────────────────────── */
+.inc-grid{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:560px){.inc-grid{grid-template-columns:1fr 1fr}}
+.inc-col{display:flex;flex-direction:column;gap:8px}
+.inc-col h4{font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.inc-col.yes h4{color:var(--ok)}
+.inc-col.no h4{color:var(--danger)}
+.inc-col ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.inc-col li{font-size:13px;display:flex;gap:8px;align-items:flex-start}
+.inc-col li .ic{flex:0 0 auto;font-weight:700}
+.inc-col.yes li .ic{color:var(--ok)}
+.inc-col.no li .ic{color:var(--danger)}
+
+/* ── privacy panel ──────────────────────────────────────── */
+.priv-panel{border:1px solid var(--line);border-radius:8px;background:var(--soft)}
+.priv-panel summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;gap:10px;align-items:center;font-weight:600;font-size:14px}
+.priv-panel summary::-webkit-details-marker{display:none}
+.priv-panel summary .chev{margin-left:auto;color:var(--muted);font-size:12px}
+.priv-panel[open] summary .chev{transform:rotate(90deg)}
+.priv-body{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px;font-size:13px;color:var(--muted)}
+.priv-body h5{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink);margin:0}
+.priv-ver{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted)}
+
+/* ── form ───────────────────────────────────────────────── */
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:12.5px;font-weight:600}
+.field .req{color:var(--danger)}
+.field input[type=text], .field input[type=email], .field input[type=tel]{
+  font:inherit;font-size:15px;padding:11px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);width:100%;min-height:44px;
+}
+.field input[aria-invalid=true]{border-color:var(--danger)}
+.field-err{font-size:12px;color:var(--danger);min-height:15px}
+.field-grid{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:560px){.field-grid{grid-template-columns:1fr 1fr}}
+.field-grid .full{grid-column:1/-1}
+
+.agree-row{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;padding:9px 0;border-top:1px solid var(--line)}
+.agree-row:first-of-type{border-top:none}
+.agree-row input[type=checkbox]{margin-top:3px;flex:0 0 auto;width:19px;height:19px;min-width:19px}
+.agree-row label{cursor:pointer}
+
+/* ── signature pad ──────────────────────────────────────── */
+.sig-wrap{display:flex;flex-direction:column;gap:8px}
+.sig-switch{background:none;border:none;color:var(--z-store);font:600 13px Barlow,sans-serif;cursor:pointer;padding:2px 0;text-align:left;width:fit-content}
+.sig-canvas-box{border:1.5px dashed var(--line);border-radius:8px;background:var(--surface);position:relative;touch-action:pan-y}
+.sig-canvas-box canvas{display:block;width:100%;height:180px;touch-action:none;cursor:crosshair;border-radius:8px}
+.sig-hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;pointer-events:none}
+.sig-typed-preview{width:100%;height:180px;border:1.5px dashed var(--line);border-radius:8px;background:var(--surface);
+  display:flex;align-items:center;justify-content:center;padding:12px;text-align:center}
+.sig-typed-preview span{font-family:"Barlow Semi Condensed",sans-serif;font-style:italic;font-weight:600;font-size:clamp(20px,6vw,34px);color:var(--ink);word-break:break-word}
+.sig-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sig-size{font-size:11.5px;color:var(--muted);margin-left:auto;font-family:"JetBrains Mono",monospace}
+
+/* ── buttons ────────────────────────────────────────────── */
+.btn{font:600 14px Barlow,Arial,sans-serif;padding:12px 18px;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:8px;justify-content:center;min-height:44px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--ember);border-color:var(--ember);color:var(--ember-ink)}
+.btn-ghost{background:transparent}
+.btn-block{width:100%}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap}
+
+/* ── state cards ────────────────────────────────────────── */
+.state-card{text-align:center;padding:44px 18px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.state-card .ic{font-size:38px}
+.state-card h2{font-size:18px}
+.state-card p{color:var(--muted);max-width:46ch}
+.spinner{width:28px;height:28px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--ember);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.spinner{animation:none;border-top-color:var(--line)}}
+
+.code-input{font:600 22px "JetBrains Mono",monospace;letter-spacing:.12em;text-align:center;padding:14px;border:1.5px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);width:100%;text-transform:uppercase}
+.err-slot{font-size:13px;color:var(--danger);min-height:18px}
+.lockout-slot{font-size:13.5px;color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--surface));border:1px solid var(--warn);border-radius:8px;padding:12px;text-align:center}
+.lockout-slot .cd{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:16px;display:block;margin-top:4px}
+.lost-code{font-size:13px;color:var(--muted);text-align:center}
+
+/* ── sticky sign bar ────────────────────────────────────── */
+.signbar{position:sticky;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--line);
+  box-shadow:0 -4px 14px rgba(0,0,0,.08);padding:12px 16px;display:flex;align-items:center;gap:12px;
+  margin:0 -16px;border-radius:0}
+.signbar .txt{font-size:13px;font-weight:600;flex:1;min-width:0}
+.signbar .txt small{display:block;font-weight:400;color:var(--muted)}
+
+/* ── receipt ────────────────────────────────────────────── */
+.receipt-ref{font-family:"JetBrains Mono",monospace;font-size:21px;font-weight:700;letter-spacing:.03em}
+.receipt-kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font-size:13.5px}
+.receipt-kv dt{color:var(--muted)}
+.receipt-kv dd{margin:0;font-weight:600}
+.sig-preview-img{max-width:280px;max-height:120px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px}
+.agree-check-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.agree-check-list li{display:flex;gap:6px}
+.agree-check-list li .ic{color:var(--ok);font-weight:700}
+
+/* ── payments / updates ─────────────────────────────────── */
+.pay-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px}
+.pay-row:first-child{border-top:none}
+.pay-row .st{font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px}
+.pay-row .st.received{background:color-mix(in srgb,var(--ok) 18%,var(--surface));color:var(--ok)}
+.pay-row .st.due{background:color-mix(in srgb,var(--muted) 16%,var(--surface));color:var(--muted)}
+.upd{display:flex;flex-direction:column;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
+.upd:first-child{border-top:none}
+.upd .upd-date{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted)}
+.upd .upd-title{font-weight:700;font-size:14px}
+.upd .upd-body{font-size:13px;color:var(--muted)}
+.upd-photos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.upd-photos a{display:block;border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+.upd-photos img{display:block;width:100%;height:100px;object-fit:cover}
+
+/* ── footer ─────────────────────────────────────────────── */
+.foot{font-size:11.5px;color:var(--muted);text-align:center;padding:10px 6px;line-height:1.6}
+
+/* ── print — the client saves the receipt as a PDF via the browser's own Print
+   dialog; js/pdf-lite.js is not loadable here (outside the app shell), so this
+   is the only PDF path available. body.print-receipt is toggled on right
+   before window.print() and removed on `afterprint`. ── */
+@media print{
+  body.print-receipt > .wrap > *:not(#receipt){display:none !important}
+  body.print-receipt #receipt{box-shadow:none;border-color:#999;color:#000;background:#fff}
+  body.print-receipt{background:#fff}
+  .no-print{display:none !important}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brandbar no-print">
+    <div class="mark" aria-hidden="true">BK</div>
+    <div>
+      <div class="name">Barro Kitchens</div>
+      <div class="sub">Project Confirmation Portal</div>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle light/dark theme">◑</button>
+  </div>
+
+  <div id="app" aria-live="polite">
+    <div class="card"><div class="state-card"><div class="spinner" role="status" aria-label="Loading"></div><p>Loading your project…</p></div></div>
+  </div>
+
+  <div class="foot no-print">
+    Barro Industries OPC · SEC Registered · Metro Manila<br>
+    0927 683 6300 · barroindustries@gmail.com
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ============================================================================
+   0. THEME TOGGLE — small sun/moon control (spec §5.2). Remembers an explicit
+   choice in localStorage; with nothing stored the page follows the OS.
+   ========================================================================= */
+(function initThemeToggle(){
+  var btn = document.getElementById("theme-toggle");
+  function effective(){
+    var stored = null;
+    try { stored = localStorage.getItem("bkportal_theme"); } catch (_e) {}
+    if (stored === "light" || stored === "dark") return stored;
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  }
+  function apply(next){
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("bkportal_theme", next); } catch (_e) {}
+    btn.textContent = next === "dark" ? "☀" : "◑";
+  }
+  btn.textContent = effective() === "dark" ? "☀" : "◑";
+  btn.addEventListener("click", function () { apply(effective() === "dark" ? "light" : "dark"); });
+})();
+
+/* ============================================================================
+   1. FIREBASE — compat SDK only, callables, no Firestore (spec §5: "the page
+   never talks to Firestore"). Config block copied verbatim from q/index.html
+   (same Firebase project). Region 'asia-east1' is mandatory on every call —
+   without it the SDK silently targets us-central1, where these functions do
+   not exist, and every call fails.
+   ========================================================================= */
+var FIREBASE_CFG = {
+  apiKey: "AIzaSyA1-fDeMCxTsUm29O49l954Ez5BqbyHijk",
+  authDomain: "barro-industries.firebaseapp.com",
+  projectId: "barro-industries",
+  storageBucket: "barro-industries.firebasestorage.app",
+  messagingSenderId: "700081895848",
+  appId: "1:700081895848:web:265511313b4ff74575459d"
+};
+var REGION = "asia-east1";
+
+/* ============================================================================
+   2. portalId — derived from the page's own path, not hardcoded (spec §1.1,
+   D6). `/projects/chibabs/projectconfirmation/` → `chibabs__projectconfirmation`.
+   This is what lets a future client be nothing more than a folder copy.
+   ========================================================================= */
+var PORTAL_ID_RE = /^[a-z0-9-]{2,40}__[a-z0-9-]{2,40}$/;
+function derivePortalId(pathname){
+  var parts = String(pathname || "").split("/").filter(Boolean);
+  // .../projects/<client>/<page>/(index.html)? → last two non-empty segments,
+  // ignoring a trailing index.html if the URL happens to include it.
+  if (parts.length && /\.html?$/i.test(parts[parts.length - 1])) parts.pop();
+  if (parts.length < 2) return null;
+  var clientSlug = parts[parts.length - 2];
+  var pageSlug = parts[parts.length - 1];
+  var id = String(clientSlug).toLowerCase() + "__" + String(pageSlug).toLowerCase();
+  return PORTAL_ID_RE.test(id) ? id : null;
+}
+var PORTAL_ID = derivePortalId(location.pathname);
+
+var qs = new URLSearchParams(location.search);
+var MOCK_MODE = qs.get("mock") === "1";
+// QA-only hooks honored ONLY under ?mock=1, to reach states a single click-through
+// cannot naturally hit (loading/expired/link-error/lockout). Never read by the
+// real backend; WS-B can ignore `sim` entirely.
+var SIM = MOCK_MODE ? (qs.get("sim") || "") : "";
+var LS_TOKEN_PREFIX = "bkportal:"; // spec §5.3 / D3 — one key per portalId
+
+/* ============================================================================
+   3. MOCK FIXTURE — used ONLY under ?mock=1, shaped EXACTLY like the real
+   `state` the callables return (spec §2.5), so every render function below
+   reads the identical shape whether the data came from Portal.mock or from
+   a real portalUnlock/portalState/portalSign response. This is also where
+   the extracted proposal content (scratchpad/chibabs-proposal-content.md)
+   lives now — CONTENT is fixture-only, never a runtime data source.
+   ========================================================================= */
+var CONTENT = {
+  portal: {
+    id: PORTAL_ID || "chibabs__projectconfirmation",
+    status: "live",
+    // FIXTURE NOTE — mock-mode data only (?mock=1). Deliberately fictional:
+    // this file ships to a PUBLIC repository (GitHub Pages serves every file
+    // verbatim), so no real client name, figures, or proposal number may ever
+    // appear here — the real proposal lives only in Firestore, imported at
+    // runtime (spec D6). Keep every value below obviously a placeholder.
+    client: { name: "Juan dela Cruz", company: "Example Food Corp.", contactName: "Juan dela Cruz", address: "123 Sample Street, Sample City" },
+    proposal: {
+      number: "DEMO-0000-000", title: "Commercial Kitchen Proposal",
+      tagline: "A complete commercial kitchen, built to serve your dining room.",
+      scopeLine: "Layout, fabrication, delivery and installation of stainless steel kitchen equipment for Example Food Corp. — 123 Sample Street, Sample City.",
+      issuedOn: "2026-09-26", validUntil: "2026-10-11",
+      referenceDrawing: "Reference Plan A-01 · Proposed Floor Plan · Sample date (sample seating)",
+      preparedBy: "Neil Barro", preparedByTitle: "President, Barro Industries OPC",
+      brand: "Barro Kitchens by Barro Industries OPC",
+      vendorFooter: "Barro Industries OPC · SEC Registered · Metro Manila · 0927 683 6300 · barroindustries@gmail.com"
+    },
+    figures: {
+      currency: "PHP", contractTotal: 1000000,
+      vatNote: "VAT-exclusive. Barro Industries OPC is a non-VAT registered entity — no VAT is added.",
+      itemCount: 24, unitCount: 27, zoneCount: 5, optionalCount: 3,
+      leadDays: 63, turnoverBy: "2026-11-30", warrantyMonths: 12,
+      discountBasis: "15% off all Barro-fabricated items. All chilling equipment is supplied at cost, no markup, from a third-party supplier.",
+      fabricationNote: "All Barro-fabricated items: Stainless Steel 304, hairline finish, adjustable footing, 5 mm fabrication tolerance.",
+      pricingNote: "Line-item pricing is per the proposal PDF issued to you by e-mail."
+    },
+    milestones: [
+      { key: "M1", pct: 20, amount: 200000, label: "Design & shop drawings", dueOn: "2026-09-28", restated: false,
+        parts: [ { label: "Initial payment", amount: 50000, dueOn: "2026-09-26" }, { label: "Balance", amount: 150000, dueOn: "2026-09-28" } ] },
+      { key: "M2", pct: 40, amount: 400000, label: "Fabrication start", dueOn: "2026-09-30", restated: true },
+      { key: "M3", pct: 15, amount: 150000, label: "Factory inspection at 80%", dueOn: "2026-11-13", restated: true },
+      { key: "M4", pct: 25, amount: 250000, label: "Turnover", dueOn: "2026-11-30", restated: true }
+    ],
+    zones: [
+      { no: 1, name: "Cooking Line", colorKey: "cook", planColour: "Red", itemNos: [1,2,3,4,5,6] },
+      { no: 2, name: "Preparation", colorKey: "prep", planColour: "Yellow & Green", itemNos: [7,8,9,10,11] },
+      { no: 3, name: "Storage & Refrigeration", colorKey: "store", planColour: "Blue", itemNos: [12,13] },
+      { no: 4, name: "Dishwashing & Waste", colorKey: "dish", planColour: "Light Blue", itemNos: [14,15,16,17,18] },
+      { no: 5, name: "Back Bar & Service", colorKey: "foh", planColour: "Purple", itemNos: [19,20,21,22,23,24] },
+      { no: 6, name: "Optional Items", colorKey: "opt", planColour: "On Request", itemNos: [25,26,27] }
+    ],
+    items: [
+      { no: 1, zoneNo: 1, name: "Charcoal Griller, 2 Layers, with Charcoal Storage Bin & Lid", dims: "1350 L × 650 W × 850 H mm",
+        spec: "SS304 1.3mm top plate; 5/16\" shafting grills; 1.5mm fuel bed; 1.5\" square tube posts and braces; storage bin with lid and wheels; with clippers." },
+      { no: 2, zoneNo: 1, name: "4-Burner High Pressure Range Stove", dims: "850 × 650 × 850 mm", utilities: { gas: "High pressure" },
+        spec: "SS304 1.3mm top; Katsura high-pressure burners with pilot light; cast iron square grates; Kitz hand-operated ball valves; drain, undershelf and faucet." },
+      { no: 3, zoneNo: 1, name: "3-Burner High Pressure Stock Pot Stove with Preparation Area", dims: "1200 × 650 × 475 mm", utilities: { gas: "High pressure" },
+        spec: "SS304 1.2mm top; Katsura burners with pilot light; large square grates; drain, undershelf, faucet." },
+      { no: 4, zoneNo: 1, name: "Rice Steamer, 12 Layers (Gas)", dims: "650 × 650 × 1450 mm", utilities: { gas: "Low pressure" },
+        spec: "SS304 1.2mm body; low-pressure burner." },
+      { no: 5, zoneNo: 1, name: "Range Hood with Fresh Air, Baffle Filters, Vapor Lamps & Switches", dims: "5400 × 750 × 500 mm", utilities: { electrical: "1 × duplex outlet (vapor lamps)" },
+        spec: "SS304 1.0mm body; baffle filters and oil cup; 4 × 20W vapor lamps; fresh-air supply." },
+      { no: 6, zoneNo: 1, name: "Wall Cladding with Shelf and Faucets", dims: "5400 L × 700 H mm", utilities: { water: "Supply for 4 faucets" },
+        spec: "SS304 1.0mm body; integrated shelf 2700 × 200 mm; 4 faucets." },
+
+      { no: 7, zoneNo: 2, name: "Preparation Sink Table with Overhead Shelves & 15 GPM Grease Trap", dims: "1100 × 600 × 850 mm", utilities: { water: "Supply for 1 faucet" },
+        spec: "SS304 1.2mm top; gooseneck faucet." },
+      { no: 8, zoneNo: 2, name: "Hot Holding Cabinet (Electric), 15 Layers", dims: "900 × 650 × 1650 mm", utilities: { electrical: "1 × duplex outlet, 1000W / 220V" },
+        spec: "SS304 1.0mm body; 1\" square tube braces and layering; thermostat control." },
+      { no: 9, zoneNo: 2, name: "Preparation Table — Plating & Dispatch, 3 Layers, with Overhead Shelves (inside kitchen)", dims: "2400 × 650 × 850 mm", utilities: { electrical: "2 × duplex outlets" },
+        spec: "SS304 1.2mm top; adjacent to the pass-thru window." },
+      { no: 10, zoneNo: 2, name: "Preparation Table — Plating & Dispatch, 3 Layers, with Overhead Shelves (outside kitchen)", dims: "1500 × 400 × 850 mm", utilities: { electrical: "1 × duplex outlet" },
+        spec: "SS304 1.2mm top; adjacent to the pass-thru window." },
+      { no: 11, zoneNo: 2, name: "Pass-Thru Window with Sliding Glass", dims: "1000 × 450 × 500 mm",
+        spec: "SS304 1.0mm frame; 2 layers with mid-shelf and main shelf; clear glass in stainless frame." },
+
+      { no: 12, zoneNo: 3, name: "Storage Rack, 5 Layers", dims: "1400 × 650 × 1650 mm",
+        spec: "SS304 1.0mm layers; 1.5\" square tube posts; lower layers sized for new stock awaiting cold storage." },
+      { no: 13, zoneNo: 3, name: "4-Door Upright Chiller / Freezer", dims: "1220 × 760 × 1980 mm", utilities: { electrical: "1 × duplex outlet, 220V / 60Hz / 750W single phase" }, atCost: true,
+        spec: "Commercial upright unit; adjacent to the grilling area and main storage." },
+
+      { no: 14, zoneNo: 4, name: "Dishwashing Sink, Double Tub, with 20 GPM Grease Trap", dims: "2400 × 650 × 850 mm", utilities: { water: "Supply for 2 faucets" },
+        spec: "SS304 1.2mm top plate; 1.5\" square tube posts; gooseneck faucet." },
+      { no: 15, zoneNo: 4, name: "Dirty Landing Table with Trash Bin", dims: "1200 × 550 × 850 mm",
+        spec: "SS304 1.2mm top plate; 1.0mm body construction." },
+      { no: 16, zoneNo: 4, name: "Food Waste Segregation Bin (Solid & Liquid)", dims: "650 × 450 × 850 mm", utilities: { water: "Supply for 1 faucet" },
+        spec: "SS304 1.2mm top plate; 1.0mm body construction; with drain." },
+      { no: 17, zoneNo: 4, name: "Dish Rack, 4 Layers", dims: "600 × 600 × 1450 mm",
+        spec: "SS304 1.0mm body construction." },
+      { no: 18, zoneNo: 4, name: "Wall Shelf above Sink, 2-Layer Slotted", dims: "2400 L × 300 W mm",
+        spec: "SS304 1.0mm body construction; wall mounted." },
+
+      { no: 19, zoneNo: 5, name: "Halo-Halo Station with Sink, Cabinet Below & Overhead Shelves", dims: "1200 × 650 × 850 mm", utilities: { electrical: "2 × duplex outlets, 220V / 200W" },
+        spec: "SS304 1.2mm top, 1.0mm body; dedicated halo-halo prep area; 1 sink; enclosed cabinet below; overhead shelves; cut-out and provision for the tabletop salad chiller (item 20)." },
+      { no: 20, zoneNo: 5, name: "Tabletop Salad Chiller, 5 Pans", utilities: { electrical: "1 × duplex outlet, 220V" }, atCost: true,
+        spec: "Refrigerated countertop pan unit for halo-halo toppings; sits on item 19." },
+      { no: 21, zoneNo: 5, name: "Utensil Heater (Electric), 4 Cups", dims: "250 × 250 × 150 mm", utilities: { electrical: "Shared, 1000W / 220V" },
+        spec: "SS304 1.0mm body; thermostat control; sits on the outside dispatch table (item 11 per the proposal's own numbering; power provision included there)." },
+      { no: 22, zoneNo: 5, name: "Beverage Chiller, 10 cu ft, Single Door", dims: "675 × 600 mm bay", utilities: { electrical: "1 × duplex outlet, 220V" }, atCost: true,
+        spec: "Commercial upright display chiller at the service counter per plan." },
+      { no: 23, zoneNo: 5, name: "Ice Maker Machine, 68 kg/day", dims: "500 × 600 × 800 mm", utilities: { electrical: "1 × duplex outlet, 220V / 550W" }, atCost: true,
+        spec: "68 kg daily output; 20 kg storage bin." },
+      { no: 24, zoneNo: 5, name: "Tabletop Ice Freezer, 6 Pans", dims: "670 × 760 × 380 mm", utilities: { electrical: "1 × duplex outlet, 220V / 550W" }, atCost: true,
+        spec: "Countertop chilled pan unit for toppings and halo-halo service." },
+
+      { no: 25, zoneNo: 6, optional: true, name: "Kitchen Trench (Floor Drain)",
+        spec: "Stainless floor trench with grating, sized to the wet zones once the civil drain layout is confirmed." },
+      { no: 26, zoneNo: 6, optional: true, name: "Staff Locker", dims: "740 × 400 mm",
+        spec: "Stainless locker for the storage/locker room shown on the plan." },
+      { no: 27, zoneNo: 6, optional: true, name: "Dry Storage Rack", dims: "1200 × 600 mm",
+        spec: "Stainless rack for the dry storage bay shown on the plan." }
+    ],
+    workflow: [
+      { title: "Receiving — Storage & Refrigeration", body: "Deliveries come through the rear entry straight to the 4-door chiller and the 5-layer rack, so raw chicken, dry goods and produce each have a home before service starts." },
+      { title: "Mise en Place — Preparation", body: "The prep sink with grease trap feeds marinating and portioning. Cooked chicken rests in the 15-layer hot holding cabinet, keeping the grill ahead of the order queue during peak hours." },
+      { title: "The Heart of the Kitchen — Cooking Line", body: "Two 1.35 m charcoal grillers under a single 5.4 m fresh-air hood, flanked by the 4-burner range, the 3-burner stock pot stove and the 12-layer rice steamer. Stainless wall cladding with four faucets keeps the back wall washable." },
+      { title: "Kitchen to Table — Plating & Dispatch", body: "A 2.4 m plating table inside and a 1.5 m dispatch table outside meet at the pass-thru window, so plates move to the dining room without staff crossing the cooking line. The utensil heater sits on the outside table." },
+      { title: "Closing the Loop — Dishwashing & Waste", body: "Dirty ware returns through its own pass-thru to the landing table, the double-tub sink with 20 GPM grease trap, and two 4-layer dish racks. Solid and liquid waste are segregated at a dedicated bin beside the rear entry." },
+      { title: "Front of House — Back Bar & Service", body: "The halo-halo station, ice maker, tabletop ice freezer and beverage chiller line the service counter, so desserts and drinks are assembled in the dining room without pulling staff from the kitchen." }
+    ],
+    // tags: {who:'client'|'barro', text} — flat display tags. The payment
+    // trigger chip is NOT stored per-step; it's derived from `milestoneKey`
+    // by looking the milestone up (see renderTimeline), so the chip and the
+    // milestone table can never disagree about a label or a "±".
+    steps: [
+      { no: 1, title: "Proposal accepted", dateLabel: "26 Sep 2026 (Saturday)",
+        body: "You sign the conforme and release the ₱50,000 initial payment, locking in the scope, the approved layout and the prices in this initial quotation. Shop drawings start the same day.",
+        tags: [ { who: "client", text: "Sign & pay ₱50,000" }, { who: "barro", text: "Start shop drawings" } ], milestoneKey: "M1" },
+      { no: 2, title: "Shop drawings finalised · store visit", dateLabel: "28 Sep 2026 (Monday)",
+        body: "We visit your existing store to see how the line actually runs — grill rhythm, rice volume, where plates stack up — and fold that into the drawings. Stations are dimensioned, utility points marked, and you release the balance of Milestone 1.",
+        tags: [ { who: "client", text: "Walk us through the store" }, { who: "client", text: "Pay M1 balance" }, { who: "barro", text: "Finalise shop drawings" } ], milestoneKey: "M1" },
+      { no: 3, title: "Final quotation approved · fabrication starts", dateLabel: "30 Sep 2026 (Wednesday)",
+        body: "Changes from the store visit are priced and issued as the final quotation. You approve drawings and final quote together; Milestone 2 is released and cutting begins in Valenzuela. Milestones 2–4 are restated against this final quote.",
+        tags: [ { who: "client", text: "Approve drawings & final quote" }, { who: "barro", text: "Begin fabrication" } ], milestoneKey: "M2" },
+      { no: 4, title: "Fabrication at Valenzuela", dateLabel: "Oct – Nov 2026 (approx. 6 weeks)",
+        body: "Stainless 304 is cut, formed, welded and hairline-finished station by station; chilling equipment is ordered from a third-party supplier at cost. We send progress photos while your contractor roughs in gas, water and power at the points on the drawings.",
+        tags: [ { who: "client", text: "Site roughing-in by your contractor" }, { who: "barro", text: "Fabricate" }, { who: "barro", text: "Order chillers" }, { who: "barro", text: "Progress photos" } ] },
+      { no: 5, title: "Factory inspection at 80%", dateLabel: "13 Nov 2026 (Friday)",
+        body: "You see the stations assembled at the plant before anything is packed. Grill heights, shelf spacing and finish are checked against the drawings and adjusted on the spot. Milestone 3 is released after the visit.",
+        tags: [ { who: "client", text: "Inspect at the plant" }, { who: "barro", text: "Adjust" }, { who: "barro", text: "Finish" }, { who: "barro", text: "Pack" } ], milestoneKey: "M3" },
+      { no: 6, title: "Delivery & installation", dateLabel: "Late Nov 2026 (approx. 1 week)",
+        body: "Equipment travels on our own truck to your site. Our team positions and levels every station, mounts the hood, cladding and wall shelves, and connects to the roughed-in points. Site must be ready: floors and walls finished, utilities in place.",
+        tags: [ { who: "client", text: "Site ready for installation" }, { who: "barro", text: "Deliver" }, { who: "barro", text: "Install" }, { who: "barro", text: "Level" }, { who: "barro", text: "Mount" } ] },
+      { no: 7, title: "Testing & turnover", dateLabel: "30 Nov 2026 (Monday)",
+        body: "Burners are fired, hood and fresh-air run, sinks and grease traps flushed, chillers pulled to temperature. We walk your team through each station, hand over the Delivery Receipt, and Milestone 4 closes the contract.",
+        tags: [ { who: "client", text: "Accept turnover" }, { who: "barro", text: "Test" }, { who: "barro", text: "Train" }, { who: "barro", text: "Hand over" } ], milestoneKey: "M4" },
+      { no: 8, title: "12-month workmanship warranty", dateLabel: "Dec 2026 – Nov 2027 (after turnover)",
+        body: "Fabrication workmanship is covered for twelve months; chilling equipment carries its supplier's warranty. One call to Barro Kitchens covers both.",
+        tags: [ { who: "barro", text: "Warranty support" } ] }
+    ],
+    terms: [
+      { heading: "Scope of Work", body: "Price covers fabrication, supply, delivery and installation as specified in the equipment schedule. Electrical works, gas connections, plumbing and civil works are excluded unless expressly stated." },
+      { heading: "Completion", body: "Lead time (63 calendar days) runs from receipt of the down payment and approved shop drawings — two weeks minimum plus three working days per ₱20,000 of materials, Sundays excluded. Client-side changes or site delays are not counted against it." },
+      { heading: "Warranty", body: "Twelve months on fabrication workmanship from turnover. Chilling equipment carries the warranty of its third-party supplier. Warranty excludes misuse, physical damage, and failure to maintain equipment properly." },
+      { heading: "Measurement Tolerance", body: "All fabricated dimensions are subject to a 5 mm tolerance, standard for stainless steel fabrication. Variations within tolerance are not grounds for rework or rejection." },
+      { heading: "Site Requirements", body: "The client ensures the site is ready for installation, including finished floors and walls and roughed-in utilities at the locations indicated. Barro Kitchens is not liable for delays due to unprepared site conditions." },
+      { heading: "Design Changes", body: "Changes requested after shop-drawing approval are quoted separately and may extend the timeline. Optional items are quoted on request and added by written variation." },
+      { heading: "Payment Terms", body: "Milestone 1 (₱50,000 on acceptance, balance Monday 28 September 2026) is fixed on this initial quotation. Milestones 2–4, marked ±, are restated against the final quotation approved at Milestone 2 and fall due when their condition is met. Payments are non-refundable once fabrication has commenced; title passes on full payment. Delivery is documented by Delivery Receipt." },
+      { heading: "Validity & Acceptance", body: "This proposal is valid for 15 days from the date of issue; prices may change thereafter. Signing below signifies acceptance of the scope, price and terms stated herein." }
+    ],
+    included: [
+      "Layout coordination with the approved floor plan", "Shop drawings for approval", "Fabrication at our Valenzuela plant",
+      "Factory inspection visit", "Delivery by company truck to your site", "Positioning, levelling and installation",
+      "Final testing and turnover", "12-month workmanship warranty"
+    ],
+    notIncluded: [
+      "Electrical roughing-in and outlets", "Gas line and LPG connection", "Plumbing and drainage",
+      "Civil works", "Optional items (25–27) unless separately quoted"
+    ],
+    agreementsRequired: ["scope", "price", "terms", "payment"]
+  },
+  privacyNotice: {
+    version: "2026-09-26.1",
+    sections: [
+      { heading: "Who is responsible for your data", body: "Personal Information Controller: Barro Industries OPC (SEC-registered, Metro Manila), trading as Barro Kitchens. Contact for privacy matters: the President, 0927 683 6300, barroindustries@gmail.com." },
+      { heading: "What we collect on this page", body: "Your name, e-mail, mobile number, designation, company; your drawn or typed signature; the agreements you tick; the date/time you sign; your device's IP address and browser identifier; the access code you enter (never stored in readable form)." },
+      { heading: "Why", body: "To record your acceptance of this proposal and form the contract; to contact you about this project (drawings, inspection, delivery, turnover, warranty); to keep the records Philippine law requires of a business." },
+      { heading: "Lawful basis", body: "RA 10173 §12(b) (necessary for a contract you are party to), §12(c) (legal obligation for business records), and your consent for the signature image and for any optional communications." },
+      { heading: "Who we share it with", body: "Barro Industries staff who work on your project; Google LLC, whose Firebase/Google Cloud services host this system (servers may be outside the Philippines); government authorities only when the law requires. We do not sell or rent personal data." },
+      { heading: "How long we keep it", body: "For the life of the project and ten (10) years after turnover, in line with Philippine record-keeping requirements for business and tax records; then deleted or anonymised." },
+      { heading: "Your rights", body: "To be informed; to access; to object; to rectification; to erasure or blocking; to damages; to data portability; and to lodge a complaint with the National Privacy Commission (privacy.gov.ph). Write to the contact in section 1; we respond within fifteen (15) working days." },
+      { heading: "Security", body: "Data is encrypted in transit and access is limited to authorised staff; this page stores only a viewer key in your browser (no advertising cookies)." }
+    ]
+  }
+};
+
+function mockDeepClone(x){ return JSON.parse(JSON.stringify(x)); }
+
+// MOCK-ONLY persistence (localStorage) so signing, reloading and revisiting
+// can all be demonstrated offline before the real backend exists. The real
+// seam has no client-side persistence beyond the opaque viewer token.
+var MOCK_LS_KEY = "chibabs_mock_portal_db_v2";
+function mockDb(){ try { return JSON.parse(localStorage.getItem(MOCK_LS_KEY) || "null") || {}; } catch (_e) { return {}; } }
+function mockDbSave(db){ try { localStorage.setItem(MOCK_LS_KEY, JSON.stringify(db)); } catch (_e) {} }
+function mockRefNo(){
+  var d = new Date();
+  var yy = String(d.getFullYear()).slice(2), mm = pad2(d.getMonth() + 1), dd = pad2(d.getDate());
+  var alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789", rand = "";
+  for (var i = 0; i < 6; i++) rand += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return "BKC-" + yy + mm + dd + "-" + rand;
+}
+function pad2(n){ return (n < 10 ? "0" : "") + n; }
+function delay(ms){ return new Promise(function (res) { setTimeout(res, ms); }); }
+
+function mockBuildState(acceptance, progress){
+  return {
+    portal: mockDeepClone(CONTENT.portal),
+    acceptance: acceptance || null,
+    progress: progress || { currentStep: 0, steps: {}, payments: [], updates: [] },
+    privacyNotice: mockDeepClone(CONTENT.privacyNotice),
+    server: { now: new Date().toISOString(), today: new Date().toISOString().slice(0, 10), expired: SIM === "expired" }
+  };
+}
+
+/* ============================================================================
+   4. THE INTEGRATION SEAM — Portal.unlock / Portal.loadState / Portal.sign.
+   Everything the page needs from the backend goes through these three
+   methods. Under ?mock=1 they resolve from the fixture above (with the
+   `sim` QA hooks); otherwise they are the real `asia-east1` httpsCallable
+   functions per spec §2. Swapping mock↔real never touches a render function.
+   ========================================================================= */
+var fbApp = null, fnUnlock = null, fnState = null, fnSign = null;
+function ensureFirebase(){
+  if (fbApp) return;
+  fbApp = firebase.initializeApp(FIREBASE_CFG);
+  var fns = firebase.app().functions(REGION);
+  fnUnlock = fns.httpsCallable("portalUnlock");
+  fnState = fns.httpsCallable("portalState");
+  fnSign = fns.httpsCallable("portalSign");
+}
+// Normalizes both a real firebase.functions HttpsError and a mock-mode
+// rejection into the same {code, message} shape the UI switches on.
+function normalizeError(e){
+  return { code: (e && e.code) || "internal", message: (e && e.message) || "Something went wrong. Please try again." };
+}
+
+var Portal = {
+  unlock: function (code) {
+    if (MOCK_MODE) {
+      return delay(SIM === "loading" ? 2200 : 500).then(function () {
+        var normalized = String(code || "").toUpperCase().replace(/[^A-HJ-NP-TV-Z2-9]/g, "");
+        if (normalized.length !== 8) {
+          return Promise.reject({ code: "permission-denied", message: "That access code isn't right." });
+        }
+        // Deterministic per-code token (not random) so that unlocking with the
+        // SAME code twice — e.g. a revisit that skipped the localStorage token
+        // — reproduces the SAME mock db record, exactly like a real backend
+        // would recognize the same signer. This is also what lets `sim=signed`
+        // / `sim=progress` apply on the very FIRST unlock, not only on a
+        // second loadState() call.
+        var token = "mock." + btoa(normalized).replace(/=+$/, "");
+        var db = mockDb();
+        var rec = db[token] || null;
+        var forcedFixture = (SIM === "signed" || SIM === "progress");
+        var state = mockBuildState(rec ? rec.acceptance : (forcedFixture ? mockSignedFixture() : null), rec ? rec.progress : (forcedFixture ? mockProgressFixture() : null));
+        return { ok: true, viewerToken: token, expiresAt: new Date(Date.now() + 90 * 86400000).toISOString(), state: state };
+      });
+    }
+    ensureFirebase();
+    return fnUnlock({ portalId: PORTAL_ID, code: code }).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  },
+
+  loadState: function (viewerToken) {
+    if (MOCK_MODE) {
+      return delay(SIM === "loading" ? 1800 : 350).then(function () {
+        if (SIM === "error") return Promise.reject({ code: "unavailable", message: "Something went wrong on our side — please try again in a moment." });
+        if (SIM === "unauthenticated") return Promise.reject({ code: "unauthenticated", message: "Please enter your access code again." });
+        var db = mockDb();
+        var rec = db[viewerToken] || null;
+        // `sim=signed` and `sim=progress` both seed a non-trivial in-flight
+        // project (payments recorded, an update posted) so the richer
+        // progress view can be verified without signing first; `sim=progress`
+        // additionally starts further along (current step 4) than a
+        // freshly-signed portal would be.
+        var forcedFixture = (SIM === "signed" || SIM === "progress");
+        return { ok: true, state: mockBuildState(rec ? rec.acceptance : (forcedFixture ? mockSignedFixture() : null), rec ? rec.progress : (forcedFixture ? mockProgressFixture() : null)) };
+      });
+    }
+    ensureFirebase();
+    return fnState({ portalId: PORTAL_ID, viewerToken: viewerToken }).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  },
+
+  sign: function (payload) {
+    if (MOCK_MODE) {
+      return delay(1200).then(function () {
+        var db = mockDb();
+        var refNo = mockRefNo();
+        var signedAt = new Date().toISOString();
+        var acceptance = {
+          refNo: refNo, signedAt: signedAt,
+          signer: { name: payload.signer.name, email: payload.signer.email, phone: payload.signer.phone, designation: payload.signer.designation, company: payload.signer.company },
+          typedName: payload.typedName, signatureMode: payload.signatureMode, signaturePng: payload.signaturePng,
+          agreements: payload.agreements,
+          privacy: { noticeVersion: payload.privacy.noticeVersion, consentedAt: signedAt }
+        };
+        var progress = { currentStep: 1, steps: { "1": { state: "current", on: signedAt.slice(0, 10), note: "" } },
+          payments: [], updates: [] };
+        db[payload.viewerToken] = { acceptance: acceptance, progress: progress };
+        mockDbSave(db);
+        return { ok: true, receipt: { refNo: refNo, signedAt: signedAt, signerName: payload.signer.name, signerEmail: payload.signer.email, proposalNumber: CONTENT.portal.proposal.number, contractTotal: CONTENT.portal.figures.contractTotal, noticeVersion: payload.privacy.noticeVersion }, state: mockBuildState(acceptance, progress) };
+      });
+    }
+    ensureFirebase();
+    return fnSign(payload).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  }
+};
+
+// A more advanced mock fixture for `?mock=1&sim=signed` / `&sim=progress` — a
+// non-trivial in-flight project, useful for verifying the progress view
+// without having to sign first.
+function mockSignedFixture(){
+  return {
+    refNo: "BKC-260930-7F3K2Q", signedAt: "2026-09-26T09:14:00+08:00",
+    signer: { name: "Juan dela Cruz", email: "juan.delacruz@example.com", phone: "0900 000 0000", designation: "Owner", company: "Example Food Corp." },
+    typedName: "Juan dela Cruz", signatureMode: "typed", signaturePng: null,
+    agreements: { scope: true, price: true, terms: true, payment: true },
+    privacy: { noticeVersion: CONTENT.privacyNotice.version, consentedAt: "2026-09-26T09:14:00+08:00" }
+  };
+}
+function mockProgressFixture(){
+  return {
+    currentStep: 4,
+    steps: {
+      "1": { state: "done", on: "2026-09-26", note: "" },
+      "2": { state: "done", on: "2026-09-28", note: "Store visit completed; drawings finalised." },
+      "3": { state: "done", on: "2026-09-30", note: "Final quotation approved; fabrication started." },
+      "4": { state: "current", on: "", note: "" }
+    },
+    payments: [
+      { milestoneKey: "M1", partIndex: 0, amount: 50000, receivedOn: "2026-09-26", method: "Bank transfer" },
+      { milestoneKey: "M1", partIndex: 1, amount: 150000, receivedOn: "2026-09-28", method: "Bank transfer" },
+      { milestoneKey: "M2", amount: 400000, receivedOn: "2026-09-30", method: "Bank transfer" }
+    ],
+    updates: [
+      { id: "u1", at: "2026-09-30T15:00:00+08:00", title: "Fabrication under way", body: "Cutting and forming started on the cooking-line stations at the Valenzuela plant.", photos: [] }
+    ]
+  };
+}
+
+/* ============================================================================
+   5. HELPERS — esc()/peso()/fmtDate() follow the exact conventions used in
+   q/index.html and t/index.html. Every interpolated value on this page,
+   including everything that comes back from the server over the seam above,
+   passes through esc(). Treat all of it as untrusted.
+   ========================================================================= */
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+function peso(n){
+  n = Number(n) || 0;
+  return "₱" + n.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+// ISO 'YYYY-MM-DD' → 'Sep 26, 2026', parsed as local midnight (never raw
+// `new Date(iso)` on a bare date, which UTC-shifts and can print the wrong
+// calendar day — see q/index.html's fmtDate and the repo's Manila-time notes).
+function fmtDate(iso){
+  if (!iso) return "";
+  var d = new Date(String(iso).length <= 10 ? iso + "T00:00:00" : iso);
+  if (isNaN(d)) return esc(String(iso));
+  return d.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+}
+function fmtDateTime(iso){
+  if (!iso) return "";
+  var d = new Date(iso);
+  if (isNaN(d)) return esc(String(iso));
+  return d.toLocaleString("en-PH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function daysUntil(iso){
+  if (!iso) return null;
+  var d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return null;
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.ceil((d - today) / 86400000);
+}
+function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "").trim()); }
+function zoneColorVar(colorKey){
+  var map = { cook: "--z-cook", prep: "--z-prep", store: "--z-store", dish: "--z-dish", foh: "--z-foh", opt: "--z-waste" };
+  return "var(" + (map[colorKey] || "--muted") + ")";
+}
+function zoneByNo(portal, no){
+  var zs = portal.zones || [];
+  for (var i = 0; i < zs.length; i++) if (zs[i].no === no) return zs[i];
+  return null;
+}
+function milestoneByKey(portal, key){
+  var ms = portal.milestones || [];
+  for (var i = 0; i < ms.length; i++) if (ms[i].key === key) return ms[i];
+  return null;
+}
+
+/* ============================================================================
+   6. STATE MACHINE (spec §5.3)
+   render states: loading | locked | link-error | review | signed
+   "submitting" and the sign sheet are in-place UI conditions within
+   `review`/`locked`, not separate full-page states — matching the frozen
+   transition diagram (buttons disable + relabel in flight; nothing swaps
+   the whole page except on an actual state change).
+   ========================================================================= */
+var STATE = "loading";
+var CTX = {
+  viewerToken: null,
+  data: null,          // { portal, acceptance, progress, privacyNotice, server } — the exact `state` shape
+  lockoutUntil: 0,      // epoch ms; > now while locked out
+  lockoutTimer: null,
+  lockedBanner: "",     // e.g. "Your session ended — enter your code again"
+  linkErrorText: "",
+  signSheetOpen: false,
+  signatureMode: "drawn",
+  freshlySigned: false,
+  lastReceipt: null
+};
+var app = document.getElementById("app");
+
+function goto(state){ STATE = state; render(); }
+function render(){
+  var html;
+  switch (STATE) {
+    case "loading":    html = renderLoadingView(); break;
+    case "link-error": html = renderLinkErrorView(); break;
+    case "locked":     html = renderLockedView(); break;
+    case "review":     html = renderReviewView(); break;
+    case "signed":     html = renderSignedView(); break;
+    default:           html = renderLinkErrorView();
+  }
+  app.innerHTML = html;
+  wireCurrentView();
+}
+
+function tokenKey(){ return LS_TOKEN_PREFIX + PORTAL_ID; }
+function storedToken(){ try { return localStorage.getItem(tokenKey()); } catch (_e) { return null; } }
+function storeToken(t){ try { localStorage.setItem(tokenKey(), t); } catch (_e) {} }
+function clearToken(){ try { localStorage.removeItem(tokenKey()); } catch (_e) {} }
+
+/* ---- boot (spec §5.3) --------------------------------------------------- */
+function boot(){
+  if (!PORTAL_ID) {
+    CTX.linkErrorText = "This link looks incomplete. Please use the exact link Barro Kitchens sent you.";
+    goto("link-error");
+    return;
+  }
+  goto("loading");
+  var tok = storedToken();
+  if (!tok) { goto("locked"); return; }
+  CTX.viewerToken = tok;
+  Portal.loadState(tok).then(function (res) {
+    CTX.data = res.state;
+    goto(res.state.acceptance ? "signed" : "review");
+  }).catch(function (err) {
+    if (err.code === "unauthenticated") {
+      clearToken();
+      CTX.lockedBanner = "Your session ended — enter your code again.";
+      goto("locked");
+    } else if (err.code === "not-found") {
+      CTX.linkErrorText = err.message || "This link isn't active.";
+      goto("link-error");
+    } else {
+      CTX.linkErrorText = (err.code === "unavailable" || err.code === "internal")
+        ? "Something went wrong on our side — please try again in a moment."
+        : (err.message || "Could not load your project.");
+      goto("link-error");
+    }
+  });
+}
+
+/* ============================================================================
+   7. VIEWS
+   ========================================================================= */
+function renderLoadingView(){
+  return '<div class="card"><div class="state-card"><div class="spinner" role="status" aria-label="Loading"></div><p>Loading your project…</p></div></div>';
+}
+
+function renderLinkErrorView(){
+  return '' +
+    '<div class="card"><div class="state-card">' +
+      '<div class="ic" aria-hidden="true">⚠️</div>' +
+      "<h2>This link isn't active</h2>" +
+      "<p>" + esc(CTX.linkErrorText || "Please check the link, or contact Barro Kitchens.") + "</p>" +
+      '<button class="btn btn-primary" id="btn-retry">Try again</button>' +
+    "</div></div>";
+}
+
+function renderLockedView(){
+  var lockedOut = CTX.lockoutUntil > Date.now();
+  return '' +
+    '<div class="card">' +
+      (CTX.lockedBanner ? '<div class="badge warn">' + esc(CTX.lockedBanner) + "</div>" : "") +
+      '<div class="card-head">' +
+        '<span class="eyebrow">Project confirmation</span>' +
+        "<h1>Enter your access code</h1>" +
+        '<p class="muted">Barro Kitchens gave you an 8-character code. It isn’t in this link.</p>' +
+      "</div>" +
+      (lockedOut ? '' :
+        '<div class="field">' +
+          '<label for="code-input">Access code</label>' +
+          '<input id="code-input" class="code-input" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" maxlength="9" placeholder="XXXX-XXXX">' +
+        "</div>" +
+        '<div class="err-slot" id="lock-err" role="alert"></div>' +
+        '<button class="btn btn-primary btn-block" id="btn-unlock">Open my proposal</button>'
+      ) +
+      (lockedOut ? '<div class="lockout-slot" id="lockout-msg" role="alert">Too many attempts.<span class="cd" id="lockout-cd"></span></div>' : "") +
+      '<p class="lost-code">Lost your code? Call <a href="tel:+639276836300">0927 683 6300</a>.</p>' +
+      (MOCK_MODE ? '<p class="muted" style="font-size:11.5px;text-align:center">Mock mode: any 8-letter/number code (excluding 0,O,1,I,L) unlocks the demo.</p>' : "") +
+    "</div>";
+}
+
+function renderHeaderSection(portal, server){
+  var p = portal.proposal;
+  var left = daysUntil(p.validUntil);
+  var validPill = server.expired
+    ? '<span class="badge danger">Expired</span>'
+    : (left != null ? '<span class="badge">' + esc(Math.max(left, 0)) + " day" + (left === 1 ? "" : "s") + " left</span>" : "");
+  return '' +
+    '<header class="hd">' +
+      '<span class="eyebrow">Commercial kitchen proposal · ' + esc(p.number) + "</span>" +
+      "<h1>" + esc(p.title) + "</h1>" +
+      '<p class="muted">' + esc(p.tagline) + "</p>" +
+      '<p style="font-size:13.5px;max-width:64ch">' + esc(p.scopeLine) + "</p>" +
+      '<div class="hd-meta">' +
+        "<span><b>Prepared for</b> " + esc(portal.client.contactName || portal.client.name) + ", " + esc(portal.client.company) + "</span>" +
+        "<span><b>Prepared by</b> " + esc(p.preparedBy) + ", " + esc(p.preparedByTitle) + "</span>" +
+      "</div>" +
+      '<div class="hd-meta">' +
+        "<span><b>Date issued</b> " + esc(fmtDate(p.issuedOn)) + "</span>" +
+        "<span><b>Valid until</b> " + esc(fmtDate(p.validUntil)) + " " + validPill + "</span>" +
+        "<span><b>Reference drawing</b> " + esc(p.referenceDrawing) + "</span>" +
+      "</div>" +
+    "</header>";
+}
+
+function renderHeadlineSection(portal){
+  var f = portal.figures;
+  return '' +
+    '<section class="card headline">' +
+      '<span class="eyebrow">Contract price</span>' +
+      '<div class="amt"><span class="cur">₱</span>' + esc(Number(f.contractTotal).toLocaleString("en-PH")) + "</div>" +
+      '<p class="note">' + esc(f.vatNote) + "</p>" +
+    "</section>";
+}
+
+function renderStatsSection(portal){
+  var f = portal.figures;
+  var stats = [
+    { k: "Scope", v: f.itemCount + " items / " + f.unitCount + " units / " + f.zoneCount + " zones" },
+    { k: "Optional (unpriced)", v: f.optionalCount + " items" },
+    { k: "Lead time", v: f.leadDays + " days · turnover by " + fmtDate(f.turnoverBy) },
+    { k: "Warranty", v: f.warrantyMonths + " months, fabrication" }
+  ];
+  return '' +
+    '<section class="card">' +
+      '<div class="stat-grid">' +
+        stats.map(function (s) { return '<div class="stat"><span class="k">' + esc(s.k) + '</span><span class="v">' + esc(s.v) + "</span></div>"; }).join("") +
+      "</div>" +
+      '<p class="muted" style="font-size:12.5px">' + esc(f.discountBasis) + "</p>" +
+    "</section>";
+}
+
+function renderMilestonesSection(portal){
+  var f = portal.figures;
+  var rows = (portal.milestones || []).map(function (m) {
+    var markerHtml = m.restated
+      ? '<span class="marker restated">± Restated</span>'
+      : '<span class="marker fixed">Fixed</span>';
+    var partRows = (m.parts || []).map(function (p) {
+      return '<tr class="part"><td colspan="2">• ' + esc(p.label) + " — " + esc(fmtDate(p.dueOn)) + '</td><td class="num">' + peso(p.amount) + "</td><td></td></tr>";
+    }).join("");
+    return "<tr><td>" + esc(m.pct) + "%</td><td>" + esc(m.label) + "</td><td>" + esc(fmtDate(m.dueOn)) + '</td><td class="num">' + peso(m.amount) + "</td><td>" + markerHtml + "</td></tr>" + partRows;
+  }).join("");
+  return '' +
+    '<section class="card">' +
+      "<h2>Payment milestones</h2>" +
+      '<div class="scrollx"><table class="ms">' +
+        "<thead><tr><th>%</th><th>Milestone</th><th>Due date</th><th>Amount</th><th>Status</th></tr></thead>" +
+        "<tbody>" + rows + '<tr class="foot"><td></td><td>Total</td><td></td><td class="num">' + peso(f.contractTotal) + "</td><td></td></tr></tbody>" +
+      "</table></div>" +
+      '<div class="ms-legend">' +
+        '<span><span class="marker fixed">Fixed</span> — Milestone 1 is fixed on this initial quotation.</span>' +
+        '<span><span class="marker restated">± Restated</span> — Milestones 2–4 will be restated against the final quotation approved at flow step 3; the total contract price is not expected to change.</span>' +
+      "</div>" +
+    "</section>";
+}
+
+function renderWorkflowSection(portal){
+  var zones = portal.zones || [];
+  return '' +
+    '<section class="card">' +
+      "<h2>How the kitchen works</h2>" +
+      '<div class="wf-list">' +
+        (portal.workflow || []).map(function (w, i) {
+          var z = zones.length ? zones[i % zones.length] : null;
+          var style = z ? ' style="--zc:' + zoneColorVar(z.colorKey) + '"' : "";
+          return '<div class="wf"' + style + ">" +
+            '<div class="wf-no" aria-hidden="true">●</div>' +
+            '<div><span class="wf-title">' + esc(w.title) + "</span><br><span class=\"wf-desc\">" + esc(w.body) + "</span></div>" +
+          "</div>";
+        }).join("") +
+      "</div>" +
+    "</section>";
+}
+
+function itemUtilChips(it){
+  var chips = [];
+  if (it.utilities) {
+    if (it.utilities.gas) chips.push('<span class="util-chip">Gas: ' + esc(it.utilities.gas) + "</span>");
+    if (it.utilities.water) chips.push('<span class="util-chip">Water: ' + esc(it.utilities.water) + "</span>");
+    if (it.utilities.electrical) chips.push('<span class="util-chip">Electrical: ' + esc(it.utilities.electrical) + "</span>");
+  }
+  if (it.atCost) chips.push('<span class="util-chip cost">At cost, no markup</span>');
+  return chips.join("");
+}
+
+function renderEquipmentSection(portal){
+  var itemsByZone = {};
+  (portal.items || []).forEach(function (it) { (itemsByZone[it.zoneNo] = itemsByZone[it.zoneNo] || []).push(it); });
+  var zonesHtml = (portal.zones || []).map(function (z) {
+    var items = itemsByZone[z.no] || [];
+    var itemsHtml = items.map(function (it) {
+      return '<div class="item">' +
+        '<div class="item-head"><span class="item-no">' + esc(it.no) + "</span>" +
+        '<span class="item-title">' + esc(it.name) + "</span></div>" +
+        (it.dims ? '<div class="item-dims">' + esc(it.dims) + "</div>" : "") +
+        (it.spec ? '<div class="item-notes">' + esc(it.spec) + "</div>" : "") +
+        '<div class="item-utils">' + itemUtilChips(it) + "</div>" +
+      "</div>";
+    }).join("");
+    var isOptional = items.length && items[0].optional;
+    var countLabel = items.length + (isOptional ? " optional item" : " item") + (items.length === 1 ? "" : "s");
+    return '<details class="zone-acc' + (isOptional ? " optional" : "") + '"' + (isOptional ? "" : " open") + '>' +
+      '<summary style="--zc:' + zoneColorVar(z.colorKey) + '">' +
+        '<span class="zt"><b>' + esc(z.name) + (isOptional ? " — to be priced on request, excluded from the contract total" : "") + "</b><span>" + esc(countLabel) + " · plan colour: " + esc(z.planColour) + "</span></span>" +
+        '<span class="chev" aria-hidden="true">›</span>' +
+      "</summary>" +
+      '<div class="zone-items">' + itemsHtml + "</div>" +
+    "</details>";
+  }).join("");
+
+  return '' +
+    '<section class="card">' +
+      "<h2>Equipment schedule</h2>" +
+      '<p class="muted" style="font-size:13px">' + esc(portal.figures.fabricationNote) + "</p>" +
+      zonesHtml +
+      '<div class="eq-note">' + esc(portal.figures.pricingNote) + "</div>" +
+    "</section>";
+}
+
+/* Reusable timeline component (spec §5.5.6 / §5.8) — shared by REVIEW (all
+   steps pending) and the progress view within SIGNED (real per-step state
+   from `progress.steps`). The PAYMENT TRIGGER chip is derived here from
+   `step.milestoneKey` looked up against `portal.milestones`, so it can never
+   drift from the milestones table above it. */
+function renderTimeline(portal, steps, stepStates){
+  stepStates = stepStates || {};
+  var items = (steps || []).map(function (step) {
+    var st = stepStates[step.no] || stepStates[String(step.no)] || { state: "pending" };
+    var cls = st.state || "pending";
+    var mark = cls === "done" ? "✓" : String(step.no);
+    var tagsHtml = (step.tags || []).map(function (t) {
+      var cls2 = t.who === "client" ? "yours" : "barro";
+      return '<span class="tl-tag ' + cls2 + '">' + esc(t.text) + "</span>";
+    }).join("");
+    if (step.milestoneKey) {
+      var m = milestoneByKey(portal, step.milestoneKey);
+      if (m) tagsHtml += '<span class="tl-tag pay">' + esc(m.key) + (m.restated ? " (±)" : "") + " — " + esc(m.pct) + "%</span>";
+    }
+    var noteHtml = st.note ? '<div class="tl-note">' + esc(st.note) + "</div>" : "";
+    var onHtml = st.on ? '<div class="tl-date">Recorded ' + esc(fmtDate(st.on)) + "</div>" : "";
+    return '<li class="tl-step ' + cls + '">' +
+      '<span class="tl-line" aria-hidden="true"></span>' +
+      '<span class="tl-dot">' + mark + "</span>" +
+      '<div class="tl-body">' +
+        '<span class="tl-date">' + esc(step.dateLabel) + "</span>" +
+        '<span class="tl-title">' + esc(step.title) + "</span>" +
+        '<span class="tl-desc">' + esc(step.body) + "</span>" +
+        '<div class="tl-tags">' + tagsHtml + "</div>" +
+        onHtml + noteHtml +
+      "</div></li>";
+  }).join("");
+  return '<ol class="timeline">' + items + "</ol>";
+}
+
+function renderFlowSection(portal){
+  return '' +
+    '<section class="card">' +
+      "<h2>Flow of events</h2>" +
+      '<p class="muted" style="font-size:12.5px">Tags: <span class="tl-tag yours" style="margin:0 3px">your part</span><span class="tl-tag barro" style="margin:0 3px">barro kitchens</span><span class="tl-tag pay" style="margin:0 3px">payment trigger</span></p>' +
+      renderTimeline(portal, portal.steps, {}) +
+    "</section>";
+}
+
+function renderTermsSection(portal){
+  var terms = portal.terms || [];
+  var head = terms.slice(0, 3), rest = terms.slice(3);
+  function termHtml(t){ return '<div class="term"><h4>' + esc(t.heading) + "</h4><p>" + esc(t.body) + "</p></div>"; }
+  return '' +
+    '<section class="card">' +
+      "<h2>Terms &amp; conditions</h2>" +
+      '<div class="terms-list">' + head.map(termHtml).join("") + "</div>" +
+      (rest.length ? (
+        '<div class="terms-more" id="terms-more" hidden>' + rest.map(termHtml).join("") + "</div>" +
+        '<button type="button" class="btn-textlink" id="btn-show-terms">Show all terms</button>'
+      ) : "") +
+    "</section>";
+}
+
+function renderIncludedSection(portal){
+  return '' +
+    '<section class="card">' +
+      "<h2>What's included</h2>" +
+      '<div class="inc-grid">' +
+        '<div class="inc-col yes"><h4>Included</h4><ul>' +
+          (portal.included || []).map(function (t) { return '<li><span class="ic">✓</span>' + esc(t) + "</li>"; }).join("") +
+        "</ul></div>" +
+        '<div class="inc-col no"><h4>Not included</h4><ul>' +
+          (portal.notIncluded || []).map(function (t) { return '<li><span class="ic">✕</span>' + esc(t) + "</li>"; }).join("") +
+        "</ul></div>" +
+      "</div>" +
+    "</section>";
+}
+
+function renderPrivacySection(notice){
+  return '' +
+    '<section class="card" id="privacy-card">' +
+      "<h2>Data privacy notice</h2>" +
+      '<details class="priv-panel" open>' +
+        '<summary>Data Privacy Act notice (RA 10173)<span class="chev" aria-hidden="true">›</span></summary>' +
+        '<div class="priv-body">' +
+          (notice.sections || []).map(function (s) { return "<h5>" + esc(s.heading) + "</h5><p>" + esc(s.body) + "</p>"; }).join("") +
+          '<p class="priv-ver">Notice version ' + esc(notice.version) + "</p>" +
+        "</div>" +
+      "</details>" +
+      '<div class="agree-row">' +
+        '<input type="checkbox" id="privacy-consent">' +
+        '<label for="privacy-consent">I have read the Privacy Notice and consent to Barro Industries OPC processing my personal data as described.</label>' +
+      "</div>" +
+      '<div class="field-err" id="err-privacy"></div>' +
+    "</section>";
+}
+
+function agreementLabel(key, portal){
+  var f = portal.figures;
+  var m1 = milestoneByKey(portal, "M1");
+  var parts = (m1 && m1.parts) || [];
+  switch (key) {
+    case "scope": return "I accept the scope (" + f.itemCount + " items, " + f.unitCount + " units, " + f.zoneCount + " zones)";
+    case "price": return "I accept the contract price of " + peso(f.contractTotal) + ", VAT-exclusive";
+    case "terms": return "I accept the terms &amp; conditions above, including the 5 mm tolerance and site requirements";
+    case "payment":
+      if (parts.length >= 2) {
+        return "I accept the payment terms — " + peso(parts[0].amount) + " on acceptance, " + peso(parts[1].amount) + " on " + esc(fmtDate(parts[1].dueOn)) + ", and milestones 2–4 as restated against the final quotation";
+      }
+      return "I accept the payment milestone schedule above";
+    default: return "I accept " + esc(key);
+  }
+}
+
+function renderSignSheetSection(portal){
+  var m1 = milestoneByKey(portal, "M1");
+  return '' +
+    '<section class="card" id="sign-sheet"' + (CTX.signSheetOpen ? "" : " hidden") + '>' +
+      "<h2>Sign to accept</h2>" +
+      '<div class="field-grid">' +
+        '<div class="field"><label for="f-name">Full name <span class="req">*</span></label>' +
+          '<input type="text" id="f-name" autocomplete="name" maxlength="120" value="' + esc(portal.client.contactName || "") + '"><div class="field-err" id="err-name"></div></div>' +
+        '<div class="field"><label for="f-email">E-mail <span class="req">*</span></label>' +
+          '<input type="email" id="f-email" autocomplete="email" maxlength="160"><div class="field-err" id="err-email"></div></div>' +
+        '<div class="field"><label for="f-mobile">Mobile number <span class="req">*</span></label>' +
+          '<input type="tel" id="f-mobile" autocomplete="tel" maxlength="24"><div class="field-err" id="err-mobile"></div></div>' +
+        '<div class="field"><label for="f-designation">Designation <span class="req">*</span></label>' +
+          '<input type="text" id="f-designation" maxlength="80" value="Owner / Authorised signatory"><div class="field-err" id="err-designation"></div></div>' +
+        '<div class="field full"><label for="f-company">Company <span class="req">*</span></label>' +
+          '<input type="text" id="f-company" maxlength="160" value="' + esc(portal.client.company || "") + '"><div class="field-err" id="err-company"></div></div>' +
+      "</div>" +
+
+      ["scope", "price", "terms", "payment"].map(function (key) {
+        return '<div class="agree-row"><input type="checkbox" id="chk-' + key + '"><label for="chk-' + key + '">' + agreementLabel(key, portal) + "</label></div>";
+      }).join("") +
+      '<div class="field-err" id="err-agree"></div>' +
+
+      '<div class="sig-wrap">' +
+        '<label id="sig-label">Signature <span class="req">*</span></label>' +
+        '<div id="sig-drawn-panel">' +
+          '<div class="sig-canvas-box" id="sig-box">' +
+            '<canvas id="sig-canvas" role="img" aria-label="Signature drawing area" aria-describedby="sig-label"></canvas>' +
+            '<div class="sig-hint" id="sig-hint">Draw your signature here</div>' +
+          "</div>" +
+          '<div class="sig-toolbar">' +
+            '<button type="button" class="btn btn-ghost" id="btn-sig-undo">Undo</button>' +
+            '<button type="button" class="btn btn-ghost" id="btn-sig-clear">Clear</button>' +
+            '<span class="sig-size" id="sig-size"></span>' +
+          "</div>" +
+          '<button type="button" class="sig-switch" id="btn-sig-typed">I can’t draw — type my name instead</button>' +
+        "</div>" +
+        '<div id="sig-typed-panel" hidden>' +
+          '<div class="sig-typed-preview"><span id="sig-typed-preview-text">&nbsp;</span></div>' +
+          '<button type="button" class="sig-switch" id="btn-sig-drawn">Draw my signature instead</button>' +
+        "</div>" +
+        '<div class="field"><label for="f-typedname">Type your full name to confirm <span class="req">*</span></label>' +
+          '<input type="text" id="f-typedname" maxlength="120"><div class="field-err" id="err-typedname"></div></div>' +
+        '<div class="field-err" id="err-signature"></div>' +
+      "</div>" +
+
+      '<div class="field-err" id="err-form" role="alert" aria-live="assertive"></div>' +
+      '<button class="btn btn-primary btn-block" id="btn-submit" disabled>Sign and accept proposal</button>' +
+    "</section>";
+}
+
+function renderReviewView(){
+  var portal = CTX.data.portal, server = CTX.data.server;
+  var expired = !!server.expired;
+  var signBar = expired
+    ? '<div class="signbar no-print"><div class="txt">Validity ended — call <a href="tel:+639276836300">0927 683 6300</a></div></div>'
+    : ('<div class="signbar no-print"><div class="txt">Review complete?<small>Sign to accept the proposal.</small></div>' +
+       '<button class="btn btn-primary" id="btn-open-sign">Sign &amp; accept</button></div>');
+  return '' +
+    renderHeaderSection(portal, server) +
+    (expired ? '<div class="card"><div class="badge danger" style="width:auto">This proposal’s validity period has ended — please contact Barro Kitchens for an updated one.</div></div>' : "") +
+    renderHeadlineSection(portal) +
+    renderStatsSection(portal) +
+    renderMilestonesSection(portal) +
+    renderWorkflowSection(portal) +
+    renderEquipmentSection(portal) +
+    renderFlowSection(portal) +
+    renderTermsSection(portal) +
+    renderIncludedSection(portal) +
+    (expired ? "" : renderPrivacySection(CTX.data.privacyNotice)) +
+    (expired ? "" : renderSignSheetSection(portal)) +
+    signBar;
+}
+
+function renderReceiptSection(){
+  var portal = CTX.data.portal, a = CTX.data.acceptance;
+  var agreeLabels = { scope: "Scope of work", price: "Contract price", terms: "Terms &amp; conditions", payment: "Payment terms" };
+  var agreedList = (portal.agreementsRequired || []).filter(function (k) { return a.agreements && a.agreements[k]; })
+    .map(function (k) { return "<li><span class=\"ic\">✓</span>" + (agreeLabels[k] || esc(k)) + "</li>"; }).join("");
+  var sigHtml = a.signatureMode === "drawn" && a.signaturePng
+    ? '<img class="sig-preview-img" src="' + esc(a.signaturePng) + '" alt="Signature">'
+    : '<div class="sig-typed-preview" style="height:auto;padding:16px 20px"><span>' + esc(a.typedName || a.signer.name) + "</span></div>";
+  return '' +
+    '<section class="card" id="receipt">' +
+      '<div class="state-card no-print">' +
+        '<div class="ic" aria-hidden="true">✅</div>' +
+        (CTX.freshlySigned ? "<h2>Signed and received</h2>" : "<h2>Proposal accepted</h2>") +
+        "<p>Barro Kitchens has been notified. Neil Barro will e-mail your confirmation to " + esc(a.signer.email) + ". Keep this reference number — it is your proof of acceptance.</p>" +
+      "</div>" +
+      '<div class="hr"></div>' +
+      "<h3>Receipt</h3>" +
+      '<dl class="receipt-kv">' +
+        "<dt>Reference no.</dt><dd class=\"receipt-ref\">" + esc(a.refNo) + "</dd>" +
+        "<dt>Proposal</dt><dd>" + esc(portal.proposal.number) + "</dd>" +
+        "<dt>Signed on</dt><dd>" + esc(fmtDateTime(a.signedAt)) + "</dd>" +
+        "<dt>Signatory</dt><dd>" + esc(a.signer.name) + ", " + esc(a.signer.designation) + "</dd>" +
+        "<dt>Company</dt><dd>" + esc(a.signer.company) + "</dd>" +
+        "<dt>Contact</dt><dd>" + esc(a.signer.email) + " · " + esc(a.signer.phone) + "</dd>" +
+        "<dt>Contract price</dt><dd>" + peso(portal.figures.contractTotal) + "</dd>" +
+        "<dt>Privacy notice</dt><dd>v" + esc(a.privacy.noticeVersion) + " accepted on " + esc(fmtDate((a.privacy.consentedAt || "").slice(0, 10))) + "</dd>" +
+      "</dl>" +
+      "<h3 style=\"margin-top:6px\">What was agreed</h3>" +
+      '<ul class="agree-check-list">' + agreedList + "</ul>" +
+      "<h3 style=\"margin-top:6px\">Signature</h3>" +
+      sigHtml +
+      '<div class="btn-row no-print" style="margin-top:8px">' +
+        '<button class="btn btn-primary" id="btn-print-receipt">Save as PDF</button>' +
+        '<button class="btn btn-ghost" id="btn-copy-ref">Copy reference</button>' +
+      "</div>" +
+    "</section>";
+}
+
+function renderProgressSection(){
+  var portal = CTX.data.portal, progress = CTX.data.progress || { currentStep: 0, steps: {}, payments: [], updates: [] };
+  var payRows = (portal.milestones || []).reduce(function (rows, m) {
+    var parts = m.parts && m.parts.length ? m.parts : [null];
+    parts.forEach(function (part, idx) {
+      var paid = (progress.payments || []).filter(function (p) { return p.milestoneKey === m.key && (part ? p.partIndex === idx : p.partIndex == null); })[0];
+      var label = part ? (m.key + " — " + part.label) : (m.key + " — " + m.label);
+      var amount = part ? part.amount : m.amount;
+      var due = part ? part.dueOn : m.dueOn;
+      rows.push('<div class="pay-row"><span>' + esc(label) + " · " + peso(amount) + "</span>" +
+        (paid ? '<span class="st received">Received ✓ ' + esc(fmtDate(paid.receivedOn)) + "</span>" : '<span class="st due">Due ' + esc(fmtDate(due)) + "</span>") + "</div>");
+    });
+    return rows;
+  }, []).join("");
+
+  var updates = (progress.updates || []).slice().sort(function (a, b) { return (b.at || "").localeCompare(a.at || ""); });
+  var updatesHtml = updates.map(function (u) {
+    var photos = (u.photos || []).map(function (p) {
+      return '<a href="' + esc(p.url) + '" target="_blank" rel="noopener"><img src="' + esc(p.url) + '" alt="' + esc(p.caption || "Progress photo") + '" loading="lazy"></a>';
+    }).join("");
+    return '<div class="upd"><div class="upd-date">' + esc(fmtDateTime(u.at)) + '</div><div class="upd-title">' + esc(u.title) +
+      '</div><div class="upd-body">' + esc(u.body) + "</div>" + (photos ? '<div class="upd-photos">' + photos + "</div>" : "") + "</div>";
+  }).join("");
+
+  return '' +
+    '<section class="card no-print">' +
+      "<h2>Project progress</h2>" +
+      renderTimeline(portal, portal.steps, progress.steps) +
+    "</section>" +
+    '<section class="card no-print">' +
+      "<h2>Payments</h2>" +
+      payRows +
+    "</section>" +
+    (updates.length ? '<section class="card no-print"><h2>Updates from the plant</h2>' + updatesHtml + "</section>" : "") +
+    '<div class="foot no-print"><button class="btn-textlink" id="btn-signout">Sign out on this device</button></div>';
+}
+
+function renderSignedView(){
+  return renderReceiptSection() + renderProgressSection();
+}
+
+/* ============================================================================
+   8. WIRING
+   ========================================================================= */
+function wireCurrentView(){
+  if (STATE === "link-error") {
+    var r = document.getElementById("btn-retry");
+    if (r) r.addEventListener("click", boot);
+  }
+  if (STATE === "locked") wireLockedView();
+  if (STATE === "review") wireReviewView();
+  if (STATE === "signed") wireSignedView();
+}
+
+function startLockoutCountdown(untilMs){
+  CTX.lockoutUntil = untilMs;
+  render();
+  clearInterval(CTX.lockoutTimer);
+  CTX.lockoutTimer = setInterval(function () {
+    var msLeft = CTX.lockoutUntil - Date.now();
+    if (msLeft <= 0) { clearInterval(CTX.lockoutTimer); CTX.lockoutUntil = 0; render(); return; }
+    var el = document.getElementById("lockout-cd");
+    if (el) {
+      var mm = Math.floor(msLeft / 60000), ss = Math.floor((msLeft % 60000) / 1000);
+      el.textContent = "Try again in " + mm + ":" + pad2(ss);
+    }
+  }, 500);
+}
+
+function wireLockedView(){
+  var input = document.getElementById("code-input");
+  var btn = document.getElementById("btn-unlock");
+  var errSlot = document.getElementById("lock-err");
+  if (input) {
+    input.addEventListener("input", function () {
+      var raw = input.value.toUpperCase().replace(/[^A-HJ-NP-TV-Z2-9]/g, "").slice(0, 8);
+      input.value = raw.length > 4 ? raw.slice(0, 4) + "-" + raw.slice(4) : raw;
+    });
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter") attempt(); });
+    var pre = qs.get("code"); if (pre) input.value = pre;
+  }
+  if (btn) btn.addEventListener("click", attempt);
+
+  function attempt(){
+    var code = input ? input.value.trim() : "";
+    errSlot.textContent = "";
+    btn.disabled = true;
+    var origText = btn.textContent; btn.textContent = "Checking…";
+    Portal.unlock(code).then(function (res) {
+      CTX.viewerToken = res.viewerToken;
+      storeToken(res.viewerToken);
+      CTX.data = res.state;
+      CTX.lockedBanner = "";
+      goto(res.state.acceptance ? "signed" : "review");
+    }).catch(function (err) {
+      btn.disabled = false; btn.textContent = origText;
+      if (err.code === "resource-exhausted") {
+        var mins = 15; var mm = /(\d+)\s*minute/.exec(err.message || ""); if (mm) mins = parseInt(mm[1], 10) || mins;
+        startLockoutCountdown(Date.now() + mins * 60000);
+      } else if (err.code === "not-found") {
+        CTX.linkErrorText = err.message; goto("link-error");
+      } else if (err.code === "unavailable" || err.code === "internal") {
+        errSlot.textContent = "Something went wrong on our side — please try again in a moment.";
+      } else {
+        errSlot.textContent = err.message || "That access code isn't right.";
+      }
+    });
+  }
+}
+
+function wireSignedView(){
+  var pr = document.getElementById("btn-print-receipt");
+  if (pr) pr.addEventListener("click", function () {
+    document.body.classList.add("print-receipt");
+    window.print();
+  });
+  window.addEventListener("afterprint", function () { document.body.classList.remove("print-receipt"); });
+  var cp = document.getElementById("btn-copy-ref");
+  if (cp) cp.addEventListener("click", function () {
+    var ref = CTX.data.acceptance.refNo;
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ref).catch(function () {});
+    cp.textContent = "Copied!";
+    setTimeout(function () { cp.textContent = "Copy reference"; }, 1500);
+  });
+  var so = document.getElementById("btn-signout");
+  if (so) so.addEventListener("click", function () { clearToken(); CTX.data = null; goto("locked"); });
+}
+
+function wireReviewView(){
+  var $ = function (id) { return document.getElementById(id); };
+
+  var showTerms = $("btn-show-terms");
+  if (showTerms) showTerms.addEventListener("click", function () {
+    var more = $("terms-more"); var willShow = more.hidden;
+    more.hidden = !willShow; showTerms.textContent = willShow ? "Show fewer terms" : "Show all terms";
+  });
+
+  var openSign = $("btn-open-sign");
+  if (openSign) openSign.addEventListener("click", function () {
+    CTX.signSheetOpen = true;
+    var sheet = $("sign-sheet"); sheet.hidden = false;
+    sheet.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  var sheet = $("sign-sheet");
+  if (!sheet) return; // expired — no sign sheet in the DOM at all
+
+  var sigPad = initSignaturePad($("sig-canvas"), $("sig-box"), $("sig-hint"), $("sig-size"));
+  var fields = ["f-name", "f-email", "f-mobile", "f-designation", "f-company", "f-typedname"];
+  fields.forEach(function (id) { $(id).addEventListener("input", function () { validateField(id); updateSubmitEnabled(); }); });
+  ["chk-scope", "chk-price", "chk-terms", "chk-payment", "privacy-consent"].forEach(function (id) {
+    var el = $(id); if (el) el.addEventListener("change", updateSubmitEnabled);
+  });
+
+  $("btn-sig-typed").addEventListener("click", function () { switchSigMode("typed"); });
+  $("btn-sig-drawn").addEventListener("click", function () { switchSigMode("drawn"); });
+  $("btn-sig-clear").addEventListener("click", function () { sigPad.clear(); updateSubmitEnabled(); });
+  $("btn-sig-undo").addEventListener("click", function () { sigPad.undo(); updateSubmitEnabled(); });
+  sigPad.onChange = updateSubmitEnabled;
+
+  function switchSigMode(mode){
+    CTX.signatureMode = mode;
+    $("sig-drawn-panel").hidden = mode !== "drawn";
+    $("sig-typed-panel").hidden = mode !== "typed";
+    updateSubmitEnabled();
+  }
+
+  function validateField(id){
+    var el = $(id); var errEl = $("err-" + id.replace(/^f-/, ""));
+    var v = el.value.trim(); var msg = "";
+    if (!v) msg = "This field is required.";
+    else if (id === "f-email" && !isValidEmail(v)) msg = "Enter a valid email address.";
+    else if (id === "f-mobile" && v.replace(/\D/g, "").length < 6) msg = "Enter a valid mobile number.";
+    else if (id === "f-typedname" && !namesMatch(v, $("f-name").value)) msg = "This must match your full name above.";
+    el.setAttribute("aria-invalid", msg ? "true" : "false");
+    if (errEl) errEl.textContent = msg;
+    return !msg;
+  }
+  function namesMatch(a, b){ return String(a || "").trim().toLowerCase().replace(/\s+/g, " ") === String(b || "").trim().toLowerCase().replace(/\s+/g, " "); }
+
+  function updateSubmitEnabled(){
+    var typedPreview = $("sig-typed-preview-text");
+    if (typedPreview) typedPreview.textContent = $("f-typedname").value.trim() || " ";
+
+    var allFieldsOk = fields.every(function (id) {
+      var v = $(id).value.trim();
+      if (!v) return false;
+      if (id === "f-email") return isValidEmail(v);
+      if (id === "f-mobile") return v.replace(/\D/g, "").length >= 6;
+      if (id === "f-typedname") return namesMatch(v, $("f-name").value);
+      return true;
+    });
+    var agreesOk = ["chk-scope", "chk-price", "chk-terms", "chk-payment"].every(function (id) { return $(id).checked; });
+    var privacyOk = $("privacy-consent").checked;
+    var sigOk = CTX.signatureMode === "typed" ? true : (!sigPad.isEmpty() && sigPad.pointCount() >= 40);
+
+    $("err-agree").textContent = "";
+    $("err-privacy").textContent = "";
+    $("err-signature").textContent = "";
+    var sizeLabel = $("sig-size");
+    if (sizeLabel) sizeLabel.textContent = (CTX.signatureMode === "drawn" && !sigPad.isEmpty()) ? "~" + Math.round(sigPad.approxBytes() / 1024) + " KB" : "";
+
+    $("btn-submit").disabled = !(allFieldsOk && agreesOk && privacyOk && sigOk);
+  }
+
+  $("btn-submit").addEventListener("click", function () {
+    var okFields = fields.every(validateField);
+    var agreesOk = ["chk-scope", "chk-price", "chk-terms", "chk-payment"].every(function (id) { return $(id).checked; });
+    var privacyOk = $("privacy-consent").checked;
+    var sigOk = CTX.signatureMode === "typed" ? true : (!sigPad.isEmpty() && sigPad.pointCount() >= 40);
+    if (!agreesOk) $("err-agree").textContent = "Please check all four agreement boxes to continue.";
+    if (!privacyOk) $("err-privacy").textContent = "Please consent to the data privacy notice to continue.";
+    if (!sigOk) $("err-signature").textContent = "Please draw your signature (or switch to typing your name).";
+    if (!okFields || !agreesOk || !privacyOk || !sigOk) {
+      $("err-form").textContent = "Please fix the highlighted fields above before submitting.";
+      return;
+    }
+    $("err-form").textContent = "";
+
+    var submitBtn = $("btn-submit");
+    submitBtn.disabled = true;
+    var origText = submitBtn.textContent; submitBtn.textContent = "Signing…";
+
+    exportSignature(sigPad).then(function (signaturePng) {
+      var payload = {
+        portalId: PORTAL_ID, viewerToken: CTX.viewerToken,
+        signer: { name: $("f-name").value.trim(), email: $("f-email").value.trim(), phone: $("f-mobile").value.trim(), designation: $("f-designation").value.trim(), company: $("f-company").value.trim() },
+        typedName: $("f-typedname").value.trim(),
+        signatureMode: CTX.signatureMode, signaturePng: CTX.signatureMode === "drawn" ? signaturePng : null,
+        agreements: { scope: $("chk-scope").checked, price: $("chk-price").checked, terms: $("chk-terms").checked, payment: $("chk-payment").checked },
+        privacy: { consent: true, noticeVersion: CTX.data.privacyNotice.version }
+      };
+      return Portal.sign(payload);
+    }).then(function (res) {
+      CTX.data = res.state; CTX.freshlySigned = true; CTX.lastReceipt = res.receipt;
+      goto("signed");
+    }).catch(function (err) {
+      submitBtn.disabled = false; submitBtn.textContent = origText;
+      if (err.code === "unauthenticated") {
+        clearToken(); CTX.lockedBanner = "Your session ended — enter your code again."; goto("locked"); return;
+      }
+      if (err.code === "failed-precondition") {
+        // "Reload to state" per spec §5.3 — e.g. already-signed races to SIGNED.
+        Portal.loadState(CTX.viewerToken).then(function (r) {
+          CTX.data = r.state;
+          goto(r.state.acceptance ? "signed" : "review");
+        }).catch(function () { $("err-form").textContent = err.message; });
+        return;
+      }
+      $("err-form").textContent = (err.code === "unavailable" || err.code === "internal")
+        ? "Something went wrong on our side — please try again in a moment."
+        : (err.message || "We couldn't record your signature. Please try again.");
+    });
+  });
+
+  updateSubmitEnabled();
+}
+
+/* ============================================================================
+   9. SIGNATURE CANVAS — mouse, touch and stylus via the unified Pointer
+   Events API, correctly scaled for retina displays.
+   ========================================================================= */
+function initSignaturePad(canvas, box, hintEl, sizeEl){
+  var ctx = canvas.getContext("2d");
+  var strokes = [];
+  var current = null;
+  var drawing = false;
+
+  // RETINA MATH: a <canvas> has two independent sizes — its CSS box (from the
+  // stylesheet, read via getBoundingClientRect()) and its backing pixel buffer
+  // (canvas.width/height). Setting only the CSS size makes the browser stretch
+  // a low-res buffer to fit, so strokes look blurry. Instead we size the
+  // buffer to CSS-size × devicePixelRatio (crisp on retina), then call
+  // ctx.setTransform(dpr,0,0,dpr,0,0) so every drawing command can still be
+  // issued in plain CSS-pixel coordinates — exactly what getBoundingClientRect()
+  // gives pointer events below. Skipping that setTransform is exactly what
+  // produces the classic "signature lands offset from the cursor" bug.
+  function resize(){
+    var rect = box.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    canvas.style.width = rect.width + "px";
+    canvas.style.height = rect.height + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    redraw();
+  }
+  function pointFromEvent(e){
+    var rect = canvas.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+  function redraw(){
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.lineWidth = 2.5;
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--ink") || "#1B2226";
+    strokes.forEach(drawStroke);
+    if (hintEl) hintEl.style.display = strokes.length ? "none" : "flex";
+  }
+  function drawStroke(pts){
+    if (pts.length < 2) {
+      if (pts.length === 1) { ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, 1.3, 0, Math.PI * 2); ctx.fillStyle = ctx.strokeStyle; ctx.fill(); }
+      return;
+    }
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+  }
+  function down(e){
+    // touch-action:none on the canvas (see CSS) stops the page panning while a
+    // finger/pen is on the pad; every other part of the page keeps scrolling
+    // normally since that rule is scoped to just this element.
+    drawing = true;
+    current = [pointFromEvent(e)];
+    strokes.push(current);
+    try { canvas.setPointerCapture(e.pointerId); } catch (_e) { /* defensive: a real pointerdown always has an active session, but guard anyway */ }
+    redraw();
+  }
+  function move(e){ if (drawing) { current.push(pointFromEvent(e)); redraw(); } }
+  function up(e){
+    if (!drawing) return;
+    drawing = false; current = null;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_e) {}
+    if (pad.onChange) pad.onChange();
+  }
+  canvas.addEventListener("pointerdown", down);
+  canvas.addEventListener("pointermove", move);
+  canvas.addEventListener("pointerup", up);
+  canvas.addEventListener("pointercancel", up);
+  canvas.addEventListener("pointerleave", function (e) { if (drawing) up(e); });
+  window.addEventListener("resize", resize);
+  resize();
+
+  var pad = {
+    onChange: null,
+    clear: function () { strokes = []; redraw(); },
+    undo: function () { strokes.pop(); redraw(); },
+    isEmpty: function () { return strokes.length === 0; },
+    pointCount: function () { return strokes.reduce(function (n, s) { return n + s.length; }, 0); },
+    canvasEl: canvas,
+    toDataUrl: function () { return canvas.toDataURL("image/png"); },
+    approxBytes: function () {
+      if (this.isEmpty()) return 0;
+      var b64 = this.toDataUrl().split(",")[1] || "";
+      return Math.round(b64.length * 3 / 4);
+    }
+  };
+  return pad;
+}
+
+// Export the drawn signature as a PNG data URL; per spec §5.6, if it exceeds
+// 200 KB, downscale by 0.75 and retry (max 3×) before submit — keeps a huge
+// retina buffer from producing an oversized field for the acceptance doc.
+function exportSignature(sigPad){
+  return new Promise(function (resolve) {
+    var url = sigPad.toDataUrl();
+    var tries = 0;
+    var srcCanvas = sigPad.canvasEl;
+    function bytes(u){ return Math.round(((u.split(",")[1] || "").length) * 3 / 4); }
+    function shrink(canvas, scale){
+      var out = document.createElement("canvas");
+      out.width = Math.max(1, Math.round(canvas.width * scale));
+      out.height = Math.max(1, Math.round(canvas.height * scale));
+      var octx = out.getContext("2d");
+      octx.drawImage(canvas, 0, 0, out.width, out.height);
+      return out;
+    }
+    var workingCanvas = srcCanvas;
+    while (bytes(url) > 200000 && tries < 3) {
+      workingCanvas = shrink(workingCanvas, 0.75);
+      url = workingCanvas.toDataURL("image/png");
+      tries++;
+    }
+    resolve(url);
+  });
+}
+
+/* Global helper mirroring spec §5's expectation that the resolved signature
+   is reachable as a plain PNG data URL for backend/QA inspection. */
+window.getSignatureDataUrl = function () {
+  var c = document.getElementById("sig-canvas");
+  return c ? c.toDataURL("image/png") : null;
+};
+
+boot();
+})();
+</script>
+</body>
+</html>

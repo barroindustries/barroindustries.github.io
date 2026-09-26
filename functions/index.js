@@ -1,6 +1,10 @@
 const functions = require('firebase-functions');
 const admin     = require('firebase-admin');
 const crypto    = require('crypto');
+// CLIENT-PORTAL-CHIBABS-SPEC.md §7.1/§7.2 — pure helpers for the four portal
+// callables appended at the end of this file. Zero Firebase deps, so it is
+// also required directly (no emulator) by tests/client-portal.test.mjs.
+const portal    = require('./portal-core');
 admin.initializeApp();
 
 // v14 re-audit fix — real per-sender enforcement (see the block inside
@@ -2554,4 +2558,545 @@ exports.metaLeadWebhook = functions
     // once per lead.
     if (anyFailure) res.status(500).send('Retry');
     else res.status(200).send('OK');
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
+//  Client portal callables — CLIENT-PORTAL-CHIBABS-SPEC.md §2 / §7.1.
+//
+//  Same shape as respondToQuote above: the public portal page
+//  (barroindustries.com/projects/chibabs/projectconfirmation/) has no
+//  Firebase Auth session at all, by owner ruling — the access CODE is the
+//  gate, not the URL. firestore.rules therefore has no public read/write for
+//  client_portals or any of its subcollections (see the §7.3 rules hunk),
+//  and the three no-match collections (client_portal_secrets/_sessions/
+//  _ratelimit) have no rules block at all — Firestore denies unmatched
+//  paths, so those are Admin-SDK-only by construction. These four callables
+//  are consequently the ONLY way any of this data moves: portalUnlock (code
+//  → viewer token), portalState (token → current state, for revisits),
+//  portalSign (the once-only signature guard), and portalAdminRotateCode
+//  (staff-authenticated code rotation). All pure decision logic (code
+//  hashing, rate-limit math, milestone/signature validation, the client
+//  payload shape) lives in ./portal-core.js so it can be unit-tested without
+//  an emulator; these functions are thin Admin-SDK/Firestore glue around it.
+//
+//  Region is asia-east1 on all four — MANDATORY on the client:
+//    firebase.app().functions('asia-east1').httpsCallable('portalUnlock')(…)
+//  No context.auth check on portalUnlock/portalState/portalSign — the
+//  caller is anonymous by design. portalAdminRotateCode is the one
+//  exception (staff-only, checked below).
+// ──────────────────────────────────────────────────────────────────────────
+
+const PORTAL_ID_RE = /^[a-z0-9-]{2,40}__[a-z0-9-]{2,40}$/;
+const VIEWER_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+/** IP: first entry of x-forwarded-for, else the raw request's own ip, else
+ *  '0.0.0.0' — same precedence for all four callables (hard rule). */
+function portalClientIp(context) {
+  const req = context && context.rawRequest;
+  const xff = req && req.headers && req.headers['x-forwarded-for'];
+  if (xff) {
+    const first = String(xff).split(',')[0].trim();
+    if (first) return first;
+  }
+  if (req && req.ip) return req.ip;
+  return '0.0.0.0';
+}
+
+/** Strip real control chars only (keep \n/\r/\t is NOT needed here — every
+ *  portal text field is single-line — so this clamps to printable text,
+ *  mirroring respondToQuote's stripControlChars but single-line-strict). */
+function portalStripText(s) {
+  return String(s == null ? '' : s).replace(/[\x00-\x1F\x7F]/g, '').trim();
+}
+
+function portalSha256Hex(s) {
+  return crypto.createHash('sha256').update(String(s)).digest('hex');
+}
+
+// ── portalUnlock — §2.1 ─────────────────────────────────────────────────
+exports.portalUnlock = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+
+    const portalId = (data && typeof data.portalId === 'string') ? data.portalId : '';
+    if (!PORTAL_ID_RE.test(portalId)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid portal link.');
+    }
+    const rawCode = (data && typeof data.code === 'string') ? data.code.slice(0, 32) : '';
+    const code = portal.normalizeCode(rawCode);
+    if (code.length !== 8) {
+      throw new functions.https.HttpsError('invalid-argument', 'Enter your 8-character access code.');
+    }
+
+    const ip = portalClientIp(context);
+    const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
+    const ipBucketRef = db.collection('client_portal_ratelimit').doc(portalSha256Hex(portalId + '|' + ip));
+    const secretsRef  = db.collection('client_portal_secrets').doc(portalId);
+    const portalRef   = db.collection('client_portals').doc(portalId);
+
+    let result;
+    try {
+      result = await db.runTransaction(async (tx) => {
+        // 1. All reads first (transaction requirement) — secrets (which
+        // carries the per-portal fail bucket), the per-IP bucket, and the
+        // portal doc itself.
+        const [secretsSnap, ipSnap, portalSnap] = await Promise.all([
+          tx.get(secretsRef), tx.get(ipBucketRef), tx.get(portalRef),
+        ]);
+        const secretsData = secretsSnap.exists ? secretsSnap.data() : null;
+        const ipBucketData = ipSnap.exists ? ipSnap.data() : null;
+        const portalData = portalSnap.exists ? portalSnap.data() : null;
+
+        // 2. Rate-limit gate on BOTH buckets, fail CLOSED. Checked before
+        // the portal-existence check and before verifyCode — a caller
+        // already locked out never learns anything more (§2.1 order).
+        const ipDecision = portal.rateLimitDecision(ipBucketData, nowMs, portal.RATE.ip);
+        const portalDecision = portal.rateLimitDecision(secretsData ? secretsData.fail : null, nowMs, portal.RATE.portal);
+        if (!ipDecision.allowed || !portalDecision.allowed) {
+          const retryMs = Math.max(ipDecision.retryAfterMs || 0, portalDecision.retryAfterMs || 0);
+          const minutes = Math.max(1, Math.ceil(retryMs / 60000));
+          throw new functions.https.HttpsError('resource-exhausted', `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+        }
+
+        // 3. Portal must exist and be reachable.
+        if (!portalData || !['live', 'signed'].includes(portalData.status)) {
+          throw new functions.https.HttpsError('not-found', "This link isn't active. Please check with Barro Kitchens.");
+        }
+
+        const failWrite = (nextIp, nextPortalFail) => {
+          tx.set(ipBucketRef, Object.assign({}, nextIp, { updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
+          if (secretsSnap.exists) tx.update(secretsRef, { fail: nextPortalFail });
+          else tx.set(secretsRef, { fail: nextPortalFail }, { merge: true });
+          tx.create(portalRef.collection('events').doc(), {
+            at: admin.firestore.FieldValue.serverTimestamp(), kind: 'unlock_fail',
+            actor: { type: 'client' }, ipHash: portalSha256Hex(ip), detail: {},
+          });
+        };
+
+        // 4. No secrets doc means no code has ever been generated for this
+        // portal — never distinguish this from "wrong code" to the caller,
+        // but still bucket-count the attempt.
+        if (!secretsData) {
+          failWrite(ipDecision.next, portalDecision.next);
+          throw new functions.https.HttpsError('permission-denied', "That access code isn't right.");
+        }
+
+        const codeOk = portal.verifyCode(code, secretsData.codeSalt, secretsData.codeHash);
+        if (!codeOk) {
+          failWrite(ipDecision.next, portalDecision.next);
+          throw new functions.https.HttpsError('permission-denied', "That access code isn't right.");
+        }
+
+        // 5. Success — reset both buckets, mint + store the viewer token,
+        // log the event, bump lastViewedAt.
+        const { token, tokenHash: tHash } = portal.newViewerToken();
+        const expiresAtMs = nowMs + portal.SESSION_TTL_MS;
+        tx.set(ipBucketRef, Object.assign({}, portal.bucketAfterSuccess(nowMs), { updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
+        tx.update(secretsRef, { fail: portal.bucketAfterSuccess(nowMs) });
+        tx.set(db.collection('client_portal_sessions').doc(tHash), {
+          portalId,
+          generation: portalData.sessionsGeneration || 1,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          expiresAt: admin.firestore.Timestamp.fromMillis(expiresAtMs),
+          lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+          uaHash: portalSha256Hex(userAgent),
+          ipHash: portalSha256Hex(ip),
+        });
+        tx.create(portalRef.collection('events').doc(), {
+          at: admin.firestore.FieldValue.serverTimestamp(), kind: 'unlock_ok',
+          actor: { type: 'client' }, ipHash: portalSha256Hex(ip), detail: {},
+        });
+        tx.update(portalRef, { lastViewedAt: admin.firestore.FieldValue.serverTimestamp() });
+
+        return { token, expiresAtMs, portalData };
+      });
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[portalUnlock] transaction failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    // Assemble the response payload OUTSIDE the transaction — reading the
+    // acceptance/updates docs isn't security-critical (the atomic guard
+    // above already committed), just needed to build `state`.
+    let acceptanceDoc = null;
+    let updatesList = [];
+    try {
+      if (result.portalData.status === 'signed' && result.portalData.acceptance && result.portalData.acceptance.refNo) {
+        const accSnap = await portalRef.collection('acceptances').doc(result.portalData.acceptance.refNo).get();
+        if (accSnap.exists) acceptanceDoc = accSnap.data();
+      }
+      const updSnap = await portalRef.collection('updates').orderBy('at', 'desc').get();
+      updatesList = updSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    } catch (e) {
+      console.error('[portalUnlock] response payload assembly failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    const state = portal.publicProjection(Object.assign({ id: portalId }, result.portalData), updatesList, { nowMs, acceptanceDoc });
+    return { ok: true, viewerToken: result.token, expiresAt: new Date(result.expiresAtMs).toISOString(), state };
+  });
+
+// ── portalState — §2.2 ──────────────────────────────────────────────────
+exports.portalState = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+
+    const portalId = (data && typeof data.portalId === 'string') ? data.portalId : '';
+    const viewerToken = (data && typeof data.viewerToken === 'string') ? data.viewerToken : '';
+    if (!PORTAL_ID_RE.test(portalId) || !VIEWER_TOKEN_RE.test(viewerToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please enter your access code again.');
+    }
+
+    const tHash = portal.tokenHash(viewerToken);
+    const sessionRef = db.collection('client_portal_sessions').doc(tHash);
+    const portalRef = db.collection('client_portals').doc(portalId);
+
+    let sessionData, portalData;
+    try {
+      const [sessionSnap, portalSnap] = await Promise.all([sessionRef.get(), portalRef.get()]);
+      sessionData = sessionSnap.exists ? sessionSnap.data() : null;
+      portalData = portalSnap.exists ? portalSnap.data() : null;
+    } catch (e) {
+      console.error('[portalState] read failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    const valid = !!(sessionData && portalData
+      && sessionData.portalId === portalId
+      && portal.sessionValid(sessionData, { nowMs, generation: portalData.sessionsGeneration || 1, portalId })
+      && ['live', 'signed'].includes(portalData.status));
+    if (!valid) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please enter your access code again.');
+    }
+
+    // Best-effort: throttle lastSeenAt bump (only if stale >10 min) and log
+    // at most one `view` event per session per hour via a deterministic doc
+    // id (same dedup-by-id idiom as dedupDocId above) — never fails the call.
+    try {
+      const lastSeenMs = sessionData.lastSeenAt && typeof sessionData.lastSeenAt.toMillis === 'function'
+        ? sessionData.lastSeenAt.toMillis() : 0;
+      const writes = [];
+      if (!lastSeenMs || (nowMs - lastSeenMs) > 10 * 60 * 1000) {
+        writes.push(sessionRef.update({ lastSeenAt: admin.firestore.FieldValue.serverTimestamp() }));
+      }
+      const hourBucket = Math.floor(nowMs / 3600000);
+      const viewEventId = dedupDocId(`view_${tHash}_${hourBucket}`);
+      writes.push(portalRef.collection('events').doc(viewEventId).set({
+        at: admin.firestore.FieldValue.serverTimestamp(), kind: 'view', actor: { type: 'client' }, detail: {},
+      }));
+      await Promise.all(writes);
+    } catch (e) {
+      console.error('[portalState] best-effort view/lastSeen update failed:', e.message);
+    }
+
+    let acceptanceDoc = null;
+    let updatesList = [];
+    try {
+      if (portalData.status === 'signed' && portalData.acceptance && portalData.acceptance.refNo) {
+        const accSnap = await portalRef.collection('acceptances').doc(portalData.acceptance.refNo).get();
+        if (accSnap.exists) acceptanceDoc = accSnap.data();
+      }
+      const updSnap = await portalRef.collection('updates').orderBy('at', 'desc').get();
+      updatesList = updSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+    } catch (e) {
+      console.error('[portalState] response payload assembly failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    const state = portal.publicProjection(Object.assign({ id: portalId }, portalData), updatesList, { nowMs, acceptanceDoc });
+    return { ok: true, state };
+  });
+
+// ── portalSign — §2.3. The once-only guard — same pattern as
+// respondToQuote's transaction above: asserts acceptance == null &&
+// status === 'live' and writes both in the SAME commit, at the database,
+// never trusting a UI-level "already signed" check. ──────────────────────
+exports.portalSign = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+
+    const portalId = (data && typeof data.portalId === 'string') ? data.portalId : '';
+    const viewerToken = (data && typeof data.viewerToken === 'string') ? data.viewerToken : '';
+    if (!PORTAL_ID_RE.test(portalId) || !VIEWER_TOKEN_RE.test(viewerToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please enter your access code again.');
+    }
+
+    // 1. Validate & clamp every untrusted field before touching Firestore —
+    // exactly respondToQuote's style.
+    const rawSigner = (data && data.signer) || {};
+    const signer = {
+      name: portalStripText(rawSigner.name).slice(0, 120),
+      email: portalStripText(rawSigner.email).slice(0, 160),
+      phone: portalStripText(rawSigner.phone).slice(0, 32),
+      designation: portalStripText(rawSigner.designation).slice(0, 80),
+      company: portalStripText(rawSigner.company).slice(0, 120),
+    };
+    if (signer.name.length < 2) throw new functions.https.HttpsError('invalid-argument', 'Enter your full name.');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(signer.email)) throw new functions.https.HttpsError('invalid-argument', 'Enter a valid e-mail address.');
+    if (!/^[0-9+\-\s]{6,32}$/.test(signer.phone)) throw new functions.https.HttpsError('invalid-argument', 'Enter a valid mobile number.');
+    if (!signer.company) throw new functions.https.HttpsError('invalid-argument', 'Enter the company name.');
+
+    const typedName = portalStripText(data && data.typedName).slice(0, 120);
+    if (typedName.length < 2) throw new functions.https.HttpsError('invalid-argument', 'Type your full name to confirm.');
+
+    const signatureMode = data && data.signatureMode;
+    if (signatureMode !== 'drawn' && signatureMode !== 'typed') {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid signature mode.');
+    }
+    const signaturePngIn = (data && typeof data.signaturePng === 'string') ? data.signaturePng : null;
+    if (signatureMode === 'drawn') {
+      const check = portal.validateSignaturePng(signaturePngIn);
+      if (!check.ok) throw new functions.https.HttpsError('invalid-argument', check.error || 'Invalid signature image.');
+    } else {
+      if (signaturePngIn !== null) throw new functions.https.HttpsError('invalid-argument', 'Invalid signature payload.');
+      const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (norm(typedName) !== norm(signer.name)) throw new functions.https.HttpsError('invalid-argument', 'Typed name must match your full name.');
+    }
+
+    const rawAgreements = (data && data.agreements) || {};
+    const agreements = {
+      scope: rawAgreements.scope === true,
+      price: rawAgreements.price === true,
+      terms: rawAgreements.terms === true,
+      payment: rawAgreements.payment === true,
+    };
+
+    const rawPrivacy = (data && data.privacy) || {};
+    if (rawPrivacy.consent !== true) {
+      throw new functions.https.HttpsError('invalid-argument', 'Please accept the privacy notice.');
+    }
+    if (rawPrivacy.noticeVersion !== portal.PRIVACY_NOTICE.version) {
+      throw new functions.https.HttpsError('failed-precondition', 'The privacy notice was updated — please reload and review it again.');
+    }
+
+    const ip = portalClientIp(context);
+    const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
+    const acceptLanguage = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['accept-language']) || '';
+
+    const sessionRef = db.collection('client_portal_sessions').doc(portal.tokenHash(viewerToken));
+    const portalRef = db.collection('client_portals').doc(portalId);
+
+    let txResult;
+    try {
+      txResult = await db.runTransaction(async (tx) => {
+        const [sessionSnap, portalSnap] = await Promise.all([tx.get(sessionRef), tx.get(portalRef)]);
+        const sessionData = sessionSnap.exists ? sessionSnap.data() : null;
+        const portalData = portalSnap.exists ? portalSnap.data() : null;
+
+        if (!portalData || !sessionData || sessionData.portalId !== portalId
+            || !portal.sessionValid(sessionData, { nowMs, generation: portalData.sessionsGeneration || 1, portalId })) {
+          throw new functions.https.HttpsError('unauthenticated', 'Please enter your access code again.');
+        }
+        // The once-only guard: status AND acceptance checked together,
+        // written together below — never separately.
+        if (portalData.status !== 'live') {
+          const msg = portalData.status === 'signed'
+            ? 'A signature was already recorded for this proposal.'
+            : 'This proposal is closed.';
+          throw new functions.https.HttpsError('failed-precondition', msg);
+        }
+        if (portalData.acceptance != null) {
+          throw new functions.https.HttpsError('failed-precondition', 'A signature was already recorded for this proposal.');
+        }
+
+        const requiredKeys = Array.isArray(portalData.agreementsRequired) && portalData.agreementsRequired.length
+          ? portalData.agreementsRequired : ['scope', 'price', 'terms', 'payment'];
+        if (!requiredKeys.every((k) => agreements[k] === true)) {
+          throw new functions.https.HttpsError('invalid-argument', 'Please accept all four agreements before signing.');
+        }
+
+        const validUntil = portalData.proposal && portalData.proposal.validUntil;
+        const today = manilaDate();
+        if (validUntil && today > validUntil) {
+          throw new functions.https.HttpsError('failed-precondition', "This proposal's validity period has ended — please contact Barro Kitchens for an updated one.");
+        }
+
+        // Generate refNo, retrying once on a same-day collision.
+        let ref = portal.refNo(nowMs);
+        let acceptanceRef = portalRef.collection('acceptances').doc(ref);
+        let acceptanceSnap = await tx.get(acceptanceRef);
+        if (acceptanceSnap.exists) {
+          ref = portal.refNo(nowMs);
+          acceptanceRef = portalRef.collection('acceptances').doc(ref);
+          acceptanceSnap = await tx.get(acceptanceRef);
+          if (acceptanceSnap.exists) {
+            throw new functions.https.HttpsError('internal', 'Could not record your signature — please try again.');
+          }
+        }
+
+        const milestonesFrozen = (Array.isArray(portalData.milestones) ? portalData.milestones : [])
+          .map((m) => ({ key: m.key, pct: m.pct, amount: m.amount }));
+        const signedOnManila = manilaDate();
+
+        tx.create(acceptanceRef, {
+          refNo: ref, portalId,
+          signedAt: admin.firestore.FieldValue.serverTimestamp(),
+          signedOnManila,
+          signer, typedName, signatureMode,
+          signaturePng: signatureMode === 'drawn' ? signaturePngIn : null,
+          agreements,
+          privacy: { consent: true, noticeVersion: rawPrivacy.noticeVersion, noticeSha256: portal.privacyNoticeSha256(), consentedAt: admin.firestore.FieldValue.serverTimestamp() },
+          figuresAtSigning: {
+            contractTotal: portalData.figures && portalData.figures.contractTotal,
+            milestones: milestonesFrozen,
+            validUntil,
+            proposalNumber: portalData.proposal && portalData.proposal.number,
+          },
+          client: { ip, userAgent: String(userAgent).slice(0, 512), acceptLanguage: String(acceptLanguage).slice(0, 64) },
+          sessionTokenHash: portal.tokenHash(viewerToken),
+          codeVersion: portalData.codeVersion || 1,
+        });
+
+        // Once-only guard: acceptance summary + status flip in the SAME commit.
+        tx.update(portalRef, {
+          status: 'signed',
+          acceptance: { refNo: ref, signedAt: admin.firestore.FieldValue.serverTimestamp(), signerName: signer.name, signerEmail: signer.email, signatureMode },
+          'progress.currentStep': 1,
+          'progress.steps.1': { state: 'current', on: signedOnManila, note: '' },
+        });
+
+        return { ref, portalData, signedOnManila };
+      });
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[portalSign] transaction failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not record your signature — please try again.');
+    }
+
+    // 3. Best-effort post-commit work — NEVER fails the client's call, the
+    // transaction above already committed: sign_ok event, outbox doc,
+    // President notification (exact notifications/{uid}/items shape so
+    // sendPushOnNotification + the in-app inbox pick it up with zero
+    // client-side changes).
+    try {
+      const acceptanceForOutbox = { refNo: txResult.ref, signer, signedOnManila: txResult.signedOnManila };
+      const body = portal.buildOutboxBody(Object.assign({ id: portalId }, txResult.portalData), acceptanceForOutbox);
+      const proposalNumber = (txResult.portalData.proposal && txResult.portalData.proposal.number) || '';
+      const subject = `Confirmation received — Proposal ${proposalNumber} (Ref ${txResult.ref})`;
+
+      await portalRef.collection('events').add({
+        at: admin.firestore.FieldValue.serverTimestamp(), kind: 'sign_ok',
+        actor: { type: 'client' }, detail: { refNo: txResult.ref },
+      });
+      await db.collection('client_portal_outbox').doc(txResult.ref).set({
+        portalId, refNo: txResult.ref,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        to: signer.email, toName: signer.name,
+        subject, body, status: 'pending',
+      });
+
+      const clientName = (txResult.portalData.client && txResult.portalData.client.name) || '';
+      const presSnap = await db.collection('users').where('role', '==', 'president').limit(1).get();
+      await Promise.all(presSnap.docs.map((d) =>
+        db.collection('notifications').doc(d.id).collection('items').add({
+          title: `✍️ Proposal signed — ${clientName}`,
+          body: `${signer.name} · ${proposalNumber} · Ref ${txResult.ref}`,
+          icon: '✍️', type: 'client_portal_signed', link: 'client-portals', read: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch((e) => console.error('[portalSign] notify failed for', d.id, e.message))
+      ));
+    } catch (e) {
+      console.error('[portalSign] post-commit best-effort work failed (signature already recorded):', e.message);
+    }
+
+    // 4. Response payload assembly (not security-critical — the commit above
+    // already happened).
+    let refreshedPortalData = txResult.portalData;
+    let updatesList = [];
+    let acceptanceDocForState = null;
+    try {
+      const freshSnap = await portalRef.get();
+      if (freshSnap.exists) refreshedPortalData = freshSnap.data();
+      const updSnap = await portalRef.collection('updates').orderBy('at', 'desc').get();
+      updatesList = updSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+      const accSnap = await portalRef.collection('acceptances').doc(txResult.ref).get();
+      if (accSnap.exists) acceptanceDocForState = accSnap.data();
+    } catch (e) {
+      console.error('[portalSign] response payload assembly failed:', e.message);
+    }
+
+    const state = portal.publicProjection(Object.assign({ id: portalId }, refreshedPortalData), updatesList, { nowMs, acceptanceDoc: acceptanceDocForState });
+
+    return {
+      ok: true,
+      receipt: {
+        refNo: txResult.ref,
+        signedAt: new Date().toISOString(),
+        signerName: signer.name,
+        signerEmail: signer.email,
+        proposalNumber: (txResult.portalData.proposal && txResult.portalData.proposal.number) || '',
+        contractTotal: (txResult.portalData.figures && txResult.portalData.figures.contractTotal) || 0,
+        noticeVersion: rawPrivacy.noticeVersion,
+      },
+      state,
+    };
+  });
+
+// ── portalAdminRotateCode — §2.4 (staff-authenticated) ──────────────────
+exports.portalAdminRotateCode = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+    }
+    const db = admin.firestore();
+    const uid = context.auth.uid;
+
+    let role = null;
+    try {
+      const uSnap = await db.collection('users').doc(uid).get();
+      role = uSnap.exists ? (uSnap.data().role || null) : null;
+    } catch (e) {
+      console.error('[portalAdminRotateCode] role lookup failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not verify your account — please try again.');
+    }
+    if (role !== 'president' && role !== 'manager') {
+      throw new functions.https.HttpsError('permission-denied', 'You do not have permission to do this.');
+    }
+
+    const portalId = (data && typeof data.portalId === 'string') ? data.portalId : '';
+    if (!PORTAL_ID_RE.test(portalId)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid portal.');
+    }
+
+    const portalRef = db.collection('client_portals').doc(portalId);
+    const secretsRef = db.collection('client_portal_secrets').doc(portalId);
+
+    let code, newVersion;
+    try {
+      await db.runTransaction(async (tx) => {
+        const [portalSnap, secretsSnap] = await Promise.all([tx.get(portalRef), tx.get(secretsRef)]);
+        if (!portalSnap.exists) {
+          throw new functions.https.HttpsError('not-found', 'Portal not found.');
+        }
+        code = portal.generateCode();
+        const hashed = portal.hashCode(code.replace(/-/g, ''));
+        const prevVersion = secretsSnap.exists ? (secretsSnap.data().codeVersion || 0) : 0;
+        newVersion = prevVersion + 1;
+        tx.set(secretsRef, {
+          codeHash: hashed.hashHex, codeSalt: hashed.saltHex, codeAlgo: hashed.algo,
+          codeVersion: newVersion,
+          codeRotatedAt: admin.firestore.FieldValue.serverTimestamp(), codeRotatedBy: uid,
+          fail: portal.bucketAfterSuccess(Date.now()),
+        });
+        tx.update(portalRef, { codeVersion: newVersion });
+        tx.create(portalRef.collection('events').doc(), {
+          at: admin.firestore.FieldValue.serverTimestamp(), kind: 'code_rotated',
+          actor: { type: 'staff', uid }, detail: { codeVersion: newVersion },
+        });
+      });
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[portalAdminRotateCode] transaction failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not rotate the code — please try again.');
+    }
+
+    return { ok: true, code, codeVersion: newVersion };
   });
