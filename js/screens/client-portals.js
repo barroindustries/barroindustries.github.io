@@ -369,6 +369,16 @@ window.cpBackToList = function () {
   window.renderClientPortals();
 };
 
+// The detail header's sub-line (proposal no. + status pill + contract total).
+// Extracted so _cpRepaintTabBody can refresh it after a status change: the
+// handlers refetch _cpCurrentPortal but used to repaint only the tab body,
+// leaving the header pill reading "Draft" after Go live until a full reload
+// (owner-visible: it looks like the portal never went live).
+function _cpDetailSubHtml(p) {
+  const proposal = p.proposal || {}, figures = p.figures || {};
+  return `${escHtml(proposal.number || '')} ${_cpStatusPill(p.status)} ${figures.contractTotal ? window.fmtPeso(figures.contractTotal, { dp: 0 }) : ''}`;
+}
+
 function _cpRenderDetail(p) {
   const canWrite = ['president', 'manager'].includes(window.currentRole);
   const client = p.client || {}, proposal = p.proposal || {}, figures = p.figures || {};
@@ -378,7 +388,7 @@ function _cpRenderDetail(p) {
       <button class="btn-icon" onclick="cpBackToList()" title="Back">${emojiIcon('arrow-left', 18)}</button>
       <div>
         <div style="font-weight:700;font-size:16px">${escHtml(client.company || client.name || p.id)}</div>
-        <div style="font-size:12px;color:var(--text-muted)">${escHtml(proposal.number || '')} ${_cpStatusPill(p.status)} ${figures.contractTotal ? window.fmtPeso(figures.contractTotal, { dp: 0 }) : ''}</div>
+        <div id="cp-detail-sub" style="font-size:12px;color:var(--text-muted)">${_cpDetailSubHtml(p)}</div>
       </div>
     </div>
     ${window.chipTabs(tabs.map(t => ({ key: t, label: t })), _cpTab)}
@@ -389,6 +399,10 @@ function _cpRenderDetail(p) {
 async function _cpRepaintTabBody() {
   const el = document.getElementById('cp-tab-body');
   if (el) el.innerHTML = window.skeletonHtml('rows');
+  // Keep the header in step with the refetched doc — status changes repaint
+  // through here, and a stale pill misreports whether the client link is live.
+  const sub = document.getElementById('cp-detail-sub');
+  if (sub && _cpCurrentPortal) sub.innerHTML = _cpDetailSubHtml(_cpCurrentPortal);
   await _cpRenderTabBody(_cpCurrentPortal);
 }
 
