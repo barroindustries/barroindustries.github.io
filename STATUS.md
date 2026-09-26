@@ -161,6 +161,29 @@ what the script prints.
 > the Meta webhook was untouched. `release.sh record functions` deliberately NOT run (same reason as
 > the portal-callables entry above: only part of the surface is deployed).
 
+> **2026-09-27 — product pricing pulled out of the public repo (PARTIAL; two items still open).**
+> The repo is PUBLIC and Pages serves every file, so `barroindustries.com/products-database.json`
+> returned 200 to anyone. It carried, for 165 products: every `basePrice`, the per-mm formulas to
+> price ANY custom size, `constants.markup` by segment (retail 1.35 / commercial 1.25 / government
+> 1.15) and `laborRoles[].ratePerDay` (foreman 900, sr welder 700, welder 550, finisher 450) — the
+> markup structure and crew pay, not just a price list. **Removed** (live URL verified 404), PRECACHE
+> entry dropped, `.gitignore` guard added, master copy moved to `~/Desktop/barro-private/`.
+> Safe because Firestore is the quote builder's PRIMARY source and is seeded (170 docs in `products`,
+> `productMeta/config` present), true costs already sit in `product_costs` behind
+> `canFinance()/isAdmin()`, and both callers (quote-builder `loadDatabase`, `js/app.js` seed) already
+> degrade on a failed fetch. **Verified after removal: no tracked file contains the markup
+> multipliers or the 900/700/550/450 day rates any more.**
+> **STILL OPEN — owner's call:**
+> 1. **`getEmbeddedDB()` in `quote-builder-v2.html` (public) still carries money:** 10 real product
+>    basePrices (18000/32000/61000/155000/14000/18500/0/39000/91000/185400), 7 `ratePerDay` values
+>    (1500/1200/1000/1000/1200/1000/1500 — a different, likely older scale than the JSON's) and
+>    `travelDayRate: 3500`. No markup block. Sanitising it changes offline-quoting behaviour and
+>    trips the quote-builder tutorial contract (TUTORIAL_VERSION + What's New), so it was not done
+>    unasked.
+> 2. **Git history still contains `products-database.json`.** The live URL is dead, but history in a
+>    public repo is readable; full retraction needs a rewrite + force-push, which would break every
+>    concurrent clone (two sessions were live in this tree at the time). Owner's call.
+
 ## Open rulings — decisions only the President can make
 
 Ten-minute review at the start of any working session. Oldest first within severity.
@@ -176,7 +199,7 @@ Ten-minute review at the start of any working session. Oldest first within sever
 | 7 | 2026-07-12 | **Leave policy + production-pay rulings** (V13 Ph 69–72). | Leave & PH holidays reaching either pay run. |
 | 8 | 2026-08-10 | **Meetings**: add a `department` field (schema change)? Secretary calendar read scope. | Calendar privacy. |
 
-| 9 | 2026-09-26 | **Public-repo exposure.** The repo is PUBLIC and GitHub Pages serves every file verbatim — `products-database.json` (full product pricing), `STATUS.md`, `CLAUDE.md` and `firestore.rules` all return 200 to anyone. Firebase web keys and rules being public is by design (rules are the boundary); **`products-database.json` is the real concern** — cost/price data any competitor can fetch by guessing the filename. Options: (a) move `products-database.json` + `docs/` + `specs/` out of the Pages root (cheap, but the quote builder fetches the product data so it must be re-pointed and re-verified); (b) private repo (needs Pages on a paid plan + custom-domain and Actions re-verification). Owner 2026-09-26: **logged, no action today.** | Pricing confidentiality. |
+| 9 | 2026-09-26 | **PARTLY ACTIONED 2026-09-27 — `products-database.json` REMOVED from the repo (live URL now 404, v14.0.299+); master copy at `~/Desktop/barro-private/`, `.gitignore` guard added. Residue below still open.** **Public-repo exposure.** The repo is PUBLIC and GitHub Pages serves every file verbatim — `products-database.json` (full product pricing), `STATUS.md`, `CLAUDE.md` and `firestore.rules` all return 200 to anyone. Firebase web keys and rules being public is by design (rules are the boundary); **`products-database.json` is the real concern** — cost/price data any competitor can fetch by guessing the filename. Options: (a) move `products-database.json` + `docs/` + `specs/` out of the Pages root (cheap, but the quote builder fetches the product data so it must be re-pointed and re-verified); (b) private repo (needs Pages on a paid plan + custom-domain and Actions re-verification). Owner 2026-09-26: **logged, no action today.** | Pricing confidentiality. |
 
 Smaller pending rulings live in V13-PLAN Part F2 (D-registry) — none block money.
 
