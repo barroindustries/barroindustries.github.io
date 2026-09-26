@@ -409,6 +409,45 @@ else
 fi
 
 echo
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK 8 — RULES SIZE: firestore.rules must stay clear of Firebase's cap
+# ═══════════════════════════════════════════════════════════════════════
+# A rules SOURCE file has a hard 262,144-byte limit. Exceeding it does NOT
+# produce a helpful message: `firebase deploy` fails with a bare
+# INVALID_ARGUMENT and no mention of size, which cost real debugging time
+# before this check existed (STATUS backlog 9b). On 2026-09-27 the file sat
+# at 261,042 bytes — 1,102 from the cap — and 160 long narrative comment
+# blocks were relocated verbatim to docs/firestore-rules-notes.md, taking it
+# to ~131KB. This guard keeps that headroom from silently eroding again.
+#
+# WARN at 80% of the cap, FAIL at 95%. If you legitimately need more room,
+# relocate commentary to docs/firestore-rules-notes.md rather than raising
+# these numbers — the cap itself is Firebase's and cannot be raised.
+echo "=== [8/8] RULES SIZE: firestore.rules must stay under Firebase's 262,144-byte cap ==="
+RULES_CAP=262144
+RULES_WARN=$(( RULES_CAP * 80 / 100 ))
+RULES_FAIL=$(( RULES_CAP * 95 / 100 ))
+if [ ! -f firestore.rules ]; then
+  echo "FAIL: firestore.rules not found."
+  overall_fail=1
+else
+  rules_bytes=$(wc -c < firestore.rules | tr -d ' ')
+  rules_free=$(( RULES_CAP - rules_bytes ))
+  if [ "$rules_bytes" -ge "$RULES_FAIL" ]; then
+    echo "FAIL: firestore.rules is ${rules_bytes} bytes — only ${rules_free} under the ${RULES_CAP}-byte cap."
+    echo "      A deploy near this limit fails as a bare INVALID_ARGUMENT that never mentions size."
+    echo "      Move narrative comments to docs/firestore-rules-notes.md (comment-only lines; keep a"
+    echo "      one-line [RN-n] pointer) and re-run. Never delete a rule to make room."
+    overall_fail=1
+  elif [ "$rules_bytes" -ge "$RULES_WARN" ]; then
+    echo "WARN: firestore.rules is ${rules_bytes} bytes — ${rules_free} under the ${RULES_CAP}-byte cap."
+    echo "      Still passing, but plan a commentary-relocation pass before the next big rules change."
+  else
+    echo "PASS: firestore.rules is ${rules_bytes} bytes, ${rules_free} under the ${RULES_CAP}-byte cap"
+  fi
+fi
+
+echo
 if [ "$overall_fail" -ne 0 ]; then
   echo "=== invariants: FAILED ==="
   exit 1
