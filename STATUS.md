@@ -126,23 +126,40 @@ what the script prints.
 - [x] **Seed the Chibab's portal** — DONE 2026-09-26 (server-side, via ADC from the firebase CLI refresh token): portal `chibabs__projectconfirmation` is **live**, 27 items, contract total verified, codeVersion 1, unsigned. Access code was minted and handed to the President in session — it exists in plaintext NOWHERE (scrypt-hashed in `client_portal_secrets`), so if it is lost the only recovery is Rotate in the app. All verification sessions were revoked (`sessionsGeneration` -> 2) so the client starts clean. Original note: (President, in-app, after the deploys): Client Portals → New portal (`chibabs` / `projectconfirmation`) → Import JSON from `~/Desktop/chibabs/chibabs-portal-content.json` → Generate access code (shown **once** — copy it) → Go live. Hand the code to Joseph Asis out-of-band, never in the same channel as the link.
 <!-- PENDING-OPS:END -->
 
-> **2026-09-26 SECURITY, QUEUED (not urgent, deliberately deferred by the owner): the portal's
-> client IP is caller-controlled.** `portalClientIp()` (functions/index.js:2599) takes the FIRST
-> entry of `X-Forwarded-For`; Google's LB appends the real client IP and then its own, so everything
-> before that is whatever the caller sent. **Confirmed exploitable against production:** six wrong
-> codes from a forged `X-Forwarded-For: 203.0.113.1` locked that identity out on the 6th, then one
-> request claiming `203.0.113.99` sailed through — verified at the DB level by hash-matching
-> `sha256(portalId+'|'+forgedIP)` against real `client_portal_ratelimit` doc ids. Buckets were reset
-> afterwards; no client was left locked.
-> **Severity, honestly:** the access code is NOT at practical risk — the per-portal cap (20 failures
-> /60 min, not IP-keyed) still holds, capping guessing at ~480/day against 31^8 ≈ 8.5e11 codes. The
-> real harm is **evidentiary**: `acceptances/{refNo}.client.ip`, recorded as authenticity evidence on
-> a signed ₱1,408,100 contract, is forgeable with one header, as is `events.ipHash`.
-> **Fix (queued as a background task):** key on the second-from-last XFF entry and record the full
-> chain on the acceptance record. **Carries a real risk if done carelessly** — a wrong hop index keys
-> every client to one bucket and locks out everyone for 15 min, so it must be verified by
-> hash-matching against live buckets and the buckets reset afterwards. Selective functions deploy
-> only (the Meta webhook stays undeployed).
+> **2026-09-26 SECURITY — FIXED & DEPLOYED 2026-09-27 (v14.0.299, commit e130f4a): the portal's
+> client IP was caller-controlled.** `portalClientIp()` took the FIRST entry of `X-Forwarded-For`;
+> Google APPENDS the address it saw rather than replacing the header, so everything before it was
+> whatever the caller sent. Confirmed exploitable against production on 2026-09-26 (six wrong codes
+> from a forged `203.0.113.1` locked that identity out; one request claiming `203.0.113.99` sailed
+> through, hash-matched against real `client_portal_ratelimit` doc ids; buckets reset afterwards).
+>
+> **⚠ The fix originally queued here — "key on the second-from-last XFF entry" — was WRONG, and
+> would have taken the live portal down.** That is the Cloud Load Balancing rule (`client,lb`), and
+> these callables sit behind no load balancer: `firebase.json` has no `hosting` block and the page
+> calls `asia-east1-*.cloudfunctions.net` directly. **Measured on 2026-09-27** with a throwaway
+> `portalIpDiag` function (deployed, called, deleted the same minute — 404 confirmed): a clean
+> request arrives with **exactly ONE** XFF entry, the true peer. Second-from-last would have hit the
+> `entries.length < hops` branch on every honest request and **fail-closed every real client**.
+> The measurement also killed a second assumption: `rawRequest.ip` is **the LEFT-most XFF entry**
+> (the Functions Framework does enable Express `trust proxy`), i.e. fully attacker-controlled too —
+> so "prefer rawRequest.ip" would have fixed nothing. `req.socket.remoteAddress` is the constant
+> `::ffff:169.254.1.1` for every caller, which would have put the whole portal in one bucket.
+>
+> **What shipped:** `portal.clientIpFrom()` / `rateLimitIpKey()` in `functions/portal-core.js` —
+> right-most XFF entry via a named `TRUSTED_PROXY_HOPS = 1` (set to 2 if a Google ALB is ever put in
+> front), `node:net` validation, fail-closed (`trusted:false` ⇒ `portalUnlock` returns the same
+> `resource-exhausted` wording a real lockout gives, so stripping the header is not an oracle).
+> IPv6 buckets key on the **/64**, not the exact address — a subscriber can rotate all 2^64
+> otherwise, and the portal's own traffic is IPv6 in practice. `portalSign` records `ip: null` +
+> new `ipTrusted: false` rather than refusing a legitimate signature; it previously stored the
+> caller's own header string as contract evidence. 33 new tests in `tests/client-portal.test.mjs`
+> (513/513 pass). **Existing IPv4 buckets carry over byte-identically** (a browser sends no XFF, so
+> Google's appended entry is both first and last) — verified post-deploy: the collection holds one
+> bucket, count 0, unlocked. No doc-id version prefix on purpose: that would free anyone locked out.
+>
+> Deployed selectively — `firebase deploy --only functions:portalUnlock,functions:portalSign` — so
+> the Meta webhook was untouched. `release.sh record functions` deliberately NOT run (same reason as
+> the portal-callables entry above: only part of the surface is deployed).
 
 ## Open rulings — decisions only the President can make
 

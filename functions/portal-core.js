@@ -12,6 +12,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const net = require('net');
 
 // Excludes 0/O/1/I — visually ambiguous on a phone screen or over the phone.
 // 32 chars, and 256 % 32 === 0, so mapping a random byte via `% length` below
@@ -190,6 +191,158 @@ function rateLimitDecision(bucket, nowMs, cfg) {
  *  the lock streak (only a success clears it; window expiry alone does not). */
 function bucketAfterSuccess(nowMs = Date.now()) {
   return { count: 0, windowStart: nowMs, lockedUntil: 0, lockStreak: 0 };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+//  Client IP derivation — anti-spoof (2026-09-26 security fix)
+//
+//  THE BUG THIS REPLACES: the old helper took the FIRST comma-separated
+//  entry of `x-forwarded-for`. Google's front end APPENDS the address it
+//  actually saw to whatever XFF the caller sent — it does not replace the
+//  header — so the left-most entry is 100% attacker-controlled. Anyone
+//  calling the callables directly (curl, not the web page) could send a
+//  fresh fake XFF per request and land in a brand-new per-IP rate-limit
+//  bucket every time, i.e. unlimited guesses at an 8-character access code.
+//
+//  Google's own docs, both halves of the rule:
+//   * Cloud Load Balancing, "Target proxies / X-Forwarded-For": the load
+//     balancer APPENDS `<client-ip>,<load-balancer-ip>` and cautions that it
+//     "does not verify any IP addresses that precede" those two.
+//   * Cloud Run functions, "Request headers": XFF is a header "added for
+//     your use" of the form `clientIp, proxy1Ip, proxy2Ip`.
+//  So the trustworthy value is counted from the RIGHT, never the left.
+//
+//  HOP COUNT. These callables are invoked straight at
+//  `https://asia-east1-<project>.cloudfunctions.net/<name>` (firebase.json
+//  declares no `hosting` block, and the portal page calls
+//  firebase.app().functions('asia-east1').httpsCallable(...) directly), so
+//  exactly ONE entry is appended by our own infrastructure and the LAST
+//  entry is the peer. If a Google external Application Load Balancer is ever
+//  put in front of these functions it appends two (`client, lb`) and this
+//  constant must become 2 — hence the named constant rather than a bare -1.
+//
+//  `rawRequest.ip` is deliberately NOT the primary source: the Functions
+//  Framework's Express app does not enable `trust proxy`, so `req.ip` is the
+//  in-sandbox socket peer (a Google internal address, identical for every
+//  caller — one global bucket, which would lock the whole portal out); and
+//  if `trust proxy` were ever enabled, Express returns the LEFT-most XFF
+//  entry, i.e. exactly the spoofable value we are removing. It is used only
+//  when there is no XFF at all, where it genuinely is the client.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** How many trailing XFF entries our own infrastructure writes. See above. */
+const TRUSTED_PROXY_HOPS = 1;
+
+/**
+ * '203.0.113.7:51514' → '203.0.113.7', '[2001:db8::1]:443' → '2001:db8::1',
+ * '::ffff:203.0.113.7' → '203.0.113.7' (same host, one canonical form).
+ * Returns null for anything node:net won't accept as an IP literal, and for
+ * the two unspecified addresses — '0.0.0.0' was the OLD sentinel, so
+ * accepting it here would quietly recreate the shared-bucket hole.
+ */
+function _normalizeIp(raw) {
+  let s = String(raw == null ? '' : raw).trim().toLowerCase();
+  if (!s) return null;
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(s);
+  if (bracketed) {
+    s = bracketed[1];
+  } else if (s.includes('.') && s.indexOf(':') === s.lastIndexOf(':') && s.includes(':')) {
+    // Exactly one colon AND a dot ⇒ 'a.b.c.d:port'. A bare IPv6 has two or
+    // more colons, so this can never truncate one.
+    s = s.slice(0, s.indexOf(':'));
+  }
+  const mapped = /^::ffff:((?:\d{1,3}\.){3}\d{1,3})$/.exec(s);
+  if (mapped && net.isIP(mapped[1]) === 4) s = mapped[1];
+  const family = net.isIP(s);
+  if (family === 0) return null;
+  if (s === '0.0.0.0' || s === '::') return null;
+  return { ip: s, family };
+}
+
+/**
+ * The ONLY way any callable may learn its caller's address.
+ *
+ *   { ip: '203.0.113.7', family: 4, trusted: true,  source: 'xff' }
+ *   { ip: null,          family: 0, trusted: false, source: 'xff' }
+ *
+ * FAIL CLOSED: `trusted:false` means no address could be derived that Google
+ * itself wrote. Callers must treat that as rate-limited/denied — never as
+ * "no limit applies". Nothing in here ever throws.
+ *
+ * opts.trustedProxyHops overrides TRUSTED_PROXY_HOPS (tests; a future LB).
+ */
+function clientIpFrom(rawRequest, opts) {
+  const hops = (opts && Number.isInteger(opts.trustedProxyHops) && opts.trustedProxyHops > 0)
+    ? opts.trustedProxyHops
+    : TRUSTED_PROXY_HOPS;
+  const req = rawRequest || {};
+  const headers = req.headers || {};
+  const xffRaw = headers['x-forwarded-for'];
+  // Node collapses duplicate XFF headers into one comma-joined string, but
+  // accept an array too rather than stringifying it into garbage.
+  const xff = Array.isArray(xffRaw) ? xffRaw.join(',') : xffRaw;
+  const entries = String(xff == null ? '' : xff).split(',').map((s) => s.trim()).filter(Boolean);
+
+  if (entries.length) {
+    // Count from the right. Everything left of this index is caller-supplied
+    // and is never read.
+    if (entries.length < hops) return { ip: null, family: 0, trusted: false, source: 'xff' };
+    const parsed = _normalizeIp(entries[entries.length - hops]);
+    if (!parsed) return { ip: null, family: 0, trusted: false, source: 'xff' };
+    return { ip: parsed.ip, family: parsed.family, trusted: true, source: 'xff' };
+  }
+
+  // No XFF at all ⇒ nothing proxied this request, so the socket peer IS the
+  // client (emulator, local `node --test`, a direct container hit). Not
+  // spoofable: a remote caller can neither change what our socket sees nor
+  // delete the entry Google appends.
+  const sock = req.socket || req.connection || {};
+  const parsed = _normalizeIp(req.ip || sock.remoteAddress);
+  if (!parsed) return { ip: null, family: 0, trusted: false, source: null };
+  return { ip: parsed.ip, family: parsed.family, trusted: true, source: 'socket' };
+}
+
+/** '2001:db8:85a3:8d3::1' → ['2001','db8','85a3','8d3','0','0','0','1']. */
+function _expandIpv6(ip) {
+  let s = ip;
+  const embeddedV4 = /^(.*:)((?:\d{1,3}\.){3}\d{1,3})$/.exec(s);
+  if (embeddedV4) {
+    const o = embeddedV4[2].split('.').map(Number);
+    s = embeddedV4[1] + (((o[0] << 8) | o[1]) >>> 0).toString(16) + ':' + (((o[2] << 8) | o[3]) >>> 0).toString(16);
+  }
+  const halves = s.split('::');
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length > 1 ? (halves[1] ? halves[1].split(':') : []) : null;
+  const groups = right === null
+    ? left
+    : left.concat(new Array(Math.max(0, 8 - left.length - right.length)).fill('0'), right);
+  if (groups.length !== 8) return null;
+  return groups.map((g) => (parseInt(g, 16) || 0).toString(16));
+}
+
+/**
+ * The string a rate-limit bucket is keyed on — NOT the same thing as the
+ * address you log.
+ *
+ *   IPv4 → the address itself ('203.0.113.7'), byte-identical to what the
+ *          old helper produced for honest traffic, so existing
+ *          client_portal_ratelimit buckets keep working across this deploy.
+ *   IPv6 → the /64 prefix ('2001:db8:85a3:8d3::/64'). A residential or
+ *          hosted IPv6 client is handed a whole /64 (or wider) and can pick
+ *          any of 2^64 source addresses at will, so bucketing per exact
+ *          address would leave the very bypass this fix closes wide open for
+ *          anyone on IPv6. /64 is the smallest unit a single subscriber
+ *          cannot subdivide, and it is the same trade-off IPv4 NAT already
+ *          imposes (several clients may share one bucket).
+ *
+ * Returns null for an untrusted/absent address — callers must deny.
+ */
+function rateLimitIpKey(info) {
+  if (!info || info.trusted !== true || !info.ip) return null;
+  if (info.family === 4) return info.ip;
+  const groups = _expandIpv6(info.ip);
+  if (!groups) return null;
+  return groups.slice(0, 4).join(':') + '::/64';
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -503,6 +656,9 @@ module.exports = {
   sessionValid,
   rateLimitDecision,
   bucketAfterSuccess,
+  TRUSTED_PROXY_HOPS,
+  clientIpFrom,
+  rateLimitIpKey,
   manilaDateFrom,
   refNo,
   milestoneCheck,

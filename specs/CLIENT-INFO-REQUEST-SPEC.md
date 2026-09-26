@@ -147,7 +147,8 @@ captions, filenames, notifications).
   },
 
   client: {                                // staff-only forensic block (rendered inside a collapsed <details> for president/manager)
-    ip:             '203.0.113.7',
+    ip:             '203.0.113.7',        // portal.clientIpFrom(...).ip — null when untrusted, NEVER the raw XFF
+    ipTrusted:      true,                  // false ⇒ no address Google itself wrote; treat ip as absent evidence
     ipHash:         '<sha256(ip)>',
     userAgent:      '<≤512 chars>',
     acceptLanguage: '<≤64 chars>',
@@ -468,8 +469,16 @@ if **any** is `!allowed` → throw `HttpsError('resource-exhausted', 'Too many r
 (N = ceil(max retryAfterMs / 60000), min 1) and write nothing; else `tx.set(ref, {...decision.next, updatedAt: serverTimestamp()})`
 for every bucket (every call counts as an attempt — unlike the portal, there is no "success reset"; a
 window simply expires). A transaction/read error → throw `HttpsError('unavailable', …)` — **fail closed**.
-Bucket refs: `db.collection('cir_ratelimit').doc(portalSha256Hex(scope + '|' + ip))`; global:
+Bucket refs: `db.collection('cir_ratelimit').doc(portalSha256Hex(scope + '|' + ipKey))`; global:
 `db.collection('cir_ratelimit').doc('global_submit')`. Log `cir_abuse {kind:'rate_limited'}` best-effort on denial.
+
+**`ipKey` is NOT `rawRequest.headers['x-forwarded-for'].split(',')[0]`** — Google APPENDS the address
+it saw to the caller's own XFF rather than replacing it, so the first entry is attacker-controlled and
+a direct caller could mint a fresh bucket per request (fixed in the portal 2026-09-26). Derive it ONLY
+as `const ipInfo = portal.clientIpFrom(context.rawRequest); const ipKey = portal.rateLimitIpKey(ipInfo);`
+(portal-core.js — right-most XFF entry, IPv6 bucketed per /64). **`ipKey === null` ⇒ fail closed**:
+throw the same `resource-exhausted` error a locked-out caller gets, before touching Firestore. Store
+`ipInfo.ip` (may be `null`) in the forensic block, never the raw header.
 
 ### 2.2 `cirStartDraft` — `region('asia-east1').https.onCall`, anonymous
 
