@@ -626,11 +626,21 @@ function mockDeepClone(x){ return JSON.parse(JSON.stringify(x)); }
 var MOCK_LS_KEY = "chibabs_mock_portal_db_v2";
 function mockDb(){ try { return JSON.parse(localStorage.getItem(MOCK_LS_KEY) || "null") || {}; } catch (_e) { return {}; } }
 function mockDbSave(db){ try { localStorage.setItem(MOCK_LS_KEY, JSON.stringify(db)); } catch (_e) {} }
+// Access-code alphabet — MUST stay byte-identical to CODE_ALPHABET in
+// functions/portal-core.js. The filter regex is DERIVED from it, never
+// hand-written: it previously read /[^A-HJ-NP-TV-Z2-9]/, whose ranges skip U
+// (it sits between T and V, so it was in neither) and wrongly admit L. That
+// silently ate a valid character out of ~23% of real codes — a code with a U
+// in it could not be typed in at all — and accepted an L the server rejects.
+var CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+var CODE_STRIP_RE = new RegExp("[^" + CODE_ALPHABET + "]", "g");
+function normalizeCodeInput(v){ return String(v == null ? "" : v).toUpperCase().replace(CODE_STRIP_RE, ""); }
+
 function mockRefNo(){
   var d = new Date();
   var yy = String(d.getFullYear()).slice(2), mm = pad2(d.getMonth() + 1), dd = pad2(d.getDate());
-  var alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789", rand = "";
-  for (var i = 0; i < 6; i++) rand += alphabet[Math.floor(Math.random() * alphabet.length)];
+  var rand = "";
+  for (var i = 0; i < 6; i++) rand += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
   return "BKC-" + yy + mm + dd + "-" + rand;
 }
 function pad2(n){ return (n < 10 ? "0" : "") + n; }
@@ -672,7 +682,7 @@ var Portal = {
   unlock: function (code) {
     if (MOCK_MODE) {
       return delay(SIM === "loading" ? 2200 : 500).then(function () {
-        var normalized = String(code || "").toUpperCase().replace(/[^A-HJ-NP-TV-Z2-9]/g, "");
+        var normalized = normalizeCodeInput(code);
         if (normalized.length !== 8) {
           return Promise.reject({ code: "permission-denied", message: "That access code isn't right." });
         }
@@ -1375,7 +1385,7 @@ function wireLockedView(){
   var errSlot = document.getElementById("lock-err");
   if (input) {
     input.addEventListener("input", function () {
-      var raw = input.value.toUpperCase().replace(/[^A-HJ-NP-TV-Z2-9]/g, "").slice(0, 8);
+      var raw = normalizeCodeInput(input.value).slice(0, 8);
       input.value = raw.length > 4 ? raw.slice(0, 4) + "-" + raw.slice(4) : raw;
     });
     input.addEventListener("keydown", function (e) { if (e.key === "Enter") attempt(); });

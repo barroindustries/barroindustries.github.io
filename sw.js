@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.297';
+const CACHE_VER = 'bi-ops-v14.0.299';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -39,8 +39,8 @@ const PRECACHE = [
   // ?v= must match index.html's <link> hrefs exactly — the SW caches by URL,
   // so an unversioned entry here would never serve the versioned request and
   // the app would lose offline CSS. Both sides are rewritten by the hook.
-  '/css/tokens.css?v=14.0.297',
-  '/css/styles.css?v=14.0.297',
+  '/css/tokens.css?v=14.0.299',
+  '/css/styles.css?v=14.0.299',
   '/manifest.json',
   '/quote-builder-v2.html',
   '/products-database.json',

@@ -518,3 +518,54 @@ describe('buildOutboxBody', () => {
     assert.ok(body.includes('https://barroindustries.com/projects/chibabs/projectconfirmation/'));
   });
 });
+
+// ── The public page's code filter must agree with the server's alphabet ──────
+//
+// REGRESSION (found in production 2026-09-26, by the owner, on the very first
+// real access code). The page filtered typed input with a hand-written range
+// /[^A-HJ-NP-TV-Z2-9]/ that did NOT match CODE_ALPHABET: U sits between T and
+// V so it fell into neither range and was silently stripped, while L was
+// wrongly admitted. ~23% of generated codes contain a U, so roughly one code
+// in four could not be typed into the page at all -- it ate the character and
+// then rejected the result as wrong. The page now derives its filter from a
+// single CODE_ALPHABET constant; these tests pin the two copies together so
+// they can never drift again.
+describe('public page code filter vs server alphabet', () => {
+  const pageSrc = require('node:fs').readFileSync(
+    new URL('../projects/chibabs/projectconfirmation/index.html', import.meta.url), 'utf8');
+
+  const pageAlphabet = (pageSrc.match(/var CODE_ALPHABET = "([^"]+)"/) || [])[1];
+
+  it('the page declares an alphabet identical to portal-core CODE_ALPHABET', () => {
+    assert.equal(pageAlphabet, portal.CODE_ALPHABET);
+  });
+
+  it('derives the filter from the alphabet instead of hand-writing ranges', () => {
+    assert.ok(/new RegExp\("\[\^" \+ CODE_ALPHABET \+ "\]"/.test(pageSrc),
+      'page must build its strip regex from CODE_ALPHABET');
+    assert.ok(!/replace\(\/\[\^A-HJ-NP-TV-Z2-9\]\/g/.test(pageSrc),
+      'the broken hand-written range must not be live code anywhere');
+  });
+
+  it('keeps every character the server can actually mint — U included', () => {
+    const strip = new RegExp('[^' + pageAlphabet + ']', 'g');
+    for (const ch of portal.CODE_ALPHABET) {
+      assert.equal(ch.replace(strip, ''), ch, `page filter strips '${ch}', which the server can mint`);
+    }
+    assert.equal('U'.replace(strip, ''), 'U');            // the exact character that broke
+  });
+
+  it('still rejects the ambiguous characters the alphabet excludes', () => {
+    const strip = new RegExp('[^' + pageAlphabet + ']', 'g');
+    for (const ch of ['I', 'L', 'O', '0', '1']) {
+      assert.equal(ch.replace(strip, ''), '', `page filter must drop ambiguous '${ch}'`);
+      assert.ok(!portal.CODE_ALPHABET.includes(ch), `server alphabet must not contain '${ch}'`);
+    }
+  });
+
+  it('round-trips a real U-bearing code through the page filter unchanged', () => {
+    const strip = new RegExp('[^' + pageAlphabet + ']', 'g');
+    assert.equal('4UXB-7PUV'.toUpperCase().replace(strip, ''), '4UXB7PUV');
+    assert.equal(portal.normalizeCode('4UXB-7PUV'), '4UXB7PUV');
+  });
+});
