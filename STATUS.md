@@ -126,6 +126,24 @@ what the script prints.
 - [x] **Seed the Chibab's portal** — DONE 2026-09-26 (server-side, via ADC from the firebase CLI refresh token): portal `chibabs__projectconfirmation` is **live**, 27 items, contract total verified, codeVersion 1, unsigned. Access code was minted and handed to the President in session — it exists in plaintext NOWHERE (scrypt-hashed in `client_portal_secrets`), so if it is lost the only recovery is Rotate in the app. All verification sessions were revoked (`sessionsGeneration` -> 2) so the client starts clean. Original note: (President, in-app, after the deploys): Client Portals → New portal (`chibabs` / `projectconfirmation`) → Import JSON from `~/Desktop/chibabs/chibabs-portal-content.json` → Generate access code (shown **once** — copy it) → Go live. Hand the code to Joseph Asis out-of-band, never in the same channel as the link.
 <!-- PENDING-OPS:END -->
 
+> **2026-09-26 SECURITY, QUEUED (not urgent, deliberately deferred by the owner): the portal's
+> client IP is caller-controlled.** `portalClientIp()` (functions/index.js:2599) takes the FIRST
+> entry of `X-Forwarded-For`; Google's LB appends the real client IP and then its own, so everything
+> before that is whatever the caller sent. **Confirmed exploitable against production:** six wrong
+> codes from a forged `X-Forwarded-For: 203.0.113.1` locked that identity out on the 6th, then one
+> request claiming `203.0.113.99` sailed through — verified at the DB level by hash-matching
+> `sha256(portalId+'|'+forgedIP)` against real `client_portal_ratelimit` doc ids. Buckets were reset
+> afterwards; no client was left locked.
+> **Severity, honestly:** the access code is NOT at practical risk — the per-portal cap (20 failures
+> /60 min, not IP-keyed) still holds, capping guessing at ~480/day against 31^8 ≈ 8.5e11 codes. The
+> real harm is **evidentiary**: `acceptances/{refNo}.client.ip`, recorded as authenticity evidence on
+> a signed ₱1,408,100 contract, is forgeable with one header, as is `events.ipHash`.
+> **Fix (queued as a background task):** key on the second-from-last XFF entry and record the full
+> chain on the acceptance record. **Carries a real risk if done carelessly** — a wrong hop index keys
+> every client to one bucket and locks out everyone for 15 min, so it must be verified by
+> hash-matching against live buckets and the buckets reset afterwards. Selective functions deploy
+> only (the Meta webhook stays undeployed).
+
 ## Open rulings — decisions only the President can make
 
 Ten-minute review at the start of any working session. Oldest first within severity.
