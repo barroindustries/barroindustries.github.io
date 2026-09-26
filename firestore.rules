@@ -797,6 +797,29 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // Client information requests (specs/CLIENT-INFO-REQUEST-SPEC.md) — public form is callable-only;
+    // cir_drafts / cir_ratelimit / cir_abuse have NO match block (Admin SDK only). Secretary = view-only.
+    function cirWriter() { return isSeniorAdmin() || (!isSecretary() && inDept('Sales')); }
+    match /client_info_requests/{ref} {
+      allow read: if isAuth() && !isPartner();
+      allow create, delete: if false;
+      allow update: if isAuth() && cirWriter()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status','statusChangedAt','statusChangedBy','statusChangedByName','convertedClientId','convertedAt','convertedBy','updatedAt'])
+        && request.resource.data.get('status','') in ['new','in_review','contacted','converted','archived']
+        // Attribution fields must name the real writer when set, else forgeable.
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['statusChangedBy']) || request.resource.data.statusChangedBy == request.auth.uid)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
+    }
+    match /client_info_requests/{ref}/notes/{nid} {
+      allow read: if isAuth() && !isPartner();
+      allow create: if isAuth() && cirWriter()
+        && request.resource.data.get('authorUid','') == request.auth.uid
+        && request.resource.data.get('at', null) == request.time
+        && isBoundedString(request.resource.data.get('text',''), 2000);
+      allow update, delete: if false;
+    }
+
     match /notes/{noteId} {
       allow read: if isAuth() && ( noteIsOwner(resource) || noteIsShared(resource) );
 

@@ -523,6 +523,60 @@ describe('WS-0 mirror invariant (functional regression, independent of ci-invari
   });
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+//  Hardening pass 2026-09-26 (adversarial-review finding #1): the per-IP
+//  buckets above key on portalClientIp, which trusts the FIRST
+//  X-Forwarded-For entry — GCP appends the real peer IP rather than
+//  replacing the header, so a caller hitting the callables directly with a
+//  rotating fake XFF defeats them. cirSubmit already had an IP-independent
+//  global bucket; cirStartDraft and cirUploadPhoto had none, leaving
+//  unbounded cir_drafts creation and unbounded Storage cost from one host.
+//  These pin the two new IP-independent buckets as CONFIG (the enforcement
+//  itself lives in functions/index.js and reuses portal.rateLimitDecision,
+//  which is fail-closed and pinned by tests/client-portal.test.mjs).
+// ──────────────────────────────────────────────────────────────────────────
+describe('RATE — IP-independent global caps (hardening)', () => {
+  it('defines a global bucket for BOTH pre-submit steps, not just submit', () => {
+    assert.ok(cir.RATE.globalStart, 'cirStartDraft has no IP-independent cap');
+    assert.ok(cir.RATE.globalPhoto, 'cirUploadPhoto has no IP-independent cap');
+  });
+
+  it('every global bucket is a complete, well-formed config', () => {
+    for (const key of ['global', 'globalStart', 'globalPhoto']) {
+      const cfg = cir.RATE[key];
+      for (const field of ['window', 'max', 'lock', 'maxLock']) {
+        assert.equal(typeof cfg[field], 'number', `RATE.${key}.${field} must be a number`);
+        assert.ok(cfg[field] > 0, `RATE.${key}.${field} must be positive`);
+      }
+      // A bucket whose lockout can never exceed its own window would let an
+      // attacker simply wait out the window and resume at full rate.
+      assert.ok(cfg.maxLock >= cfg.lock, `RATE.${key}.maxLock must not be below lock`);
+    }
+  });
+
+  it('global caps sit above the submit cap they backstop, so they never block real traffic first', () => {
+    // A brief requires one draft and (usually) several photos, so the
+    // pre-submit caps MUST be looser than the submit cap or a legitimate
+    // visitor would be stopped before finishing a single brief.
+    assert.ok(cir.RATE.globalStart.max > cir.RATE.global.max,
+      'globalStart must exceed the global submit cap');
+    assert.ok(cir.RATE.globalPhoto.max > cir.RATE.global.max,
+      'globalPhoto must exceed the global submit cap');
+  });
+
+  it('bounds worst-case hourly Storage cost to something a human would notice, not a bill', () => {
+    // globalPhoto.max uploads/hr, each capped at LIMITS.maxPhotoBytes.
+    const worstCaseBytesPerHour = cir.RATE.globalPhoto.max * cir.LIMITS.maxPhotoBytes;
+    assert.ok(worstCaseBytesPerHour <= 1024 * 1024 * 1024,
+      `worst-case ${Math.round(worstCaseBytesPerHour / 1048576)}MB/hr exceeds the 1GB/hr ceiling this cap exists to hold`);
+  });
+
+  it('the per-IP buckets are still present — the global caps are defence in depth, not a replacement', () => {
+    assert.deepEqual(cir.RATE.start, { window: 3600e3, max: 20, lock: 3600e3, maxLock: 24 * 3600e3 });
+    assert.deepEqual(cir.RATE.photo, { window: 3600e3, max: 80, lock: 3600e3, maxLock: 24 * 3600e3 });
+  });
+});
+
 describe('privacyNoticeSha256', () => {
   it('is a stable 64-hex-char digest', () => {
     const h1 = cir.privacyNoticeSha256();

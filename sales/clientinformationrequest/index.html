@@ -1,0 +1,1344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+// Applied before first paint to avoid a flash of the wrong theme on a repeat
+// visit. Own key (this page is standalone, not the app shell) — three-state
+// pattern: an explicit stored choice wins; no stored choice = follow the OS
+// via the media query in the stylesheet below (CLIENT-INFO-REQUEST-SPEC.md §4.1).
+try {
+  var __t = localStorage.getItem("barro-cir-theme");
+  if (__t === "light" || __t === "dark") document.documentElement.setAttribute("data-theme", __t);
+} catch (_e) {}
+</script>
+<title>Commissary Kitchen Project Brief — Barro Industries</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#1D4F7A">
+<meta name="description" content="Tell us about your commissary kitchen project — Barro Industries.">
+<link rel="icon" href="/icons/icon-192.png">
+<!-- OG tags are deliberately generic — this file is static and served verbatim by
+     GitHub Pages (the repo is public), so nothing client-specific belongs in the head. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Barro Industries">
+<meta property="og:title" content="Commissary Kitchen Project Brief — Barro Industries">
+<meta property="og:description" content="Tell us how your kitchen runs today and where you want it to go — no account needed.">
+<meta property="og:image" content="https://barroindustries.com/icons/barro-kitchens.png">
+<meta property="og:url" content="https://barroindustries.com/sales/clientinformationrequest/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Commissary Kitchen Project Brief — Barro Industries">
+<meta name="twitter:description" content="Tell us how your kitchen runs today and where you want it to go — no account needed.">
+<meta name="twitter:image" content="https://barroindustries.com/icons/barro-kitchens.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   THEMING — three-state pattern (spec §4.1): bare :root = light (and the
+   default when the browser has no preference); @media(prefers-color-scheme:
+   dark) guarded by :root:not([data-theme="light"]) = auto-dark unless the
+   visitor explicitly forced light; :root[data-theme="dark"] = explicit
+   forced-dark wins over all. Every token has a bare :root definition first.
+   Palette/tokens/layout below are Neil's original commissary-intake.html,
+   kept as designed (the "equipment rating plate" look), with additions
+   noted inline for the Photos part, banners, theme toggle and receipt.
+   ========================================================================= */
+:root{
+  --steel:#DCE1E5; --sheet:#F6F7F8; --ink:#17212B; --muted:#5A6672;
+  --line:#B9C2CA; --blue:#1D4F7A; --flame:#2E86DE; --ok:#1F7A4D; --err:#B3261E;
+  --display:"Archivo","Arial Narrow",Arial,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  box-sizing:border-box;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --steel:#10171E; --sheet:#18222C; --ink:#E6EBEF; --muted:#9AA7B3; --line:#33424F; --blue:#8DB9E2; --flame:#5AA6F0;
+}}
+:root[data-theme="dark"]{--steel:#10171E;--sheet:#18222C;--ink:#E6EBEF;--muted:#9AA7B3;--line:#33424F;--blue:#8DB9E2;--flame:#5AA6F0}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}}
+body{
+  margin:0;background:var(--steel);color:var(--ink);font:16px/1.55 var(--body);-webkit-font-smoothing:antialiased;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 80px}
+
+/* Nameplate header — styled like an equipment rating plate */
+.plate{background:var(--sheet);border:2px solid var(--ink);border-radius:6px;padding:22px 22px 18px;position:relative;margin-bottom:28px}
+.plate::before,.plate::after,.plate .r1,.plate .r2{content:"";position:absolute;width:9px;height:9px;border-radius:50%;background:var(--line);border:1px solid var(--muted)}
+.plate::before{top:8px;left:8px}.plate::after{top:8px;right:8px}
+.plate .r1{bottom:8px;left:8px}.plate .r2{bottom:8px;right:8px}
+.brand{font:700 13px/1 var(--display);font-stretch:112%;letter-spacing:.04em;color:var(--blue);margin:0 46px 14px 0}
+h1{font:800 clamp(30px,7vw,48px)/.95 var(--display);font-stretch:75%;margin:0 0 12px;letter-spacing:-.01em}
+.intro{color:var(--muted);margin:0;max-width:60ch}
+.specs{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);margin-top:18px;padding-top:12px;gap:8px;font-size:13px;color:var(--muted)}
+.specs b{display:block;color:var(--ink);font:700 18px/1.2 var(--display);font-stretch:90%}
+
+/* Theme toggle — portal idiom, 38px round button, top-right of the plate */
+.theme-toggle{position:absolute;top:14px;right:14px;width:38px;height:38px;border-radius:999px;border:1px solid var(--line);
+  background:var(--steel);color:var(--ink);display:grid;place-items:center;cursor:pointer;font-size:16px;z-index:2;padding:0}
+
+/* Banners — offline / expired-draft / load error */
+.banner{background:var(--sheet);border:1px solid var(--line);border-left:4px solid var(--flame);border-radius:4px;padding:10px 14px;font-size:13.5px;margin-bottom:14px}
+.banner.err{border-left-color:var(--err)}
+
+/* Progress */
+.progress{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--steel);padding:10px 0;margin-bottom:8px}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--flame);transition:width .3s}
+.progress small{display:block;color:var(--muted);font-size:12px;margin-top:6px}
+
+/* Sections */
+fieldset{border:0;margin:0 0 18px;padding:22px 18px;background:var(--sheet);border-radius:4px;border-left:4px solid var(--blue)}
+legend{float:left;width:100%;padding:0;margin:0 0 4px;font:700 22px/1.15 var(--display);font-stretch:85%;display:flex;gap:10px;align-items:baseline}
+legend span{font-size:14px;color:var(--flame);font-stretch:100%}
+.hint{clear:both;color:var(--muted);font-size:14px;margin:0 0 18px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}
+.full{grid-column:1/-1}
+@media (max-width:560px){.grid{grid-template-columns:1fr}.specs{grid-template-columns:1fr 1fr 1fr}}
+label.f{display:block;font-weight:500;font-size:14px;margin-bottom:5px}
+label.f em{font-style:normal;color:var(--err)}
+input[type=text],input[type=email],input[type=tel],input[type=number],input[type=date],input[type=url],select,textarea{
+  width:100%;font:16px var(--body);color:var(--ink);background:var(--steel);border:1px solid var(--line);border-radius:4px;padding:11px 12px;min-height:44px}
+textarea{min-height:88px;resize:vertical}
+input:focus,select:focus,textarea:focus,button:focus-visible,.chip input:focus-visible+span{outline:3px solid var(--flame);outline-offset:1px}
+.sub{font:600 15px var(--body);margin:18px 0 8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{position:relative}
+.chip input{position:absolute;opacity:0;inset:0;margin:0;width:100%;height:100%;cursor:pointer}
+.chip span{display:inline-block;padding:8px 12px;border:1px solid var(--line);border-radius:999px;font-size:14px;cursor:pointer;background:var(--steel);user-select:none;min-height:20px}
+.chip input:checked+span{background:var(--blue);border-color:var(--blue);color:#fff}
+:root[data-theme="dark"] .chip input:checked+span{color:#0d1620}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .chip input:checked+span{color:#0d1620}}
+
+/* Equipment table */
+.eq-scroll{overflow-x:auto;margin:0 -4px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+th{text-align:left;font-weight:600;color:var(--muted);padding:6px 4px;border-bottom:1px solid var(--line)}
+td{padding:5px 4px;vertical-align:top}
+td input,td select{padding:8px;font-size:14px;min-height:40px}
+.del{background:none;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:6px;min-width:32px;min-height:32px}
+.btn{font:600 15px var(--body);border-radius:4px;padding:12px 18px;cursor:pointer;border:2px solid var(--ink);background:transparent;color:var(--ink);min-height:44px}
+.btn.primary{background:var(--ink);color:var(--sheet)}
+.btn.small{padding:8px 12px;font-size:14px;border-width:1px;margin-top:10px;min-height:38px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}
+.saved{font-size:13px;color:var(--muted)}
+.consent{display:flex;gap:10px;align-items:flex-start;font-size:14px}
+.consent input{margin-top:4px;width:18px;height:18px;flex:0 0 auto}
+.priv-details{margin-top:12px;font-size:13px;color:var(--muted)}
+.priv-details summary{cursor:pointer;color:var(--blue);font-weight:600}
+.priv-sec{margin-top:10px}
+.priv-sec h5{margin:0 0 3px;font-size:13px;color:var(--ink)}
+.priv-sec p{margin:0}
+.priv-ver{margin-top:10px;font-size:11.5px}
+.hp{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden}
+.done{background:var(--sheet);border:2px solid var(--ok);border-radius:4px;padding:24px}
+.done h2{font:800 30px/1 var(--display);font-stretch:80%;margin:0 0 10px}
+.ref-label{color:var(--muted);font-size:13px;margin:16px 0 2px;text-transform:uppercase;letter-spacing:.05em}
+.ref-no{font:700 28px/1 ui-monospace,"IBM Plex Mono",monospace;letter-spacing:.02em;margin:0 0 10px;word-break:break-all}
+.received-line{color:var(--muted);font-size:14px;margin:0 0 16px}
+.receipt-summary{margin-top:20px;border-top:1px solid var(--line);padding-top:14px}
+.receipt-sec{margin-bottom:14px}
+.receipt-sec h4{font:700 14px var(--display);margin:0 0 6px;color:var(--blue)}
+.rk{display:flex;gap:8px;font-size:13px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.rk-l{color:var(--muted);flex:0 0 42%}
+.rk-v{flex:1;word-break:break-word;white-space:pre-wrap}
+.err{color:var(--err);font-size:14px;margin-top:8px}
+footer{text-align:center;color:var(--muted);font-size:13px;margin-top:30px}
+.mock-badge{position:fixed;bottom:10px;right:10px;background:var(--flame);color:#fff;font-size:11px;padding:5px 10px;border-radius:4px;z-index:9;opacity:.9;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+
+/* Photos part (addition to Neil's stylesheet) */
+.photos-wrap{display:flex;flex-direction:column;gap:18px}
+.ph-counter{color:var(--muted);font-size:13px;margin:-10px 0 4px}
+.ph-group{border:1px solid var(--line);border-radius:6px;padding:14px}
+.ph-group-head h4{margin:0 0 2px;font:700 16px var(--display);font-stretch:90%}
+.ph-group-head .hint{margin:0 0 10px}
+.ph-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.ph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.ph-tile{border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--steel);display:flex;flex-direction:column}
+.ph-tile img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--line)}
+.ph-placeholder{width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:var(--line);color:var(--muted);font-size:26px;text-align:center;padding:6px;gap:4px;flex-direction:column}
+.ph-placeholder span{font-size:10px;line-height:1.25}
+.ph-tile .cap{border:0;border-top:1px solid var(--line);border-radius:0;font-size:12px;padding:6px 8px;min-height:32px;background:var(--sheet);width:100%}
+.ph-status{font-size:11px;padding:4px 8px 2px;color:var(--muted)}
+.ph-status.err{color:var(--err);cursor:pointer;text-decoration:underline;background:none;border:0;text-align:left;font:inherit;width:100%}
+.ph-tile .tile-foot{display:flex;align-items:center;justify-content:space-between;padding:0 4px 4px}
+.ph-tile .del{font-size:16px;padding:2px 8px}
+
+@media print{
+  .progress,.actions,.del,.btn.small,.theme-toggle,.hp,.banner,.ph-actions,.mock-badge{display:none !important}
+  body{background:#fff}
+  fieldset{break-inside:avoid;border-left-color:#000}
+  body.print-receipt .wrap>*:not(#done){display:none !important}
+  body.print-receipt #done{display:block !important;box-shadow:none;border-color:#999}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="plate" id="plate">
+  <i class="r1"></i><i class="r2"></i>
+  <button type="button" class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">◐</button>
+  <p class="brand" id="brandText"></p>
+  <h1 id="titleText"></h1>
+  <p class="intro" id="introText"></p>
+  <div class="specs" id="specsGrid"></div>
+</header>
+
+<div id="appRoot">
+
+  <div class="banner err" id="offlineBanner" hidden role="status">You're offline — your draft is safe on this device; sending needs a connection.</div>
+  <div class="banner" id="expiredBanner" hidden role="status"></div>
+
+  <div class="progress" id="progressWrap" aria-hidden="true">
+    <div class="bar"><i id="barFill"></i></div>
+    <small id="barText">0% complete</small>
+  </div>
+
+  <form id="intake" novalidate autocomplete="on">
+    <p class="hp" aria-hidden="true"><label>Fax number <input name="fax_number" id="hpField" tabindex="-1" autocomplete="off"></label></p>
+    <div id="sectionsMount"></div>
+    <div class="actions">
+      <button type="submit" class="btn primary" id="submitBtn"></button>
+      <button type="button" class="btn" id="printBtn">Print / save as PDF</button>
+      <span class="saved" id="savedNote"></span>
+    </div>
+    <p class="err" id="errMsg" role="alert" aria-live="assertive"></p>
+  </form>
+
+  <div class="done" id="done" role="status" hidden></div>
+
+</div>
+
+<footer id="footerText"></footer>
+</div>
+
+<script src="/js/cir-forms.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script>
+(function () {
+"use strict";
+
+/* ============================================================================
+   0. LOAD GUARD — if js/cir-forms.js failed to load or is stale, show a
+   full-page error card instead of a half-built form (spec §4.1).
+   ========================================================================= */
+var FORM_ID = "commissary_brief";
+var appRoot = document.getElementById("appRoot");
+if (!window.CIR_FORMS || !window.CIR_FORMS[FORM_ID] || !window.CIR_LIMITS || !window.CIR_PRIVACY_NOTICE) {
+  if (appRoot) {
+    appRoot.innerHTML = '<div class="done" role="alert"><h2>Could not load the form</h2>' +
+      "<p>Please reload this page, or call 0927 683 6300 and we'll take your details over the phone.</p></div>";
+  }
+  return;
+}
+
+var def = window.CIR_FORMS[FORM_ID];
+var LIMITS = window.CIR_LIMITS;
+var PRIVACY_NOTICE = window.CIR_PRIVACY_NOTICE;
+
+/* ============================================================================
+   1. FIREBASE — compat SDK only, callables, no Firestore/Storage/Auth SDK on
+   this page (spec §4.1). Config block copied verbatim from
+   projects/chibabs/projectconfirmation/index.html (same Firebase project).
+   REGION is mandatory on every call — without it the SDK targets
+   us-central1, where these functions do not exist, and every call fails.
+   ========================================================================= */
+var FIREBASE_CFG = {
+  apiKey: "AIzaSyA1-fDeMCxTsUm29O49l954Ez5BqbyHijk",
+  authDomain: "barro-industries.firebaseapp.com",
+  projectId: "barro-industries",
+  storageBucket: "barro-industries.firebasestorage.app",
+  messagingSenderId: "700081895848",
+  appId: "1:700081895848:web:265511313b4ff74575459d"
+};
+var REGION = "asia-east1";
+
+var qs = new URLSearchParams(location.search);
+var MOCK_MODE = qs.get("mock") === "1";
+// QA-only hook, honored ONLY under ?mock=1 (spec §4.6) — never read by the
+// real backend. Values: ratelimit, expired, dup, invalid, unauth, photobig,
+// error, slow.
+var SIM = MOCK_MODE ? (qs.get("sim") || "") : "";
+
+/* ============================================================================
+   2. HELPERS — esc() escapes every interpolation, including the visitor's
+   own answers echoed back in the receipt (defence in depth against a pasted
+   <script> from their own clipboard — spec §4.2).
+   ========================================================================= */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+function delay(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+function isBlank(v) {
+  if (v == null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  return String(v).trim() === "";
+}
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Manila date shown as "DD Mon YYYY", built from the string's own parts — never
+// `new Date(str)` on a bare 'YYYY-MM-DD', which UTC-shifts and can print the
+// wrong calendar day (spec §4.7 / repo Manila-time convention).
+function fmtManilaDate(isoDateOrIso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(isoDateOrIso || ""));
+  if (!m) return esc(String(isoDateOrIso || ""));
+  var y = m[1], mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+  if (!mo || mo < 1 || mo > 12) return esc(String(isoDateOrIso || ""));
+  return d + " " + MONTHS[mo - 1] + " " + y;
+}
+function manilaDateStrFromMs(ms) {
+  var d = new Date(ms);
+  var parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
+  var y = "", mo = "", da = "";
+  parts.forEach(function (p) { if (p.type === "year") y = p.value; if (p.type === "month") mo = p.value; if (p.type === "day") da = p.value; });
+  return y + "-" + mo + "-" + da;
+}
+var CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I — matches portal.CODE_ALPHABET
+function mockRefNo(nowMs) {
+  var iso = manilaDateStrFromMs(nowMs);
+  var yy = iso.slice(2, 4), mm = iso.slice(5, 7), dd = iso.slice(8, 10);
+  var rand = "";
+  for (var i = 0; i < 6; i++) rand += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  return "CIR-" + yy + mm + dd + "-" + rand;
+}
+function mockToken() {
+  var abc = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz0123456789-_";
+  var s = "";
+  for (var i = 0; i < 43; i++) s += abc[Math.floor(Math.random() * abc.length)];
+  return s;
+}
+function mockPhotoId() {
+  var hex = "0123456789abcdef", s = "";
+  for (var i = 0; i < 12; i++) s += hex[Math.floor(Math.random() * 16)];
+  return "p_" + s;
+}
+
+/* ============================================================================
+   3. THE INTEGRATION SEAM — Cir.startDraft / uploadPhoto / removePhoto /
+   submit (spec §4.6). Under ?mock=1 they resolve locally with no Firebase
+   init; otherwise they are the real asia-east1 httpsCallable functions.
+   Swapping mock↔real never touches a render function.
+   ========================================================================= */
+var fbApp = null, fnStart = null, fnUpload = null, fnRemove = null, fnSubmit = null;
+function ensureFirebase() {
+  if (fbApp) return;
+  fbApp = firebase.initializeApp(FIREBASE_CFG);
+  var fns = firebase.app().functions(REGION);
+  fnStart = fns.httpsCallable("cirStartDraft");
+  fnUpload = fns.httpsCallable("cirUploadPhoto");
+  fnRemove = fns.httpsCallable("cirRemovePhoto");
+  fnSubmit = fns.httpsCallable("cirSubmit");
+}
+// Normalizes both a real firebase.functions HttpsError and a mock-mode
+// rejection into the same {code, message} shape the UI switches on (spec §2.7).
+function normalizeError(e) {
+  return { code: (e && e.code) || "internal", message: (e && e.message) || "Something went wrong. Please try again." };
+}
+var mockCounters = { photoCount: 0, bytesTotal: 0 };
+var Cir = {
+  startDraft: function () {
+    if (MOCK_MODE) {
+      return delay(400 + Math.random() * 500).then(function () {
+        if (SIM === "error") return Promise.reject({ code: "unavailable", message: "Something went wrong on our side — your answers are saved on this device. Please try again in a moment." });
+        mockCounters = { photoCount: 0, bytesTotal: 0 };
+        return { ok: true, draftToken: mockToken(), formVersion: def.formVersion, serverNow: new Date().toISOString() };
+      });
+    }
+    ensureFirebase();
+    return fnStart({ formId: FORM_ID }).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  },
+  uploadPhoto: function (payload) {
+    if (MOCK_MODE) {
+      var ms = 400 + Math.random() * 500 + (SIM === "slow" ? 3000 : 0);
+      return delay(ms).then(function () {
+        if (SIM === "photobig") return Promise.reject({ code: "invalid-argument", message: "Photo is too large." });
+        if (SIM === "unauth") return Promise.reject({ code: "unauthenticated", message: "Please reload the page." });
+        if (SIM === "error") return Promise.reject({ code: "unavailable", message: "Something went wrong on our side — your answers are saved on this device. Please try again in a moment." });
+        var bytes = Math.round((payload.dataUrl || "").length * 0.73);
+        mockCounters.photoCount++; mockCounters.bytesTotal += bytes;
+        return { ok: true, photoId: mockPhotoId(), bytes: bytes, photoCount: mockCounters.photoCount, bytesTotal: mockCounters.bytesTotal };
+      });
+    }
+    ensureFirebase();
+    return fnUpload(payload).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  },
+  removePhoto: function (payload) {
+    if (MOCK_MODE) {
+      return delay(200).then(function () {
+        mockCounters.photoCount = Math.max(0, mockCounters.photoCount - 1);
+        return { ok: true, removed: true, photoCount: mockCounters.photoCount, bytesTotal: mockCounters.bytesTotal };
+      });
+    }
+    ensureFirebase();
+    return fnRemove(payload).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  },
+  submit: function (payload) {
+    if (MOCK_MODE) {
+      var ms = 400 + Math.random() * 500 + (SIM === "slow" ? 3000 : 0);
+      return delay(ms).then(function () {
+        if (SIM === "ratelimit") return Promise.reject({ code: "resource-exhausted", message: "Too many requests from this connection. Try again in 12 minutes." });
+        if (SIM === "expired") return Promise.reject({ code: "failed-precondition", message: "Your session expired — reload the page and send again (your answers are saved on this device)." });
+        if (SIM === "dup") return Promise.reject({ code: "already-exists", message: "We already received a brief from this e-mail and number today. Call 0927 683 6300 if you need to change something." });
+        if (SIM === "invalid") return Promise.reject({ code: "invalid-argument", message: '"Full name" is required.' });
+        if (SIM === "error") return Promise.reject({ code: "unavailable", message: "Something went wrong on our side — your answers are saved on this device. Please try again in a moment." });
+        var now = Date.now();
+        return { ok: true, refNo: mockRefNo(now), receivedAt: new Date(now).toISOString(), submittedOnManila: manilaDateStrFromMs(now) };
+      });
+    }
+    ensureFirebase();
+    return fnSubmit(payload).then(function (r) { return r.data; }).catch(function (e) { return Promise.reject(normalizeError(e)); });
+  }
+};
+
+/* ============================================================================
+   4. STATE
+   ========================================================================= */
+var DRAFT_KEY = "barro-cir-" + FORM_ID + "-v" + def.formVersion;
+var state = {
+  draftToken: null,
+  draftCreatedAtIso: null,
+  startedAtMs: Date.now(),
+  photos: {}   // group key -> array of tile objects
+};
+var tileCounter = 0;
+var uploadsInFlight = 0;
+var submitting = false;
+var eqField = null;   // the 'table' field def (current_equipment)
+var phField = null;   // the 'photos' field def
+var photoQueue = [];
+var queueRunning = false;
+
+/* DOM refs (filled after buildStaticShell) */
+var form = document.getElementById("intake");
+var sectionsMount = document.getElementById("sectionsMount");
+var submitBtn = document.getElementById("submitBtn");
+var printBtn = document.getElementById("printBtn");
+var savedNote = document.getElementById("savedNote");
+var errMsg = document.getElementById("errMsg");
+var done = document.getElementById("done");
+var progressWrap = document.getElementById("progressWrap");
+var barFill = document.getElementById("barFill");
+var barText = document.getElementById("barText");
+var offlineBanner = document.getElementById("offlineBanner");
+var expiredBanner = document.getElementById("expiredBanner");
+var hpField = document.getElementById("hpField");
+var eqTbody = null;
+
+/* ============================================================================
+   5. RENDERING — data-driven from CIR_FORMS (spec §4.2, rendering rule from
+   §1.4): consecutive input-type fields share one .grid; a chips/table/photos
+   field closes the grid, renders full-width, and a new grid opens after.
+   ========================================================================= */
+function optVal(o) { return typeof o === "string" ? o : o.v; }
+function optLabel(o) { return typeof o === "string" ? o : o.l; }
+
+function renderInputField(field) {
+  var wCls = field.w === "full" ? "full" : "";
+  var reqMark = field.required ? ' <em>*</em>' : "";
+  var describedBy = field.hint ? ' aria-describedby="' + esc(field.key) + '-hint"' : "";
+  var common = ' id="' + esc(field.key) + '" name="' + esc(field.key) + '" data-key="' + esc(field.key) + '"' +
+    (field.required ? " required" : "") + describedBy;
+  var input = "";
+  switch (field.type) {
+    case "text":
+      input = '<input type="text"' + common +
+        (field.autocomplete ? ' autocomplete="' + esc(field.autocomplete) + '"' : "") +
+        (field.placeholder ? ' placeholder="' + esc(field.placeholder) + '"' : "") +
+        (field.max ? ' maxlength="' + field.max + '"' : "") + '>';
+      break;
+    case "tel":
+      input = '<input type="tel"' + common +
+        (field.autocomplete ? ' autocomplete="' + esc(field.autocomplete) + '"' : "") +
+        (field.placeholder ? ' placeholder="' + esc(field.placeholder) + '"' : "") + '>';
+      break;
+    case "email":
+      input = '<input type="email"' + common +
+        (field.autocomplete ? ' autocomplete="' + esc(field.autocomplete) + '"' : "") + '>';
+      break;
+    case "textarea":
+      input = "<textarea" + common + ' rows="' + (field.rows || 3) + '"' +
+        (field.placeholder ? ' placeholder="' + esc(field.placeholder) + '"' : "") +
+        (field.max ? ' maxlength="' + field.max + '"' : "") + "></textarea>";
+      break;
+    case "select":
+      var opts = '<option value="">Select</option>' + (field.options || []).map(function (o) {
+        return '<option value="' + esc(optVal(o)) + '">' + esc(optLabel(o)) + "</option>";
+      }).join("");
+      input = "<select" + common + ">" + opts + "</select>";
+      break;
+    case "number":
+      input = '<input type="number"' + common +
+        (field.min != null ? ' min="' + field.min + '"' : "") +
+        (field.max != null ? ' max="' + field.max + '"' : "") +
+        (field.step != null ? ' step="' + field.step + '"' : "") + '>';
+      break;
+    case "date":
+      input = '<input type="date"' + common + '>';
+      break;
+    case "url":
+      input = '<input type="url"' + common +
+        (field.placeholder ? ' placeholder="' + esc(field.placeholder) + '"' : "") + '>';
+      break;
+    default:
+      input = "";
+  }
+  var hintHtml = field.hint ? '<p class="hint" id="' + esc(field.key) + '-hint" style="margin:4px 0 0">' + esc(field.hint) + "</p>" : "";
+  return '<div class="' + wCls + '"><label class="f" for="' + esc(field.key) + '">' + esc(field.label) + reqMark + "</label>" + input + hintHtml + "</div>";
+}
+
+function renderChips(field) {
+  var opts = (field.options || []).map(function (o) {
+    return '<label class="chip"><input type="checkbox" name="' + esc(field.key) + '" value="' + esc(optVal(o)) + '"><span>' + esc(optLabel(o)) + "</span></label>";
+  }).join("");
+  return '<div class="full"><p class="sub">' + esc(field.label) + '</p><div class="chips">' + opts + "</div></div>";
+}
+
+function renderTable(field) {
+  eqField = field;
+  var theadCells = (field.columns || []).map(function (c) {
+    return '<th style="width:' + esc(c.width || "") + '">' + esc(c.label) + "</th>";
+  }).join("") + "<th></th>";
+  return '<div class="full"><p class="sub">' + esc(field.label) + '</p>' +
+    '<div class="eq-scroll"><table id="eqTable"><thead><tr>' + theadCells + '</tr></thead><tbody></tbody></table></div>' +
+    '<button type="button" class="btn small" id="addEqRow">' + esc(field.addLabel || "+ Add row") + "</button></div>";
+}
+
+function renderPhotosField(field) {
+  phField = field;
+  var html = '<div class="photos-wrap full" data-field="' + esc(field.key) + '">';
+  html += '<p class="ph-counter" id="phCounter">0 of ' + LIMITS.maxPhotos + " photos · 0.0 MB</p>";
+  (field.groups || []).forEach(function (g) {
+    html += '<div class="ph-group" data-group="' + esc(g.key) + '">' +
+      '<div class="ph-group-head"><h4>' + esc(g.label) + "</h4><p class=\"hint\">" + esc(g.hint) + "</p></div>" +
+      '<div class="ph-actions">' +
+      '<button type="button" class="btn small ph-add" data-group="' + esc(g.key) + '">Add photos</button>' +
+      '<button type="button" class="btn small ph-take" data-group="' + esc(g.key) + '">Take photo</button>' +
+      '<input type="file" accept="image/*" multiple class="ph-input-add sr-only" data-group="' + esc(g.key) + '" tabindex="-1" aria-hidden="true">' +
+      '<input type="file" accept="image/*" capture="environment" class="ph-input-take sr-only" data-group="' + esc(g.key) + '" tabindex="-1" aria-hidden="true">' +
+      "</div>" +
+      '<div class="ph-grid" data-group-grid="' + esc(g.key) + '" aria-live="polite"></div>' +
+      "</div>";
+  });
+  html += "</div>";
+  return html;
+}
+
+function consentHtml() {
+  var secs = (PRIVACY_NOTICE.sections || []).map(function (s) {
+    return '<div class="priv-sec"><h5>' + esc(s.heading) + "</h5><p>" + esc(s.body) + "</p></div>";
+  }).join("");
+  return '<label class="consent" style="margin-top:18px">' +
+    '<input type="checkbox" id="consent" name="consent" required>' +
+    "<span>" + esc(PRIVACY_NOTICE.consentLine) + "</span></label>" +
+    '<details class="priv-details"><summary>Read the full privacy notice (RA 10173)</summary>' + secs +
+    '<p class="priv-ver">Notice version ' + esc(PRIVACY_NOTICE.version) + "</p></details>";
+}
+
+function renderSection(section, idx, isLast) {
+  var html = '<fieldset data-section="' + esc(section.key) + '"><legend><span>' + (idx + 1) + "</span>" + esc(section.title) + "</legend>" +
+    '<p class="hint">' + esc(section.hint) + "</p>";
+  var gridBuf = [];
+  function flush() { if (gridBuf.length) { html += '<div class="grid">' + gridBuf.join("") + "</div>"; gridBuf = []; } }
+  (section.fields || []).forEach(function (field) {
+    if (field.type === "chips") { flush(); html += renderChips(field); }
+    else if (field.type === "table") { flush(); html += renderTable(field); }
+    else if (field.type === "photos") { flush(); html += renderPhotosField(field); }
+    else { gridBuf.push(renderInputField(field)); }
+  });
+  flush();
+  if (isLast) html += consentHtml();
+  html += "</fieldset>";
+  return html;
+}
+
+function buildStaticShell() {
+  document.getElementById("brandText").textContent = def.brand;
+  document.getElementById("titleText").textContent = def.title;
+  document.getElementById("introText").textContent = def.intro;
+  document.getElementById("specsGrid").innerHTML = (def.specs || []).map(function (s) {
+    return "<div><b>" + esc(s.b) + "</b>" + esc(s.t) + "</div>";
+  }).join("");
+  document.getElementById("footerText").textContent = def.footer;
+  submitBtn.textContent = def.submitLabel;
+
+  var html = "";
+  def.sections.forEach(function (sec, idx) {
+    html += renderSection(sec, idx, idx === def.sections.length - 1);
+  });
+  sectionsMount.innerHTML = html;
+
+  eqTbody = sectionsMount.querySelector("#eqTable tbody");
+  var addBtn = sectionsMount.querySelector("#addEqRow");
+  if (addBtn) {
+    addBtn.onclick = function () {
+      addEquipmentRow();
+      var lastInput = eqTbody.lastElementChild && eqTbody.lastElementChild.querySelector("input,select");
+      if (lastInput) lastInput.focus();
+      scheduleSave(); updateProgress();
+    };
+  }
+
+  if (MOCK_MODE) {
+    var badge = document.createElement("div");
+    badge.className = "mock-badge";
+    badge.textContent = "Mock mode" + (SIM ? " · sim=" + SIM : "");
+    document.body.appendChild(badge);
+  }
+}
+
+/* ============================================================================
+   6. EQUIPMENT TABLE — mirrors Neil's row()/eqData() (commissary-intake.html)
+   ========================================================================= */
+function addEquipmentRow(d) {
+  d = d || {};
+  var cellsHtml = (eqField.columns || []).map(function (col) {
+    if (col.type === "select") {
+      var opts = '<option value="">—</option>' + (col.options || []).map(function (o) {
+        return '<option value="' + esc(o) + '"' + (d[col.key] === o ? " selected" : "") + ">" + esc(o) + "</option>";
+      }).join("");
+      return '<td style="width:' + esc(col.width || "") + '"><select data-k="' + esc(col.key) + '" aria-label="' + esc(col.label) + '">' + opts + "</select></td>";
+    }
+    if (col.type === "number") {
+      return '<td style="width:' + esc(col.width || "") + '"><input type="number" data-k="' + esc(col.key) + '" aria-label="' + esc(col.label) + '"' +
+        (col.min != null ? ' min="' + col.min + '"' : "") + (col.max != null ? ' max="' + col.max + '"' : "") +
+        (d[col.key] != null && d[col.key] !== "" ? ' value="' + esc(d[col.key]) + '"' : "") + "></td>";
+    }
+    return '<td style="width:' + esc(col.width || "") + '"><input type="text" data-k="' + esc(col.key) + '" aria-label="' + esc(col.label) + '"' +
+      (col.placeholder ? ' placeholder="' + esc(col.placeholder) + '"' : "") +
+      ' value="' + esc(d[col.key] || "") + '"></td>';
+  }).join("");
+  var tr = document.createElement("tr");
+  tr.innerHTML = cellsHtml + '<td><button type="button" class="del" aria-label="Remove row">×</button></td>';
+  tr.querySelector(".del").onclick = function () { tr.remove(); scheduleSave(); updateProgress(); };
+  eqTbody.appendChild(tr);
+}
+function ensureMinEquipmentRows() {
+  var min = eqField.minRows || 0;
+  while (eqTbody.rows.length < min) addEquipmentRow();
+}
+function readAllTableRows() {
+  var rows = [];
+  Array.prototype.forEach.call(eqTbody ? eqTbody.rows : [], function (tr) {
+    var o = {};
+    tr.querySelectorAll("[data-k]").forEach(function (el) {
+      o[el.dataset.k] = el.type === "number" ? (el.value === "" ? "" : Number(el.value)) : el.value.trim();
+    });
+    rows.push(o);
+  });
+  return rows;
+}
+function readNonBlankTableRows() { return readAllTableRows().filter(function (r) { return r.item; }); }
+
+/* ============================================================================
+   7. FIELD VALUE HELPERS
+   ========================================================================= */
+function fieldByKey(key) {
+  var found = null;
+  def.sections.forEach(function (sec) { sec.fields.forEach(function (f) { if (f.key === key) found = f; }); });
+  return found;
+}
+function readFieldValue(field) {
+  if (field.type === "chips") {
+    var vals = [];
+    form.querySelectorAll('input[name="' + field.key + '"]:checked').forEach(function (cb) { vals.push(cb.value); });
+    return vals;
+  }
+  var el = form.querySelector('[name="' + field.key + '"]');
+  if (!el) return "";
+  if (field.type === "number") {
+    if (el.value === "") return "";
+    var n = Number(el.value);
+    return isNaN(n) ? "" : n;
+  }
+  return el.value;
+}
+function setFieldValue(field, val) {
+  if (field.type === "chips") {
+    var arr = Array.isArray(val) ? val : [];
+    form.querySelectorAll('input[name="' + field.key + '"]').forEach(function (cb) { cb.checked = arr.indexOf(cb.value) !== -1; });
+    return;
+  }
+  var el = form.querySelector('[name="' + field.key + '"]');
+  if (el) el.value = val == null ? "" : val;
+}
+
+/* ============================================================================
+   8. PHOTO PIPELINE (spec §4.4) — decode ladder mirrors js/drive.js
+   _decodeForAvatar; downscale retry ladder is quality 0.8 -> 0.6 @ same edge
+   -> 1200px @ 0.6; queue processes one file at a time (never parallel).
+   ========================================================================= */
+function decodeViaImg(file) {
+  return new Promise(function (resolve) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { resolve(null); };
+      img.src = e.target.result;
+    };
+    reader.onerror = function () { resolve(null); };
+    reader.readAsDataURL(file);
+  });
+}
+function decodeImage(file) {
+  if (typeof createImageBitmap === "function") {
+    return createImageBitmap(file, { imageOrientation: "from-image" }).catch(function () {
+      return createImageBitmap(file).catch(function () { return decodeViaImg(file); });
+    });
+  }
+  return decodeViaImg(file);
+}
+function drawToBlob(src, longEdge, quality) {
+  var w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+  var scale = Math.min(1, longEdge / Math.max(w, h));
+  var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+  var canvas = document.createElement("canvas");
+  canvas.width = cw; canvas.height = ch;
+  var ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cw, ch);
+  ctx.drawImage(src, 0, 0, cw, ch);
+  return new Promise(function (resolve) {
+    try { canvas.toBlob(function (blob) { resolve(blob); }, "image/jpeg", quality); }
+    catch (_e) { resolve(null); }
+  }).then(function (blob) { return { blob: blob, width: cw, height: ch }; });
+}
+function downscaleToJpeg(src) {
+  var close = function () { try { if (typeof src.close === "function") src.close(); } catch (_e) {} };
+  return drawToBlob(src, LIMITS.photoLongEdge, LIMITS.photoQuality).then(function (r1) {
+    if (r1.blob && r1.blob.size <= LIMITS.maxPhotoBytes) { close(); return r1; }
+    return drawToBlob(src, LIMITS.photoLongEdge, 0.6).then(function (r2) {
+      if (r2.blob && r2.blob.size <= LIMITS.maxPhotoBytes) { close(); return r2; }
+      return drawToBlob(src, 1200, 0.6).then(function (r3) {
+        close();
+        if (r3.blob && r3.blob.size <= LIMITS.maxPhotoBytes) return r3;
+        return null;
+      });
+    });
+  }).catch(function () { close(); return null; });
+}
+function blobToDataUrl(blob) {
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function () { resolve(reader.result); };
+    reader.onerror = function () { reject(reader.error); };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function countAllPhotos() {
+  var n = 0;
+  Object.keys(state.photos).forEach(function (g) { state.photos[g].forEach(function (t) { if (t.status !== "error") n++; }); });
+  return n;
+}
+function bytesTotalCurrent() {
+  var b = 0;
+  Object.keys(state.photos).forEach(function (g) { state.photos[g].forEach(function (t) { if (t.status !== "error") b += (t.bytes || 0); }); });
+  return b;
+}
+function findTileById(tileId) {
+  var found = null;
+  Object.keys(state.photos).forEach(function (g) { state.photos[g].forEach(function (t) { if (t.tileId === tileId) found = t; }); });
+  return found;
+}
+function addTile(tile) {
+  state.photos[tile.group] = state.photos[tile.group] || [];
+  state.photos[tile.group].push(tile);
+  renderGroupGrid(tile.group);
+  updatePhotoCounter();
+  scheduleSave();
+}
+function addErrorTile(tileId, group, name, msg) {
+  addTile({ tileId: tileId, group: group, name: name, bytes: 0, status: "error", errorMsg: msg, retryable: false, caption: "" });
+}
+function tileHtml(tile) {
+  var img;
+  if (tile.placeholder) {
+    img = '<div class="ph-placeholder" aria-hidden="true">🖼<span>Uploaded — preview not available after reload</span></div>';
+  } else if (tile.status === "error") {
+    img = '<div class="ph-placeholder" aria-hidden="true">⚠</div>';
+  } else if (tile.blobUrl) {
+    img = '<img src="' + tile.blobUrl + '" alt="' + esc(tile.caption || tile.name || "") + '" loading="lazy">';
+  } else {
+    img = '<div class="ph-placeholder" aria-hidden="true">⏳</div>';
+  }
+  var statusText = "";
+  if (tile.status === "uploading") statusText = "Uploading…";
+  else if (tile.status === "uploaded") statusText = "Uploaded ✓";
+  else if (tile.status === "error") statusText = tile.errorMsg || "Couldn't upload this photo.";
+  var statusEl = tile.status === "error" && tile.retryable
+    ? '<button type="button" class="ph-status err" data-tile="' + esc(tile.tileId) + '">' + esc(statusText) + " — tap to retry</button>"
+    : '<div class="ph-status' + (tile.status === "error" ? " err" : "") + '" aria-live="polite">' + esc(statusText) + "</div>";
+  return '<div class="ph-tile" data-id="' + esc(tile.tileId) + '" data-status="' + esc(tile.status) + '">' +
+    img +
+    '<input type="text" class="cap" maxlength="' + LIMITS.maxCaption + '" placeholder="Caption (optional)" value="' + esc(tile.caption || "") + '" aria-label="Photo caption" data-tile="' + esc(tile.tileId) + '">' +
+    statusEl +
+    '<div class="tile-foot"><span></span><button type="button" class="del" aria-label="Remove photo" data-tile="' + esc(tile.tileId) + '">×</button></div>' +
+    "</div>";
+}
+function renderGroupGrid(group) {
+  var el = sectionsMount.querySelector('.ph-grid[data-group-grid="' + group + '"]');
+  if (!el) return;
+  el.innerHTML = (state.photos[group] || []).map(tileHtml).join("");
+}
+function renderAllPhotoGrids() {
+  if (!phField) return;
+  phField.groups.forEach(function (g) { renderGroupGrid(g.key); });
+  updatePhotoCounter();
+}
+function updatePhotoCounter() {
+  var count = 0, bytes = 0;
+  Object.keys(state.photos).forEach(function (g) { state.photos[g].forEach(function (t) { if (t.status !== "error") { count++; bytes += (t.bytes || 0); } }); });
+  var el = sectionsMount.querySelector("#phCounter");
+  if (el) el.textContent = count + " of " + LIMITS.maxPhotos + " photos · " + (bytes / 1e6).toFixed(1) + " MB";
+}
+
+function ensureDraftToken(force) {
+  if (state.draftToken && !force) return Promise.resolve(state.draftToken);
+  return Cir.startDraft().then(function (res) {
+    state.draftToken = res.draftToken;
+    state.draftCreatedAtIso = res.serverNow || new Date().toISOString();
+    scheduleSave();
+    return state.draftToken;
+  });
+}
+// unauthenticated (bad/expired draft token) → clear it, request a new one,
+// retry the call ONCE; a second unauthenticated becomes a generic error
+// (spec §2.7).
+function withTokenRetry(makeCall) {
+  return makeCall().catch(function (err) {
+    var n = normalizeError(err);
+    if (n.code !== "unauthenticated") return Promise.reject(err);
+    state.draftToken = null; scheduleSave();
+    return ensureDraftToken(true).then(function () {
+      return makeCall().catch(function (err2) {
+        var n2 = normalizeError(err2);
+        if (n2.code === "unauthenticated") {
+          return Promise.reject({ code: "internal", message: "Something went wrong on our side — your answers are saved on this device. Please try again in a moment." });
+        }
+        return Promise.reject(err2);
+      });
+    });
+  });
+}
+
+function uploadTileData(tile, dataUrl, width, height) {
+  if (dataUrl && dataUrl.length > 1300000) {
+    tile.status = "error"; tile.retryable = false; tile.errorMsg = "Photo is too large.";
+    renderGroupGrid(tile.group);
+    return Promise.resolve();
+  }
+  return ensureDraftToken(false).then(function () {
+    return withTokenRetry(function () {
+      return Cir.uploadPhoto({ draftToken: state.draftToken, group: tile.group, caption: "", dataUrl: dataUrl, width: width || 0, height: height || 0 });
+    });
+  }).then(function (res) {
+    if (tile.cancelled) { fireRemove(res.photoId); return; }
+    tile.photoId = res.photoId;
+    tile.status = "uploaded";
+    tile.retryable = false;
+    renderGroupGrid(tile.group);
+    updatePhotoCounter();
+    scheduleSave();
+  }).catch(function (err) {
+    var n = normalizeError(err);
+    tile.status = "error";
+    if (n.code === "resource-exhausted" || n.code === "invalid-argument") {
+      tile.errorMsg = n.message; tile.retryable = false;
+    } else {
+      tile.errorMsg = "Upload failed"; tile.retryable = true;
+    }
+    renderGroupGrid(tile.group);
+  });
+}
+function fireRemove(photoId) {
+  if (!photoId) return;
+  var attempt = function () { return Cir.removePhoto({ draftToken: state.draftToken, photoId: photoId }); };
+  attempt().catch(function () { attempt().catch(function () {}); });
+}
+
+function processOneFile(file, group) {
+  var tileId = "t_" + (++tileCounter);
+  if (countAllPhotos() >= LIMITS.maxPhotos) {
+    addErrorTile(tileId, group, file.name, "Up to " + LIMITS.maxPhotos + " photos per brief.");
+    return Promise.resolve();
+  }
+  if (file.type && !/^image\//.test(file.type)) {
+    addErrorTile(tileId, group, file.name, "Not an image.");
+    return Promise.resolve();
+  }
+  return decodeImage(file).then(function (src) {
+    if (!src) { addErrorTile(tileId, group, file.name, "Couldn't read this photo on this device — try a JPEG/PNG or a screenshot of it."); return; }
+    return downscaleToJpeg(src).then(function (r) {
+      if (!r || !r.blob) { addErrorTile(tileId, group, file.name, "This photo is too detailed to shrink — try a different one."); return; }
+      if (bytesTotalCurrent() + r.blob.size > LIMITS.maxTotalPhotoBytes) {
+        addErrorTile(tileId, group, file.name, "Photos total is over the limit — remove one and try again.");
+        return;
+      }
+      var blobUrl = URL.createObjectURL(r.blob);
+      var tile = { tileId: tileId, group: group, name: file.name, bytes: r.blob.size, status: "uploading", blobUrl: blobUrl, blob: r.blob, width: r.width, height: r.height, caption: "", retryable: false };
+      addTile(tile);
+      uploadsInFlight++;
+      return blobToDataUrl(r.blob).then(function (dataUrl) {
+        return uploadTileData(tile, dataUrl, r.width, r.height);
+      }).then(function () { uploadsInFlight--; }, function () { uploadsInFlight--; });
+    });
+  }).catch(function () {
+    addErrorTile(tileId, group, file.name, "Couldn't read this photo on this device — try a JPEG/PNG or a screenshot of it.");
+  });
+}
+function processQueue() {
+  if (queueRunning) return;
+  queueRunning = true;
+  (function next() {
+    var item = photoQueue.shift();
+    if (!item) { queueRunning = false; return; }
+    processOneFile(item.file, item.group).then(next, next);
+  })();
+}
+function enqueueFiles(fileList, group) {
+  Array.prototype.forEach.call(fileList || [], function (file) { photoQueue.push({ file: file, group: group }); });
+  processQueue();
+}
+function removeTile(tileId) {
+  var tile = findTileById(tileId);
+  if (!tile) return;
+  if (tile.blobUrl) { try { URL.revokeObjectURL(tile.blobUrl); } catch (_e) {} }
+  var arr = state.photos[tile.group] || [];
+  var idx = arr.indexOf(tile);
+  if (idx !== -1) arr.splice(idx, 1);
+  renderGroupGrid(tile.group);
+  updatePhotoCounter();
+  scheduleSave();
+  if (tile.status === "uploading") { tile.cancelled = true; return; }
+  if (tile.photoId) fireRemove(tile.photoId);
+}
+function retryTile(tileId) {
+  var tile = findTileById(tileId);
+  if (!tile || tile.status !== "error" || !tile.retryable || !tile.blob) return;
+  tile.status = "uploading"; tile.errorMsg = "";
+  renderGroupGrid(tile.group);
+  uploadsInFlight++;
+  blobToDataUrl(tile.blob).then(function (dataUrl) {
+    return uploadTileData(tile, dataUrl, tile.width, tile.height);
+  }).then(function () { uploadsInFlight--; }, function () { uploadsInFlight--; });
+}
+function anyPhotoUploading() {
+  return Object.keys(state.photos).some(function (g) { return state.photos[g].some(function (t) { return t.status === "uploading"; }); });
+}
+
+/* ============================================================================
+   9. DRAFT AUTOSAVE (localStorage, no image bytes — spec §4.3)
+   ========================================================================= */
+var saveTimer = null;
+function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraft, 300); }
+function saveDraft() {
+  try {
+    var answers = {};
+    def.sections.forEach(function (sec) {
+      sec.fields.forEach(function (f) {
+        if (f.type === "photos" || f.type === "table") return;
+        var val = readFieldValue(f);
+        if (!isBlank(val)) answers[f.key] = val;
+      });
+    });
+    // Only persist tiles that actually finished uploading (a real server-side
+    // photoId). A tile still uploading or left in error has no Storage object
+    // behind it, so it must never come back as a fake "uploaded" placeholder
+    // after a reload (spec §4.3).
+    var photosFlat = [];
+    Object.keys(state.photos).forEach(function (g) {
+      state.photos[g].forEach(function (t) {
+        if (t.status !== "uploaded" || !t.photoId) return;
+        photosFlat.push({ photoId: t.photoId, group: t.group, caption: t.caption || "", name: t.name || "", bytes: t.bytes || 0 });
+      });
+    });
+    var data = {
+      answers: answers,
+      equipment: readAllTableRows(),
+      photos: photosFlat,
+      draftToken: state.draftToken,
+      draftCreatedAtIso: state.draftCreatedAtIso,
+      startedAtMs: state.startedAtMs,
+      savedAtMs: Date.now()
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+    savedNote.textContent = "Draft saved on this device";
+  } catch (_e) { /* private mode / storage disabled — degrade silently */ }
+  updateProgress();
+}
+function loadDraft() {
+  var raw = null;
+  try { raw = localStorage.getItem(DRAFT_KEY); } catch (_e) { raw = null; }
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_e) { return null; }
+}
+function showBanner(el, text) { el.textContent = text; el.hidden = false; }
+function restoreDraft(data) {
+  if (!data) { ensureMinEquipmentRows(); return; }
+  Object.keys(data.answers || {}).forEach(function (key) {
+    var field = fieldByKey(key);
+    if (field) setFieldValue(field, data.answers[key]);
+    // unknown/older-version keys are simply not restorable on this static
+    // page (no per-field target) — the server keeps them regardless.
+  });
+  (data.equipment && data.equipment.length ? data.equipment : []).forEach(function (row) { addEquipmentRow(row); });
+  ensureMinEquipmentRows();
+
+  state.startedAtMs = data.startedAtMs || Date.now();
+
+  var expired = data.draftCreatedAtIso && (Date.now() - new Date(data.draftCreatedAtIso).getTime() > LIMITS.draftTtlMs);
+  if (expired) {
+    showBanner(expiredBanner, "Your earlier photos expired after 7 days — please add them again.");
+    state.draftToken = null;
+    state.draftCreatedAtIso = null;
+  } else {
+    state.draftToken = data.draftToken || null;
+    state.draftCreatedAtIso = data.draftCreatedAtIso || null;
+    (data.photos || []).forEach(function (p) {
+      addTileSilent({ tileId: "t_" + (++tileCounter), photoId: p.photoId, group: p.group, name: p.name, bytes: p.bytes, caption: p.caption, status: "uploaded", placeholder: true, retryable: false });
+    });
+  }
+  renderAllPhotoGrids();
+  updateProgress();
+}
+function addTileSilent(tile) {
+  state.photos[tile.group] = state.photos[tile.group] || [];
+  state.photos[tile.group].push(tile);
+}
+function clearDraftStorage() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch (_e) {}
+}
+
+/* ============================================================================
+   10. PROGRESS BAR (spec §4.2)
+   ========================================================================= */
+function updateProgress() {
+  var total = def.sections.length;
+  var started = 0;
+  def.sections.forEach(function (sec) {
+    var hit = sec.fields.some(function (f) {
+      if (f.type === "chips") return form.querySelectorAll('input[name="' + f.key + '"]:checked').length > 0;
+      if (f.type === "table") return readNonBlankTableRows().length > 0;
+      if (f.type === "photos") return f.groups.some(function (g) { return (state.photos[g.key] || []).length > 0; });
+      var el = form.querySelector('[name="' + f.key + '"]');
+      return !!(el && el.value && el.value.trim());
+    });
+    if (hit) started++;
+  });
+  var pct = total ? Math.round((started / total) * 100) : 0;
+  barFill.style.width = pct + "%";
+  barText.textContent = pct + "% complete · " + started + " of " + total + " parts started";
+}
+
+/* ============================================================================
+   11. SUBMIT FLOW (spec §4.5)
+   ========================================================================= */
+function buildPayload() {
+  var answers = {};
+  def.sections.forEach(function (sec) {
+    sec.fields.forEach(function (f) {
+      if (f.type === "photos" || f.type === "table") return;
+      var val = readFieldValue(f);
+      if (!isBlank(val)) answers[f.key] = val;
+    });
+  });
+  if (eqField) {
+    var rows = readNonBlankTableRows();
+    if (rows.length) answers[eqField.key] = rows;
+  }
+  var photos = [];
+  Object.keys(state.photos).forEach(function (g) {
+    state.photos[g].forEach(function (tile) {
+      if (tile.status === "uploaded" && tile.photoId) {
+        photos.push({ photoId: tile.photoId, group: tile.group, caption: (tile.caption || "").slice(0, LIMITS.maxCaption) });
+      }
+    });
+  });
+  return {
+    draftToken: state.draftToken,
+    formId: FORM_ID,
+    formVersion: def.formVersion,
+    answers: answers,
+    photos: photos,
+    consent: { agreed: true, noticeVersion: PRIVACY_NOTICE.version },
+    honeypot: hpField.value,
+    fillMs: Date.now() - state.startedAtMs
+  };
+}
+function validateRequired() {
+  var missing = [];
+  def.sections.forEach(function (sec) {
+    sec.fields.forEach(function (f) {
+      if (!f.required) return;
+      var el = form.querySelector('[name="' + f.key + '"]');
+      if (!el) return;
+      var val = (el.value || "").trim();
+      if (!val) { missing.push(f.label); return; }
+      if (f.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) missing.push(f.label + " (check the format)");
+    });
+  });
+  if (!form.consent.checked) missing.push("data privacy consent");
+  return { missing: missing, hasUploading: anyPhotoUploading() };
+}
+function focusFirstMissing() {
+  for (var i = 0; i < def.sections.length; i++) {
+    var sec = def.sections[i];
+    for (var j = 0; j < sec.fields.length; j++) {
+      var f = sec.fields[j];
+      if (!f.required) continue;
+      var el = form.querySelector('[name="' + f.key + '"]');
+      if (el && !el.value.trim()) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus(); return; }
+    }
+  }
+  if (!form.consent.checked) { form.consent.scrollIntoView({ behavior: "smooth", block: "center" }); form.consent.focus(); }
+}
+function focusNamedField(message) {
+  var foundKey = null;
+  def.sections.forEach(function (sec) {
+    sec.fields.forEach(function (f) {
+      if (foundKey || !f.label) return;
+      if (message.indexOf(f.label) !== -1) foundKey = f.key;
+    });
+  });
+  if (!foundKey) return;
+  var el = form.querySelector('[name="' + foundKey + '"]');
+  if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus(); }
+}
+function handleSubmitError(err) {
+  if (err.code === "failed-precondition") {
+    errMsg.innerHTML = esc(err.message) + ' <button type="button" class="btn small" id="reloadBtn">Reload</button>';
+    var rb = document.getElementById("reloadBtn");
+    if (rb) rb.onclick = function () { location.reload(); };
+  } else if (err.code === "resource-exhausted" || err.code === "already-exists") {
+    errMsg.textContent = err.message;
+  } else if (err.code === "invalid-argument") {
+    errMsg.textContent = err.message;
+    focusNamedField(err.message);
+  } else {
+    errMsg.innerHTML = esc("Something went wrong on our side — your answers are saved on this device. Please try again in a moment.") +
+      ' <button type="button" class="btn small" id="retrySubmitBtn">Retry</button>';
+    var rt = document.getElementById("retrySubmitBtn");
+    if (rt) rt.onclick = function () { onSubmit(); };
+    if (!navigator.onLine) offlineBanner.hidden = false;
+  }
+}
+function buildReceiptSummaryHtml() {
+  var html = "";
+  def.sections.forEach(function (sec) {
+    var rows = [];
+    sec.fields.forEach(function (f) {
+      if (f.type === "photos") return;
+      if (f.type === "table") {
+        var eqRows = readNonBlankTableRows();
+        if (eqRows.length) {
+          var eqText = eqRows.map(function (r) {
+            return r.item + " × " + (r.qty !== "" && r.qty != null ? r.qty : "?") + " | " + (r.brand || "-") + " | " + (r.power || "-") + " | " + (r.cond || "-") + " | " + (r.plan || "-");
+          }).join("\n");
+          rows.push('<div class="rk"><span class="rk-l">' + esc(f.label) + '</span><span class="rk-v">' + esc(eqText) + "</span></div>");
+        }
+        return;
+      }
+      var val = readFieldValue(f);
+      if (isBlank(val)) return;
+      var display = Array.isArray(val) ? val.join(", ") : String(val);
+      rows.push('<div class="rk"><span class="rk-l">' + esc(f.label) + '</span><span class="rk-v">' + esc(display) + "</span></div>");
+    });
+    if (sec.key === "photos") {
+      sec.fields.forEach(function (f) {
+        if (f.type !== "photos") return;
+        f.groups.forEach(function (g) {
+          var n = (state.photos[g.key] || []).filter(function (t) { return t.status === "uploaded"; }).length;
+          if (n) rows.push('<div class="rk"><span class="rk-l">' + esc(g.label) + '</span><span class="rk-v">' + n + " photo" + (n === 1 ? "" : "s") + "</span></div>");
+        });
+      });
+    }
+    if (!rows.length) return;
+    html += '<div class="receipt-sec"><h4>' + esc(sec.title) + "</h4>" + rows.join("") + "</div>";
+  });
+  return html;
+}
+function renderDone(res) {
+  var manila = fmtManilaDate(res.submittedOnManila || res.receivedAt);
+  done.innerHTML =
+    "<h2>" + esc(def.doneTitle) + "</h2>" +
+    "<p>" + esc(def.doneBody) + "</p>" +
+    '<p class="ref-label">Reference number</p>' +
+    '<p class="ref-no">' + esc(res.refNo) + "</p>" +
+    '<p class="received-line">Received ' + esc(manila) + " · we'll be in touch to schedule a site visit</p>" +
+    '<div class="actions">' +
+    '<button type="button" class="btn primary" id="printReceiptBtn">Save receipt as PDF</button>' +
+    '<button type="button" class="btn" id="sendAnotherBtn">Send another brief</button>' +
+    "</div>" +
+    '<div class="receipt-summary">' + buildReceiptSummaryHtml() + "</div>";
+  document.getElementById("printReceiptBtn").onclick = function () {
+    document.body.classList.add("print-receipt");
+    window.print();
+  };
+  document.getElementById("sendAnotherBtn").onclick = function () { resetForAnotherBrief(); };
+}
+function onSubmitSuccess(res) {
+  clearDraftStorage();
+  form.hidden = true;
+  progressWrap.hidden = true;
+  renderDone(res);
+  done.hidden = false;
+  done.scrollIntoView({ behavior: "smooth" });
+}
+function resetForAnotherBrief() {
+  form.reset();
+  Object.keys(state.photos).forEach(function (g) {
+    state.photos[g].forEach(function (t) { if (t.blobUrl) { try { URL.revokeObjectURL(t.blobUrl); } catch (_e) {} } });
+  });
+  state.photos = {};
+  state.draftToken = null;
+  state.draftCreatedAtIso = null;
+  state.startedAtMs = Date.now();
+  eqTbody.innerHTML = "";
+  ensureMinEquipmentRows();
+  clearDraftStorage();
+  done.hidden = true;
+  form.hidden = false;
+  progressWrap.hidden = false;
+  errMsg.textContent = "";
+  renderAllPhotoGrids();
+  updateProgress();
+  ensureDraftToken(true).catch(function () {});
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function onSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  if (submitting) return;
+  errMsg.textContent = "";
+  var v = validateRequired();
+  if (v.hasUploading) {
+    errMsg.textContent = "Please wait for photos to finish uploading, or remove them, before sending.";
+    return;
+  }
+  if (v.missing.length) {
+    errMsg.textContent = "Please complete the required fields: " + v.missing.join(", ") + ".";
+    focusFirstMissing();
+    return;
+  }
+  submitting = true;
+  submitBtn.disabled = true;
+  var origLabel = def.submitLabel;
+  submitBtn.textContent = "Sending…";
+  ensureDraftToken(false).then(function () {
+    var payload = buildPayload();
+    var json = JSON.stringify(payload);
+    if (json.length > LIMITS.maxPayloadBytes) {
+      return Promise.reject({ code: "invalid-argument", message: "The form is too long — please shorten your longest answers" });
+    }
+    return withTokenRetry(function () { return Cir.submit(buildPayload()); });
+  }).then(function (res) {
+    onSubmitSuccess(res);
+  }).catch(function (err) {
+    handleSubmitError(normalizeError(err));
+  }).then(function () {
+    submitting = false;
+    submitBtn.disabled = false;
+    submitBtn.textContent = origLabel;
+  });
+}
+
+/* ============================================================================
+   12. THEME TOGGLE (own key, per §4.1)
+   ========================================================================= */
+function initThemeToggle() {
+  var btn = document.getElementById("themeToggle");
+  function effective() {
+    var stored = null;
+    try { stored = localStorage.getItem("barro-cir-theme"); } catch (_e) {}
+    if (stored === "light" || stored === "dark") return stored;
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+  }
+  function apply(next) {
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("barro-cir-theme", next); } catch (_e) {}
+    btn.textContent = next === "dark" ? "☀" : "◐";
+  }
+  btn.textContent = effective() === "dark" ? "☀" : "◐";
+  btn.addEventListener("click", function () { apply(effective() === "dark" ? "light" : "dark"); });
+}
+
+/* ============================================================================
+   13. WIRING
+   ========================================================================= */
+function wireEvents() {
+  form.addEventListener("submit", onSubmit);
+  form.addEventListener("input", function (e) {
+    if (e.target.classList && e.target.classList.contains("cap")) return; // handled separately below
+    scheduleSave();
+    updateProgress();
+  });
+  form.addEventListener("change", function (e) {
+    if (e.target.classList && (e.target.classList.contains("ph-input-add") || e.target.classList.contains("ph-input-take"))) return;
+    scheduleSave();
+    updateProgress();
+  });
+
+  sectionsMount.addEventListener("click", function (e) {
+    var addBtn = e.target.closest(".ph-add");
+    if (addBtn) { var inp = addBtn.parentElement.querySelector(".ph-input-add"); inp.value = ""; inp.click(); return; }
+    var takeBtn = e.target.closest(".ph-take");
+    if (takeBtn) { var inp2 = takeBtn.parentElement.querySelector(".ph-input-take"); inp2.value = ""; inp2.click(); return; }
+    var del = e.target.closest(".ph-tile .del");
+    if (del) { removeTile(del.dataset.tile); return; }
+    var errStatus = e.target.closest(".ph-status.err");
+    if (errStatus && errStatus.dataset.tile) { retryTile(errStatus.dataset.tile); return; }
+  });
+  sectionsMount.addEventListener("change", function (e) {
+    if (e.target.classList.contains("ph-input-add") || e.target.classList.contains("ph-input-take")) {
+      enqueueFiles(e.target.files, e.target.dataset.group);
+    }
+  });
+  sectionsMount.addEventListener("input", function (e) {
+    if (e.target.classList.contains("cap")) {
+      var tileId = e.target.dataset.tile;
+      var tile = findTileById(tileId);
+      if (tile) { tile.caption = e.target.value; scheduleSave(); }
+    }
+  });
+
+  printBtn.addEventListener("click", function () { window.print(); });
+  window.addEventListener("afterprint", function () { document.body.classList.remove("print-receipt"); });
+
+  window.addEventListener("offline", function () { offlineBanner.hidden = false; });
+  window.addEventListener("online", function () { offlineBanner.hidden = true; });
+  if (!navigator.onLine) offlineBanner.hidden = false;
+
+  window.addEventListener("beforeunload", function (e) {
+    if (uploadsInFlight > 0) { e.preventDefault(); e.returnValue = ""; }
+  });
+}
+
+/* ============================================================================
+   14. INIT
+   ========================================================================= */
+function init() {
+  buildStaticShell();
+  initThemeToggle();
+  wireEvents();
+  var draftData = loadDraft();
+  restoreDraft(draftData);
+  updateProgress();
+  ensureDraftToken(false).catch(function (err) {
+    // Non-fatal at load — the form is still usable; a token is minted lazily
+    // on first photo upload / submit. Surface nothing here to avoid an alarming
+    // banner before the visitor has done anything.
+    void err;
+  });
+}
+init();
+
+})();
+</script>
+</body>
+</html>

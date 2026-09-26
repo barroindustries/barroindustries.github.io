@@ -5,6 +5,11 @@ const crypto    = require('crypto');
 // callables appended at the end of this file. Zero Firebase deps, so it is
 // also required directly (no emulator) by tests/client-portal.test.mjs.
 const portal    = require('./portal-core');
+// CLIENT-INFO-REQUEST-SPEC.md §2.0 — pure helpers for the five cir* callables
+// appended at the end of this file. Zero Firebase deps (like portal-core),
+// so it is also required directly (no emulator) by
+// tests/client-info-request.test.mjs.
+const cir       = require('./cir-core');
 admin.initializeApp();
 
 // v14 re-audit fix — real per-sender enforcement (see the block inside
@@ -3129,4 +3134,779 @@ exports.portalAdminRotateCode = functions
     }
 
     return { ok: true, code, codeVersion: newVersion };
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
+//  Client Information Request callables — CLIENT-INFO-REQUEST-SPEC.md §2.
+//
+//  Sibling of the client-portal callables directly above: a public, no-account
+//  intake form (barroindustries.com/sales/clientinformationrequest/) with NO
+//  Firebase Auth session for the four public callables (cirStartDraft/
+//  cirUploadPhoto/cirRemovePhoto/cirSubmit) — cirAdminDelete is the one
+//  staff-authenticated exception, mirroring portalAdminRotateCode. All pure
+//  decision logic (form validation, JPEG magic-byte check, bot/duplicate
+//  guards, refNo/photoId minting, the notification/summary shape) lives in
+//  ./cir-core.js — required as `cir` at the top of this file — so it can be
+//  unit-tested without an emulator; these functions are thin Admin-SDK glue
+//  around it, reusing portal-core.js's rateLimitDecision/manilaDateFrom/
+//  tokenHash/newViewerToken and this file's own portalClientIp/
+//  portalSha256Hex/manilaDate/dedupDocId/commitInChunks helpers rather than
+//  reimplementing any of them.
+//
+//  cir_drafts / cir_ratelimit / cir_abuse have NO firestore.rules match block
+//  at all (Admin-SDK only, see the §3.1 rules hunk) — these five callables
+//  are consequently the ONLY way any of this data moves, and Storage writes
+//  for photos are Admin-SDK-only too (storage.rules §3.2: `allow write: if
+//  false` on the client-info-requests/{ref}/{fileName} block; the 4-segment
+//  drafts/ path matches no block at all).
+//
+//  Region is asia-east1 on all five — MANDATORY on the client:
+//    firebase.app().functions('asia-east1').httpsCallable('cirStartDraft')(…)
+// ──────────────────────────────────────────────────────────────────────────
+
+function cirIpBucketRef(db, scope, ip) {
+  return db.collection('cir_ratelimit').doc(portalSha256Hex(scope + '|' + ip));
+}
+function cirGlobalSubmitBucketRef(db) {
+  return db.collection('cir_ratelimit').doc('global_submit');
+}
+// Same shape/collection as the global_submit bucket above — IP-independent
+// fallbacks for cirStartDraft/cirUploadPhoto (see cir.RATE.globalStart/
+// globalPhoto for the chosen limits and their justification). Defence in
+// depth alongside the per-IP buckets, not a replacement for them.
+function cirGlobalStartBucketRef(db) {
+  return db.collection('cir_ratelimit').doc('global_start');
+}
+function cirGlobalPhotoBucketRef(db) {
+  return db.collection('cir_ratelimit').doc('global_photo');
+}
+
+/** Best-effort abuse log — cir_abuse has no rules match (Admin SDK only).
+ *  NEVER throws; a logging failure must never affect the caller-facing
+ *  outcome of whatever check is logging it. */
+async function cirLogAbuse(db, kind, ipHash, detail) {
+  try {
+    await db.collection('cir_abuse').add({
+      at: admin.firestore.FieldValue.serverTimestamp(),
+      kind, ipHash: ipHash || '', detail: detail || {},
+    });
+  } catch (e) {
+    console.error('[cirAbuse] log failed:', e.message);
+  }
+}
+
+/**
+ * §2.5 step 9/10 double-failure recovery — called only when a photo move AND
+ * its compensating move-back both fail, leaving an object stranded under the
+ * FINAL client-info-requests/{ref}/ prefix with no Firestore doc ever
+ * created (cirAdminDelete can't reach it without a doc). Best-effort and
+ * NEVER throws (reuses cirLogAbuse, which already never throws) — a human
+ * finds the stranded paths either in logs (one clearly-tagged console.error
+ * naming every path) or in cir_abuse (kind:'photo_orphan'), and deletes them
+ * by hand. No automatic sweeper — deliberately out of scope.
+ */
+async function cirLogStrandedPhotos(db, ipHash, ref, strandedPaths) {
+  try {
+    console.error('[cirSubmit] STRANDED PHOTO OBJECTS — move-back failed, no Firestore doc will reference these — ref', ref, 'paths:', JSON.stringify(strandedPaths));
+  } catch (e) {
+    // JSON.stringify practically cannot throw here, but this path must never throw regardless.
+  }
+  await cirLogAbuse(db, 'photo_orphan', ipHash, { ref, paths: strandedPaths }).catch(() => {});
+}
+
+/**
+ * §2.1 — one Firestore transaction: read every bucket, decide via
+ * portal.rateLimitDecision (reused, not reimplemented), and — matching
+ * portalUnlock's hard-won lesson just above — the transaction callback NEVER
+ * throws (a throw inside runTransaction discards every staged write,
+ * including the very lockout counter meant to stick). Every bucket is
+ * written on EVERY call (unlike the portal, there is no "success reset" —
+ * a window simply expires), so the write happens whether this attempt is
+ * allowed or not. A transaction/read error is the one case that DOES throw,
+ * straight to `unavailable` — fail CLOSED, never fall through to allow.
+ */
+async function cirRateLimit(db, buckets, nowMs) {
+  let result;
+  try {
+    result = await db.runTransaction(async (tx) => {
+      const snaps = await Promise.all(buckets.map((b) => tx.get(b.ref)));
+      const decisions = snaps.map((snap, i) => portal.rateLimitDecision(snap.exists ? snap.data() : null, nowMs, buckets[i].cfg));
+      const anyBlocked = decisions.some((d) => !d.allowed);
+      if (anyBlocked) {
+        const retryAfterMs = decisions.reduce((mx, d) => Math.max(mx, d.retryAfterMs || 0), 0);
+        return { allowed: false, retryAfterMs };
+      }
+      decisions.forEach((d, i) => {
+        tx.set(buckets[i].ref, Object.assign({}, d.next, { updatedAt: admin.firestore.FieldValue.serverTimestamp() }));
+      });
+      return { allowed: true };
+    });
+  } catch (e) {
+    console.error('[cirRateLimit] transaction failed — failing CLOSED:', e.message);
+    throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+  }
+  if (!result.allowed) {
+    const minutes = Math.max(1, Math.ceil(result.retryAfterMs / 60000));
+    cirLogAbuse(db, 'rate_limited', '', {}).catch(() => {});
+    throw new functions.https.HttpsError('resource-exhausted', `Too many requests from this connection. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+  }
+}
+
+/** The photo groups a form defines (walks FORMS[formId].sections for its one
+ *  `type:'photos'` field) — used to validate `group` on upload, independent
+ *  of cir-core's internal copy of the same walk (validatePhotoList) so an
+ *  upload can be checked before a photo list even exists. */
+function cirGroupKeysOf(formDef) {
+  const out = [];
+  (formDef && formDef.sections ? formDef.sections : []).forEach((sec) => {
+    (sec.fields || []).forEach((f) => { if (f.type === 'photos') (f.groups || []).forEach((g) => out.push(g.key)); });
+  });
+  return out;
+}
+
+/**
+ * §2.2/§2.5-11c — best-effort purge of up to 5 stale drafts, oldest first.
+ * A composite index (submittedAt == null AND orderBy createdAt) would be
+ * needed to filter server-side on submission state, so instead this queries
+ * only `orderBy('createdAt','asc').limit(5)` (single-field, no index) and
+ * age-filters in code. AMBIGUITY NOTE (flagged in the WS-B report): §2.2's
+ * own text is internally inconsistent — it first says to additionally keep
+ * only docs matching `submittedAt == null`, then in the same breath notes
+ * "submitted drafts older than the TTL are also deleted (their photos were
+ * moved; deleteFiles on an empty prefix is a no-op)". This implementation
+ * follows the SECOND, more complete sentence: age is the only test, whether
+ * or not the draft was ever submitted — a submitted draft's own Storage
+ * prefix is already empty (photos moved to client-info-requests/{ref}/ by
+ * cirSubmit), so deleting it here is a safe no-op, and it lets old submitted
+ * drafts stop accumulating in cir_drafts forever.
+ */
+async function cirPurgeStaleDrafts(db, nowMs) {
+  let snap;
+  try {
+    snap = await db.collection('cir_drafts').orderBy('createdAt', 'asc').limit(5).get();
+  } catch (e) {
+    console.error('[cirPurgeStaleDrafts] query failed:', e.message);
+    return;
+  }
+  const bucket = admin.storage().bucket();
+  for (const doc of snap.docs) {
+    const data = doc.data() || {};
+    const createdMs = data.createdAt && typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : 0;
+    if (!createdMs || (nowMs - createdMs) <= cir.LIMITS.draftTtlMs) continue; // not stale — and later docs are even younger (orderBy asc), but keep scanning the small page rather than assuming strict monotonicity of clock skew.
+    try {
+      await bucket.deleteFiles({ prefix: `client-info-requests/drafts/${doc.id}/` });
+    } catch (e) {
+      console.error('[cirPurgeStaleDrafts] deleteFiles failed for', doc.id, e.message);
+    }
+    try {
+      await doc.ref.delete();
+    } catch (e) {
+      console.error('[cirPurgeStaleDrafts] doc delete failed for', doc.id, e.message);
+    }
+  }
+}
+
+/**
+ * §2.5 step 11b — owner ruling R1 (amended): union of Sales-department users
+ * (legacy `department` string field + current `departments` array field,
+ * same dual-query idiom processMetaLead uses for the same reason) AND an
+ * INDEPENDENT role=='president' query, deduped by uid, partners always
+ * dropped. Each of the three queries is caught individually so one failing
+ * never drops the other two's recipients (spec: "still send to whoever the
+ * others returned"). Role for the partner-drop check comes straight off each
+ * query's own doc data — no extra re-read per recipient.
+ */
+async function cirNotifyStaff(db, doc, refNo) {
+  const uidRole = new Map();
+  const salesUids = new Set();
+  const presidentUids = new Set();
+
+  const q1 = db.collection('users').where('department', '==', 'Sales').get()
+    .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
+    .catch((e) => console.error('[cirSubmit] notify: Sales(department) query failed:', e.message));
+  const q2 = db.collection('users').where('departments', 'array-contains', 'Sales').get()
+    .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
+    .catch((e) => console.error('[cirSubmit] notify: Sales(departments[]) query failed:', e.message));
+  const q3 = db.collection('users').where('role', '==', 'president').get()
+    .then((s) => s.docs.forEach((d) => { presidentUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
+    .catch((e) => console.error('[cirSubmit] notify: president query failed:', e.message));
+  await Promise.all([q1, q2, q3]);
+
+  const allUids = new Set([...salesUids, ...presidentUids]);
+  if (allUids.size === 0) {
+    console.error('[cirSubmit] notify: no recipients resolved (all three lookups empty or failed) for', refNo);
+    return;
+  }
+
+  const toNotify = [];
+  allUids.forEach((uid) => {
+    if (uidRole.get(uid) === 'partner') return; // R1: partners always dropped, even if somehow Sales/president.
+    toNotify.push({
+      ref: db.collection('notifications').doc(uid).collection('items').doc(),
+      notifData: Object.assign({}, cir.buildNotification(doc), { dedupKey: `cir_${refNo}_${uid}` }),
+      // NO senderUid — system send, exempt from sendPushOnNotification's
+      // per-sender push quota, same as metaLeadWebhook above.
+    });
+  });
+  if (toNotify.length) await commitInChunks(db, toNotify, null);
+}
+
+// ── cirStartDraft — §2.2, anonymous ─────────────────────────────────────
+exports.cirStartDraft = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+
+    const formId = (data && typeof data.formId === 'string') ? data.formId : '';
+    const formDef = cir.FORMS[formId];
+    if (!formDef) {
+      throw new functions.https.HttpsError('invalid-argument', 'Unknown form.');
+    }
+
+    const ip = portalClientIp(context);
+    const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
+
+    await cirRateLimit(db, [
+      { ref: cirIpBucketRef(db, 'start', ip), cfg: cir.RATE.start },
+      { ref: cirGlobalStartBucketRef(db), cfg: cir.RATE.globalStart },
+    ], nowMs);
+
+    const { token, tokenHash: tHash } = portal.newViewerToken();
+    const draftRef = db.collection('cir_drafts').doc(tHash);
+    try {
+      await draftRef.create({
+        formId,
+        formVersion: formDef.formVersion,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        ipHash: portalSha256Hex(ip),
+        uaHash: portalSha256Hex(userAgent),
+        photoCount: 0,
+        bytesTotal: 0,
+        photos: {},
+        submittedAt: null,
+        refNo: null,
+      });
+    } catch (e) {
+      console.error('[cirStartDraft] draft create failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    // Best-effort stale-draft purge (§2.2 step 4) — never fails the call.
+    try {
+      await cirPurgeStaleDrafts(db, nowMs);
+    } catch (e) {
+      console.error('[cirStartDraft] stale-draft purge failed:', e.message);
+    }
+
+    return { ok: true, draftToken: token, formVersion: formDef.formVersion, serverNow: new Date(nowMs).toISOString() };
+  });
+
+// ── cirUploadPhoto — §2.3, anonymous ────────────────────────────────────
+exports.cirUploadPhoto = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    const ip = portalClientIp(context);
+
+    const draftToken = (data && typeof data.draftToken === 'string') ? data.draftToken : '';
+    if (!/^[A-Za-z0-9_-]{43}$/.test(draftToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please reload the page.');
+    }
+    const dataUrl = (data && typeof data.dataUrl === 'string') ? data.dataUrl : '';
+    if (dataUrl.length > 1300000) {
+      throw new functions.https.HttpsError('invalid-argument', 'Photo is too large.');
+    }
+
+    await cirRateLimit(db, [
+      { ref: cirIpBucketRef(db, 'photo', ip), cfg: cir.RATE.photo },
+      { ref: cirGlobalPhotoBucketRef(db), cfg: cir.RATE.globalPhoto },
+    ], nowMs);
+
+    const jpegCheck = cir.validateJpegDataUrl(dataUrl);
+    if (!jpegCheck.ok) {
+      cirLogAbuse(db, 'photo_reject', portalSha256Hex(ip), { error: jpegCheck.error }).catch(() => {});
+      throw new functions.https.HttpsError('invalid-argument', jpegCheck.error);
+    }
+
+    const tHash = portal.tokenHash(draftToken);
+    const draftRef = db.collection('cir_drafts').doc(tHash);
+    const sessionExpiredMsg = 'Your upload session expired — reload the page.';
+
+    // Pre-check OUTSIDE the transaction (fail fast before the Storage write
+    // below) — re-validated for real, atomically, inside the transaction.
+    let draftSnap;
+    try {
+      draftSnap = await draftRef.get();
+    } catch (e) {
+      console.error('[cirUploadPhoto] draft read failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+    const draftData = draftSnap.exists ? draftSnap.data() : null;
+    const createdMs0 = draftData && draftData.createdAt && typeof draftData.createdAt.toMillis === 'function' ? draftData.createdAt.toMillis() : 0;
+    if (!draftData || draftData.submittedAt != null || !createdMs0 || (nowMs - createdMs0) > cir.LIMITS.draftTtlMs) {
+      throw new functions.https.HttpsError('failed-precondition', sessionExpiredMsg);
+    }
+    const groupKeys = cirGroupKeysOf(cir.FORMS[draftData.formId]);
+    const group = (data && typeof data.group === 'string') ? data.group : '';
+    if (!groupKeys.includes(group)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid photo group.');
+    }
+    if ((draftData.photoCount || 0) + 1 > cir.LIMITS.maxPhotos) {
+      throw new functions.https.HttpsError('resource-exhausted', 'Up to 20 photos per brief.');
+    }
+    if ((draftData.bytesTotal || 0) + jpegCheck.bytes > cir.LIMITS.maxTotalPhotoBytes) {
+      throw new functions.https.HttpsError('resource-exhausted', 'Photos total is over the limit — remove one and try again.');
+    }
+
+    const id = cir.photoId();
+    const path = cir.draftPath(tHash, id);
+    const width = Math.max(1, Math.min(10000, Math.round(Number(data && data.width)) || 1));
+    const height = Math.max(1, Math.min(10000, Math.round(Number(data && data.height)) || 1));
+
+    // Write the Storage object BEFORE the Firestore update — a failed
+    // upload must never leave a phantom Firestore record.
+    const bucket = admin.storage().bucket();
+    try {
+      await bucket.file(path).save(jpegCheck.buf, {
+        contentType: 'image/jpeg',
+        resumable: false,
+        metadata: { cacheControl: 'private, max-age=0', metadata: { firebaseStorageDownloadTokens: crypto.randomUUID(), group, photoId: id } },
+      });
+    } catch (e) {
+      console.error('[cirUploadPhoto] Storage save failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Could not save your photo — please try again in a moment.');
+    }
+
+    // Transaction re-checks everything atomically (never throws inside —
+    // portalUnlock's lesson: a throw here would roll back nothing-staged
+    // anyway on the reject paths, but returning a verdict keeps the shape
+    // consistent and lets the caller clean up the just-saved object on ANY
+    // non-'ok' outcome, not only a hard transaction error).
+    let txResult;
+    try {
+      txResult = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(draftRef);
+        const cur = snap.exists ? snap.data() : null;
+        if (!cur || cur.submittedAt != null) return { outcome: 'expired' };
+        const curCreatedMs = cur.createdAt && typeof cur.createdAt.toMillis === 'function' ? cur.createdAt.toMillis() : 0;
+        if (!curCreatedMs || (nowMs - curCreatedMs) > cir.LIMITS.draftTtlMs) return { outcome: 'expired' };
+        if (!cirGroupKeysOf(cir.FORMS[cur.formId]).includes(group)) return { outcome: 'bad_group' };
+        const curPhotoCount = cur.photoCount || 0;
+        const curBytesTotal = cur.bytesTotal || 0;
+        if (curPhotoCount + 1 > cir.LIMITS.maxPhotos) return { outcome: 'too_many' };
+        if (curBytesTotal + jpegCheck.bytes > cir.LIMITS.maxTotalPhotoBytes) return { outcome: 'too_big' };
+        const nextPhotoCount = curPhotoCount + 1;
+        const nextBytesTotal = curBytesTotal + jpegCheck.bytes;
+        tx.update(draftRef, {
+          [`photos.${id}`]: { group, bytes: jpegCheck.bytes, width, height, path, uploadedAt: admin.firestore.FieldValue.serverTimestamp() },
+          photoCount: nextPhotoCount,
+          bytesTotal: nextBytesTotal,
+        });
+        return { outcome: 'ok', photoCount: nextPhotoCount, bytesTotal: nextBytesTotal };
+      });
+    } catch (e) {
+      console.error('[cirUploadPhoto] transaction failed — cleaning up the just-saved object:', e.message);
+      await bucket.file(path).delete().catch(() => {});
+      throw new functions.https.HttpsError('unavailable', 'Could not save your photo — please try again in a moment.');
+    }
+
+    if (txResult.outcome !== 'ok') {
+      // No path leaves a Storage object without a Firestore record: every
+      // non-'ok' verdict here cleans up the object this call itself just
+      // wrote, best-effort, before reporting the failure.
+      await bucket.file(path).delete().catch(() => {});
+      if (txResult.outcome === 'expired') throw new functions.https.HttpsError('failed-precondition', sessionExpiredMsg);
+      if (txResult.outcome === 'bad_group') throw new functions.https.HttpsError('invalid-argument', 'Invalid photo group.');
+      if (txResult.outcome === 'too_many') throw new functions.https.HttpsError('resource-exhausted', 'Up to 20 photos per brief.');
+      throw new functions.https.HttpsError('resource-exhausted', 'Photos total is over the limit — remove one and try again.');
+    }
+
+    return { ok: true, photoId: id, bytes: jpegCheck.bytes, photoCount: txResult.photoCount, bytesTotal: txResult.bytesTotal };
+  });
+
+// ── cirRemovePhoto — §2.4, anonymous ────────────────────────────────────
+exports.cirRemovePhoto = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    const ip = portalClientIp(context);
+
+    const draftToken = (data && typeof data.draftToken === 'string') ? data.draftToken : '';
+    if (!/^[A-Za-z0-9_-]{43}$/.test(draftToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please reload the page.');
+    }
+    const targetPhotoId = (data && typeof data.photoId === 'string') ? data.photoId : '';
+    if (!/^p_[0-9a-f]{12}$/.test(targetPhotoId)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid photo id.');
+    }
+
+    await cirRateLimit(db, [{ ref: cirIpBucketRef(db, 'photo', ip), cfg: cir.RATE.photo }], nowMs);
+
+    const tHash = portal.tokenHash(draftToken);
+    const draftRef = db.collection('cir_drafts').doc(tHash);
+
+    let txResult;
+    try {
+      txResult = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(draftRef);
+        const cur = snap.exists ? snap.data() : null;
+        if (!cur || cur.submittedAt != null) return { outcome: 'expired' };
+        const photos = cur.photos || {};
+        const removed = photos[targetPhotoId];
+        if (!removed) return { outcome: 'not_found' }; // idempotent — already removed.
+        const nextPhotoCount = Math.max(0, (cur.photoCount || 0) - 1);
+        const nextBytesTotal = Math.max(0, (cur.bytesTotal || 0) - (removed.bytes || 0));
+        tx.update(draftRef, {
+          [`photos.${targetPhotoId}`]: admin.firestore.FieldValue.delete(),
+          photoCount: nextPhotoCount,
+          bytesTotal: nextBytesTotal,
+        });
+        return { outcome: 'ok', path: removed.path, photoCount: nextPhotoCount, bytesTotal: nextBytesTotal };
+      });
+    } catch (e) {
+      console.error('[cirRemovePhoto] transaction failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    if (txResult.outcome === 'expired') {
+      throw new functions.https.HttpsError('failed-precondition', 'Your upload session expired — reload the page.');
+    }
+    if (txResult.outcome === 'not_found') {
+      return { ok: true, removed: false };
+    }
+
+    // Best-effort Storage delete AFTER the Firestore record is gone — a
+    // missing object is fine (never fails the call).
+    admin.storage().bucket().file(txResult.path).delete()
+      .catch((e) => console.error('[cirRemovePhoto] Storage delete failed (record already removed):', e.message));
+
+    return { ok: true, removed: true, photoCount: txResult.photoCount, bytesTotal: txResult.bytesTotal };
+  });
+
+// ── cirSubmit — §2.5, anonymous ─────────────────────────────────────────
+exports.cirSubmit = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    const ip = portalClientIp(context);
+    const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
+    const acceptLanguage = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['accept-language']) || '';
+    const referer = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['referer']) || '';
+
+    // 1. Shape + size.
+    let payloadLen;
+    try { payloadLen = JSON.stringify(data == null ? {} : data).length; } catch (e) { payloadLen = Infinity; }
+    if (!(payloadLen <= cir.LIMITS.maxPayloadBytes)) {
+      throw new functions.https.HttpsError('invalid-argument', 'The form is too large to send.');
+    }
+    const draftToken = (data && typeof data.draftToken === 'string') ? data.draftToken : '';
+    if (!/^[A-Za-z0-9_-]{43}$/.test(draftToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please reload the page.');
+    }
+    const formId = (data && typeof data.formId === 'string') ? data.formId : '';
+    const formDef = cir.FORMS[formId];
+    if (!formDef) {
+      throw new functions.https.HttpsError('invalid-argument', 'Unknown form.');
+    }
+    if ((data && data.formVersion) !== formDef.formVersion) {
+      throw new functions.https.HttpsError('failed-precondition', 'This form was updated — please reload the page. Your answers are saved on this device.');
+    }
+    const consent = (data && data.consent) || {};
+    if (consent.agreed !== true) {
+      throw new functions.https.HttpsError('invalid-argument', 'Please tick the data privacy consent.');
+    }
+    if (consent.noticeVersion !== cir.PRIVACY_NOTICE.version) {
+      throw new functions.https.HttpsError('failed-precondition', 'The privacy notice was updated — please reload and review it again.');
+    }
+
+    // 2. Rate limit — submit|ip AND global_submit, one transaction.
+    await cirRateLimit(db, [
+      { ref: cirIpBucketRef(db, 'submit', ip), cfg: cir.RATE.submit },
+      { ref: cirGlobalSubmitBucketRef(db), cfg: cir.RATE.global },
+    ], nowMs);
+
+    // 3. Validate answers.
+    const av = cir.validateAnswers(formDef, data && data.answers);
+    if (!av.ok) {
+      if (av.errors.some((e) => e.indexOf('Unknown field') === 0)) {
+        cirLogAbuse(db, 'bad_payload', portalSha256Hex(ip), { errors: av.errors.slice(0, 5) }).catch(() => {});
+      }
+      throw new functions.https.HttpsError('invalid-argument', av.errors.slice(0, 5).join(' '));
+    }
+    const clean = av.clean;
+
+    // 4. Read draft.
+    const tHash = portal.tokenHash(draftToken);
+    const draftRef = db.collection('cir_drafts').doc(tHash);
+    const sessionExpiredMsg = 'Your session expired — reload the page and send again (your answers are saved on this device).';
+    let draftSnap;
+    try {
+      draftSnap = await draftRef.get();
+    } catch (e) {
+      console.error('[cirSubmit] draft read failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+    const draftData = draftSnap.exists ? draftSnap.data() : null;
+    const draftCreatedMs = draftData && draftData.createdAt && typeof draftData.createdAt.toMillis === 'function' ? draftData.createdAt.toMillis() : 0;
+    if (!draftData || draftData.formId !== formId || draftData.submittedAt != null
+        || !draftCreatedMs || (nowMs - draftCreatedMs) > cir.LIMITS.draftTtlMs) {
+      throw new functions.https.HttpsError('failed-precondition', sessionExpiredMsg);
+    }
+
+    // 5. Bot check — plausible fake success, nothing written, nothing moved,
+    // no notification. The honest client is never this fast (15s floor).
+    const bot = cir.botCheck({ honeypot: data && data.honeypot, draftCreatedMs, nowMs });
+    if (bot.bot) {
+      cirLogAbuse(db, bot.reason, portalSha256Hex(ip), {}).catch(() => {});
+      return { ok: true, refNo: cir.refNo(nowMs), receivedAt: new Date(nowMs).toISOString() };
+    }
+
+    // 6. Validate photos (ownership against the draft's OWN recorded group —
+    // never the client's claimed group).
+    const pv = cir.validatePhotoList(formDef, data && data.photos, draftData.photos);
+    if (!pv.ok) {
+      throw new functions.https.HttpsError('invalid-argument', pv.errors.slice(0, 5).join(' '));
+    }
+    const submittedPhotoIds = new Set(pv.clean.map((p) => p.photoId));
+    const omittedPhotoIds = Object.keys(draftData.photos || {}).filter((id) => !submittedPhotoIds.has(id));
+
+    // 7. Duplicate guard.
+    const todayManila = manilaDate();
+    const fpDay = cir.fingerprintDay(clean.email, clean.phone, todayManila);
+    let dupSnap;
+    try {
+      dupSnap = await db.collection('client_info_requests').where('fingerprintDay', '==', fpDay).limit(1).get();
+    } catch (e) {
+      console.error('[cirSubmit] duplicate-guard query failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+    if (!dupSnap.empty) {
+      cirLogAbuse(db, 'duplicate', portalSha256Hex(ip), {}).catch(() => {});
+      throw new functions.https.HttpsError('already-exists', 'We already received a brief from this e-mail and number today. Call 0927 683 6300 if you need to change something.');
+    }
+
+    // 8. Mint refNo, retry once on a same-day collision.
+    let ref = cir.refNo(nowMs);
+    let refSnap;
+    try {
+      refSnap = await db.collection('client_info_requests').doc(ref).get();
+      if (refSnap.exists) {
+        ref = cir.refNo(nowMs);
+        refSnap = await db.collection('client_info_requests').doc(ref).get();
+        if (refSnap.exists) {
+          throw new functions.https.HttpsError('internal', 'Could not record your brief — please try again.');
+        }
+      }
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[cirSubmit] refNo collision check failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    // 9. Move photos to the final prefix, sequentially. On ANY failure, move
+    // everything already moved back best-effort, then fail — no path leaves
+    // a photo recorded in Firestore without a matching Storage object, nor a
+    // Storage object outside both the draft prefix and its own final prefix.
+    const bucket = admin.storage().bucket();
+    const moved = [];
+    const finalPhotos = [];
+    try {
+      for (const p of pv.clean) {
+        const from = p.path;
+        const to = cir.finalPath(ref, p.photoId);
+        await bucket.file(from).move(to);
+        moved.push({ from, to });
+        finalPhotos.push(Object.assign({}, p, { path: to }));
+      }
+    } catch (e) {
+      console.error('[cirSubmit] photo move failed — moving back:', e.message);
+      const strandedPaths = [];
+      for (let i = moved.length - 1; i >= 0; i--) {
+        const m = moved[i];
+        await bucket.file(m.to).move(m.from).catch((e2) => {
+          console.error('[cirSubmit] move-back failed for', m.to, e2.message);
+          strandedPaths.push(m.to);
+        });
+      }
+      if (strandedPaths.length) {
+        await cirLogStrandedPhotos(db, portalSha256Hex(ip), ref, strandedPaths).catch(() => {});
+      }
+      throw new functions.https.HttpsError('unavailable', 'Could not save your photos — please try again in a moment.');
+    }
+
+    // 10. Transaction: create the submission doc + flip the draft, atomically.
+    const summary = cir.buildSummary(formDef, clean, finalPhotos.length);
+    const docBody = {
+      refNo: ref,
+      formId,
+      formVersion: formDef.formVersion,
+      status: 'new',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      submittedOnManila: todayManila,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      summary,
+      answers: clean,
+      photos: finalPhotos,
+      consent: {
+        agreed: true,
+        noticeVersion: consent.noticeVersion,
+        noticeSha256: cir.privacyNoticeSha256(),
+        consentedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      client: {
+        ip,
+        ipHash: portalSha256Hex(ip),
+        userAgent: String(userAgent).slice(0, 512),
+        acceptLanguage: String(acceptLanguage).slice(0, 64),
+        referer: String(referer).slice(0, 300),
+        fillMs: Number.isFinite(Number(data && data.fillMs)) ? Math.max(0, Math.round(Number(data.fillMs))) : 0,
+      },
+      fingerprintDay: fpDay,
+      draftHash: tHash,
+    };
+    try {
+      await db.runTransaction(async (tx) => {
+        const freshSnap = await tx.get(draftRef);
+        const fresh = freshSnap.exists ? freshSnap.data() : null;
+        if (!fresh || fresh.submittedAt != null) {
+          throw new functions.https.HttpsError('failed-precondition', sessionExpiredMsg);
+        }
+        tx.create(db.collection('client_info_requests').doc(ref), docBody);
+        tx.update(draftRef, { submittedAt: admin.firestore.FieldValue.serverTimestamp(), refNo: ref });
+      });
+    } catch (e) {
+      const strandedPaths2 = [];
+      for (let i = moved.length - 1; i >= 0; i--) {
+        const m = moved[i];
+        await bucket.file(m.to).move(m.from).catch((e2) => {
+          console.error('[cirSubmit] move-back failed for', m.to, e2.message);
+          strandedPaths2.push(m.to);
+        });
+      }
+      if (strandedPaths2.length) {
+        await cirLogStrandedPhotos(db, portalSha256Hex(ip), ref, strandedPaths2).catch(() => {});
+      }
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[cirSubmit] commit transaction failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not record your brief — please try again.');
+    }
+
+    // 11. Post-commit — best-effort, NEVER fails the call (the transaction
+    // above already committed); each of a/b/c is its own try/catch so one
+    // failing best-effort step never skips the others.
+    try {
+      await Promise.all(omittedPhotoIds.map((id) => {
+        const p = (draftData.photos || {})[id];
+        if (!p || !p.path) return null;
+        return bucket.file(p.path).delete().catch((e) => console.error('[cirSubmit] omitted-photo delete failed:', id, e.message));
+      }));
+    } catch (e) {
+      console.error('[cirSubmit] post-commit (a) omitted-photo cleanup failed:', e.message);
+    }
+    try {
+      await cirNotifyStaff(db, docBody, ref);
+    } catch (e) {
+      console.error('[cirSubmit] post-commit (b) notify failed:', e.message);
+    }
+    try {
+      await cirPurgeStaleDrafts(db, nowMs);
+    } catch (e) {
+      console.error('[cirSubmit] post-commit (c) stale-draft purge failed:', e.message);
+    }
+
+    return { ok: true, refNo: ref, receivedAt: new Date(nowMs).toISOString(), submittedOnManila: todayManila };
+  });
+
+// ── cirAdminDelete — §2.6, staff-authenticated (President/Manager — R2) ──
+exports.cirAdminDelete = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+    }
+    const db = admin.firestore();
+    const uid = context.auth.uid;
+
+    // Role comes from users/{uid}.role (Firestore), NOT a custom claim —
+    // custom claims here would need a token refresh to reflect a same-
+    // session promotion/demotion, same reasoning portalAdminRotateCode uses.
+    let role = null;
+    let actorName = '';
+    try {
+      const uSnap = await db.collection('users').doc(uid).get();
+      const uData = uSnap.exists ? (uSnap.data() || {}) : {};
+      role = uData.role || null;
+      actorName = uData.displayName || uData.email || '';
+    } catch (e) {
+      console.error('[cirAdminDelete] role lookup failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not verify your account — please try again.');
+    }
+    if (role !== 'president' && role !== 'manager') {
+      throw new functions.https.HttpsError('permission-denied', 'You do not have permission to do this.');
+    }
+
+    const ref = (data && typeof data.refNo === 'string') ? data.refNo : '';
+    if (!/^CIR-\d{6}-[A-Z2-9]{6}$/.test(ref)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid reference number.');
+    }
+
+    const docRef = db.collection('client_info_requests').doc(ref);
+    let docSnap;
+    try {
+      docSnap = await docRef.get();
+    } catch (e) {
+      console.error('[cirAdminDelete] doc read failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not read the brief — please retry.');
+    }
+    if (!docSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'This brief no longer exists.');
+    }
+    const docData = docSnap.data() || {};
+
+    try {
+      // The trailing '/' is load-bearing: without it 'CIR-260926-ABCDEF'
+      // would ALSO match every object under a different, longer refNo that
+      // merely starts with these same characters (e.g. an 'ABCDEFG' suffix
+      // sharing the 'ABCDEF' prefix) — deleteFiles({prefix}) is a plain
+      // string prefix match, not a path-segment match.
+      await admin.storage().bucket().deleteFiles({ prefix: `client-info-requests/${ref}/` });
+    } catch (e) {
+      console.error('[cirAdminDelete] Storage delete failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not delete the photos — please retry (this operation is safe to repeat).');
+    }
+
+    try {
+      const notesSnap = await docRef.collection('notes').get();
+      if (!notesSnap.empty) {
+        const batch = db.batch();
+        notesSnap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+      await docRef.delete();
+    } catch (e) {
+      console.error('[cirAdminDelete] doc/notes delete failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not finish deleting the brief — please retry (this operation is safe to repeat).');
+    }
+
+    try {
+      await db.collection('audit_log').add({
+        ts: admin.firestore.FieldValue.serverTimestamp(),
+        action: 'delete',
+        entity: 'client_info_request',
+        entityId: ref,
+        actorUid: uid,
+        actorName,
+        actorRole: role,
+        // Company only — no further PII in the audit trail (spec §2.6).
+        details: { company: (docData.summary && docData.summary.company) || '', photoCount: (docData.summary && docData.summary.photoCount) || 0 },
+      });
+    } catch (e) {
+      console.error('[cirAdminDelete] audit log write failed (delete already committed):', e.message);
+    }
+
+    return { ok: true };
   });

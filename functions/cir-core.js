@@ -26,6 +26,20 @@ const RATE = {
   photo:  { window: 3600e3,      max: 80, lock: 3600e3,      maxLock: 24 * 3600e3 },
   submit: { window: 24 * 3600e3, max: 5,  lock: 24 * 3600e3, maxLock: 7 * 24 * 3600e3 },
   global: { window: 3600e3,      max: 40, lock: 1800e3,      maxLock: 6 * 3600e3 },
+  // IP-independent fallbacks for the two pre-submit steps, mirroring
+  // `global` above (portalClientIp trusts the first X-Forwarded-For entry,
+  // which GCP's front end never overwrites, so a rotating fake XFF defeats
+  // the per-IP buckets above — these two never key on IP at all).
+  // globalStart: 300/hr is ~7.5x `global.max` (40/hr submits) — plenty of
+  // headroom for real visitors who reload/abandon the page (many drafts per
+  // completed submission) while still bounding a rotating-IP attacker to
+  // 300 wasted cir_drafts docs/hr before the lockout escalates.
+  globalStart: { window: 3600e3, max: 300, lock: 1800e3, maxLock: 6 * 3600e3 },
+  // globalPhoto: 600/hr comfortably covers `global.max` (40) submissions/hr
+  // each attaching well over its realistic average photo count, while
+  // capping worst-case Storage cost at ~600 * LIMITS.maxPhotoBytes
+  // (≈540MB) per hour before the same escalating lockout applies.
+  globalPhoto: { window: 3600e3, max: 600, lock: 1800e3, maxLock: 6 * 3600e3 },
 };
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -34,3 +34,12 @@ firebase-debug.log
 /dev/_*
 # Quarantined debris awaiting deletion (see dev/README.md)
 /dev/_attic/
+
+# Product catalogue — REMOVED FROM THE REPO 2026-09-26 (owner ruling).
+# This repo is PUBLIC and GitHub Pages serves every file verbatim, so this file
+# was exposing 165 base prices, the per-mm pricing formulas, the markup
+# multipliers by segment (retail/commercial/government) and staff day rates at
+# a guessable URL. Firestore's `products` collection is the live source (170
+# docs, seeded); costs live in `product_costs`, which firestore.rules restricts
+# to finance/admin. The private master copy is ~/Desktop/barro-private/.
+products-database.json
