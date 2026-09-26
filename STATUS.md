@@ -83,6 +83,29 @@ _Last updated: **2026-09-26**_
 > rules, by design — the UI offers Close only), so a test/mistaken portal needs a server-side delete.
 > Worth a ruling if that ever needs to be a president-only UI action.
 
+> **2026-09-26 CSS cache-busting — deploys now land (COMMITTED, NOT PUSHED).** Found live: the app
+> ran v14.0.288 JS while rendering v14.0.284 CSS, so a shipped CSS change looked like it never
+> deployed (the deployed file was correct throughout). Cause: sw.js serves js/css network-first with
+> a **400ms** ceiling — `config.js` is small and wins that race, `styles.css` (~437KB) loses it and
+> falls back to cache; and the SW update policy in `js/app.js` deliberately applies a new worker only
+> at the login screen or on a hidden tab with no work in progress, so a logged-in tab can sit on an
+> old worker (and its old STATIC cache) for a long time. That policy is correct and unchanged.
+> **Fix:** the version now lives in the URL — `css/tokens.css?v=X.Y.Z`, `css/styles.css?v=X.Y.Z`. A
+> new version is a new cache key, so even a stale worker must hit the network. `sw.js`'s PRECACHE
+> entries carry the same query (an unversioned entry would never match the versioned request and
+> would cost offline CSS), and **two** resolvers had to learn to strip the query before hashing a
+> file: `.githooks/pre-commit` and ci-invariants' own PRECACHE-MANIFEST check (the second caused a
+> false hash-mismatch failure on a correct tree). The hook rewrites the `?v=` in both files on every
+> commit and no-ops cleanly if the markers are removed. Tradeoff: the two stylesheets are refetched
+> once per deploy instead of diff-copied forward — correctness over 437KB for a handful of internal
+> users; content-hash versioning would keep the diffing but adds logic to a hook that runs on every
+> commit in every session.
+> **HELD:** these commits also carry a concurrent session's in-flight Client Info Request files
+> (sw.js PRECACHE already referenced two of them, so the manifest could not stay consistent with HEAD
+> while they were untracked). That session's `firestore.rules`/`storage.rules` are written but NOT
+> deployed — **do not push until it has deployed them**; use `release.sh push`, which refuses on
+> rules drift, not a raw `git push`.
+
 ## Pending deploys & one-time actions
 
 - [x] **2026-09-12 domain cutover: app moved to `barroindustries.com`** (GoDaddy A records -> GitHub Pages, CNAME flipped). Old domain `barroindustries-operatingsystem.ravenmails.com` serves a redirect + SW kill-switch from the `barroindustries/ops-legacy-redirect` repo. Firebase Auth authorized domains updated. Everyone re-opens the app at the new URL (PWA reinstall + re-login).
