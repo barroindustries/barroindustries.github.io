@@ -16,14 +16,40 @@
 #   bash scripts/release.sh push [--force]  # guarded git push origin master
 #   bash scripts/release.sh verify          # compare live APP_VERSION vs local
 #
-# State: .deploy-state (repo root, gitignored) — "<surface> <sha256> <date>" per line.
-# It records what was last deployed FROM THIS MACHINE; deploys done elsewhere
-# need a manual `record` after verifying in the Firebase console.
+# State: .deploy-state (MAIN worktree root, gitignored) — "<surface> <sha256> <date>"
+# per line. It records what was last deployed FROM THIS MACHINE; deploys done
+# elsewhere need a manual `record` after verifying in the Firebase console.
+#
+# The state file deliberately lives in the MAIN worktree even when this script
+# runs from a linked one. There is ONE deployed Firebase project, so there must
+# be ONE record of what is deployed to it. Before 2026-09-27 the path was a bare
+# relative ".deploy-state", so a deploy run from a worktree recorded into that
+# worktree and the main checkout never learned; it then reported the surface as
+# DRIFTED, or as having no baseline at all, when in fact it was freshly
+# deployed. That exact stale-baseline-read-as-drift is what produced the
+# long-lived (and false) "metaLeadWebhook was never deployed" entry in STATUS.
+# The SOURCE being hashed still comes from whichever tree you are standing in,
+# which is correct: you deploy your tree, and a main checkout that differs from
+# it then reports DRIFTED truthfully.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-STATE_FILE=".deploy-state"
+# .deploy-state belongs to the MAIN worktree (see the header note). git's
+# --git-common-dir is the shared .git for every linked worktree, so its parent
+# is the main worktree root; in the main checkout it is just ".git" and this
+# resolves to where the file already lived. Any failure falls back to the old
+# relative path rather than losing the record.
+resolve_state_file() {
+  local common main
+  common="$(git rev-parse --git-common-dir 2>/dev/null)" || { printf '%s\n' ".deploy-state"; return; }
+  [ -n "$common" ] || { printf '%s\n' ".deploy-state"; return; }
+  case "$common" in /*) ;; *) common="$PWD/$common" ;; esac
+  main="$(cd "$common/.." 2>/dev/null && pwd)" || { printf '%s\n' ".deploy-state"; return; }
+  if [ -n "$main" ] && [ -d "$main" ]; then printf '%s\n' "$main/.deploy-state"
+  else printf '%s\n' ".deploy-state"; fi
+}
+STATE_FILE="$(resolve_state_file)"
 STATUS_MD="STATUS.md"
 LIVE_URL="https://barroindustries-operatingsystem.ravenmails.com"
 FIREBASE="$(command -v firebase || true)"
@@ -70,6 +96,7 @@ print_pending_ops() {
 print_status() {
   echo "══ release.sh — $(date +%Y-%m-%d\ %H:%M) ══════════════════════════"
   echo "── Firebase surface drift (vs last deploy recorded on this machine) ─"
+  echo "  state: $STATE_FILE"
   local s d warn=0
   for s in firestore storage functions; do
     d="$(drift_of "$s")"
