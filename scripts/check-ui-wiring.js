@@ -101,6 +101,40 @@ const GET_BY_ID_RE = /getElementById\(\s*['"]([a-zA-Z0-9_-]+)['"]\s*\)/g;
 // intentionally excluded from ID extraction below via a boundary check)
 const QUERY_SELECTOR_ID_RE = /querySelector(?:All)?\(\s*['"]#([a-zA-Z0-9_-]+)['"]\s*\)/g;
 
+// '#some-id' as a bare string literal ANYWHERE. Nothing in this app writes a
+// '#foo' literal except to reach the element with that id, and the lookup is very
+// often not a direct querySelector call: event delegation (e.target.closest('#x')),
+// or the id handed to a binder helper (bindPolicyPick('#sr-tb-pick-flat', ...),
+// set('status', '#vt-f-status', ...)). Treating the literal itself as the reference
+// covers all of those uniformly instead of chasing each call shape.
+// Two shapes must be rejected or this floods: a CSS hex colour ('#FF6B9D' would read
+// as the id "FF6B9D") and a concatenation prefix ('#chat-mediatab-' + key), which is a
+// fragment, not an id. So require a letter/underscore start, no trailing '-', and
+// reject pure-hex strings of colour length (3/4/6/8).
+const HASH_LITERAL_RE = /['"]#([a-zA-Z_][a-zA-Z0-9_-]*)['"]/g;
+const HEX_COLOR_RE = /^(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+function isIdLike(v) {
+  return !v.endsWith('-') && !HEX_COLOR_RE.test(v);
+}
+
+// $('x') / $p('x') / $hrp('x') / ctx.$('x') — this codebase's dominant lookup idiom.
+// Every modal opens with a local `const $<suffix> = (id) => _panel.querySelector('#' + id)`
+// (45 such helpers across js/ and js/screens/). Because the '#' is CONCATENATED,
+// QUERY_SELECTOR_ID_RE cannot see any of it — that one blind spot accounted for ~190
+// of the 204 class-(b) warnings. Two argument shapes exist under these names:
+// a bare id (the '#' + id helpers) and a full selector (the `(sel) => qs(sel)` ones),
+// so accept '#foo' and bare `foo`, and ignore anything else ('.cls', '[data-x]').
+const DOLLAR_HELPER_RE = /\$[\w$]*\(\s*['"]([^'"]+)['"]\s*\)/g;
+const BARE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+// Declarative id config keys. These are handed to a renderer that interpolates them
+// into an id= attribute (js/ui-states.js emits id="' + esc(action.id) + '", and
+// window.birToolbarHTML({csvId}) emits id="${csvId}"), then looked up by that same
+// string. So each is BOTH a rendered id and a reference to it, and neither side is
+// visible to the literal-attribute / literal-lookup regexes.
+const DECL_ID_RE = /\b(?:csvId|saveBtnId|targetId)\s*:\s*['"]([a-zA-Z0-9_-]+)['"]/g;
+const NESTED_ID_RE = /\b(?:action|filter)\s*:[^{};\n]{0,60}\{[^{}]*\bid\s*:\s*['"]([a-zA-Z0-9_-]+)['"]/g;
+
 // onclick="fnName(...)" — first identifier immediately followed by '(' inside the value,
 // skipping method calls (identifier preceded by '.').
 const ONCLICK_ATTR_RE = /onclick=["']([^"']*)["']/g;
@@ -150,6 +184,22 @@ function extractAll(sources) {
 
     QUERY_SELECTOR_ID_RE.lastIndex = 0;
     while ((m = QUERY_SELECTOR_ID_RE.exec(text))) querySelectorIdRefs.add(m[1]);
+
+    HASH_LITERAL_RE.lastIndex = 0;
+    while ((m = HASH_LITERAL_RE.exec(text))) { if (isIdLike(m[1])) querySelectorIdRefs.add(m[1]); }
+
+    DOLLAR_HELPER_RE.lastIndex = 0;
+    while ((m = DOLLAR_HELPER_RE.exec(text))) {
+      const arg = m[1].startsWith('#') ? m[1].slice(1) : m[1];
+      if (BARE_ID_RE.test(arg) && isIdLike(arg)) querySelectorIdRefs.add(arg);
+    }
+
+    // Both a definition and a reference — see DECL_ID_RE above.
+    DECL_ID_RE.lastIndex = 0;
+    while ((m = DECL_ID_RE.exec(text))) { definedIds.add(m[1]); querySelectorIdRefs.add(m[1]); }
+
+    NESTED_ID_RE.lastIndex = 0;
+    while ((m = NESTED_ID_RE.exec(text))) { definedIds.add(m[1]); querySelectorIdRefs.add(m[1]); }
 
     ONCLICK_ATTR_RE.lastIndex = 0;
     while ((m = ONCLICK_ATTR_RE.exec(text))) {

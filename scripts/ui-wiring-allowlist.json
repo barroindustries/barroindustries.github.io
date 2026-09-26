@@ -1,17 +1,33 @@
 {
-  "_comment": "Phase 110 (V13-PLAN.md) UI-wiring CI guard allowlist. See scripts/check-ui-wiring.js and ARCHITECTURE.md for the wiring conventions this documents.",
+  "_comment": "Phase 110 (V13-PLAN.md) UI-wiring CI guard allowlist. See scripts/check-ui-wiring.js and ARCHITECTURE.md for the wiring conventions this documents. Every entry below was traced to the code that actually binds it (2026-09-26 triage, backlog 9c) — an entry is a statement that the control IS wired, by a route the static regexes cannot follow. Do NOT add entries to silence a warning you have not traced.",
+  "_retired_2026-09-26": "The 7 bir-*-csv entries and e-vat were removed: check-ui-wiring.js now understands the `csvId:`/`saveBtnId:`/`targetId:` declarative keys, so window.birToolbarHTML({csvId}) and window.vatFieldHTML(id, def) resolve on their own.",
+
   "getElementById": {
-    "page-panel": "assigned via el.id = 'page-panel' in js/app.js:7857 (createElement pattern), never appears as a literal id= in a template",
-    "bi-toast": "assigned via el.id = 'bi-toast' in js/notifications.js:573 (createElement pattern)",
-    "worker-profile-panel": "assigned via el.id = 'worker-profile-panel' in js/app.js:5203 (createElement pattern)",
-    "bir-gj-csv": "id passed through window.birToolbarHTML({csvId}) (js/bir.js:123) which interpolates id=\"${csvId}\" — dynamic id, the static regex can't see it",
-    "bir-gl-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:306-308",
-    "bir-crb-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:348-350",
-    "bir-cdb-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:385-387",
-    "bir-vat-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:446-454",
-    "bir-wht-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:554-556",
-    "bir-alpha-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:644-646",
-    "e-vat": "id passed through window.vatFieldHTML(id, def) (js/bir.js:40) which interpolates id=\"${id}\" — dynamic id, same indirection class as the bir-*-csv entries"
+    "page-panel": "assigned via el.id = 'page-panel' in js/app.js (createElement pattern), never a literal id= in a template",
+    "bi-toast": "assigned via el.id = 'bi-toast' in js/notifications.js (createElement pattern)",
+    "worker-profile-panel": "assigned via el.id = 'worker-profile-panel' in js/app.js (createElement pattern)",
+
+    "epstat-sss-amt": "rendered as id=\"epstat-${k}-amt\" in js/screens/employee-profile.js:739 — the statutory rows are generated from a key loop, so no literal id= exists for any of the four. Read back via panel.querySelector('#epstat-sss-amt') at :798.",
+    "epstat-philhealth-amt": "same id=\"epstat-${k}-amt\" loop as epstat-sss-amt (js/screens/employee-profile.js:739)",
+    "epstat-pagibig-amt": "same id=\"epstat-${k}-amt\" loop as epstat-sss-amt (js/screens/employee-profile.js:739)",
+    "epstat-tax-amt": "same id=\"epstat-${k}-amt\" loop as epstat-sss-amt (js/screens/employee-profile.js:739)",
+
+    "file-input-vt-upload": "js/drive.js:320 renders id=\"file-input-${containerId}\"; js/screens/ventures.js:938 looks it up with containerId 'vt-upload' (the ventures source even comments the indirection). Cross-file dynamic id — unresolvable statically.",
+    "upload-label-vt-upload": "same js/drive.js:309 id=\"upload-label-${containerId}\" indirection as file-input-vt-upload",
+    "upload-status-vt-upload": "same js/drive.js:341 id=\"upload-status-${containerId}\" indirection as file-input-vt-upload",
+
+    "add-expense-btn": "NOT a real lookup — the only occurrence in the tree is an audit comment at js/app.js:4762 recording that '#add-expense-btn' never existed. The scanner's '#id'-literal rule cannot tell code from comment text."
   },
-  "unboundControls": {}
+
+  "unboundControls": {
+    "ep-sss-mode": "bound through a data-driven id table: _epStatPairs = [['ep-sss-mode','ep-sss'],...] at js/screens/hr.js:2197, iterated into panel.querySelector('#'+modeId) at :2200. The id is a bare string in an array, so no regex can tie it to the rendered <select>.",
+    "ep-ph-mode": "same _epStatPairs table as ep-sss-mode (js/screens/hr.js:2197)",
+    "ep-pi-mode": "same _epStatPairs table as ep-sss-mode (js/screens/hr.js:2197)",
+    "ep-tax-mode": "same _epStatPairs table as ep-sss-mode (js/screens/hr.js:2197)",
+
+    "hrp-stat-sss-mode": "read via the bare-id helper _wpModeOf('hrp-stat-sss-mode') at js/screens/hr.js:3463 — a non-$-prefixed helper, so outside the $helper('id') convention the scanner understands.",
+    "hrp-stat-ph-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)",
+    "hrp-stat-pib-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)",
+    "hrp-stat-tax-mode": "same _wpModeOf(...) call site as hrp-stat-sss-mode (js/screens/hr.js:3463)"
+  }
 }
