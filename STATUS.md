@@ -72,6 +72,17 @@ _Last updated: **2026-09-26**_
 > tests, because the logic was correct and only the persistence was lost.** Lesson for future
 > callables: never stage a write and then throw from inside the same transaction callback.
 
+> **2026-09-26 Client-portal creation flow verified end-to-end on production** (throwaway portal
+> `zz-test__sandbox`, created → content imported → code generated → gone live → deleted; only
+> `chibabs__projectconfirmation` remains). Rules permit a signed-in president to create and update a
+> portal; the import guards both work through the UI (a milestone that doesn't reconcile is refused
+> with per-line errors, and items carrying `amount`/`unitPrice`/`qty` are refused by the forbidden-key
+> scan) and neither writes anything on failure. `portalAdminRotateCode` authenticates and shows the
+> code once. Two findings: (a) the detail header's status pill went stale after Go live — FIXED
+> (v14.0.290); (b) **a portal cannot be deleted from the UI at all** (`allow delete: if false` in
+> rules, by design — the UI offers Close only), so a test/mistaken portal needs a server-side delete.
+> Worth a ruling if that ever needs to be a president-only UI action.
+
 ## Pending deploys & one-time actions
 
 - [x] **2026-09-12 domain cutover: app moved to `barroindustries.com`** (GoDaddy A records -> GitHub Pages, CNAME flipped). Old domain `barroindustries-operatingsystem.ravenmails.com` serves a redirect + SW kill-switch from the `barroindustries/ops-legacy-redirect` repo. Firebase Auth authorized domains updated. Everyone re-opens the app at the new URL (PWA reinstall + re-login).
