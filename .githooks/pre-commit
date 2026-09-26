@@ -12,6 +12,10 @@
 #   - Skips the bump entirely when the staged diff touches ONLY the three
 #     version files (js/config.js, index.html, sw.js) — prevents an
 #     amend/merge of a version-only commit from double-bumping.
+#   - Skips the bump when NOTHING the browser loads is staged (2026-09-27):
+#     tests/, functions/, scripts/, docs/, specs/, rules, root *.md. Driven by
+#     an ALLOWLIST of non-shipping paths, so anything unclassified still
+#     bumps, cross-checked against sw.js's PRECACHE list.
 
 CONFIG="js/config.js"
 INDEX="index.html"
@@ -41,6 +45,57 @@ if [ -n "$STAGED" ]; then
       exit 0
     fi
     echo "[version] Version files have real content changes — bumping"
+  fi
+fi
+
+# ── Skip-if-nothing-ships guard (2026-09-27) ────────────────────────────────
+# A commit touching only files the browser never loads — tests, Cloud
+# Functions, release/CI scripts, this hook, docs/specs, Firebase rules — must
+# NOT bump the app version. Every bump rewrites CACHE_VER, which invalidates
+# the service-worker cache for EVERY user and forces a full re-download of the
+# app shell. Paying that for an edit to scripts/release.sh or tests/*.mjs buys
+# nothing. (Four such bumps happened in one session on 2026-09-27.) It also
+# stops those commits from re-staging config.js/index.html/sw.js, which is the
+# documented footgun where a version-only rewrite sweeps in another live
+# session's uncommitted edits to those same three files.
+#
+# THE POLARITY IS DELIBERATE AND LOAD-BEARING: this is an ALLOWLIST of paths
+# known NOT to ship. Anything unmatched — any .html, js/, css/, image, icon,
+# manifest, or a directory nobody has classified yet — counts as shipping and
+# BUMPS. The dangerous direction is skipping a bump for something that IS
+# served, because users then silently keep stale cached code; a needless bump
+# only costs a re-download. So when in doubt, bump. Do not invert this into a
+# denylist of shipping paths.
+if [ -n "$STAGED" ]; then
+  SHIPPING=$(echo "$STAGED" \
+    | grep -v -E '^(tests/|functions/|scripts/|\.githooks/|\.github/|\.claude/|\.vscode/|docs/|specs/|archive/|fable-workplan/)' \
+    | grep -v -E '^[^/]+\.md$' \
+    | grep -v -E '^(firestore\.rules|storage\.rules|firestore\.indexes\.json|firebase\.json|\.firebaserc|\.gitignore|package\.json|package-lock\.json)$')
+
+  # Belt and braces: the service worker's own PRECACHE list is the ground
+  # truth for "the browser caches this". If a staged path is in it, the file
+  # ships no matter what the allowlist above believes — and that also means
+  # the allowlist has drifted and wants fixing.
+  PRECACHED_STAGED=""
+  for _entry in $(sed -n '/const PRECACHE = \[/,/^];/p' "$SW" | grep -oE "'/[^']*'" | tr -d "'"); do
+    case "$_entry" in
+      "/")   _t="index.html" ;;
+      "/t/") _t="t/index.html" ;;
+      "/v/") _t="v/index.html" ;;
+      *)     _t=$(printf '%s' "$_entry" | sed 's#^/##; s#?.*##') ;;
+    esac
+    if echo "$STAGED" | grep -qxF "$_t"; then
+      PRECACHED_STAGED="$PRECACHED_STAGED $_t"
+    fi
+  done
+
+  if [ -n "$PRECACHED_STAGED" ] && [ -z "$SHIPPING" ]; then
+    echo "[version] WARNING: staged path(s) matched the non-shipping allowlist but ARE in sw.js PRECACHE:$PRECACHED_STAGED"
+    echo "[version] Bumping anyway (PRECACHE wins). Fix the allowlist in .githooks/pre-commit."
+  elif [ -z "$SHIPPING" ]; then
+    echo "[version] No browser-served file staged — skipping bump (nothing to cache-bust)"
+    echo "[version]   staged: $(echo "$STAGED" | tr '\n' ' ')"
+    exit 0
   fi
 fi
 
