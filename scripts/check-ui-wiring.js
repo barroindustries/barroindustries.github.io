@@ -21,8 +21,16 @@
  * and some rendered fields are intentionally read-only (no binding needed). Both are
  * covered by scripts/ui-wiring-allowlist.json.
  *
+ * Scan scope: index.html plus js/ RECURSIVELY (js/vendor/ excluded). The recursion
+ * matters — js/screens/*.js is 24 files and the bulk of the UI surface, and until
+ * 2026-09-26 a non-recursive readdir meant none of it was scanned, so class (c)
+ * only ever guarded js/*.js. All files are read into ONE global inventory, so a
+ * handler defined in one file and called from another (21 screens call app.js's
+ * closeModal() / chat.js's navigateTo()) resolves correctly.
+ *
  * Usage: node scripts/check-ui-wiring.js
- * Exit code: 1 only on a hard failure (class c). Warnings never fail the build.
+ * Exit code: 1 on a hard failure (class c) or if js/screens/ stops being scanned.
+ * Warnings never fail the build.
  */
 'use strict';
 
@@ -44,13 +52,28 @@ function readAllowlist() {
   };
 }
 
+// Directory names under js/ that are never part of the app's own UI surface.
+// vendor/ is third-party (html2canvas etc.) — its onclick/id conventions are not ours.
+const SKIP_JS_DIRS = new Set(['vendor', 'node_modules']);
+
+// Recurse js/ so js/screens/*.js (the bulk of the UI surface, lazy-loaded via
+// PAGE_SCRIPTS in js/config.js) is scanned too. All files are read into ONE
+// inventory, so a handler defined in one screen and called from another is fine.
 function listSourceFiles() {
   const files = [];
-  if (fs.existsSync(JS_DIR)) {
-    for (const name of fs.readdirSync(JS_DIR)) {
-      if (name.endsWith('.js')) files.push(path.join(JS_DIR, name));
+  function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKIP_JS_DIRS.has(entry.name)) continue;
+        walk(full);
+      } else if (entry.name.endsWith('.js')) {
+        files.push(full);
+      }
     }
   }
+  if (fs.existsSync(JS_DIR)) walk(JS_DIR);
+  files.sort();
   const indexHtml = path.join(ROOT, 'index.html');
   if (fs.existsSync(indexHtml)) files.push(indexHtml);
   return files;
@@ -82,6 +105,14 @@ const QUERY_SELECTOR_ID_RE = /querySelector(?:All)?\(\s*['"]#([a-zA-Z0-9_-]+)['"
 // skipping method calls (identifier preceded by '.').
 const ONCLICK_ATTR_RE = /onclick=["']([^"']*)["']/g;
 const FIRST_CALL_RE = /([A-Za-z_$][\w$]*)\s*\(/;
+
+// onclick="window.fnName(...)" — the explicitly-namespaced form. FIRST_CALL_RE sees
+// `fnName` preceded by '.' and skips it as a method call, so without this the whole
+// form went unchecked. A missing window.fnName is just as dead as a bare fnName.
+const WINDOW_CALL_RE = /(?:^|[^.\w$])window\.([A-Za-z_$][\w$]*)\s*\(/;
+
+// Browser built-ins on window — real functions, never defined by this app.
+const WINDOW_BUILTINS = new Set(['print', 'open', 'alert', 'confirm', 'prompt', 'close', 'scrollTo', 'focus']);
 
 // window.X = ...
 const WINDOW_ASSIGN_RE = /window\.([A-Za-z_$][\w$]*)\s*=/g;
@@ -127,7 +158,14 @@ function extractAll(sources) {
       if (!callMatch) continue;
       const ident = callMatch[1];
       const precedingChar = value[callMatch.index - 1];
-      if (precedingChar === '.') continue; // method call, e.g. this.blur()
+      if (precedingChar === '.') {
+        // A method call — but `window.fnName(...)` is a global call wearing a dot.
+        const winMatch = WINDOW_CALL_RE.exec(value);
+        if (winMatch && !WINDOW_BUILTINS.has(winMatch[1])) {
+          onclickCalls.push({ file, ident: winMatch[1], snippet: value.slice(0, 60) });
+        }
+        continue; // e.g. this.blur(), event.stopPropagation()
+      }
       if (SKIP_ONCLICK_IDENTS.has(ident)) continue;
       onclickCalls.push({ file, ident, snippet: value.slice(0, 60) });
     }
@@ -208,7 +246,22 @@ function main() {
     allowlist
   );
 
-  console.log('UI-wiring check — scanned %d files (%s)', files.length, files.map((f) => path.basename(f)).join(', '));
+  // Relative paths, not basenames: js/payroll.js and js/screens/payroll.js are
+  // different files and the basename list made that ambiguous.
+  const rel = files.map((f) => path.relative(ROOT, f));
+  const screenCount = rel.filter((f) => f.startsWith(`js${path.sep}screens${path.sep}`)).length;
+  console.log('UI-wiring check — scanned %d files (%d under js/screens/)', files.length, screenCount);
+  console.log('  %s', rel.join(', '));
+
+  // Self-guard: js/screens/ is the bulk of the UI surface. Until 2026-09-26 this
+  // script did a non-recursive readdir and silently scanned none of it, so every
+  // dead onclick in a screen shipped green. If the walk ever stops reaching them
+  // again, fail loudly rather than reporting a meaningless PASS.
+  const screensDir = path.join(JS_DIR, 'screens');
+  if (fs.existsSync(screensDir) && fs.readdirSync(screensDir).some((f) => f.endsWith('.js')) && screenCount === 0) {
+    console.log('FAIL: js/screens/ contains .js files but none were scanned — listSourceFiles() has regressed.');
+    process.exit(1);
+  }
   console.log('');
   console.log('| Class                                   | Count |');
   console.log('|------------------------------------------|-------|');
