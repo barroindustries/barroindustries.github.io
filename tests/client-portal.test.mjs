@@ -329,6 +329,36 @@ describe('clientIpFrom — fails CLOSED', () => {
   });
 });
 
+describe('clientIpFrom — the return value is an OBJECT, on purpose', () => {
+  // Regression guard. While the anti-spoof change and the Client Information
+  // Request feature were in flight at the same time, cir* was written against
+  // the OLD string-returning helper and merged cleanly against the new one —
+  // no textual conflict, no test failure, but every bucket id became
+  // sha256('start|[object Object]'): ONE bucket for the entire internet, so
+  // the first five submitters would lock out everyone else for 24 hours.
+  // Caught before deploy. The contract below is what makes that a bug you can
+  // point at rather than a silent collapse.
+  it('is never usable as a bucket key by direct string concatenation', () => {
+    const info = portal.clientIpFrom(req('203.0.113.7'));
+    assert.equal(typeof info, 'object');
+    assert.notEqual(typeof info, 'string');
+    assert.match(String('scope|' + info), /\[object Object\]/,
+      'stringifying it must stay obviously broken — never silently plausible');
+  });
+
+  it('rateLimitIpKey is the ONLY supported way to get a key, and it is a string', () => {
+    const key = portal.rateLimitIpKey(portal.clientIpFrom(req('203.0.113.7')));
+    assert.equal(typeof key, 'string');
+    assert.ok(key.length > 0 && !key.includes('object Object'));
+  });
+
+  it('distinct callers get distinct keys — the collapse is detectable', () => {
+    const keys = ['203.0.113.7', '198.51.100.9', '2001:db8:1:2::5']
+      .map((h) => portal.rateLimitIpKey(portal.clientIpFrom(req(h))));
+    assert.equal(new Set(keys).size, 3, 'three callers must not share one bucket');
+  });
+});
+
 describe('clientIpFrom — existing rate-limit buckets survive the deploy', () => {
   // client_portal_ratelimit doc ids are sha256(portalId + '|' + <key>). For
   // honest IPv4 traffic the OLD helper's value (first XFF entry) and the NEW

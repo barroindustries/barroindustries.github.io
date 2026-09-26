@@ -148,7 +148,6 @@ captions, filenames, notifications).
 
   client: {                                // staff-only forensic block (rendered inside a collapsed <details> for president/manager)
     ip:             '203.0.113.7',        // portal.clientIpFrom(...).ip — null when untrusted, NEVER the raw XFF
-    ipTrusted:      true,                  // false ⇒ no address Google itself wrote; treat ip as absent evidence
     ipHash:         '<sha256(ip)>',
     userAgent:      '<≤512 chars>',
     acceptLanguage: '<≤64 chars>',
@@ -476,9 +475,14 @@ Bucket refs: `db.collection('cir_ratelimit').doc(portalSha256Hex(scope + '|' + i
 it saw to the caller's own XFF rather than replacing it, so the first entry is attacker-controlled and
 a direct caller could mint a fresh bucket per request (fixed in the portal 2026-09-26). Derive it ONLY
 as `const ipInfo = portal.clientIpFrom(context.rawRequest); const ipKey = portal.rateLimitIpKey(ipInfo);`
-(portal-core.js — right-most XFF entry, IPv6 bucketed per /64). **`ipKey === null` ⇒ fail closed**:
-throw the same `resource-exhausted` error a locked-out caller gets, before touching Firestore. Store
-`ipInfo.ip` (may be `null`) in the forensic block, never the raw header.
+(portal-core.js — right-most XFF entry, IPv6 bucketed per /64). Implemented as `cirRequireIpKey(db, ipInfo)`.
+**`clientIpFrom` returns an OBJECT, never a string** — concatenating it into a doc id yields the
+literal `'[object Object]'`, which silently collapses every caller into ONE bucket (this exact defect
+reached master on 2026-09-27 and was caught before deploy; pinned now by the "return value is an
+OBJECT" block in `tests/client-portal.test.mjs`). **`ipKey === null` ⇒ fail closed**: throw the same
+`resource-exhausted` wording `cirRateLimit` uses, before touching Firestore. Because CIR fails closed,
+`ipInfo.ip` is always a trustworthy string by the time the forensic block is written — store that,
+never the raw header.
 
 ### 2.2 `cirStartDraft` — `region('asia-east1').https.onCall`, anonymous
 

@@ -719,7 +719,7 @@ window.cirPrint = async function (refNo) {
       dateLabel: 'Received ' + (sub.submittedOnManila || ''),
       extraMeta: [refNo, company],
       signatures: [{ label: 'Reviewed by', name: userName, title: 'Sales' }],
-      footerNote: 'Barro Industries Operating System · Generated ' + new Date().toLocaleString('en-PH') + ' · Contains personal data (RA 10173) — handle accordingly.'
+      footerNote: 'Barro Industries Operating System · Generated ' + new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) + ' · Contains personal data (RA 10173) — handle accordingly.'
     }) : null;
 
     const consent = sub.consent || {};
@@ -821,7 +821,14 @@ function _cirRenderKvRow(f, sub) {
 }
 
 function _cirRenderChipsBlock(f, sub, mode) {
-  const vals = (sub.answers && sub.answers[f.key]) || [];
+  // Defensive: a truthy NON-array here (a bare string from a future
+  // formVersion, a hand-edited doc, an import) used to reach .map() and throw,
+  // and cirOpen()'s outer catch turned that into an error card with no status,
+  // notes, photos or delete reachable for the whole brief. The public path
+  // can't produce it (cir-core validateAnswers coerces), so this is
+  // defence in depth for everything that isn't the public path.
+  const raw = sub.answers && sub.answers[f.key];
+  const vals = Array.isArray(raw) ? raw : [];
   const labels = vals.map(v => { const l = _cirOptionLabel(f, v); return l != null ? l : v; });
   let body;
   if (mode === 'print') {
@@ -833,7 +840,9 @@ function _cirRenderChipsBlock(f, sub, mode) {
 }
 
 function _cirRenderTableBlock(f, sub) {
-  const rows = (sub.answers && sub.answers[f.key]) || [];
+  // Same defence as _cirRenderChipsBlock above.
+  const rawRows = sub.answers && sub.answers[f.key];
+  const rows = Array.isArray(rawRows) ? rawRows : [];
   if (!rows.length) return '';
   const cols = f.columns || [];
   const thead = `<tr>${cols.map(c => `<th>${escHtml(c.label)}</th>`).join('')}</tr>`;
