@@ -2254,7 +2254,7 @@ async function loadDatabase(force) {
   // file:// protocol blocks Firestore/fetch — skip directly to embedded data
   if (location.protocol === 'file:') {
     DB = getEmbeddedDB();
-    setStatus('offline','📦 Using embedded data (open via a web server to load the live database)');
+    setStatus('offline','📦 Offline catalogue — no prices. Open via a web server to load the live database before quoting.');
     initUI();
     return;
   }
@@ -2388,7 +2388,7 @@ async function loadDatabase(force) {
     DB = JSON.parse(clean);
     setStatus('online',`✅ Database loaded — ${DB.products.length} products in ${DB.categories.length} categories`);
   } catch(e) {
-    setStatus('offline','⚠️ Using embedded data (could not load products database)');
+    setStatus('offline','⚠️ Offline catalogue — no prices. Could not reach the live database, so priced quotes are blocked until it loads.');
     DB = getEmbeddedDB();
   }
   initUI();
@@ -8123,6 +8123,7 @@ function updatePrintRunFooter(){
 }
 
 function doPrint(){
+  if (DB && DB.pricesUnavailable){ showToast('Prices are unavailable — this is the offline catalogue. Reconnect and reload the database before printing a priced quote.','error'); return; }
   // Ensure the letterhead is rebuilt in CLIENT-copy state (no agent tag) —
   // reordered ahead of applyLetterheadHeader() so a print right after an
   // agent-copy print (body-agent still set, e.g. its cleanup timeout hasn't
@@ -8165,6 +8166,7 @@ function doPrintWorkforce(){
 
 function doPrintAgent(){
   if(!items.length){ showToast('Add at least one item before printing an agent copy.','error'); return; }
+  if (DB && DB.pricesUnavailable){ showToast('Prices are unavailable — this is the offline catalogue. Reconnect and reload the database before printing a priced quote.','error'); return; }
   buildAgentBox();
   document.body.classList.remove('body-workforce');   // never both copies' state at once
   document.body.classList.add('body-agent');
@@ -8223,7 +8225,17 @@ function quoteFileName(suffix){
 //  EMBEDDED FALLBACK DB (minimal, for offline use)
 // ═══════════════════════════════════════════════════════════════════
 function getEmbeddedDB(){
+  // PRICES DELIBERATELY REMOVED (2026-09-26, owner ruling). This file is served
+  // from a PUBLIC repo, so every number in here was readable by anyone at
+  // barroindustries.com/quote-builder-v2.html — base prices, the per-mm and
+  // per-sqm rates, crew day rates and travelDayRate. They are all 0 now and
+  // MUST STAY 0: this is a catalogue shape for the offline fallback, not a
+  // price list. Real pricing lives in Firestore (`products` / `product_costs`,
+  // rules-gated) and reaches the builder only through the authenticated load.
+  // `pricesUnavailable` makes that explicit so the UI can refuse to print a
+  // priced quote from this data instead of silently producing a PHP 0 one.
   return {
+    pricesUnavailable:true,
     categories:[
       {id:'cooking_line',label:'Cooking Line',code:'CE',color:'#E74C3C',icon:'🔥'},
       {id:'prep_washing',label:'Preparation & Washing',code:'PW',color:'#3498DB',icon:'🧼'},
@@ -8234,29 +8246,29 @@ function getEmbeddedDB(){
       {id:'miscellaneous',label:'Miscellaneous',code:'MS',color:'#8E44AD',icon:'🔧'},
     ],
     products:[
-      {id:'CE-001',category:'cooking_line',name:'SS Open Top LP Stove (1 Burner)',shortName:'LP Stove 1B',formulaType:'fixed',basePrice:18000,defaultDimensions:{W:600,D:700,H:850},specs:[],laborHours:{fabrication:8,installation:2,teamSize:2},leadTime:'10-14 days',notes:'LP burner, SS304 1.1mm top',unit:'pc'},
-      {id:'CE-002',category:'cooking_line',name:'SS Open Top LP Stove (2 Burner)',shortName:'LP Stove 2B',formulaType:'fixed',basePrice:32000,defaultDimensions:{W:800,D:700,H:850},specs:[],laborHours:{fabrication:12,installation:2,teamSize:2},leadTime:'10-14 days',notes:'2x LP burners',unit:'pc'},
-      {id:'CE-003',category:'cooking_line',name:'SS Open Top LP Stove (3 Burner)',shortName:'LP Stove 3B',formulaType:'fixed',basePrice:61000,defaultDimensions:{W:1000,D:700,H:850},specs:[],laborHours:{fabrication:16,installation:3,teamSize:2},leadTime:'10-14 days',notes:'3x LP burners',unit:'pc'},
-      {id:'CE-004',category:'cooking_line',name:'SS Open Top HP Stove (4 Burner)',shortName:'HP Stove 4B',formulaType:'fixed',basePrice:155000,defaultDimensions:{W:1200,D:700,H:850},specs:[],laborHours:{fabrication:24,installation:4,teamSize:2},leadTime:'14-21 days',notes:'4x HP burners',unit:'pc'},
-      {id:'PW-001',category:'prep_washing',name:'SS Preparation Table (1 Layer)',shortName:'Prep Table 1L',formulaType:'per_length',basePrice:14000,defaultDimensions:{W:900,D:600,H:850},formula:{baseLengthMm:900,pricePerExtraMm:8.5},specs:[],laborHours:{fabrication:6,installation:1,teamSize:2},leadTime:'7-10 days',notes:'SS304, adjustable shelf',unit:'pc'},
-      {id:'PW-004',category:'prep_washing',name:'SS Wash Sink (Single) + Gooseneck Faucet',shortName:'Single Sink',formulaType:'fixed',basePrice:18500,defaultDimensions:{W:500,D:500,H:850},specs:[],laborHours:{fabrication:6,installation:2,teamSize:2},leadTime:'7-10 days',notes:'SS304, 1 basin',unit:'pc'},
-      {id:'PW-013',category:'prep_washing',name:'SS Wall Cladding',shortName:'Wall Cladding',formulaType:'per_area',basePrice:0,defaultDimensions:{W:1000,H:1000},formula:{pricePerSqm:72000},specs:[],laborHours:{fabrication:8,installation:4,teamSize:2},leadTime:'10-14 days',notes:'Per sqm',unit:'sqm'},
-      {id:'VT-001',category:'ventilation',name:'SS Range Hood + Baffle Filter + Lamp',shortName:'Range Hood',formulaType:'per_length',basePrice:39000,defaultDimensions:{W:1000,D:900,H:500},formula:{baseLengthMm:1000,pricePerExtraMm:28},specs:[],laborHours:{fabrication:12,installation:4,teamSize:2},leadTime:'14-21 days',notes:'SS304, scales by length',unit:'pc'},
-      {id:'GL-001',category:'gas_line',name:'Gas Line System + Tank Farm (4×50kg)',shortName:'Gas Line + Tank Farm',formulaType:'fixed',basePrice:91000,defaultDimensions:{},specs:[],laborHours:{fabrication:8,installation:8,teamSize:3},leadTime:'7-14 days',notes:'BI pipes, fully welded',unit:'lot'},
-      {id:'FS-001',category:'fire_suppression',name:'Fire Suppression System (Small)',shortName:'Fire Suppression Small',formulaType:'fixed',basePrice:185400,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:16,teamSize:3},leadTime:'21-30 days',notes:'BFP compliant, wet chem',unit:'system'},
-      {id:'MS-005',category:'miscellaneous',name:'Delivery + Installation + Labor (Small)',shortName:'D+I+L Small',formulaType:'fixed',basePrice:43000,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:8,teamSize:3},leadTime:'—',notes:'1-3 items, same city',unit:'lot'},
-      {id:'MS-006',category:'miscellaneous',name:'Delivery + Installation + Labor (Medium)',shortName:'D+I+L Medium',formulaType:'fixed',basePrice:88000,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:16,teamSize:4},leadTime:'—',notes:'Full kitchen, same city',unit:'lot'},
+      {id:'CE-001',category:'cooking_line',name:'SS Open Top LP Stove (1 Burner)',shortName:'LP Stove 1B',formulaType:'fixed',basePrice:0,defaultDimensions:{W:600,D:700,H:850},specs:[],laborHours:{fabrication:8,installation:2,teamSize:2},leadTime:'10-14 days',notes:'LP burner, SS304 1.1mm top',unit:'pc'},
+      {id:'CE-002',category:'cooking_line',name:'SS Open Top LP Stove (2 Burner)',shortName:'LP Stove 2B',formulaType:'fixed',basePrice:0,defaultDimensions:{W:800,D:700,H:850},specs:[],laborHours:{fabrication:12,installation:2,teamSize:2},leadTime:'10-14 days',notes:'2x LP burners',unit:'pc'},
+      {id:'CE-003',category:'cooking_line',name:'SS Open Top LP Stove (3 Burner)',shortName:'LP Stove 3B',formulaType:'fixed',basePrice:0,defaultDimensions:{W:1000,D:700,H:850},specs:[],laborHours:{fabrication:16,installation:3,teamSize:2},leadTime:'10-14 days',notes:'3x LP burners',unit:'pc'},
+      {id:'CE-004',category:'cooking_line',name:'SS Open Top HP Stove (4 Burner)',shortName:'HP Stove 4B',formulaType:'fixed',basePrice:0,defaultDimensions:{W:1200,D:700,H:850},specs:[],laborHours:{fabrication:24,installation:4,teamSize:2},leadTime:'14-21 days',notes:'4x HP burners',unit:'pc'},
+      {id:'PW-001',category:'prep_washing',name:'SS Preparation Table (1 Layer)',shortName:'Prep Table 1L',formulaType:'per_length',basePrice:0,defaultDimensions:{W:900,D:600,H:850},formula:{baseLengthMm:900,pricePerExtraMm:0},specs:[],laborHours:{fabrication:6,installation:1,teamSize:2},leadTime:'7-10 days',notes:'SS304, adjustable shelf',unit:'pc'},
+      {id:'PW-004',category:'prep_washing',name:'SS Wash Sink (Single) + Gooseneck Faucet',shortName:'Single Sink',formulaType:'fixed',basePrice:0,defaultDimensions:{W:500,D:500,H:850},specs:[],laborHours:{fabrication:6,installation:2,teamSize:2},leadTime:'7-10 days',notes:'SS304, 1 basin',unit:'pc'},
+      {id:'PW-013',category:'prep_washing',name:'SS Wall Cladding',shortName:'Wall Cladding',formulaType:'per_area',basePrice:0,defaultDimensions:{W:1000,H:1000},formula:{pricePerSqm:0},specs:[],laborHours:{fabrication:8,installation:4,teamSize:2},leadTime:'10-14 days',notes:'Per sqm',unit:'sqm'},
+      {id:'VT-001',category:'ventilation',name:'SS Range Hood + Baffle Filter + Lamp',shortName:'Range Hood',formulaType:'per_length',basePrice:0,defaultDimensions:{W:1000,D:900,H:500},formula:{baseLengthMm:1000,pricePerExtraMm:0},specs:[],laborHours:{fabrication:12,installation:4,teamSize:2},leadTime:'14-21 days',notes:'SS304, scales by length',unit:'pc'},
+      {id:'GL-001',category:'gas_line',name:'Gas Line System + Tank Farm (4×50kg)',shortName:'Gas Line + Tank Farm',formulaType:'fixed',basePrice:0,defaultDimensions:{},specs:[],laborHours:{fabrication:8,installation:8,teamSize:3},leadTime:'7-14 days',notes:'BI pipes, fully welded',unit:'lot'},
+      {id:'FS-001',category:'fire_suppression',name:'Fire Suppression System (Small)',shortName:'Fire Suppression Small',formulaType:'fixed',basePrice:0,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:16,teamSize:3},leadTime:'21-30 days',notes:'BFP compliant, wet chem',unit:'system'},
+      {id:'MS-005',category:'miscellaneous',name:'Delivery + Installation + Labor (Small)',shortName:'D+I+L Small',formulaType:'fixed',basePrice:0,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:8,teamSize:3},leadTime:'—',notes:'1-3 items, same city',unit:'lot'},
+      {id:'MS-006',category:'miscellaneous',name:'Delivery + Installation + Labor (Medium)',shortName:'D+I+L Medium',formulaType:'fixed',basePrice:0,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:16,teamSize:4},leadTime:'—',notes:'Full kitchen, same city',unit:'lot'},
     ],
     laborRoles:[
-      {id:'foreman',label:'Foreman',ratePerDay:1500},
-      {id:'sr_welder',label:'Sr. Welder / Fabricator',ratePerDay:1200},
-      {id:'welder',label:'Welder / Fabricator',ratePerDay:1000},
-      {id:'finisher',label:'Finisher / Painter',ratePerDay:1000},
-      {id:'techgasac',label:'Technician (HVAC/Gas)',ratePerDay:1200},
-      {id:'driver',label:'Driver / Helper',ratePerDay:1000},
-      {id:'subcon',label:'Subcontractor',ratePerDay:1500},
+      {id:'foreman',label:'Foreman',ratePerDay:0},
+      {id:'sr_welder',label:'Sr. Welder / Fabricator',ratePerDay:0},
+      {id:'welder',label:'Welder / Fabricator',ratePerDay:0},
+      {id:'finisher',label:'Finisher / Painter',ratePerDay:0},
+      {id:'techgasac',label:'Technician (HVAC/Gas)',ratePerDay:0},
+      {id:'driver',label:'Driver / Helper',ratePerDay:0},
+      {id:'subcon',label:'Subcontractor',ratePerDay:0},
     ],
-    constants:{vat:0.12,materialPriceIndexMultiplier:1.0,workHoursPerDay:8,travelDayRate:3500}
+    constants:{vat:0.12,materialPriceIndexMultiplier:1.0,workHoursPerDay:8,travelDayRate:0}
   };
 }
 
@@ -8266,8 +8278,12 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 41;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 42;   // integer; bump on every user-visible quote-builder change
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:42, date:'2026-09-27', items:[
+    '🔒 The built-in offline catalogue no longer carries any prices. It used to hold base prices, the per-metre and per-square-metre rates and crew day rates — and because this page is public, anyone could read them. Prices now come only from the live database once you are signed in.',
+    'If the live database cannot be reached, the builder still shows the catalogue so you can browse items, but Save PDF and Agent Copy are blocked and the status bar says "Offline catalogue — no prices". This stops a ₱0 quote ever reaching a client. Workforce Copy still works, since it prints no prices by design. Reload once you are back online and everything returns to normal.',
+  ]},
   { ver:41, date:'2026-09-21', items:[
     '🛠 Workforce Copy — a print/PDF for the fabrication crew with NO prices: item details, specs, dims, notes, qty and unit only. The price columns, subtotals, totals and payment/terms are all left off; the header is tagged "WORKFORCE COPY — NO PRICES" and the ±5mm tolerance note still prints. Find it beside Agent Copy.',
   ]},
