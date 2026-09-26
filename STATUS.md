@@ -5,9 +5,60 @@
 > History lives in [ROADMAP.md](ROADMAP.md) (frozen), plans in [docs/plans/](docs/plans/), audits in
 > [docs/reviews/](docs/reviews/), feature specs in [specs/](specs/).
 
-_Last updated: **2026-09-26**_
+_Last updated: **2026-09-27**_
 
 > **2026-09-26 — UI-wiring commit gate was scanning 25% of the UI (FIXED, v14.0.288).** `scripts/check-ui-wiring.js` — one of the three gates CLAUDE.md requires before every commit — built its file list with a NON-recursive `fs.readdirSync(js/)`, so it never saw **`js/screens/*.js`: 24 files and the bulk of the app's UI** (tasks, finance, hr, payroll, sales, production, inventory, crm, design, partners, worker, todo, client-portals...). Its only HARD FAIL — class (c), `onclick="fn()"` with no matching window global, i.e. a dead button — therefore guarded `js/*.js` only, and a dead handler in any screen shipped green. Now walks `js/` recursively (skipping `vendor/`, `node_modules/`): scan surface **25 -> 55 files, rendered ids 396 -> 1739, getElementById/# lookups 268 -> 1068**. **Triage: zero dead handlers, so `scripts/ui-wiring-allowlist.json` is UNCHANGED** (deliberately no blanket-allowlisting to force green). That was verified, not assumed — the inventory was rebuilt from `window.X =` assignments only (573 names vs the script's looser 2147) and just 4 idents fell out, all `qe*` top-level functions in `js/screens/sales.js`, which has no IIFE wrapper, so they are genuine globals. **Second hole closed in the same check:** `onclick="window.fnName()"` was skipped entirely because `FIRST_CALL_RE` saw the `.` and treated it as a method call — 26 real handler calls, including the finance migration buttons (`window.runRestateMaterialCosts`, `window.backfillLedgerFromJournals`). Now covered, with a browser-builtin skip set so `window.print`/`window.open` need no bogus allowlist entries. **Mutation-tested** in a scratch copy (shared tree never mutated): dead handlers injected into `screens/tasks.js` + `screens/inventory.js` make the fixed script exit 1 naming both, while the pre-fix script passes clean. **Self-guard added**: if `js/screens/` holds `.js` files but none are scanned, exit 1 rather than report a meaningless PASS, so the blind spot cannot silently return. Cross-file resolution confirmed intact (one shared inventory across all scanned files — the 21 screens calling app.js's `closeModal()` / chat.js's `navigateTo()` resolve instead of becoming false failures). **Open follow-up:** the WARN classes grew with the scan surface — dangling lookups 3 -> 10, unbound controls 48 -> **204**. Neither fails the build and none were allowlisted; they need a real triage pass (most look like `addEventListener`/delegation bindings the regex cannot see). Added to **Follow-up DONE same day (v14.0.290) — the 214 WARNs triaged to ZERO, and none of them was a real defect.** Every one was a static-analysis false positive, so the fix was to teach the scanner this codebase's four real binding idioms rather than allowlist noise: (1) the **`$`-helper convention** — every modal opens with a local `const $<suffix> = (id) => _panel.querySelector('#' + id)` (45 of them across js/ and js/screens/); the `'#'` is CONCATENATED, so the literal-selector regex saw none of it — this one blind spot alone caused ~190 of the 204; (2) **`'#id'` string literals anywhere**, covering event delegation (`e.target.closest('#x')`) and ids handed to binder helpers (`bindPolicyPick('#sr-tb-pick-flat', ...)`); (3) the **declarative id keys** `csvId:` / `saveBtnId:` / `targetId:` and `action:{id}` / `filter:{id}`, which are BOTH a rendered id and a reference because a helper interpolates them into `id=` (js/ui-states.js, window.birToolbarHTML) — this also **retired 8 now-redundant allowlist entries** (the 7 `bir-*-csv` plus `e-vat`). Two over-match traps were found and closed while doing it: CSS hex colours (`'#FF6B9D'` read as the id `FF6B9D` — 86 phantom refs) and concatenation prefixes (`'#chat-mediatab-' + key`). **16 allowlist entries remain, each traced to the line that binds it** — the hr.js `_epStatPairs` id table and `_wpModeOf('...')` bare-id helper (8), the `id="epstat-${k}-amt"` and drive.js `id="file-input-${containerId}"` interpolated ids (7), and `add-expense-btn`, which is not a lookup at all: its only occurrence in the tree is a 2026-08-03 audit comment recording that the id never existed. **Guarded against vacuousness** — widening the reference set risks making (a)/(b) green by construction, so all three classes were re-mutation-tested in a scratch copy: an unbound control, a dangling lookup, a hex-shaped id and a dead onclick are each still caught. Counts now 0/0/0 with no warnings suppressed.
+
+> **2026-09-27 — Client Information Request: public intake form + Sales › Briefs (NEW, SHIPPED & DEPLOYED, v14.0.304).**
+> Neil's standalone "Commissary Kitchen Project Brief" HTML form is now a system feature. A **public,
+> open-link, no-account page** at `barroindustries.com/sales/clientinformationrequest/` (repo
+> `sales/clientinformationrequest/index.html`, standalone, `noindex`, deliberately NOT in index.html or
+> `sw.js` PRECACHE) asks 10 parts — Neil's original 9 plus a new **Photos** part (Site/space · Existing
+> kitchen · Equipment · Floor plan or documents, "Add photos" + "Take photo", 20 photos / 900 KB each
+> after downscale / 12 MB total). The client's browser downscales each image (long edge 1600, JPEG q0.8)
+> and ships it through a callable; **no public Storage rule was opened** — every object is written by the
+> Admin SDK. Submitting returns an on-screen receipt `CIR-yymmdd-XXXXXX`. Draft autosave keeps answers on
+> the client's own device (never image bytes — photos return as placeholder tiles, and the photo half of a
+> draft expires after 7 days). **Spec: [specs/CLIENT-INFO-REQUEST-SPEC.md](specs/CLIENT-INFO-REQUEST-SPEC.md).**
+> **Security shape:** the repo is PUBLIC and the link is OPEN, so nothing about a submission is publicly
+> readable or listable. Five `asia-east1` callables (`cirStartDraft` / `cirUploadPhoto` / `cirRemovePhoto` /
+> `cirSubmit` / `cirAdminDelete`); `cir_drafts` / `cir_ratelimit` / `cir_abuse` have **no rules match at
+> all** (Admin-SDK-only); `client_info_requests` is staff-read, callable-create/delete, with updates
+> confined to an 8-key allowlist + a status enum and `statusChangedBy`/`convertedBy` **pinned to
+> `request.auth.uid`** so attribution cannot be forged. Photos live at `client-info-requests/{ref}/`
+> (staff read, `write: if false`); the 4-segment drafts path matches no block and is denied by
+> construction. Rate limiting is per-IP **and** IP-independent global caps on draft/photo/submit, all
+> fail-closed. Submission content is treated as attacker-controlled and `escHtml()`'d in the list, detail,
+> print body, captions and filenames.
+> **Internal:** Sales › **Briefs** (2nd chip) — list with status/age, a detail view that walks the form
+> definition generically, photo gallery, Print/PDF on letterhead, status, internal notes, **Convert to
+> client (CRM)**, Prefill Quote Builder, and Delete (president/manager only, which also destroys the
+> photos). A new brief notifies **every Sales-department user + the President** in-app and by push.
+> **The form definition is versioned** in `js/cir-forms.js`, mirrored byte-for-byte at
+> `functions/cir-forms.js` (enforced by new **ci-invariants check 7**) and walked by page, callables and
+> internal renderer alike — a second questionnaire is a new `FORMS` key + a new folder, no migration.
+> **Owner rulings:** R1 Sales dept **and** President notified · R2 president+manager may delete ·
+> R3 flag-only retention, no auto-purge (privacy notice promises deletion of unconverted briefs within
+> 24 months; a human does it) · R4 tab named "Briefs", Photos as part 6.
+> **Two adversarial reviews, no ship-blockers.** Fixes they earned: IP-independent global caps (the
+> per-IP buckets key on `portalClientIp`, which trusted a spoofable `X-Forwarded-For`), the attribution
+> pinning above, a stranded-photo diagnostic, a non-array answer that could blank a whole brief's detail
+> view, and a print footer that used the viewer's timezone instead of Manila.
+> **CAUGHT IN MERGE, WOULD HAVE BEEN SEVERE:** the concurrent portal XFF fix changed `portalClientIp()`
+> to return `{ip, family, trusted, source}` instead of a string; the cir* call sites, written against the
+> string, silently produced `sha256('start|[object Object]')` — **one shared rate-limit bucket for the
+> entire internet**, so the first five submitters would have locked out every client for 24h. Merged with
+> no conflict and no failing test. Fixed in `15668fe` (`cirRequireIpKey`, all four anonymous call sites
+> key on `ipKey`, `ipInfo.ip` kept for `ipHash`), verified live in production against a forged header.
+> Deployed 2026-09-27: firestore.rules + storage.rules recorded in `.deploy-state`; all five callables
+> created in `asia-east1` by a **selective** deploy, naming the five explicitly so no unrelated function
+> was touched or restarted. Post-deploy audit: **24 deployed = 24 repo exports**, none missing, none
+> orphaned. (Corrected 2026-09-27: the long-held belief that the **Meta lead webhook is undeployed** is
+> FALSE and has been since 2026-08-30 — `metaLeadWebhook` is ACTIVE in `asia-east1` with all three
+> secrets bound, deployed three minutes after `1eb1494` was authored. The belief came from a
+> `.deploy-state` functions baseline recorded 33 minutes BEFORE that deploy and never re-recorded, so
+> every later drift check reported "functions DRIFTED" and it got read as "never deployed". Verified
+> here against `firebase functions:list`: 24 live = 24 exports.)
 
 > **2026-09-26 — Client signing & progress portal (NEW, built, NOT yet deployed).** A client-facing
 > digital signing + receiving page at `/projects/<client>/<page>/`, first instance
@@ -54,7 +105,7 @@ _Last updated: **2026-09-26**_
 
 | | |
 |---|---|
-| **Production** | v14.0.288 (auto-bumps each commit — live check: `curl -sL https://barroindustries.com/js/config.js \| grep APP_VERSION`) |
+| **Production** | v14.0.304 (auto-bumps each commit — live check: `curl -sL https://barroindustries.com/js/config.js \| grep APP_VERSION`) |
 | **Deploy** | `git push origin master` → GitHub Pages (custom domain above; the github.io URL 301s to it). Firebase surfaces deploy separately — use `scripts/release.sh`. |
 | **Active program** | V14 overhaul ([docs/plans/V14-OVERHAUL-PLAN.md](docs/plans/V14-OVERHAUL-PLAN.md)) — Wave 1 + 2A live. Current build thread: **costing system** (phases 1–2 shipped: true-cost panel, material price list, custom-item BOM, break-even v2, pace dashboard). NEW 2026-08-31: **Inventory department** ([specs/INVENTORY-DEPT-SPEC-2026-08-31.md](specs/INVENTORY-DEPT-SPEC-2026-08-31.md)) — Stock / Raw Materials (price list, moved from Purchasing) / Finished Products (catalog view) / Movements / Count Form (moved from Production); Production slimmed 8→5 tabs, Purchasing 5→4; `inventory_items`/`stock_movements` write rules tightened to Inventory/Purchasing/Production/Finance + senior admins (was: any internal staff; secretary now view-only). ALSO 2026-08-31 (v14.0.203): quote builder ships a built-in **Help & guided demo** — ❓ Help button, first-run "New to the quote builder?" banner, 14-step read-only spotlight tour, What's New panel — under a self-updating contract: every user-visible QB change must bump `TUTORIAL_VERSION` + add a What's-New entry ([.claude/skills/quote-builder-tutorial/SKILL.md](.claude/skills/quote-builder-tutorial/SKILL.md), spec [specs/QB-TUTORIAL-SPEC-2026-08-31.md](specs/QB-TUTORIAL-SPEC-2026-08-31.md)). |
 | **Blocked on owner** | Office/monthly payroll disbursement — waiting on verified 2026 statutory rates (ruling #1 below). Everything else about office pay is built. |
@@ -115,6 +166,9 @@ Run `scripts/release.sh` for the live drift report. Tick items here when done �
 what the script prints.
 
 <!-- PENDING-OPS:BEGIN -->
+- [ ] **`release.sh record functions` — now the obvious thing to do, pending only Neil's word.** The five `cir*` callables are LIVE and verified; `functions` is still unrecorded in `.deploy-state` (firestore + storage are recorded). **The reason for holding off has evaporated:** recording was avoided on the belief that it would mask an undeployed Meta webhook — that belief is false (see the 2026-09-27 entry above; 24 live = 24 exports, `metaLeadWebhook` active since 2026-08-30). Recording now clears a **phantom** drift rather than hiding a real one, and until it is run, every `release.sh` drift report keeps crying wolf on functions. Must be run from the MAIN checkout — `.deploy-state` is gitignored and machine-local, so a worktree writes to the wrong file.
+- [ ] **Reconcile the stray Firestore index** — the 2026-09-27 firestore deploy reported **1 index live in the project that is NOT in `firestore.indexes.json`**. Nothing was deleted (`--force` deliberately not passed) and it predates this work, but the file and reality have diverged: a future `--force` deploy would silently drop it. Identify what query it serves, then either add it to the file or delete it.
+- [ ] **CIR live smoke test (President, phone)** — open `barroindustries.com/sales/clientinformationrequest/`, fill the six required fields, attach 2 photos, submit; confirm the receipt number, that the notification reaches Sales **and** you, and that Sales › Briefs shows the row with working photo preview + print; then **delete that test brief** and confirm its Storage folder is gone. Nothing has been submitted end-to-end in production yet — only `cirStartDraft` was exercised.
 - [x] **PUSH HELD — commit fce2637 (v14.0.200) local-only** — resolved 2026-08-31: the Inventory-department commit (v14.0.202) landed `js/screens/inventory.js` and both were pushed together; rules deployed first.
 - [ ] **Seed the Material Price List** — President → costing screen seed button (shipped v14.0.191, never clicked). Costing math reads placeholder prices until then.
 - [ ] **Phase-9 president one-time buttons** (pending since July): Finance → Reports → "🔄 Sync to ledger"; Projects → "🔖 Tag"; `remapDesignProjectClients` (browser console). All idempotent.
