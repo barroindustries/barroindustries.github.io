@@ -2589,17 +2589,24 @@ exports.metaLeadWebhook = functions
 const PORTAL_ID_RE = /^[a-z0-9-]{2,40}__[a-z0-9-]{2,40}$/;
 const VIEWER_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
-/** IP: first entry of x-forwarded-for, else the raw request's own ip, else
- *  '0.0.0.0' — same precedence for all four callables (hard rule). */
+/**
+ * The caller's address, derived ANTI-SPOOF. Returns portal-core's
+ * `{ ip, family, trusted, source }` — never a bare string, so no call site
+ * can accidentally use an untrusted value as if it were a real address.
+ *
+ * Was: "first entry of x-forwarded-for, else rawRequest.ip, else '0.0.0.0'".
+ * That was spoofable end-to-end — Google APPENDS the address it saw to the
+ * caller's XFF instead of replacing it, so the first entry is whatever the
+ * caller typed, and a direct caller could mint a fresh per-IP rate-limit
+ * bucket on every single request. See portal-core.js `clientIpFrom` for the
+ * full write-up and the hop-count rule.
+ *
+ * FAIL CLOSED at every call site: `trusted === false` is a deny, never an
+ * "unlimited" fall-through. The old '0.0.0.0' sentinel is gone — it was a
+ * single shared bucket that any caller could opt into.
+ */
 function portalClientIp(context) {
-  const req = context && context.rawRequest;
-  const xff = req && req.headers && req.headers['x-forwarded-for'];
-  if (xff) {
-    const first = String(xff).split(',')[0].trim();
-    if (first) return first;
-  }
-  if (req && req.ip) return req.ip;
-  return '0.0.0.0';
+  return portal.clientIpFrom(context && context.rawRequest);
 }
 
 /** Strip real control chars only (keep \n/\r/\t is NOT needed here — every
@@ -2630,9 +2637,21 @@ exports.portalUnlock = functions
       throw new functions.https.HttpsError('invalid-argument', 'Enter your 8-character access code.');
     }
 
-    const ip = portalClientIp(context);
+    const ipInfo = portalClientIp(context);
+    const ipKey = portal.rateLimitIpKey(ipInfo);
     const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
-    const ipBucketRef = db.collection('client_portal_ratelimit').doc(portalSha256Hex(portalId + '|' + ip));
+    // FAIL CLOSED. No trustworthy address ⇒ no per-IP bucket can be keyed,
+    // so this attempt gets the SAME answer a locked-out caller gets (same
+    // code, same wording — an attacker must not be able to tell the two
+    // apart, or stripping the header would become an oracle). On the live
+    // deployment this branch is unreachable: Google always appends the peer
+    // to x-forwarded-for.
+    if (!ipKey) {
+      console.error('[portalUnlock] no trustworthy client IP — denying (source=%s)', ipInfo.source);
+      throw new functions.https.HttpsError('resource-exhausted', 'Too many attempts. Try again in 15 minutes.');
+    }
+    const ip = ipInfo.ip;
+    const ipBucketRef = db.collection('client_portal_ratelimit').doc(portalSha256Hex(portalId + '|' + ipKey));
     const secretsRef  = db.collection('client_portal_secrets').doc(portalId);
     const portalRef   = db.collection('client_portals').doc(portalId);
 
@@ -2906,7 +2925,14 @@ exports.portalSign = functions
       throw new functions.https.HttpsError('failed-precondition', 'The privacy notice was updated — please reload and review it again.');
     }
 
-    const ip = portalClientIp(context);
+    // Forensic only — portalSign is gated by a valid viewer token, not by a
+    // per-IP bucket, so there is nothing here to fail closed ON. An
+    // untrusted address is therefore RECORDED AS NULL (with the flag below)
+    // rather than blocking a legitimate contract signature. Before this fix
+    // the acceptance record stored whatever string the caller put in its own
+    // x-forwarded-for header, silently, as if it were evidence.
+    const ipInfo = portalClientIp(context);
+    const ip = ipInfo.trusted ? ipInfo.ip : null;
     const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
     const acceptLanguage = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['accept-language']) || '';
 
@@ -2979,7 +3005,7 @@ exports.portalSign = functions
             validUntil,
             proposalNumber: portalData.proposal && portalData.proposal.number,
           },
-          client: { ip, userAgent: String(userAgent).slice(0, 512), acceptLanguage: String(acceptLanguage).slice(0, 64) },
+          client: { ip, ipTrusted: ipInfo.trusted === true, userAgent: String(userAgent).slice(0, 512), acceptLanguage: String(acceptLanguage).slice(0, 64) },
           sessionTokenHash: portal.tokenHash(viewerToken),
           codeVersion: portalData.codeVersion || 1,
         });

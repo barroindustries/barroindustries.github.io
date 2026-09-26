@@ -186,6 +186,167 @@ describe('rateLimitDecision', () => {
   });
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+//  clientIpFrom / rateLimitIpKey — the 2026-09-26 XFF-spoofing fix.
+//
+//  The defect these pin: the old helper read the FIRST x-forwarded-for entry.
+//  Google APPENDS the address it actually saw rather than replacing the
+//  header, so the first entry is caller-controlled and a direct caller could
+//  mint a fresh per-IP rate-limit bucket on every request — unlimited
+//  guesses at an 8-character portal access code.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** A minimal Express-ish req: `xff` undefined ⇒ the header is absent. */
+function req(xff, remoteAddress) {
+  const headers = {};
+  if (xff !== undefined) headers['x-forwarded-for'] = xff;
+  return { headers, socket: remoteAddress === undefined ? {} : { remoteAddress } };
+}
+
+describe('clientIpFrom — trustworthy client IP', () => {
+  it('takes the RIGHT-most entry, which is the one Google wrote', () => {
+    const info = portal.clientIpFrom(req('203.0.113.7'));
+    assert.deepEqual(info, { ip: '203.0.113.7', family: 4, trusted: true, source: 'xff' });
+  });
+
+  it('ignores a spoofed left-most entry (the actual bypass)', () => {
+    // What a `curl -H 'X-Forwarded-For: 9.9.9.9'` looks like once the front
+    // end has appended the real peer.
+    const info = portal.clientIpFrom(req('9.9.9.9, 203.0.113.7'));
+    assert.equal(info.ip, '203.0.113.7');
+    assert.equal(info.trusted, true);
+  });
+
+  it('is immune to an arbitrarily long spoofed prefix', () => {
+    const info = portal.clientIpFrom(req('1.1.1.1, 2.2.2.2, 3.3.3.3, 198.51.100.4, 203.0.113.7'));
+    assert.equal(info.ip, '203.0.113.7');
+  });
+
+  it('gives the SAME bucket key however the attacker rotates the prefix', () => {
+    const keys = new Set([
+      '203.0.113.7',
+      '9.9.9.9, 203.0.113.7',
+      'not-an-ip, 203.0.113.7',
+      '::1, 8.8.8.8, 203.0.113.7',
+      '   , 203.0.113.7',
+    ].map((h) => portal.rateLimitIpKey(portal.clientIpFrom(req(h)))));
+    assert.deepEqual([...keys], ['203.0.113.7'], 'every rotation must land in one bucket');
+  });
+
+  it('accepts duplicate XFF headers delivered as an array', () => {
+    const info = portal.clientIpFrom(req(['9.9.9.9', '203.0.113.7']));
+    assert.equal(info.ip, '203.0.113.7');
+  });
+
+  it('strips a port and an IPv4-mapped-IPv6 prefix', () => {
+    assert.equal(portal.clientIpFrom(req('203.0.113.7:51514')).ip, '203.0.113.7');
+    assert.equal(portal.clientIpFrom(req('::ffff:203.0.113.7')).ip, '203.0.113.7');
+    assert.equal(portal.clientIpFrom(req('[2001:db8::1]:443')).ip, '2001:db8::1');
+  });
+
+  it('honours a 2-hop configuration (a Google ALB appends client,lb)', () => {
+    const info = portal.clientIpFrom(req('9.9.9.9, 203.0.113.7, 34.117.1.1'), { trustedProxyHops: 2 });
+    assert.equal(info.ip, '203.0.113.7');
+  });
+
+  it('falls back to the socket peer only when there is NO XFF header', () => {
+    const info = portal.clientIpFrom(req(undefined, '198.51.100.5'));
+    assert.deepEqual(info, { ip: '198.51.100.5', family: 4, trusted: true, source: 'socket' });
+    // The emulator / `npx serve` case — loopback is a real peer, not a fault.
+    assert.equal(portal.clientIpFrom(req(undefined, '::ffff:127.0.0.1')).ip, '127.0.0.1');
+  });
+
+  it('never lets the socket override a present XFF header', () => {
+    const info = portal.clientIpFrom(req('203.0.113.7', '10.0.0.1'));
+    assert.equal(info.ip, '203.0.113.7');
+    assert.equal(info.source, 'xff');
+  });
+});
+
+describe('clientIpFrom — IPv6', () => {
+  it('returns the full address but buckets on the /64', () => {
+    const info = portal.clientIpFrom(req('2001:db8:85a3:8d3:1319:8a2e:370:7348'));
+    assert.equal(info.family, 6);
+    assert.equal(info.ip, '2001:db8:85a3:8d3:1319:8a2e:370:7348');
+    assert.equal(portal.rateLimitIpKey(info), '2001:db8:85a3:8d3::/64');
+  });
+
+  it('collapses a whole /64 into ONE bucket — a subscriber owns all 2^64', () => {
+    const keys = new Set([
+      '2001:db8:85a3:8d3:1319:8a2e:370:7348',
+      '2001:0db8:85A3:08d3::dead',
+      '2001:db8:85a3:8d3::',
+      '2001:db8:85a3:8d3:ffff:ffff:ffff:ffff',
+    ].map((h) => portal.rateLimitIpKey(portal.clientIpFrom(req(h)))));
+    assert.deepEqual([...keys], ['2001:db8:85a3:8d3::/64']);
+  });
+
+  it('keeps a DIFFERENT /64 in a different bucket', () => {
+    const a = portal.rateLimitIpKey(portal.clientIpFrom(req('2001:db8:85a3:8d3::1')));
+    const b = portal.rateLimitIpKey(portal.clientIpFrom(req('2001:db8:85a3:8d4::1')));
+    assert.notEqual(a, b);
+  });
+
+  it('handles :: shorthand and an embedded IPv4 tail', () => {
+    assert.equal(portal.rateLimitIpKey(portal.clientIpFrom(req('::1'))), '0:0:0:0::/64');
+    assert.equal(portal.rateLimitIpKey(portal.clientIpFrom(req('2001:db8::203.0.113.7'))), '2001:db8:0:0::/64');
+  });
+});
+
+describe('clientIpFrom — fails CLOSED', () => {
+  const denied = [
+    ['header present but unparseable',      req('not-an-ip')],
+    ['header present, last entry garbage',  req('203.0.113.7, wat')],
+    ['header is only separators',           req(' , , ')],
+    ['empty header, no socket',             req('')],
+    ['no header, no socket at all',         req(undefined)],
+    ['no header, socket is garbage',        req(undefined, 'lo0')],
+    ['the old 0.0.0.0 sentinel',            req('0.0.0.0')],
+    ['the IPv6 unspecified address',        req('::')],
+    ['fewer entries than trusted hops',     req('203.0.113.7')],
+  ];
+  for (const [name, r] of denied) {
+    it(`${name} ⇒ untrusted, and NO bucket key`, () => {
+      const opts = name === 'fewer entries than trusted hops' ? { trustedProxyHops: 2 } : undefined;
+      const info = portal.clientIpFrom(r, opts);
+      assert.equal(info.trusted, false, 'must never be reported as trustworthy');
+      assert.equal(info.ip, null);
+      assert.equal(portal.rateLimitIpKey(info), null,
+        'a null key is what forces the caller to deny — a string here would be a shared "unlimited" bucket');
+    });
+  }
+
+  it('never throws, whatever it is handed', () => {
+    for (const bad of [undefined, null, {}, { headers: null }, { headers: { 'x-forwarded-for': 12345 } }]) {
+      assert.doesNotThrow(() => portal.rateLimitIpKey(portal.clientIpFrom(bad)));
+    }
+  });
+
+  it('rateLimitIpKey refuses a hand-made "trusted" object with no ip', () => {
+    assert.equal(portal.rateLimitIpKey({ trusted: true, ip: '', family: 4 }), null);
+    assert.equal(portal.rateLimitIpKey({ trusted: true, ip: '203.0.113.7', family: 6 }), null);
+    assert.equal(portal.rateLimitIpKey(null), null);
+  });
+});
+
+describe('clientIpFrom — existing rate-limit buckets survive the deploy', () => {
+  // client_portal_ratelimit doc ids are sha256(portalId + '|' + <key>). For
+  // honest IPv4 traffic the OLD helper's value (first XFF entry) and the NEW
+  // key are the same string — a browser sends no XFF of its own, so Google's
+  // appended entry is both the first AND the last — which means live buckets
+  // (including lockouts in force) carry straight over instead of resetting.
+  it('IPv4: the new key is byte-identical to the old first-entry value', () => {
+    for (const ip of ['203.0.113.7', '112.198.1.55', '198.51.100.240']) {
+      const oldValue = String(ip).split(',')[0].trim(); // the old helper, verbatim
+      assert.equal(portal.rateLimitIpKey(portal.clientIpFrom(req(ip))), oldValue);
+    }
+  });
+
+  it('TRUSTED_PROXY_HOPS is 1 — a direct cloudfunctions.net invoke', () => {
+    assert.equal(portal.TRUSTED_PROXY_HOPS, 1);
+  });
+});
+
 describe('sessions', () => {
   it('newViewerToken produces a 43-char base64url token and a 64-hex-char hash', () => {
     const { token, tokenHash } = portal.newViewerToken();
