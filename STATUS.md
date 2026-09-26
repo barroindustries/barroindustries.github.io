@@ -157,6 +157,19 @@ _Last updated: **2026-09-27**_
 > deployed — **do not push until it has deployed them**; use `release.sh push`, which refuses on
 > rules drift, not a raw `git push`.
 
+> **2026-09-27 — Chibab's portal is READY TO SEND (dates corrected, code rotated).** Milestone/step
+> dates were stale against the calendar: step 1 and the ₱50,000 were dated 26 Sep (already past).
+> Owner ruling: the ₱50,000 and step 1 are now **"On acceptance"** (so they can never go stale again,
+> whenever the client signs) and the ₱231,620 balance moved **28 Sep → 30 Sep**, restoring the
+> two-day gap the proposal intended. M2 (30 Sep), M3 (13 Nov) and M4 (30 Nov turnover) are UNCHANGED,
+> so the client's November opening is unaffected; milestones still sum exactly to ₱1,408,100.
+> Step 2 reads "28–30 SEP 2026" (store visit Mon, balance released by Wed). Applied to Firestore and
+> to the off-repo master JSON at `~/Desktop/barro-private/`-adjacent `~/Desktop/chibabs/`.
+> **The access code is at v5** — rotated at the owner's request after the earlier ones were
+> superseded. It is NOT recorded anywhere (scrypt-hashed; shown once), and deliberately NOT written
+> here — this repo is public. Only the President holds it; if lost, rotate again from Client Portals
+> → Settings. Portal state: `live`, unsigned, step 0, all verification sessions revoked.
+
 ## Pending deploys & one-time actions
 
 - [x] **2026-09-12 domain cutover: app moved to `barroindustries.com`** (GoDaddy A records -> GitHub Pages, CNAME flipped). Old domain `barroindustries-operatingsystem.ravenmails.com` serves a redirect + SW kill-switch from the `barroindustries/ops-legacy-redirect` repo. Firebase Auth authorized domains updated. Everyone re-opens the app at the new URL (PWA reinstall + re-login).
