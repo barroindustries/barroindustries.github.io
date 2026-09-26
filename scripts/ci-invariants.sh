@@ -361,7 +361,8 @@ try{
   if(man.version!==ver)console.log('version mismatch: manifest '+man.version+' vs config.js '+ver);
   for(const p of paths){
     if(!man.files[p]){console.log('missing manifest entry: '+p);continue;}
-    let t=p.replace(/^\//,''); if(p==='/')t='index.html'; if(p==='/t/')t='t/index.html'; if(p==='/v/')t='v/index.html';
+    // Strip any ?v= cache-bust: the PRECACHE entry is a URL, the thing we hash is a file.
+    let t=p.replace(/^\//,'').replace(/\?.*$/,''); if(p==='/')t='index.html'; if(p==='/t/')t='t/index.html'; if(p==='/v/')t='v/index.html';
     let blob; try{blob=execSync('git show HEAD:'+JSON.stringify(t),{maxBuffer:64*1024*1024});}catch(e){console.log('not in HEAD: '+t);continue;}
     const h=require('crypto').createHash('sha1').update(blob).digest('hex');
     if(h!==man.files[p])console.log('hash mismatch vs HEAD: '+p);
@@ -374,6 +375,37 @@ if [ -n "$manifest_fail" ]; then
   overall_fail=1
 else
   echo "PASS: precache-manifest.json matches HEAD for every PRECACHE entry"
+fi
+
+echo
+echo "=== [7/7] CIR FORMS MIRROR: functions/cir-forms.js must be byte-identical to js/cir-forms.js ==="
+# CLIENT-INFO-REQUEST-SPEC.md §1.4/§6 WS-0 — the client-info-request public
+# page, the internal Sales › Briefs renderer and the Cloud Functions callables
+# all validate against the SAME form definition. functions/ only ships its own
+# directory (firebase.json), so js/cir-forms.js is mirrored by a plain `cp`
+# rather than shared via require — nothing enforces the two stay in sync
+# except this check. A drift here means a field/option/limit change was made
+# on one side only, silently letting the client and server validate different
+# shapes.
+cir_mirror_fail=0
+if [ ! -f js/cir-forms.js ]; then
+  echo "FAIL: js/cir-forms.js is missing."
+  cir_mirror_fail=1
+fi
+if [ ! -f functions/cir-forms.js ]; then
+  echo "FAIL: functions/cir-forms.js is missing."
+  cir_mirror_fail=1
+fi
+if [ "$cir_mirror_fail" -eq 0 ]; then
+  if ! cmp -s js/cir-forms.js functions/cir-forms.js; then
+    echo "FAIL: functions/cir-forms.js must be byte-identical to js/cir-forms.js — edit js/cir-forms.js then: cp js/cir-forms.js functions/cir-forms.js"
+    cir_mirror_fail=1
+  fi
+fi
+if [ "$cir_mirror_fail" -eq 0 ]; then
+  echo "PASS: functions/cir-forms.js is byte-identical to js/cir-forms.js"
+else
+  overall_fail=1
 fi
 
 echo
