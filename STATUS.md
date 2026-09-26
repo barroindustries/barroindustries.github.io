@@ -58,6 +58,18 @@ _Last updated: **2026-09-26**_
 | **Blocked on owner** | Office/monthly payroll disbursement — waiting on verified 2026 statutory rates (ruling #1 below). Everything else about office pay is built. |
 | **Commit gates** | `node --test tests/*.test.mjs && bash scripts/ci-invariants.sh && node scripts/check-ui-wiring.js` — all three, before every commit. |
 
+> **2026-09-26 CRITICAL fix, found by live testing and deployed (portalUnlock):** the brute-force
+> lockout did not work at all. `failWrite()` staged the rate-limit increment and the `unlock_fail`
+> audit event INSIDE `runTransaction`, then threw `HttpsError` — and a throw from a transaction
+> callback ABORTS it, discarding those writes. Every wrong guess rolled back its own counter:
+> unlimited code guessing, zero audit trail. Proven live (6 wrong codes, no lockout, 0 `unlock_fail`
+> docs). Fixed by making the transaction RETURN a verdict and raising the error only after the
+> failure writes commit. Re-proven live: attempts 1-5 `PERMISSION_DENIED`, 6th `RESOURCE_EXHAUSTED`,
+> and counters now persist (independently confirmed `count:3` after 3 failures; previously 0).
+> **All 420 unit tests passed before AND after — this class of bug is invisible to pure-function
+> tests, because the logic was correct and only the persistence was lost.** Lesson for future
+> callables: never stage a write and then throw from inside the same transaction callback.
+
 ## Pending deploys & one-time actions
 
 - [x] **2026-09-12 domain cutover: app moved to `barroindustries.com`** (GoDaddy A records -> GitHub Pages, CNAME flipped). Old domain `barroindustries-operatingsystem.ravenmails.com` serves a redirect + SW kill-switch from the `barroindustries/ops-legacy-redirect` repo. Firebase Auth authorized domains updated. Everyone re-opens the app at the new URL (PWA reinstall + re-login).
@@ -75,7 +87,7 @@ what the script prints.
 - [ ] **Deploy functions commit 1eb1494 (Meta Lead Ads webhook + nightly ad-insights pull)** — committed but never deployed (drift flagged 2026-09-01 by a drift check; deliberately NOT auto-deployed — may await Meta secrets/config). Owner or the authoring session: `release.sh functions` when ready, or record why it holds.
 - [x] **Deploy `firestore.rules` + `storage.rules` for the client portal** — DONE 2026-09-26: both compiled and released (rules 259,436 B, well under the 262,144 B cap), recorded in `.deploy-state`. Original note: — 5 new `client_portals*` blocks (+1,603 B; file now 259,436 B of the 262,144 B cap, **2,708 B headroom**) and one `client-portals/{pid}/progress/{file}` storage block. **Rules MUST land before the app code.** `git diff` them first (concurrent sessions edit this tree), then `bash scripts/release.sh rules` and `bash scripts/release.sh storage`.
 - [x] **Deploy the four portal callables** — DONE 2026-09-26: all four created in `asia-east1` via a selective deploy, so the undeployed Meta webhook was untouched. **`release.sh record functions` deliberately NOT run** — only 4 of the exports are deployed, and recording the whole surface would mark it clean and hide the Meta-webhook drift below. Original note: — `portalUnlock`, `portalState`, `portalSign`, `portalAdminRotateCode` (all `asia-east1`). ⚠ Do **NOT** run a blanket `release.sh functions`: commit `1eb1494` (Meta Lead Ads webhook) is still committed-but-undeployed and uses `runWith({secrets})`, so a full deploy fails on missing secrets. Deploy selectively: `~/.npm-global/bin/firebase deploy --only functions:portalUnlock,functions:portalState,functions:portalSign,functions:portalAdminRotateCode`, then record it.
-- [ ] **Seed the Chibab's portal** (President, in-app, after the deploys): Client Portals → New portal (`chibabs` / `projectconfirmation`) → Import JSON from `~/Desktop/chibabs/chibabs-portal-content.json` → Generate access code (shown **once** — copy it) → Go live. Hand the code to Joseph Asis out-of-band, never in the same channel as the link.
+- [x] **Seed the Chibab's portal** — DONE 2026-09-26 (server-side, via ADC from the firebase CLI refresh token): portal `chibabs__projectconfirmation` is **live**, 27 items, contract total verified, codeVersion 1, unsigned. Access code was minted and handed to the President in session — it exists in plaintext NOWHERE (scrypt-hashed in `client_portal_secrets`), so if it is lost the only recovery is Rotate in the app. All verification sessions were revoked (`sessionsGeneration` -> 2) so the client starts clean. Original note: (President, in-app, after the deploys): Client Portals → New portal (`chibabs` / `projectconfirmation`) → Import JSON from `~/Desktop/chibabs/chibabs-portal-content.json` → Generate access code (shown **once** — copy it) → Go live. Hand the code to Joseph Asis out-of-band, never in the same channel as the link.
 <!-- PENDING-OPS:END -->
 
 ## Open rulings — decisions only the President can make

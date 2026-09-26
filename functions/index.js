@@ -2636,6 +2636,19 @@ exports.portalUnlock = functions
     const secretsRef  = db.collection('client_portal_secrets').doc(portalId);
     const portalRef   = db.collection('client_portals').doc(portalId);
 
+    // IMPORTANT — Firestore transaction semantics, not just control flow:
+    // throwing INSIDE a runTransaction callback aborts the WHOLE transaction
+    // and discards every tx.set/tx.create/tx.update staged before the throw.
+    // An earlier version of this function staged the rate-limit-bucket
+    // increment + the unlock_fail event and then threw permission-denied in
+    // the same breath — which silently rolled back the very counter meant to
+    // stop the brute force, so the lockout never engaged (found in
+    // production end-to-end testing). The fix: the transaction callback
+    // below NEVER throws — every path (locked / not-found / bad-code / ok)
+    // instead RETURNS a verdict, so any writes it staged actually commit
+    // when the callback resolves. The HttpsError is thrown AFTER
+    // db.runTransaction has resolved, once we know the write (if any) is
+    // already durable.
     let result;
     try {
       result = await db.runTransaction(async (tx) => {
@@ -2651,18 +2664,20 @@ exports.portalUnlock = functions
 
         // 2. Rate-limit gate on BOTH buckets, fail CLOSED. Checked before
         // the portal-existence check and before verifyCode — a caller
-        // already locked out never learns anything more (§2.1 order).
+        // already locked out never learns anything more (§2.1 order). No
+        // writes are staged on this path (a still-locked bucket's `next`
+        // from rateLimitDecision is the bucket unchanged), so returning
+        // without writing is correct here.
         const ipDecision = portal.rateLimitDecision(ipBucketData, nowMs, portal.RATE.ip);
         const portalDecision = portal.rateLimitDecision(secretsData ? secretsData.fail : null, nowMs, portal.RATE.portal);
         if (!ipDecision.allowed || !portalDecision.allowed) {
           const retryMs = Math.max(ipDecision.retryAfterMs || 0, portalDecision.retryAfterMs || 0);
-          const minutes = Math.max(1, Math.ceil(retryMs / 60000));
-          throw new functions.https.HttpsError('resource-exhausted', `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+          return { outcome: 'locked', retryMs };
         }
 
-        // 3. Portal must exist and be reachable.
+        // 3. Portal must exist and be reachable. Also no writes staged yet.
         if (!portalData || !['live', 'signed'].includes(portalData.status)) {
-          throw new functions.https.HttpsError('not-found', "This link isn't active. Please check with Barro Kitchens.");
+          return { outcome: 'not_found' };
         }
 
         const failWrite = (nextIp, nextPortalFail) => {
@@ -2677,16 +2692,17 @@ exports.portalUnlock = functions
 
         // 4. No secrets doc means no code has ever been generated for this
         // portal — never distinguish this from "wrong code" to the caller,
-        // but still bucket-count the attempt.
+        // but still bucket-count the attempt. Stage the writes, then RETURN
+        // (not throw) so they commit.
         if (!secretsData) {
           failWrite(ipDecision.next, portalDecision.next);
-          throw new functions.https.HttpsError('permission-denied', "That access code isn't right.");
+          return { outcome: 'bad_code' };
         }
 
         const codeOk = portal.verifyCode(code, secretsData.codeSalt, secretsData.codeHash);
         if (!codeOk) {
           failWrite(ipDecision.next, portalDecision.next);
-          throw new functions.https.HttpsError('permission-denied', "That access code isn't right.");
+          return { outcome: 'bad_code' };
         }
 
         // 5. Success — reset both buckets, mint + store the viewer token,
@@ -2710,12 +2726,26 @@ exports.portalUnlock = functions
         });
         tx.update(portalRef, { lastViewedAt: admin.firestore.FieldValue.serverTimestamp() });
 
-        return { token, expiresAtMs, portalData };
+        return { outcome: 'ok', token, expiresAtMs, portalData };
       });
     } catch (e) {
-      if (e instanceof functions.https.HttpsError) throw e;
       console.error('[portalUnlock] transaction failed:', e.message);
       throw new functions.https.HttpsError('unavailable', 'Something went wrong on our side — please try again in a moment.');
+    }
+
+    // Only NOW — after any writes the verdict warranted have already
+    // committed — do we raise the caller-facing error. Messages are
+    // unchanged from before the fix: an attacker still cannot tell a locked
+    // portal from a wrong code, or a wrong code from "no code ever issued".
+    if (result.outcome === 'locked') {
+      const minutes = Math.max(1, Math.ceil(result.retryMs / 60000));
+      throw new functions.https.HttpsError('resource-exhausted', `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`);
+    }
+    if (result.outcome === 'not_found') {
+      throw new functions.https.HttpsError('not-found', "This link isn't active. Please check with Barro Kitchens.");
+    }
+    if (result.outcome === 'bad_code') {
+      throw new functions.https.HttpsError('permission-denied', "That access code isn't right.");
     }
 
     // Assemble the response payload OUTSIDE the transaction — reading the
