@@ -181,6 +181,9 @@ document.addEventListener('DOMContentLoaded', () => {
           // the success path above it.
           window._navDepth = 0;
           window._navFwd = 0;
+          // The signOut() below lands in the null branch, which routes through
+          // showSignedOut(); keep the LOGIN screen (with this error) rather than the website.
+          window._wantLogin = true;
           await auth.signOut();
           showLogin();
           // Keep form wrap visible (not role picker) so the error element is shown
@@ -245,7 +248,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // removed-user gate above, the wrong-portal gate, and any future path —
       // it is idempotent, so running it twice on those paths costs nothing.
       window.resetSessionOverlays();
-      showLogin();
+      // PUBLIC-WEBSITE-SPEC.md §5.2 — was showLogin(). Installed PWA / a visitor who asked
+      // for login -> login screen; a signed-out browser visitor -> the public website.
+      showSignedOut();
     }
   });
 });
@@ -729,6 +734,7 @@ try {
 // ── Screens ───────────────────────────────────────
 function showLogin() {
   hideSplash();
+  _setView('login');
   document.title = 'Barro Industries Operating System';
   document.body.classList.remove('qb-desktop');
   // 2026-08-08 — LOCKOUT FIX. The mandatory-photo gate was appearing OVER the
@@ -756,6 +762,59 @@ function showLogin() {
   document.getElementById('app-shell').classList.add('hidden');
 }
 
+// ── Public website view switch (PUBLIC-WEBSITE-SPEC.md §4.2, §5.2) ───────────
+// <html data-view="boot|site|login|app"> is set before first paint by the inline
+// script in index.html's <head> and CORRECTED here once Firebase auth resolves:
+// showApp() -> app, showLogin() -> login, showSite() -> site. css/site.css keys on
+// it; #login-screen / #app-shell keep their own .hidden toggles. The installed PWA
+// (html[data-standalone]) never shows the website. localStorage['bi-auth-hint'] is a
+// boot HINT only: showApp() sets it; showSignedOut() / showRemovedUserScreen() clear it.
+window._wantLogin = window._wantLogin || false;   // the head script may already have set it
+function _setView(v) { try { document.documentElement.setAttribute('data-view', v); } catch (_) {} }
+function _isStandalone() { return document.documentElement.hasAttribute('data-standalone'); }
+// Byte-identical to the static <title> in index.html (app.js must not depend on site.js).
+const SITE_TITLE = 'Barro Industries — Commercial Kitchen Equipment & Stainless Fabrication, Metro Manila';
+function showSite() {
+  hideSplash();
+  _setView('site');
+  document.title = SITE_TITLE;
+  // #login-screen / #app-shell classes are deliberately NOT touched: css/site.css hides
+  // both while data-view="site". (The caller already ran window.resetSessionOverlays().)
+  //
+  // What showLogin() does for EVERY signed-out path — and what is lost if the site is
+  // shown instead — is its session-boundary reset (see the LOCKOUT FIX note there):
+  // without it the mandatory-photo gate's own "Sign out" button leaves #req-photo-overlay
+  // (z-splash, no dismiss control) painted over the public site, and the signed-out
+  // page keeps the previous user's profile/role. Same five resets, same order.
+  document.body.classList.remove('qb-desktop');
+  if (_reqPhotoTimer) { clearTimeout(_reqPhotoTimer); _reqPhotoTimer = 0; }
+  document.getElementById('req-photo-overlay')?.remove();
+  _reqPhotoFails = 0; _reqPhotoDeferred = false;
+  userProfile = {};
+  currentRole = null;
+  currentDepts = [];
+}
+// The single funnel for "no user": every sign-out path (explicit, inactivity,
+// force-logout, removed-user, wrong-portal) ends in the auth listener's null branch,
+// which calls this. Installed PWA, or a visitor who asked for login -> login screen;
+// anyone else (browser, signed out) -> the public website.
+function showSignedOut() {
+  try { localStorage.removeItem('bi-auth-hint'); } catch (_) {}
+  if (_isStandalone() || window._wantLogin) showLogin(); else showSite();
+}
+// Wired by js/site.js (Login button / footer link) and by the login screen's back link.
+window.openLoginFromSite = function () { window._wantLogin = true; showLogin(); };
+window.backToSiteFromLogin = function () {
+  window._wantLogin = false;
+  clearLoginError();
+  document.getElementById('password').value = '';
+  selectedLoginType = null;   // reset so a restored session is not gated by a stale portal pick
+  document.getElementById('login-form-wrap').classList.add('hidden');
+  document.getElementById('signup-form-wrap').classList.add('hidden');
+  document.getElementById('login-role-picker').classList.remove('hidden');   // back to the picker
+  showSite();
+};
+
 // ── Removed-user block screen (owner feature — employee offboarding) ─────
 // Shown when users/{uid}.removed === true (see the auth.onAuthStateChanged
 // gate above, and js/screens/people.js's renderTeamCards "Remove from
@@ -768,6 +827,7 @@ function showLogin() {
 // Sign Out button — nothing else on the page is reachable underneath it.
 function showRemovedUserScreen() {
   hideSplash();
+  try { localStorage.removeItem('bi-auth-hint'); } catch (_) {}
   document.getElementById('login-screen')?.classList.add('hidden');
   document.getElementById('app-shell')?.classList.add('hidden');
   let el = document.getElementById('removed-user-screen');
@@ -792,6 +852,10 @@ function showRemovedUserScreen() {
 let _ptrInit = false;
 function showApp() {
   hideSplash();
+  _setView('app'); window._wantLogin = false;
+  // The ONLY place a user is confirmed signed in and bootstrapped, hence the only
+  // writer of the boot hint the <head> script reads (PUBLIC-WEBSITE-SPEC.md §4.2).
+  try { localStorage.setItem('bi-auth-hint', '1'); } catch (_) {}
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
   // a11y (Phase 188): explicit landmark roles on the shell — additive only,
@@ -1394,6 +1458,9 @@ function initLogin() {
     document.getElementById('signup-spinner').classList.add('hidden');
     document.getElementById('signup-submit-btn').disabled = false;
   });
+
+  // "Back to website" (PUBLIC-WEBSITE-SPEC.md §5.3) — window.backToSiteFromLogin is defined next to showSite().
+  document.getElementById('login-site-back')?.addEventListener('click', window.backToSiteFromLogin);
 
   // Back button (regular login)
   document.getElementById('login-back-btn')?.addEventListener('click', () => {
@@ -4625,6 +4692,9 @@ window.devCheckStacking = function () {
 
 // ── v12 WS10 — router wiring (Back/Forward/hash edits/Esc) ───────────────
 window.addEventListener('popstate', (e) => {
+  // Public website / login / boot: there is no session to route. Site anchors (#catalogue…)
+  // and #login must never reach navigateTo() while signed out (PUBLIC-WEBSITE-SPEC.md §5.2).
+  if (document.documentElement.getAttribute('data-view') !== 'app') return;
   // Overlay open? A Back press dismisses the top overlay and consumes the event.
   if (window.Overlay && window.Overlay.isOpen()) { window.Overlay._popOne(); return; }
   // DIRECTION MATTERS. This used to decrement unconditionally, which reads a
@@ -4646,6 +4716,7 @@ window.addEventListener('popstate', (e) => {
   navigateTo(st.page || 'dashboard', { subtab: st.subtab || null, fromHistory: true });
 });
 window.addEventListener('hashchange', () => {         // user typed/edited the URL hash
+  if (document.documentElement.getAttribute('data-view') !== 'app') return;   // see popstate above
   const p = parseHash();
   if (p.page === window.currentPage && p.subtab === (window.currentSubtab||null)) return;
   navigateTo(p.page, { subtab: p.subtab, replace: true });
@@ -4878,6 +4949,12 @@ window.Keymap = (function () {
 
   function onKeydown(e) {
     if (e.defaultPrevented) return;
+    // Public website: there is no session behind it, so the app shortcuts (/, ?, ⌘/Ctrl+K,
+    // g+letter, Alt+digit) must not reach navigateTo() or open the internal shortcuts modal
+    // over the site for an anonymous visitor. Scoped to the site view ONLY, so the login
+    // screen and the app behave exactly as before (PUBLIC-WEBSITE-SPEC.md §5.2's "no
+    // navigateTo() while signed out" rule, applied to the keyboard path it did not list).
+    if (document.documentElement.getAttribute('data-view') === 'site') return;
     const typing = isTextInputFocused();
 
     // 'g d' / 'g t' / 'g a' / 'g c' / 'g p' go-to sequences: stateful two-key
@@ -5556,8 +5633,10 @@ window.migrateStrandedBKQuotes = async function () {
 // never interrupted by a forced mid-work reload.
 let _swReloading = false; // set only when WE trigger a silent login-screen apply
 function _atLoginScreen() {
-  const s = document.getElementById('login-screen');
-  return s && !s.classList.contains('hidden');
+  // "No session to disrupt": the login screen, the splash that precedes it, or the public
+  // website (a silent SW apply reloads a visitor at most once per deploy). PUBLIC-WEBSITE-SPEC.md §5.2.
+  const v = document.documentElement.getAttribute('data-view');
+  return v === 'login' || v === 'site' || v === 'boot';
 }
 // Re-audit 2026-08-03 (item d) — "Mid-session: do nothing" above meant a
 // long-lived kiosk session (up to the 10-day AUTO_LOGOUT_MS window, per

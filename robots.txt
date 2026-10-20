@@ -1,0 +1,16 @@
+User-agent: *
+Allow: /
+Disallow: /q/
+Disallow: /t/
+Disallow: /v/
+Disallow: /track.html
+Disallow: /sales/
+Disallow: /projects/
+Disallow: /partners/
+Disallow: /parterns/
+Disallow: /ventures/
+Disallow: /docs/
+Disallow: /specs/
+Disallow: /quote-builder-v2.html
+Disallow: /quote-builder.html
+Sitemap: https://barroindustries.com/sitemap.xml
