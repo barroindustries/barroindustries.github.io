@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.316';
+const CACHE_VER = 'bi-ops-v14.0.317';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -39,8 +39,8 @@ const PRECACHE = [
   // ?v= must match index.html's <link> hrefs exactly — the SW caches by URL,
   // so an unversioned entry here would never serve the versioned request and
   // the app would lose offline CSS. Both sides are rewritten by the hook.
-  '/css/tokens.css?v=14.0.316',
-  '/css/styles.css?v=14.0.316',
+  '/css/tokens.css?v=14.0.317',
+  '/css/styles.css?v=14.0.317',
   '/css/site.css',
   '/manifest.json',
   '/quote-builder-v2.html',
@@ -64,6 +64,7 @@ const PRECACHE = [
   '/js/svc-approvals.js',
   '/js/ui-crud-table.js',
   '/js/money-core.js',
+  '/js/pricing-core.js',
   '/js/pay-policy.js',
   '/js/statutory-status.js',
   '/js/geo-core.js',
@@ -108,7 +109,9 @@ const PRECACHE = [
   '/js/screens/todo.js',
   '/js/screens/client-portals.js',
   '/js/cir-forms.js',
+  '/js/qr-def.js',
   '/js/screens/client-info-requests.js',
+  '/js/screens/quote-requests.js',
   '/js/screens/dashboards.js',
   '/js/screens/layoff.js',
   '/js/chat.js',

@@ -10,6 +10,14 @@ const portal    = require('./portal-core');
 // so it is also required directly (no emulator) by
 // tests/client-info-request.test.mjs.
 const cir       = require('./cir-core');
+// PUBLIC-QUOTE-REQUEST-SPEC.md §5.0 — pure helpers for the four qr* callables
+// appended at the end of this file (intake / item validation, the server-side
+// estimate, the response key set). Zero Firebase deps, so it is also required
+// directly (no emulator) by tests/quote-request.test.mjs. It pulls in
+// ./pricing-core (the Quote Builder's pricing math, byte-mirrored from
+// js/pricing-core.js), ./qr-def (the shared definitions) and ./qr-published.json
+// (the generated allowlist of published product ids).
+const qr        = require('./qr-core');
 admin.initializeApp();
 
 // v14 re-audit fix — real per-sender enforcement (see the block inside
@@ -3358,32 +3366,46 @@ async function cirPurgeStaleDrafts(db, nowMs) {
 }
 
 /**
+ * Recipient resolution shared by cirNotifyStaff and qrNotifyStaff (PUBLIC-QUOTE-REQUEST-SPEC.md §5.0 — a pure
+ * extraction of the three-query union that used to live inline in cirNotifyStaff; CIR behaviour, including every log
+ * line, is unchanged: `logTag` is '[cirSubmit]' for CIR).
+ *
  * §2.5 step 11b — owner ruling R1 (amended): union of Sales-department users
  * (legacy `department` string field + current `departments` array field,
  * same dual-query idiom processMetaLead uses for the same reason) AND an
  * INDEPENDENT role=='president' query, deduped by uid, partners always
- * dropped. Each of the three queries is caught individually so one failing
- * never drops the other two's recipients (spec: "still send to whoever the
- * others returned"). Role for the partner-drop check comes straight off each
- * query's own doc data — no extra re-read per recipient.
+ * dropped (by the caller, from the returned uid -> role map). Each of the
+ * three queries is caught individually so one failing never drops the other
+ * two's recipients (spec: "still send to whoever the others returned"). Role
+ * for the partner-drop check comes straight off each query's own doc data — no
+ * extra re-read per recipient.
+ * Returns { allUids: Set<string>, uidRole: Map<string, string|undefined> }.
  */
-async function cirNotifyStaff(db, doc, refNo) {
+async function resolveSalesAndPresidentUids(db, logTag) {
   const uidRole = new Map();
   const salesUids = new Set();
   const presidentUids = new Set();
 
   const q1 = db.collection('users').where('department', '==', 'Sales').get()
     .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
-    .catch((e) => console.error('[cirSubmit] notify: Sales(department) query failed:', e.message));
+    .catch((e) => console.error(`${logTag} notify: Sales(department) query failed:`, e.message));
   const q2 = db.collection('users').where('departments', 'array-contains', 'Sales').get()
     .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
-    .catch((e) => console.error('[cirSubmit] notify: Sales(departments[]) query failed:', e.message));
+    .catch((e) => console.error(`${logTag} notify: Sales(departments[]) query failed:`, e.message));
   const q3 = db.collection('users').where('role', '==', 'president').get()
     .then((s) => s.docs.forEach((d) => { presidentUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
-    .catch((e) => console.error('[cirSubmit] notify: president query failed:', e.message));
+    .catch((e) => console.error(`${logTag} notify: president query failed:`, e.message));
   await Promise.all([q1, q2, q3]);
 
-  const allUids = new Set([...salesUids, ...presidentUids]);
+  return { allUids: new Set([...salesUids, ...presidentUids]), uidRole };
+}
+
+/**
+ * §2.5 step 11b — notify the Sales department + the President (owner ruling R1) of a new client brief.
+ * Recipient resolution lives in resolveSalesAndPresidentUids above.
+ */
+async function cirNotifyStaff(db, doc, refNo) {
+  const { allUids, uidRole } = await resolveSalesAndPresidentUids(db, '[cirSubmit]');
   if (allUids.size === 0) {
     console.error('[cirSubmit] notify: no recipients resolved (all three lookups empty or failed) for', refNo);
     return;
@@ -3965,6 +3987,619 @@ exports.cirAdminDelete = functions
       });
     } catch (e) {
       console.error('[cirAdminDelete] audit log write failed (delete already committed):', e.message);
+    }
+
+    return { ok: true };
+  });
+
+// ──────────────────────────────────────────────────────────────────────────
+//  Public quote request callables — PUBLIC-QUOTE-REQUEST-SPEC.md §5.
+//
+//  Sibling of the Client Information Request callables directly above: the public
+//  "Get a quote" flow on barroindustries.com/catalogue/ (3-step intake -> "Add to
+//  quote" -> a server-computed ESTIMATE RANGE -> submit) has NO Firebase Auth
+//  session for the three public callables (qrStartSession / qrEstimate /
+//  qrSubmit); qrAdminDelete is the one staff-authenticated exception, mirroring
+//  cirAdminDelete. All pure decision logic (intake / item validation, the
+//  pricing, the estimate range + gate, the response key set, the notification
+//  text) lives in ./qr-core.js — required as `qr` at the top of this file — so it
+//  is unit-tested without an emulator; these functions are thin Admin-SDK glue,
+//  reusing this file's portalClientIp / cirRequireIpKey / cirRateLimit /
+//  portalSha256Hex / manilaDate / commitInChunks / resolveSalesAndPresidentUids
+//  rather than reimplementing any of them. (cirRequireIpKey / cirRateLimit log
+//  their abuse events to cir_abuse — acceptable, and noted here so nobody hunts
+//  for them in qr_abuse.)
+//
+//  THE RULE: no price, rate, formula, midpoint, exact total or per-line figure is
+//  ever returned to the browser. qrEstimate returns ONLY qr.publicEstimate()'s
+//  fixed key set; qrSubmit returns the receipt (ref, dates, the rounded {low,high}
+//  the client was shown). The exact total and the per-line list prices are stored
+//  on the staff-only `internal` block of quote_requests/{ref} and nowhere else —
+//  never in a notification, never in a response.
+//
+//  qr_sessions / qr_ratelimit / qr_abuse have NO firestore.rules match block
+//  (Admin-SDK only, spec §9): these callables are the ONLY way that data moves.
+//
+//  Pricing source: Firestore `products` + `productMeta/config`, read here by the
+//  Admin SDK (rules do not apply) and cached per instance — the same docs the
+//  Quote Builder prices from (quote-builder-v2.html loadDatabase()). Only
+//  PUBLISHED product ids (functions/qr-published.json) are quotable.
+//
+//  Region is asia-east1 on all four — MANDATORY on the client:
+//    firebase.app().functions('asia-east1').httpsCallable('qrEstimate')(…)
+// ──────────────────────────────────────────────────────────────────────────
+
+function qrIpBucketRef(db, scope, ipKey) {
+  return db.collection('qr_ratelimit').doc(portalSha256Hex(scope + '|' + ipKey));
+}
+// IP-independent fallbacks (defence in depth alongside the per-IP buckets — the
+// per-IP key is the right-most XFF entry, which a fresh network path rotates).
+function qrGlobalBucketRef(db, name) {
+  return db.collection('qr_ratelimit').doc(name);              // 'global_start' | 'global_estimate' | 'global_submit'
+}
+
+/** Best-effort abuse / forensic log — qr_abuse has no rules match (Admin SDK only). NEVER throws. */
+async function qrLogAbuse(db, kind, ipHash, detail) {
+  try {
+    await db.collection('qr_abuse').add({
+      at: admin.firestore.FieldValue.serverTimestamp(),
+      kind, ipHash: ipHash || '', detail: detail || {},
+    });
+  } catch (e) {
+    console.error('[qrAbuse] log failed:', e.message);
+  }
+}
+
+/**
+ * Shape guard for the three PUBLIC callables, run before anything reads the body. firebase-functions decodes the request with
+ * bracket assignment, so a wire body {"__proto__":{…}} reaches the handler as an object with NO own keys whose fields live on
+ * its prototype: JSON.stringify(data).length reads 2 (the size guard below is blind to it) and every Object.keys() allowlist
+ * (unknown / family / config keys) sees nothing. A plain-data check on the decoded tree refuses that outright; the raw body
+ * length (when the runtime exposes it) bounds what a request may cost before it is even parsed. UTF-8 can be up to 3 bytes
+ * per UTF-16 unit, hence the x3 on the character limit.
+ */
+function qrAssertWellFormed(data, context) {
+  const raw = context && context.rawRequest && context.rawRequest.rawBody;
+  const rawLen = raw && typeof raw.length === 'number' ? raw.length : 0;
+  if (rawLen > qr.QR_DEF.LIMITS.maxPayloadBytes * 3 + 1024) {
+    throw new functions.https.HttpsError('invalid-argument', 'Your request is too large to send.');
+  }
+  if (!qr.isPlainJsonTree(data)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Your request is not in the expected format — please reload the page.');
+  }
+}
+
+const QR_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+const QR_SESSION_EXPIRED_MSG = 'Your session expired — reload the page (your list is saved on this device).';
+const QR_SOMETHING_WRONG_MSG = 'Something went wrong on our side — your list is saved on this device. Please try again in a moment.';
+
+function qrTsMs(ts) { return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0; }
+
+/** Best-effort purge of up to 5 sessions older than the TTL, oldest first (single-field order — no index). NEVER throws. */
+async function qrPurgeStaleSessions(db, nowMs) {
+  let snap;
+  try {
+    snap = await db.collection('qr_sessions').orderBy('createdAt', 'asc').limit(5).get();
+  } catch (e) {
+    console.error('[qrPurgeStaleSessions] query failed:', e.message);
+    return;
+  }
+  for (const doc of snap.docs) {
+    const createdMs = qrTsMs((doc.data() || {}).createdAt);
+    if (!createdMs || (nowMs - createdMs) <= qr.QR_DEF.LIMITS.sessionTtlMs) continue;
+    try { await doc.ref.delete(); } catch (e) { console.error('[qrPurgeStaleSessions] delete failed for', doc.id, e.message); }
+  }
+}
+
+/** Best-effort purge of up to 5 qr_abuse records older than the retention window, oldest first (single-field order — no index). NEVER throws. */
+async function qrPurgeStaleAbuse(db, nowMs) {
+  let snap;
+  try {
+    snap = await db.collection('qr_abuse').orderBy('at', 'asc').limit(5).get();
+  } catch (e) {
+    console.error('[qrPurgeStaleAbuse] query failed:', e.message);
+    return;
+  }
+  for (const doc of snap.docs) {
+    const atMs = qrTsMs((doc.data() || {}).at);
+    if (!atMs || (nowMs - atMs) <= qr.ABUSE_TTL_MS) continue;
+    try { await doc.ref.delete(); } catch (e) { console.error('[qrPurgeStaleAbuse] delete failed for', doc.id, e.message); }
+  }
+}
+
+// ── product master cache (§5.0) ───────────────────────────────────────────
+// One read of `products` (limit 1000, the Quote Builder's own limit) + productMeta/config per instance per 10 minutes.
+// A failed refresh may be covered by a cache younger than 24 hours; anything older fails CLOSED ('unavailable').
+let _qrProductsCache = null;                                    // { byId: Map, constants, estimateEnabled, loadedAt }
+const _qrEstimateLru = qr.createLru(256, 10 * 60 * 1000);       // basketHash+entity+version+loadedAt -> { basket, range, gate }
+let _qrEstimateCalls = 0;                                       // per-instance counter for the every-20th forensic sample
+
+async function qrLoadProducts(db, nowMs) {
+  const state = qr.productsCacheState(_qrProductsCache, nowMs);
+  if (state === 'fresh') return _qrProductsCache;
+  try {
+    const [snap, metaSnap] = await Promise.all([
+      db.collection('products').limit(1000).get(),
+      db.collection('productMeta').doc('config').get(),
+    ]);
+    const meta = metaSnap.exists ? metaSnap.data() : {};
+    const byId = qr.buildProductIndex(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+    // An empty index means the master (or functions/qr-published.json) is not what we think it is — refuse, never "price nothing".
+    if (byId.size === 0) throw new Error('no published products resolved from the product master');
+    _qrProductsCache = { byId, constants: qr.constantsOf(meta), estimateEnabled: qr.estimateEnabledOf(meta), loadedAt: nowMs };
+    return _qrProductsCache;
+  } catch (e) {
+    console.error('[qrLoadProducts] refresh failed:', e.message);
+    if (state === 'stale') {
+      console.error('[qrLoadProducts] serving the cached product master (< 24 h old)');
+      return _qrProductsCache;
+    }
+    throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
+  }
+}
+
+/** §5.4 step 11a — notify the Sales department + the President (R6) of a new quote request. NEVER carries the exact figure. */
+async function qrNotifyStaff(db, doc, refNo) {
+  const { allUids, uidRole } = await resolveSalesAndPresidentUids(db, '[qrSubmit]');
+  if (allUids.size === 0) {
+    console.error('[qrSubmit] notify: no recipients resolved (all three lookups empty or failed) for', refNo);
+    return;
+  }
+  const toNotify = [];
+  allUids.forEach((uid) => {
+    if (uidRole.get(uid) === 'partner') return;                  // partners always dropped
+    toNotify.push({
+      ref: db.collection('notifications').doc(uid).collection('items').doc(),
+      notifData: Object.assign({}, qr.buildNotification(doc), { dedupKey: `qr_${refNo}_${uid}` }),
+      // NO senderUid — system send, exempt from sendPushOnNotification's per-sender push quota (same as cirNotifyStaff).
+    });
+  });
+  if (toNotify.length) await commitInChunks(db, toNotify, null);
+}
+
+// ── qrStartSession — §5.2, anonymous ────────────────────────────────────
+exports.qrStartSession = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    qrAssertWellFormed(data, context);
+    if (!data || data.defVersion !== qr.QR_DEF.VERSION) {
+      throw new functions.https.HttpsError('failed-precondition', 'This page was updated — please reload.');
+    }
+    const ipInfo = portalClientIp(context);
+    const ipKey = cirRequireIpKey(db, ipInfo);
+    const ip = ipInfo.ip;
+    const userAgent = (context.rawRequest && context.rawRequest.headers && context.rawRequest.headers['user-agent']) || '';
+
+    await cirRateLimit(db, [
+      { ref: qrIpBucketRef(db, 'start', ipKey), cfg: qr.RATE.start },
+      { ref: qrGlobalBucketRef(db, 'global_start'), cfg: qr.RATE.globalStart },
+    ], nowMs);
+
+    const { token, tokenHash: tHash } = portal.newViewerToken();
+    try {
+      await db.collection('qr_sessions').doc(tHash).create({
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        ipHash: portalSha256Hex(ip),
+        uaHash: portalSha256Hex(userAgent),
+        estimateCount: 0,
+        lastEstimateAt: null,
+        lastBasketHash: null,
+        submittedAt: null,
+        refNo: null,
+      });
+    } catch (e) {
+      console.error('[qrStartSession] session create failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
+    }
+
+    try { await qrPurgeStaleSessions(db, nowMs); } catch (e) { console.error('[qrStartSession] stale-session purge failed:', e.message); }
+    try { await qrPurgeStaleAbuse(db, nowMs); } catch (e) { console.error('[qrStartSession] stale-abuse purge failed:', e.message); }
+
+    return { ok: true, sessionToken: token, serverNow: new Date(nowMs).toISOString() };
+  });
+
+// ── qrEstimate — §5.3, anonymous ────────────────────────────────────────
+exports.qrEstimate = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    const L = qr.QR_DEF.LIMITS;
+    qrAssertWellFormed(data, context);
+    const ipInfo = portalClientIp(context);
+    const ipKey = cirRequireIpKey(db, ipInfo);
+    const ip = ipInfo.ip;
+
+    // 1. Shape + size.
+    let payloadLen;
+    try { payloadLen = JSON.stringify(data == null ? {} : data).length; } catch (e) { payloadLen = Infinity; }
+    if (!(payloadLen <= L.maxPayloadBytes)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Your list is too large to estimate.');
+    }
+    const d = (data && typeof data === 'object') ? data : {};
+    const sessionToken = typeof d.sessionToken === 'string' ? d.sessionToken : '';
+    if (!QR_TOKEN_RE.test(sessionToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please reload the page.');
+    }
+    if (d.defVersion !== qr.QR_DEF.VERSION) {
+      throw new functions.https.HttpsError('failed-precondition', 'This page was updated — please reload.');
+    }
+    if (d.entityType !== 'private' && d.entityType !== 'government') {
+      throw new functions.https.HttpsError('invalid-argument', 'Please choose government or private on the details form.');
+    }
+    if (!Array.isArray(d.items) || d.items.length < 1 || d.items.length > L.maxItems) {
+      throw new functions.https.HttpsError('invalid-argument', 'Add at least one item to your quote.');
+    }
+
+    // 2. Rate limit — estimate|ip AND global_estimate, one transaction.
+    await cirRateLimit(db, [
+      { ref: qrIpBucketRef(db, 'estimate', ipKey), cfg: qr.RATE.estimate },
+      { ref: qrGlobalBucketRef(db, 'global_estimate'), cfg: qr.RATE.globalEstimate },
+    ], nowMs);
+
+    // 3. Session + the per-session counter (150 / 24 h, independent of the IP). The transaction RETURNS a verdict and
+    // never throws inside (STATUS 2026-09-26: a throw from a transaction callback discards every staged write); the
+    // error is raised AFTER it commits.
+    const tHash = portal.tokenHash(sessionToken);
+    const sessRef = db.collection('qr_sessions').doc(tHash);
+    let verdict;
+    try {
+      verdict = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(sessRef);
+        const cur = snap.exists ? snap.data() : null;
+        if (!qr.sessionUsable(cur, qrTsMs(cur && cur.createdAt), nowMs)) return { outcome: 'expired' };
+        const dec = qr.sessionEstimateDecision({ estimateCount: cur.estimateCount, lastEstimateMs: qrTsMs(cur.lastEstimateAt) || null }, nowMs, portalSha256Hex(JSON.stringify(d.items)));
+        if (!dec.allowed) return { outcome: 'blocked' };
+        tx.update(sessRef, Object.assign({}, dec.next, { lastEstimateAt: admin.firestore.FieldValue.serverTimestamp() }));
+        return { outcome: 'ok' };
+      });
+    } catch (e) {
+      console.error('[qrEstimate] session transaction failed — failing CLOSED:', e.message);
+      throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
+    }
+    if (verdict.outcome === 'expired') throw new functions.https.HttpsError('failed-precondition', QR_SESSION_EXPIRED_MSG);
+    if (verdict.outcome === 'blocked') throw new functions.https.HttpsError('resource-exhausted', 'Estimate paused for today — you can still submit your list.');
+
+    // 4. Products (cached). Kill-switch (O7): no pricing performed at all when the owner has switched the figure off.
+    const products = await qrLoadProducts(db, nowMs);
+    if (!products.estimateEnabled) {
+      return qr.publicEstimate(null, null, { shown: false, reason: 'disabled' }, qr.QR_DEF.ESTIMATE, d.entityType, nowMs);
+    }
+
+    // 5. Items against the PUBLISHED master.
+    const norm = qr.normaliseItems(d.items, products.byId);
+    if (!norm.ok) {
+      const err = new functions.https.HttpsError('invalid-argument', norm.errors.slice(0, 3).join(' '), norm.badIds.length ? { itemIds: norm.badIds } : undefined);
+      throw err;
+    }
+
+    // 6. Price (LRU by basket hash + entity + estimate version + master load time, so a master refresh is never served stale).
+    const cfg = qr.QR_DEF.ESTIMATE;
+    const hash = qr.basketHash(norm.items);
+    const key = [hash, d.entityType, cfg.version, products.loadedAt].join('|');
+    let hit = _qrEstimateLru.get(key, nowMs);
+    if (!hit) {
+      const basket = qr.computeBasket(norm.items, products.byId, products.constants, cfg);
+      hit = { basket, range: qr.rangeFor(basket.exact, cfg), gate: qr.gateFor(basket, cfg) };
+      _qrEstimateLru.set(key, hit, nowMs);
+    }
+
+    // 7. Forensic sampling — every 20th estimate per instance, recorded as 'estimate_gate' when that call was gate-denied (no prices,
+    // ever). Gate-denied calls are NOT logged individually: whether a basket is gated is attacker-controlled, so "log every gate
+    // denial" would let one caller write a qr_abuse document per request; the per-IP / per-session / global limits already throttle them.
+    _qrEstimateCalls++;
+    if (_qrEstimateCalls % 20 === 0) {
+      qrLogAbuse(db, hit.gate.shown ? 'estimate_sample' : 'estimate_gate', portalSha256Hex(ip),
+        { basketHash: hash, lines: norm.items.length, shown: !!hit.gate.shown }).catch(() => {});
+    }
+
+    return qr.publicEstimate(hit.basket, hit.range, hit.gate, cfg, d.entityType, nowMs);
+  });
+
+// ── qrSubmit — §5.4, anonymous ──────────────────────────────────────────
+exports.qrSubmit = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    const db = admin.firestore();
+    const nowMs = Date.now();
+    const L = qr.QR_DEF.LIMITS;
+    qrAssertWellFormed(data, context);
+    const ipInfo = portalClientIp(context);
+    const ipKey = cirRequireIpKey(db, ipInfo);
+    const ip = ipInfo.ip;
+    const hdr = (context.rawRequest && context.rawRequest.headers) || {};
+    const userAgent = hdr['user-agent'] || '';
+    const acceptLanguage = hdr['accept-language'] || '';
+    const referer = hdr['referer'] || '';
+
+    // 1. Shape + size, token, definition + notice versions, consent.
+    let payloadLen;
+    try { payloadLen = JSON.stringify(data == null ? {} : data).length; } catch (e) { payloadLen = Infinity; }
+    if (!(payloadLen <= L.maxPayloadBytes)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Your request is too large to send.');
+    }
+    const d = (data && typeof data === 'object') ? data : {};
+    const sessionToken = typeof d.sessionToken === 'string' ? d.sessionToken : '';
+    if (!QR_TOKEN_RE.test(sessionToken)) {
+      throw new functions.https.HttpsError('unauthenticated', 'Please reload the page.');
+    }
+    if (d.defVersion !== qr.QR_DEF.VERSION) {
+      throw new functions.https.HttpsError('failed-precondition', 'This page was updated — please reload.');
+    }
+    const consent = (d.consent && typeof d.consent === 'object') ? d.consent : {};
+    if (consent.agreed !== true) {
+      throw new functions.https.HttpsError('invalid-argument', 'Please tick the data privacy consent.');
+    }
+    if (consent.noticeVersion !== qr.QR_DEF.PRIVACY_NOTICE.version) {
+      throw new functions.https.HttpsError('failed-precondition', 'The privacy notice was updated — please reload and review it again.');
+    }
+
+    // 2. Rate limit — submit|ip AND global_submit.
+    await cirRateLimit(db, [
+      { ref: qrIpBucketRef(db, 'submit', ipKey), cfg: qr.RATE.submit },
+      { ref: qrGlobalBucketRef(db, 'global_submit'), cfg: qr.RATE.globalSubmit },
+    ], nowMs);
+
+    // 3. Validate intake + contact (the server is the authority).
+    const iv = qr.validateIntake(d.intake, nowMs);
+    const cv = qr.validateContact(d.contact);
+    const fieldErrors = iv.errors.concat(cv.errors);
+    if (fieldErrors.length) {
+      if (fieldErrors.some((e) => e.indexOf('Unknown field') === 0)) {
+        qrLogAbuse(db, 'bad_payload', portalSha256Hex(ip), { errors: fieldErrors.slice(0, 5) }).catch(() => {});
+      }
+      throw new functions.https.HttpsError('invalid-argument', fieldErrors.slice(0, 3).join(' '));
+    }
+    const intake = iv.clean;
+    const contact = cv.clean;
+
+    // 4. Session: exists, unsubmitted, unexpired.
+    const tHash = portal.tokenHash(sessionToken);
+    const sessRef = db.collection('qr_sessions').doc(tHash);
+    let sessSnap;
+    try {
+      sessSnap = await sessRef.get();
+    } catch (e) {
+      console.error('[qrSubmit] session read failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
+    }
+    const sess = sessSnap.exists ? sessSnap.data() : null;
+    const sessCreatedMs = qrTsMs(sess && sess.createdAt);
+    if (!qr.sessionUsable(sess, sessCreatedMs, nowMs)) {
+      throw new functions.https.HttpsError('failed-precondition', QR_SESSION_EXPIRED_MSG);
+    }
+
+    // 5. Bot check — a plausible fake success, NOTHING written, no notification. (The honest page waits out the 20 s floor
+    // before it calls this, so a real visitor never trips it.)
+    const lastEstimate = (() => {
+      const le = d.lastEstimate;
+      if (!le || typeof le !== 'object') return null;
+      const n = (v) => (Number.isFinite(v) && v >= 0 && v <= 1e10 ? Math.round(v) : null);
+      const h = (typeof le.basketHash === 'string' && /^[0-9a-f]{64}$/.test(le.basketHash)) ? le.basketHash : null;
+      return (n(le.low) == null && n(le.high) == null && !h) ? null : { low: n(le.low), high: n(le.high), basketHash: h };
+    })();
+    const bot = qr.botCheck({ honeypot: d.honeypot, sessionCreatedMs: sessCreatedMs, nowMs });
+    if (bot.bot) {
+      qrLogAbuse(db, bot.reason, portalSha256Hex(ip), {}).catch(() => {});
+      return {
+        ok: true, refNo: qr.refNo(nowMs), receivedAt: new Date(nowMs).toISOString(), submittedOnManila: manilaDate(),
+        estimate: (lastEstimate && lastEstimate.low != null && lastEstimate.high != null) ? { low: lastEstimate.low, high: lastEstimate.high } : null,
+      };
+    }
+
+    // 6. Items against the PUBLISHED master.
+    const products = await qrLoadProducts(db, nowMs);
+    const norm = qr.normaliseItems(d.items, products.byId);
+    if (!norm.ok) {
+      throw new functions.https.HttpsError('invalid-argument', norm.errors.slice(0, 3).join(' '), norm.badIds.length ? { itemIds: norm.badIds } : undefined);
+    }
+
+    // 7. Price AGAIN, at submit time. This is what is stored — never anything the page reported.
+    const cfg = qr.QR_DEF.ESTIMATE;
+    const basket = qr.computeBasket(norm.items, products.byId, products.constants, cfg);
+    const range = qr.rangeFor(basket.exact, cfg);
+    const gate = products.estimateEnabled ? qr.gateFor(basket, cfg) : { shown: false, reason: 'disabled' };
+    const pe = qr.publicEstimate(basket, range, gate, cfg, intake.entityType, nowMs);
+    // What the page says it displayed is client-reported, so it is checked against what the server computes NOW: a different basket
+    // hash, OR a different {low, high} (a hostile page can echo the correct hash next to any figure it likes), OR a figure for a
+    // basket the server would no longer show one for.
+    const estimateMismatch = !!(lastEstimate && (
+      (lastEstimate.basketHash && lastEstimate.basketHash !== basket.basketHash)
+      || (lastEstimate.low != null && lastEstimate.high != null && (!pe.shown || lastEstimate.low !== pe.low || lastEstimate.high !== pe.high))
+    ));
+
+    // 8. Duplicate guard (same e-mail + mobile on the same Manila day).
+    const todayManila = manilaDate();
+    const fpDay = qr.fingerprintDay(contact.email, contact.mobile, todayManila);
+    let dupSnap;
+    try {
+      dupSnap = await db.collection('quote_requests').where('fingerprintDay', '==', fpDay).limit(1).get();
+    } catch (e) {
+      console.error('[qrSubmit] duplicate-guard query failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
+    }
+    if (!dupSnap.empty) {
+      qrLogAbuse(db, 'duplicate', portalSha256Hex(ip), {}).catch(() => {});
+      throw new functions.https.HttpsError('already-exists', 'We already received a quote request from this e-mail and number today. Call 0927 683 6300 to add to it.');
+    }
+
+    // 9. Mint the reference number, retry once on a same-day collision.
+    let ref = qr.refNo(nowMs);
+    try {
+      let refSnap = await db.collection('quote_requests').doc(ref).get();
+      if (refSnap.exists) {
+        ref = qr.refNo(nowMs);
+        refSnap = await db.collection('quote_requests').doc(ref).get();
+        if (refSnap.exists) throw new functions.https.HttpsError('internal', 'Could not record your request — please try again.');
+      }
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      console.error('[qrSubmit] refNo collision check failed:', e.message);
+      throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
+    }
+
+    // 10. Transaction: create the request + flip the session, atomically. It RETURNS a verdict — a throw from a
+    // transaction callback would discard the staged writes — and the error is raised after.
+    const FV = admin.firestore.FieldValue;
+    const fillMsRaw = Number(d.fillMs);
+    const docBody = {
+      refNo: ref,
+      defVersion: qr.QR_DEF.VERSION,
+      estimateVersion: cfg.version,
+      status: 'new',
+      createdAt: FV.serverTimestamp(),
+      submittedOnManila: todayManila,
+      updatedAt: FV.serverTimestamp(),
+      summary: qr.buildSummary({ contact, intake, itemCount: norm.items.length, estimate: pe }),
+      contact,
+      intake,
+      items: norm.items,
+      estimate: {
+        shown: pe.shown, reason: pe.reason, low: pe.low, high: pe.high, step: pe.step,
+        vatBasis: pe.vatBasis, deliveryIncluded: pe.deliveryIncluded,
+        pricedCount: pe.pricedCount, reviewCount: pe.reviewCount, customSizeCount: pe.customSizeCount,
+        notes: pe.notes, basketHash: pe.basketHash, computedAt: FV.serverTimestamp(),
+      },
+      lastEstimate,
+      estimateMismatch,
+      internal: {
+        exactTotal: basket.exact,
+        lines: basket.lines,
+        pricingSource: 'firestore:products',
+        productsLoadedAt: new Date(products.loadedAt).toISOString(),
+        materialPriceIndexMultiplier: (products.constants && products.constants.materialPriceIndexMultiplier) || 1,
+        computedAt: FV.serverTimestamp(),
+      },
+      consent: {
+        agreed: true,
+        noticeVersion: consent.noticeVersion,
+        noticeSha256: qr.privacyNoticeSha256(),
+        consentedAt: FV.serverTimestamp(),
+      },
+      client: {
+        ip,
+        ipHash: portalSha256Hex(ip),
+        userAgent: String(userAgent).slice(0, 512),
+        acceptLanguage: String(acceptLanguage).slice(0, 64),
+        referer: String(referer).slice(0, 300),
+        fillMs: Number.isFinite(fillMsRaw) ? Math.min(Math.max(0, Math.round(fillMsRaw)), 7 * 24 * 3600e3) : 0,
+        estimateCalls: Number.isInteger(sess.estimateCount) ? sess.estimateCount : 0,
+      },
+      fingerprintDay: fpDay,
+      sessionHash: tHash,
+    };
+    let txVerdict;
+    try {
+      txVerdict = await db.runTransaction(async (tx) => {
+        const freshSnap = await tx.get(sessRef);
+        const fresh = freshSnap.exists ? freshSnap.data() : null;
+        if (!fresh || fresh.submittedAt != null) return { outcome: 'expired' };
+        tx.create(db.collection('quote_requests').doc(ref), docBody);
+        tx.update(sessRef, { submittedAt: FV.serverTimestamp(), refNo: ref });
+        return { outcome: 'ok' };
+      });
+    } catch (e) {
+      console.error('[qrSubmit] commit transaction failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not record your request — please try again.');
+    }
+    if (txVerdict.outcome !== 'ok') throw new functions.https.HttpsError('failed-precondition', QR_SESSION_EXPIRED_MSG);
+
+    // 11. Post-commit — best-effort, NEVER fails the call (the transaction already committed); each step is its own
+    // try/catch so one failing never skips the other.
+    try {
+      await qrNotifyStaff(db, docBody, ref);
+    } catch (e) {
+      console.error('[qrSubmit] post-commit (a) notify failed:', e.message);
+    }
+    try {
+      await qrPurgeStaleSessions(db, nowMs);
+    } catch (e) {
+      console.error('[qrSubmit] post-commit (b) stale-session purge failed:', e.message);
+    }
+    try {
+      await qrPurgeStaleAbuse(db, nowMs);
+    } catch (e) {
+      console.error('[qrSubmit] post-commit (c) stale-abuse purge failed:', e.message);
+    }
+
+    return { ok: true, refNo: ref, receivedAt: new Date(nowMs).toISOString(), submittedOnManila: todayManila, estimate: pe.shown ? { low: pe.low, high: pe.high } : null };
+  });
+
+// ── qrAdminDelete — §5.5, staff-authenticated (President/Manager) ───────
+exports.qrAdminDelete = functions
+  .region('asia-east1')
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+    }
+    const db = admin.firestore();
+    const uid = context.auth.uid;
+
+    // Role comes from users/{uid}.role (Firestore), NOT a custom claim — same reasoning as cirAdminDelete.
+    let role = null;
+    let actorName = '';
+    try {
+      const uSnap = await db.collection('users').doc(uid).get();
+      const uData = uSnap.exists ? (uSnap.data() || {}) : {};
+      role = uData.role || null;
+      actorName = uData.displayName || uData.email || '';
+    } catch (e) {
+      console.error('[qrAdminDelete] role lookup failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not verify your account — please try again.');
+    }
+    if (role !== 'president' && role !== 'manager') {
+      throw new functions.https.HttpsError('permission-denied', 'You do not have permission to do this.');
+    }
+
+    const ref = (data && typeof data.refNo === 'string') ? data.refNo : '';
+    if (!/^QR-\d{6}-[A-Z2-9]{6}$/.test(ref)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid reference number.');
+    }
+
+    const docRef = db.collection('quote_requests').doc(ref);
+    let docSnap;
+    try {
+      docSnap = await docRef.get();
+    } catch (e) {
+      console.error('[qrAdminDelete] doc read failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not read the request — please retry.');
+    }
+    if (!docSnap.exists) {
+      // Idempotent: a repeat of a delete that already finished is a success, not an error.
+      return { ok: true };
+    }
+    const docData = docSnap.data() || {};
+
+    try {
+      const notesSnap = await docRef.collection('notes').get();
+      // Firestore batches cap at 500 writes — delete the notes in chunks of 400.
+      for (let i = 0; i < notesSnap.docs.length; i += 400) {
+        const batch = db.batch();
+        notesSnap.docs.slice(i, i + 400).forEach((nd) => batch.delete(nd.ref));
+        await batch.commit();
+      }
+      await docRef.delete();
+    } catch (e) {
+      console.error('[qrAdminDelete] doc/notes delete failed:', e.message);
+      throw new functions.https.HttpsError('internal', 'Could not finish deleting the request — please retry (this operation is safe to repeat).');
+    }
+
+    try {
+      await db.collection('audit_log').add({
+        ts: admin.firestore.FieldValue.serverTimestamp(),
+        action: 'delete',
+        entity: 'quote_request',
+        entityId: ref,
+        actorUid: uid,
+        actorName,
+        actorRole: role,
+        // Company + item count only — no further PII in the audit trail.
+        details: { company: (docData.summary && docData.summary.company) || '', items: (docData.summary && docData.summary.itemCount) || 0 },
+      });
+    } catch (e) {
+      console.error('[qrAdminDelete] audit log write failed (delete already committed):', e.message);
     }
 
     return { ok: true };

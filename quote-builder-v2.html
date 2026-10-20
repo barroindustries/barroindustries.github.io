@@ -1873,6 +1873,10 @@ body.body-workforce #costMarginWrap{display:none!important;}
      sw.js PRECACHE. Falls back to the legacy #printHeader if it fails to load
      (offline/file://). -->
 <script defer src="js/letterhead.js"></script>
+<!-- PUBLIC-QUOTE-REQUEST-SPEC.md §6.2 — the catalogue-item pricing formula (computePrice below delegates to it).
+     One copy of the math, shared with the Cloud Functions' public estimate; already in sw.js PRECACHE so the builder
+     still prices offline. Relative src, so file:// opens work too. -->
+<script defer src="js/pricing-core.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
@@ -3610,59 +3614,24 @@ function toggleVolumeBreak(idx){
 
 function computePrice(p){
   if(!p) return 0;
-  let price = p.basePrice||0;
-  const consts = DB.constants||{};
-  const matMult = consts.materialPriceIndexMultiplier||1.0;
-  calcPriceWarning='';
-
-  if(p.formulaType==='per_length' && p.formula){
-    const dd = p.defaultDimensions||{};
-    const W = dimsMm.W ?? dd.W ?? 900;
-    const base = p.formula.baseLengthMm||900;
-    const ppm = p.formula.pricePerExtraMm||0;
-    const extra = Math.max(0, W-base);
-    price = p.basePrice + extra*ppm;
-
-    // Width (D) / Height (H) surcharge — only when the user actually moved
-    // the dimension above the product's own default (mirrors the Length
-    // Math.max(0, W-base) behavior: shrinking below default never discounts).
-    const missingRates=[];
-    [['D','Width'],['H','Height']].forEach(([dim,label])=>{
-      if(!(dim in dimsMm)) return;              // no such input for this product
-      const val=dimsMm[dim], defVal=dd[dim];
-      if(defVal==null || val<=defVal) return;   // unchanged or shrunk — no surcharge
-      const rate=p.formula['rate'+dim+'100'];
-      if(rate==null){ missingRates.push(label); return; }
-      price += ((val-defVal)/100)*rate;
-    });
-    if(missingRates.length){
-      calcPriceWarning=`No rate on file for custom ${missingRates.join(' / ')} — priced at default size for ${missingRates.join('/')}.`;
-    }
-  } else if(p.formulaType==='per_area' && p.formula){
-    const W = dimsMm.W ?? p.defaultDimensions.W ?? 1000;
-    const H = dimsMm.H ?? p.defaultDimensions.H ?? 1000;
-    const sqm = (W*H)/1e6;
-    price = sqm * (p.formula.pricePerSqm||0);
-  } else if(p.formulaType==='per_run' && p.formula){
-    const runs = runsVal||1;
-    price = (p.formula.pricePerRun||p.basePrice) * runs;
+  // The formula lives in js/pricing-core.js (PUBLIC-QUOTE-REQUEST-SPEC.md §6.2): ONE copy, shared with the Cloud
+  // Functions that compute the public "Get a quote" estimate, so the two can never disagree. This function only
+  // reads the calc panel (dimsMm / runsVal / the #spec_i selects) and hands it over — same inputs, same result,
+  // same warning sentence as the inline version it replaced (tests/pricing-core.test.mjs holds the old function as
+  // a frozen oracle). A spec <select> that is absent adds no adder, exactly as before.
+  if(typeof window.priceCatalogItem!=='function'){
+    calcPriceWarning='The pricing engine did not load — reload this page before quoting.';
+    return 0;
   }
-
-  price *= matMult;
-
-  // Add spec price adders
-  if(p.specs&&p.specs.length){
-    p.specs.forEach((s,i)=>{
-      const sel=document.getElementById(`spec_${i}`);
-      if(sel){
-        const oi=parseInt(sel.value||0);
-        const adder=s.priceAdder&&s.priceAdder[oi]?s.priceAdder[oi]:0;
-        price+=adder;
-      }
-    });
-  }
-
-  return Math.max(0,Math.round(price));
+  const dims={};
+  ['W','D','H'].forEach(k=>{ if(k in dimsMm) dims[k]=dimsMm[k]; });
+  const specIdx=(p.specs||[]).map((s,i)=>{
+    const sel=document.getElementById(`spec_${i}`);
+    return sel ? parseInt(sel.value||0) : null;
+  });
+  const r=window.priceCatalogItem(p,{dims,runs:runsVal,specIdx},DB.constants||{});
+  calcPriceWarning=r.warnings.join(' ');
+  return r.unitPrice;
 }
 
 function recomputePrice(){

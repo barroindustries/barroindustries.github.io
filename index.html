@@ -141,8 +141,8 @@
        CSS beside new JS and a shipped CSS change looked like it never landed.
        A new version = a new cache key, so even a stale SW must hit the network.
        Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-  <link rel="stylesheet" href="css/tokens.css?v=14.0.316"/>
-  <link rel="stylesheet" href="css/styles.css?v=14.0.316"/>
+  <link rel="stylesheet" href="css/tokens.css?v=14.0.317"/>
+  <link rel="stylesheet" href="css/styles.css?v=14.0.317"/>
   <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet. Loads AFTER
        styles.css so its #site rules win ties. No ?v= on purpose: .githooks/pre-commit
        only rewrites the tokens/styles links, and this file is small enough to win the
@@ -201,7 +201,7 @@
     <p class="hero-years"><span class="hero-years-num">23</span><span class="hero-years-label">years in business</span></p>
     <h1>Premium <span class="nowrap">stainless-steel</span> kitchens, built to order in Metro Manila.</h1>
     <p class="hero-lead">We design, fabricate, deliver and install high-quality commercial kitchens in food-grade SS304 stainless steel, including exhaust and fresh-air systems, gas lines and fire suppression, for restaurants, hotels, schools and government institutions.</p>
-    <p class="hero-cta"><a class="site-btn site-btn-light" href="/sales/clientinformationrequest/">Get a quote</a><a class="site-btn site-btn-ghost" href="/catalogue/">Browse the catalogue</a></p>
+    <p class="hero-cta"><a class="site-btn site-btn-light" href="/catalogue/?quote=1" data-qr-start>Get a quote</a><a class="site-btn site-btn-ghost" href="/catalogue/">Browse the catalogue</a></p>
   </div>
 </section>
 
@@ -313,8 +313,8 @@
     <div class="contact-intro reveal">
       <p class="eyebrow">Contact</p>
       <h2>Get a quote</h2>
-      <p class="site-lead">Tell us about your kitchen or fabrication project and we will come back with a quotation. No account needed.</p>
-      <p><a class="site-btn site-btn-primary" href="/sales/clientinformationrequest/">Open the project brief form</a></p>
+      <p class="site-lead">Tell us about your kitchen or fabrication project and we will come back with a quotation. No account needed. For a whole commissary project, send us a <a href="/sales/clientinformationrequest/">full project brief</a> instead.</p>
+      <p><a class="site-btn site-btn-primary" href="/catalogue/?quote=1" data-qr-start>Get a quote</a></p>
     </div>
     <ul class="contact-list reveal">
       <li><span class="contact-label">Phone</span><a href="tel:+639276836300">0927 683 6300</a></li>
@@ -333,7 +333,7 @@
       <p class="foot-name">Barro Industries OPC</p>
       <p>21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines</p>
     </div>
-    <p class="foot-links"><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="/sales/clientinformationrequest/">Get a quote</a><a href="/#login" id="site-footer-login">Staff login</a></p>
+    <p class="foot-links"><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="/catalogue/?quote=1" data-qr-start>Get a quote</a><a href="/#login" id="site-footer-login">Staff login</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC. Barro Kitchens is a brand of Barro Industries OPC.</p>
   </div>
 </footer>
@@ -476,7 +476,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.316 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.317 · Barro Industries</div>
   </div>
 </div>
 

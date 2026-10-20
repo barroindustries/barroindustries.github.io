@@ -3,7 +3,8 @@
 # Dependency-free POSIX-ish shell (grep/sed/find only, no node/python packages).
 # Run from the repo root: bash scripts/ci-invariants.sh
 #
-# Three checks, each fails the build (non-zero exit) when violated:
+# Ten checks (the first three below, then ledger / text-sink / drawer-icon / precache-manifest / cir-forms mirror /
+# rules size / public site / QR mirrors), each fails the build (non-zero exit) when violated:
 #   1. STACKING   — no new 4-digit z-index literal in js/*.js, js/screens/*.js,
 #                    or css/*.css
 #   2. PRECACHE   — every local js/*.js, js/screens/*.js, css/*.css referenced by
@@ -574,9 +575,34 @@ if grep -nF -- "'/site/img/" sw.js >/dev/null 2>&1; then
   grep -nF -- "'/site/img/" sw.js | sed 's/^/    /'
   cat_fail=1
 fi
-if grep -nE -- "'/catalogue/|'/js/catalogue\.js'|'/css/catalogue\.css'" sw.js >/dev/null 2>&1; then
-  echo "FAIL: sw.js PRECACHE lists the standalone /catalogue/ page or its assets. It is deliberately NOT precached (it is not part of the app shell, and the pre-commit manifest generator only maps '/', '/t/' and '/v/' to an index.html):"
-  grep -nE -- "'/catalogue/|'/js/catalogue\.js'|'/css/catalogue\.css'" sw.js | sed 's/^/    /'
+if grep -nE -- "'/catalogue/|'/js/catalogue\.js'|'/css/catalogue\.css'|'/js/quote-request\.js'|'/css/quote-request\.css'" sw.js >/dev/null 2>&1; then
+  echo "FAIL: sw.js PRECACHE lists the standalone /catalogue/ page or its assets (incl. the quote-request UI). They are deliberately NOT precached (not part of the app shell, and the pre-commit manifest generator only maps '/', '/t/' and '/v/' to an index.html):"
+  grep -nE -- "'/catalogue/|'/js/catalogue\.js'|'/css/catalogue\.css'|'/js/quote-request\.js'|'/css/quote-request\.css'" sw.js | sed 's/^/    /'
+  cat_fail=1
+fi
+
+# PUBLIC-QUOTE-REQUEST-SPEC.md — the quote UI ships to the public, so its scripts carry NO pricing vocabulary: no price field
+# name, no formula field name, no peso amount (a peso sign followed by a digit; the page prints the server's figures with a
+# local formatter that never writes one literally). The page never loads, or even names, the pricing engine: the browser
+# only ever receives the server's rounded {low, high} range. FAIL output carries line numbers only.
+# The pattern also catches the loose spellings a price takes in a script: a peso sign / "PHP" then a digit (spaces tolerated), a
+# thousands-separated number (84,120), and the figure names the server keeps on the staff-only block. The four files are every
+# PUBLIC script the catalogue page can load (the quote UI, its shared definition, the catalogue filter, the site chrome).
+QR_VOCAB='basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|formulaType|unitPrice|lineTotal|exactTotal|listPrice|₱[[:space:]]*[0-9]|PHP ?[0-9]|\b[0-9]{1,3}(,[0-9]{3})+\b|pricing-core'
+for qrf in js/quote-request.js js/qr-def.js js/catalogue.js js/site.js; do
+  if [ ! -f "$qrf" ]; then
+    echo "FAIL: public quote-request file $qrf is missing."
+    cat_fail=1
+  else
+    qr_vocab_lines=$(grep -nE "$QR_VOCAB" "$qrf" | cut -d: -f1 | head -10 | tr '\n' ' ')
+    if [ -n "$qr_vocab_lines" ]; then
+      echo "FAIL: $qrf carries pricing vocabulary (line(s): $qr_vocab_lines). The public quote UI must hold no price field name, no formula field name, no peso amount and no reference to the pricing engine. Offending text withheld on purpose."
+      cat_fail=1
+    fi
+  fi
+done
+if [ -f "$CAT_PAGE" ] && grep -qiE 'pricing-core' "$CAT_PAGE"; then
+  echo "FAIL: $CAT_PAGE references the pricing engine. The public catalogue page must never load or name it — it receives only the server's rounded estimate range."
   cat_fail=1
 fi
 
@@ -601,7 +627,7 @@ else
     brand_fail=1
   fi
 fi
-PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js"
+PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js css/quote-request.css js/quote-request.js js/qr-def.js"
 [ -f scripts/product-photos.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/product-photos.json"
 [ -f scripts/public-categories.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-categories.json"
 for pub in $PUBLIC_FILES; do
@@ -614,9 +640,69 @@ for pub in $PUBLIC_FILES; do
   fi
 done
 if [ "$brand_fail" -eq 0 ]; then
-  echo "PASS: no partner-brand reference in the public site surfaces (index.html <head> + #site section, catalogue/index.html, robots.txt, sitemap.xml, css/site.css, js/site.js, css/catalogue.css, js/catalogue.js, scripts/product-photos.json, scripts/public-categories.json)"
+  echo "PASS: no partner-brand reference in the public site surfaces (index.html <head> + #site section, catalogue/index.html, robots.txt, sitemap.xml, css/site.css, js/site.js, css/catalogue.css, js/catalogue.js, css/quote-request.css, js/quote-request.js, js/qr-def.js, scripts/product-photos.json, scripts/public-categories.json)"
 fi
 if [ "$cat_fail" -ne 0 ] || [ "$brand_fail" -ne 0 ]; then
+  overall_fail=1
+fi
+
+echo
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK 10 — QR MIRRORS (PUBLIC-QUOTE-REQUEST-SPEC.md §7.1)
+# ═══════════════════════════════════════════════════════════════════════
+# The public "Get a quote" flow shares TWO files between the browser side and the Cloud Functions, and functions/ only
+# ships its own directory (firebase.json), so each is mirrored by a plain `cp` and nothing but this check keeps the two
+# copies equal:
+#   js/qr-def.js       <-> functions/qr-def.js        the intake / limits / estimate-range / notice definition
+#   js/pricing-core.js <-> functions/pricing-core.js  the catalogue-item pricing math the Quote Builder AND the server share
+# A drift means the page and the server validated, or priced, different things. pricing-core is under the money-core
+# contract (pinned + mutation-tested tests/pricing-core.test.mjs). Also: the server's published-product allowlist
+# (functions/qr-published.json, GENERATED by scripts/build-catalogue.js) must list exactly the products on the committed
+# catalogue's "Add to quote" data island — so nothing can be quotable without being on the page, or on the page without
+# being quotable, and no list is ever kept by hand.
+echo "=== [10/10] QR MIRRORS: functions/qr-def.js and functions/pricing-core.js byte-identical to js/; published-id allowlist == catalogue island ==="
+qr_fail=0
+for qrm in qr-def.js pricing-core.js; do
+  if [ ! -f "js/$qrm" ]; then
+    echo "FAIL: js/$qrm is missing."
+    qr_fail=1
+  fi
+  if [ ! -f "functions/$qrm" ]; then
+    echo "FAIL: functions/$qrm is missing."
+    qr_fail=1
+  fi
+  if [ -f "js/$qrm" ] && [ -f "functions/$qrm" ] && ! cmp -s "js/$qrm" "functions/$qrm"; then
+    echo "FAIL: functions/$qrm must be byte-identical to js/$qrm — edit js/$qrm then: cp js/$qrm functions/$qrm"
+    qr_fail=1
+  fi
+done
+qr_pub_problems=$(node - <<'NODEEOF'
+const fs = require('fs');
+const out = [];
+try {
+  const allow = JSON.parse(fs.readFileSync('functions/qr-published.json', 'utf8'));
+  const page = fs.readFileSync('catalogue/index.html', 'utf8');
+  const m = page.match(/<script type="application\/json" id="qr-catalogue">([\s\S]*?)<\/script>/);
+  if (!m) {
+    out.push('catalogue/index.html has no #qr-catalogue data island — run: node scripts/build-catalogue.js');
+  } else {
+    const island = JSON.parse(m[1]);
+    const a = (allow.ids || []).slice().sort().join(',');
+    const b = island.products.map(p => p.id).sort().join(',');
+    if (!Array.isArray(allow.ids) || allow.ids.length === 0) out.push('functions/qr-published.json has no ids');
+    if (a !== b) out.push('functions/qr-published.json does not list exactly the products in the catalogue data island — run: node scripts/build-catalogue.js');
+  }
+} catch (e) { out.push('published-id check error: ' + e.message); }
+out.forEach(x => console.log(x));
+NODEEOF
+)
+if [ -n "$qr_pub_problems" ]; then
+  echo "$qr_pub_problems" | sed 's/^/FAIL: /'
+  qr_fail=1
+fi
+if [ "$qr_fail" -eq 0 ]; then
+  echo "PASS: functions/qr-def.js and functions/pricing-core.js are byte-identical to js/qr-def.js and js/pricing-core.js; functions/qr-published.json matches the catalogue data island"
+else
   overall_fail=1
 fi
 

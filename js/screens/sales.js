@@ -107,12 +107,13 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   // drawer it should also be in sales department page") embeds the same
   // sales-scoped view renderSalesAnalytics() serves on the Analytics page —
   // quota to meet, OH to cover, floor, pace and the discount signal.
-  const salesTabs = ['Clients','Briefs','Quotes','Analytics','Partner','Files','SOP','Budgeting','Tasks'];
+  const salesTabs = ['Clients','Briefs','Quote requests','Quotes','Analytics','Partner','Files','SOP','Budgeting','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
                   'Partner Quotes':'Partner', 'Partner Files':'Partner',
                   'Work Plans':'Files', 'Proposals':'Files',
-                  'Client Briefs':'Briefs', 'Client Information Requests':'Briefs', 'Info Requests':'Briefs' };
+                  'Client Briefs':'Briefs', 'Client Information Requests':'Briefs', 'Info Requests':'Briefs',
+                  'Quote Requests':'Quote requests', 'QuoteRequests':'Quote requests' };
   subtab = alias[subtab] || (salesTabs.includes(subtab) ? subtab : 'Clients');
   c.innerHTML = `
     <div class="page-header">
@@ -124,6 +125,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
     ${window.sopPanel('How Sales works', [
       'Clients is the CRM book here; the AEC architect/engineer/contractor prospecting directory moved to the CRM department.',
       'Briefs holds every Client Information Request sent from barroindustries.com/sales/clientinformationrequest/ — review the answers and photos, add notes, then Convert to client.',
+      'Quote requests holds every "Get a quote" request sent from barroindustries.com/catalogue/ — review the items and the estimate the client saw, then Open in Quote Builder to price it properly.',
       'Quotes has ＋New Quotation (full builder) and Quick Estimate (fast price check); everything filed lands in Records, where revisions chain together.',
       'Partner is a read-only window into Brilliant Steel\'s quotes and files for coordination.',
       'Files holds Work Plans and Proposals; Tasks is the department board.'
@@ -169,6 +171,11 @@ async function loadSalesContent(currentUser, currentRole, sub) {
     case 'Briefs':
       if (window.renderClientBriefs) await window.renderClientBriefs(content, currentUser, currentRole);
       else content.innerHTML = window.renderEmptyState({ icon: '⚠️', title: 'Briefs screen not loaded', hint: 'Reload the app and try again.' });
+      break;
+
+    case 'Quote requests':
+      if (window.renderQuoteRequests) await window.renderQuoteRequests(content, currentUser, currentRole);
+      else content.innerHTML = window.renderEmptyState({ icon: '⚠️', title: 'Quote requests screen not loaded', hint: 'Reload the app and try again.' });
       break;
 
     case 'Analytics':
