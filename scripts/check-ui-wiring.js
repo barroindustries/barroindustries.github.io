@@ -21,7 +21,8 @@
  * and some rendered fields are intentionally read-only (no binding needed). Both are
  * covered by scripts/ui-wiring-allowlist.json.
  *
- * Scan scope: index.html plus js/ RECURSIVELY (js/vendor/ excluded). The recursion
+ * Scan scope: index.html, the standalone public page catalogue/index.html (its ids are what
+ * js/catalogue.js looks up, so it is part of the UI surface), plus js/ RECURSIVELY (js/vendor/ excluded). The recursion
  * matters — js/screens/*.js is 24 files and the bulk of the UI surface, and until
  * 2026-09-26 a non-recursive readdir meant none of it was scanned, so class (c)
  * only ever guarded js/*.js. All files are read into ONE global inventory, so a
@@ -74,8 +75,12 @@ function listSourceFiles() {
   }
   if (fs.existsSync(JS_DIR)) walk(JS_DIR);
   files.sort();
-  const indexHtml = path.join(ROOT, 'index.html');
-  if (fs.existsSync(indexHtml)) files.push(indexHtml);
+  // Standalone HTML pages whose controls are wired by a js/ file: scanned like index.html, so the
+  // ids a script looks up are checked against the markup that really renders them.
+  for (const page of ['index.html', path.join('catalogue', 'index.html')]) {
+    const full = path.join(ROOT, page);
+    if (fs.existsSync(full)) files.push(full);
+  }
   return files;
 }
 

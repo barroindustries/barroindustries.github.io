@@ -1,15 +1,19 @@
-// tests/catalogue-public.test.mjs — PUBLIC-WEBSITE-SPEC.md §7.3, plus the two owner rulings that
-// govern the public site: R1 NO PRICES anywhere, and R5 the partner company is NEVER named.
+// tests/catalogue-public.test.mjs — PUBLIC-WEBSITE-SPEC.md §7.3, plus the owner rulings that govern the
+// public site: R1 NO PRICES anywhere, R5 the partner company is NEVER named, the catalogue is its OWN page
+// (/catalogue/, generated) and the homepage lists NO products, one public contact email / address / phone,
+// and the copy standard (British spelling, ™ once, sentence-case headings, no unverifiable claims).
 //
-// Pins scripts/build-catalogue.js — the field ALLOWLIST that keeps every price field out of the
-// baked catalogue, the money guard, the partner-brand guard — and the committed index.html /
-// public-surface files those guards protect — and, last, the inline <head> script that picks the
-// first-paint view (site / login / boot), run in a vm against the spec §4.2 decision table.
-// Fixtures are synthetic: the private master (products-database.json) is gitignored and absent
-// in CI, so nothing here reads it.
+// Pins scripts/build-catalogue.js — the field ALLOWLIST that keeps every price field out of the baked
+// catalogue, the money guard, the partner-brand guard, TEXT_FIXES, the product-photo map — and the committed
+// public files those guards protect (index.html, catalogue/index.html, css/js, robots, sitemap), and, last,
+// the inline <head> script that picks the first-paint view (site / login / boot), run in a vm against the
+// spec §4.2 decision table. Fixtures are synthetic: the private master (products-database.json) is
+// gitignored and absent in CI, so the one test that reads it skips itself there.
 //
-// Mutation-tested (scratch copy, never the shared tree): making publicProduct() spread `...p`
-// must fail "allowlist" below; removing the brand guard must fail "partner-brand guard".
+// Mutation-tested (scratch copy, never the shared tree): making publicProduct() spread `...p` must fail
+// "allowlist" below; removing the brand guard must fail "partner-brand guard"; a price token pasted into
+// catalogue/index.html, a restored catalogue block in index.html, or a product image added to sw.js PRECACHE
+// must fail the committed-page tests and CHECK 9.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -17,18 +21,21 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const B = require('../scripts/build-catalogue.js');
-const { publicProduct, renderCatalogue, injectIntoHtml, stripJsonComments, NOTE_OVERRIDES,
-        MONEY_RE, FORMULA_RE, BRAND_RE, START_MARKER, END_MARKER, CatalogueGuardError } = B;
+const { publicProduct, renderCatalogue, injectIntoHtml, stripJsonComments, webpSize, loadPhotoMap,
+        loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
+        NOTE_OVERRIDES, TEXT_FIXES, MONEY_RE, FORMULA_RE, BRAND_RE, START_MARKER, END_MARKER, CatalogueGuardError, esc } = B;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+const exists = (rel) => fs.existsSync(path.join(ROOT, rel));
 
 // ── synthetic fixtures ──────────────────────────────────────────────────────
 const CATS = [
@@ -59,15 +66,43 @@ const PESO_NOTE = { id: 'T-003', category: 'cooking_line', name: 'Test Griddle',
 const PARTNER = 'Brilliant' + ' Steel';            // built at run time only so this file never needs the literal
 const prod = (over) => ({ id: 'T-100', category: 'cooking_line', name: 'Plain Table', unit: 'pc', specs: [], notes: 'SS304', ...over });
 const db = (products, categories) => ({ categories: categories || CATS, products });
-const render = (products, opts) => renderCatalogue(db(products), { hasPhoto: () => false, ...(opts || {}) });
+// The synthetic master categories map onto the public ones (cooking_line -> Cooking, prep_washing -> Preparation).
+const PUBMAP = { cooking_line: 'cooking', prep_washing: 'preparation' };
+const pubOf = (products, over = {}) => ({ products: Object.fromEntries(products.map(p => [p.id, over[p.id] || PUBMAP[p.category]])), excludedProducts: {} });
+const render = (products, opts) => renderCatalogue(db(products), { publicCategories: pubOf(products), ...(opts || {}) });
+const renderWith = (products, categories, opts) => renderCatalogue(db(products, categories), { publicCategories: pubOf(products), ...(opts || {}) });
 const violationsOf = (fn) => { try { fn(); } catch (e) { return e.violations || null; } return null; };
 const allKeys = (v, out = new Set()) => {
   if (Array.isArray(v)) v.forEach(x => allKeys(x, out));
   else if (v && typeof v === 'object') for (const k of Object.keys(v)) { out.add(k); allKeys(v[k], out); }
   return out;
 };
-// text between two markers / the lines of a region of index.html
+// text between two markers
 const between = (html, a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i + 1); return html.slice(i + a.length, j); };
+
+// ── helpers for the committed public files ──────────────────────────────────
+const decode = (s) => s.replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+const stripTags = (html, sep = ' ') => html.replace(/<!--[\s\S]*?-->/g, sep).replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, sep).replace(/<[^>]+>/g, sep);
+const visibleText = (html) => decode(stripTags(html)).replace(/\s+/g, ' ').trim();
+const attrText = (html) => [...html.matchAll(/\s(?:alt|aria-label|placeholder|title)="([^"]*)"|<meta[^>]*\scontent="([^"]*)"/g)].map(m => decode(m[1] || m[2] || '')).join(' | ');
+const publicCopy = (html) => `${visibleText(html)} | ${attrText(html)}`;
+const imageRefs = (html) => [
+  ...[...html.matchAll(/(?:href|src)="(\/?site\/img\/[^"]+)"/g)].map(m => m[1]),
+  ...[...html.matchAll(/srcset="([^"]+)"/g)].flatMap(m => m[1].split(',').map(s => s.trim().split(/\s+/)[0])).filter(u => /^\/?site\/img\//.test(u)),
+].map(u => u.replace(/^\//, ''));
+const brandHit = (text) => BRAND_RE.test(text.replace(/[\s\-_./]+/g, ' '));
+const stripJsComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
+const phoneDigits = (text) => [...text.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map(m => m[0].replace(/\D/g, '').replace(/^63/, '0'));
+
+const home = read('index.html');
+const homeSite = home.slice(home.indexOf('<div id="site"'), home.indexOf('<!-- /#site -->'));
+const homeHead = home.slice(0, home.indexOf('</head>'));
+const cat = read('catalogue/index.html');
+const catHead = cat.slice(0, cat.indexOf('</head>'));
+const catBlock = between(cat, START_MARKER, END_MARKER);
+const catHand = cat.replace(catBlock, '');                    // the catalogue page minus its generated block
+const pageIds = new Set([...catBlock.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]));
+const pubJson = JSON.parse(read('scripts/public-categories.json'));
 
 describe('publicProduct — the allowlist (R1: no price field can reach the page)', () => {
   const FORBIDDEN = ['basePrice', 'formula', 'formulaType', 'laborHours', 'leadTime', 'priceAdder'];
@@ -137,7 +172,7 @@ describe('money guard (R1)', () => {
   });
 
   it('refuses every money shape in any emitted field', () => {
-    const bad = ['₱500', 'PHP 2500', 'PHP2500', 'about 12,000 each', 'price on request', 'cost varies', 'markup 30%',
+    const bad = ['₱500', 'PHP 2500', 'PHP2500', 'about 12,000 each', 'price on request', 'cost varies', 'markup 30%', 'volume pricing for full-rack sets', 'Pricing on request',
                  'add rateD100 per 100mm', 'see basePrice', 'laborHours 8', 'ratePerDay'];
     for (const t of bad) {
       for (const field of ['name', 'notes']) {
@@ -179,11 +214,194 @@ describe('money guard (R1)', () => {
     assert.deepEqual(report.unusedOverrides, ['T-999']);
   });
 
-  it('every shipped NOTE_OVERRIDES replacement passes both money guards and the brand guard', () => {
+  it('every shipped NOTE_OVERRIDES replacement passes both money guards and the brand guard, and is British', () => {
     for (const [id, text] of Object.entries(NOTE_OVERRIDES)) {
       assert.ok(!MONEY_RE.test(text) && !FORMULA_RE.test(text) && !BRAND_RE.test(text), `${id} replacement trips a guard`);
     }
     assert.equal(NOTE_OVERRIDES['EX-015'], 'Scope varies per project');     // spec §7.2
+    assert.equal(NOTE_OVERRIDES['PW-013'], 'SS304 wall sheet, per square metre');
+    assert.equal(NOTE_OVERRIDES['BA-008'], 'SS304 sheet/tray, 600x400mm GN-compatible. Rolled reinforced edges. Sold per piece.');   // the pricing clause is dropped
+  });
+});
+
+describe('TEXT_FIXES — typo / British-spelling / grammar corrections of displayed product text', () => {
+  const entries = Object.entries(TEXT_FIXES).flatMap(([id, fields]) => Object.entries(fields).map(([field, [before, after]]) => ({ id, field, before, after })));
+
+  it('has the fixes the copy audit found (one per spelling family, at least)', () => {
+    assert.ok(entries.length >= 30, `only ${entries.length} fixes`);
+    const afterText = entries.map(e => e.after).join(' | ');
+    for (const word of ['Bottom Shelf', 'Galvanised', 'Fibre Wool', 'Fibreglass', 'Sterilising', 'sterilisation', 'Pasteuriser', 'Labour', '6-tray capacity', '4-gallon capacity', 'heavy-duty', 'bent angle', 'angle-bent', 'reconditioning', '60–95°C', 'R404A', 'temperature monitoring']) {
+      assert.ok(afterText.includes(word), `no fix produces "${word}"`);
+    }
+  });
+
+  it('only name / notes are fixable, before differs from after, and neither side trips a price or partner guard', () => {
+    for (const e of entries) {
+      assert.ok(['name', 'notes'].includes(e.field), `${e.id}.${e.field}`);
+      assert.notEqual(e.before, e.after);
+      for (const s of [e.before, e.after]) assert.ok(!MONEY_RE.test(s) && !FORMULA_RE.test(s) && !BRAND_RE.test(s), `${e.id}.${e.field} trips a guard`);
+    }
+  });
+
+  it('every fix applies while the master text matches — and is reported', () => {
+    for (const e of entries) {
+      const fixed = [];
+      const out = publicProduct(prod({ id: e.id, category: 'cooking_line', name: 'Plain Table', notes: 'SS304', [e.field]: e.before }), { fixed });
+      assert.equal(out[e.field], e.after, `${e.id}.${e.field} was not fixed`);
+      assert.deepEqual(fixed, [{ id: e.id, field: e.field, before: e.before, after: e.after }]);
+    }
+  });
+
+  it('a fix never applies once the master text has changed (a stale entry does nothing, and is reported unused)', () => {
+    const { id, field, before } = entries[0];
+    const fixed = [];
+    const out = publicProduct(prod({ id, [field]: before + ' (revised)' }), { fixed });
+    assert.equal(out[field], before + ' (revised)');
+    assert.deepEqual(fixed, []);
+    const report = {};
+    render([prod({ id, [field]: 'something else entirely' })], { textFixes: { [id]: { [field]: [before, 'x'] } }, report });
+    assert.deepEqual(report.unusedTextFixes, [`${id}.${field}`]);
+  });
+
+  it('a fix cannot launder a price or the partner name past the guards', () => {
+    assert.throws(() => publicProduct(prod({ id: 'T-700', notes: 'SS304' }), { textFixes: { 'T-700': { notes: ['SS304', '₱500 only'] } } }), CatalogueGuardError);
+    assert.throws(() => publicProduct(prod({ id: 'T-701', name: 'Plain Table' }), { textFixes: { 'T-701': { name: ['Plain Table', `${PARTNER} Table`] } } }), CatalogueGuardError);
+  });
+
+  it('only name / notes can ever be fixed: a fix aimed at any other field is ignored', () => {
+    for (const field of ['unit', 'id', 'category', 'material', 'specs']) {
+      const out = publicProduct(prod({ id: 'T-710', unit: 'pc' }), { textFixes: { 'T-710': { [field]: ['pc', 'set'] } } });
+      assert.equal(out.unit, 'pc', `a fix reached ${field}`);
+      assert.equal(out.id, 'T-710');
+    }
+  });
+
+  it('terse spec fragments are left alone ("SS304 1.1mm top, 0.8mm body")', () => {
+    for (const e of entries) assert.ok(!/^SS304 1\.1mm top, 0\.8mm body$/.test(e.before));
+    const out = publicProduct(prod({ id: 'CE-001', notes: 'LP burner, SS304 1.1mm top, 0.8mm body' }));
+    assert.equal(out.notes, 'LP burner, SS304 1.1mm top, 0.8mm body');
+  });
+
+  it('every fix for a published product is reflected in the committed catalogue page, and no original survives there', () => {
+    const onPage = entries.filter(e => pageIds.has(e.id));
+    assert.ok(onPage.length >= 10, `only ${onPage.length} fixes touch a published product`);
+    for (const e of onPage) {
+      assert.ok(cat.includes(esc(e.after)), `${e.id}.${e.field}: the fixed text is not on the page — re-run node scripts/build-catalogue.js`);
+      // the original must not survive as a whole displayed string
+      assert.ok(!cat.includes(`>${esc(e.before)}<`), `${e.id}.${e.field}: the original text is still on the page`);
+    }
+  });
+});
+
+describe('the five public categories (owner ruling 2026-10-21: "just the equipment")', () => {
+  it('are exactly Preparation, Washing, Cooking, Storage, Refrigeration — in that order — and four master categories are excluded', () => {
+    assert.deepEqual(PUBLIC_CATEGORIES.map(c => [c.id, c.label]), [['preparation', 'Preparation'], ['washing', 'Washing'], ['cooking', 'Cooking'], ['storage', 'Storage'], ['refrigeration', 'Refrigeration']]);
+    assert.deepEqual([...EXCLUDED_CATEGORIES], ['exhaust_system', 'fresh_air_system', 'gas_line', 'fire_suppression']);
+    assert.ok(Object.isFrozen(PUBLIC_CATEGORIES) && Object.isFrozen(EXCLUDED_CATEGORIES));
+  });
+
+  it('an excluded category is skipped ENTIRELY: no card, no count, no search text, no nav link — and it is not guard-scanned', () => {
+    const fixtures = [
+      prod({ id: 'T-901', category: 'exhaust_system', name: 'Hood With Price List', notes: '₱9,999 each' }),   // would trip every guard if it were scanned
+      prod({ id: 'T-902', category: 'gas_line', name: 'Gas Line Kit' }),
+      prod({ id: 'T-903', category: 'fresh_air_system', name: 'Fresh Air Blower' }),
+      prod({ id: 'T-904', category: 'fire_suppression', name: 'Fire Suppression Tank' }),
+      prod({ id: 'T-905', name: 'A Real Stove' }),
+    ];
+    const cats = [...CATS, { id: 'exhaust_system', label: `${PARTNER} Exhaust`, code: 'EX', color: '#27AE60' }, { id: 'gas_line', label: 'Gas Line', code: 'GL', color: '#F39C12' },
+      { id: 'fresh_air_system', label: 'Fresh Air System', code: 'FA', color: '#16A085' }, { id: 'fire_suppression', label: 'Fire Suppression', code: 'FS', color: '#E67E22' }];
+    const report = {};
+    const out = renderCatalogue(db(fixtures, cats), { report, publicCategories: { products: { 'T-905': 'cooking' }, excludedProducts: {} } });
+    assert.equal((out.match(/<li class="cat-card/g) || []).length, 1);
+    assert.ok(out.includes('>T-905</p>'));
+    for (const gone of ['T-901', 'T-902', 'T-903', 'T-904', 'Hood With Price List', 'Gas Line Kit', 'Fresh Air Blower', 'Fire Suppression Tank']) assert.ok(!out.includes(gone), `${gone} leaked`);
+    assert.ok(out.includes('1 products in 1 categories') && out.includes('placeholder="Search 1 products"'));
+    assert.deepEqual(report.skipped, { categories: { exhaust_system: 1, gas_line: 1, fresh_air_system: 1, fire_suppression: 1 }, categoryProducts: 4, products: [] });
+    assert.equal(report.total, 1);
+  });
+
+  it('the excluded list is a parameter of the build, not a hard-wired edit of the data (a category can be excluded or restored)', () => {
+    const products = [prod({ id: 'T-910', category: 'cooking_line' }), prod({ id: 'T-911', category: 'prep_washing' })];
+    const none = renderCatalogue(db(products), { publicCategories: pubOf(products), excludedCategories: ['prep_washing'] });
+    assert.ok(none.includes('>T-910</p>') && !none.includes('>T-911</p>'));
+    const both = renderCatalogue(db(products), { publicCategories: pubOf(products), excludedCategories: [] });
+    assert.ok(both.includes('>T-910</p>') && both.includes('>T-911</p>'));
+  });
+
+  it('a product listed under excludedProducts is skipped (and reported with the others), even when it would trip a guard', () => {
+    const products = [prod({ id: 'T-920', name: 'Install Labour', notes: 'price per visit' }), prod({ id: 'T-921', name: 'Plain Table' })];
+    const report = {};
+    const out = renderCatalogue(db(products), { report, publicCategories: { products: { 'T-921': 'preparation' }, excludedProducts: { 'T-920': 'a service line' } } });
+    assert.ok(!out.includes('T-920') && !out.includes('Install Labour') && out.includes('>T-921</p>'));
+    assert.deepEqual(report.skipped.products, ['T-920']);
+  });
+
+  it('REFUSES a published-category product that is in neither "products" nor "excludedProducts" — a new product forces a decision', () => {
+    const v = violationsOf(() => renderCatalogue(db([prod({ id: 'T-930' }), prod({ id: 'T-931' })]), { publicCategories: { products: { 'T-930': 'cooking' }, excludedProducts: {} } }));
+    assert.deepEqual(v, [{ id: 'T-931', field: 'publicCategory', rule: 'unmapped' }]);
+  });
+
+  it('REFUSES a mapping entry for a product the master does not have (stale)', () => {
+    const v = violationsOf(() => renderCatalogue(db([prod({ id: 'T-940' })]), { publicCategories: { products: { 'T-940': 'cooking', 'T-999': 'storage' }, excludedProducts: { 'T-998': 'gone' } } }));
+    assert.deepEqual(v.map(x => [x.id, x.rule]).sort(), [['T-998', 'stale'], ['T-999', 'stale']]);
+  });
+
+  it('every product lands in exactly one public category; a category with no products is left out; the order is the ruled order', () => {
+    const products = [prod({ id: 'T-950' }), prod({ id: 'T-951' }), prod({ id: 'T-952' }), prod({ id: 'T-953' })];
+    const map = { products: { 'T-950': 'refrigeration', 'T-951': 'storage', 'T-952': 'washing', 'T-953': 'cooking' }, excludedProducts: {} };
+    const out = renderCatalogue(db(products), { publicCategories: map });
+    const order = [...out.matchAll(/<section class="cat-group" id="cat-([a-z]+)"/g)].map(m => m[1]);
+    assert.deepEqual(order, ['washing', 'cooking', 'storage', 'refrigeration']);          // no "preparation" section: nothing is in it
+    for (const p of products) assert.equal((out.match(new RegExp(`<p class="cat-code">${p.id}</p>`, 'g')) || []).length, 1);
+    assert.ok(out.includes('4 products in 4 categories'));
+    // tile initials are the public labels' first letters
+    for (const [id, initial] of [['T-950', 'R'], ['T-951', 'S'], ['T-952', 'W'], ['T-953', 'C']]) assert.ok(out.includes(`<span>${initial}</span></div><p class="cat-code">${id}</p>`), id);
+  });
+
+  it('publishedProductIds is exactly the products that reach the page', () => {
+    const products = [prod({ id: 'T-960' }), prod({ id: 'T-961', category: 'gas_line' }), prod({ id: 'T-962' }), prod({ id: 'T-963' }), prod({ id: 'T-964' })];
+    // T-961 is even (wrongly) mapped: the excluded CATEGORY still wins. T-964 is in no list at all.
+    const pub = { products: { 'T-960': 'cooking', 'T-961': 'cooking', 'T-963': 'storage' }, excludedProducts: { 'T-962': 'service' } };
+    assert.deepEqual([...publishedProductIds(db(products), pub)].sort(), ['T-960', 'T-963']);
+    const out = renderCatalogue(db(products.filter(p => p.id !== 'T-964')), { publicCategories: pub });
+    assert.ok(!out.includes('T-961') && !out.includes('T-962') && out.includes('>T-960</p>') && out.includes('>T-963</p>'));
+  });
+});
+
+describe('loadPublicCategories — scripts/public-categories.json', () => {
+  const tmp = (obj) => { const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pubcat-')), 'public-categories.json'); fs.writeFileSync(f, typeof obj === 'string' ? obj : JSON.stringify(obj)); return f; };
+  const IDS = ['T-001', 'T-002', 'T-003'];
+
+  it('reads a valid map (products + excludedProducts, a _readme is allowed)', () => {
+    const out = loadPublicCategories({ file: tmp({ _readme: 'x', products: { 'T-001': 'cooking', 'T-002': 'storage' }, excludedProducts: { 'T-003': 'a service' } }), ids: IDS });
+    assert.deepEqual({ ...out.products }, { 'T-001': 'cooking', 'T-002': 'storage' });
+    assert.deepEqual({ ...out.excludedProducts }, { 'T-003': 'a service' });
+  });
+
+  it('refuses a missing file, invalid JSON, a non-object and an unknown top-level key', () => {
+    assert.throws(() => loadPublicCategories({ file: path.join(os.tmpdir(), 'definitely-not-here.json'), ids: IDS }), /not found/);
+    assert.throws(() => loadPublicCategories({ file: tmp('{ nope'), ids: IDS }), /not valid JSON/);
+    assert.throws(() => loadPublicCategories({ file: tmp('[1]'), ids: IDS }), /must be a JSON object/);
+    assert.throws(() => loadPublicCategories({ file: tmp({ products: {}, excludedProducts: {}, extra: 1 }), ids: IDS }), /unknown top-level key "extra"/);
+  });
+
+  it('refuses an id the master does not have, a value that is not one of the five, and a product listed twice — all reported together, never echoing a value', () => {
+    const file = tmp({ products: { 'T-001': 'cooking_line', 'X-999': 'cooking', 'T-002': 'storage' }, excludedProducts: { 'T-002': 'also excluded', 'T-003': `${PARTNER} line` } });
+    try { loadPublicCategories({ file, ids: IDS }); assert.fail('should have thrown'); }
+    catch (e) {
+      assert.match(e.message, /4 problem\(s\)/);
+      assert.ok(e.message.includes('T-001: the category is not one of preparation, washing, cooking, storage, refrigeration'));
+      assert.ok(e.message.includes('X-999: not a product id in the master'));
+      assert.ok(e.message.includes('T-002: listed as published AND as excluded'));
+      assert.ok(e.message.includes('T-003: the reason trips a pricing / partner-brand guard'));
+      assert.ok(!e.message.includes('cooking_line"') && !BRAND_RE.test(e.message));
+    }
+  });
+
+  it('refuses an empty reason and a missing "products" / "excludedProducts" section', () => {
+    assert.throws(() => loadPublicCategories({ file: tmp({ products: { 'T-001': 'cooking' }, excludedProducts: { 'T-002': '  ' } }), ids: IDS }), /reason must be a non-empty string/);
+    assert.throws(() => loadPublicCategories({ file: tmp({ products: {} }), ids: IDS }), /"excludedProducts" must be an object/);
+    assert.throws(() => loadPublicCategories({ file: tmp({ excludedProducts: {} }), ids: IDS }), /"products" must be an object/);
   });
 });
 
@@ -235,50 +453,57 @@ describe('partner-brand guard (R5: the partner company is never named on the pub
 
   it('refuses a partner-branded category label and the whole build — it is never dropped or renamed silently', () => {
     const cats = [{ ...CATS[0], label: `${PARTNER} Line` }, CATS[1]];
-    assert.throws(() => renderCatalogue(db([prod({})], cats), { hasPhoto: () => false }), CatalogueGuardError);
+    assert.throws(() => renderWith([prod({})], cats), CatalogueGuardError);
     const v = violationsOf(() => render([prod({ id: 'T-500' }), prod({ id: 'T-501', name: `${PARTNER} Table` }), prod({ id: 'T-502', notes: PARTNER })]));
     assert.deepEqual(v.map(x => x.id).sort(), ['T-501', 'T-502']);      // every offender listed; the clean one is not
   });
 });
 
-describe('renderCatalogue', () => {
+describe('renderCatalogue — the /catalogue/ block', () => {
   const PRODUCTS = [WITH_ADDER, PER_LENGTH];                                // deliberately out of category order
   const html = render(PRODUCTS);
 
-  it('has no <script and escapes markup in a product name', () => {
+  it('has no <script, no inline handler or style, and escapes markup in a product name', () => {
     assert.ok(!/<script/i.test(html));
-    assert.ok(html.includes('Test Stove &lt;b&gt;One&lt;/b&gt;'));
+    assert.ok(!/\son[a-z]+=/i.test(html) && !/\sstyle=/i.test(html));
+    assert.ok(html.includes('<h3>Test Stove &lt;b&gt;One&lt;/b&gt;</h3>'));
     assert.ok(!html.includes('<b>One'));
-    assert.ok(html.includes('data-name="test stove &lt;b&gt;one&lt;/b&gt;"'));
   });
 
-  it('puts each product in exactly one category group (one card, one data-cat group per product)', () => {
-    assert.equal((html.match(/<li class="cat-card"/g) || []).length, PRODUCTS.length);
+  it('puts each product in exactly one category group (one card, one group per product)', () => {
+    assert.equal((html.match(/<li class="cat-card/g) || []).length, PRODUCTS.length);
     const groups = html.split('<section class="cat-group"').slice(1);
     assert.equal(groups.length, 2);
     for (const p of PRODUCTS) {
-      const holders = groups.filter(g => g.includes(`>${p.id}</div>`));
+      const holders = groups.filter(g => g.includes(`<p class="cat-code">${p.id}</p>`));
       assert.equal(holders.length, 1, `${p.id} appears in ${holders.length} groups`);
-      assert.ok(holders[0].startsWith(` data-cat="${p.category}"`), `${p.id} sits in the wrong group`);
+      const want = PUBMAP[p.category];
+      assert.ok(holders[0].startsWith(` id="cat-${want}" data-cat="${want}"`), `${p.id} sits in the wrong group`);
     }
   });
 
-  it('orders by category order, then id, and is deterministic', () => {
-    assert.ok(html.indexOf('>T-001</div>') < html.indexOf('>T-002</div>'));
+  it('orders by the ruled public category order (Preparation before Cooking), then id, and is deterministic', () => {
+    assert.ok(html.indexOf('>T-002</p>') < html.indexOf('>T-001</p>'));
     assert.equal(html, render(PRODUCTS));
   });
 
-  it('carries the chip bar, search box and totals', () => {
-    assert.ok(html.includes('data-cat="all" aria-pressed="true">All <span>2</span>'));
-    assert.ok(html.includes('placeholder="Search 2 products…"'));
+  it('carries the search box, the live status, the category nav with counts, and the empty state', () => {
+    assert.ok(html.includes('placeholder="Search 2 products"'));
+    assert.ok(html.includes('id="cat-search"') && html.includes('role="search"'));
+    assert.ok(html.includes('id="cat-status" role="status" aria-live="polite">2 products in 2 categories</p>'));
+    assert.ok(html.includes('<nav class="cat-nav" id="cat-nav" aria-label="Product categories">'));
+    assert.ok(html.includes('<a class="cat-link" href="#cat-cooking" data-cat="cooking"><span class="cat-link-name">Cooking</span><span class="cat-link-n" data-total="1">1</span></a>'));
+    assert.ok(html.includes('<h2 id="cat-h-preparation">Preparation <span class="cat-count">1</span></h2>'));
     assert.ok(html.includes('id="cat-empty"') && html.includes('hidden>'));
-    assert.ok(html.includes('role="group"'));
+    assert.ok(html.includes('id="cat-search-clear"') && html.includes('id="cat-empty-clear"'));
+    assert.ok(html.includes('href="/sales/clientinformationrequest/">Request a quote</a>'));
   });
 
-  it('shows "Show all N" only for a group of more than 8', () => {
-    const many = (n) => Array.from({ length: n }, (_, i) => prod({ id: `T-${600 + i}` }));
-    assert.ok(render(many(9)).includes('Show all 9</button>'));
-    assert.ok(!render(many(8)).includes('cat-more'));
+  it('shows EVERY product — there is no "Show all N" folding any more', () => {
+    const many = Array.from({ length: 12 }, (_, i) => prod({ id: `T-${600 + i}` }));
+    const big = render(many);
+    assert.equal((big.match(/<li class="cat-card/g) || []).length, 12);
+    assert.ok(!/cat-more|is-open|Show all|Show fewer/.test(big));
   });
 
   it('renders partial dimensions labelled, and specs/material as a description list', () => {
@@ -287,30 +512,163 @@ describe('renderCatalogue', () => {
     assert.ok(html.includes('<dt>Grade</dt><dd>SS304</dd>'));
   });
 
-  it('swaps the tile for a photo only when one exists (spec §7.5)', () => {
-    const withPhoto = render(PRODUCTS, { hasPhoto: (id) => id === 'T-001' });
-    assert.ok(withPhoto.includes('<img src="site/img/products/T-001.webp"'));
-    assert.ok(!withPhoto.includes('>T-001</div>') && withPhoto.includes('>T-002</div>'));
+  it('puts the product code in its own element and gives an unmapped card the navy placeholder with the category initial', () => {
+    assert.ok(html.includes('<li class="cat-card"><div class="cat-tile" aria-hidden="true"><span>C</span></div><p class="cat-code">T-001</p>'));
+    assert.ok(html.includes('<div class="cat-tile" aria-hidden="true"><span>P</span></div><p class="cat-code">T-002</p>'));
+  });
+
+  it('a mapped card shows a lazy, sized, srcset photo with the "Representative image" caption instead of the tile', () => {
+    const photos = { 'T-001': { src: 'site/img/products/alpha.webp', thumb: 'site/img/products/alpha-thumb.webp', width: 400, height: 300, mainWidth: 800 } };
+    const out = render(PRODUCTS, { photos });
+    const card = out.split('<li class="cat-card').find(c => c.includes('>T-001</p>'));
+    assert.ok(card.startsWith(' has-photo">'));
+    assert.ok(card.includes('<figure class="cat-photo"><img src="/site/img/products/alpha-thumb.webp" srcset="/site/img/products/alpha-thumb.webp 400w, /site/img/products/alpha.webp 800w"'));
+    assert.ok(card.includes('width="400" height="300"') && card.includes('loading="lazy" decoding="async"'));
+    assert.ok(card.includes('<figcaption>Representative image</figcaption></figure>'));
+    assert.ok(!card.includes('cat-tile'));
+    // the unmapped card keeps its placeholder
+    const other = out.split('<li class="cat-card').find(c => c.includes('>T-002</p>'));
+    assert.ok(other.startsWith('">') && other.includes('cat-tile') && !other.includes('<img'));
+  });
+
+  it('the photo alt text is the product name, escaped', () => {
+    const nasty = prod({ id: 'T-800', name: 'Say "Hi" <b>&amp;</b> Range' });
+    const photos = { 'T-800': { src: 'site/img/products/a.webp', thumb: 'site/img/products/a-thumb.webp', width: 400, height: 300, mainWidth: 800 } };
+    const out = render([nasty], { photos });
+    assert.ok(out.includes('alt="Say &quot;Hi&quot; &lt;b&gt;&amp;amp;&lt;/b&gt; Range"'));
+    assert.ok(!/alt="[^"]*[<>]/.test(out));
+  });
+
+  it('last line of defence: the FINISHED markup is scanned too, so a poisoned photo path cannot ship a price word or the partner name', () => {
+    const poisoned = (src) => ({ 'T-001': { src, thumb: src.replace(/\.webp$/, '-thumb.webp'), width: 400, height: 300, mainWidth: 800 } });
+    const price = violationsOf(() => render([PER_LENGTH], { photos: poisoned('site/img/products/price-list.webp') }));
+    assert.deepEqual(price, [{ id: '(rendered block)', field: 'html', rule: 'money' }]);
+    const brand = violationsOf(() => render([PER_LENGTH], { photos: poisoned(`site/img/products/${PARTNER.toLowerCase().replace(' ', '-')}-range.webp`) }));
+    assert.deepEqual(brand, [{ id: '(rendered block)', field: 'html', rule: 'brand' }]);
   });
 
   it('scans category labels too: a price word or the partner name there refuses the build, naming the category', () => {
     const rule = { 'Price List': 'money', 'Cost Centre': 'money', 'Markup Items': 'money', [`${PARTNER} Line`]: 'brand' };
     for (const [label, expected] of Object.entries(rule)) {
-      const v = violationsOf(() => renderCatalogue(db([prod({})], [{ ...CATS[0], label }, CATS[1]]), { hasPhoto: () => false }));
+      const v = violationsOf(() => renderWith([prod({})], [{ ...CATS[0], label }, CATS[1]]));
       assert.deepEqual(v, [{ id: 'cooking_line', field: 'category.label', rule: expected }], label);
     }
   });
 
+  it('sorts products inside a public category by the master\'s category order, then id (a baking item follows the cooking line)', () => {
+    const cats = [{ id: 'cooking_line', label: 'Cooking Line' }, { id: 'baking', label: 'Baking' }];
+    const mixed = [prod({ id: 'BA-001', category: 'baking' }), prod({ id: 'CE-002' }), prod({ id: 'BA-000', category: 'baking' }), prod({ id: 'CE-001' })];
+    const out = renderCatalogue(db(mixed, cats), { publicCategories: { products: Object.fromEntries(mixed.map(p => [p.id, 'cooking'])), excludedProducts: {} } });
+    assert.deepEqual([...out.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]), ['CE-001', 'CE-002', 'BA-000', 'BA-001']);
+  });
+
   it('sorts products inside a category by id', () => {
     const out = render([prod({ id: 'T-020', name: 'Second' }), prod({ id: 'T-010', name: 'First' }), prod({ id: 'T-015', name: 'Middle' })]);
-    assert.ok(out.indexOf('>T-010</div>') < out.indexOf('>T-015</div>') && out.indexOf('>T-015</div>') < out.indexOf('>T-020</div>'));
+    assert.ok(out.indexOf('>T-010</p>') < out.indexOf('>T-015</p>') && out.indexOf('>T-015</p>') < out.indexOf('>T-020</p>'));
   });
 
   it('rejects a malformed record instead of emitting it', () => {
     assert.throws(() => render([prod({ id: 'bad id' })]), CatalogueGuardError);
     assert.throws(() => render([prod({ category: 'nope' })]), CatalogueGuardError);
     assert.throws(() => render([prod({ id: 'T-1' }), prod({ id: 'T-1' })]), CatalogueGuardError);
-    assert.throws(() => renderCatalogue(db([prod({})], [{ ...CATS[0], color: 'red' }]), { hasPhoto: () => false }), CatalogueGuardError);
+    assert.throws(() => renderWith([prod({})], [{ ...CATS[0], id: 'Bad Id' }]), CatalogueGuardError);
+  });
+});
+
+describe('webpSize / loadPhotoMap — the optional product-photo map (scripts/product-photos.json)', () => {
+  const P = (rel) => path.join(ROOT, 'site/img/projects', rel);
+  const makeRoot = (files) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'photomap-'));
+    fs.mkdirSync(path.join(root, 'site/img/products'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      fs.writeFileSync(path.join(root, 'site/img/products', name), Buffer.isBuffer(content) ? content : fs.readFileSync(content));
+    }
+    return root;
+  };
+  const withMap = (root, map) => { const f = path.join(root, 'scripts/product-photos.json'); fs.writeFileSync(f, typeof map === 'string' ? map : JSON.stringify(map)); return f; };
+  const GOOD = { 'alpha.webp': P('ispsc/06.webp'), 'alpha-thumb.webp': P('ispsc/06-thumb.webp'), 'beta.webp': P('ispsc/01.webp'), 'beta-thumb.webp': P('ispsc/01-thumb.webp') };
+  const IDS = ['T-001', 'T-002', 'T-003'];
+
+  it('reads the real WebP headers (lossy, any size)', () => {
+    assert.deepEqual(webpSize(fs.readFileSync(P('ispsc/01.webp'))), { width: 1600, height: 1200 });
+    assert.deepEqual(webpSize(fs.readFileSync(P('ispsc/06-thumb.webp'))), { width: 450, height: 600 });
+    assert.deepEqual(webpSize(fs.readFileSync(P('dmmmsu/06-thumb.webp'))), { width: 277, height: 600 });
+    assert.equal(webpSize(Buffer.from('not an image at all, just some text bytes that are long enough')), null);
+    assert.equal(webpSize(Buffer.alloc(10)), null);
+  });
+
+  it('an absent mapping file is not an error: nothing is mapped', () => {
+    const root = makeRoot(GOOD);
+    assert.deepEqual(loadPhotoMap({ root, file: path.join(root, 'scripts/product-photos.json'), ids: IDS }), { photos: Object.create(null), files: 0 });
+  });
+
+  it('a valid map resolves dimensions from the thumb, and many ids may share one image', () => {
+    const root = makeRoot(GOOD);
+    const file = withMap(root, { 'T-001': 'site/img/products/alpha.webp', 'T-002': 'site/img/products/alpha.webp', 'T-003': 'site/img/products/beta.webp' });
+    const { photos, files } = loadPhotoMap({ root, file, ids: IDS });
+    assert.equal(files, 2);
+    assert.deepEqual(photos['T-001'], { src: 'site/img/products/alpha.webp', thumb: 'site/img/products/alpha-thumb.webp', width: 450, height: 600, mainWidth: 1200 });
+    assert.deepEqual(photos['T-002'], photos['T-001']);
+    assert.deepEqual(photos['T-003'], { src: 'site/img/products/beta.webp', thumb: 'site/img/products/beta-thumb.webp', width: 600, height: 450, mainWidth: 1600 });
+  });
+
+  it('refuses invalid JSON, a non-object, and a key that is not a real product id', () => {
+    const root = makeRoot(GOOD);
+    assert.throws(() => loadPhotoMap({ root, file: withMap(root, '{ nope'), ids: IDS }), /not valid JSON/);
+    assert.throws(() => loadPhotoMap({ root, file: withMap(root, '["a"]'), ids: IDS }), /must be a JSON object/);
+    assert.throws(() => loadPhotoMap({ root, file: withMap(root, { 'X-999': 'site/img/products/alpha.webp' }), ids: IDS }), /X-999: not a product id/);
+  });
+
+  it('refuses a missing main file or a missing thumb', () => {
+    const root = makeRoot({ 'alpha.webp': P('ispsc/06.webp'), 'beta-thumb.webp': P('ispsc/01-thumb.webp') });
+    const file = withMap(root, { 'T-001': 'site/img/products/alpha.webp', 'T-002': 'site/img/products/beta.webp' });
+    assert.throws(() => loadPhotoMap({ root, file, ids: IDS }), (e) => /T-001: missing file site\/img\/products\/alpha-thumb\.webp/.test(e.message) && /T-002: missing file site\/img\/products\/beta\.webp/.test(e.message));
+  });
+
+  it('refuses a malformed path: traversal, upper case, a thumb as the main file, the wrong type, a leading slash, a space', () => {
+    const root = makeRoot(GOOD);
+    for (const bad of ['../x.webp', 'site/img/products/Alpha.webp', 'site/img/products/alpha-thumb.webp', 'site/img/products/alpha.png', '/site/img/products/alpha.webp', 'site/img/products/al pha.webp', 'site/img/projects/ispsc/01.webp', 42]) {
+      assert.throws(() => loadPhotoMap({ root, file: withMap(root, { 'T-001': bad }), ids: IDS }), /T-001:/, String(bad));
+    }
+  });
+
+  it('refuses a thumb that is not narrower than its main image, an aspect mismatch, and bytes that are not WebP', () => {
+    const root = makeRoot({
+      ...GOOD,
+      'gamma.webp': P('ispsc/01-thumb.webp'), 'gamma-thumb.webp': P('ispsc/01.webp'),            // thumb wider than main
+      'delta.webp': P('ispsc/01.webp'), 'delta-thumb.webp': P('ispsc/06-thumb.webp'),            // 4:3 main, 3:4 thumb
+      'epsilon.webp': Buffer.from('x'.repeat(64)), 'epsilon-thumb.webp': Buffer.from('y'.repeat(64)),
+    });
+    for (const [slug, re] of [['gamma', /must be narrower/], ['delta', /different aspect ratios/], ['epsilon', /not a readable WebP/]]) {
+      assert.throws(() => loadPhotoMap({ root, file: withMap(root, { 'T-001': `site/img/products/${slug}.webp` }), ids: IDS }), re, slug);
+    }
+  });
+
+  it('refuses an image path that carries the partner name or a price token', () => {
+    const slug = `${PARTNER.toLowerCase().replace(' ', '-')}-range`;
+    const root = makeRoot({ ...GOOD, [`${slug}.webp`]: P('ispsc/06.webp'), [`${slug}-thumb.webp`]: P('ispsc/06-thumb.webp') });
+    assert.throws(() => loadPhotoMap({ root, file: withMap(root, { 'T-001': `site/img/products/${slug}.webp` }), ids: IDS }), /partner-brand/);
+  });
+
+  it('skips the entries of unpublished products without validating them (even a missing file), but still refuses a key that is no real id', () => {
+    const root = makeRoot(GOOD);
+    const file = withMap(root, { 'T-001': 'site/img/products/alpha.webp', 'T-002': 'site/img/products/gone-from-disk.webp', 'T-003': 'not even a path' });
+    const out = loadPhotoMap({ root, file, ids: IDS, skipIds: ['T-002', 'T-003'] });
+    assert.deepEqual(Object.keys(out.photos), ['T-001']);
+    assert.equal(out.skipped, 2);
+    assert.throws(() => loadPhotoMap({ root, file: withMap(root, { 'ZZ-1': 'site/img/products/alpha.webp' }), ids: IDS, skipIds: ['ZZ-1'] }), /ZZ-1: not a product id/);
+  });
+
+  it('reports EVERY problem in one error, naming ids and paths only', () => {
+    const root = makeRoot(GOOD);
+    const file = withMap(root, { 'T-001': 'site/img/products/nope.webp', 'T-002': '../escape.webp', 'ZZ-1': 'site/img/products/alpha.webp' });
+    try { loadPhotoMap({ root, file, ids: IDS }); assert.fail('should have thrown'); }
+    catch (e) {
+      assert.match(e.message, /4 problem\(s\)/);          // T-001 is missing BOTH its main file and its thumb
+      for (const id of ['T-001', 'T-002', 'ZZ-1']) assert.ok(e.message.includes(id), id);
+      assert.ok(e.message.includes('nope-thumb.webp') && e.message.includes('nope.webp'));
+    }
   });
 });
 
@@ -337,94 +695,499 @@ describe('injectIntoHtml / stripJsonComments', () => {
   });
 });
 
-describe('the committed site: index.html + public-site files', () => {
-  const html = read('index.html');
-  const block = between(html, START_MARKER, END_MARKER);
-  const siteStart = html.indexOf('<div id="site"');
-  const siteEnd = html.indexOf('<!-- /#site -->');
-  const site = html.slice(siteStart, siteEnd);
-  const head = html.slice(0, html.indexOf('</head>'));
+describe('the committed /catalogue/ page (R1, R5, marker integrity, every product exactly once, escaping)', () => {
+  const ids = [...catBlock.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]);
+  const groups = catBlock.split('<section class="cat-group"').slice(1);
 
-  it('has both catalogue markers exactly once and a non-empty block', () => {
-    assert.equal(html.split(START_MARKER).length - 1, 1);
-    assert.equal(html.split(END_MARKER).length - 1, 1);
-    assert.ok(block.trim().length > 1000);
-    assert.ok(siteStart > 0 && siteEnd > siteStart, 'the #site section is not delimited');
+  it('has both catalogue markers exactly once, in order, around a non-empty block', () => {
+    assert.equal(cat.split(START_MARKER).length - 1, 1);
+    assert.equal(cat.split(END_MARKER).length - 1, 1);
+    assert.ok(cat.indexOf(START_MARKER) < cat.indexOf(END_MARKER));
+    assert.ok(catBlock.trim().length > 10000);
   });
 
-  it('the baked block carries no price token, no formula token and no script (R1)', () => {
-    assert.ok(!FORMULA_RE.test(block), 'CHECK 9 token list matched');
-    assert.ok(!MONEY_RE.test(block), 'money regex matched');
-    assert.ok(!/<script/i.test(block));
+  it('the generated block carries no price token, no formula token, no script, no handler, no inline style (R1)', () => {
+    assert.ok(!FORMULA_RE.test(catBlock), 'CHECK 9 token list matched');
+    assert.ok(!MONEY_RE.test(catBlock), 'money regex matched');
+    assert.ok(!/<script/i.test(catBlock) && !/\son[a-z]+=/i.test(catBlock) && !/\sstyle=/i.test(catBlock));
   });
 
-  it('the hand-written counts (hero tile, catalogue intro) match the generated block', () => {
-    const total = Number(block.match(/data-cat="all" aria-pressed="true">All <span>(\d+)<\/span>/)[1]);
-    const cats = (block.match(/<section class="cat-group"/g) || []).length;
-    assert.ok(site.includes(`${cats} categories · ${total} products`), 'hero fact tile is stale');
-    assert.ok(site.includes(`${total} products in ${cats} categories`), 'catalogue intro is stale');
-    assert.equal((block.match(/<li class="cat-card"/g) || []).length, total);
+  it('the hand-written parts of the page carry no price token either (the <head> font URL is exempt from the digits-comma pattern)', () => {
+    const body = catHand.slice(catHand.indexOf('<body'));
+    assert.ok(!FORMULA_RE.test(body), 'a price token sits in the hand-written body');
+    assert.ok(!/₱|PHP ?\d|basePrice|priceAdder|markup/i.test(catHead), 'a price token sits in the <head>');
+  });
+
+  it('every product appears exactly once, and the counts agree everywhere (nav, headings, placeholder, status)', () => {
+    assert.equal(new Set(ids).size, ids.length, 'a product id is rendered twice');
+    assert.ok(ids.every(id => /^[A-Z]{2}-\d{3}$/.test(id)), 'unexpected product id shape');
+    const total = ids.length;
+    assert.equal((catBlock.match(/<li class="cat-card/g) || []).length, total);
+    assert.ok(catBlock.includes(`placeholder="Search ${total} products"`));
+    const nCats = groups.length;
+    assert.ok(catBlock.includes(`role="status" aria-live="polite">${total} products in ${nCats} categories</p>`));
+    const navTotals = [...catBlock.matchAll(/class="cat-link-n" data-total="(\d+)"/g)].map(m => Number(m[1]));
+    assert.equal(navTotals.length, nCats);
+    assert.equal(navTotals.reduce((a, b) => a + b, 0), total);
+    groups.forEach((g, i) => {
+      const cards = (g.match(/<li class="cat-card/g) || []).length;
+      assert.equal(cards, navTotals[i], `nav count for group ${i} is stale`);
+      assert.equal(Number(g.match(/<span class="cat-count">(\d+)<\/span>/)[1]), cards, `heading count for group ${i} is stale`);
+      assert.ok(g.includes(`<h2 id="cat-h-${g.match(/data-cat="([a-z_]+)"/)[1]}">`));
+    });
+  });
+
+  it('is sorted: inside each public category the master\'s category order (cooking line, prep & washing, refrigeration, baking, misc), then id', () => {
+    const PREFIX_ORDER = ['CE', 'PW', 'RF', 'BA', 'MS'];           // the master's category order, by product-code prefix
+    const keys = (g) => [...g.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => [PREFIX_ORDER.indexOf(m[1].slice(0, 2)), m[1]]);
+    groups.forEach((g, i) => {
+      const ks = keys(g);
+      assert.ok(ks.every(k => k[0] >= 0), `group ${i} has an unexpected product-code prefix`);
+      const sorted = [...ks].sort((a, b) => (a[0] - b[0]) || (a[1] < b[1] ? -1 : 1));
+      assert.deepEqual(ks, sorted, `group ${i} is not in master-category then id order`);
+    });
+    // "Cooking" opens with the cooking line, not the bakery items that were re-filed into it
+    const cooking = keys(groups[2]);
+    assert.equal(cooking[0][1], 'CE-001');
+    assert.ok(cooking.findIndex(k => k[1].startsWith('BA-')) > cooking.findIndex(k => k[1] === 'CE-031'));
+  });
+
+  it('escapes everything: every ampersand starts an entity, and no raw angle bracket sits in a text or attribute value', () => {
+    assert.ok(!/&(?!(?:amp|lt|gt|quot|#39);)/.test(catBlock), 'an unescaped ampersand');
+    assert.ok(!/(?:alt|placeholder|aria-label|data-[a-z-]+|href|src)="[^"]*[<>]/.test(catBlock), 'a raw angle bracket in an attribute');
+    assert.ok(!/<(?!\/?(?:section|div|p|h[1-3]|ul|li|nav|a|span|dl|dt|dd|form|label|input|button|svg|circle|path|figure|figcaption|img)\b)[a-z]/i.test(catBlock), 'an unexpected tag');
+  });
+
+  it('every card has a tile or a photo, every photo is lazy, sized, captioned and has an alt equal to its product name', () => {
+    const cards = catBlock.split('<li class="cat-card').slice(1);
+    for (const c of cards) {
+      const photo = c.includes('<figure class="cat-photo">');
+      assert.ok(photo || c.includes('<div class="cat-tile" aria-hidden="true">'), 'a card has neither tile nor photo');
+      if (photo) {
+        const name = c.match(/<h3>([^<]*)<\/h3>/)[1];
+        assert.ok(c.includes(`alt="${name}"`), `photo alt differs from the product name (${name})`);
+        assert.ok(/loading="lazy" decoding="async"/.test(c) && /width="\d+" height="\d+"/.test(c) && /srcset="[^"]+ \d+w, [^"]+ \d+w"/.test(c));
+        assert.ok(c.includes('<figcaption>Representative image</figcaption>'));
+      }
+    }
+  });
+
+  it('has EXACTLY the five public categories in the ruled order — as sections, as nav links, and as deep-link slugs', () => {
+    const slugs = [...catBlock.matchAll(/<section class="cat-group" id="cat-([a-z_]+)"/g)].map(m => m[1]);
+    assert.deepEqual(slugs, ['preparation', 'washing', 'cooking', 'storage', 'refrigeration']);
+    const nav = [...catBlock.matchAll(/<a class="cat-link" href="#cat-([a-z_]+)" data-cat="([a-z_]+)"><span class="cat-link-name">([^<]+)<\/span>/g)];
+    assert.deepEqual(nav.map(m => [m[1], m[2], m[3]]), PUBLIC_CATEGORIES.map(c => [c.id, c.id, c.label]));
+    assert.ok(!/id="cat-(prep_washing|cooking_line|exhaust_system|fresh_air_system|gas_line|fire_suppression|miscellaneous|baking)"/.test(cat), 'an old master category slug survives');
+  });
+
+  it('publishes nothing from the excluded categories (exhaust, fresh air, gas line, fire suppression) or the excluded items', () => {
+    for (const id of pageIds) assert.ok(!/^(EX|FA|GL|FS)-/.test(id), `${id} is from an excluded category`);
+    for (const id of Object.keys(pubJson.excludedProducts)) assert.ok(!pageIds.has(id), `${id} is excluded but on the page`);
+    // the page chrome (everything except the product cards) and the head no longer talk about the removed systems
+    const chrome = catBlock.replace(/<li class="cat-card[\s\S]*?<\/li>/g, '');
+    for (const [label, text] of [['block chrome', visibleText(chrome)], ['hand-written page', publicCopy(catHand)], ['head', attrText(catHead)]]) {
+      assert.ok(!/exhaust|fresh[- ]air|gas lines?|fire[- ]suppression/i.test(text), `${label} still mentions a removed category`);
+    }
+    assert.match(catHead, /name="description" content="[^"]*preparation, washing, cooking, storage and refrigeration/);
+  });
+
+  it('every published product lands in EXACTLY ONE of the five public categories, as scripts/public-categories.json says (and nothing else is on the page)', () => {
+    const five = PUBLIC_CATEGORIES.map(c => c.id);
+    assert.ok(Object.values(pubJson.products).every(v => five.includes(v)), 'a product maps outside the five');
+    assert.deepEqual([...pageIds].sort(), Object.keys(pubJson.products).sort(), 'the page and the committed map disagree about which products are published');
+    assert.ok(!Object.keys(pubJson.products).some(id => id in pubJson.excludedProducts), 'a product is both published and excluded');
+    for (const g of groups) {
+      const slug = g.match(/^ id="cat-([a-z_]+)"/)[1];
+      for (const m of g.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)) assert.equal(pubJson.products[m[1]], slug, `${m[1]} sits in the wrong category`);
+    }
+    assert.doesNotThrow(() => loadPublicCategories({ ids: [...Object.keys(pubJson.products), ...Object.keys(pubJson.excludedProducts)] }));
+    assert.ok(Object.values(pubJson.excludedProducts).every(r => typeof r === 'string' && r.length > 10), 'an exclusion has no reason');
+  });
+
+  it('carries no pricing language at all — not an amount, not the word "price" or "pricing" or "cost" or "markup"', () => {
+    assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup/i.test(visibleText(catBlock) + attrText(catBlock)), 'a pricing word is on the page');
+  });
+
+  it('shows every product: no folding, no "Show all"', () => {
+    assert.ok(!/cat-more|is-open|Show all|Show fewer/.test(cat));
+  });
+
+  it('has the title, description, canonical, robots and Open Graph tags the owner specified', () => {
+    assert.match(cat, /<title>Product Catalogue — Barro Kitchens \| Barro Industries<\/title>/);
+    assert.match(catHead, /<meta name="description" content="[^"]{60,}">/);
+    assert.match(catHead, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
+    assert.match(catHead, /<meta name="robots" content="index,follow">/);
+    for (const p of ['og:title', 'og:description', 'og:url', 'og:image', 'og:type', 'og:site_name']) assert.ok(catHead.includes(`property="${p}"`), p);
+    assert.ok(catHead.includes('property="og:url" content="https://barroindustries.com/catalogue/"'));
+    assert.ok(catHead.includes('property="og:title" content="Product Catalogue — Barro Kitchens | Barro Industries"'));
+    assert.match(cat, /<html lang="en" data-view="site">/);
+  });
+
+  it('is standalone: site.css + catalogue.css, site.js + catalogue.js, no Firebase / app script / inline script / inline style, a CSP', () => {
+    assert.ok(cat.includes('<link rel="stylesheet" href="/css/site.css">') && cat.includes('<link rel="stylesheet" href="/css/catalogue.css">'));
+    const scripts = [...cat.matchAll(/<script\b[^>]*>/g)].map(m => m[0]);
+    assert.deepEqual(scripts, ['<script defer src="/js/site.js">', '<script defer src="/js/catalogue.js">']);
+    assert.ok(!/<style\b/i.test(cat) && !/\sstyle=/i.test(cat) && !/\son[a-z]+=/i.test(cat));
+    assert.ok(!/firebase|app\.js|config\.js|www\.gstatic\.com|unpkg|jsdelivr|lucide|chart\.js/i.test(cat.replace(/<!--[\s\S]*?-->/g, '')), 'an app / third-party script leaked in');
+    assert.match(catHead, /<meta http-equiv="Content-Security-Policy" content="[^"]*script-src 'self'[^"]*">/);
+    assert.ok(!/script-src[^;"]*unsafe-inline/.test(catHead), 'the CSP allows inline script');
+    assert.ok(exists('css/catalogue.css') && exists('js/catalogue.js'));
+  });
+
+  it('has the header the owner asked for: brand and Home to /, Login to /#login (a link, not the homepage button), the CTA to the brief form', () => {
+    assert.ok(cat.includes('<a href="/" id="site-brand">'));
+    assert.ok(cat.includes('<a href="/">Home</a>'));
+    assert.ok(/<a class="site-btn site-btn-outline site-btn-sm" id="site-login-link" href="\/#login">Login<\/a>/.test(cat));
+    assert.ok(!cat.includes('id="site-login-btn"') && !cat.includes('id="site-footer-login"'), 'the homepage Login ids would let site.js hijack the link');
+    assert.ok(cat.includes('<a href="/#login">Staff login</a>'));
+    assert.ok(/<a class="site-btn site-btn-primary" href="\/sales\/clientinformationrequest\/">Request a quote<\/a>/.test(cat));
+    assert.ok(cat.includes('<h2>Can’t find it? Request a quote</h2>'));
+    assert.ok(cat.includes('id="cat-top"') && cat.includes('aria-label="Back to top"'));
+  });
+
+  it('keeps the premium copy: the intro line the owner suggested, and "Premium" in the meta description', () => {
+    assert.ok(catBlock.includes('Premium SS304 equipment, built to your specifications.'));
+    assert.match(catHead, /name="description" content="Browse premium SS304/);
+  });
+
+  it('(local only) is exactly what a fresh build produces from the private master and the photo map', { skip: (() => { try { return resolveMaster() ? false : 'the private master (products-database.json) is not present'; } catch (_) { return 'no master'; } })() }, () => {
+    const master = JSON.parse(stripJsonComments(fs.readFileSync(resolveMaster(), 'utf8').replace(/^﻿/, '')));
+    const allIds = master.products.map(p => p.id);
+    const pub = loadPublicCategories({ ids: allIds });
+    const published = publishedProductIds(master, pub);
+    const photoMap = loadPhotoMap({ ids: allIds, skipIds: allIds.filter(id => !published.has(id)) });
+    const fresh = renderCatalogue(master, { photos: photoMap.photos, publicCategories: pub });
+    assert.equal(catBlock.trim(), fresh.trim(), 'catalogue/index.html is stale — run: node scripts/build-catalogue.js');
+    // every master product is accounted for exactly once: excluded category, excluded item, or mapped to one of the five
+    for (const p of master.products) {
+      const where = [EXCLUDED_CATEGORIES.includes(p.category), Object.prototype.hasOwnProperty.call(pub.excludedProducts, p.id), Object.prototype.hasOwnProperty.call(pub.products, p.id)].filter(Boolean).length;
+      assert.equal(where, 1, `${p.id} is not accounted for exactly once`);
+    }
+    assert.deepEqual([...ids].sort(), [...published].sort(), 'a published master product is missing from, or added to, the page');
+  });
+});
+
+function resolveMaster() {
+  for (const p of [path.join(ROOT, 'products-database.json'), path.join(os.homedir(), 'Desktop', 'barro-private', 'products-database.json')]) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+describe('product photos on the page (when scripts/product-photos.json exists)', () => {
+  const mapFile = path.join(ROOT, 'scripts/product-photos.json');
+  const has = fs.existsSync(mapFile);
+  const ids = [...catBlock.matchAll(/<p class="cat-code">([^<]+)<\/p>/g)].map(m => m[1]);
+
+  it('is valid JSON mapping real product ids to files that exist (the full image and its -thumb); entries of unpublished products are skipped', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
+    const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
+    for (const [id, p] of Object.entries(map)) {
+      const published = ids.includes(id);
+      assert.ok(published || /^(EX|FA|GL|FS)-/.test(id) || id in pubJson.excludedProducts, `${id} is neither on the page nor an excluded product`);
+      if (!published) continue;                 // an unpublished product's entry stays in the file but is never validated or rendered
+      assert.match(p, /^site\/img\/products\/[a-z0-9][a-z0-9-]*\.webp$/);
+      assert.ok(exists(p), `missing ${p}`);
+      assert.ok(exists(p.replace(/\.webp$/, '-thumb.webp')), `missing the thumb of ${p}`);
+    }
+    const unpublished = Object.keys(map).filter(id => !ids.includes(id));
+    assert.doesNotThrow(() => loadPhotoMap({ ids: [...ids, ...unpublished], skipIds: unpublished }));
+  });
+
+  it('gives every mapped card the photo and the "Representative image" caption, and nobody else', { skip: has ? false : 'no scripts/product-photos.json yet' }, () => {
+    const map = JSON.parse(fs.readFileSync(mapFile, 'utf8'));
+    const cards = Object.fromEntries(catBlock.split('<li class="cat-card').slice(1).map(c => [c.match(/<p class="cat-code">([^<]+)<\/p>/)[1], c]));
+    for (const id of ids) {
+      const mapped = Object.prototype.hasOwnProperty.call(map, id);
+      assert.equal(cards[id].includes('<figure class="cat-photo">'), mapped, `${id}: photo presence differs from the map`);
+      if (mapped) {
+        assert.ok(cards[id].includes(`src="/${map[id].replace(/\.webp$/, '-thumb.webp')}"`), `${id}: wrong thumb`);
+        assert.ok(cards[id].includes('<figcaption>Representative image</figcaption>'));
+      }
+    }
+  });
+
+  it('every product image the page references exists on disk', () => {
+    for (const u of imageRefs(cat)) assert.ok(exists(u), `missing ${u}`);
+  });
+
+  it('product photos and the catalogue page stay OUT of the service worker PRECACHE, and CHECK 9 enforces it', () => {
+    const sw = read('sw.js');
+    assert.ok(!sw.includes("'/site/img/"), 'a photo is precached');
+    assert.ok(!/'\/catalogue\/|'\/js\/catalogue\.js'|'\/css\/catalogue\.css'/.test(sw), 'the catalogue page or its assets are precached');
+    const sh = read('scripts/ci-invariants.sh');
+    assert.ok(sh.includes(`"'/site/img/products/"`), 'CHECK 9 has no product-photo precache guard');
+    assert.ok(sh.includes('/catalogue/'), 'CHECK 9 has no catalogue precache guard');
+  });
+});
+
+describe('the committed homepage (index.html): a business feature first, NO products', () => {
+  const nav = homeSite.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
+  const hero = homeSite.match(/<section id="hero">[\s\S]*?<\/section>/)[0];
+  const footer = homeSite.match(/<footer id="site-footer">[\s\S]*?<\/footer>/)[0];
+
+  it('lists no products: no catalogue markers, cards, groups, chips, search box, product counts or category counts', () => {
+    assert.ok(!home.includes('CATALOGUE:START') && !home.includes('CATALOGUE:END'));
+    assert.ok(!/class="cat-(card|group|chips?|tile|grid)\b|id="cat-|data-cat=|data-filter/.test(home));
+    const text = visibleText(homeSite);
+    assert.ok(!/\d+\s+products?\b/i.test(text), 'a product count is on the homepage');
+    assert.ok(!/\d+\s+categories\b/i.test(text), 'a category count is on the homepage');
+    assert.ok(!/products?\s*&\s*catalogue|search \d+/i.test(text));
+  });
+
+  it('links to the catalogue in exactly three places: the nav, the hero button and the footer', () => {
+    const all = homeSite.match(/href="\/catalogue\/"/g) || [];
+    assert.equal(all.length, 3, `${all.length} catalogue links`);
+    assert.equal((nav.match(/href="\/catalogue\/"/g) || []).length, 1);
+    assert.equal((hero.match(/href="\/catalogue\/"/g) || []).length, 1);
+    assert.equal((footer.match(/href="\/catalogue\/"/g) || []).length, 1);
+    assert.ok(hero.includes('>Browse the catalogue</a>'));
+    assert.ok(!/href="#catalogue"|href="[^"]*#cat-/.test(homeSite), 'a deep link into the catalogue is on the homepage');
+  });
+
+  it('has the nav Services · Projects · About · Catalogue · Contact, with Login top right', () => {
+    const labels = [...nav.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map(m => [m[1], m[2]]);
+    assert.deepEqual(labels, [['#services', 'Services'], ['#projects', 'Projects'], ['#about', 'About'], ['/catalogue/', 'Catalogue'], ['#contact', 'Contact']]);
+    assert.ok(/<button type="button" id="site-login-btn" class="site-btn site-btn-outline site-btn-sm">Login<\/button>/.test(homeSite));
+    assert.ok(homeSite.indexOf('id="site-login-btn"') > homeSite.indexOf('id="site-nav"'));
+  });
+
+  it('puts "23 years in business" first in the hero and the proof bar, and mentions the family business only in About', () => {
+    assert.match(hero, /<p class="hero-years"><span class="hero-years-num">23<\/span><span class="hero-years-label">years in business<\/span><\/p>/);
+    assert.ok(!/family/i.test(visibleText(hero) + attrText(hero)), 'the hero mentions the family business');
+    assert.ok(!/family business/i.test(attrText(homeHead) + home.match(/<title>[^<]*<\/title>/)[0]), 'a head tag mentions the family business');
+    const proof = homeSite.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0];
+    const items = [...proof.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(m => visibleText(m[1]));
+    assert.equal(items.length, 4);
+    assert.equal(items[0], '23 years in business');
+    assert.ok(!items.some(t => /family|products?\b|categories/i.test(t)));
+    assert.match(visibleText(homeSite.match(/<section id="about"[\s\S]*?<\/section>/)[0]), /began as a family business/);
+    assert.ok(homeSite.match(/<section id="about"[\s\S]*?<\/section>/)[0].includes('<span class="about-years-num">23</span>'));
+  });
+
+  it('leads with premium quality, and says "high-quality" three to five times — with the concrete specifics behind it', () => {
+    assert.match(visibleText(hero), /Premium stainless-steel kitchens, built to order in Metro Manila\./);
+    const n = (visibleText(homeSite).match(/high-quality/gi) || []).length;
+    assert.ok(n >= 3 && n <= 5, `"high-quality" appears ${n} times`);
+    const text = visibleText(homeSite);
+    for (const fact of ['food-grade SS304', 'No.4 brushed finish', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
+      assert.ok(text.includes(fact) || text.includes(fact.replace(/ /g, ' ')), `the specific "${fact}" is missing`);
+    }
+    assert.match(homeHead, /name="description" content="Premium stainless-steel kitchens[^"]*high-quality SS304/);
+  });
+
+  it('keeps exhaust, fresh-air, gas lines and fire suppression as SERVICES on the homepage (owner ruling) — they are only gone from the catalogue', () => {
+    const SYSTEMS = /exhaust and fresh-air systems, gas lines and fire suppression/;
+    assert.match(visibleText(hero), SYSTEMS, 'the hero lead no longer names them');
+    assert.match(visibleText(homeSite.match(/<article class="svc[^>]*>[\s\S]*?<\/article>/)[0]), /exhaust hoods and ducting, fresh-air systems, gas lines and fire suppression/, 'the fit-out service card no longer names them');
+    assert.match(homeHead, /name="description" content="[^"]*exhaust and fresh-air systems, gas lines and fire suppression/, 'the meta description no longer names them');
+  });
+
+  it('makes no unverifiable claim: no best / leading / world-class / awards / certification / lifetime / guarantee / #1', () => {
+    const BANNED = /\b(best|leading|world[- ]class|award(?:s|[- ]winning)?|certified|certification|iso ?\d{3,}|lifetime|guarantee[ds]?|unrivall?ed|unmatched|#1|number one)\b/i;
+    assert.ok(!BANNED.test(publicCopy(homeSite)), 'an unverifiable claim is in #site');
+    assert.ok(!BANNED.test(attrText(homeHead)), 'an unverifiable claim is in the head tags');
+    assert.ok(!BANNED.test(publicCopy(catHand)), 'an unverifiable claim is on the catalogue page');
   });
 
   it('the whole #site section has no peso sign, PHP amount or thousands-separated number (R1)', () => {
-    assert.ok(!/₱|PHP ?\d|\b\d{1,3}(,\d{3})+\b/i.test(site));
+    assert.ok(!/₱|PHP ?\d|\b\d{1,3}(,\d{3})+\b/i.test(homeSite));
   });
 
-  it('never names the partner company: <head>, #site section, robots.txt, sitemap.xml, site.css, site.js (R5)', () => {
-    assert.ok(!BRAND_RE.test(head.replace(/\s+/g, ' ')), '<head> names the partner');
-    assert.ok(!BRAND_RE.test(site.replace(/\s+/g, ' ')), '#site names the partner');
-    for (const f of ['robots.txt', 'sitemap.xml', 'css/site.css', 'js/site.js']) assert.ok(!BRAND_RE.test(read(f).replace(/\s+/g, ' ')), `${f} names the partner`);
+  it('never names the partner company: <head>, #site, the catalogue page, robots.txt, sitemap.xml and every public css/js file (R5)', () => {
+    assert.ok(!brandHit(homeHead), '<head> names the partner');
+    assert.ok(!brandHit(homeSite), '#site names the partner');
+    assert.ok(!brandHit(cat), 'the catalogue page names the partner');
+    for (const f of ['robots.txt', 'sitemap.xml', 'css/site.css', 'js/site.js', 'css/catalogue.css', 'js/catalogue.js']) assert.ok(!brandHit(read(f)), `${f} names the partner`);
+    if (exists('scripts/product-photos.json')) assert.ok(!brandHit(read('scripts/product-photos.json')), 'the photo map names the partner');
   });
 
-  it('JSON-LD parses, carries the verified address, and claims nothing unverified', () => {
-    const ld = JSON.parse(head.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
+  it('JSON-LD parses, carries the verified address and the public email, and claims nothing unverified', () => {
+    const ld = JSON.parse(homeHead.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
     assert.equal(ld['@type'], 'LocalBusiness');
     assert.deepEqual(ld.address, { '@type': 'PostalAddress', streetAddress: '21 Capricorn St., Tandang Sora', addressLocality: 'Quezon City', postalCode: '1116', addressRegion: 'Metro Manila', addressCountry: 'PH' });
     for (const k of ['priceRange', 'aggregateRating', 'openingHours', 'geo']) assert.ok(!(k in ld), `${k} must not be claimed`);
     assert.deepEqual(ld.sameAs, ['https://www.facebook.com/barrokitchens']);
+    assert.equal(ld.email, 'hello@barroindustries.com');
+    assert.equal(ld.telephone, '+63 927 683 6300');
   });
 
   it('the static <title> is byte-identical to SITE_TITLE in js/app.js', () => {
-    const title = html.match(/<title>([^<]*)<\/title>/)[1];
+    const title = home.match(/<title>([^<]*)<\/title>/)[1];
     const appTitle = read('js/app.js').match(/const SITE_TITLE = '([^']*)';/)[1];
     assert.equal(title, appTitle);
   });
 
   it('keeps the version-banner pattern out of the site (the pre-commit hook rewrites it by grep)', () => {
-    assert.equal(html.split(' · Barro Industries').length - 1, 1);
-    assert.ok(!/v\d+\.\d+\.\d+ · Barro Industries/.test(site));
+    assert.equal(home.split(' · Barro Industries').length - 1, 1);
+    assert.ok(!/v\d+\.\d+\.\d+ · Barro Industries/.test(homeSite));
   });
 
   it('has no inline handlers in #site, and loads site.js first, ahead of the Firebase SDK', () => {
-    assert.ok(!/\son[a-z]+=/i.test(site));
-    const firstScript = html.indexOf('<script defer src=');
-    assert.ok(html.slice(firstScript).startsWith('<script defer src="js/site.js">'));
+    assert.ok(!/\son[a-z]+=/i.test(homeSite));
+    const firstScript = home.indexOf('<script defer src=');
+    assert.ok(home.slice(firstScript).startsWith('<script defer src="js/site.js">'));
   });
 
-  it('precaches site.css and site.js, and never a project photo (spec §8.4)', () => {
+  it('adds no external script: every script origin is one the app already used', () => {
+    const hosts = new Set([...home.matchAll(/<script\b[^>]*\ssrc="https?:\/\/([^/"]+)/g)].map(m => m[1]));
+    for (const h of hosts) assert.ok(['www.gstatic.com', 'unpkg.com', 'cdn.jsdelivr.net'].includes(h), `new script origin ${h}`);
+    assert.ok(!/<script\b[^>]*\ssrc="[^"]*(?:analytics|gtag|pixel|fbevents)/i.test(home));
+  });
+
+  it('uses the ™ mark once per page (the header brand), British spelling, no doubled spaces, no stray double dash', () => {
+    for (const [label, html] of [['homepage', homeSite], ['catalogue page', cat.slice(cat.indexOf('<body'))]]) {
+      assert.equal((visibleText(html).match(/™/g) || []).length, 1, `${label}: ™ count`);
+      assert.ok(html.includes('<span class="site-brand-sub">Barro Kitchens™</span>'), `${label}: the ™ is not in the header brand`);
+      const segments = stripTags(html, '\u0001').split('\u0001').map(s => s.trim()).filter(Boolean);
+      for (const s of segments) assert.ok(!/\S {2,}\S/.test(s), `${label}: doubled space in "${s.slice(0, 50)}"`);
+      assert.ok(!/ -- |\s-\s(?=[A-Za-z])/.test(visibleText(html)), `${label}: a hyphen used as a dash`);
+    }
+    const US = /\b(catalog(?!ue)|colou?rs?\b|centers?|meters?|labor|fiber(?:glass)?|galvaniz\w*|steriliz\w*|pasteuriz\w*|organiz\w*|customiz\w*|optimiz\w*|specializ\w*|licen[cs]ed?)\b/i;
+    for (const [label, text] of [['homepage', publicCopy(homeSite)], ['homepage head', attrText(homeHead)], ['catalogue page', publicCopy(cat)]]) {
+      assert.ok(!US.test(text), `${label}: a US spelling (${(text.match(US) || [])[0]})`);
+    }
+    assert.ok(/catalogue/i.test(publicCopy(homeSite)) && /millimetres/.test(visibleText(catBlock)));
+  });
+
+  it('writes the hero lead grammatically (the owner caught "We design, fabricate, delivers and installs")', () => {
+    assert.ok(!/delivers and installs|fabricate, delivers/i.test(home));
+    assert.match(visibleText(hero), /We design, fabricate, deliver and install high-quality commercial kitchens/);
+  });
+
+  it('precaches site.css and site.js, and never a photo or the catalogue page (spec §8.4)', () => {
     const sw = read('sw.js');
     assert.ok(sw.includes("'/css/site.css',") && sw.includes("'/js/site.js',"));
-    assert.ok(!sw.includes("'/site/img/"));
+    assert.ok(!sw.includes("'/site/img/") && !sw.includes("'/catalogue/") && !sw.includes('catalogue.js') && !sw.includes('catalogue.css'));
   });
 
-  it('robots.txt and sitemap.xml: the spec shape, and exactly one sitemap URL', () => {
+  it('robots.txt allows /catalogue/ and sitemap.xml lists it with the homepage', () => {
     const robots = read('robots.txt');
     for (const p of ['/q/', '/t/', '/v/', '/track.html', '/sales/', '/projects/', '/partners/', '/parterns/', '/ventures/', '/docs/', '/specs/', '/quote-builder-v2.html', '/quote-builder.html']) {
       assert.ok(robots.includes(`Disallow: ${p}\n`), `robots.txt must disallow ${p}`);
     }
+    const disallowed = robots.split('\n').filter(l => /^Disallow:/i.test(l)).map(l => l.replace(/^Disallow:\s*/i, '').trim()).filter(Boolean);
+    assert.deepEqual(disallowed.filter(p => '/catalogue/'.startsWith(p)), [], 'a Disallow rule covers /catalogue/');
+    assert.ok(/^Allow: \/$/m.test(robots));
     assert.ok(robots.includes('Sitemap: https://barroindustries.com/sitemap.xml'));
     const sm = read('sitemap.xml');
-    assert.deepEqual(sm.match(/<loc>[^<]+<\/loc>/g), ['<loc>https://barroindustries.com/</loc>']);
-    assert.match(sm, /<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/);
+    assert.deepEqual(sm.match(/<loc>[^<]+<\/loc>/g), ['<loc>https://barroindustries.com/</loc>', '<loc>https://barroindustries.com/catalogue/</loc>']);
+    assert.equal((sm.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g) || []).length, 2);
   });
 
-  it('the 13 project photos exist (26 files), and every reference in #projects resolves', () => {
+  it('the 13 project photos exist (26 files), every one is used in #projects, and every image the homepage references exists', () => {
     const files = [];
     (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) (e.isDirectory() ? walk(path.join(d, e.name)) : files.push(path.join(d, e.name))); })(path.join(ROOT, 'site/img/projects'));
     assert.equal(files.length, 26);
-    const refs = [...site.matchAll(/(?:href|src)="(site\/img\/projects\/[^"]+)"/g)].map(m => m[1]);
-    assert.equal(refs.length, 26);
-    for (const r of refs) assert.ok(fs.existsSync(path.join(ROOT, r)), `missing ${r}`);
+    const projects = homeSite.slice(homeSite.indexOf('<section id="projects"'), homeSite.indexOf('</section>', homeSite.indexOf('<section id="projects"')));
+    const used = new Set(imageRefs(projects));
+    for (const f of files) assert.ok(used.has(path.relative(ROOT, f)), `${path.relative(ROOT, f)} is not used in #projects`);
+    const all = imageRefs(homeSite);
+    assert.ok(all.length > used.size);
+    for (const r of all) assert.ok(exists(r), `missing ${r}`);
+    assert.ok((projects.match(/<li class="is-lead">/g) || []).length === 2, 'each project has exactly one lead image');
+    assert.ok((projects.match(/<li/g) || []).length === 13);
+  });
+});
+
+describe('the premium design (light theme, navy + gold, no bright blue)', () => {
+  const css = read('css/site.css') + read('css/catalogue.css');
+  const BLUE = /#0F6CBD|#2886DE|#0C5A9E|#EAF3FC|rgb\(\s*15\s*,\s*108\s*,\s*189\s*\)/i;
+
+  it('uses the logo palette and no bright blue anywhere on the public surfaces', () => {
+    for (const hex of ['#0B1B3F', '#C9A227', '#FAF8F4', '#0E1116', '#5E6672']) assert.ok(css.toUpperCase().includes(hex), `${hex} is not in the stylesheets`);
+    for (const [label, text] of [['css', css], ['homepage', homeSite + homeHead], ['catalogue page', cat], ['site.js', read('js/site.js')], ['catalogue.js', read('js/catalogue.js')]]) {
+      assert.ok(!BLUE.test(text), `${label} still carries the old bright blue`);
+    }
+  });
+
+  it('pairs a display serif (Fraunces) with Inter, loaded from Google Fonts with display=swap, on both pages', () => {
+    assert.match(homeHead, /<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Fraunces:opsz,wght@9\.\.144,500\.\.600&display=swap"\/>/);
+    assert.match(catHead, /<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Fraunces:opsz,wght@9\.\.144,500\.\.600&family=Inter:wght@400;500;600&display=swap">/);
+    assert.ok(/--site-serif:'Fraunces'/.test(css) && /--site-sans:'Inter'/.test(css));
+    for (const html of [homeHead, catHead]) {
+      const hrefs = [...html.matchAll(/<link rel="stylesheet" href="(https?:[^"]+)"/g)].map(m => m[1]);
+      assert.ok(hrefs.every(h => h.startsWith('https://fonts.googleapis.com/')), 'a stylesheet from another origin');
+    }
+  });
+
+  it('keeps the CSP-safe shape: no 4-digit z-index in the public css, and the app login screen styling is untouched', () => {
+    assert.ok(!/z-index:\s*\d{4}/.test(css));
+    // everything except the two app-facing rules is scoped under #site / #site-* / #hero / html[data-view]
+    const siteCss = read('css/site.css');
+    assert.ok(siteCss.includes('#login-site-back{display:flex;align-items:center;gap:6px;min-height:44px;margin:-8px auto 6px -6px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--text-muted);font:600 13px/1 var(--font);cursor:pointer}'));
+    assert.ok(siteCss.includes('html[data-standalone] #login-site-back{display:none !important}'));
+  });
+
+  it('reveals sections with a fade-up that is switched off under prefers-reduced-motion', () => {
+    const js = read('js/site.js');
+    assert.ok(js.includes("(prefers-reduced-motion: reduce)") && js.includes("classList.add('js-reveal')"));
+    assert.ok(/@media \(prefers-reduced-motion:reduce\)[\s\S]*js-reveal \.reveal\{opacity:1;transform:none\}/.test(css));
+  });
+
+  it('keeps the header solid on scroll with a scroll listener (no new ids, nothing the ui-wiring gate would flag)', () => {
+    const js = read('js/site.js');
+    assert.ok(js.includes("toggle('is-solid'") && js.includes("addEventListener(ev, fn)"));
+    assert.ok(/#site\.is-home #site-header:not\(\.is-solid\):not\(\.is-menu-open\)\{background:transparent/.test(css));
+  });
+});
+
+describe('the public contact details (owner ruling: hello@ and ONE address and number)', () => {
+  const surfaces = { 'index.html <head>': homeHead, 'index.html #site': homeSite, 'catalogue page': cat };
+  const files = ['robots.txt', 'sitemap.xml', 'css/site.css', 'css/catalogue.css', 'js/site.js', 'js/catalogue.js'];
+
+  it('uses hello@barroindustries.com (mailto, JSON-LD, catalogue page) and no @gmail.com address anywhere on the public site', () => {
+    assert.ok(homeSite.includes('<a href="mailto:hello@barroindustries.com">hello@barroindustries.com</a>'));
+    assert.ok(cat.includes('<a href="mailto:hello@barroindustries.com">hello@barroindustries.com</a>'));
+    assert.ok(homeHead.includes('"email":"hello@barroindustries.com"'));
+    for (const [label, text] of Object.entries(surfaces)) assert.ok(!/@gmail\./i.test(text), `${label} carries a gmail address`);
+    for (const f of files) assert.ok(!/@gmail\./i.test(read(f)), `${f} carries a gmail address`);
+    assert.ok(!/barroindustries@/i.test(homeSite + homeHead + cat), 'the old mailbox is still named');
+  });
+
+  it('removed the domain-email TODO (the question is settled)', () => {
+    assert.ok(!/TODO-NEIL[^>]*(?:O3|domain|mailbox|@barroindustries\.com mailbox)/i.test(homeSite));
+    assert.ok(!/spec O3/.test(homeSite));
+  });
+
+  it('shows ONLY 0927 683 6300 (tel: link, JSON-LD in international form) and never 0960', () => {
+    for (const [label, text] of Object.entries(surfaces)) {
+      const found = [...new Set(phoneDigits(text))];
+      assert.ok(found.every(n => n === '09276836300'), `${label}: another number ${found.join(', ')}`);
+    }
+    assert.ok(phoneDigits(homeSite).length >= 1 && phoneDigits(cat).length >= 1);
+    assert.ok(homeSite.includes('<a href="tel:+639276836300">0927 683 6300</a>') && cat.includes('<a href="tel:+639276836300">0927 683 6300</a>'));
+    for (const [label, text] of Object.entries(surfaces)) assert.ok(!/0960/.test(text), `${label} carries 0960`);
+  });
+
+  it('shows ONLY the Quezon City address, and never La Union or San Fernando', () => {
+    const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila';
+    assert.ok(homeSite.includes(`<address>${ADDRESS}, Philippines</address>`));
+    assert.ok(homeSite.includes(`<p>${ADDRESS}, Philippines</p>`));
+    assert.ok(cat.includes(`<p>${ADDRESS}, Philippines</p>`));
+    for (const [label, text] of Object.entries(surfaces)) assert.ok(!/La\s*Union|San\s*Fernando/i.test(text), `${label} names another location`);
+    for (const f of files) assert.ok(!/La\s*Union|San\s*Fernando|0960/i.test(read(f)), `${f} names another location or number`);
+  });
+});
+
+describe('js/site.js and js/catalogue.js stay small, dependency-free and standalone', () => {
+  const site = read('js/site.js'), cj = read('js/catalogue.js');
+
+  it('site.js keeps only the header, menu, login, reveal, year and lightbox code — the catalogue code moved to catalogue.js', () => {
+    for (const dead of ['cat-chip', 'cat-search', 'cat-empty', 'cat-more', 'data-filter', 'data-searching', 'cat-group', 'setFilter', 'runSearch']) assert.ok(!site.includes(dead), `site.js still has ${dead}`);
+    for (const live of ["$('site-login-btn')", "$('site-footer-login')", "$('site-menu-btn')", "$('site-lightbox')", "$('site-year')", '.reveal']) assert.ok(site.includes(live), `site.js lost ${live}`);
+    assert.ok(site.includes("if (!$('login-screen')) return;"), 'the Login hand-off is not guarded for the standalone catalogue page');
+  });
+
+  it('neither script writes HTML, fetches data, touches storage, or evaluates strings', () => {
+    for (const [name, src] of [['site.js', stripJsComments(site)], ['catalogue.js', stripJsComments(cj)]]) {
+      assert.ok(!/\b(innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval|new Function|fetch|XMLHttpRequest|sendBeacon|WebSocket|localStorage|sessionStorage|indexedDB|firebase)\b/.test(src), `${name} uses a forbidden API`);
+    }
+  });
+
+  it('catalogue.js looks up exactly the ids the generated page renders', () => {
+    const wanted = [...cj.matchAll(/\$\('([a-z-]+)'\)/g)].map(m => m[1]);
+    assert.ok(wanted.length >= 10);
+    for (const id of new Set(wanted)) assert.ok(cat.includes(`id="${id}"`), `catalogue.js looks up #${id}, which the page does not render`);
   });
 });
 
@@ -447,7 +1210,7 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
   }
   const CASES = [
     ['a signed-out browser visitor sees the site', {}, 'site', false, false],
-    ['a site anchor (#catalogue) is still the site', { hash: '#catalogue' }, 'site', false, false],
+    ['a site anchor (#services) is still the site', { hash: '#services' }, 'site', false, false],
     ['a signed-in hint boots into the splash, never the site', { hint: true }, 'boot', false, false],
     ['an app deep link boots, and a signed-out staffer is sent to login', { hash: '#/tasks' }, 'boot', false, true],
     ['an app deep link with a hint', { hash: '#/tasks', hint: true }, 'boot', false, true],
@@ -467,5 +1230,12 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
   for (const [name, env, view, standalone, wantLogin] of CASES) {
     it(name, () => assert.deepEqual(decide(env), { view, standalone, wantLogin }));
   }
-});
 
+  it('the catalogue page\'s Login link (/#login) lands on the staff login view for a signed-out visitor, and on the app for a signed-in one', () => {
+    const href = cat.match(/id="site-login-link" href="([^"]+)"/)[1];
+    assert.equal(href, '/#login');
+    const hash = href.slice(href.indexOf('#'));
+    assert.deepEqual(decide({ hash }), { view: 'login', standalone: false, wantLogin: true });
+    assert.deepEqual(decide({ hash, hint: true }), { view: 'boot', standalone: false, wantLogin: true });
+  });
+});

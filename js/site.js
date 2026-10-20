@@ -1,24 +1,32 @@
-/* js/site.js — public website behaviour (PUBLIC-WEBSITE-SPEC.md §7.4, §8.3, §9.1).
-   Zero dependencies. It is the FIRST <script defer> in index.html, ahead of the Firebase
-   SDK, so it must never read window.* at parse time — only inside handlers. Controls are
-   bound by id or by class delegation (no inline handlers); everything below is a class or
-   attribute toggle, and the only text it writes uses textContent (no innerHTML, and the
-   search query is compared, never rendered as markup). */
+/* js/site.js — public website behaviour (PUBLIC-WEBSITE-SPEC.md §8.3, §9.1), shared by "/" and /catalogue/.
+   Zero dependencies. On "/" it is the FIRST <script defer>, ahead of the Firebase SDK, so it must
+   never read window.* at parse time — only inside handlers. Controls are bound by id or by class
+   delegation (no inline handlers); everything below is a class or attribute toggle, and the only
+   text it writes uses textContent (no innerHTML).
+   It does five things: the footer year, the Login hand-off, the phone menu, the transparent-over-the-
+   hero header, and the project lightbox, plus a quiet fade-up on scroll. Catalogue filtering and
+   search live in js/catalogue.js; every piece of this file is a no-op when its elements are absent. */
 (function () {
   'use strict';
   var d = document;
   function $(id) { return d.getElementById(id); }
   function on(el, ev, fn) { if (el) el.addEventListener(ev, fn); }
   function up(e, sel) { var t = e.target; return t && t.closest ? t.closest(sel) : null; }
+  function reducedMotion() { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
 
   function init() {
+    var site = $('site'), header = $('site-header');
+
     // Footer year (the static text is the fallback).
     var yr = $('site-year');
     if (yr) yr.textContent = String(new Date().getFullYear());
 
-    // ── Login (§9.1): the direct attribute write makes the switch instant even if app.js
-    // has not executed yet; openLoginFromSite() then keeps its state (title, etc.) in sync.
+    // ── Login (§9.1): the direct attribute write makes the switch instant even if app.js has not
+    // executed yet; openLoginFromSite() then keeps its state (title, etc.) in sync. Only on the
+    // homepage: where there is no login screen in this document (the standalone /catalogue/ page)
+    // the link is left alone and its href (/#login) takes the visitor to the staff login.
     function openLogin(e) {
+      if (!$('login-screen')) return;
       e.preventDefault();
       window._wantLogin = true;
       d.documentElement.setAttribute('data-view', 'login');
@@ -27,66 +35,45 @@
     on($('site-login-btn'), 'click', openLogin);
     on($('site-footer-login'), 'click', openLogin);
 
-    // ── Phone menu: toggles #site-nav; a nav link closes it.
+    // ── Phone menu: toggles #site-nav (and turns the header solid while it is open); a nav link,
+    // Escape, or a wide viewport closes it.
     var mb = $('site-menu-btn'), nav = $('site-nav');
     function menu(open) {
       if (!nav || !mb) return;
       nav.classList.toggle('is-open', open);
+      if (header) header.classList.toggle('is-menu-open', open);
       mb.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
     on(mb, 'click', function () { menu(!(nav && nav.classList.contains('is-open'))); });
     on(nav, 'click', function (e) { if (up(e, 'a')) menu(false); });
+    on(d, 'keydown', function (e) { if (e.key === 'Escape') menu(false); });
+    on(window, 'resize', function () { if (window.innerWidth >= 900) menu(false); });
 
-    // ── Catalogue (§7.4): chips set #catalogue[data-filter]; search toggles .is-hidden.
-    var cat = $('catalogue'), chips = $('cat-chips'), search = $('cat-search'), empty = $('cat-empty');
-    if (cat && chips) {
-      var setFilter = function (key, btn, quiet) {
-        cat.setAttribute('data-filter', key);
-        var all = chips.querySelectorAll('.cat-chip');
-        for (var k = 0; k < all.length; k++) {
-          var act = all[k] === btn;
-          all[k].classList.toggle('is-active', act);
-          all[k].setAttribute('aria-pressed', act ? 'true' : 'false');
-        }
-        if (quiet || !btn) return;
-        if (btn.scrollIntoView) btn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
-        if (cat.getBoundingClientRect().top < 0) cat.scrollIntoView();   // only when the user is below it
-      };
-      on(chips, 'click', function (e) {
-        var b = up(e, '.cat-chip');
-        if (b) setFilter(b.getAttribute('data-cat') || 'all', b);
+    // ── Header: transparent with white text while the page is at the very top (over the hero), solid
+    // the moment it has scrolled a little, so it never floats over copy it cannot be read against.
+    // Pages without a hero (/catalogue/) never get the transparent state: the header is solid in CSS.
+    if (header && $('hero') && site && site.classList.contains('is-home')) {
+      var busy = false;
+      var solidify = function () { header.classList.toggle('is-solid', (window.pageYOffset || d.documentElement.scrollTop || 0) > 24); };
+      on(window, 'scroll', function () {
+        if (busy) return;
+        busy = true;
+        window.requestAnimationFrame(function () { busy = false; solidify(); });
       });
-      // "Show all N" / "Show fewer" — toggles .is-open on the group.
-      on(cat, 'click', function (e) {
-        var m = up(e, '.cat-more');
-        if (!m) return;
-        var g = m.closest('.cat-group'), open = g.classList.toggle('is-open'), n = g.querySelector('.cat-count');
-        m.setAttribute('aria-expanded', open ? 'true' : 'false');
-        m.textContent = open ? 'Show fewer' : 'Show all ' + (n ? n.textContent : '');
-      });
+      solidify();
+    }
 
-      var timer = 0;
-      var runSearch = function () {
-        var raw = search.value.trim(), q = raw.toLowerCase();
-        // Searching ignores the chip filter: it resets the chip to All and un-folds every group.
-        if (q && cat.getAttribute('data-filter') !== 'all') setFilter('all', chips.querySelector('.cat-chip'), true);
-        if (q) cat.setAttribute('data-searching', '1'); else cat.removeAttribute('data-searching');
-        var cards = cat.querySelectorAll('.cat-card'), c;
-        for (c = 0; c < cards.length; c++) {
-          cards[c].classList.toggle('is-hidden', !!q && (cards[c].getAttribute('data-name') || '').indexOf(q) < 0);
+    // ── Scroll reveal: a quiet fade-up on first view. Off entirely under prefers-reduced-motion, and
+    // only switched on once the observer exists, so a failure leaves everything visible.
+    var items = d.querySelectorAll('.reveal');
+    if (site && items.length && 'IntersectionObserver' in window && !reducedMotion()) {
+      var io = new IntersectionObserver(function (es) {
+        for (var i = 0; i < es.length; i++) {
+          if (es[i].isIntersecting) { es[i].target.classList.add('is-in'); io.unobserve(es[i].target); }
         }
-        var groups = cat.querySelectorAll('.cat-group'), shown = 0;
-        for (c = 0; c < groups.length; c++) {
-          var any = !!groups[c].querySelector('.cat-card:not(.is-hidden)');
-          groups[c].classList.toggle('is-empty', !any);
-          if (any) shown++;
-        }
-        if (empty) {
-          empty.hidden = !(q && !shown);
-          if (q && !shown) empty.textContent = 'No products match "' + raw + '".';
-        }
-      };
-      on(search, 'input', function () { clearTimeout(timer); timer = setTimeout(runSearch, 120); });
+      }, { rootMargin: '0px 0px -8% 0px', threshold: 0.06 });
+      site.classList.add('js-reveal');
+      for (var k = 0; k < items.length; k++) io.observe(items[k]);
     }
 
     // ── Project photo lightbox (§8.3). Without <dialog> support the anchor just opens the image.

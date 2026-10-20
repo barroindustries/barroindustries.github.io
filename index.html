@@ -79,7 +79,7 @@
     de.setAttribute('data-view', failed ? 'boot' : view);
   })();</script>
   <title>Barro Industries — Commercial Kitchen Equipment & Stainless Fabrication, Metro Manila</title>
-  <meta name="description" content="Barro Industries OPC fabricates SS304 stainless-steel commercial kitchen equipment, exhaust and fresh-air systems, and custom steelworks in Metro Manila. Browse the Barro Kitchens catalogue and request a quote."/>
+  <meta name="description" content="Premium stainless-steel kitchens, built to order in Metro Manila: high-quality SS304 equipment, exhaust and fresh-air systems, gas lines and fire suppression. Browse the catalogue and request a quote."/>
   <link rel="canonical" href="https://barroindustries.com/"/>
   <meta name="robots" content="index,follow"/>
   <!-- Rich link preview — same shape as the public /q/, /t/ and /v/ pages. Only facts
@@ -87,19 +87,19 @@
   <meta property="og:type" content="website"/>
   <meta property="og:site_name" content="Barro Industries"/>
   <meta property="og:title" content="Barro Industries — Commercial Kitchen Equipment &amp; Stainless Fabrication, Metro Manila"/>
-  <meta property="og:description" content="Barro Industries OPC fabricates SS304 stainless-steel commercial kitchen equipment, exhaust and fresh-air systems, and custom steelworks in Metro Manila. Browse the Barro Kitchens catalogue and request a quote."/>
+  <meta property="og:description" content="Premium stainless-steel kitchens, built to order in Metro Manila: high-quality SS304 equipment, exhaust and fresh-air systems, gas lines and fire suppression. Browse the catalogue and request a quote."/>
   <meta property="og:url" content="https://barroindustries.com/"/>
-  <meta property="og:image" content="https://barroindustries.com/icons/icon-512.png"/>
-  <meta property="og:image:width" content="512"/>
-  <meta property="og:image:height" content="512"/>
-  <meta name="twitter:card" content="summary"/>
+  <meta property="og:image" content="https://barroindustries.com/site/img/projects/ispsc/01.webp"/>
+  <meta property="og:image:width" content="1600"/>
+  <meta property="og:image:height" content="1200"/>
+  <meta name="twitter:card" content="summary_large_image"/>
   <meta name="twitter:title" content="Barro Industries — Commercial Kitchen Equipment &amp; Stainless Fabrication, Metro Manila"/>
-  <meta name="twitter:description" content="Barro Industries OPC fabricates SS304 stainless-steel commercial kitchen equipment, exhaust and fresh-air systems, and custom steelworks in Metro Manila. Browse the Barro Kitchens catalogue and request a quote."/>
-  <meta name="twitter:image" content="https://barroindustries.com/icons/icon-512.png"/>
+  <meta name="twitter:description" content="Premium stainless-steel kitchens, built to order in Metro Manila: high-quality SS304 equipment, exhaust and fresh-air systems, gas lines and fire suppression. Browse the catalogue and request a quote."/>
+  <meta name="twitter:image" content="https://barroindustries.com/site/img/projects/ispsc/01.webp"/>
   <!-- Structured data. The CSP's script-src 'unsafe-inline' allows it; it is data, not executed.
        Street address + ZIP 1116 = owner ruling (overrides spec O4); no geo coordinates — not provided.
        Deliberately no rating, opening hours or any other unverified claim. -->
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness","name":"Barro Industries","legalName":"Barro Industries OPC","alternateName":"Barro Kitchens","url":"https://barroindustries.com/","logo":"https://barroindustries.com/icons/icon-512.png","image":"https://barroindustries.com/icons/icon-512.png","telephone":"+63 927 683 6300","email":"barroindustries@gmail.com","address":{"@type":"PostalAddress","streetAddress":"21 Capricorn St., Tandang Sora","addressLocality":"Quezon City","postalCode":"1116","addressRegion":"Metro Manila","addressCountry":"PH"},"founder":{"@type":"Person","name":"Neil Barro"},"brand":{"@type":"Brand","name":"Barro Kitchens"},"sameAs":["https://www.facebook.com/barrokitchens"],"knowsAbout":["Commercial kitchen equipment","Stainless steel fabrication","Kitchen exhaust systems","Commissary kitchen fit-out"]}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness","name":"Barro Industries","legalName":"Barro Industries OPC","alternateName":"Barro Kitchens","url":"https://barroindustries.com/","logo":"https://barroindustries.com/icons/barro-kitchens.png","image":"https://barroindustries.com/site/img/projects/ispsc/01.webp","telephone":"+63 927 683 6300","email":"hello@barroindustries.com","address":{"@type":"PostalAddress","streetAddress":"21 Capricorn St., Tandang Sora","addressLocality":"Quezon City","postalCode":"1116","addressRegion":"Metro Manila","addressCountry":"PH"},"founder":{"@type":"Person","name":"Neil Barro"},"brand":{"@type":"Brand","name":"Barro Kitchens"},"sameAs":["https://www.facebook.com/barrokitchens"],"knowsAbout":["Commercial kitchen equipment","Stainless steel fabrication","Kitchen exhaust systems","Commissary kitchen fit-out"]}</script>
   <meta name="theme-color" content="#FFFFFF"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
@@ -139,17 +139,23 @@
        CSS beside new JS and a shipped CSS change looked like it never landed.
        A new version = a new cache key, so even a stale SW must hit the network.
        Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-  <link rel="stylesheet" href="css/tokens.css?v=14.0.314"/>
-  <link rel="stylesheet" href="css/styles.css?v=14.0.314"/>
+  <link rel="stylesheet" href="css/tokens.css?v=14.0.315"/>
+  <link rel="stylesheet" href="css/styles.css?v=14.0.315"/>
   <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet. Loads AFTER
        styles.css so its #site rules win ties. No ?v= on purpose: .githooks/pre-commit
        only rewrites the tokens/styles links, and this file is small enough to win the
        service worker's 400 ms network-first race. Keep it in sw.js PRECACHE
        (ci-invariants CHECK 2). -->
   <link rel="stylesheet" href="css/site.css"/>
+  <!-- Display serif for the public website's headings only (Fraunces 500-600; the browser
+       downloads the font file only when #site text actually renders). Body type is Inter,
+       already loaded by css/styles.css. The CSP already allows fonts.googleapis.com and
+       fonts.gstatic.com, and both origins are preconnected above. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..600&display=swap"/>
   <!-- With JavaScript off nothing sets data-view, so show the (fully static) website
-       instead of leaving the splash up forever. -->
-  <noscript><style>#site{display:block !important}#splash-screen,#login-screen,#app-shell{display:none !important}</style></noscript>
+       instead of leaving the splash up forever; the header cannot go solid on scroll
+       without JS, so it is solid from the start. -->
+  <noscript><style>#site{display:block !important}#splash-screen,#login-screen,#app-shell{display:none !important}#site-header{background:#fff !important;color:#0B1B3F !important;border-bottom:1px solid #E6E1D6 !important}#site-header .site-brand-sub{color:#5E6672 !important}#site-header #site-nav a,#site-header .site-btn-outline{color:#0B1B3F !important;border-color:#0B1B3F !important}</style></noscript>
 </head>
 <body>
 
@@ -158,307 +164,88 @@
      First child of <body>. Visible ONLY while <html data-view="site"> (css/site.css);
      the head script decides the first view and js/app.js corrects it once auth
      resolves. Static markup on purpose: crawlers and no-JS visitors get the whole page.
-     Owner rulings: no monetary figures anywhere, and the partner company is never named. The
-     catalogue block below is generated by scripts/build-catalogue.js, which refuses
-     both, and ci-invariants CHECK 9 re-verifies this whole section. Verified facts
-     only (spec §3). Interactivity lives in js/site.js — no inline handlers.
+     Owner rulings: no monetary figures anywhere, and the partner company is never named;
+     the homepage lists NO products (the catalogue is its own page, /catalogue/, generated
+     by scripts/build-catalogue.js, and this page links to it in exactly three places: the
+     nav, the hero button and the footer). ci-invariants CHECK 9 re-verifies this whole
+     section. Verified facts only (spec §3 + the owner's 2026 catalogue). Interactivity
+     lives in js/site.js — no inline handlers.
      Never write the version-banner pattern in this section: .githooks/pre-commit
      rewrites it by grep.
 ══════════════════════════════════ -->
-<div id="site" data-site-root>
+<div id="site" class="is-home" data-site-root>
 
 <header id="site-header">
   <div class="site-wrap site-header-in">
-    <a href="/" id="site-brand"><img src="barro_logo.svg" width="36" height="36" alt=""><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub">Barro Kitchens™</span></a>
-    <nav id="site-nav" aria-label="Site">
-      <a href="#catalogue">Products</a>
+    <a href="/" id="site-brand"><img src="site/img/barro-kitchens-96.webp" width="36" height="36" alt="Barro Kitchens logo"><span class="site-brand-text"><span class="site-brand-name">Barro Industries</span><span class="site-brand-sub">Barro Kitchens™</span></span></a>
+    <nav id="site-nav" aria-label="Main">
       <a href="#services">Services</a>
       <a href="#projects">Projects</a>
+      <a href="#about">About</a>
+      <a href="/catalogue/">Catalogue</a>
       <a href="#contact">Contact</a>
     </nav>
-    <button type="button" id="site-login-btn" class="site-btn site-btn-outline">Login</button>
-    <button type="button" id="site-menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button type="button" id="site-login-btn" class="site-btn site-btn-outline site-btn-sm">Login</button>
+    <button type="button" id="site-menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   </div>
 </header>
 
 <main id="site-main">
 
 <section id="hero">
-  <div class="site-wrap hero-grid">
-    <div class="hero-copy">
-      <h1>Stainless-steel kitchen equipment and custom fabrication, built in Metro Manila.</h1>
-      <p class="site-lead">Barro Industries OPC designs, fabricates, delivers and installs SS304 commercial kitchen equipment, exhaust and fresh-air systems, gas lines and fire suppression — for commissaries, restaurants, schools and government institutions — under the Barro Kitchens™ trade name.</p>
-      <p class="hero-cta"><a class="site-btn site-btn-primary" href="/sales/clientinformationrequest/">Get a quote</a><a class="site-btn site-btn-outline" href="#catalogue">Browse the catalogue</a></p>
-    </div>
-    <img class="hero-visual" src="site/img/barro-kitchens-480.webp" width="240" height="240" alt="Barro Kitchens logo" fetchpriority="high">
+  <img class="hero-bg" src="site/img/projects/ispsc/01.webp" srcset="site/img/projects/ispsc/01-thumb.webp 600w, site/img/projects/ispsc/01.webp 1600w" sizes="100vw" width="1600" height="1200" alt="Stainless-steel cooking stations with range ovens, sinks and overhead hoods installed by Barro Industries" fetchpriority="high" decoding="async">
+  <div class="hero-scrim" aria-hidden="true"></div>
+  <div class="site-wrap hero-in">
+    <p class="hero-years"><span class="hero-years-num">23</span><span class="hero-years-label">years in business</span></p>
+    <h1>Premium <span class="nowrap">stainless-steel</span> kitchens, built to order in Metro Manila.</h1>
+    <p class="hero-lead">We design, fabricate, deliver and install high-quality commercial kitchens in food-grade SS304 stainless steel, including exhaust and fresh-air systems, gas lines and fire suppression, for restaurants, hotels, schools and government institutions.</p>
+    <p class="hero-cta"><a class="site-btn site-btn-light" href="/sales/clientinformationrequest/">Get a quote</a><a class="site-btn site-btn-ghost" href="/catalogue/">Browse the catalogue</a></p>
   </div>
-  <ul class="site-wrap fact-strip">
-    <li>SEC-registered OPC</li>
-    <li>SS304 stainless, No.4 brushed finish</li>
-    <li>9 categories · 165 products</li>
-    <li>Design · Fabricate · Deliver · Install</li>
-  </ul>
 </section>
 
-<section id="catalogue" class="site-sec" data-filter="all">
+<div class="proof">
   <div class="site-wrap">
-    <h2>Products &amp; catalogue</h2>
-    <p class="site-lead">The Barro Kitchens™ range: 165 products in 9 categories. Default sizes are shown in millimetres. Ask us for a quotation on any item.</p>
-    <!-- TODO-NEIL: product photos (spec O6/§7.5) — none exist yet. Drop site/img/products/<ID>.webp (long edge 800) and re-run scripts/build-catalogue.js; each card then swaps its tile for the photo. -->
-<!-- CATALOGUE:START generated by scripts/build-catalogue.js — DO NOT HAND-EDIT -->
-<div class="cat-chips" id="cat-chips" role="group" aria-label="Product categories">
-<button type="button" class="cat-chip is-active" data-cat="all" aria-pressed="true">All <span>165</span></button>
-<button type="button" class="cat-chip" data-cat="cooking_line" aria-pressed="false">Cooking Line <span>31</span></button>
-<button type="button" class="cat-chip" data-cat="prep_washing" aria-pressed="false">Preparation &amp; Washing <span>53</span></button>
-<button type="button" class="cat-chip" data-cat="refrigeration" aria-pressed="false">Refrigeration <span>6</span></button>
-<button type="button" class="cat-chip" data-cat="baking" aria-pressed="false">Baking <span>12</span></button>
-<button type="button" class="cat-chip" data-cat="exhaust_system" aria-pressed="false">Exhaust System <span>27</span></button>
-<button type="button" class="cat-chip" data-cat="fresh_air_system" aria-pressed="false">Fresh Air System <span>10</span></button>
-<button type="button" class="cat-chip" data-cat="gas_line" aria-pressed="false">Gas Line <span>3</span></button>
-<button type="button" class="cat-chip" data-cat="fire_suppression" aria-pressed="false">Fire Suppression <span>6</span></button>
-<button type="button" class="cat-chip" data-cat="miscellaneous" aria-pressed="false">Miscellaneous <span>17</span></button>
+    <ul class="proof-bar" aria-label="Key facts">
+      <li><span class="proof-val"><span class="proof-num">23</span> years</span><span class="proof-sub">in business</span></li>
+      <li><span class="proof-val">SS304</span><span class="proof-sub"><span class="nowrap">High-quality,</span> <span class="nowrap">food-grade,</span> <span class="nowrap">No.4 brushed finish</span></span></li>
+      <li><span class="proof-val">Made to order</span><span class="proof-sub">Built to your exact dimensions</span></li>
+      <li><span class="proof-val">End-to-end</span><span class="proof-sub">Design · fabricate · deliver · install</span></li>
+    </ul>
+  </div>
 </div>
-<label class="cat-search"><span class="sr-only">Search products</span><input type="search" id="cat-search" placeholder="Search 165 products…" autocomplete="off"></label>
-<section class="cat-group" data-cat="cooking_line" data-color="#E74C3C" id="cat-cooking_line">
-<h3>Cooking Line <span class="cat-count">31</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="ss open top low pressure stove (1 burner)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-001</div><h4>SS Open Top Low Pressure Stove (1 Burner)</h4><p class="cat-meta">600 × 700 × 850 mm · per pc</p><p class="cat-notes">LP burner, SS304 1.1mm top, 0.8mm body</p></li>
-<li class="cat-card" data-name="ss open top low pressure stove (2 burner)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-002</div><h4>SS Open Top Low Pressure Stove (2 Burner)</h4><p class="cat-meta">800 × 700 × 850 mm · per pc</p><p class="cat-notes">2x LP burners, SS304</p></li>
-<li class="cat-card" data-name="ss open top low pressure stove (3 burner)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-003</div><h4>SS Open Top Low Pressure Stove (3 Burner)</h4><p class="cat-meta">1000 × 700 × 850 mm · per pc</p><p class="cat-notes">3x LP burners, SS304 1.1mm top</p></li>
-<li class="cat-card" data-name="ss open top high pressure stove (4 burner)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-004</div><h4>SS Open Top High Pressure Stove (4 Burner)</h4><p class="cat-meta">1200 × 700 × 850 mm · per pc</p><p class="cat-notes">4x HP burners extra size, SS304</p></li>
-<li class="cat-card" data-name="ss open top hp stove (4 burner, square)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-005</div><h4>SS Open Top HP Stove (4 Burner, Square)</h4><p class="cat-meta">1200 × 700 × 850 mm · per pc</p><p class="cat-notes">4x HP burners square type, SS/BI combined</p></li>
-<li class="cat-card" data-name="ss wok stove (1 burner high pressure)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-006</div><h4>SS Wok Stove (1 Burner High Pressure)</h4><p class="cat-meta">600 × 700 × 850 mm · per pc</p><p class="cat-notes">1x Katsura HP burner, wok base</p></li>
-<li class="cat-card" data-name="ss combi griller-griddle"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-007</div><h4>SS Combi Griller-Griddle</h4><p class="cat-meta">900 × 700 × 850 mm · per pc</p><p class="cat-notes">H-type burners, V-type grill plates, lava rocks, semi-nonstick griddle</p></li>
-<li class="cat-card" data-name="ss griller-griddle-2lp combi"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-008</div><h4>SS Griller-Griddle-2LP Combi</h4><p class="cat-meta">1200 × 700 × 850 mm · per pc</p><p class="cat-notes">Griller, griddle, and 2 LP burners combined</p></li>
-<li class="cat-card" data-name="ss double fryer"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-009</div><h4>SS Double Fryer</h4><p class="cat-meta">700 × 700 × 850 mm · per pc</p><p class="cat-notes">SS304 double fryer</p></li>
-<li class="cat-card" data-name="ss griddle with stand"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-010</div><h4>SS Griddle with Stand</h4><p class="cat-meta">700 × 700 × 850 mm · per pc</p><p class="cat-notes">Semi-nonstick griddle plate</p></li>
-<li class="cat-card" data-name="ss commercial gas rice steamer (6-tray)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-011</div><h4>SS Commercial Gas Rice Steamer (6-Tray)</h4><p class="cat-meta">700 × 700 × 1200 mm · per pc</p><p class="cat-notes">Gas type, 6 tray capacity</p></li>
-<li class="cat-card" data-name="2-deck gas oven (6-tray)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-012</div><h4>2-Deck Gas Oven (6-Tray)</h4><p class="cat-meta">700 × 700 × 1400 mm · per pc</p><p class="cat-notes">Fiber glass insulation, temp monitoring</p></li>
-<li class="cat-card" data-name="ss 4 open top high pressure range (extra-large, talyase base)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-013</div><h4>SS 4 Open Top High Pressure Range (Extra-Large, Talyase Base)</h4><p class="cat-meta">1000 × 3454 × 483 mm · per pc</p><p class="cat-notes">SS304 1.4mm top, 1.2mm side panel, 0.8mm control panel; 4 HP burners, 2 large + 2 kuba bases for talyase pots, pilot light, copper/brass ball valve</p></li>
-<li class="cat-card" data-name="ss 4 open top square hp w/ ss/bi combo oven &amp; thermostat"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-014</div><h4>SS 4 Open Top Square HP w/ SS/BI Combo Oven &amp; Thermostat</h4><p class="cat-meta">864 × 1003 × 864 mm · per pc</p><p class="cat-notes">SS 1.2mm top, BI insulated oven cavity, fire plate, Kitz valve, thermometer, square grates/knobs</p></li>
-<li class="cat-card" data-name="ss 4 open top griller+griddle+2hp burner w/ kuba base"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-015</div><h4>SS 4 Open Top Griller+Griddle+2HP Burner w/ Kuba Base</h4><p class="cat-meta">1000 × 3454 × 483 mm · per pc</p><p class="cat-notes">SS 1.4mm top, 1.2mm side, 2&quot; round tube post, 1&quot; horizontal braces, 2 LP + 2 HP burners, heavy duty base</p></li>
-<li class="cat-card" data-name="2-deck gas oven (12-tray)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-016</div><h4>2-Deck Gas Oven (12-Tray)</h4><p class="cat-meta">per pc</p><p class="cat-notes">Larger variant of CE-012 6-tray oven. SS202 1.0mm inner, 0.8mm double panel, BI bottom plate, GI angle stand, fabricated BI pipe burner, Kitz valve</p></li>
-<li class="cat-card" data-name="ss open top extra-size range (96x28x30)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-017</div><h4>SS Open Top Extra-Size Range (96x28x30)</h4><p class="cat-meta">2438 × 711 × 762 mm · per pc</p><p class="cat-notes">Government/institutional grade. SS1.2mm top/0.8mm lower panel, 1.5&quot; round posts, 1&quot; horizontal braces, 2 HP industrial burners + base, 2 LP w/ crown, GI gas line, brass fittings.</p></li>
-<li class="cat-card" data-name="ss stock pot range (institutional)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-018</div><h4>SS Stock Pot Range (Institutional)</h4><p class="cat-meta">610 × 711 × 457 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.8mm lower panel, 1.5&quot; round tube posts, C40 burner. Institutional/government grade.</p></li>
-<li class="cat-card" data-name="ss griller (institutional, lava rock)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-019</div><h4>SS Griller (Institutional, Lava Rock)</h4><p class="cat-meta">610 × 711 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.8mm lower, 1.5&quot; posts, SS top 3/8 grill, H-type burner, commercial griller plate, lava rock</p></li>
-<li class="cat-card" data-name="ss fryer (institutional, ball valve)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-020</div><h4>SS Fryer (Institutional, Ball Valve)</h4><p class="cat-meta">610 × 711 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.8mm lower, H burner, ball valve, adjustable footing</p></li>
-<li class="cat-card" data-name="ss griddle (institutional, ms plate)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-021</div><h4>SS Griddle (Institutional, MS Plate)</h4><p class="cat-meta">610 × 711 × 851 mm · per pc</p><p class="cat-notes">SS1/2&quot; top, 0.8mm lower, 1/4 MS plate, H burner</p></li>
-<li class="cat-card" data-name="ss deep fryer (3 basket)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-022</div><h4>SS Deep Fryer (3 Basket)</h4><p class="cat-meta">per pc</p><p class="cat-notes">3-basket commercial deep fryer</p></li>
-<li class="cat-card" data-name="ss griddle (3 burner)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-023</div><h4>SS Griddle (3 Burner)</h4><p class="cat-meta">610 × 1219 × 762 mm · per pc</p><p class="cat-notes">Commercial 3-burner griddle</p></li>
-<li class="cat-card" data-name="ss display warmer (3 shelves)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-024</div><h4>SS Display Warmer (3 Shelves)</h4><p class="cat-meta">610 × 406 × 1219 mm · per pc</p><p class="cat-notes">3-shelf display warmer, optional horizontal layout</p><dl class="cat-specs"><div><dt>Layout</dt><dd>Vertical / Horizontal</dd></div></dl></li>
-<li class="cat-card" data-name="commercial chinese wok range (gas)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-025</div><h4>Commercial Chinese Wok Range (Gas)</h4><p class="cat-meta">1500 × 800 × 800 mm · per pc</p><p class="cat-notes">Recessed wok ring, water-cooled front edge</p></li>
-<li class="cat-card" data-name="lava rock griller w/ bottomshelf"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-026</div><h4>Lava Rock Griller w/ Bottomshelf</h4><p class="cat-meta">800 × 600 × 800 mm · per pc</p><p class="cat-notes">Lava rock heat distribution, 150mm bottomshelf</p></li>
-<li class="cat-card" data-name="3 open top burner w/ bottomshelf (compact)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-027</div><h4>3 Open Top Burner w/ Bottomshelf (Compact)</h4><p class="cat-meta">900 × 600 × 800 mm · per pc</p></li>
-<li class="cat-card" data-name="gas griddle w/ bottomshelf"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-028</div><h4>Gas Griddle w/ Bottomshelf</h4><p class="cat-meta">600 × 600 × 800 mm · per pc</p></li>
-<li class="cat-card" data-name="ss 4 open top combo (2 low / 2 high pressure)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-029</div><h4>SS 4 Open Top Combo (2 Low / 2 High Pressure)</h4><p class="cat-meta">per pc</p><p class="cat-notes">SS304 1.2mm top, G#20 down panel, G#22 control panel, industrial heavy duty burners and base, gas line</p></li>
-<li class="cat-card" data-name="salamander oven (broiler)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-030</div><h4>Salamander Oven (Broiler)</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="ss spoon &amp; fork electric heater (4 holes)"><div class="cat-tile" data-code="CE" aria-hidden="true">CE-031</div><h4>SS Spoon &amp; Fork Electric Heater (4 Holes)</h4><p class="cat-meta">per pc</p><p class="cat-notes">Electric, 4-hole holder/heater</p></li>
-</ul>
-<button type="button" class="cat-more" data-cat="cooking_line" aria-expanded="false">Show all 31</button>
-</section>
-<section class="cat-group" data-cat="prep_washing" data-color="#3498DB" id="cat-prep_washing">
-<h3>Preparation &amp; Washing <span class="cat-count">53</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="ss preparation table (1 layer)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-001</div><h4>SS Preparation Table (1 Layer)</h4><p class="cat-meta">900 × 600 × 850 mm · per pc</p><p class="cat-notes">SS304, adjustable shelf</p></li>
-<li class="cat-card" data-name="ss preparation table (2 layer, movable)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-002</div><h4>SS Preparation Table (2 Layer, Movable)</h4><p class="cat-meta">900 × 600 × 850 mm · per pc</p><p class="cat-notes">SS304, 2 layers, with casters</p></li>
-<li class="cat-card" data-name="ss preparation table (3 layer)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-003</div><h4>SS Preparation Table (3 Layer)</h4><p class="cat-meta">900 × 600 × 850 mm · per pc</p><p class="cat-notes">SS304, 3 layers with undershelf</p></li>
-<li class="cat-card" data-name="ss wash sink (single) with gooseneck faucet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-004</div><h4>SS Wash Sink (Single) with Gooseneck Faucet</h4><p class="cat-meta">500 × 500 × 850 mm · per pc</p><p class="cat-notes">SS304, 1 basin, gooseneck faucet</p><dl class="cat-specs"><div><dt>Basin Depth</dt><dd>250mm / 300mm / 350mm</dd></div><div><dt>Faucet Type</dt><dd>Gooseneck / Pre-rinse spray</dd></div></dl></li>
-<li class="cat-card" data-name="ss sink table with gooseneck faucet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-005</div><h4>SS Sink Table with Gooseneck Faucet</h4><p class="cat-meta">600 × 500 × 850 mm · per pc</p><p class="cat-notes">SS304, integrated drainboard</p></li>
-<li class="cat-card" data-name="ss double sink table with pre-rinse faucet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-006</div><h4>SS Double Sink Table with Pre-Rinse Faucet</h4><p class="cat-meta">1000 × 600 × 850 mm · per pc</p><p class="cat-notes">SS304, 2 basins, pre-rinse spray</p></li>
-<li class="cat-card" data-name="ss double sink table with pre-rinse faucet (large)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-007</div><h4>SS Double Sink Table with Pre-Rinse Faucet (Large)</h4><p class="cat-meta">1000 × 500 × 850 mm · per pc</p><p class="cat-notes">SS304, large basin</p></li>
-<li class="cat-card" data-name="ss giant triple sink with faucet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-008</div><h4>SS Giant Triple Sink with Faucet</h4><p class="cat-meta">1510 × 500 × 850 mm · per pc</p><p class="cat-notes">SS304, 3 basins, hospital/institutional grade</p></li>
-<li class="cat-card" data-name="ss double sink with slotted bottom"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-009</div><h4>SS Double Sink with Slotted Bottom</h4><p class="cat-meta">900 × 600 × 850 mm · per pc</p><p class="cat-notes">SS304, slotted bottom, faucet with pull-out</p></li>
-<li class="cat-card" data-name="ss dish rack (movable, 4 layer)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-010</div><h4>SS Dish Rack (Movable, 4 Layer)</h4><p class="cat-meta">600 × 500 × 1600 mm · per pc</p><p class="cat-notes">SS304, 4 shelves, with casters</p></li>
-<li class="cat-card" data-name="ss rice cooker table"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-011</div><h4>SS Rice Cooker Table</h4><p class="cat-meta">780 × 320 × 600 mm · per pc</p><p class="cat-notes">SS304, 32x78x24 inches standard</p></li>
-<li class="cat-card" data-name="ss gooseneck faucet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-012</div><h4>SS Gooseneck Faucet</h4><p class="cat-meta">per pc</p><p class="cat-notes">Standard gooseneck faucet, SS304</p></li>
-<li class="cat-card" data-name="ss wall cladding (per sqm)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-013</div><h4>SS Wall Cladding (per sqm)</h4><p class="cat-meta">W 1000 × H 1000 mm · per sqm</p><p class="cat-notes">SS304 wall sheet, per sq meter</p></li>
-<li class="cat-card" data-name="uvc sterilizing cabinet xxl"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-014</div><h4>UVC Sterilizing Cabinet XXL</h4><p class="cat-meta">450 × 365 × 645 mm · per pc</p><p class="cat-notes">45x36.5x64.5 cm, UV sterilization</p></li>
-<li class="cat-card" data-name="ss storage cabinet (3 layer with drain)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-015</div><h4>SS Storage Cabinet (3 Layer with Drain)</h4><p class="cat-meta">600 × 500 × 1800 mm · per pc</p><p class="cat-notes">SS304, 3 shelves, drain tube</p></li>
-<li class="cat-card" data-name="ss storage cabinet enclosure"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-016</div><h4>SS Storage Cabinet Enclosure</h4><p class="cat-meta">910 × 600 × 800 mm · per pc</p><p class="cat-notes">SS304 enclosure over existing cabinet</p></li>
-<li class="cat-card" data-name="ss table frame (light-duty, custom)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-017</div><h4>SS Table Frame (Light-Duty, Custom)</h4><p class="cat-meta">1200 × 800 × 700 mm · per pc</p><p class="cat-notes">SS 1x2 rect tube frame, mirror finish</p></li>
-<li class="cat-card" data-name="ss triple talyase sink with cabinet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-018</div><h4>SS Triple Talyase Sink with Cabinet</h4><p class="cat-meta">W 3137 × D 730 mm · per pc</p><p class="cat-notes">SS G#16 top, G#18 sink, G#22 back/side/bottom panel</p></li>
-<li class="cat-card" data-name="ss layer table w/ back stopper"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-019</div><h4>SS Layer Table w/ Back Stopper</h4><p class="cat-meta">W 2311 × D 1219 mm · per pc</p><p class="cat-notes">SS G#20 top/mid/bottom plate, 1.5&quot; round tube posts, adjustable footing</p></li>
-<li class="cat-card" data-name="ss long wall table"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-020</div><h4>SS Long Wall Table</h4><p class="cat-meta">W 6858 × D 591 mm · per pc</p><p class="cat-notes">SS G#20 top plate, 1.5&quot; round tube posts, 1&quot; round tube braces</p></li>
-<li class="cat-card" data-name="ss long wall table, bracket type"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-021</div><h4>SS Long Wall Table, Bracket Type</h4><p class="cat-meta">W 3962 × D 540 mm · per pc</p><p class="cat-notes">SS G#20 top plate + bracket, expansion bolt</p></li>
-<li class="cat-card" data-name="ss room sink w/ cabinet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-022</div><h4>SS Room Sink w/ Cabinet</h4><p class="cat-meta">2057 × 622 × 851 mm · per pc</p></li>
-<li class="cat-card" data-name="ss wall shelf"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-023</div><h4>SS Wall Shelf</h4><p class="cat-meta">2908 × 480 × 38 mm · per pc</p><p class="cat-notes">Available in 457mm or 508mm depth</p></li>
-<li class="cat-card" data-name="ss 3-layer dish open shelves"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-024</div><h4>SS 3-Layer Dish Open Shelves</h4><p class="cat-meta">2908 × 508 × 1372 mm · per pc</p></li>
-<li class="cat-card" data-name="ss triple sink (institutional, w/ cabinet)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-025</div><h4>SS Triple Sink (Institutional, w/ Cabinet)</h4><p class="cat-meta">3251 × 660 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 1.0mm sink, 1.5&quot; posts, 1&quot; horizontal braces, adjustable footing</p></li>
-<li class="cat-card" data-name="ss condiments table w/ 2 overhead + bottom shelf"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-026</div><h4>SS Condiments Table w/ 2 Overhead + Bottom Shelf</h4><p class="cat-meta">762 × 711 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.8mm bottom/DOS, 1.5&quot; posts</p></li>
-<li class="cat-card" data-name="ss cooling rack (caster)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-027</div><h4>SS Cooling Rack (Caster)</h4><p class="cat-meta">514 × 508 × 1651 mm · per pc</p><p class="cat-notes">SS1x1 sq tube, bended angle 1.0mm, 3&quot; caster wheels</p></li>
-<li class="cat-card" data-name="ss preparation table w/ service sink &amp; dos"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-028</div><h4>SS Preparation Table w/ Service Sink &amp; DOS</h4><p class="cat-meta">2134 × 610 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 1.0mm sink, 0.8mm DOS/bottom, 1.5&quot; posts</p></li>
-<li class="cat-card" data-name="ss dish table w/ bottom"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-029</div><h4>SS Dish Table w/ Bottom</h4><p class="cat-meta">1219 × 660 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.8mm bottom shelf, 1.5&quot; posts</p></li>
-<li class="cat-card" data-name="ss slotted clean dish rack"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-030</div><h4>SS Slotted Clean Dish Rack</h4><p class="cat-meta">1118 × 559 × 1524 mm · per pc</p><p class="cat-notes">SS1x1 sq tube, slotted 0.8mm, adjustable footing</p></li>
-<li class="cat-card" data-name="ss utensils cabinet with drawers"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-031</div><h4>SS Utensils Cabinet with Drawers</h4><p class="cat-meta">978 × 660 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.7mm panels/doors/drawers, drawer slides</p></li>
-<li class="cat-card" data-name="ss preparation table w/ bottom &amp; dos (large)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-032</div><h4>SS Preparation Table w/ Bottom &amp; DOS (Large)</h4><p class="cat-meta">2286 × 813 × 851 mm · per pc</p><p class="cat-notes">SS1.2mm top, 0.8mm bottom/DOS (254x2286mm), 1.5&quot; posts</p></li>
-<li class="cat-card" data-name="ss wall shelves, 2-layer (institutional)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-033</div><h4>SS Wall Shelves, 2-Layer (Institutional)</h4><p class="cat-meta">2311 × 356 × 25 mm · per pc</p><p class="cat-notes">SS 0.8mm all over</p></li>
-<li class="cat-card" data-name="ss trolley, 20-tray capacity"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-034</div><h4>SS Trolley, 20-Tray Capacity</h4><p class="cat-meta">700 × 630 × 1630 mm · per pc</p><p class="cat-notes">SS G#20 all over, angle-bended tray slides, caster wheels</p></li>
-<li class="cat-card" data-name="5-layer ss dish rack"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-035</div><h4>5-Layer SS Dish Rack</h4><p class="cat-meta">889 × 559 × 1143 mm · per pc</p></li>
-<li class="cat-card" data-name="ss wash sink (institutional)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-036</div><h4>SS Wash Sink (Institutional)</h4><p class="cat-meta">1016 × 711 × 851 mm · per pc</p><p class="cat-notes">SS0.9mm top/sink, 1.5&quot; round posts, 1&quot; braces, basket strainer</p></li>
-<li class="cat-card" data-name="ss double sink w/ slotted bottom (large institutional)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-037</div><h4>SS Double Sink w/ Slotted Bottom (Large Institutional)</h4><p class="cat-meta">2438 × 762 × 851 mm · per pc</p><p class="cat-notes">SS1.3mm top, 1.2mm sink, slotted bottom 0.8mm, basket strainer, stiffener</p></li>
-<li class="cat-card" data-name="ss storage cabinet, 3-layer (institutional, w/ drain)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-038</div><h4>SS Storage Cabinet, 3-Layer (Institutional, w/ Drain)</h4><p class="cat-meta">2134 × 610 × 2032 mm · per pc</p><p class="cat-notes">SS0.8mm side, 0.7mm back, 0.8mm doors, 1.5&quot; post, magnetic catches</p></li>
-<li class="cat-card" data-name="ss pass-thru counter"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-039</div><h4>SS Pass-Thru Counter</h4><p class="cat-meta">W 1219 × D 356 mm · per pc</p></li>
-<li class="cat-card" data-name="ss window frame (service)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-040</div><h4>SS Window Frame (Service)</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="ss l-type cabinet"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-041</div><h4>SS L-Type Cabinet</h4><p class="cat-meta">1372 × 1092 × 864 mm · per pc</p></li>
-<li class="cat-card" data-name="ss cashier table"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-042</div><h4>SS Cashier Table</h4><p class="cat-meta">813 × 610 × 864 mm · per pc</p></li>
-<li class="cat-card" data-name="ss lift-up counter door"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-043</div><h4>SS Lift-Up Counter Door</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="ss cashier swing door"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-044</div><h4>SS Cashier Swing Door</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="ss hanging wall cabinet (large, butterfly doors)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-045</div><h4>SS Hanging Wall Cabinet (Large, Butterfly Doors)</h4><p class="cat-meta">3500 × 900 × 3500 mm · per pc</p><p class="cat-notes">SS304 0.8mm all-over, hinges, magnetic catches, stiffeners</p></li>
-<li class="cat-card" data-name="ss hanging wall cabinet (4-door)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-046</div><h4>SS Hanging Wall Cabinet (4-Door)</h4><p class="cat-meta">3033 × 900 × 300 mm · per pc</p><p class="cat-notes">SS304 0.8mm, 4 equal butterfly doors</p></li>
-<li class="cat-card" data-name="ss countertop cabinet (mixed door types)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-047</div><h4>SS Countertop Cabinet (Mixed Door Types)</h4><p class="cat-meta">3800 × 750 × 700 mm · per pc</p><p class="cat-notes">1 butterfly + 2 single doors + 2 open shelves + 1 open no shelf</p></li>
-<li class="cat-card" data-name="ss countertop cabinet (small, single door)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-048</div><h4>SS Countertop Cabinet (Small, Single Door)</h4><p class="cat-meta">1025 × 750 × 600 mm · per pc</p><dl class="cat-specs"><div><dt>Configuration</dt><dd>1 open + 1 single door (1025x600x750) / 1 butterfly door (600x600x750)</dd></div></dl></li>
-<li class="cat-card" data-name="ss shelves, 12-tray (institutional rack)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-049</div><h4>SS Shelves, 12-Tray (Institutional Rack)</h4><p class="cat-meta">W 1041 × D 965 mm · per pc</p><p class="cat-notes">SS 3/8 shaft frames, 3/16 matting</p></li>
-<li class="cat-card" data-name="ss table (small utility)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-050</div><h4>SS Table (Small Utility)</h4><p class="cat-meta">500 × 500 × 902 mm · per pc</p><p class="cat-notes">SS G#18, 1.25&quot; round tube post, 7/8&quot; braces</p></li>
-<li class="cat-card" data-name="ss sink table (single/double basin)"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-051</div><h4>SS Sink Table (Single/Double Basin)</h4><p class="cat-meta">1524 × 711 × 787 mm · per pc</p><p class="cat-notes">Gooseneck faucet, round tube posts, adjustable bullet footings</p><dl class="cat-specs"><div><dt>Basin Type</dt><dd>Single (508x508x254) / Double</dd></div></dl></li>
-<li class="cat-card" data-name="grease trap, 10 gpm"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-052</div><h4>Grease Trap, 10 GPM</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="grease trap, 12 gpm"><div class="cat-tile" data-code="PW" aria-hidden="true">PW-053</div><h4>Grease Trap, 12 GPM</h4><p class="cat-meta">per pc</p></li>
-</ul>
-<button type="button" class="cat-more" data-cat="prep_washing" aria-expanded="false">Show all 53</button>
-</section>
-<section class="cat-group" data-cat="refrigeration" data-color="#00BCD4" id="cat-refrigeration">
-<h3>Refrigeration <span class="cat-count">6</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="pasteurizer"><div class="cat-tile" data-code="RF" aria-hidden="true">RF-001</div><h4>Pasteurizer</h4><p class="cat-meta">per pc</p><p class="cat-notes">304 food-grade SS double-layer water jacket; capacity 10L; temp range 60-95C</p></li>
-<li class="cat-card" data-name="chiller (single door display)"><div class="cat-tile" data-code="RF" aria-hidden="true">RF-002</div><h4>Chiller (Single Door Display)</h4><p class="cat-meta">per pc</p><p class="cat-notes">Full glass display, double-layer glass door, 420L capacity, fan-assisted ventilation</p></li>
-<li class="cat-card" data-name="undercounter freezer"><div class="cat-tile" data-code="RF" aria-hidden="true">RF-003</div><h4>Undercounter Freezer</h4><p class="cat-meta">1200 × 600 × 810 mm · per pc</p><p class="cat-notes">Fan cooling, Embraco/R404a compressor, -12C to -18C, SS body, digital LED controller, 100% copper condenser/evaporator, 220V/60Hz</p></li>
-<li class="cat-card" data-name="undercounter chiller"><div class="cat-tile" data-code="RF" aria-hidden="true">RF-004</div><h4>Undercounter Chiller</h4><p class="cat-meta">per pc</p><p class="cat-notes">Pending full spec confirmation per project</p></li>
-<li class="cat-card" data-name="cake chiller"><div class="cat-tile" data-code="RF" aria-hidden="true">RF-005</div><h4>Cake Chiller</h4><p class="cat-meta">per pc</p><p class="cat-notes">Pending full spec confirmation per project</p></li>
-<li class="cat-card" data-name="underbar chiller"><div class="cat-tile" data-code="RF" aria-hidden="true">RF-006</div><h4>Underbar Chiller</h4><p class="cat-meta">1500 × 700 × 800 mm · per pc</p></li>
-</ul>
-</section>
-<section class="cat-group" data-cat="baking" data-color="#D4A017" id="cat-baking">
-<h3>Baking <span class="cat-count">12</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="ss baker&#39;s worktable"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-001</div><h4>SS Baker&#39;s Worktable</h4><p class="cat-meta">1500 × 700 × 850 mm · per pc</p><p class="cat-notes">Full SS304. 1.2mm top, 0.9mm body, 38mm SS tubular legs with adjustable bullet feet. Marine-edge front, backsplash optional.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Top gauge</dt><dd>1.2mm</dd></div><div><dt>Body gauge</dt><dd>0.9mm</dd></div><div><dt>Frame</dt><dd>38mm SS square tube</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Top Gauge</dt><dd>1.2mm (std) / 1.5mm heavy-duty</dd></div><div><dt>Undershelf</dt><dd>None / 1 undershelf / 2 undershelves</dd></div></dl></li>
-<li class="cat-card" data-name="ss dough prep table w/ undershelf &amp; backsplash"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-002</div><h4>SS Dough Prep Table w/ Undershelf &amp; Backsplash</h4><p class="cat-meta">1500 × 750 × 900 mm · per pc</p><p class="cat-notes">SS304 throughout. Integrated rear backsplash, full undershelf, reinforced top for kneading/rolling. Ideal for dough handling line.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Top gauge</dt><dd>1.2mm</dd></div><div><dt>Body gauge</dt><dd>0.9mm</dd></div><div><dt>Frame</dt><dd>38mm SS square tube</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Backsplash</dt><dd>100mm / 150mm / None</dd></div><div><dt>Drawers</dt><dd>None / 1 drawer / 2 drawers</dd></div></dl></li>
-<li class="cat-card" data-name="ss baking tray / pan rack trolley (15-tier)"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-003</div><h4>SS Baking Tray / Pan Rack Trolley (15-Tier)</h4><p class="cat-meta">470 × 650 × 1700 mm · per pc</p><p class="cat-notes">SS304 mobile rack for baking sheets. Welded angle runners at 75mm pitch, heavy 4-inch casters (2 lockable). Knock-down option for shipping.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Body gauge</dt><dd>1.0mm</dd></div><div><dt>Frame</dt><dd>SS angle + round bar runners</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Casters</dt><dd>4x 4-inch swivel, 2 with brake</dd></div><div><dt>Tiers</dt><dd>10-tier / 15-tier / 20-tier</dd></div><div><dt>Tray Size</dt><dd>600x400 / 450x650</dd></div></dl></li>
-<li class="cat-card" data-name="ss double-tier bread cooling rack"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-004</div><h4>SS Double-Tier Bread Cooling Rack</h4><p class="cat-meta">1200 × 600 × 1500 mm · per pc</p><p class="cat-notes">SS304 ventilated cooling rack for loaves and pastries. Open wire shelves for airflow, mobile on lockable casters.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Frame</dt><dd>38mm SS square tube</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Shelves</dt><dd>SS wire / perforated</dd></div><div><dt>Shelf Type</dt><dd>Wire shelf / Perforated sheet</dd></div><div><dt>Casters</dt><dd>Adjustable feet / Casters w/ brake</dd></div></dl></li>
-<li class="cat-card" data-name="ss heavy-duty deck oven stand"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-005</div><h4>SS Heavy-Duty Deck Oven Stand</h4><p class="cat-meta">1300 × 1000 × 700 mm · per pc</p><p class="cat-notes">Reinforced SS304 stand for stacking deck ovens. 50mm box-tube frame, cross-braced, 1.5mm top. Integrated tray-slot proofer base optional.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Top gauge</dt><dd>1.5mm</dd></div><div><dt>Frame</dt><dd>50mm SS box tube</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Load rating</dt><dd>up to 600kg</dd></div><div><dt>Proofer Slots</dt><dd>None / 8-tray slot / 16-tray slot</dd></div></dl></li>
-<li class="cat-card" data-name="ss dough proofing cabinet (16-tray, insulated)"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-006</div><h4>SS Dough Proofing Cabinet (16-Tray, Insulated)</h4><p class="cat-meta">700 × 800 × 1850 mm · per pc</p><p class="cat-notes">Insulated SS304 proofer. Double-wall body, magnetic gasket door, thermostat + humidity tray, electric heating element. 600x400 tray pitch.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Body gauge</dt><dd>0.9mm</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Panel</dt><dd>double-wall insulated</dd></div><div><dt>Controls</dt><dd>humidity + thermostat</dd></div><div><dt>Capacity</dt><dd>16-tray / 24-tray (double door)</dd></div><div><dt>Humidity</dt><dd>Manual water tray / Auto humidifier</dd></div></dl></li>
-<li class="cat-card" data-name="ss mobile flour / ingredient storage bin"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-007</div><h4>SS Mobile Flour / Ingredient Storage Bin</h4><p class="cat-meta">500 × 600 × 700 mm · per pc</p><p class="cat-notes">Food-grade SS304 mobile bin for flour/sugar. Hinged dust lid, sloped base for scooping, swivel casters. Optional graduated scoop.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Body gauge</dt><dd>1.0mm</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Casters</dt><dd>4x 3-inch swivel</dd></div><div><dt>Lid</dt><dd>hinged SS</dd></div><div><dt>Capacity</dt><dd>60L / 100L / 150L</dd></div></dl></li>
-<li class="cat-card" data-name="ss304 baking sheet pan (600 x 400)"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-008</div><h4>SS304 Baking Sheet Pan (600 x 400)</h4><p class="cat-meta">600 × 400 × 30 mm · per pc</p><p class="cat-notes">SS304 sheet/tray, 600x400mm GN-compatible. Rolled reinforced edges. Sold per piece; volume pricing for full-rack sets.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Gauge</dt><dd>0.8mm</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Edge</dt><dd>rolled wire-reinforced</dd></div><div><dt>Gauge</dt><dd>0.8mm / 1.0mm</dd></div><div><dt>Perforation</dt><dd>Solid / Perforated</dd></div></dl></li>
-<li class="cat-card" data-name="ss spiral / dough mixer stand &amp; worktable"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-009</div><h4>SS Spiral / Dough Mixer Stand &amp; Worktable</h4><p class="cat-meta">1400 × 750 × 850 mm · per pc</p><p class="cat-notes">Reinforced SS304 worktable/stand for dough mixers. 1.5mm top, 50mm box frame, anti-vibration feet. Optional recessed mixer well.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Top gauge</dt><dd>1.5mm</dd></div><div><dt>Frame</dt><dd>50mm SS box tube</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Load rating</dt><dd>reinforced for mixer</dd></div><div><dt>Mixer Cutout</dt><dd>No cutout / Recessed mixer well</dd></div></dl></li>
-<li class="cat-card" data-name="ss bread slicing &amp; packing table"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-010</div><h4>SS Bread Slicing &amp; Packing Table</h4><p class="cat-meta">1600 × 700 × 900 mm · per pc</p><p class="cat-notes">SS304 finishing table for slicing and bagging. Pull-out crumb tray, undershelf, optional overshelf for packaging supplies.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Top gauge</dt><dd>1.2mm</dd></div><div><dt>Body gauge</dt><dd>0.9mm</dd></div><div><dt>Frame</dt><dd>38mm SS square tube</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Overshelf</dt><dd>None / Single overshelf</dd></div><div><dt>Crumb Tray</dt><dd>None / Pull-out crumb tray</dd></div></dl></li>
-<li class="cat-card" data-name="ss proofer-retarder cabinet (twin-door)"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-011</div><h4>SS Proofer-Retarder Cabinet (Twin-Door)</h4><p class="cat-meta">1400 × 800 × 1950 mm · per pc</p><p class="cat-notes">Insulated SS304 proofer-retarder. Digital controls for retard then proof, twin doors, 2x 16-tray capacity. Refrigeration unit supplied by partner.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Body gauge</dt><dd>0.9mm</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Panel</dt><dd>double-wall insulated</dd></div><div><dt>Controls</dt><dd>digital temp + humidity, retard cycle</dd></div><div><dt>Doors</dt><dd>Twin solid door / Twin glass door</dd></div></dl></li>
-<li class="cat-card" data-name="ss pot &amp; pan washing sink — 2 compartment (bakery)"><div class="cat-tile" data-code="BA" aria-hidden="true">BA-012</div><h4>SS Pot &amp; Pan Washing Sink — 2 Compartment (Bakery)</h4><p class="cat-meta">1800 × 700 × 900 mm · per pc</p><p class="cat-notes">Heavy SS304 2-compartment wash sink for trays/pans. 350mm deep bowls, integrated drainboard, undershelf, pre-rinse spray option.</p><dl class="cat-specs"><div><dt>Grade</dt><dd>SS304</dd></div><div><dt>Top gauge</dt><dd>1.2mm</dd></div><div><dt>Body gauge</dt><dd>1.0mm</dd></div><div><dt>Finish</dt><dd>No.4 brushed</dd></div><div><dt>Bowl depth</dt><dd>350mm</dd></div><div><dt>Drainboards</dt><dd>1 side / Both sides</dd></div><div><dt>Faucet</dt><dd>Gooseneck / Pre-rinse spray</dd></div></dl></li>
-</ul>
-<button type="button" class="cat-more" data-cat="baking" aria-expanded="false">Show all 12</button>
-</section>
-<section class="cat-group" data-cat="exhaust_system" data-color="#27AE60" id="cat-exhaust_system">
-<h3>Exhaust System <span class="cat-count">27</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="ss range hood with baffle filter, lamp &amp; switch"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-001</div><h4>SS Range Hood with Baffle Filter, Lamp &amp; Switch</h4><p class="cat-meta">1000 × 900 × 500 mm · per pc</p><p class="cat-notes">SS304</p></li>
-<li class="cat-card" data-name="ss range hood large (5m) with baffle filter"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-002</div><h4>SS Range Hood Large (5m) with Baffle Filter</h4><p class="cat-meta">5000 × 900 × 500 mm · per pc</p><p class="cat-notes">SS304, 5m length, baffle filter, lamp, switch</p></li>
-<li class="cat-card" data-name="ss exhaust hood (institutional grade)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-003</div><h4>SS Exhaust Hood (Institutional Grade)</h4><p class="cat-meta">5000 × 1200 × 600 mm · per pc</p><p class="cat-notes">SS304, heavy duty, with canopy</p></li>
-<li class="cat-card" data-name="galvanized exhaust duct with elbows (per ~1m)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-004</div><h4>Galvanized Exhaust Duct with Elbows (per ~1m)</h4><p class="cat-meta">W 1000 × D 1000 mm · per run</p><p class="cat-notes">Lock former type, fully welded, per ~1m section</p></li>
-<li class="cat-card" data-name="exhaust motor blower 2hp with casing"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-005</div><h4>Exhaust Motor Blower 2HP with Casing</h4><p class="cat-meta">per set</p><p class="cat-notes">Industrial, galvanized casing and reducer</p></li>
-<li class="cat-card" data-name="exhaust motor blower 3hp with casing"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-006</div><h4>Exhaust Motor Blower 3HP with Casing</h4><p class="cat-meta">per set</p><p class="cat-notes">Industrial, galvanized casing and reducer</p></li>
-<li class="cat-card" data-name="magnetic switch (single phase blower control)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-007</div><h4>Magnetic Switch (Single Phase Blower Control)</h4><p class="cat-meta">per pc</p><p class="cat-notes">Single phase magnetic switch</p></li>
-<li class="cat-card" data-name="magnetic switch (3-phase)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-008</div><h4>Magnetic Switch (3-Phase)</h4><p class="cat-meta">per pc</p><p class="cat-notes">3-phase magnetic switch</p></li>
-<li class="cat-card" data-name="gi steel ledge bracket with spring"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-009</div><h4>GI Steel Ledge Bracket with Spring</h4><p class="cat-meta">per set</p><p class="cat-notes">Ceiling/wall mount assembly</p></li>
-<li class="cat-card" data-name="grip angular stand bolt with nut &amp; consumables"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-010</div><h4>Grip Angular Stand Bolt with Nut &amp; Consumables</h4><p class="cat-meta">per set</p><p class="cat-notes">Complete hardware set</p></li>
-<li class="cat-card" data-name="fiber wool thermal insulation (per set)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-011</div><h4>Fiber Wool Thermal Insulation (per set)</h4><p class="cat-meta">per set</p><p class="cat-notes">Thermal insulation for ducting</p></li>
-<li class="cat-card" data-name="motor blower adaptor duct and reducer"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-012</div><h4>Motor Blower Adaptor Duct and Reducer</h4><p class="cat-meta">per set</p><p class="cat-notes">Custom fabricated adaptor</p></li>
-<li class="cat-card" data-name="gooseneck exhaust duct (rooftop)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-013</div><h4>Gooseneck Exhaust Duct (Rooftop)</h4><p class="cat-meta">per pc</p><p class="cat-notes">BI/GI sheet, painted, rooftop exhaust</p></li>
-<li class="cat-card" data-name="blower box with belt drive"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-014</div><h4>Blower Box with Belt Drive</h4><p class="cat-meta">per set</p><p class="cat-notes">Belt-driven blower housing</p></li>
-<li class="cat-card" data-name="exhaust system delivery, labor &amp; installation"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-015</div><h4>Exhaust System Delivery, Labor &amp; Installation</h4><p class="cat-meta">per lot</p><p class="cat-notes">Scope varies per project</p></li>
-<li class="cat-card" data-name="exhaust motor blower, 5hp 3-phase"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-016</div><h4>Exhaust Motor Blower, 5HP 3-Phase</h4><p class="cat-meta">per pc</p><p class="cat-notes">Inline blower (TECO/WEG type), 220V, on/off magnetic switch</p></li>
-<li class="cat-card" data-name="bi sheet exhaust ducting system (5hp, full spec)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-017</div><h4>BI Sheet Exhaust Ducting System (5HP, Full Spec)</h4><p class="cat-meta">per pc</p><p class="cat-notes">BI sheet welded duct run (25-30pcs), BI ledge bracket, 5pcs air vent grill 200x200mm, stand bolt + grip anchor, fiberglass wool insulation</p></li>
-<li class="cat-card" data-name="ss range hood, island type"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-018</div><h4>SS Range Hood, Island Type</h4><p class="cat-meta">1219 × 1092 × 508 mm · per pc</p><p class="cat-notes">SS G#20 all over, 1.5&quot; oil cup</p></li>
-<li class="cat-card" data-name="ss range hood, island type (large)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-019</div><h4>SS Range Hood, Island Type (Large)</h4><p class="cat-meta">4191 × 762 × 508 mm · per pc</p></li>
-<li class="cat-card" data-name="ss range hood, slim type"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-020</div><h4>SS Range Hood, Slim Type</h4><p class="cat-meta">1800 × 305 × 355 mm · per pc</p><p class="cat-notes">SS0.7mm all over, 1.5&quot; oil tube, tapered 203-508mm height</p></li>
-<li class="cat-card" data-name="ss wall type range hood (long, low profile)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-021</div><h4>SS Wall Type Range Hood (Long, Low Profile)</h4><p class="cat-meta">5480 × 660 × 508 mm · per pc</p><p class="cat-notes">SS304 original all-over, 2&quot; round tube oil cup, 610-711mm depth range</p></li>
-<li class="cat-card" data-name="industrial blower #16 w/ ss casing &amp; reducer"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-022</div><h4>Industrial Blower #16 w/ SS Casing &amp; Reducer</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="gi blower case with reducer"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-023</div><h4>GI Blower Case with Reducer</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="fire-resistant fiberglass insulator (32kg)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-024</div><h4>Fire-Resistant Fiberglass Insulator (32kg)</h4><p class="cat-meta">per pc</p><p class="cat-notes">32kg fiberglass duct insulation, bulk</p></li>
-<li class="cat-card" data-name="vibro pad isolator"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-025</div><h4>Vibro Pad Isolator</h4><p class="cat-meta">per pc</p><p class="cat-notes">Vibration isolator for blower mounting</p></li>
-<li class="cat-card" data-name="ss baffle screen filter"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-026</div><h4>SS Baffle Screen Filter</h4><p class="cat-meta">per pc</p><p class="cat-notes">Block-type, SS0.7mm</p><dl class="cat-specs"><div><dt>Size</dt><dd>12x14&quot; / 16&quot; / 20&quot;</dd></div></dl></li>
-<li class="cat-card" data-name="3 glass bulb case (range hood lighting)"><div class="cat-tile" data-code="EX" aria-hidden="true">EX-027</div><h4>3 Glass Bulb Case (Range Hood Lighting)</h4><p class="cat-meta">864 × 610 × 533 mm · per pc</p></li>
-</ul>
-<button type="button" class="cat-more" data-cat="exhaust_system" aria-expanded="false">Show all 27</button>
-</section>
-<section class="cat-group" data-cat="fresh_air_system" data-color="#16A085" id="cat-fresh_air_system">
-<h3>Fresh Air System <span class="cat-count">10</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="fresh air blower 2hp"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-001</div><h4>Fresh Air Blower 2HP</h4><p class="cat-meta">per set</p><p class="cat-notes">Centrifugal blower, galvanized casing</p></li>
-<li class="cat-card" data-name="fresh air blower 3hp"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-002</div><h4>Fresh Air Blower 3HP</h4><p class="cat-meta">per set</p><p class="cat-notes">Centrifugal blower, galvanized casing</p></li>
-<li class="cat-card" data-name="ss fresh air ducting (per run)"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-003</div><h4>SS Fresh Air Ducting (per run)</h4><p class="cat-meta">per run</p><p class="cat-notes">Lock former, elbows included; varies by length</p></li>
-<li class="cat-card" data-name="air diffuser with galva drop box (300x300)"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-004</div><h4>Air Diffuser with Galva Drop Box (300x300)</h4><p class="cat-meta">W 300 × D 300 mm · per pc</p><p class="cat-notes">300x300mm, ceiling mount</p></li>
-<li class="cat-card" data-name="air grill 300x300"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-005</div><h4>Air Grill 300x300</h4><p class="cat-meta">W 300 × D 300 mm · per pc</p><p class="cat-notes">300x300mm fixed grill</p></li>
-<li class="cat-card" data-name="ledge frame bracket with spring (fresh air)"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-006</div><h4>Ledge Frame Bracket with Spring (Fresh Air)</h4><p class="cat-meta">per set</p><p class="cat-notes">Spring-loaded ceiling bracket</p></li>
-<li class="cat-card" data-name="fresh air system delivery, labor &amp; installation"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-007</div><h4>Fresh Air System Delivery, Labor &amp; Installation</h4><p class="cat-meta">per lot</p><p class="cat-notes">Base install; varies per project</p></li>
-<li class="cat-card" data-name="fresh air motor blower, 1hp"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-008</div><h4>Fresh Air Motor Blower, 1HP</h4><p class="cat-meta">per pc</p><p class="cat-notes">Axle type, magnetic switch</p></li>
-<li class="cat-card" data-name="gi sheet fresh air ducting system (3hp, full spec)"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-009</div><h4>GI Sheet Fresh Air Ducting System (3HP, Full Spec)</h4><p class="cat-meta">per pc</p><p class="cat-notes">GI duct run 22-27pcs, BI ledge bracket, air diffuser 300x300mm, stand bolt</p></li>
-<li class="cat-card" data-name="air griller, open type"><div class="cat-tile" data-code="FA" aria-hidden="true">FA-010</div><h4>Air Griller, Open Type</h4><p class="cat-meta">W 300 × D 300 mm · per pc</p><p class="cat-notes">Distinct from diffuser type</p></li>
-</ul>
-<button type="button" class="cat-more" data-cat="fresh_air_system" aria-expanded="false">Show all 10</button>
-</section>
-<section class="cat-group" data-cat="gas_line" data-color="#F39C12" id="cat-gas_line">
-<h3>Gas Line <span class="cat-count">3</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="gas line system with tank farm (4 x 50kg)"><div class="cat-tile" data-code="GL" aria-hidden="true">GL-001</div><h4>Gas Line System with Tank Farm (4 x 50kg)</h4><p class="cat-meta">per lot</p><p class="cat-notes">BI pipes, fully welded, cage for 4 tanks (tanks not included)</p></li>
-<li class="cat-card" data-name="gas line topping to existing main line"><div class="cat-tile" data-code="GL" aria-hidden="true">GL-002</div><h4>Gas Line Topping to Existing Main Line</h4><p class="cat-meta">per lot</p><p class="cat-notes">Adaptor + piping, full kitchen connection</p></li>
-<li class="cat-card" data-name="gas line for fryer/griddle (labor &amp; materials)"><div class="cat-tile" data-code="GL" aria-hidden="true">GL-003</div><h4>Gas Line for Fryer/Griddle (Labor &amp; Materials)</h4><p class="cat-meta">per lot</p><p class="cat-notes">2-burner appliance connection</p></li>
-</ul>
-</section>
-<section class="cat-group" data-cat="fire_suppression" data-color="#E67E22" id="cat-fire_suppression">
-<h3>Fire Suppression <span class="cat-count">6</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="fire suppression system (wet chemical, small)"><div class="cat-tile" data-code="FS" aria-hidden="true">FS-001</div><h4>Fire Suppression System (Wet Chemical, Small)</h4><p class="cat-meta">per system</p><p class="cat-notes">BFP compliant cert, wet chemical tank, hood integration</p></li>
-<li class="cat-card" data-name="fire suppression system (wet chemical, large)"><div class="cat-tile" data-code="FS" aria-hidden="true">FS-002</div><h4>Fire Suppression System (Wet Chemical, Large)</h4><p class="cat-meta">per system</p><p class="cat-notes">BFP compliant cert, large coverage, installation included</p></li>
-<li class="cat-card" data-name="fire suppression system, 4-gallon (complete w/ install)"><div class="cat-tile" data-code="FS" aria-hidden="true">FS-003</div><h4>Fire Suppression System, 4-Gallon (Complete w/ Install)</h4><p class="cat-meta">per pc</p><p class="cat-notes">4 gallons capacity, complete set</p></li>
-<li class="cat-card" data-name="fire suppression system (20l flow, detailed spec)"><div class="cat-tile" data-code="FS" aria-hidden="true">FS-004</div><h4>Fire Suppression System (20L Flow, Detailed Spec)</h4><p class="cat-meta">per pc</p><p class="cat-notes">20L flow, 6 flow-point range, fryer/griller hood nozzle, corner pulley, fusible link, bracket, manual pull station, mechanical gas valve 3/4&quot;, SS316 cable w/ S-hook</p></li>
-<li class="cat-card" data-name="sprinkler system"><div class="cat-tile" data-code="FS" aria-hidden="true">FS-005</div><h4>Sprinkler System</h4><p class="cat-meta">per pc</p></li>
-<li class="cat-card" data-name="smoke detector system"><div class="cat-tile" data-code="FS" aria-hidden="true">FS-006</div><h4>Smoke Detector System</h4><p class="cat-meta">per pc</p></li>
-</ul>
-</section>
-<section class="cat-group" data-cat="miscellaneous" data-color="#8E44AD" id="cat-miscellaneous">
-<h3>Miscellaneous <span class="cat-count">17</span></h3>
-<ul class="cat-grid">
-<li class="cat-card" data-name="ss grease trap 15 gpm"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-001</div><h4>SS Grease Trap 15 GPM</h4><p class="cat-meta">per pc</p><p class="cat-notes">SS304 grease trap with basket</p></li>
-<li class="cat-card" data-name="ss grease trap 20 gpm"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-002</div><h4>SS Grease Trap 20 GPM</h4><p class="cat-meta">per pc</p><p class="cat-notes">SS304 large grease trap with basket</p></li>
-<li class="cat-card" data-name="5kg volcanic lava rock (per bag)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-003</div><h4>5kg Volcanic Lava Rock (per bag)</h4><p class="cat-meta">per bag</p><p class="cat-notes">For griller/griddle equipment</p></li>
-<li class="cat-card" data-name="ss fryer basket"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-004</div><h4>SS Fryer Basket</h4><p class="cat-meta">per pc</p><p class="cat-notes">SS304 fryer basket</p></li>
-<li class="cat-card" data-name="delivery, installation, labor &amp; commissioning (small)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-005</div><h4>Delivery, Installation, Labor &amp; Commissioning (Small)</h4><p class="cat-meta">per lot</p><p class="cat-notes">Single-item or simple install, same city</p></li>
-<li class="cat-card" data-name="delivery, installation, labor &amp; commissioning (medium)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-006</div><h4>Delivery, Installation, Labor &amp; Commissioning (Medium)</h4><p class="cat-meta">per lot</p><p class="cat-notes">Multi-item kitchen, same city</p></li>
-<li class="cat-card" data-name="delivery, installation, labor &amp; commissioning (large)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-007</div><h4>Delivery, Installation, Labor &amp; Commissioning (Large)</h4><p class="cat-meta">per lot</p><p class="cat-notes">Full kitchen, out-of-town</p></li>
-<li class="cat-card" data-name="water pipeline extension (per project)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-008</div><h4>Water Pipeline Extension (per project)</h4><p class="cat-meta">per lot</p><p class="cat-notes">From sinks to internal pipeline</p></li>
-<li class="cat-card" data-name="piping &amp; drainage works (~4.5m)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-009</div><h4>Piping &amp; Drainage Works (~4.5m)</h4><p class="cat-meta">per lot</p><p class="cat-notes">Drain piping from sink to drainage</p></li>
-<li class="cat-card" data-name="ss wall cladding installation (labor only)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-010</div><h4>SS Wall Cladding Installation (Labor Only)</h4><p class="cat-meta">per lot</p><p class="cat-notes">For SS wall cladding panels, per project</p></li>
-<li class="cat-card" data-name="oven repair / reconditioning"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-011</div><h4>Oven Repair / Reconditioning</h4><p class="cat-meta">per lot</p><p class="cat-notes">Existing oven, full recondition</p></li>
-<li class="cat-card" data-name="preventive maintenance service (per visit)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-012</div><h4>Preventive Maintenance Service (per visit)</h4><p class="cat-meta">per visit</p><p class="cat-notes">Per visit, full kitchen check</p></li>
-<li class="cat-card" data-name="rotary oven repair (full reconditioning)"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-013</div><h4>Rotary Oven Repair (Full Reconditioning)</h4><p class="cat-meta">per pc</p><p class="cat-notes">Dismantle front panel, rotary layers, side holder wheel/angle bracket; fabricate/replace rotary holder wheel; reassemble; test commission. 6-month warranty</p></li>
-<li class="cat-card" data-name="gi galvanized sheet &amp; gutter fabrication"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-014</div><h4>GI Galvanized Sheet &amp; Gutter Fabrication</h4><p class="cat-meta">per pc</p><p class="cat-notes">SS sheet 1.0mm</p></li>
-<li class="cat-card" data-name="industrial meat grinder"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-015</div><h4>Industrial Meat Grinder</h4><p class="cat-meta">1168 × 610 × 1143 mm · per pc</p><p class="cat-notes">SS worm/blade 420#CPM3V, 900W/1.2HP, 220kg/hr capacity, 110-240V, 36kg unit weight, CE approved</p></li>
-<li class="cat-card" data-name="industrial meat slicer"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-016</div><h4>Industrial Meat Slicer</h4><p class="cat-meta">1194 × 889 × 1092 mm · per pc</p><p class="cat-notes">850W, 150kg/hr, SS, 3mm slicing thickness, 29kg</p></li>
-<li class="cat-card" data-name="armchair / school desk set"><div class="cat-tile" data-code="MS" aria-hidden="true">MS-017</div><h4>Armchair / School Desk Set</h4><p class="cat-meta">500 × 475 × 720 mm · per pc</p><p class="cat-notes">Writing pad 500x330x120mm, backrest height 100mm. Government/school bid item.</p></li>
-</ul>
-<button type="button" class="cat-more" data-cat="miscellaneous" aria-expanded="false">Show all 17</button>
-</section>
-<p id="cat-empty" class="cat-empty" hidden>No products match "…".</p>
-<!-- CATALOGUE:END -->
-  </div>
-</section>
 
-<section id="services" class="site-sec site-sec-alt">
+<section id="services" class="site-sec site-sec-paper">
   <div class="site-wrap">
-    <h2>Services</h2>
-    <div class="svc-grid">
-      <article class="svc">
-        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11h16v6a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z"/><path d="M2 11h20M9 7c0-1.5 1-1.5 1-3M14 7c0-1.5 1-1.5 1-3"/></svg>
-        <h3>Commercial &amp; commissary kitchen fit-outs</h3>
-        <p>Design-build from concept to completion: cooking lines, prep and washing stations, baking, exhaust hoods and ducting, fresh-air systems, gas line and fire suppression — one contractor from drawings to commissioning.</p>
-        <p><a href="/sales/clientinformationrequest/">Start a project brief</a></p>
+    <header class="sec-head reveal">
+      <p class="eyebrow">What we do</p>
+      <h2>Services</h2>
+      <p class="site-lead">The same high-quality build runs through every service: seams welded and ground smooth, surfaces polished to a professional finish, and every piece built to order.</p>
+    </header>
+    <div class="svc-list">
+      <article class="svc reveal">
+        <div class="svc-media"><img src="site/img/projects/dmmmsu/01.webp" srcset="site/img/projects/dmmmsu/01-thumb.webp 600w, site/img/projects/dmmmsu/01.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Finished commercial kitchen with a range, hood and stainless-steel work tables"></div>
+        <div class="svc-body">
+          <p class="svc-num">01</p>
+          <h3>Commercial &amp; commissary kitchen fit-outs</h3>
+          <p>Design-build from concept to completion: cooking lines, preparation and washing stations, baking equipment, exhaust hoods and ducting, fresh-air systems, gas lines and fire suppression. One contractor, from drawings to commissioning.</p>
+          <p><a class="link-arrow" href="/sales/clientinformationrequest/">Start a project brief</a></p>
+        </div>
       </article>
-      <article class="svc">
-        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18M5 20V8m14 12V8M5 8h14M9 8v12m6-12v12"/></svg>
-        <h3>Custom stainless &amp; metal fabrication</h3>
-        <p>Railings, gates, structural and sheet-metal work fabricated to drawing, in stainless or mild steel, for commercial and residential sites.</p>
+      <article class="svc reveal">
+        <div class="svc-media"><img src="site/img/projects/ispsc/03.webp" srcset="site/img/projects/ispsc/03-thumb.webp 600w, site/img/projects/ispsc/03.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Rows of fabricated stainless-steel work tables"></div>
+        <div class="svc-body">
+          <p class="svc-num">02</p>
+          <h3>Custom stainless &amp; metal fabrication</h3>
+          <p>Railings, gates, structural and sheet-metal work fabricated to drawing, in stainless or mild steel, for commercial and residential sites.</p>
+        </div>
       </article>
-      <article class="svc">
-        <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21h18M5 21V10m4 11V10m6 11V10m4 11V10M2 10l10-6 10 6z"/></svg>
-        <h3>Institutional &amp; government supply</h3>
-        <p>Stainless-steel equipment, work tables and sinks supplied and installed for schools, LGUs and government agencies through public bidding.</p>
+      <article class="svc reveal">
+        <div class="svc-media"><img src="site/img/projects/dmmmsu/03.webp" srcset="site/img/projects/dmmmsu/03-thumb.webp 600w, site/img/projects/dmmmsu/03.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Stainless-steel tables, racks and shelving installed on a university campus"></div>
+        <div class="svc-body">
+          <p class="svc-num">03</p>
+          <h3>Institutional &amp; government supply</h3>
+          <p>Stainless-steel equipment, work tables and sinks supplied and installed for schools, LGUs and government agencies through public bidding.</p>
+        </div>
       </article>
     </div>
   </div>
@@ -466,13 +253,19 @@
 
 <section id="projects" class="site-sec">
   <div class="site-wrap">
-    <h2>Completed projects</h2>
-    <article class="proj" id="proj-ispsc-2026">
-      <h3>ISPSC 2026 — Ilocos Sur Polytechnic State College</h3>
-      <p>Stainless-steel laboratory and kitchen work tables and sinks, fabricated and installed in a school room (March 2026).</p>
-      <ul class="proj-grid">
-        <li><a href="site/img/projects/ispsc/01.webp" data-lightbox><img src="site/img/projects/ispsc/01-thumb.webp" alt="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods" loading="lazy" decoding="async" fetchpriority="low" width="600" height="450"></a></li>
-        <li><a href="site/img/projects/ispsc/02.webp" data-lightbox><img src="site/img/projects/ispsc/02-thumb.webp" alt="ISPSC 2026 — rows of stainless-steel work tables in the school room" loading="lazy" decoding="async" width="600" height="450"></a></li>
+    <header class="sec-head reveal">
+      <p class="eyebrow">Government projects</p>
+      <h2>Completed projects</h2>
+    </header>
+    <article class="proj reveal" id="proj-ispsc-2026">
+      <div class="proj-head">
+        <p class="proj-tag">ISPSC 2026</p>
+        <h3>Ilocos Sur Polytechnic State College</h3>
+        <p>Stainless-steel laboratory and kitchen work tables and sinks, fabricated and installed in a school room (March 2026).</p>
+      </div>
+      <ul class="proj-gallery">
+        <li class="is-lead"><a href="site/img/projects/ispsc/02.webp" data-lightbox><img src="site/img/projects/ispsc/02.webp" srcset="site/img/projects/ispsc/02-thumb.webp 600w, site/img/projects/ispsc/02.webp 1600w" sizes="(min-width:1180px) 1148px, 100vw" alt="ISPSC 2026 — rows of stainless-steel work tables in the school room" loading="lazy" decoding="async" width="1600" height="1200"></a></li>
+        <li><a href="site/img/projects/ispsc/01.webp" data-lightbox><img src="site/img/projects/ispsc/01-thumb.webp" alt="ISPSC 2026 — wide view of the cooking stations with range ovens, sinks and overhead hoods" loading="lazy" decoding="async" width="600" height="450"></a></li>
         <li><a href="site/img/projects/ispsc/03.webp" data-lightbox><img src="site/img/projects/ispsc/03-thumb.webp" alt="ISPSC 2026 — rows of stainless-steel work tables, wide view" loading="lazy" decoding="async" width="600" height="450"></a></li>
         <li><a href="site/img/projects/ispsc/04.webp" data-lightbox><img src="site/img/projects/ispsc/04-thumb.webp" alt="ISPSC 2026 — stainless-steel work tables with the protective film still on" loading="lazy" decoding="async" width="600" height="450"></a></li>
         <li><a href="site/img/projects/ispsc/05.webp" data-lightbox><img src="site/img/projects/ispsc/05-thumb.webp" alt="ISPSC 2026 — cooking station with range oven and sink" loading="lazy" decoding="async" width="600" height="450"></a></li>
@@ -480,12 +273,15 @@
         <li><a href="site/img/projects/ispsc/07.webp" data-lightbox><img src="site/img/projects/ispsc/07-thumb.webp" alt="ISPSC 2026 — range with an overhead shelf" loading="lazy" decoding="async" width="450" height="600"></a></li>
       </ul>
     </article>
-    <article class="proj" id="proj-dmmmsu-2022-2023">
-      <h3>DMMMSU 2022–2023 — Don Mariano Marcos Memorial State University</h3>
-      <p>Stainless-steel equipment delivered and installed on campus (March 2023 – December 2025).</p>
-      <ul class="proj-grid">
+    <article class="proj reveal" id="proj-dmmmsu-2022-2023">
+      <div class="proj-head">
+        <p class="proj-tag">DMMMSU 2022–2023</p>
+        <h3>Don Mariano Marcos Memorial State University</h3>
+        <p>Stainless-steel equipment delivered and installed on campus (March 2023 – December 2025).</p>
+      </div>
+      <ul class="proj-gallery">
+        <li class="is-lead"><a href="site/img/projects/dmmmsu/02.webp" data-lightbox><img src="site/img/projects/dmmmsu/02.webp" srcset="site/img/projects/dmmmsu/02-thumb.webp 600w, site/img/projects/dmmmsu/02.webp 1600w" sizes="(min-width:1180px) 1148px, 100vw" alt="DMMMSU — room installed with stainless-steel tables, racks and shelving" loading="lazy" decoding="async" width="1600" height="1200"></a></li>
         <li><a href="site/img/projects/dmmmsu/01.webp" data-lightbox><img src="site/img/projects/dmmmsu/01-thumb.webp" alt="DMMMSU — finished commercial kitchen with range, hood and work tables" loading="lazy" decoding="async" width="600" height="450"></a></li>
-        <li><a href="site/img/projects/dmmmsu/02.webp" data-lightbox><img src="site/img/projects/dmmmsu/02-thumb.webp" alt="DMMMSU — room installed with stainless-steel tables, racks and shelving" loading="lazy" decoding="async" width="600" height="450"></a></li>
         <li><a href="site/img/projects/dmmmsu/03.webp" data-lightbox><img src="site/img/projects/dmmmsu/03-thumb.webp" alt="DMMMSU — stainless-steel tables and racks installed in the room" loading="lazy" decoding="async" width="600" height="450"></a></li>
         <li><a href="site/img/projects/dmmmsu/04.webp" data-lightbox><img src="site/img/projects/dmmmsu/04-thumb.webp" alt="DMMMSU — stainless-steel shelving and work tables after installation" loading="lazy" decoding="async" width="600" height="277"></a></li>
         <li><a href="site/img/projects/dmmmsu/05.webp" data-lightbox><img src="site/img/projects/dmmmsu/05-thumb.webp" alt="DMMMSU — installed stainless-steel tables and racks, wide view" loading="lazy" decoding="async" width="600" height="450"></a></li>
@@ -495,27 +291,34 @@
   </div>
 </section>
 
-<section id="about" class="site-sec site-sec-alt">
+<section id="about" class="site-sec site-sec-paper">
   <div class="site-wrap about-in">
-    <h2>About Barro Industries</h2>
-    <p class="site-lead">Barro Industries OPC is a manufacturing company built on precision, quality, and a commitment to long-term growth.</p>
-    <p class="values">Excellence · Integrity · People First · Growth</p>
-    <p class="tagline">Building the Future, Brick by Brick.</p>
+    <div class="about-media reveal"><img src="site/img/projects/ispsc/07.webp" srcset="site/img/projects/ispsc/07-thumb.webp 450w, site/img/projects/ispsc/07.webp 1200w" sizes="(min-width:900px) 40vw, 100vw" width="1200" height="1600" loading="lazy" decoding="async" alt="Stainless-steel range with an overhead shelf, fabricated and installed by Barro Industries"></div>
+    <div class="about-copy reveal">
+      <p class="eyebrow">Our story</p>
+      <h2>About Barro Industries</h2>
+      <p class="about-years"><span class="about-years-num">23</span><span class="about-years-label">years in business</span></p>
+      <p class="site-lead">Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
+      <p class="about-note">The company began as a family business.</p>
+      <p class="values">Excellence · Integrity · People first · Growth</p>
+      <p class="tagline">Building the Future, Brick by Brick.</p>
+    </div>
   </div>
 </section>
 
 <section id="contact" class="site-sec">
   <div class="site-wrap contact-grid">
-    <div>
+    <div class="contact-intro reveal">
+      <p class="eyebrow">Contact</p>
       <h2>Get a quote</h2>
       <p class="site-lead">Tell us about your kitchen or fabrication project and we will come back with a quotation. No account needed.</p>
       <p><a class="site-btn site-btn-primary" href="/sales/clientinformationrequest/">Open the project brief form</a></p>
     </div>
-    <ul class="contact-list">
-      <li><a href="tel:+639276836300">0927 683 6300</a></li>
-      <li><a href="mailto:barroindustries@gmail.com">barroindustries@gmail.com</a><!-- TODO-NEIL: spec O3 — barroindustries@gmail.com is the only verified address in the repo; swap for a @barroindustries.com mailbox if one exists. --></li>
-      <li><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">facebook.com/barrokitchens</a><!-- TODO-NEIL: Instagram / TikTok URLs — the lead-source list in js/config.js suggests they exist, but no URL is in the repo. --></li>
-      <li><address>21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines</address><a class="contact-dir" href="https://www.google.com/maps/search/?api=1&amp;query=21+Capricorn+St+Tandang+Sora+Quezon+City" rel="noopener" target="_blank">Get directions</a></li>
+    <ul class="contact-list reveal">
+      <li><span class="contact-label">Phone</span><a href="tel:+639276836300">0927 683 6300</a></li>
+      <li><span class="contact-label">Email</span><a href="mailto:hello@barroindustries.com">hello@barroindustries.com</a></li>
+      <li><span class="contact-label">Facebook</span><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">facebook.com/barrokitchens</a><!-- TODO-NEIL: Instagram / TikTok URLs — the lead-source list in js/config.js suggests they exist, but no URL is in the repo. --></li>
+      <li><span class="contact-label">Address</span><address>21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines</address><a class="contact-dir" href="https://www.google.com/maps/search/?api=1&amp;query=21+Capricorn+St+Tandang+Sora+Quezon+City" rel="noopener" target="_blank">Get directions</a></li>
     </ul>
   </div>
 </section>
@@ -523,14 +326,17 @@
 </main>
 
 <footer id="site-footer">
-  <div class="site-wrap">
-    <p>Barro Industries OPC · Barro Kitchens™ is a registered trademark of Barro Industries OPC · © <span id="site-year">2026</span> Barro Industries OPC</p>
-    <p>21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines</p>
-    <p class="foot-links"><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a> · <a href="/sales/clientinformationrequest/">Get a quote</a> · <a href="/#login" id="site-footer-login">Staff login</a></p>
+  <div class="site-wrap foot-in">
+    <div class="foot-brand">
+      <p class="foot-name">Barro Industries OPC</p>
+      <p>21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines</p>
+    </div>
+    <p class="foot-links"><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="/sales/clientinformationrequest/">Get a quote</a><a href="/#login" id="site-footer-login">Staff login</a></p>
+    <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC. Barro Kitchens is a brand of Barro Industries OPC.</p>
   </div>
 </footer>
 
-<dialog id="site-lightbox" aria-label="Photo"><button type="button" id="site-lightbox-close" aria-label="Close">×</button><img id="site-lightbox-img" alt=""></dialog>
+<dialog id="site-lightbox" aria-label="Project photo"><button type="button" id="site-lightbox-close" aria-label="Close photo">×</button><img id="site-lightbox-img" alt=""></dialog>
 
 </div><!-- /#site -->
 
@@ -668,7 +474,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.314 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.315 · Barro Industries</div>
   </div>
 </div>
 
