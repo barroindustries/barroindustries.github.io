@@ -1212,8 +1212,10 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
     ['a signed-out browser visitor sees the site', {}, 'site', false, false],
     ['a site anchor (#services) is still the site', { hash: '#services' }, 'site', false, false],
     ['a signed-in hint boots into the splash, never the site', { hint: true }, 'boot', false, false],
-    ['an app deep link boots, and a signed-out staffer is sent to login', { hash: '#/tasks' }, 'boot', false, true],
-    ['an app deep link with a hint', { hash: '#/tasks', hint: true }, 'boot', false, true],
+    // Owner 2026-10-21: autocompleted #/dashboard on a signed-out laptop must show the website, not login.
+    ['an app deep link with no session hint shows the site (hash kept for after Login)', { hash: '#/tasks' }, 'site', false, false],
+    ['an autocompleted #/dashboard with no hint shows the site', { hash: '#/dashboard' }, 'site', false, false],
+    ['an app deep link with a hint boots (auth decides)', { hash: '#/tasks', hint: true }, 'boot', false, false],
     ['#login cold load shows the login screen', { hash: '#login' }, 'login', false, true],
     ['#login with a hint boots (auth decides) but still asks for login', { hash: '#login', hint: true }, 'boot', false, true],
     ['installed PWA: display-mode standalone', { modes: ['standalone'] }, 'boot', true, false],

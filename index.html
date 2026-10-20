@@ -67,14 +67,16 @@
     } catch (_) { failed = true; }
     try {
       var hash = location.hash || '';
-      var appHash = hash.indexOf('#/') === 0;
       var loginHash = hash.slice(1) === 'login';
       var hint = localStorage.getItem('bi-auth-hint') === '1';
+      // An app deep link (#/tasks…) with no session hint shows the SITE, not login: browsers
+      // autocomplete the bare domain to an old #/dashboard from history (owner, 2026-10-21).
+      // The hash is kept, so app.js routes to it after a successful Login.
       if (de.hasAttribute('data-standalone')) view = 'boot';
-      else if (hint || appHash) view = 'boot';
+      else if (hint) view = 'boot';
       else if (loginHash) view = 'login';
       else view = 'site';
-      if (loginHash || appHash) window._wantLogin = true;
+      if (loginHash) window._wantLogin = true;
     } catch (_) { failed = true; }
     de.setAttribute('data-view', failed ? 'boot' : view);
   })();</script>
@@ -139,8 +141,8 @@
        CSS beside new JS and a shipped CSS change looked like it never landed.
        A new version = a new cache key, so even a stale SW must hit the network.
        Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-  <link rel="stylesheet" href="css/tokens.css?v=14.0.315"/>
-  <link rel="stylesheet" href="css/styles.css?v=14.0.315"/>
+  <link rel="stylesheet" href="css/tokens.css?v=14.0.316"/>
+  <link rel="stylesheet" href="css/styles.css?v=14.0.316"/>
   <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet. Loads AFTER
        styles.css so its #site rules win ties. No ?v= on purpose: .githooks/pre-commit
        only rewrites the tokens/styles links, and this file is small enough to win the
@@ -474,7 +476,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.315 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.316 · Barro Industries</div>
   </div>
 </div>
 
