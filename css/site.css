@@ -2,7 +2,7 @@
    Scoped to #site (and #login-site-back); loads AFTER styles.css on the homepage and on its own
    on /catalogue/ (which sets <html data-view="site"> and wraps its page in #site). Own light
    --site-* tokens (never --bg/--text/--primary), so a dark or astral device theme still gets a
-   white site. Palette from the Barro Kitchens logo: deep navy, gold ONLY as hairlines / eyebrows /
+   white site. Palette from the brand's logo: deep navy, gold ONLY as hairlines / eyebrows /
    small numerals, warm off-white. No bright blue. No 4-digit z-index (CHECK 1).
    Catalogue-only rules live in css/catalogue.css. */
 
@@ -11,8 +11,33 @@
 html[data-view="site"] #site{display:block}
 html[data-view="site"] #splash-screen,
 html[data-view="site"] #login-screen,
-html[data-view="site"] #app-shell{display:none !important}
+html[data-view="site"] #app-shell,
+html[data-view="site"] #modal-overlay,
+html[data-view="site"] #profile-drawer,
+html[data-view="site"] #drawer-overlay,
+html[data-view="site"] #dialog-overlay{display:none !important}
 html[data-standalone] #login-site-back{display:none !important}
+
+/* The website view loads NO app stylesheet (css/tokens.css + css/styles.css are in index.html's app-kit template, written only for
+   the app views — see the PERF note there), and a few global rules of that stylesheet used to shape this page. They are restated
+   here, scoped to the website view, with the SAME values, so the page looks and behaves as it did. Verified element by element:
+   the computed styles of all 448 #site elements are identical with and without the app stylesheet (and so is a full-page
+   screenshot at 412 and 1280 px); html and body differ only in the canvas colour (white here, the app theme's there) and in the
+   overscroll behaviour below. html:not([data-view]) is the no-JavaScript case, which loads no app stylesheet either. After "Back
+   to website" from the sign-in the app stylesheet IS present; these rules win on specificity and agree with it. Deliberately NOT
+   carried over: the app's own overscroll-behavior:none (it exists so the app's pull-to-refresh is not fought) — a public page
+   keeps the browser's native one. */
+html[data-view="site"],html:not([data-view]){scroll-behavior:smooth;-webkit-tap-highlight-color:transparent;background:#fff}
+html[data-view="site"] body,html:not([data-view]) body{position:relative;margin:0;background:#fff;overflow-x:hidden}
+#site a,#site button,#site input,#site select,#site textarea,#site summary,#site [role="button"]{touch-action:manipulation}
+@media (max-width:768px){
+  html[data-view="site"] body,html:not([data-view]) body{-webkit-text-size-adjust:100%;text-size-adjust:100%;text-rendering:optimizeLegibility}
+}
+/* the app stylesheet's thin light scrollbar, which the homepage always showed on desktop (light-theme values; #site is always white) */
+html[data-view="site"]::-webkit-scrollbar,html[data-view="site"] ::-webkit-scrollbar{width:4px;height:4px}
+html[data-view="site"]::-webkit-scrollbar-track,html[data-view="site"] ::-webkit-scrollbar-track{background:transparent}
+html[data-view="site"]::-webkit-scrollbar-thumb,html[data-view="site"] ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.14);border-radius:2px}
+html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.24)}
 
 /* tokens + base */
 #site{
@@ -29,7 +54,7 @@ html[data-standalone] #login-site-back{display:none !important}
   --site-sans:'Inter',-apple-system,'SF Pro Text',system-ui,sans-serif;
   --site-radius:8px;--site-max:1180px;--site-head:64px;
   --site-sec:clamp(64px,9vw,120px);
-  background:var(--site-bg);color:var(--site-ink);min-height:100dvh;
+  box-sizing:border-box;background:var(--site-bg);color:var(--site-ink);min-height:100dvh;
   font:400 16px/1.65 var(--site-sans);-webkit-font-smoothing:antialiased;
   overflow-x:hidden;overflow-x:clip; /* clip: no scroll container, so the sticky header still sticks */
 }

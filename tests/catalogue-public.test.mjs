@@ -1342,7 +1342,13 @@ describe('the premium design (light theme, navy + gold, no bright blue)', () => 
   });
 
   it('pairs a display serif (Fraunces) with Inter, loaded from Google Fonts with display=swap, on both pages', () => {
-    assert.match(homeHead, /<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Fraunces:opsz,wght@9\.\.144,500\.\.600&display=swap"\/>/);
+    // ONE request for both families on the homepage (Inter used to come from the app stylesheet, which the website view no longer loads), made by a script
+    // 300 ms AFTER the load event so the two font files never share the phone's bandwidth with the largest paint, with a plain stylesheet in <noscript> —
+    // see index.html's comment on it and tests/site-perf-loading.test.mjs
+    const FONTS = 'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..600&family=Inter:opsz,wght@14..32,400..600&display=swap';
+    assert.ok(homeHead.includes(`<noscript><link rel="stylesheet" href="${FONTS}"/></noscript>`), 'the homepage font request has no <noscript> fallback');
+    assert.ok(homeHead.includes(`l.rel = 'stylesheet'; l.href = '${FONTS}'; document.head.appendChild(l);`), 'the homepage font request is not made by the post-load script');
+    assert.ok(!/<link rel="stylesheet" href="https:\/\/fonts\.googleapis/.test(homeHead.replace(/<noscript>[\s\S]*?<\/noscript>/g, '')), 'a font stylesheet blocks the first paint');
     assert.match(catHead, /<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com\/css2\?family=Fraunces:opsz,wght@9\.\.144,500\.\.600&family=Inter:wght@400;500;600&display=swap">/);
     assert.ok(/--site-serif:'Fraunces'/.test(css) && /--site-sans:'Inter'/.test(css));
     for (const html of [homeHead, catHead]) {

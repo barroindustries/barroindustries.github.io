@@ -23,16 +23,26 @@
     if (yr) yr.textContent = String(new Date().getFullYear());
 
     // ── Team portal (§9.1): the discreet footer link is the ONLY way into the sign-in from the website (the header
-    // carries "Get a quote" now, 2026-10-21). The direct attribute write makes the switch instant even if app.js has not
-    // executed yet; openLoginFromSite() then keeps its state (title, etc.) in sync. Only on the
-    // homepage: where there is no login screen in this document (the standalone /catalogue/ page)
-    // the link is left alone and its href (/#login) takes the visitor to the team sign-in.
+    // carries "Get a quote" now, 2026-10-21). Only on the homepage: where there is no login screen in this document
+    // (the standalone /catalogue/ page) the link is left alone and its href (/#login) takes the visitor to the team sign-in.
+    // Two cases on the homepage:
+    //  - the app is already in this page (a staff member pressed "Back to website" from the sign-in): switch the view
+    //    in place, exactly as before — the direct attribute write is instant, openLoginFromSite() keeps its state (title, etc.) in sync.
+    //  - the website view, which DOES NOT LOAD THE APP (index.html's PERF note: no Firebase SDK, no app stylesheet, no app script
+    //    for a visitor who only reads the site): hand over by reloading into /#login. The head script then picks the "login"
+    //    view and writes the app kit, so this is the same path as typing that address — the one boot path, no second loader to
+    //    keep in step with it. replace(), not assign(): no extra history entry, as before (the click never touched the URL).
     function openLogin(e) {
       if (!$('login-screen')) return;
       e.preventDefault();
-      window._wantLogin = true;
-      d.documentElement.setAttribute('data-view', 'login');
-      if (window.openLoginFromSite) window.openLoginFromSite();
+      if (window.openLoginFromSite) {
+        window._wantLogin = true;
+        d.documentElement.setAttribute('data-view', 'login');
+        window.openLoginFromSite();
+        return;
+      }
+      try { var to = new URL(window.location.href); to.hash = 'login'; window.location.replace(to.href); } catch (_) {}
+      window.location.reload();
     }
     on($('site-team-portal'), 'click', openLogin);
 
@@ -72,7 +82,11 @@
     // (the finished logo) is what shows. Without IntersectionObserver it starts only if the website is the current view.
     var vid = d.querySelector('#hero video');
     if (vid && !reducedMotion() && typeof vid.play === 'function') {
-      var start = function () { var p = vid.play(); if (p && p.catch) p.catch(function () {}); };
+      // The clip is 0.8-1.3 MB: it must not compete with the page's own load, whose largest paint is the hero photo and this very
+      // poster. So play() waits for the load event (at once when the page has already loaded) — the clip downloads after the page
+      // is complete, not alongside it.
+      var go = function () { var p = vid.play(); if (p && p.catch) p.catch(function () {}); };
+      var start = function () { if (d.readyState === 'complete') go(); else window.addEventListener('load', go, { once: true }); };
       if ('IntersectionObserver' in window) {
         var seen = new IntersectionObserver(function (es) {
           for (var j = 0; j < es.length; j++) { if (es[j].isIntersecting) { seen.disconnect(); start(); return; } }

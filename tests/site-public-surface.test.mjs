@@ -301,7 +301,8 @@ describe('2 · header: "Get a quote" top right, no Login · footer: a discreet "
     assert.ok(home.footer.includes('<a class="foot-portal" href="/#login" id="site-team-portal">Team portal</a>'));
     assert.ok(!catalogue.html.includes('id="site-team-portal"'), 'the catalogue page has no login screen for site.js to open');
     assert.ok(/on\(\$\('site-team-portal'\), 'click', openLogin\);/.test(siteJs));
-    assert.ok(/window\.openLoginFromSite\)\s*window\.openLoginFromSite\(\);/.test(siteJs) && siteJs.includes("if (!$('login-screen')) return;"));
+    // the app already in the page (staff pressed "Back to website"): the in-place switch through the hand-off; the website view loads no app, so it reloads into /#login (tests/site-perf-loading.test.mjs pins that half)
+    assert.ok(/if \(window\.openLoginFromSite\) \{[^}]*window\.openLoginFromSite\(\);[^}]*return;\s*\}/.test(siteJs) && siteJs.includes("if (!$('login-screen')) return;"));
     assert.ok(/window\.openLoginFromSite = function \(\) \{ window\._wantLogin = true; showLogin\(\); \};/.test(read('js/app.js')), 'app.js no longer defines the hand-off');
     assert.ok(read('js/app.js').includes("document.getElementById('login-site-back')?.addEventListener('click', window.backToSiteFromLogin);"), 'the login screen lost its Back to website link');
     assert.ok(home.S.elements.some((e) => e.attrs.id === 'login-site-back'));

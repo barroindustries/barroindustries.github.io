@@ -812,6 +812,9 @@ window.backToSiteFromLogin = function () {
   document.getElementById('login-form-wrap').classList.add('hidden');
   document.getElementById('signup-form-wrap').classList.add('hidden');
   document.getElementById('login-role-picker').classList.remove('hidden');   // back to the picker
+  // The website's "Team portal" link reaches this login view by reloading into /#login (js/site.js: the website view loads no app).
+  // Leave that address behind, or a refresh after "Back to website" would land on the sign-in again instead of the site.
+  try { if (location.hash.slice(1) === 'login') history.replaceState(history.state, '', location.pathname + location.search); } catch (_) {}
   showSite();
 };
 

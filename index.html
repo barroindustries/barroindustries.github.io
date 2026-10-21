@@ -48,8 +48,8 @@
        js/app.js CORRECTS the view once Firebase auth resolves: showApp() -> app,
        showLogin() -> login, showSite() -> site (reached via showSignedOut()).
        localStorage['bi-auth-hint'] is only a HINT, never trusted: showApp() sets it
-       to '1'; showSignedOut() and showRemovedUserScreen() remove it; nothing else
-       writes it. A stale hint adds one splash round-trip, then the site. The
+       to '1'; showSignedOut() and showRemovedUserScreen() remove it; the only other
+       writer is the legacy-session probe below. A stale hint adds one splash round-trip, then the site. The
        installed PWA (display-mode standalone, or iOS navigator.standalone) NEVER shows
        the website: it sets data-standalone, which also hides the login screen's
        "Back to website" link. App deep links (hash starting with #/) and #login set
@@ -79,6 +79,211 @@
       if (loginHash) window._wantLogin = true;
     } catch (_) { failed = true; }
     de.setAttribute('data-view', failed ? 'boot' : view);
+  })();</script>
+  <!-- PUBLIC-WEBSITE-SPEC.md §4.4 — js/site.js is the FIRST script in the document: zero-dependency, `defer`,
+       and the only script the public website runs. It never reads window.* at parse time. It sits ahead of
+       everything the app kit below writes, exactly as it sat ahead of the old list in <body>. -->
+  <script defer src="js/site.js"></script>
+  <!-- PERF (2026-10-21) — the public website must not download or run the staff app. A mobile Lighthouse run of the
+       old page fetched 49 files (3.6 MB) for a visitor who only reads the site. The <template> below is INERT:
+       nothing inside it is fetched, executed or preloaded, yet the pre-commit hook (the ?v= rewrite),
+       scripts/ci-invariants.sh CHECK 2 (PRECACHE) and the tests read its <link> / <script> lines like any other
+       markup. app-kit holds the preconnect and preload hints, the two app stylesheets and the whole ordered script
+       list, byte for byte what used to sit here and at the end of <body>. The script right after it copies the kit
+       into the page with document.write() while the head is still being parsed — for data-view boot, login and app
+       (decided above), NEVER for site — so the signed-in boot gets parser-inserted render-blocking stylesheets and
+       ordered `defer` scripts exactly as before (same order, same DOMContentLoaded timing, same service-worker
+       registration), and the website view writes nothing.
+       A website visitor therefore fetches NO Firebase SDK, no icon library, no app stylesheet, no app script, and
+       registers no service worker (js/app.js does that). Staff reach the sign-in from the footer "Team portal",
+       which reloads into /#login: the head script then picks the login view and the kit is written, the same path
+       as typing that address.
+       TO ADD, REMOVE OR REORDER AN APP SCRIPT OR STYLESHEET, EDIT app-kit — never the body. Only elements are
+       written (comments are documentation). scripts/check-site-view.js (ci-invariants CHECK 11) and
+       tests/site-perf-loading.test.mjs fail if the website view would fetch anything but site.js, fonts and images
+       (its own stylesheet is inline, below). -->
+  <template id="app-kit">
+    <!-- Preconnect to external origins — reduces DNS+TLS latency -->
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin/>
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin/>
+    <!-- Storage bucket is barro-industries.firebasestorage.app (js/firebase-config.js);
+         getDownloadURL() actually resolves photo/file <img> requests to
+         firebasestorage.googleapis.com, not storage.googleapis.com — preconnect
+         the origin real requests hit so the DNS+TLS warmup isn't wasted. -->
+    <link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin/>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin/>
+    <link rel="dns-prefetch" href="https://unpkg.com"/>
+
+    <!-- The sign-in / splash logo is lazy in the markup (so the website view, where those screens are hidden, never
+         downloads this 848 KB file); the app views start it here, as early as they always did. -->
+    <link rel="preload" as="image" href="icons/barro-kitchens.png"/>
+
+    <!-- Stylesheets — browser downloads in parallel with scripts below.
+         tokens.css MUST load before styles.css: it defines the :root design
+         tokens (Batch 2 / spec 2a) that styles.css consumes throughout. -->
+    <!-- ?v= is a CACHE-BUST, rewritten by .githooks/pre-commit on every commit.
+         styles.css is ~437KB and loses sw.js's 400ms network-first race whenever
+         the service worker is a version behind (its update applies only at the
+         login screen or on a hidden tab, by design), so the browser served old
+         CSS beside new JS and a shipped CSS change looked like it never landed.
+         A new version = a new cache key, so even a stale SW must hit the network.
+         Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
+    <link rel="stylesheet" href="css/tokens.css?v=14.0.324"/>
+    <link rel="stylesheet" href="css/styles.css?v=14.0.324"/>
+
+    <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
+         Firebase messaging loaded lazily in notifications.js when FCM is configured.
+
+         v14 Wave 7 (2026-08-03, Passes 1-10) split most of the old monolithic
+         js/departments.js and js/app.js/modules.js screen renderers out into
+         js/screens/*.js (design, tasks, sales, hr, production, finance,
+         approvals, govit, partners, people, dashboards) — one file per
+         domain, each window.*-attached with no bundler/ESM, same convention
+         as everything else in this app. Every js/screens/*.js file loads
+         AFTER the departments.js/app.js/modules.js host it was extracted
+         from and calls that host's shared helpers/services by bare
+         window.*/global name at runtime only, never at parse time; see each
+         script's own load-order comment below (and that file's own header
+         comment) for its specific forward/backward call graph. What remains
+         in departments.js/app.js/modules.js after Pass 10's cleanup is
+         shared services, shared renderers, and app shell/router — not
+         screens.
+
+         PERF-WAVE1 WP1 (2026-08-24) — most js/screens/*.js files (and a few
+         js/*.js engine/utility files: bir, letterhead, migrations, pay-policy,
+         statutory-status, payroll-weekly, payroll, qrcode) are no longer listed
+         as <script defer> below. They still exist on disk and are still in
+         sw.js's PRECACHE list — js/app.js's navigateTo() now calls
+         window.ensurePage(page), which injects exactly the files that page's
+         PAGE_SCRIPTS entry (js/config.js) names, right before dispatching to
+         that page's render function. A typical employee boot now parses only
+         the files still listed here, not the whole tree. js/screens/dashboards.js
+         and js/screens/dept-budgets.js and js/print-docs.js stay eager on
+         purpose — see js/config.js's PAGE_SCRIPTS comment for why the latter two
+         were pulled back rather than bundled per-page. js/gestures.js is dead
+         (zero callers, its own listeners commented out) and was dropped
+         entirely — no PAGE_SCRIPTS entry loads it. -->
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" integrity="sha384-AQ3POAMqIhwS81FrUH95ekxqBZHeP5tG2JfEL3+7GuTtfRLWnrRh32UxwzM+//A9" crossorigin="anonymous"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" integrity="sha384-TnlRYaR4JYz/lpaGuaiU61PjNberSA4vjLjtF+oRC/IkohkJqnWxw5EmDSOt1vA1" crossorigin="anonymous"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" integrity="sha384-qn4Jh88HhJA8dplNQyGjOh9OGI4izVhrfj/qIFgaKcdgOE06pXqIKGlsCILZcLAC" crossorigin="anonymous"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js" integrity="sha384-6I0gWsz4FIAr30c0TxIxJnPQuJiZ1FfILdZrgJdjxTH3R8dgPGTvexbyqTvReV6Z" crossorigin="anonymous"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" integrity="sha384-3IYu+dnH2y9gX1s6p9F4D55XbEmZBfJ3D1Ylh8J6bfdqnJCOmDVSRTq1yhJsBY1H" crossorigin="anonymous"></script>
+  <!-- v12 WS16 — Chart.js loads on demand via window.ensureChart() (config.js), not eagerly here.
+       The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
+  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
+  <script defer src="js/firebase-config.js"></script>
+  <!-- v13 Phase 8 — client error logging. Loads right after firebase-config.js
+       so window.onerror/onunhandledrejection catch boot errors too. -->
+  <script defer src="js/errlog.js"></script>
+  <script defer src="js/config.js"></script>
+  <!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/
+       window.escHtml only at CALL time; placed right after config.js for clarity. -->
+  <script defer src="js/ui-states.js"></script>
+  <!-- v13 Part E Phase 40/115/116 — statusBadge2()/STATUS_META. Needs window.escHtml
+       (config.js) only; must load before departments.js, the first consumer. -->
+  <script defer src="js/ui-status-meta.js"></script>
+  <script defer src="js/statutory-tables.js"></script>
+  <script defer src="js/print-docs.js"></script>
+  <script defer src="js/finance-ledger.js"></script>
+  <script defer src="js/drive.js"></script>
+  <script defer src="js/notifications.js"></script>
+  <!-- Meetings + in-system calendar (owner request). MUST load after
+       notifications.js: window.Meetings sends invites through Notifs.send at
+       RUN time. Everything it touches is a runtime reference, never parse-time,
+       so this position is about intent, not a hard parse dependency. -->
+  <script defer src="js/meetings.js"></script>
+  <!-- COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2 — window.CalendarFeed, the ONE
+       calendar data source for both the dashboard mini calendar and the drawer
+       Calendar page. Must load right after meetings.js: it consumes
+       window.Meetings._h (the Manila date helpers) at call time. -->
+  <script defer src="js/calendar-feed.js"></script>
+  <!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
+       before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
+  <script defer src="js/svc-approvals.js"></script>
+  <!-- v13 Phase 45 — generic finance CRUD table component; departments.js's
+       Taxes/Records tabs call window.renderFinanceCrudTable. -->
+  <script defer src="js/ui-crud-table.js"></script>
+  <!-- v14 Wave 2 Batch A — pure money-math (vatSplit, computePayLine), split out
+       of departments.js so it's independently unit-tested (tests/money.test.mjs).
+       Must load before departments.js, which calls these via window.*. -->
+  <script defer src="js/money-core.js"></script>
+  <!-- PERF-WAVE1 WP1 — js/pay-policy.js and js/statutory-status.js (formerly
+       here, load-bearing before js/payroll.js/js/departments.js/js/screens/*)
+       are now lazy-loaded as part of the payroll compute-engine bundle
+       (js/config.js's PAGE_SCRIPTS, every payroll-touching page) instead of
+       eager — the guarded (typeof-checked) references to them still in
+       js/departments.js/js/screens/dashboards.js degrade gracefully if a
+       non-payroll page never loads them. -->
+  <!-- Type-B (Production, weekly) self-service attendance — pure geofencing
+       math (haversineMeters/siteMatch), independently unit-tested
+       (tests/geo.test.mjs). No dependencies; loads early like money-core.js. -->
+  <script defer src="js/geo-core.js"></script>
+  <script defer src="js/departments.js"></script>
+  <!-- PERF-WAVE1 WP1 (2026-08-24) — js/screens/design.js, tasks.js, sales.js,
+       crm.js, ventures.js, hr.js, employee-profile.js, js/payroll-weekly.js,
+       js/payroll.js, js/screens/payroll.js, js/screens/payroll-backfill.js,
+       js/screens/production.js, js/screens/finance.js,
+       js/screens/statutory-rates.js, js/screens/approvals.js,
+       js/screens/govit.js, js/screens/partners.js (formerly all listed here,
+       in this order) are now lazy-loaded per page via js/config.js's
+       PAGE_SCRIPTS + window.ensurePage(), called from js/app.js's navigateTo()
+       right before it dispatches to that page's render function — see
+       js/config.js's PAGE_SCRIPTS comment for the full per-page file list and
+       the export/caller sweep behind it. Every load-order relationship these
+       files' own header comments describe (which shared departments.js/
+       money-core.js/app.js helpers they call, by window.*/bare-global name,
+       never at parse time) is unchanged by this — only WHEN the file arrives
+       on the page did. -->
+  <!-- DEPT-BUDGETS-SPEC-2026-08-11 — department budgets (release/spend/confirm/
+       reimburse). Must load after departments.js (canEditDept, deptContainer,
+       escHtml, fmt, today, onClickSafe, deptBlockedForSecretary) and
+       finance-ledger.js (window.Ledger): calls both by window.*/bare-global name
+       at click/render time only, never at parse time. departments.js's
+       renderBudgeting reaches forward into this file's window.openLogSpendForm/
+       openBudgetRequestForm/openReleaseBudgetForm/openCloseFloatModal/
+       repostFloatRelease the same way every other pass in this file documents.
+       PERF-WAVE1 WP1 — kept EAGER (NOT moved to PAGE_SCRIPTS): the EAGER
+       departments.js's renderBudgeting above calls this file's exports
+       unguarded and is itself reused, unchanged, by NINE different
+       departments' "Budgeting" subtab — bundling this file into all nine
+       PAGE_SCRIPTS entries individually was strictly worse than its ~62KB
+       eager cost. See js/config.js's PAGE_SCRIPTS comment. -->
+  <script defer src="js/screens/dept-budgets.js"></script>
+  <script defer src="js/app.js"></script>
+  <script defer src="js/modules.js"></script>
+  <!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
+       System Health, Audit Log, Product Database, SOPs, Personal Finance +
+       the KPI/attendance-score cluster, Progress Reports, Company, Departments,
+       Analytics, Team accounts-admin, Help), split verbatim out of js/app.js.
+       The screens below call almost every other screen's shared globals at
+       runtime (fetchUsersWithPayroll, renderClientProfiles, window.Projects,
+       window.Ledger, window.CashAdvance, ledgerForPeriod, Period.parse, etc.)
+       by bare-global/window.* name at runtime only, never at parse time — same
+       convention as every other Wave 7 pass. app.js's navigateTo switch and
+       the bottom-nav route tables (config.js) reach forward into this file's
+       window.render()/bare render() entry points the same way; notifications.js's
+       openMemoById deep-link does too.
+       PERF-WAVE1 WP1 (2026-08-24) — js/screens/people.js, notes.js, layoff.js
+       and js/screens/worker.js (formerly right after/around this file) are now
+       lazy-loaded per page — see js/config.js's PAGE_SCRIPTS comment. This
+       file (dashboards.js) and js/chat.js below stay eager: dashboards.js's
+       own performance fixes are PERF-WAVE1 WP3's package, not this one's, and
+       chat.js's one lazy-file reach (openTaskDetail, tasks.js) is WP4's. -->
+  <script defer src="js/screens/dashboards.js"></script>
+  <script defer src="js/chat.js"></script>
+  </template>
+  <script>(function(){
+    var root = document.documentElement;
+    if (root.getAttribute('data-view') === 'site') return;   // the website loads no app: it writes nothing
+    try {
+      var kit = document.getElementById('app-kit'), out = '', n;
+      for (n = kit.content.firstChild; n; n = n.nextSibling) if (n.nodeType === 1) out += n.outerHTML;
+      document.write(out);
+    } catch (_) {
+      // The kit could not be written (a browser without <template> support): never leave the splash up for
+      // ever — show the website instead.
+      root.setAttribute('data-view', 'site');
+    }
   })();</script>
   <title>Barro Industries — Premium Stainless-Steel Commercial Kitchens, Metro Manila</title>
   <meta name="description" content="Premium stainless-steel commercial kitchens, built to order in Metro Manila: food-grade SS304 and laboratory-grade SS316 equipment, exhaust and fresh-air systems, gas lines and fire suppression. Request a quote."/>
@@ -120,50 +325,531 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png"/>
   <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png"/>
   <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png"/>
-  <!-- Preconnect to external origins — reduces DNS+TLS latency -->
-  <link rel="preconnect" href="https://www.gstatic.com" crossorigin/>
-  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin/>
-  <!-- Storage bucket is barro-industries.firebasestorage.app (js/firebase-config.js);
-       getDownloadURL() actually resolves photo/file <img> requests to
-       firebasestorage.googleapis.com, not storage.googleapis.com — preconnect
-       the origin real requests hit so the DNS+TLS warmup isn't wasted. -->
-  <link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin/>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin/>
   <!-- v12 WS42 Phase 27 — the Inter font is loaded via @import inside css/styles.css,
        so these origins aren't discovered until the stylesheet itself is parsed;
        preconnecting here lets the DNS+TLS handshake happen in parallel instead
-       of serially after that discovery. -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin/>
+       of serially after that discovery. The two differ on purpose: fonts.googleapis.com serves
+       the font STYLESHEET, a credentialed no-cors request, so its preconnect carries no crossorigin
+       (a CORS-mode preconnect would open a different socket and be wasted); fonts.gstatic.com serves
+       the font FILES, which are fetched in CORS mode, so its preconnect does. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link rel="dns-prefetch" href="https://unpkg.com"/>
 
-  <!-- Stylesheets — browser downloads in parallel with scripts below.
-       tokens.css MUST load before styles.css: it defines the :root design
-       tokens (Batch 2 / spec 2a) that styles.css consumes throughout. -->
-  <!-- ?v= is a CACHE-BUST, rewritten by .githooks/pre-commit on every commit.
-       styles.css is ~437KB and loses sw.js's 400ms network-first race whenever
-       the service worker is a version behind (its update applies only at the
-       login screen or on a hidden tab, by design), so the browser served old
-       CSS beside new JS and a shipped CSS change looked like it never landed.
-       A new version = a new cache key, so even a stale SW must hit the network.
-       Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-  <link rel="stylesheet" href="css/tokens.css?v=14.0.323"/>
-  <link rel="stylesheet" href="css/styles.css?v=14.0.323"/>
-  <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet. Loads AFTER
-       styles.css so its #site rules win ties. No ?v= on purpose: .githooks/pre-commit
-       only rewrites the tokens/styles links, and this file is small enough to win the
-       service worker's 400 ms network-first race. Keep it in sw.js PRECACHE
-       (ci-invariants CHECK 2). -->
-  <link rel="stylesheet" href="css/site.css"/>
-  <!-- Display serif for the public website's headings only (Fraunces 500-600; the browser
-       downloads the font file only when #site text actually renders). Body type is Inter,
-       already loaded by css/styles.css. The CSP already allows fonts.googleapis.com and
-       fonts.gstatic.com, and both origins are preconnected above. -->
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..600&display=swap"/>
+  <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet, INLINE. It is css/site.css copied verbatim
+       between the two markers below by scripts/inline-site-css.js (DO NOT hand-edit the copy: edit css/site.css, then run
+       that script; ci-invariants CHECK 11 and tests/site-perf-loading.test.mjs fail while the two differ). Inline because a
+       render-blocking <link> here cost the whole website one extra request — a round trip plus the server's own response
+       time — before its first paint on a phone; the standalone pages (/catalogue/, /services/ ...) still link the file.
+       It comes AFTER the app kit above, so in the app views its #site rules still win ties against css/styles.css exactly
+       as the old <link> did. Nothing here is versioned (the old link was not either): the stylesheet now travels with the
+       page, so the two can never be out of step. -->
+<!-- SITE-CSS:START generated from css/site.css by scripts/inline-site-css.js — DO NOT HAND-EDIT: edit css/site.css, then run  node scripts/inline-site-css.js -->
+<style id="site-css">
+/* css/site.css — PUBLIC WEBSITE (PUBLIC-WEBSITE-SPEC.md §5.4, premium pass 2026-10-21).
+   Scoped to #site (and #login-site-back); loads AFTER styles.css on the homepage and on its own
+   on /catalogue/ (which sets <html data-view="site"> and wraps its page in #site). Own light
+   --site-* tokens (never --bg/--text/--primary), so a dark or astral device theme still gets a
+   white site. Palette from the brand's logo: deep navy, gold ONLY as hairlines / eyebrows /
+   small numerals, warm off-white. No bright blue. No 4-digit z-index (CHECK 1).
+   Catalogue-only rules live in css/catalogue.css. */
+
+/* view state machine: html[data-view] is set by the head script, corrected by js/app.js */
+#site{display:none}
+html[data-view="site"] #site{display:block}
+html[data-view="site"] #splash-screen,
+html[data-view="site"] #login-screen,
+html[data-view="site"] #app-shell,
+html[data-view="site"] #modal-overlay,
+html[data-view="site"] #profile-drawer,
+html[data-view="site"] #drawer-overlay,
+html[data-view="site"] #dialog-overlay{display:none !important}
+html[data-standalone] #login-site-back{display:none !important}
+
+/* The website view loads NO app stylesheet (css/tokens.css + css/styles.css are in index.html's app-kit template, written only for
+   the app views — see the PERF note there), and a few global rules of that stylesheet used to shape this page. They are restated
+   here, scoped to the website view, with the SAME values, so the page looks and behaves as it did. Verified element by element:
+   the computed styles of all 448 #site elements are identical with and without the app stylesheet (and so is a full-page
+   screenshot at 412 and 1280 px); html and body differ only in the canvas colour (white here, the app theme's there) and in the
+   overscroll behaviour below. html:not([data-view]) is the no-JavaScript case, which loads no app stylesheet either. After "Back
+   to website" from the sign-in the app stylesheet IS present; these rules win on specificity and agree with it. Deliberately NOT
+   carried over: the app's own overscroll-behavior:none (it exists so the app's pull-to-refresh is not fought) — a public page
+   keeps the browser's native one. */
+html[data-view="site"],html:not([data-view]){scroll-behavior:smooth;-webkit-tap-highlight-color:transparent;background:#fff}
+html[data-view="site"] body,html:not([data-view]) body{position:relative;margin:0;background:#fff;overflow-x:hidden}
+#site a,#site button,#site input,#site select,#site textarea,#site summary,#site [role="button"]{touch-action:manipulation}
+@media (max-width:768px){
+  html[data-view="site"] body,html:not([data-view]) body{-webkit-text-size-adjust:100%;text-size-adjust:100%;text-rendering:optimizeLegibility}
+}
+/* the app stylesheet's thin light scrollbar, which the homepage always showed on desktop (light-theme values; #site is always white) */
+html[data-view="site"]::-webkit-scrollbar,html[data-view="site"] ::-webkit-scrollbar{width:4px;height:4px}
+html[data-view="site"]::-webkit-scrollbar-track,html[data-view="site"] ::-webkit-scrollbar-track{background:transparent}
+html[data-view="site"]::-webkit-scrollbar-thumb,html[data-view="site"] ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.14);border-radius:2px}
+html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.24)}
+
+/* tokens + base */
+#site{
+  --site-navy:#0B1B3F;--site-navy-2:#17306A;
+  --site-gold:#C9A227;            /* hairlines, rules, numerals on dark */
+  --site-gold-ink:#85690F;        /* gold TEXT on light backgrounds: 4.9:1 on the paper tone */
+  --site-gold-big:#9A7A14;        /* the large gold numeral on light: >= 3:1 */
+  --site-gold-lite:#E2C766;       /* gold text on the navy hero overlay */
+  --site-paper:#FAF8F4;--site-bg:#fff;
+  --site-ink:#0E1116;--site-muted:#5E6672;
+  --site-line:#E6E1D6;--site-line-gold:rgba(201,162,39,.5);
+  --site-tint:#E6EAF2;            /* the land on the Luzon map: a pale navy tint */
+  --site-serif:'Fraunces','Iowan Old Style','Palatino Linotype',Georgia,serif;
+  --site-sans:'Inter',-apple-system,'SF Pro Text',system-ui,sans-serif;
+  --site-radius:8px;--site-max:1180px;--site-head:64px;
+  --site-sec:clamp(64px,9vw,120px);
+  box-sizing:border-box;background:var(--site-bg);color:var(--site-ink);min-height:100dvh;
+  font:400 16px/1.65 var(--site-sans);-webkit-font-smoothing:antialiased;
+  overflow-x:hidden;overflow-x:clip; /* clip: no scroll container, so the sticky header still sticks */
+}
+#site *,#site *::before,#site *::after{box-sizing:border-box;margin:0;padding:0}
+#site h1,#site h2,#site h3,#site h4{color:var(--site-navy);font-family:var(--site-serif);font-weight:500;font-optical-sizing:auto;line-height:1.1;letter-spacing:-.015em}
+#site ul{list-style:none}
+#site .nowrap{white-space:nowrap}
+#site a{color:var(--site-navy)}
+#site img{display:block;max-width:100%;height:auto}
+#site [hidden]{display:none !important}
+#site .sr-only{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+#site a:focus-visible,#site button:focus-visible,#site input:focus-visible{outline:2px solid var(--site-navy);outline-offset:3px}
+#hero a:focus-visible,#hero button:focus-visible{outline-color:#fff}
+#site .site-wrap{max-width:var(--site-max);margin:0 auto;padding:0 max(16px,env(safe-area-inset-right)) 0 max(16px,env(safe-area-inset-left))}
+#site section[id]{scroll-margin-top:calc(var(--site-head) - 1px)}
+#site .site-sec{padding:var(--site-sec) 0}
+#site .site-sec-paper{background:var(--site-paper)}
+#site h2{font-size:clamp(2rem,3.2vw + .8rem,3.25rem);line-height:1.08;letter-spacing:-.02em}
+#site h3{font-size:clamp(1.5rem,1.2vw + 1.1rem,2rem);line-height:1.18}
+#site .site-lead{max-width:36em;color:var(--site-muted);font-size:clamp(1.0625rem,.3vw + 1rem,1.1875rem)}
+#site .skip-link{position:absolute;left:12px;top:-64px;z-index:3;padding:12px 18px;border-radius:6px;background:var(--site-navy);color:#fff;font:600 14px/1 var(--site-sans);text-decoration:none}
+#site .skip-link:focus{top:10px}
+
+/* eyebrow: small caps, wide tracking, a gold hairline before it */
+#site .eyebrow{display:flex;align-items:center;gap:14px;margin-bottom:18px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .eyebrow::before{content:"";flex:none;width:34px;height:1px;background:var(--site-gold)}
+
+/* buttons: slightly squarer, solid navy primary + thin navy outline */
+#site .site-btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 26px;border:1px solid transparent;border-radius:6px;font:600 15px/1 var(--site-sans);letter-spacing:.02em;text-decoration:none;cursor:pointer;transition:background-color .2s,color .2s,border-color .2s}
+#site .site-btn-primary{background:var(--site-navy);border-color:var(--site-navy);color:#fff}
+#site .site-btn-primary:hover{background:var(--site-navy-2);border-color:var(--site-navy-2)}
+#site .site-btn-outline{background:transparent;border-color:var(--site-navy);color:var(--site-navy)}
+#site .site-btn-outline:hover{background:var(--site-navy);color:#fff}
+#site .site-btn-sm{min-height:40px;padding:0 18px;font-size:14px}
+/* inverse pair, used on the photo hero only (navy-on-navy would vanish) */
+#site .site-btn-light{background:#fff;border-color:#fff;color:var(--site-navy)}
+#site .site-btn-light:hover{background:var(--site-paper);border-color:var(--site-paper)}
+#site .site-btn-ghost{background:transparent;border-color:rgba(255,255,255,.72);color:#fff}
+#site .site-btn-ghost:hover{background:rgba(255,255,255,.14);border-color:#fff}
+#site .link-arrow{display:inline-block;padding-bottom:3px;border-bottom:1px solid var(--site-gold);color:var(--site-navy);font-weight:600;text-decoration:none}
+#site .link-arrow::after{content:" →"}
+#site .link-arrow:hover{border-bottom-color:var(--site-navy)}
+
+/* header: sticky and solid by default; on the homepage it is transparent over the hero until js/site.js
+   adds .is-solid (scrolled past the hero) or .is-menu-open */
+#site-header{position:sticky;top:0;z-index:2;height:var(--site-head);background:#fff;border-bottom:1px solid var(--site-line);color:var(--site-navy);transition:background-color .25s,border-color .25s}
+#site .site-header-in{display:flex;align-items:center;gap:12px;height:100%}
+#site #site-brand{display:flex;flex:1 1 auto;align-items:center;gap:11px;min-width:0;margin-right:auto;color:inherit;text-decoration:none}
+#site #site-brand img{flex:none;width:36px;height:36px;border-radius:7px}
+#site .site-brand-text{display:flex;flex-direction:column;min-width:0}
+#site .site-brand-name{overflow:hidden;text-overflow:ellipsis;font:600 19px/1.1 var(--site-serif);letter-spacing:-.005em;white-space:nowrap}
+#site .site-brand-sub{overflow:hidden;margin-top:4px;color:var(--site-muted);font:600 9.5px/1 var(--site-sans);letter-spacing:.17em;text-overflow:ellipsis;text-transform:uppercase;white-space:nowrap}
+#site .site-head-cta,#site #site-menu-btn{flex:none}
+#site .site-head-cta{white-space:nowrap}
+#site #site-nav{display:none;position:absolute;top:var(--site-head);left:0;right:0;flex-direction:column;padding:4px 16px 14px;background:#fff;border-bottom:1px solid var(--site-line);box-shadow:0 18px 30px rgba(11,27,63,.08)}
+#site #site-nav.is-open{display:flex}
+#site #site-nav a{padding:14px 4px;border-top:1px solid var(--site-line);color:var(--site-navy);font-weight:500;text-decoration:none}
+#site #site-nav a[aria-current="page"]{color:var(--site-gold-ink)}
+#site #site-menu-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;padding:0;border:1px solid var(--site-navy);border-radius:6px;background:transparent;color:var(--site-navy);cursor:pointer}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open){background:transparent;border-bottom-color:transparent;color:#fff}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-brand-sub{color:rgba(255,255,255,.82)}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-btn-outline,
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) #site-menu-btn{border-color:rgba(255,255,255,.75);color:#fff}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-btn-outline:hover{background:rgba(255,255,255,.16)}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-head-cta{background:#fff;border-color:#fff;color:var(--site-navy)}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-head-cta:hover{background:var(--site-paper);border-color:var(--site-paper)}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) a:focus-visible,
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) button:focus-visible{outline-color:#fff}
+
+/* hero: full-bleed photo under a navy gradient, white serif headline */
+#hero{position:relative;isolation:isolate;display:flex;align-items:flex-end;margin-top:calc(var(--site-head) * -1);min-height:560px;min-height:max(560px,70svh);overflow:hidden;background:var(--site-navy);color:#fff}
+#site .hero-bg{position:absolute;inset:0;z-index:-2;width:100%;height:100%;max-width:none;object-fit:cover;object-position:46% 50%}
+#site .hero-scrim{position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(11,27,63,.72) 0,rgba(11,27,63,.8) 50%,rgba(11,27,63,.93) 100%)}
+#site .hero-in{display:flex;flex-direction:column;width:100%;padding-top:calc(var(--site-head) - 6px);padding-bottom:calc(clamp(32px,5vh,96px) + var(--proof-lift))}
+/* the logo-reveal animation (owner, 2026-10-21): above the headline on a phone, the right column from 900px. The clip is a dark navy square, so it is
+   feathered into the hero twice: a circular mask that reaches zero exactly at the middle of each edge of the square (so no edge survives) and is fully
+   opaque out to 86% of the radius — the finished logo sits inside 80%, and over all 10 seconds only the cube's top corners while it is first "forged"
+   come near the rim and the flame tip touches the top edge for a moment (frames checked at 1.2, 1.8, 2.1, 2.4, 2.7, 3, 4 and 9.95 s) — over a soft dark
+   pool behind it, so the rim of the disc dissolves into the photo. Not clickable, not focusable, no controls. */
+#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(220px,60vw,260px);margin:0 auto -16px}
+#site .hero-mark::before{content:"";position:absolute;inset:-60%;z-index:-1;border-radius:50%;background:radial-gradient(closest-side,rgba(5,11,28,.9),rgba(5,11,28,.8) 36%,rgba(5,11,28,.55) 52%,rgba(5,11,28,.25) 74%,rgba(5,11,28,0));pointer-events:none}
+#site .hero-mark video{display:block;width:100%;height:auto;aspect-ratio:1/1;pointer-events:none;-webkit-mask-image:radial-gradient(closest-side,#000 86%,transparent 100%);mask-image:radial-gradient(closest-side,#000 86%,transparent 100%)}
+#site .hero-years{display:flex;align-items:flex-end;gap:16px;margin-bottom:24px}
+#site .hero-years-num{color:var(--site-gold);font:500 clamp(5rem,9vw + 1.6rem,8.25rem)/.8 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.03em}
+#site .hero-years-label{padding:0 0 4px 16px;border-left:1px solid var(--site-line-gold);color:var(--site-gold-lite);font:600 12px/1.5 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site #hero h1{max-width:15em;margin-bottom:22px;color:#fff;font-size:clamp(2.2rem,4.2vw + .7rem,4.1rem);line-height:1.06;letter-spacing:-.02em}
+#site .hero-lead{max-width:34em;color:rgba(255,255,255,.92);font-size:clamp(1.0625rem,.4vw + 1rem,1.25rem);line-height:1.6}
+#site .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+@media (max-width:899px){
+  #site .hero-years{margin-bottom:16px}
+  #site .hero-cta{margin-top:24px}
+}
+@media (min-width:900px){
+  #site .hero-in{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,460px);column-gap:clamp(24px,4vw,64px);align-items:center;padding-top:calc(var(--site-head) + 48px);padding-bottom:calc(clamp(48px,9vh,104px) + var(--proof-lift))}
+  #site .hero-mark{order:0;width:100%;margin:0}
+  #site #hero h1{font-size:clamp(2rem,2.8vw + .7rem,3.5rem)}
+}
+
+/* proof bar: a white card that lifts over the bottom of the hero (a serif value, a muted line, inset gold rules) */
+#site{--proof-lift:44px}
+#site .proof{padding-bottom:clamp(0px,2vw,16px);background:var(--site-paper)}
+#site .proof-bar{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);margin-top:calc(var(--proof-lift) * -1);padding:4px 0;border-radius:var(--site-radius);background:#fff;box-shadow:0 24px 48px -16px rgba(11,27,63,.24),0 2px 8px rgba(11,27,63,.06)}
+#site .proof-bar li{position:relative;display:flex;flex-direction:column;justify-content:flex-start;padding:20px 24px}
+#site .proof-bar li+li::before{content:"";position:absolute;top:0;left:24px;right:24px;height:1px;background:var(--site-line-gold)}
+#site .proof-val{color:var(--site-navy);font:500 1.5rem/1.12 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.012em}
+#site .proof-num{color:var(--site-gold-big)}
+#site .proof-sub{margin-top:6px;color:var(--site-muted);font-size:14px;line-height:1.45;text-wrap:balance}
+
+/* section heads */
+#site .sec-head{max-width:40rem;margin-bottom:clamp(40px,5vw,72px)}
+#site .sec-head h2,#site .about-copy h2,#site .contact-intro h2{margin-bottom:20px}
+
+/* services: photo-led rows, flipping each row */
+#site .svc-list{display:grid;gap:clamp(56px,8vw,112px)}
+#site .svc{display:grid;grid-template-columns:minmax(0,1fr);gap:26px;align-items:center}
+#site .svc-media{overflow:hidden;border-radius:4px;aspect-ratio:4/3;background:#E9E6DF}
+#site .svc-media img{width:100%;height:100%;object-fit:cover}
+#site .svc-num{display:flex;align-items:center;gap:14px;margin-bottom:14px;color:var(--site-gold-ink);font:500 15px/1 var(--site-serif);letter-spacing:.1em}
+#site .svc-num::after{content:"";width:40px;height:1px;background:var(--site-gold)}
+#site .svc h3{margin-bottom:16px}
+#site .svc-body p{color:var(--site-muted);font-size:1.0625rem}
+#site .svc-body p+p{margin-top:20px}
+
+/* projects: an editorial gallery — one lead image, then a tight grid */
+#site .proj{margin-top:clamp(48px,7vw,88px)}
+#site .proj+.proj{padding-top:clamp(48px,7vw,88px);border-top:1px solid var(--site-line)}
+#site .proj-head{max-width:46rem;margin-bottom:28px}
+#site .proj-tag{margin-bottom:12px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .proj-head h3{margin-bottom:12px;font-size:clamp(1.65rem,1.6vw + 1.1rem,2.375rem)}
+#site .proj-head p:last-child{color:var(--site-muted);font-size:1.0625rem}
+#site .proj-gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#site .proj-gallery li:last-child:nth-child(even){grid-column:1/-1}
+#site .proj-gallery .is-lead{grid-column:1/-1}
+#site .proj-gallery a{display:block;overflow:hidden;border-radius:3px;aspect-ratio:4/3;background:#ECE9E2}
+#site .proj-gallery .is-lead a{aspect-ratio:16/10}
+#site .proj-gallery img{width:100%;height:100%;object-fit:cover;transition:transform .4s ease}
+#site .proj-gallery a:hover img,#site .proj-gallery a:focus-visible img{transform:scale(1.03)}
+
+/* projects across Luzon: a schematic map beside a plain-text list of the places. js/site.js lights a place's pin and
+   label when its list item is hovered, and the other way round; with no script the page is complete as it is. */
+#site #luzon{padding-bottom:0}
+#site .luzon-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(28px,5vw,44px)}
+#site .luzon-grid .sec-head{margin-bottom:0}
+#site .luzon-map{margin:0;padding:clamp(12px,2.6vw,22px) clamp(12px,2.6vw,22px) 14px;border:1px solid var(--site-line);border-radius:var(--site-radius);background:var(--site-paper)}
+#site .lz-svg{display:block;width:100%;max-width:520px;height:auto;margin:0 auto}
+#site .luzon-map figcaption{margin-top:10px;color:var(--site-muted);font:600 11px/1.4 var(--site-sans);letter-spacing:.16em;text-align:center;text-transform:uppercase}
+/* the map itself: navy line on a pale navy tint, gold pins ringed in navy */
+#site .lz-sea{fill:none;stroke:var(--site-navy);stroke-linejoin:round;stroke-linecap:round}
+#site .lz-sea-1{stroke-width:8;opacity:.06}
+#site .lz-sea-2{stroke-width:17;opacity:.035}
+#site .lz-land{fill:var(--site-tint);stroke:var(--site-navy);stroke-width:1.1;stroke-linejoin:round}
+#site .lz-lake{fill:var(--site-paper);stroke:var(--site-navy);stroke-width:.7;stroke-linejoin:round}
+#site .lz-isle{fill:var(--site-tint);stroke:var(--site-navy);stroke-width:.6;stroke-linejoin:round}
+#site .lz-leader{fill:none;stroke:var(--site-navy);stroke-width:.8;opacity:.42;transition:opacity .2s,stroke .2s}
+#site .lz-ring{fill:#fff;opacity:.94}
+#site .lz-core{fill:var(--site-gold);stroke:var(--site-navy);stroke-width:1.5;transform-box:fill-box;transform-origin:center;transition:transform .2s}
+#site .lz-glow{fill:var(--site-gold);opacity:0;transition:opacity .2s}
+#site .lz-label{fill:var(--site-navy);font:600 13px/1 var(--site-sans);paint-order:stroke;stroke:var(--site-tint);stroke-width:3;stroke-linejoin:round;transition:fill .2s}
+#site .lz-north path{fill:none;stroke:var(--site-navy);stroke-width:1;opacity:.55}
+#site .lz-north text{fill:var(--site-navy);font:600 9px/1 var(--site-sans);letter-spacing:.1em;opacity:.7}
+/* linked highlight: the same data-pin on the list item, leader, pin and label */
+#site .lz-pin.is-on .lz-core{transform:scale(1.35)}
+#site .lz-pin.is-on .lz-glow{opacity:.3}
+#site .lz-label.is-on{fill:var(--site-gold-ink)}
+#site .lz-leader.is-on{stroke:var(--site-gold-ink);opacity:.9}
+/* the list of places: plain HTML text */
+#site .luzon-places{display:grid;grid-template-columns:minmax(0,1fr);gap:30px 44px}
+#site .luzon-stat{display:flex;align-items:flex-end;gap:16px;align-self:start}
+#site .luzon-stat-num{color:var(--site-gold-big);font:500 clamp(4rem,6vw,5.25rem)/.8 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.03em}
+#site .luzon-stat-label{padding:0 0 3px 16px;border-left:1px solid var(--site-line-gold);color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.18em;text-transform:uppercase;text-wrap:balance}
+#site .luzon-group h3{margin-bottom:10px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .luzon-group ul{border-top:1px solid var(--site-line-gold)}
+#site .luzon-group li{display:flex;align-items:center;gap:13px;padding:11px 2px;border-bottom:1px solid var(--site-line);color:var(--site-navy);font-weight:500;transition:background-color .2s,color .2s}
+#site .luzon-group li::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--site-gold);box-shadow:0 0 0 1.5px var(--site-navy);transition:transform .2s}
+#site .luzon-group li.is-on{background:var(--site-paper)}
+#site .luzon-group li.is-on::before{transform:scale(1.35)}
+@media (min-width:600px){
+  #site .luzon-places{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (min-width:1024px){
+  #site .lz-label{font-size:12px}
+  #site .luzon-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-template-areas:"head map" "places map";column-gap:clamp(48px,6vw,88px);row-gap:40px;align-items:start}
+  #site .luzon-grid .sec-head{grid-area:head}
+  #site .luzon-places{grid-area:places}
+  #site .luzon-map{grid-area:map}
+}
+
+/* trusted by: typography only (the owner named these two institutions; no logos or seals) */
+#site .sec-head-tight{margin-bottom:clamp(24px,3vw,36px)}
+#site .trust{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 18px;padding:22px 0;border-top:1px solid var(--site-line-gold);border-bottom:1px solid var(--site-line-gold)}
+#site .trust-label{flex:0 0 100%;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .trust-name{flex:0 0 100%;color:var(--site-navy);font:500 1.1875rem/1.35 var(--site-serif);letter-spacing:-.005em}
+#site .trust-sep{display:none;color:var(--site-gold);font:600 1.75rem/1 var(--site-sans)}
+
+/* registrations: the owner's three stated facts — PhilGEPS-registered, SEC-registered, VAT-registered — as plain-text pills, each with the same generic
+   shield-and-check line-icon (inline SVG, decorative). No agency logo or seal (the agencies restrict them) and no registration number (none given). */
+#site .regs{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+#site .regs li{display:inline-flex;align-items:center;gap:7px;padding:7px 14px 7px 10px;border:1px solid var(--site-line-gold);border-radius:999px;background:#fff;color:var(--site-navy);font:600 13px/1.2 var(--site-sans);letter-spacing:.01em;white-space:nowrap}
+#site .regs-ic{flex:none;color:var(--site-gold-ink)}
+/* directly under the proof bar: a slim row, the label first (small gold caps, like the "Trusted by" label), then the pills */
+#site .regs-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:18px 4px 0}
+#site .regs-label{color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+/* under the "Trusted by state universities" line, and in both footers */
+#site .regs-trust{margin-top:16px}
+#site .regs-foot{margin-top:16px}
+#site .regs-foot li{font-size:12.5px}
+
+/* how we work: a numbered timeline, vertical on a phone and one horizontal line from 1024px.
+   Each step carries a TODO-NEIL comment where a typical duration can go; nothing about time is shown. */
+#site .steps{display:grid;grid-template-columns:minmax(0,1fr);list-style:none}
+#site .step{position:relative;padding:0 0 38px 68px}
+#site .step:last-child{padding-bottom:0}
+#site .step::before{content:"";position:absolute;left:21px;top:52px;bottom:8px;width:1px;background:var(--site-line-gold)}
+#site .step:last-child::before{content:none}
+#site .step-num{position:absolute;left:0;top:0;display:grid;place-items:center;width:44px;height:44px;border:1px solid var(--site-gold);border-radius:50%;background:var(--site-paper);color:var(--site-gold-ink);font:500 17px/1 var(--site-serif)}
+#site .step h3{margin:9px 0 8px;font-size:1.3rem;line-height:1.2}
+#site .step p{color:var(--site-muted);font-size:1rem;line-height:1.55}
+
+/* warranty and after-sales: two navy cards with a gold inner frame */
+#site .wcards{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+#site .wcard{position:relative;isolation:isolate;padding:clamp(30px,4vw,46px) clamp(26px,3.4vw,42px);border-radius:var(--site-radius);background:var(--site-navy);color:#fff}
+#site .wcard::before{content:"";position:absolute;z-index:-1;inset:10px;border:1px solid var(--site-line-gold);border-radius:4px}
+#site .wcard-fig{display:flex;align-items:flex-end;gap:14px;margin-bottom:24px}
+#site .wcard-num{color:var(--site-gold-lite);font:500 clamp(4.5rem,7vw,6.25rem)/.8 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.03em}
+#site .wcard-unit{padding:0 0 4px 14px;border-left:1px solid var(--site-line-gold);color:rgba(255,255,255,.82);font:600 12px/1.5 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .wcard h3{margin-bottom:12px;color:#fff;font-size:clamp(1.5rem,1.2vw + 1.1rem,1.9rem)}
+#site .wcard p:last-child{max-width:30em;color:rgba(255,255,255,.9);font-size:1.0625rem}
+
+@media (min-width:360px) and (max-width:599px){
+  #site .luzon-group ul{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px}
+}
+@media (min-width:720px){
+  #site .wcards{grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+}
+@media (min-width:1100px){
+  #site .trust{gap:8px 22px}
+  #site .trust-name{flex:0 1 auto}
+  #site .trust-sep{display:inline}
+}
+@media (min-width:1024px){
+  #site .steps{grid-template-columns:repeat(6,minmax(0,1fr));column-gap:26px}
+  #site .step{padding:64px 0 0}
+  #site .step::before{left:58px;right:-20px;top:22px;bottom:auto;width:auto;height:1px}
+  #site .step h3{margin-top:0;font-size:1.2rem}
+}
+
+/* about: the "23" story moment */
+#site .about-in{display:grid;grid-template-columns:minmax(0,1fr);gap:44px;align-items:center}
+#site .about-media img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:4px}
+#site .about-years{display:flex;align-items:flex-end;gap:16px;margin:4px 0 26px}
+#site .about-years-num{color:var(--site-gold-big);font:500 clamp(6rem,11vw + 1rem,10rem)/.8 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.04em}
+#site .about-years-label{padding:0 0 4px 16px;border-left:1px solid var(--site-line-gold);color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .about-copy p+p{margin-top:16px}
+#site .about-copy .site-lead{color:var(--site-ink)}
+#site .about-copy .about-note{color:var(--site-muted)}
+#site .values{margin-top:28px;padding-top:20px;border-top:1px solid var(--site-line-gold);color:var(--site-navy);font-weight:600;letter-spacing:.01em}
+#site .tagline{margin-top:14px;color:var(--site-gold-ink);font:italic 500 1.25rem/1.4 var(--site-serif)}
+
+/* contact */
+#site .contact-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:44px}
+#site .contact-intro .site-btn{margin-top:30px}
+#site .contact-list{border-top:1px solid var(--site-line)}
+#site .contact-list li{display:grid;grid-template-columns:86px minmax(0,1fr);gap:4px 18px;align-items:baseline;padding:20px 0;border-bottom:1px solid var(--site-line)}
+#site .contact-label{color:var(--site-muted);font:600 11px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
+#site .contact-list a{color:var(--site-navy);font-weight:500;text-decoration:none;overflow-wrap:anywhere}
+#site .contact-list a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+#site address{font-style:normal}
+#site .contact-dirs{grid-column:2;display:flex;flex-wrap:wrap;gap:4px 22px}
+#site .contact-dir{font-size:14px}
+
+/* links to the public content pages (/services/, /work/, /areas-we-serve/, /faq/): an arrow link under a section lead, a row of them under a card
+   or a CTA, the muted "Also: …" line under the fit-out card, and the link after a project gallery. Plain links, no script. */
+#site .sec-link{margin-top:22px}
+#site .link-row{display:flex;flex-wrap:wrap;gap:12px 28px;margin-top:20px}
+#site .svc-body .svc-also{margin-top:14px;color:var(--site-muted);font-size:.9375rem;line-height:1.6}
+#site .svc-also a{color:var(--site-navy);font-weight:500;text-decoration-color:var(--site-gold);text-underline-offset:3px}
+#site .proj-more{margin-top:26px}
+#site .proj-all{margin-top:clamp(40px,5vw,64px)}
+
+/* footer */
+#site-footer{padding:52px 0 60px;border-top:1px solid var(--site-line);background:var(--site-paper);color:var(--site-muted);font-size:14px}
+#site .foot-in{display:grid;grid-template-columns:minmax(0,1fr);gap:26px}
+#site .foot-name{margin-bottom:6px;color:var(--site-navy);font:600 17px/1.2 var(--site-serif)}
+#site .foot-links{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 26px}
+#site #site-footer a.foot-portal{color:var(--site-muted);font-size:13px;font-weight:400}
+#site #site-footer a{color:var(--site-navy);font-weight:500;text-decoration:none}
+#site #site-footer a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+#site .foot-legal{padding-top:22px;border-top:1px solid var(--site-line)}
+
+/* scroll reveal: js/site.js adds .js-reveal to #site only when motion is allowed */
+#site.js-reveal .reveal{opacity:0;transform:translateY(18px);transition:opacity .8s cubic-bezier(.2,.6,.2,1),transform .8s cubic-bezier(.2,.6,.2,1)}
+#site.js-reveal .reveal.is-in{opacity:1;transform:none}
+
+/* project photo lightbox (<dialog> is in the top layer: no z-index) */
+#site-lightbox{margin:auto;padding:0;border:0;background:transparent;max-width:100vw;max-height:100vh;overflow:visible}
+#site-lightbox::backdrop{background:rgba(7,15,36,.92)}
+#site #site-lightbox img{width:auto;height:auto;max-width:96vw;max-height:92vh;margin:0 auto;object-fit:contain}
+#site-lightbox-close{position:fixed;top:10px;right:10px;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:#fff;color:#0B1B3F;font:400 28px/1 var(--site-sans);cursor:pointer}
+
+/* login screen "Back to website": themed by the app tokens, hidden in the installed PWA */
+#login-site-back{display:flex;align-items:center;gap:6px;min-height:44px;margin:-8px auto 6px -6px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--text-muted);font:600 13px/1 var(--font);cursor:pointer}
+#login-site-back:hover{color:var(--text)}
+
+/* phones (<= 420px): a compact header — smaller brand, compact "Get a quote" — so the menu button is always fully visible */
+@media (max-width:420px){
+  #site .site-header-in{gap:8px}
+  #site #site-brand{gap:8px}
+  #site #site-brand img{width:32px;height:32px}
+  #site .site-brand-name{font-size:17px}
+  #site .site-brand-sub{margin-top:3px;font-size:8.5px;letter-spacing:.13em}
+  #site .site-btn-sm{padding:0 12px;font-size:13px}
+}
+/* 360px phones: the name drops one notch so "Barro Industries" stays whole beside the "Get a quote" button */
+@media (max-width:369px){
+  #site .site-brand-name{font-size:16px}
+}
+/* under 360px (a 320px phone) the name wraps onto two lines instead of being cut off, and the logo, gaps and button tighten a little, so the
+   whole brand, the "Get a quote" button and the menu button all stay on screen */
+@media (max-width:359px){
+  #site .site-header-in,#site #site-brand{gap:6px}
+  #site #site-brand img{width:28px;height:28px}
+  #site .site-brand-name{font-size:15px;line-height:1.05;overflow:visible;text-overflow:clip;white-space:normal}
+  #site .site-brand-sub{font-size:8px;letter-spacing:.08em}
+  #site .site-btn-sm{padding:0 10px;font-size:12.5px}
+}
+/* responsive: proof bar 2x2 from 600px and four columns from 1024px; 720px grids; 900px side-by-side rows + inline nav */
+@media (min-width:600px){
+  #site .proof-bar{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .proof-bar li+li::before{content:none}
+  #site .proof-bar li:nth-child(even)::before{content:"";top:22%;bottom:22%;left:0;right:auto;width:1px;height:auto}
+  #site .proof-bar li:nth-child(n+3)::after{content:"";position:absolute;top:0;left:24px;right:24px;height:1px;background:var(--site-line-gold)}
+}
+@media (min-width:720px){
+  #site{--proof-lift:56px}
+  #site .proj-gallery{grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+  #site .proj-gallery li{grid-column:span 2}
+  #site .proj-gallery .is-lead{grid-column:1/-1}
+  #site .proj-gallery .is-lead a{aspect-ratio:2/1}
+  #site .proj-gallery li:nth-child(5):nth-last-child(2),#site .proj-gallery li:nth-child(6):nth-last-child(1){grid-column:span 3}
+  #site .contact-list li{grid-template-columns:110px minmax(0,1fr)}
+}
+@media (min-width:900px){
+  #site{--site-head:72px}
+  #site #site-menu-btn{display:none}
+  #site #site-nav{display:flex;position:static;flex-direction:row;gap:34px;margin-right:12px;padding:0;border:0;background:none;box-shadow:none}
+  #site #site-nav a{padding:8px 0;border:0;color:inherit;font-size:15px}
+  #site #site-nav a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:6px}
+  #site .site-brand-name{font-size:21px}
+  #hero{min-height:clamp(640px,86svh,940px)}
+  #site .hero-bg{object-position:56% 52%}
+  #site .hero-scrim{background:linear-gradient(180deg,rgba(11,27,63,.7) 0,rgba(11,27,63,0) 170px),linear-gradient(90deg,rgba(11,27,63,.95) 0%,rgba(11,27,63,.9) 46%,rgba(11,27,63,.82) 72%,rgba(11,27,63,.3) 100%),linear-gradient(0deg,rgba(11,27,63,.55) 0,rgba(11,27,63,0) 42%)}
+  #site .svc{grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:clamp(40px,6vw,88px)}
+  #site .svc:nth-child(even){grid-template-columns:minmax(0,5fr) minmax(0,7fr)}
+  #site .svc:nth-child(even) .svc-media{order:2}
+  #site .about-in{grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(48px,7vw,112px)}
+  #site .about-media{position:relative;isolation:isolate}
+  #site .about-media::after{content:"";position:absolute;z-index:-1;inset:18px -18px -18px 18px;border:1px solid var(--site-gold);border-radius:4px}
+  #site .contact-grid{grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:clamp(48px,7vw,112px);align-items:start}
+  #site .foot-in{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);align-items:start}
+  #site .foot-links{justify-content:flex-end}
+  #site .foot-legal{grid-column:1/-1}
+}
+@media (min-width:900px) and (max-width:1099px){
+  /* six links, the button and the wordmark share one row: a little less room between the links keeps "Barro Industries" whole at 900px */
+  #site #site-nav{gap:20px}
+  #site #site-nav a{font-size:14px}
+}
+@media (min-width:1100px){
+  /* wide enough for every footer link on one row; below this the links wrap inside the right half, so the address and the badges keep their room */
+  #site .foot-in{grid-template-columns:minmax(0,1fr) auto}
+}
+@media (min-width:1024px){
+  #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
+  #site .proof-bar li{padding:26px 22px}
+  #site .regs-row{padding-left:22px}
+  #site .proof-bar li:nth-child(n+3)::after{content:none}
+  #site .proof-bar li+li::before{content:"";top:24%;bottom:24%;left:0;right:auto;width:1px;height:auto}
+  #site .proof-val{font-size:1.75rem}
+  #site .proof-sub{min-height:2.9em}
+}
+@media (min-width:1280px){
+  #site .proof-bar li{padding:26px 28px}
+  #site .regs-row{padding-left:28px}
+  #site .proof-val{font-size:2rem}
+  #site .proj-gallery .is-lead a{aspect-ratio:21/9}
+}
+@media (prefers-reduced-motion:reduce){
+  html[data-view="site"]{scroll-behavior:auto}
+  #site *,#site *::before,#site *::after{transition:none !important;animation:none !important}
+  #site.js-reveal .reveal{opacity:1;transform:none}
+}
+</style>
+<!-- SITE-CSS:END -->
+  <!-- The public website's two typefaces, in ONE request: the display serif for its headings (Fraunces 500-600) and its
+       body type (Inter 400-600, on the same optical-size axis as the app stylesheet's own @import, so the same font file and
+       the same look). css/styles.css, which used to supply Inter to this page, is not loaded in the website view. The
+       browser downloads a font file only when text that uses it renders. The CSP already allows fonts.googleapis.com and
+       fonts.gstatic.com, and both origins are preconnected above.
+       REQUESTED AFTER THE PAGE HAS LOADED, never before: it is a third-party stylesheet behind a connection of its own,
+       and the two font files it brings (about 140 KB) would otherwise share the phone's bandwidth with the hero photo and
+       the logo poster — the largest paint — while they are still downloading. The page paints without it (font-display
+       is swap: the first paint uses the fallback stack, the typefaces swap in when they arrive; a layout shift of a few
+       hundredths, measured on a phone). So the link is created by the script below 300 ms after the load event (the
+       largest paint has happened by then), and a plain stylesheet inside <noscript> covers visitors without JavaScript.
+       Both carry the same URL (tests/site-perf-loading.test.mjs pins that they match). It is requested in every view:
+       in the app views it is one tiny request after the load, and it keeps the website's serif ready for "Back to website". -->
+  <script>window.addEventListener('load', function () { setTimeout(function () { var l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..600&family=Inter:opsz,wght@14..32,400..600&display=swap'; document.head.appendChild(l); }, 300); });</script>
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..600&family=Inter:opsz,wght@14..32,400..600&display=swap"/></noscript>
+  <!-- LEGACY-SESSION PROBE. The website view loads no app, so nothing there can notice that this browser already holds a signed-in
+       session — and until now that was corrected a second later by the app's own auth check (the old page flashed the website, then
+       switched to the app) for anyone whose boot hint is missing: a session from before the hint existed, or storage that was cleared
+       selectively. Without this, such a staff member would stay on the website until they found "Team portal". So, once per tab and
+       only in the website view, a moment after the page has loaded, this asks IndexedDB — read-only, and only if the database already
+       EXISTS (asking for one that does not would create an empty copy that breaks the app's own first open) — whether the app's auth
+       library has stored a user. If it has, it sets the boot hint and reloads: the head script then boots the app, as it does for any
+       signed-in device. A visitor with no stored user (every first-time visitor, search engines, PageSpeed) costs one
+       indexedDB.databases() call and nothing else; a browser that cannot answer it (no indexedDB.databases) is simply left on the
+       website, one tap from "Team portal". The stored-user key prefix is the auth library's own (pinned SDK 10.12.2). -->
+  <script>(function () {
+    if (document.documentElement.getAttribute('data-view') !== 'site') return;
+    window.addEventListener('load', function () { setTimeout(function () {
+      try {
+        if (sessionStorage.getItem('bi-probed') || !window.indexedDB || !indexedDB.databases) return;
+        indexedDB.databases().then(function (dbs) {
+          if (!dbs.some(function (d) { return d.name === 'firebaseLocalStorageDb'; })) return;
+          var open = indexedDB.open('firebaseLocalStorageDb');
+          open.onsuccess = function () {
+            var db = open.result;
+            try {
+              if (!db.objectStoreNames.contains('firebaseLocalStorage')) { db.close(); return; }
+              var keys = db.transaction('firebaseLocalStorage', 'readonly').objectStore('firebaseLocalStorage').getAllKeys();
+              keys.onsuccess = function () {
+                db.close();
+                if (!(keys.result || []).some(function (k) { return String(k).indexOf('firebase:authUser:') === 0; })) return;
+                try { sessionStorage.setItem('bi-probed', '1'); localStorage.setItem('bi-auth-hint', '1'); } catch (_) { return; }
+                location.reload();
+              };
+              keys.onerror = function () { db.close(); };
+            } catch (_) { try { db.close(); } catch (__) {} }
+          };
+        }, function () {});
+      } catch (_) {}
+    }, 600); });
+  })();</script>
   <!-- With JavaScript off nothing sets data-view, so show the (fully static) website
        instead of leaving the splash up forever; the header cannot go solid on scroll
        without JS, so it is solid from the start. -->
-  <noscript><style>#site{display:block !important}#splash-screen,#login-screen,#app-shell{display:none !important}#site-header{background:#fff !important;color:#0B1B3F !important;border-bottom:1px solid #E6E1D6 !important}#site-header .site-brand-sub{color:#5E6672 !important}#site-header #site-nav a{color:#0B1B3F !important}#site-header .site-head-cta{background:#0B1B3F !important;border-color:#0B1B3F !important;color:#fff !important}</style></noscript>
+  <noscript><style>#site{display:block !important}#splash-screen,#login-screen,#app-shell,#modal-overlay,#profile-drawer,#drawer-overlay,#dialog-overlay{display:none !important}#site-header{background:#fff !important;color:#0B1B3F !important;border-bottom:1px solid #E6E1D6 !important}#site-header .site-brand-sub{color:#5E6672 !important}#site-header #site-nav a{color:#0B1B3F !important}#site-header .site-head-cta{background:#0B1B3F !important;border-color:#0B1B3F !important;color:#fff !important}</style></noscript>
 </head>
 <body>
 
@@ -256,7 +942,7 @@
     </header>
     <div class="svc-list">
       <article class="svc reveal">
-        <div class="svc-media"><img src="site/img/projects/dmmmsu/01.webp" srcset="site/img/projects/dmmmsu/01-thumb.webp 600w, site/img/projects/dmmmsu/01.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Finished commercial kitchen with a range, hood and stainless-steel work tables"></div>
+        <div class="svc-media"><img src="site/img/projects/dmmmsu/01.webp" srcset="site/img/projects/dmmmsu/01-thumb.webp 600w, site/img/pages/hero-dmmmsu-01.webp 1000w, site/img/projects/dmmmsu/01.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Finished commercial kitchen with a range, hood and stainless-steel work tables"></div>
         <div class="svc-body">
           <p class="svc-num">01</p>
           <h3>Commercial &amp; commissary kitchen fit-outs</h3>
@@ -266,7 +952,7 @@
         </div>
       </article>
       <article class="svc reveal">
-        <div class="svc-media"><img src="site/img/projects/ispsc/03.webp" srcset="site/img/projects/ispsc/03-thumb.webp 600w, site/img/projects/ispsc/03.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Rows of fabricated stainless-steel work tables"></div>
+        <div class="svc-media"><img src="site/img/projects/ispsc/03.webp" srcset="site/img/projects/ispsc/03-thumb.webp 600w, site/img/pages/hero-ispsc-03.webp 1000w, site/img/projects/ispsc/03.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Rows of fabricated stainless-steel work tables"></div>
         <div class="svc-body">
           <p class="svc-num">02</p>
           <h3>Custom stainless &amp; metal fabrication</h3>
@@ -275,7 +961,7 @@
         </div>
       </article>
       <article class="svc reveal">
-        <div class="svc-media"><img src="site/img/projects/dmmmsu/03.webp" srcset="site/img/projects/dmmmsu/03-thumb.webp 600w, site/img/projects/dmmmsu/03.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Stainless-steel tables, racks and shelving installed on a university campus"></div>
+        <div class="svc-media"><img src="site/img/projects/dmmmsu/03.webp" srcset="site/img/projects/dmmmsu/03-thumb.webp 600w, site/img/pages/hero-dmmmsu-03.webp 1000w, site/img/projects/dmmmsu/03.webp 1600w" sizes="(min-width:900px) 56vw, 100vw" width="1600" height="1200" loading="lazy" decoding="async" alt="Stainless-steel tables, racks and shelving installed on a university campus"></div>
         <div class="svc-body">
           <p class="svc-num">03</p>
           <h3>Institutional &amp; government supply</h3>
@@ -567,7 +1253,7 @@
 <div id="splash-screen" data-nosnippet>
   <div class="splash-inner">
     <div class="splash-logo-card">
-      <img src="icons/barro-kitchens.png" alt="Barro Industries" class="splash-logo"
+      <img src="icons/barro-kitchens.png" alt="Barro Industries" class="splash-logo" loading="lazy"
            onerror="this.style.display='none';document.getElementById('splash-bi-fallback').style.display='flex'"/>
       <div id="splash-bi-fallback" class="splash-bi-fallback" style="display:none">BI</div>
     </div>
@@ -590,7 +1276,7 @@
          shows the website (css/site.css: html[data-standalone]). -->
     <button type="button" class="login-site-back" id="login-site-back" aria-label="Back to website"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg><span>Back to website</span></button>
     <div class="login-logo-wrap">
-      <img src="icons/barro-kitchens.png" alt="Barro Industries" class="login-logo-img" onerror="this.style.display='none';document.getElementById('login-logo-fallback').style.display='flex'"/>
+      <img src="icons/barro-kitchens.png" alt="Barro Industries" class="login-logo-img" loading="lazy" onerror="this.style.display='none';document.getElementById('login-logo-fallback').style.display='flex'"/>
       <div id="login-logo-fallback" class="login-logo-fallback" style="display:none">BI</div>
     </div>
     <h1 class="login-title">Barro Industries</h1>
@@ -695,7 +1381,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.323 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.324 · Barro Industries</div>
   </div>
 </div>
 
@@ -721,7 +1407,7 @@
     </div>
     <div class="topbar-logo-area">
       <div class="topbar-logo-card">
-        <img src="icons/barro-kitchens.png" alt="Barro Industries" class="topbar-logo-img"
+        <img src="icons/barro-kitchens.png" alt="Barro Industries" class="topbar-logo-img" loading="lazy"
              onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
         <div class="topbar-logo-fallback" style="display:none">BI</div>
       </div>
@@ -891,66 +1577,8 @@
      created/removed dynamically — no static markup needed. -->
 <div id="dialog-overlay" class="dialog-overlay hidden"></div>
 
-<!-- All scripts deferred — download in parallel, execute in order after HTML parse.
-     Firebase messaging loaded lazily in notifications.js when FCM is configured.
-
-     v14 Wave 7 (2026-08-03, Passes 1-10) split most of the old monolithic
-     js/departments.js and js/app.js/modules.js screen renderers out into
-     js/screens/*.js (design, tasks, sales, hr, production, finance,
-     approvals, govit, partners, people, dashboards) — one file per
-     domain, each window.*-attached with no bundler/ESM, same convention
-     as everything else in this app. Every js/screens/*.js file loads
-     AFTER the departments.js/app.js/modules.js host it was extracted
-     from and calls that host's shared helpers/services by bare
-     window.*/global name at runtime only, never at parse time; see each
-     script's own load-order comment below (and that file's own header
-     comment) for its specific forward/backward call graph. What remains
-     in departments.js/app.js/modules.js after Pass 10's cleanup is
-     shared services, shared renderers, and app shell/router — not
-     screens.
-
-     PERF-WAVE1 WP1 (2026-08-24) — most js/screens/*.js files (and a few
-     js/*.js engine/utility files: bir, letterhead, migrations, pay-policy,
-     statutory-status, payroll-weekly, payroll, qrcode) are no longer listed
-     as <script defer> below. They still exist on disk and are still in
-     sw.js's PRECACHE list — js/app.js's navigateTo() now calls
-     window.ensurePage(page), which injects exactly the files that page's
-     PAGE_SCRIPTS entry (js/config.js) names, right before dispatching to
-     that page's render function. A typical employee boot now parses only
-     the files still listed here, not the whole tree. js/screens/dashboards.js
-     and js/screens/dept-budgets.js and js/print-docs.js stay eager on
-     purpose — see js/config.js's PAGE_SCRIPTS comment for why the latter two
-     were pulled back rather than bundled per-page. js/gestures.js is dead
-     (zero callers, its own listeners commented out) and was dropped
-     entirely — no PAGE_SCRIPTS entry loads it. -->
-<!-- PUBLIC-WEBSITE-SPEC.md §4.4 — js/site.js is the FIRST script tag: zero-dependency,
-     intentionally ahead of the Firebase SDK so the public site (catalogue filters,
-     lightbox, Login button) is interactive before the ~1 MB app stack executes. It
-     must never read window.* at parse time. This only adds one independent file in
-     front of the load-order chain documented in CLAUDE.md; it does not reorder it. -->
-<script defer src="js/site.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" integrity="sha384-AQ3POAMqIhwS81FrUH95ekxqBZHeP5tG2JfEL3+7GuTtfRLWnrRh32UxwzM+//A9" crossorigin="anonymous"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" integrity="sha384-TnlRYaR4JYz/lpaGuaiU61PjNberSA4vjLjtF+oRC/IkohkJqnWxw5EmDSOt1vA1" crossorigin="anonymous"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" integrity="sha384-qn4Jh88HhJA8dplNQyGjOh9OGI4izVhrfj/qIFgaKcdgOE06pXqIKGlsCILZcLAC" crossorigin="anonymous"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js" integrity="sha384-6I0gWsz4FIAr30c0TxIxJnPQuJiZ1FfILdZrgJdjxTH3R8dgPGTvexbyqTvReV6Z" crossorigin="anonymous"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" integrity="sha384-3IYu+dnH2y9gX1s6p9F4D55XbEmZBfJ3D1Ylh8J6bfdqnJCOmDVSRTq1yhJsBY1H" crossorigin="anonymous"></script>
-<!-- v12 WS16 — Chart.js loads on demand via window.ensureChart() (config.js), not eagerly here.
-     The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
-<script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
-<script defer src="js/firebase-config.js"></script>
-<!-- v13 Phase 8 — client error logging. Loads right after firebase-config.js
-     so window.onerror/onunhandledrejection catch boot errors too. -->
-<script defer src="js/errlog.js"></script>
-<script defer src="js/config.js"></script>
-<!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/
-     window.escHtml only at CALL time; placed right after config.js for clarity. -->
-<script defer src="js/ui-states.js"></script>
-<!-- v13 Part E Phase 40/115/116 — statusBadge2()/STATUS_META. Needs window.escHtml
-     (config.js) only; must load before departments.js, the first consumer. -->
-<script defer src="js/ui-status-meta.js"></script>
-<script defer src="js/statutory-tables.js"></script>
-<script defer src="js/print-docs.js"></script>
-<script defer src="js/finance-ledger.js"></script>
+<!-- The app's scripts are not listed here: they live in <template id="app-kit"> in the <head> (see the PERF note
+     there), so the public website never downloads them. js/site.js, the website's own script, is in the <head> too. -->
 <script defer>
   /* runs immediately after config.js (defer preserves order). BRAND + APP_VERSION exist by now. */
   window._applyBrandVersion = function () {
@@ -988,92 +1616,6 @@
   };
   window._applyBrandVersion();
 </script>
-<script defer src="js/drive.js"></script>
-<script defer src="js/notifications.js"></script>
-<!-- Meetings + in-system calendar (owner request). MUST load after
-     notifications.js: window.Meetings sends invites through Notifs.send at
-     RUN time. Everything it touches is a runtime reference, never parse-time,
-     so this position is about intent, not a hard parse dependency. -->
-<script defer src="js/meetings.js"></script>
-<!-- COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2 — window.CalendarFeed, the ONE
-     calendar data source for both the dashboard mini calendar and the drawer
-     Calendar page. Must load right after meetings.js: it consumes
-     window.Meetings._h (the Manila date helpers) at call time. -->
-<script defer src="js/calendar-feed.js"></script>
-<!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
-     before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
-<script defer src="js/svc-approvals.js"></script>
-<!-- v13 Phase 45 — generic finance CRUD table component; departments.js's
-     Taxes/Records tabs call window.renderFinanceCrudTable. -->
-<script defer src="js/ui-crud-table.js"></script>
-<!-- v14 Wave 2 Batch A — pure money-math (vatSplit, computePayLine), split out
-     of departments.js so it's independently unit-tested (tests/money.test.mjs).
-     Must load before departments.js, which calls these via window.*. -->
-<script defer src="js/money-core.js"></script>
-<!-- PERF-WAVE1 WP1 — js/pay-policy.js and js/statutory-status.js (formerly
-     here, load-bearing before js/payroll.js/js/departments.js/js/screens/*)
-     are now lazy-loaded as part of the payroll compute-engine bundle
-     (js/config.js's PAGE_SCRIPTS, every payroll-touching page) instead of
-     eager — the guarded (typeof-checked) references to them still in
-     js/departments.js/js/screens/dashboards.js degrade gracefully if a
-     non-payroll page never loads them. -->
-<!-- Type-B (Production, weekly) self-service attendance — pure geofencing
-     math (haversineMeters/siteMatch), independently unit-tested
-     (tests/geo.test.mjs). No dependencies; loads early like money-core.js. -->
-<script defer src="js/geo-core.js"></script>
-<script defer src="js/departments.js"></script>
-<!-- PERF-WAVE1 WP1 (2026-08-24) — js/screens/design.js, tasks.js, sales.js,
-     crm.js, ventures.js, hr.js, employee-profile.js, js/payroll-weekly.js,
-     js/payroll.js, js/screens/payroll.js, js/screens/payroll-backfill.js,
-     js/screens/production.js, js/screens/finance.js,
-     js/screens/statutory-rates.js, js/screens/approvals.js,
-     js/screens/govit.js, js/screens/partners.js (formerly all listed here,
-     in this order) are now lazy-loaded per page via js/config.js's
-     PAGE_SCRIPTS + window.ensurePage(), called from js/app.js's navigateTo()
-     right before it dispatches to that page's render function — see
-     js/config.js's PAGE_SCRIPTS comment for the full per-page file list and
-     the export/caller sweep behind it. Every load-order relationship these
-     files' own header comments describe (which shared departments.js/
-     money-core.js/app.js helpers they call, by window.*/bare-global name,
-     never at parse time) is unchanged by this — only WHEN the file arrives
-     on the page did. -->
-<!-- DEPT-BUDGETS-SPEC-2026-08-11 — department budgets (release/spend/confirm/
-     reimburse). Must load after departments.js (canEditDept, deptContainer,
-     escHtml, fmt, today, onClickSafe, deptBlockedForSecretary) and
-     finance-ledger.js (window.Ledger): calls both by window.*/bare-global name
-     at click/render time only, never at parse time. departments.js's
-     renderBudgeting reaches forward into this file's window.openLogSpendForm/
-     openBudgetRequestForm/openReleaseBudgetForm/openCloseFloatModal/
-     repostFloatRelease the same way every other pass in this file documents.
-     PERF-WAVE1 WP1 — kept EAGER (NOT moved to PAGE_SCRIPTS): the EAGER
-     departments.js's renderBudgeting above calls this file's exports
-     unguarded and is itself reused, unchanged, by NINE different
-     departments' "Budgeting" subtab — bundling this file into all nine
-     PAGE_SCRIPTS entries individually was strictly worse than its ~62KB
-     eager cost. See js/config.js's PAGE_SCRIPTS comment. -->
-<script defer src="js/screens/dept-budgets.js"></script>
-<script defer src="js/app.js"></script>
-<script defer src="js/modules.js"></script>
-<!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
-     System Health, Audit Log, Product Database, SOPs, Personal Finance +
-     the KPI/attendance-score cluster, Progress Reports, Company, Departments,
-     Analytics, Team accounts-admin, Help), split verbatim out of js/app.js.
-     The screens below call almost every other screen's shared globals at
-     runtime (fetchUsersWithPayroll, renderClientProfiles, window.Projects,
-     window.Ledger, window.CashAdvance, ledgerForPeriod, Period.parse, etc.)
-     by bare-global/window.* name at runtime only, never at parse time — same
-     convention as every other Wave 7 pass. app.js's navigateTo switch and
-     the bottom-nav route tables (config.js) reach forward into this file's
-     window.render()/bare render() entry points the same way; notifications.js's
-     openMemoById deep-link does too.
-     PERF-WAVE1 WP1 (2026-08-24) — js/screens/people.js, notes.js, layoff.js
-     and js/screens/worker.js (formerly right after/around this file) are now
-     lazy-loaded per page — see js/config.js's PAGE_SCRIPTS comment. This
-     file (dashboards.js) and js/chat.js below stay eager: dashboards.js's
-     own performance fixes are PERF-WAVE1 WP3's package, not this one's, and
-     chat.js's one lazy-file reach (openTaskDetail, tasks.js) is WP4's. -->
-<script defer src="js/screens/dashboards.js"></script>
-<script defer src="js/chat.js"></script>
 <script>
   window.addEventListener('load', () => { if (window._applyBrandVersion) window._applyBrandVersion(); });
 </script>

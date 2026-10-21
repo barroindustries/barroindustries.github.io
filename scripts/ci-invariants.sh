@@ -3,8 +3,8 @@
 # Dependency-free POSIX-ish shell (grep/sed/find only, no node/python packages).
 # Run from the repo root: bash scripts/ci-invariants.sh
 #
-# Ten checks (the first three below, then ledger / text-sink / drawer-icon / precache-manifest / cir-forms mirror /
-# rules size / public site / QR mirrors), each fails the build (non-zero exit) when violated:
+# Eleven checks (the first three below, then ledger / text-sink / drawer-icon / precache-manifest / cir-forms mirror /
+# rules size / public site / QR mirrors / website-view loading), each fails the build (non-zero exit) when violated:
 #   1. STACKING   — no new 4-digit z-index literal in js/*.js, js/screens/*.js,
 #                    or css/*.css
 #   2. PRECACHE   — every local js/*.js, js/screens/*.js, css/*.css referenced by
@@ -806,6 +806,33 @@ if [ -n "$qr_pub_problems" ]; then
 fi
 if [ "$qr_fail" -eq 0 ]; then
   echo "PASS: functions/qr-def.js, pricing-core.js, product-families.js and qr-families.js are byte-identical to their js/ originals; functions/qr-published.json matches the catalogue data island; every published SKU is absorbed by one family or a fixed card, exactly once"
+else
+  overall_fail=1
+fi
+
+echo
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK 11 — WEBSITE VIEW LOADING (PERF, 2026-10-21)
+# ═══════════════════════════════════════════════════════════════════════
+# index.html is both the public website and the app shell. A visitor on the website must not download or run the app (a mobile Lighthouse run of the
+# old page fetched 49 files / 3.6 MB for it: Performance 61). So the app's stylesheets, hints and the whole ordered script list live in an inert
+# <template id="app-kit"> in the head, which a head script writes only for the app views (boot / login / app) — see the PERF note in index.html.
+# Two things must therefore stay true, and both fail HERE, loudly, instead of silently putting the app back on the website:
+#   (a) outside that template (and outside comments, <noscript>, the inline stylesheet and the JSON-LD) index.html references NO app asset:
+#       js/site.js is the only external script, there is no css/ file, no Firebase / icon-library host, no preload, no dns-prefetch, no stylesheet link.
+#       A new app script or stylesheet goes INTO app-kit (and into sw.js PRECACHE, CHECK 2) — not into <body>, however CLAUDE.md used to say.
+#   (b) the inline website stylesheet (<style id="site-css">) is css/site.css verbatim. Edit css/site.css, then run:  node scripts/inline-site-css.js
+# (a) is scripts/check-site-view.js, (b) is scripts/inline-site-css.js --check. tests/site-perf-loading.test.mjs pins the rest (kit order, the writer, the hand-off).
+echo "=== [11/11] SITE VIEW: index.html's website view must load no app asset (app-kit template), and its inline stylesheet must equal css/site.css ==="
+site_view_fail=0
+if ! node scripts/check-site-view.js; then
+  site_view_fail=1
+fi
+if ! node scripts/inline-site-css.js --check; then
+  site_view_fail=1
+fi
+if [ "$site_view_fail" -eq 0 ]; then
+  echo "PASS: the website view loads no app asset (only site.js, fonts and images); the inline stylesheet equals css/site.css"
 else
   overall_fail=1
 fi
