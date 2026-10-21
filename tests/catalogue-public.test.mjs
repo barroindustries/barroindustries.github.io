@@ -1222,7 +1222,8 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     const ld = JSON.parse(homeHead.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
     assert.equal(ld['@type'], 'LocalBusiness');
     assert.deepEqual(ld.address, { '@type': 'PostalAddress', streetAddress: '21 Capricorn St., Tandang Sora', addressLocality: 'Quezon City', postalCode: '1116', addressRegion: 'Metro Manila', addressCountry: 'PH' });
-    for (const k of ['priceRange', 'aggregateRating', 'openingHours', 'geo']) assert.ok(!(k in ld), `${k} must not be claimed`);
+    // geo is allowed since 2026-10-21: the owner supplied the verified Google Maps coordinates (pinned in tests/site-luzon-map.test.mjs)
+    for (const k of ['priceRange', 'aggregateRating', 'openingHours']) assert.ok(!(k in ld), `${k} must not be claimed`);
     assert.deepEqual(ld.sameAs, ['https://www.facebook.com/barrokitchens']);
     assert.equal(ld.email, 'hello@barroindustries.com');
     assert.equal(ld.telephone, '+63 927 683 6300');
@@ -1253,7 +1254,8 @@ describe('the committed homepage (index.html): a business feature first, NO prod
 
   it('uses the ™ mark once per page (the header brand), British spelling, no doubled spaces, no stray double dash', () => {
     for (const [label, html] of [['homepage', homeSite], ['catalogue page', cat.slice(cat.indexOf('<body'))]]) {
-      assert.equal((visibleText(html).match(/™/g) || []).length, 1, `${label}: ™ count`);
+      // the owner's programme name KitchenShield™ (warranty section, 2026-10-21) is the one other mark; the header brand stays the only other ™
+      assert.equal((visibleText(html).replace(/KitchenShield™/g, 'KitchenShield').match(/™/g) || []).length, 1, `${label}: ™ count`);
       assert.ok(html.includes('<span class="site-brand-sub">Barro Kitchens™</span>'), `${label}: the ™ is not in the header brand`);
       const segments = stripTags(html, '\u0001').split('\u0001').map(s => s.trim()).filter(Boolean);
       for (const s of segments) assert.ok(!/\S {2,}\S/.test(s), `${label}: doubled space in "${s.slice(0, 50)}"`);
@@ -1376,12 +1378,15 @@ describe('the public contact details (owner ruling: hello@ and ONE address and n
     for (const [label, text] of Object.entries(surfaces)) assert.ok(!/0960/.test(text), `${label} carries 0960`);
   });
 
-  it('shows ONLY the Quezon City address, and never La Union or San Fernando', () => {
+  it('shows ONLY the Quezon City address; La Union is a project location (the map section and areaServed), never an address, and San Fernando is never named', () => {
     const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila';
     assert.ok(homeSite.includes(`<address>${ADDRESS}, Philippines</address>`));
     assert.ok(homeSite.includes(`<p>${ADDRESS}, Philippines</p>`));
     assert.ok(cat.includes(`<p>${ADDRESS}, Philippines</p>`));
-    for (const [label, text] of Object.entries(surfaces)) assert.ok(!/La\s*Union|San\s*Fernando/i.test(text), `${label} names another location`);
+    // Owner ruling 2026-10-21: La Union is a PROJECT location ("Projects across Luzon", section #luzon, and the JSON-LD areaServed), never an address.
+    // Everything else on these surfaces (the contact section, the footer, the JSON-LD address, the other head tags) stays guarded.
+    const withoutPlaces = { 'index.html <head>': homeHead.replace(/"areaServed":\[[^\]]*\],?/, ''), 'index.html #site': homeSite.replace(/<section id="luzon"[\s\S]*?<\/section>/, ''), 'catalogue page': cat };
+    for (const [label, text] of Object.entries(withoutPlaces)) assert.ok(!/La\s*Union|San\s*Fernando/i.test(text), `${label} names another location`);
     for (const f of files) assert.ok(!/La\s*Union|San\s*Fernando|0960/i.test(read(f)), `${f} names another location or number`);
   });
 });

@@ -4,7 +4,7 @@
    delegation (no inline handlers); everything below is a class or attribute toggle, and the only
    text it writes uses textContent (no innerHTML).
    It does five things: the footer year, the Login hand-off, the phone menu, the transparent-over-the-
-   hero header, and the project lightbox, plus a quiet fade-up on scroll. Catalogue filtering and
+   hero header, and the project lightbox, plus the Luzon-map pin highlight and a quiet fade-up on scroll. Catalogue filtering and
    search live in js/catalogue.js; every piece of this file is a no-op when its elements are absent. */
 (function () {
   'use strict';
@@ -91,6 +91,26 @@
       on($('site-lightbox-close'), 'click', function () { dlg.close(); });
       on(dlg, 'click', function (e) { if (e.target === dlg) dlg.close(); });   // backdrop click
       on(dlg, 'close', function () { img.removeAttribute('src'); });
+    }
+
+    // ── Projects-across-Luzon map (section #luzon): hovering a place in the list lights its pin, leader and label on
+    // the map, and hovering a pin does the reverse. Only class toggles, on every element that shares the place's
+    // data-pin. The page is complete without it: the list is plain text and the map is a labelled picture.
+    var lz = $('luzon');
+    if (lz) {
+      var lit = '';
+      var light = function (id) {
+        if (id === lit) return;
+        var els, i;
+        if (lit) { els = lz.querySelectorAll('[data-pin="' + lit + '"]'); for (i = 0; i < els.length; i++) els[i].classList.remove('is-on'); }
+        if (id) { els = lz.querySelectorAll('[data-pin="' + id + '"]'); for (i = 0; i < els.length; i++) els[i].classList.add('is-on'); }
+        lit = id;
+      };
+      var pinOf = function (e) { var t = up(e, '[data-pin]'); return t && lz.contains(t) ? t.getAttribute('data-pin') : ''; };
+      on(lz, 'mouseover', function (e) { light(pinOf(e)); });
+      on(lz, 'mouseout', function (e) { if (!e.relatedTarget || !lz.contains(e.relatedTarget)) light(''); });
+      on(lz, 'focusin', function (e) { light(pinOf(e)); });
+      on(lz, 'focusout', function () { light(''); });
     }
   }
 
