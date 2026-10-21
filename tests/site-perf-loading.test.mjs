@@ -27,6 +27,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { makeEnv } from './fixtures/hero-intro-env.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -385,22 +386,40 @@ describe('6 · images and the hero clip', () => {
     assert.equal(hero.match(/srcset="([^"]*)"/)[1], 'site/img/projects/ispsc/01-thumb.webp 600w, site/img/projects/ispsc/01.webp 1600w');
   });
 
-  it('starts the hero logo clip only after the page has loaded (at once if it already has), so a megabyte of video never shares the phone\'s bandwidth with the largest paint', () => {
-    const run = ({ readyState }) => {
-      const calls = [];
-      const vid = { play: () => { calls.push('play()'); return Promise.resolve(); } };
-      class IO { constructor(cb) { this.cb = cb; } observe() { this.cb([{ isIntersecting: true }]); } disconnect() {} }
-      const doc = { readyState, documentElement: { scrollTop: 0, getAttribute: () => 'site' }, getElementById: () => null, querySelector: (s) => (s === '#hero video' ? vid : null), querySelectorAll: () => [], addEventListener() {} };
-      const win = { matchMedia: () => ({ matches: false }), addEventListener: (ev, fn, opts) => { if (ev === 'load') calls.push(`on ${ev}${opts && opts.once ? ' once' : ''}`); win['__' + ev] = fn; }, innerWidth: 1440, pageYOffset: 0, IntersectionObserver: IO };
-      vm.runInNewContext(siteJs, { document: doc, window: win, IntersectionObserver: IO });
-      return { calls, fire: (ev) => win['__' + ev] && win['__' + ev]() };
-    };
-    const done = run({ readyState: 'complete' });
-    assert.deepEqual(done.calls, ['play()'], 'a page that has already loaded starts the clip at once');
-    const loading = run({ readyState: 'interactive' });
-    assert.deepEqual(loading.calls, ['on load once'], 'a page still loading must wait for the load event');
-    loading.fire('load');
-    assert.deepEqual(loading.calls, ['on load once', 'play()']);
+  it('starts the logo intro only after the page has loaded (at once if it already has) and the hero is on screen, so a megabyte of video never shares the phone\'s bandwidth with the largest paint — and the overlay is not drawn (hidden, opacity 0) until the clip really plays, so it can never be the LCP candidate', () => {
+    const done = makeEnv(siteJs, { readyState: 'complete' });
+    assert.equal(done.plays(), 0, 'nothing plays before the hero is on screen');
+    done.intersect(true);
+    assert.equal(done.plays(), 1, 'a page that has already loaded starts the clip at once');
+    const loading = makeEnv(siteJs, { readyState: 'interactive' });
+    loading.intersect(true);
+    assert.equal(loading.plays(), 0, 'a page still loading must wait for the load event');
+    assert.equal(loading.waitingForLoad(), 1);
+    loading.load();
+    assert.equal(loading.plays(), 1);
+    assert.ok(!loading.classes.has('is-on'), 'still not drawn: opacity 0 until the "playing" event');
+    loading.fire('video', 'playing');
+    assert.ok(loading.classes.has('is-on'));
+    assert.ok(/#site \.hero-ghost\{[^}]*;opacity:0;/.test(siteCss), 'the stylesheet draws the overlay at opacity 0');
+    assert.ok(/<div class="hero-ghost" aria-hidden="true" hidden>/.test(html), 'the markup hides it');
+    assert.ok(!/is-on/.test(html.replace(/<style id="site-css">[\s\S]*?<\/style>/, '')), 'the page never marks the overlay as shown by itself');
+  });
+
+  it('never runs in the app or the boot: the app kit holds none of the intro, and with <html data-view> boot, login or app nothing is requested or played — the overlay is hidden inside the display:none website, whatever the observer says', () => {
+    assert.ok(!/hero-ghost|brand-reveal|<video|\.mp4/.test(kitHtml), 'the app kit carries the intro');
+    assert.ok(!/hero-ghost|brand-reveal|<video|\.mp4/.test(kitEls.map((e) => e.text).join('')), 'the kit as written for the app views carries the intro');
+    for (const view of ['boot', 'login', 'app']) {
+      const e = makeEnv(siteJs, { view, readyState: 'interactive' });
+      assert.equal(e.ghost.hidden, true, `${view}: the overlay is hidden`);
+      assert.equal(e.plays(), 0, `${view}: nothing plays at parse time`);
+      e.load();
+      assert.equal(e.plays(), 0, `${view}: nothing plays at the load event`);
+      e.intersect(true);
+      assert.equal(e.plays(), 0, `${view}: nothing plays even when the observer reports the hero`);
+      assert.equal(e.animations.length, 0);
+    }
+    // only the website view shows the website at all
+    assert.ok(siteCss.includes('#site{display:none}') && siteCss.includes('html[data-view="site"] #site{display:block}'));
   });
 });
 

@@ -27,8 +27,12 @@
 //   · the owner's answers of 2026-10-21: the ISPSC scope is work tables, sinks, gas ranges and exhaust hoods (one sentence, the same on the
 //     homepage and every page), and DMMMSU is in La Union — said in the project description wherever the project is shown, on the /work/ and
 //     /areas-we-serve/ pages and in the map section, never in a header, footer, call to action, contact detail or the JSON-LD address;
-//   · the brand is swappable: "Barro Kitchens" is wrapped in <span data-brand> exactly once per page (the header lockup), appears once in
-//     the JSON-LD (brand.name), and never in a <title>; the primary name everywhere is "Barro Industries";
+//   · the brand: "Barro Kitchens" is wrapped in <span data-brand> exactly once per page (the header lockup: what a rename SWAPS) and is, by the
+//     owner's ruling of 2026-10-22, a PERMANENT name in each page's meta description and in the business JSON-LD (alternateName x2, brand.name,
+//     the page node's description: what a rename KEEPS) — 8 mentions per page, pinned — and never in a <title> (these 12 pages keep their own
+//     titles); the primary name everywhere is "Barro Industries";
+//   · "Message us" (2026-10-22): the Messenger chat link (https://m.me/barrokitchens) is in every public footer, the homepage contact section and
+//     the catalogue / FAQ call-to-action bands, written one way, with an inline icon and no Facebook / Meta asset, script or CSP change;
 //   · internal links resolve, the hubs link to every child, every page links home, to the catalogue and to the quote flow;
 //   · no app script, only the shared /js/site.js; nothing is in the service worker's PRECACHE.
 //
@@ -172,7 +176,12 @@ const siteJs = read('js/site.js');
 const pagesCss = read('css/pages.css');
 const PLACE_URL = 'https://www.google.com/maps/place/Barro+Industries/@14.6852336,121.0376564,17z/data=!3m1!4b1!4m6!3m5!1s0x3397b7e5c5101e17:0x43c0f9fffeef237!8m2!3d14.6852336!4d121.0376564!16s%2Fg%2F11p24zhgfq';
 const FB = 'https://www.facebook.com/barrokitchens';
-const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines';
+const ALT_NAMES = ['Barro Kitchens', 'Barro Kitchens by Barro Industries'];   // PERMANENT (owner ruling 2026-10-22): a historic name of the business, kept even after a rebrand
+const MSGR = 'https://m.me/barrokitchens';   // the Messenger chat (owner 2026-10-22): "Message us"
+// the link exactly as it is written everywhere: an inline chat-bubble icon (one <path>, no image, no external file), target + rel, data-brand (the handle is the brand's)
+const MSG_ICON = '<svg class="msg-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>';
+const msgLink = (cls, text) => `<a ${cls ? `class="${cls}" ` : ''}href="${MSGR}" rel="noopener" target="_blank" data-brand>${MSG_ICON}${text}</a>`;
+const ADDRESS ='21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines';
 const PLACES = ['Ilocos Sur', 'La Union', 'Baguio', 'La Trinidad', 'Tarlac', 'Pampanga', 'Bulacan', 'Iba, Zambales', 'Subic', 'Manila', 'Cavite', 'Laguna', 'Batangas'];
 const GROUPS = [['North Luzon', ['ilocos-sur', 'la-union', 'baguio', 'la-trinidad']], ['Central Luzon', ['tarlac', 'pampanga', 'bulacan', 'iba-zambales', 'subic']], ['Metro Manila & South', ['manila', 'cavite', 'laguna', 'batangas']]];
 const BADGES = ['PhilGEPS-registered', 'SEC-registered', 'VAT-registered'];
@@ -405,15 +414,16 @@ describe('JSON-LD: LocalBusiness, BreadcrumbList, Service / CreativeWork / ItemL
     });
   });
 
-  it('has the one LocalBusiness: "Barro Industries", legal name "Barro Industries OPC", the verified address, phone, email, Maps place, Facebook, the brand and the 13 places', () => {
+  it('has the one LocalBusiness: "Barro Industries", legal name "Barro Industries OPC", the alternate names ["Barro Kitchens", "Barro Kitchens by Barro Industries"], the verified address, phone, email, Maps place, Facebook, the brand and the 13 places', () => {
     each((p) => {
       const lb = p.node('LocalBusiness');
       assert.equal(lb.length, 1, `${p.path}: LocalBusiness count`);
       const b = lb[0];
-      assert.deepEqual(Object.keys(b).sort(), ['@id', '@type', 'address', 'areaServed', 'brand', 'email', 'geo', 'hasMap', 'image', 'legalName', 'logo', 'name', 'sameAs', 'telephone', 'url']);
+      assert.deepEqual(Object.keys(b).sort(), ['@id', '@type', 'address', 'alternateName', 'areaServed', 'brand', 'email', 'geo', 'hasMap', 'image', 'legalName', 'logo', 'name', 'sameAs', 'telephone', 'url']);
       assert.equal(b['@id'], BASE + '/#business');
       assert.equal(b.name, 'Barro Industries');
       assert.equal(b.legalName, 'Barro Industries OPC');
+      assert.deepEqual(b.alternateName, ALT_NAMES, `${p.path}: the permanent alternate names`);
       assert.equal(b.url, BASE + '/');
       assert.equal(b.telephone, '+63 927 683 6300');
       assert.equal(b.email, 'hello@barroindustries.com');
@@ -503,12 +513,13 @@ describe('JSON-LD: LocalBusiness, BreadcrumbList, Service / CreativeWork / ItemL
     for (const [hub, list] of [[svc, ls], [work, lw]]) for (const i of list.itemListElement) assert.ok(hub.html.includes(`href="${i.url.replace(BASE, '')}"`), `${hub.path} does not link to ${i.url}`);
   });
 
-  it('names the brand exactly once in the JSON-LD: LocalBusiness.brand.name', () => {
+  it('names the brand in the JSON-LD in exactly four places: LocalBusiness.alternateName (two names), LocalBusiness.brand.name and the description of the page node (which is the meta description)', () => {
     each((p) => {
       const hits = [];
       (function walk(v, at) { if (typeof v === 'string') { if (/Barro\s+Kitchens/i.test(v)) hits.push(at); } else if (v && typeof v === 'object') for (const k of Object.keys(v)) walk(v[k], at ? `${at}.${k}` : k); })(p.graph, '');
-      assert.equal(hits.length, 1, `${p.path}: ${hits.join(', ')}`);
-      assert.match(hits[0], /^\d+\.brand\.name$/);
+      assert.equal(hits.length, 4, `${p.path}: ${hits.join(', ')}`);
+      assert.deepEqual(hits.map((h) => h.replace(/^\d+\./, '')), ['alternateName.0', 'alternateName.1', 'brand.name', 'description'], `${p.path}: ${hits.join(', ')}`);
+      assert.deepEqual(p.node('LocalBusiness')[0].brand, { '@type': 'Brand', name: 'Barro Kitchens' });
     });
   });
 });
@@ -774,11 +785,11 @@ describe('materials and finishes (owner, 2026-10-21): SS304 food grade as standa
   });
 });
 
-describe('the brand is swappable: "Barro Kitchens" is one <span data-brand> per page (the header lockup) plus one JSON-LD field — and never in a title', () => {
+describe('the brand: "Barro Kitchens" is one swappable <span data-brand> per page (the header lockup) and a PERMANENT name in the meta description and the business JSON-LD (owner ruling 2026-10-22) — never in a title', () => {
   const BRAND = 'Barro Kitchens';
   const count = (s) => (s.match(/Barro\s+Kitchens/gi) || []).length;
 
-  it('wraps the one visible mention in a bare <span data-brand> that holds exactly the name, inside the header\'s brand lockup, with the ™ after it', () => {
+  it('wraps the one visible mention in a bare <span data-brand> that holds exactly the name, inside the header\'s brand lockup, with the ™ after it — the swap point of a rename', () => {
     each((p) => {
       const visible = p.S.texts.filter((t) => count(t.text));
       assert.equal(visible.length, 1, `${p.path}: visible mentions`);
@@ -786,33 +797,50 @@ describe('the brand is swappable: "Barro Kitchens" is one <span data-brand> per 
       assert.deepEqual(parent.attrs, { 'data-brand': '' }, `${p.path}: the wrapper must be a bare <span data-brand>`);
       assert.equal(visible[0].text, BRAND);
       assert.ok(p.header.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'), `${p.path}: the header lockup`);
-      assert.equal(p.S.elements.filter((e) => 'data-brand' in e.attrs).length, 1);
+      assert.equal(p.S.elements.filter((e) => e.tag === 'span' && 'data-brand' in e.attrs).length, 1);
+      // the only OTHER data-brand elements are the Messenger "Message us" links: their URL carries the brand's handle (m.me/barrokitchens), so a rename must find them
+      // too (owner 2026-10-22; the full list of where they sit is pinned in the "Message us" block below)
+      for (const e of p.S.elements.filter((x) => x.tag !== 'span' && 'data-brand' in x.attrs)) assert.deepEqual([e.tag, e.attrs.href], ['a', MSGR], `${p.path}: a data-brand element that is not the brand span or the Messenger link`);
+      // data-brand-legacy (what a rename KEEPS) is for the homepage's About line only: these pages carry none
+      assert.equal(p.S.elements.filter((e) => 'data-brand-legacy' in e.attrs).length, 0, `${p.path}: data-brand-legacy`);
     });
   });
 
-  it('has the brand nowhere else: not in a title, a description, a social tag, an alt text, an aria-label, a comment, a script — the logo\'s alt names the company', () => {
+  it('has the brand in exactly the places the ruling allows — the meta description (description, og:description, twitter:description: once each), the business JSON-LD and the header span — and nowhere else: no title, no og:site_name, no image alt, no aria-label, no comment, no script', () => {
     each((p) => {
-      for (const v of [p.title, p.meta('og:title'), p.meta('twitter:title')]) assert.ok(!count(v), `${p.path}: the brand is in a title`);
-      for (const k of ['description', 'og:description', 'twitter:description', 'og:site_name', 'og:image:alt', 'twitter:image:alt']) assert.ok(!count(p.meta(k)), `${p.path}: ${k}`);
-      assert.deepEqual(p.S.attrs.filter((a) => count(a.value)).map((a) => `${a.tag}[${a.name}]`), [], `${p.path}: an attribute names the brand`);
+      for (const v of [p.title, p.meta('og:title'), p.meta('twitter:title')]) assert.ok(!count(v), `${p.path}: the brand is in a title (the 12 pages keep their own titles)`);
+      for (const k of ['description', 'og:description', 'twitter:description']) assert.equal(count(p.meta(k)), 1, `${p.path}: ${k} names the brand ${count(p.meta(k))} times`);
+      for (const k of ['og:site_name', 'og:image:alt', 'twitter:image:alt']) assert.ok(!count(p.meta(k)), `${p.path}: ${k}`);
+      // the only attributes that carry it are those three descriptions (every other attribute, alt and aria-label included, is free of it)
+      assert.deepEqual(p.S.attrs.filter((a) => count(a.value)).map((a) => `${a.tag}[${a.name}]`), ['meta[content]', 'meta[content]', 'meta[content]'], `${p.path}: an attribute names the brand`);
       assert.equal(p.S.comments.filter((c) => count(c.text)).length, 0);
       assert.equal(p.S.scripts.filter((s) => s.attrs.type !== 'application/ld+json' && count(s.body)).length, 0);
       assert.ok(p.html.includes('alt="Barro Industries logo"'));
     });
   });
 
-  it('keeps the whole inventory to 2 per page (1 visible + 1 JSON-LD) = 24 in all, so a rename is a find-and-replace of a known list; the hyphenated names are file paths and the Facebook address only', () => {
+  it('keeps the whole inventory to 8 per page (1 visible span + 3 in the meta description + 4 in the JSON-LD) = 96 in all, so a rename is a find-and-replace of a known list; the hyphenated names are file paths and the Facebook and Messenger addresses only', () => {
     let total = 0;
     each((p) => {
-      assert.equal(count(p.html), 2, `${p.path}: brand occurrences`);
+      assert.equal(count(p.html), 8, `${p.path}: brand occurrences`);
       total += count(p.html);
+      assert.equal(count(p.head), 7, `${p.path}: in the head: 3 descriptions + 4 in the JSON-LD`);
       const slugs = [...p.html.matchAll(/[A-Za-z0-9/._:-]*barro-?kitchens[A-Za-z0-9/._-]*/gi)].map((m) => m[0]).sort();
-      assert.deepEqual(slugs.filter((s) => !/^https:\/\/www\.facebook\.com\/barrokitchens$/.test(s)), ['/site/img/barro-kitchens-96.webp', 'https://barroindustries.com/icons/barro-kitchens.png'].sort(), `${p.path}: the hyphenated brand names`);
+      assert.deepEqual(slugs.filter((s) => !/^https:\/\/(www\.facebook\.com|m\.me)\/barrokitchens$/.test(s)), ['/site/img/barro-kitchens-96.webp', 'https://barroindustries.com/icons/barro-kitchens.png'].sort(), `${p.path}: the hyphenated brand names`);
     });
-    assert.equal(total, 24);
+    assert.equal(total, 96);
   });
 
-  it('is CSS-neutral and script-neutral: no stylesheet or script selects or reads [data-brand]', () => {
+  it('carries the same permanent alternate names on every page as on the homepage — ["Barro Kitchens", "Barro Kitchens by Barro Industries"] — and the homepage says in a comment that they STAY when the brand is renamed', () => {
+    const homeLd = JSON.parse(home.match(/<script type="application\/ld\+json">(\{"@context":"https:\/\/schema\.org","@type":"LocalBusiness"[\s\S]*?)<\/script>/)[1]);
+    assert.deepEqual(homeLd.alternateName, ALT_NAMES);
+    each((p) => assert.deepEqual(p.node('LocalBusiness')[0].alternateName, homeLd.alternateName, `${p.path}: alternateName differs from the homepage`));
+    const note = home.match(/<!-- PERMANENT \(owner ruling, 2026-10-22\)[\s\S]*?-->/);
+    assert.ok(note, 'the PERMANENT comment is gone from the homepage head');
+    assert.ok(/formerly Barro Kitchens/.test(note[0]) && /STAYS/.test(note[0]) && /ADDED/.test(note[0]) && /data-brand-legacy/.test(note[0]) && /alternateName/.test(note[0]));
+  });
+
+  it('is CSS-neutral and script-neutral: no stylesheet or script selects or reads [data-brand] or [data-brand-legacy]', () => {
     assert.ok(!/data-brand/.test(pagesCss));
     for (const f of ['css/site.css', 'js/site.js']) assert.ok(!/data-brand/.test(read(f)), `${f} touches data-brand`);
   });
@@ -858,9 +886,9 @@ describe('header and footer: the same on every page, "Get a quote" top right and
     assert.deepEqual(cur(byPath('/faq/')), [['/faq/', 'page']]);
   });
 
-  it('has the footer links to Home, the hubs, the FAQ, the catalogue, Facebook, "Get a quote" and the discreet "Team portal"', () => {
+  it('has the footer links to Home, the hubs, the FAQ, the catalogue, Facebook, "Message us" (Messenger), "Get a quote" and the discreet "Team portal"', () => {
     const f = byPath('/faq/').footer;
-    assert.ok(f.includes('<p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>'));
+    assert.ok(f.includes(`<p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a>${msgLink('', 'Message us')}<a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>`));
   });
 });
 
@@ -943,9 +971,10 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
     }
   });
 
-  it('has one footer link row on the catalogue and the 12 pages (Home, Services, Our work, Areas we serve, FAQ, Catalogue, Facebook, Get a quote, Team portal) and the homepage\'s without Home — "Team portal" last everywhere', () => {
-    const rows = (html) => [...footLinks(html).matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    const FULL = [['/', 'Home'], ['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']];
+  it('has one footer link row on the catalogue and the 12 pages (Home, Services, Our work, Areas we serve, FAQ, Catalogue, Facebook, Message us, Get a quote, Team portal) and the homepage\'s without Home — "Team portal" last everywhere', () => {
+    // the Message us link carries an inline icon: take the <svg> out so the row reads as its words
+    const rows = (html) => [...footLinks(html).replace(/<svg[\s\S]*?<\/svg>/g, '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
+    const FULL = [['/', 'Home'], ['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']];
     assert.deepEqual(rows(catalogue), FULL);
     assert.deepEqual(rows(homeHtml), FULL.slice(1));
     for (const p of PAGES) assert.deepEqual(rows(p.html), FULL, p.path);
@@ -1005,10 +1034,10 @@ describe('links: every internal link resolves, the hubs list every child, every 
     });
   });
 
-  it('links only to the site, the verified Google Maps place, the Facebook page, one phone number and one email — external links open with rel="noopener"', () => {
+  it('links only to the site, the verified Google Maps place, the Facebook page, the Messenger chat, one phone number and one email — external links open with rel="noopener"', () => {
     each((p) => {
       for (const a of p.S.elements.filter((e) => e.tag === 'a' && /^https?:/.test(e.attrs.href || ''))) {
-        assert.ok([FB, PLACE_URL].includes(a.attrs.href), `${p.path}: an external link ${a.attrs.href}`);
+        assert.ok([FB, MSGR, PLACE_URL].includes(a.attrs.href), `${p.path}: an external link ${a.attrs.href}`);
         assert.equal(a.attrs.rel, 'noopener');
         assert.equal(a.attrs.target, '_blank');
       }
@@ -1240,5 +1269,89 @@ describe('sitemap and robots: the new paths are crawlable and listed', () => {
     }
     assert.equal(sm.split('<url>').length - 1, 14);
     assert.ok(!/brilliant/i.test(sm));
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// Owner 2026-10-22: "Message us" opens the Facebook Messenger chat (https://m.me/barrokitchens, which 302s to the chat). One link, written the same everywhere:
+// a small inline chat-bubble icon (a single <path>: no Facebook / Meta logo, no image, no script, no widget, the CSP unchanged), target=_blank + rel=noopener,
+// data-brand (the handle is the brand's, so a rename must find it; the inventory in the brand tests above allows exactly this URL beside the Facebook one).
+describe('"Message us": the Messenger chat is linked from every public footer, the homepage contact section and the two call-to-action bands — and nowhere else', () => {
+  const ALL = [['/', home], ['/catalogue/', catalogue], ...PAGES.map((p) => [p.path, p.html])];
+  const row = (html) => html.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
+  const msgAnchors = (html) => [...html.matchAll(/<a\b[^>]*\shref="https:\/\/m\.me\/[^"]*"[^>]*>[\s\S]*?<\/a>/g)].map((m) => m[0]);
+  const section = (html, re) => (html.match(re) || [''])[0];
+
+  it('has the link in the footer of the homepage, the catalogue and all 12 content pages: right after Facebook, before "Get a quote" and "Team portal" (which stays last), written exactly as the shared markup', () => {
+    assert.equal(ALL.length, 14);
+    for (const [p, html] of ALL) {
+      const r = row(html);
+      assert.deepEqual(msgAnchors(r), [msgLink('', 'Message us')], `${p}: the footer's Messenger link`);
+      const at = (s) => r.indexOf(s);
+      assert.ok(at('>Facebook</a>') >= 0 && at('>Facebook</a>') < at(MSGR) && at(MSGR) < at('>Get a quote</a>') && at('>Get a quote</a>') < at('Team portal'), `${p}: the footer order`);
+      assert.ok(r.endsWith('Team portal</a></p>'), `${p}: "Team portal" is not last`);
+      assert.ok(r.indexOf(MSGR) === r.indexOf('>Facebook</a>') + '>Facebook</a>'.length + '<a href="'.length, `${p}: not directly beside the Facebook link`);
+    }
+  });
+
+  it('writes it with its attributes: href https://m.me/barrokitchens, target="_blank", rel="noopener", a bare data-brand, the words "Message us" (no brand name), and an aria-hidden inline <svg> holding one <path>', () => {
+    for (const [p, html] of ALL) {
+      for (const a of msgAnchors(html)) {
+        const S = scan(a);
+        assert.deepEqual(S.problems, [], `${p}: the link is malformed`);
+        const el = S.elements[0];
+        assert.equal(el.tag, 'a');
+        assert.equal(el.attrs.href, 'https://m.me/barrokitchens');
+        assert.equal(el.attrs.target, '_blank');
+        assert.equal(el.attrs.rel, 'noopener');
+        assert.ok('data-brand' in el.attrs && el.attrs['data-brand'] === '', `${p}: no bare data-brand on the link`);
+        assert.deepEqual(S.elements.slice(1).map((e) => e.tag), ['svg', 'path'], `${p}: the icon is one svg with one path, nothing else`);
+        assert.equal(S.elements[1].attrs['aria-hidden'], 'true');
+        assert.ok(!('href' in S.elements[1].attrs) && !/<(img|use|image|script|style)\b/i.test(a), `${p}: the icon pulls in an external file`);
+        const words = visibleText(a);
+        assert.ok(/^Message us( on Messenger)?$/.test(words), `${p}: link text "${words}"`);
+        assert.ok(!/Barro|Kitchens/i.test(words), `${p}: the brand is in the link text`);
+      }
+    }
+  });
+
+  it('has it in the homepage CONTACT section as a prominent secondary (outline) button beside the primary "Get a quote" — "Message us on Messenger"', () => {
+    const contact = section(home, /<section id="contact"[\s\S]*?<\/section>/);
+    assert.ok(contact.includes(`<p class="contact-actions"><a class="site-btn site-btn-primary" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>${msgLink('site-btn site-btn-outline', 'Message us on Messenger')}</p>`));
+    assert.equal(msgAnchors(contact).length, 1);
+    assert.ok(/#site \.contact-actions\{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px\}/.test(read('css/site.css')), 'the two buttons sit side by side and wrap');
+  });
+
+  it('has it as a secondary (outline) button in the catalogue\'s "Can\'t find it?" band and in the FAQ page\'s closing call to action, between the primary button and the "or call" lines', () => {
+    const cat = section(catalogue, /<section class="cat-cta[\s\S]*?<\/section>/);
+    assert.ok(cat.includes(`data-qr-start>Request a quote</a>\n      ${msgLink('site-btn site-btn-outline', 'Message us')}\n      <p class="cat-cta-or">`), 'catalogue band');
+    const faq = section(byPath('/faq/').html, /<section class="pg-cta"[\s\S]*?<\/section>/);
+    assert.ok(faq.includes(`href="/catalogue/?quote=1">Get a quote</a>\n      ${msgLink('site-btn site-btn-outline', 'Message us')}\n      <p class="pg-cta-or">`), 'FAQ call to action');
+  });
+
+  it('links Messenger exactly where it was asked for: 2 places on the homepage (contact + footer), the catalogue and the FAQ page (call to action + footer), 1 on each other page (footer) — never in the header, the phone menu, the JSON-LD or the hero', () => {
+    const expected = { '/': 2, '/catalogue/': 2, '/faq/': 2 };
+    for (const [p, html] of ALL) {
+      assert.equal(msgAnchors(html).length, expected[p] || 1, `${p}: Messenger links`);
+      assert.deepEqual(msgAnchors(section(html, /<header id="site-header">[\s\S]*?<\/header>/)), [], `${p}: the header keeps "Get a quote" only`);
+      for (const s of scan(html).scripts.filter((x) => x.attrs.type === 'application/ld+json')) assert.ok(!/m\.me/.test(s.body), `${p}: m.me in the JSON-LD (it is not a profile)`);
+    }
+    assert.deepEqual(msgAnchors(section(home, /<section id="hero">[\s\S]*?<\/section>/)), []);
+  });
+
+  it('adds nothing to the CSP or the page weight: no Facebook / Meta / Messenger host in any CSP, no script, no image and no stylesheet from them, the icon is inline', () => {
+    for (const [p, html] of ALL) {
+      const csp = (html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1] || '';
+      assert.ok(csp && !/facebook|messenger|meta\.com|m\.me|fbcdn|fbsbx/i.test(csp), `${p}: the CSP names Messenger`);
+      const S = scan(html);
+      for (const e of S.elements.filter((x) => ['script', 'img', 'link', 'iframe', 'source'].includes(x.tag))) assert.ok(!/facebook|messenger|meta\.com|m\.me|fbcdn|fbsbx/i.test((e.attrs.src || '') + (e.attrs.href || '') + (e.attrs.srcset || '')), `${p}: a <${e.tag}> loads from Facebook / Messenger`);
+    }
+  });
+
+  it('styles the icon with one shared rule (currentColor, so it follows the link and its hover), in css/site.css which every one of these pages links', () => {
+    const css = read('css/site.css');
+    assert.ok(/#site \.msg-ic\{flex:none;margin-right:8px;vertical-align:-3px\}/.test(css));
+    for (const [p, html] of ALL.filter(([x]) => x !== '/')) assert.ok(/<link rel="stylesheet" href="\/css\/site\.css">/.test(html), `${p}: does not link css/site.css`);
+    assert.ok(!/data-brand/.test(css) && !/data-brand/.test(read('js/site.js')), 'a stylesheet or script reads [data-brand]');
   });
 });

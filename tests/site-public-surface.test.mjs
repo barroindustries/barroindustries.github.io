@@ -15,12 +15,17 @@
 //      indexable, Open Graph + Twitter large card with the hero project photo as an absolute URL, icons, sitemap and
 //      robots, JSON-LD (LocalBusiness + WebSite on "/", an ItemList of the 32 products on /catalogue/) — and no
 //      price or offer key in any of it.
-//   4. The brand is swappable. The primary public name is "Barro Industries"; "Barro Kitchens" is a brand that may be
-//      renamed, so every visible mention is wrapped in <span data-brand> (CSS-neutral), the brand is never in a
-//      <title>, and the exact inventory of places it appears is pinned: renaming it is a find-and-replace of that list.
+//   4. The brand. The primary public name is "Barro Industries"; "Barro Kitchens" is BOTH the current brand a rename SWAPS (every visible
+//      mention in a bare <span data-brand>, CSS-neutral) AND, by the owner's ruling of 2026-10-22, a PERMANENT historic name a rename KEEPS: it is
+//      REQUIRED in the "/" and /catalogue/ titles ("Barro Kitchens by Barro Industries"), SITE_TITLE, the meta descriptions, the JSON-LD
+//      alternateName array and the About line marked data-brand-legacy. The two markers are distinct and the exact inventory of places the name
+//      appears is pinned, so a rename is a find-and-replace of that list that knows which entries to swap and which to keep.
 //   5. scripts/build-catalogue.js generates the ItemList (names + #cat-… anchors only) from the same walk as the cards.
-//   6. The hero's logo-reveal animation: a muted <video> that plays once and holds its final frame (the poster), the 480px file under 900px and the
-//      720px file above, stopped under prefers-reduced-motion, never precached, no audio track, feathered into the hero by a mask.
+//   6. The hero's logo INTRO (2026-10-22): the muted clip plays once, translucent and large behind the headline (a hidden, aria-hidden overlay,
+//      opacity 0 until the clip plays), then flies to the header logo (#site-brand img, FLIP by transform + opacity) and is removed — and a
+//      visitor with no script, reduced motion, a data-saver request, a hidden tab, a refused autoplay, the app / boot views, or a page scrolled
+//      away sees none of it. Pinned as markup, stylesheet and BEHAVIOUR (js/site.js run in tests/fixtures/hero-intro-env.mjs, a small fake
+//      browser). The 480px file under 900px and the 720px file above, never precached, no audio track, no poster.
 //   7. The material: two stainless grades (SS304 food-grade as the standard, SS316 laboratory-grade) and three finishes (brushed, mirror, satin) are
 //      stated on the homepage and the catalogue; no past project is credited with a grade; no configurator or quote-flow option exists for either yet.
 //
@@ -35,6 +40,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { makeEnv, parseTransform } from './fixtures/hero-intro-env.mjs';
 
 const require = createRequire(import.meta.url);
 const B = require('../scripts/build-catalogue.js');
@@ -337,23 +343,26 @@ describe('2 · header: "Get a quote" top right, no Login · footer: a discreet "
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitemap, robots', () => {
-  it('gives each page its own keyword-rich title: the exact titles, distinct, short enough, not stuffed', () => {
-    assert.equal(home.title, 'Barro Industries — Premium Stainless-Steel Commercial Kitchens, Metro Manila');
-    assert.equal(catalogue.title, 'Commercial Kitchen Equipment Catalogue | Barro Industries');
+  it('gives each page its own keyword-rich title: the exact titles, distinct, short enough, not stuffed — and both carry "Barro Kitchens by Barro Industries" (owner ruling 2026-10-22: Barro Kitchens is a permanent, historic name of the business)', () => {
+    assert.equal(home.title, 'Barro Kitchens by Barro Industries — Premium Stainless-Steel Kitchens, Metro Manila');
+    assert.equal(catalogue.title, 'Commercial Kitchen Equipment Catalogue | Barro Kitchens by Barro Industries');
     assert.notEqual(home.title, catalogue.title);
     for (const p of [home, catalogue]) {
-      assert.ok(p.title.length >= 30 && p.title.length <= 80, `${p.file}: title length ${p.title.length}`);
+      assert.ok(p.title.length >= 30 && p.title.length <= 90, `${p.file}: title length ${p.title.length}`);
       assert.equal(p.S.texts.filter((t) => inHead(t.chain) && t.chain[t.chain.length - 1].tag === 'title').length, 1);
-      assert.equal(maxRepeat(p.title), 1, `${p.file}: a word is repeated in the title`);
-      assert.ok(/Barro Industries/.test(p.title), 'the primary public name is in the title');
+      // the only words repeated in a title are those the ruling itself repeats: "Barro" (the brand's and the company's) and, in the home title, "Kitchens" (the brand's and
+      // the product's); nothing else is stuffed
+      const seen = {}; for (const w of wordsOf(p.title)) seen[w] = (seen[w] || 0) + 1;
+      assert.deepEqual(Object.entries(seen).filter(([, n]) => n > 1), p === home ? [['barro', 2], ['kitchens', 2]] : [['barro', 2]], `${p.file}: a word is repeated in the title`);
+      assert.ok(p.title.includes('Barro Kitchens by Barro Industries'), 'the permanent name and the primary public name are in the title');
     }
-    assert.ok(/Metro Manila/.test(home.title) && /Stainless-Steel/.test(home.title) && /Commercial Kitchens/.test(home.title));
+    assert.ok(/Metro Manila/.test(home.title) && /Stainless-Steel/.test(home.title) && /Premium/.test(home.title) && /Kitchens/.test(home.title));
     assert.ok(/Commercial Kitchen Equipment/.test(catalogue.title));
   });
 
-  it('keeps the homepage <title> byte-identical to SITE_TITLE in js/app.js (the view switch restores it), the brand out of it, and the login-view title untouched', () => {
+  it('keeps the homepage <title> byte-identical to SITE_TITLE in js/app.js (the view switch restores it), the permanent name in it, and the login-view title untouched', () => {
     assert.equal(home.title, siteTitleInApp);
-    assert.ok(!siteTitleInApp.includes('Barro Kitchens'));
+    assert.ok(siteTitleInApp.includes('Barro Kitchens by Barro Industries'));
   });
 
   it('gives each page its own meta description: distinct, 100-200 characters, naming what the page is about, not stuffed', () => {
@@ -365,8 +374,10 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
       assert.ok(maxRepeat(d) <= 2, `${p.file}: a word is repeated in the description`);
       assert.ok(/\.$/.test(d), 'the description is a finished sentence');
     }
-    assert.ok(/^Premium stainless-steel commercial kitchens, built to order in Metro Manila: food-grade SS304 and laboratory-grade SS316 equipment, exhaust and fresh-air systems, gas lines and fire suppression\./.test(hd));
-    assert.ok(/^Browse premium commercial kitchen equipment in SS304 or SS316 stainless steel for preparation, washing, cooking, storage and refrigeration/.test(cd));
+    assert.ok(/^Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens to order in Metro Manila: food-grade SS304 and laboratory-grade SS316, exhaust and fresh-air systems, gas lines and fire suppression\.$/.test(hd));
+    assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, storage and refrigeration/.test(cd));
+    // the permanent name, once, in each (owner ruling 2026-10-22)
+    for (const d of [hd, cd]) assert.equal((d.match(/Barro Kitchens/g) || []).length, 1);
   });
 
   it('declares one absolute canonical URL per page, equal to the page\'s own address', () => {
@@ -456,18 +467,18 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     }
   });
 
-  it('on "/": a LocalBusiness named "Barro Industries" (legal name Barro Industries OPC, alternate name and brand Barro Kitchens) with sameAs = Facebook + the Google Maps place, and a minimal WebSite node', () => {
+  it('on "/": a LocalBusiness named "Barro Industries" (legal name Barro Industries OPC, alternate names [Barro Kitchens, Barro Kitchens by Barro Industries], brand Barro Kitchens) with sameAs = Facebook + the Google Maps place, and a WebSite node with the same alternate names', () => {
     assert.equal(home.ld.length, 2);
     const [lb, ws] = home.ld;
     assert.equal(lb['@type'], 'LocalBusiness');
     assert.equal(lb.name, 'Barro Industries');
     assert.equal(lb.legalName, 'Barro Industries OPC');
-    assert.equal(lb.alternateName, 'Barro Kitchens');
+    assert.deepEqual(lb.alternateName, ['Barro Kitchens', 'Barro Kitchens by Barro Industries'], 'PERMANENT: kept as an alternate name even after a rebrand');
     assert.deepEqual(lb.brand, { '@type': 'Brand', name: 'Barro Kitchens' });
     assert.deepEqual(lb.sameAs, ['https://www.facebook.com/barrokitchens', lb.hasMap]);
     assert.ok(lb.hasMap.startsWith('https://www.google.com/maps/place/'));
     assert.equal(lb.url, home.url);
-    assert.deepEqual(ws, { '@context': 'https://schema.org', '@type': 'WebSite', name: 'Barro Industries', url: 'https://barroindustries.com/' });
+    assert.deepEqual(ws, { '@context': 'https://schema.org', '@type': 'WebSite', name: 'Barro Industries', alternateName: ['Barro Kitchens', 'Barro Kitchens by Barro Industries'], url: 'https://barroindustries.com/' });
   });
 
   it('on /catalogue/: one ItemList with a ListItem per card, in page order — name and the #cat-… anchor of its category, no other key', () => {
@@ -513,73 +524,110 @@ function resolveMaster() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
-describe('4 · the brand is swappable: "Barro Industries" is the public name, "Barro Kitchens" a brand that may be renamed', () => {
+describe('4 · the brand: "Barro Industries" is the primary public name; "Barro Kitchens" is the current brand a rename SWAPS (data-brand) and a PERMANENT historic name a rename KEEPS (title, descriptions, alternateName, the About line: data-brand-legacy)', () => {
   const BRAND = 'Barro Kitchens';
+  const PHRASE = 'Barro Kitchens by Barro Industries';
   const count = (text) => text.split(BRAND).length - 1;
+  const ALT = ['Barro Kitchens', 'Barro Kitchens by Barro Industries'];
+  const ldHits = (ld) => { const out = []; (function walk(v, p) { if (typeof v === 'string') { if (v.includes(BRAND)) out.push(p); } else if (v && typeof v === 'object') for (const k of Object.keys(v)) walk(v[k], p ? `${p}.${k}` : k); })(ld, ''); return out; };
 
-  it('wraps every VISIBLE mention in <span data-brand> that holds exactly the name (homepage: header sub-line + footer; catalogue page: header sub-line + eyebrow + footer)', () => {
-    for (const [p, n] of [[home, 2], [catalogue, 3]]) {
-      const visible = p.S.texts.filter((t) => t.text.includes(BRAND));
-      assert.equal(visible.length, n, `${p.file}: visible mentions of the brand`);
-      for (const t of visible) {
+  it('wraps every VISIBLE mention in the body either in a bare <span data-brand> that holds exactly the name — SWAPPABLE: homepage header sub-line + footer, catalogue header sub-line + eyebrow + footer — or inside a data-brand-legacy element — PERMANENT: the homepage About line; the two markers are distinct and never on one element', () => {
+    for (const [p, nSwap, nLegacy] of [[home, 2, 1], [catalogue, 3, 0]]) {
+      const visible = p.S.texts.filter((t) => inBody(t.chain) && t.text.includes(BRAND));
+      const swap = visible.filter((t) => 'data-brand' in t.chain[t.chain.length - 1].attrs);
+      const legacy = visible.filter((t) => t.chain.some((e) => 'data-brand-legacy' in e.attrs));
+      assert.equal(swap.length, nSwap, `${p.file}: swappable mentions`);
+      assert.equal(legacy.length, nLegacy, `${p.file}: permanent mentions`);
+      assert.equal(visible.length, nSwap + nLegacy, `${p.file}: a visible mention is neither swappable nor permanent`);
+      for (const t of swap) {
         const parent = t.chain[t.chain.length - 1];
         assert.equal(parent.tag, 'span', `${p.file}: a mention is not wrapped`);
         assert.deepEqual(parent.attrs, { 'data-brand': '' }, `${p.file}: the wrapper must be a bare <span data-brand>`);
         assert.equal(t.text, BRAND, `${p.file}: the span holds more than the name`);
       }
-      assert.equal(p.S.elements.filter((e) => e.tag === 'span' && 'data-brand' in e.attrs).length, n, `${p.file}: a data-brand span holds no brand name`);
+      assert.equal(p.S.elements.filter((e) => e.tag === 'span' && 'data-brand' in e.attrs).length, nSwap, `${p.file}: a data-brand span holds no brand name`);
+      assert.equal(p.S.elements.filter((e) => 'data-brand-legacy' in e.attrs).length, nLegacy, `${p.file}: data-brand-legacy elements`);
+      assert.ok(!p.S.elements.some((e) => 'data-brand' in e.attrs && 'data-brand-legacy' in e.attrs), `${p.file}: one element carries both markers`);
+      assert.ok(!p.S.elements.some((e) => 'data-brand' in e.attrs && e.chain.some((c) => 'data-brand-legacy' in c.attrs)) && !legacy.some((t) => t.chain.some((e) => 'data-brand' in e.attrs)), `${p.file}: the markers are nested`);
       assert.ok(p.html.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'), `${p.file}: the header sub-line`);
     }
     assert.ok(home.footer.includes('<span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.'));
     assert.ok(catalogue.footer.includes('<span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.'));
     assert.ok(catalogue.html.includes('<p class="eyebrow"><span data-brand>Barro Kitchens</span></p>'));
-    // the one other data-brand element: the hero's logo animation (a brand-specific ASSET, labelled with the name); the catalogue page has none
-    assert.deepEqual(home.S.elements.filter((e) => e.tag !== 'span' && 'data-brand' in e.attrs).map((e) => e.tag), ['video']);
-    assert.deepEqual(catalogue.S.elements.filter((e) => e.tag !== 'span' && 'data-brand' in e.attrs), []);
+    // the permanent line: ONE grammatical sentence in the About copy, right after the family-business line, marked data-brand-legacy
+    assert.ok(home.html.includes('<p class="about-note">The company began as a family business in Baguio City and La Union.</p>\n      <p class="about-note" data-brand-legacy>Our kitchens have long been known as Barro Kitchens.</p>'));
+    // the other data-brand elements: the hero's logo animation (a brand-specific ASSET, labelled with the name; the catalogue page has none) and the Messenger
+    // "Message us" links, whose URL carries the brand's handle (https://m.me/barrokitchens; owner 2026-10-22): the homepage has two (contact + footer), the catalogue two
+    // (call to action + footer). tests/seo-pages.test.mjs pins where each one sits.
+    const others = (p) => p.S.elements.filter((e) => e.tag !== 'span' && 'data-brand' in e.attrs).map((e) => (e.tag === 'a' ? `a ${e.attrs.href}` : e.tag));
+    assert.deepEqual(others(home), ['video', 'a https://m.me/barrokitchens', 'a https://m.me/barrokitchens']);
+    assert.deepEqual(others(catalogue), ['a https://m.me/barrokitchens', 'a https://m.me/barrokitchens']);
   });
 
-  it('is CSS-neutral: no stylesheet or script selects or reads [data-brand]', () => {
+  it('is CSS-neutral: no stylesheet or script selects or reads [data-brand] or [data-brand-legacy]', () => {
     for (const f of ['css/site.css', 'css/catalogue.css', 'css/quote-request.css', 'css/styles.css', 'js/site.js', 'js/catalogue.js', 'js/quote-request.js']) assert.ok(!/data-brand/.test(read(f)), `${f} touches data-brand`);
   });
 
-  it('pins the exact inventory of places the brand name appears, so a rename is a find-and-replace of this list', () => {
-    // index.html — public parts: 2 visible spans (above), 1 logo alt, 1 label on the hero's logo animation, 2 JSON-LD fields (LocalBusiness.alternateName, LocalBusiness.brand.name)
-    const homeAlt = home.S.attrs.filter((a) => a.value.includes(BRAND));
+  it('REQUIRES the name in the search results (owner ruling 2026-10-22: Barro Kitchens is well known, so searching it must show Barro Industries, now and after any rebrand): "Barro Kitchens by Barro Industries" in the <title>, og:title and twitter:title of "/" and /catalogue/ and in SITE_TITLE, and "Barro Kitchens" once in each meta description', () => {
+    for (const p of [home, catalogue]) {
+      for (const v of [p.title, p.meta('og:title'), p.meta('twitter:title')]) assert.ok(v.includes(PHRASE), `${p.file}: the title lacks "${PHRASE}"`);
+      for (const k of ['description', 'og:description', 'twitter:description']) assert.equal(count(p.meta(k)), 1, `${p.file}: ${k} names the brand ${count(p.meta(k))} times`);
+      assert.equal(p.meta('og:site_name'), 'Barro Industries', 'og:site_name stays the company');
+      for (const k of ['og:site_name', 'og:image:alt', 'twitter:image:alt']) assert.ok(!p.meta(k).includes(BRAND), `${p.file}: ${k}`);
+    }
+    assert.ok(home.title.startsWith(PHRASE + ' — '), 'the home title leads with the permanent name');
+    assert.ok(catalogue.title.endsWith(' | ' + PHRASE), 'the catalogue title ends with it, as the content pages end with "| Barro Industries"');
+    assert.ok(siteTitleInApp.includes(PHRASE));
+  });
+
+  it('pins the exact inventory of places the brand name appears, so a rename is a find-and-replace of this list — what it SWAPS (data-brand) and what it KEEPS (permanent)', () => {
+    // index.html, 19 in all. KEEPS (permanent): <title>, og:title, twitter:title (3), description, og:description, twitter:description (3), the PERMANENT note (a comment, 3 mentions),
+    //   JSON-LD LocalBusiness.alternateName x2 and WebSite.alternateName x2 (4), the About line (1). SWAPS or is brand artwork: the header sub-line and the footer line (2 spans),
+    //   LocalBusiness.brand.name (1), the header logo's alt (1) and the animation's aria-label (1).
+    const metaNames = home.S.elements.filter((e) => e.tag === 'meta' && count(e.attrs.content || '')).map((e) => e.attrs.name || e.attrs.property).sort();
+    assert.deepEqual(metaNames, ['description', 'og:description', 'og:title', 'twitter:description', 'twitter:title']);
+    const homeAlt = home.S.attrs.filter((a) => a.tag !== 'meta' && a.value.includes(BRAND));
     assert.deepEqual(homeAlt.map((a) => `${a.tag}[${a.name}]=${a.value}`), ['img[alt]=Barro Kitchens logo', 'video[aria-label]=Barro Kitchens logo animation']);
-    const ldHits = [];
-    (function walk(v, p) { if (typeof v === 'string') { if (v.includes(BRAND)) ldHits.push(p); } else if (v && typeof v === 'object') for (const k of Object.keys(v)) walk(v[k], p ? `${p}.${k}` : k); })(home.ld, '');
-    assert.deepEqual(ldHits, ['0.alternateName', '0.brand.name']);
-    assert.equal(home.S.comments.filter((c) => c.text.includes(BRAND)).length + home.S.scripts.filter((s) => s.attrs.type !== 'application/ld+json' && s.body.includes(BRAND)).length, 0, 'a comment or script names the brand');
-    // catalogue/index.html: 3 visible spans (above), 1 logo alt, nothing in the head, the ItemList or the data island
-    assert.deepEqual(catalogue.S.attrs.filter((a) => a.value.includes(BRAND)).map((a) => `${a.tag}[${a.name}]=${a.value}`), ['img[alt]=Barro Kitchens logo']);
+    assert.deepEqual(ldHits(home.ld), ['0.alternateName.0', '0.alternateName.1', '0.brand.name', '1.alternateName.0', '1.alternateName.1']);
+    assert.deepEqual(home.ld[0].alternateName, ALT);
+    assert.deepEqual(home.ld[1].alternateName, ALT);
+    const homeNotes = home.S.comments.filter((c) => c.text.includes(BRAND));
+    assert.equal(homeNotes.length, 1, 'only the PERMANENT note names the brand in a comment');
+    assert.equal(count(homeNotes[0].text), 3);
+    assert.match(homeNotes[0].text, /^ PERMANENT \(owner ruling, 2026-10-22\)/);
+    assert.equal(home.S.scripts.filter((s) => s.attrs.type !== 'application/ld+json' && s.body.includes(BRAND)).length, 0, 'a script names the brand');
+    assert.equal(count(home.html), 19);
+    // catalogue/index.html, 11: <title>, og:title, twitter:title, 3 descriptions, the PERMANENT note (1), 3 visible spans, 1 logo alt; nothing in the ItemList or the data island
+    assert.deepEqual(catalogue.S.attrs.filter((a) => a.tag !== 'meta' && a.value.includes(BRAND)).map((a) => `${a.tag}[${a.name}]=${a.value}`), ['img[alt]=Barro Kitchens logo']);
+    assert.equal(catalogue.S.elements.filter((e) => e.tag === 'meta' && count(e.attrs.content || '')).length, 5);
+    assert.equal(catalogue.S.comments.filter((c) => c.text.includes(BRAND)).length, 1);
     assert.equal(catalogue.S.scripts.filter((s) => s.body.includes(BRAND)).length, 0);
-    assert.equal(count(catalogue.head), 0);
+    assert.equal(count(catalogue.head), 7);
+    assert.equal(count(catalogue.html), 11);
     // the places outside the two pages: the intake's privacy notice (and its byte-identical mirror in functions/) and the generator's one constant
     assert.equal(count(read('js/qr-def.js')), 1);
     assert.equal(read('functions/qr-def.js'), read('js/qr-def.js'));
     assert.ok(/trading as Barro Kitchens\./.test(read('js/qr-def.js')));
     assert.equal(B.SITE_BRAND_NAME, BRAND);
     assert.equal((read('scripts/build-catalogue.js').match(/'Barro Kitchens'/g) || []).length, 1, 'the generator holds the brand in exactly one constant');
-    // so: renaming = on "/" 2 wrapped spans + 1 logo alt + 1 animation label + 2 JSON-LD fields; on /catalogue/ 3 wrapped spans + 1 logo alt; the privacy notice;
-    // the generator's constant — 12 places in all, each listed above (and the animation's FILES, which are brand artwork, not text)
     const total = count(home.html) + count(catalogue.html) + count(read('js/qr-def.js')) + 1;
     assert.equal(home.S.elements.filter((e) => e.tag === 'script' && e.attrs.type === 'application/ld+json').length, 2);
-    assert.equal(total, 6 + 4 + 1 + 1, 'the brand appears somewhere new: wrap it in <span data-brand> (or list it here) so a rename still finds every place');
+    assert.equal(total, 19 + 11 + 1 + 1, 'the brand appears somewhere new: wrap it in <span data-brand> (swappable) or data-brand-legacy (permanent), or list it here, so a rename still finds every place');
   });
 
-  it('keeps the brand out of every <title>, og:title and twitter:title, and out of SITE_TITLE (the public name is Barro Industries)', () => {
-    for (const p of [home, catalogue]) {
-      for (const v of [p.title, p.meta('og:title'), p.meta('twitter:title')]) assert.ok(!v.includes(BRAND), `${p.file}: the brand is in a title`);
-    }
-    assert.ok(!siteTitleInApp.includes(BRAND));
-    // ... nor in the descriptions or the other social tags (fewer places to change)
-    for (const p of [home, catalogue]) for (const k of ['description', 'og:description', 'twitter:description', 'og:site_name', 'og:image:alt']) assert.ok(!p.meta(k).includes(BRAND), `${p.file}: ${k}`);
+  it('writes the PERMANENT rule down where the permanent name lives — the homepage head and the catalogue head — in a comment: if the brand is renamed, the new brand is ADDED and "Barro Kitchens" STAYS as alternateName ("formerly Barro Kitchens"), and data-brand marks what a rename swaps, data-brand-legacy what it keeps', () => {
+    const note = home.S.comments.find((c) => /PERMANENT/.test(c.text));
+    assert.ok(note && inHead(note.chain));
+    for (const w of ['ADDED', 'STAYS', 'alternateName', 'formerly Barro Kitchens', 'data-brand-legacy', 'data-brand marks what a rename SWAPS']) assert.ok(note.text.includes(w), `the note lacks "${w}"`);
+    const cat = catalogue.S.comments.find((c) => /PERMANENT/.test(c.text));
+    assert.ok(cat && inHead(cat.chain) && /permanent, historic name/.test(cat.text));
   });
 
-  it('keeps "Barro Industries" as the primary public name: the header name, og:site_name, the WebSite name and the LocalBusiness name', () => {
+  it('keeps "Barro Industries" as the primary public name: the header name, og:site_name, the WebSite name, the LocalBusiness name and legal name', () => {
     for (const p of [home, catalogue]) assert.ok(p.header.includes('<span class="site-brand-name">Barro Industries</span>'));
     assert.equal(home.meta('og:site_name'), 'Barro Industries');
     assert.equal(home.ld[0].name, 'Barro Industries');
+    assert.equal(home.ld[0].legalName, 'Barro Industries OPC');
     assert.equal(home.ld[1].name, 'Barro Industries');
   });
 });
@@ -654,10 +702,11 @@ describe('5 · scripts/build-catalogue.js generates the ItemList (names + catego
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
-describe('6 · the hero logo animation: a muted video that plays once, holds its last frame and costs the page nothing', () => {
+describe('6 · the hero logo intro: a translucent clip behind the headline that flies to the header logo, and leaves nothing behind', () => {
   const video = home.S.elements.filter((e) => e.tag === 'video');
   const sources = home.S.elements.filter((e) => e.tag === 'source' && e.chain.some((c) => c.tag === 'video'));
   const hero = home.html.match(/<section id="hero">[\s\S]*?<\/section>/)[0];
+  const ghosts = home.S.elements.filter((e) => /(^|\s)hero-ghost(\s|$)/.test(e.attrs.class || ''));
   const mp4 = (rel) => fs.readFileSync(path.join(ROOT, rel));
   // a minimal MP4 box reader: the handler type of every track ('vide' / 'soun'), the movie duration and the first video track's size
   function mp4Info(buf) {
@@ -678,24 +727,43 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
     return { handlers, duration, size };
   }
 
-  it('puts ONE <video> in the hero, after the headline in reading order, inside .hero-mark, with the poster, muted, playsinline, preload none, no loop, no controls, not focusable — started by js/site.js, never by an autoplay attribute', () => {
+  // ── the markup ─────────────────────────────────────────────────────────────────────────────────────────────
+  it('puts ONE overlay in the hero — a hidden, aria-hidden .hero-ghost, a direct child of #hero after the photo and the scrim and before the text — holding ONE <video>: muted, playsinline, preload none, no autoplay / loop / controls / poster / src / tabindex', () => {
     assert.equal(video.length, 1);
     assert.equal(catalogue.S.elements.filter((e) => e.tag === 'video').length, 0);
+    assert.equal(ghosts.length, 1);
+    const g = ghosts[0];
+    assert.equal(g.tag, 'div');
+    assert.deepEqual(g.attrs, { class: 'hero-ghost', 'aria-hidden': 'true', hidden: '' }, 'the overlay carries exactly a class, aria-hidden and hidden');
+    assert.equal(g.chain[g.chain.length - 1].attrs.id, 'hero', 'the overlay is not a direct child of #hero');
+    const at = (s) => hero.indexOf(s);
+    assert.ok(at('class="hero-bg"') >= 0 && at('class="hero-bg"') < at('class="hero-scrim"') && at('class="hero-scrim"') < at('class="hero-ghost"') && at('class="hero-ghost"') < at('class="site-wrap hero-in"'), 'order in the hero: photo, scrim, overlay, text');
+    // the video is the overlay's only content, and nothing else in the hero is media
+    assert.equal(video[0].chain[video[0].chain.length - 1].attrs.class, 'hero-ghost');
     const v = video[0].attrs;
-    assert.ok(hero.includes('<video'), 'the video is not in #hero');
-    assert.deepEqual(video[0].chain.slice(-2).map((e) => e.attrs.class), ['site-wrap hero-in', 'hero-mark']);
-    assert.ok(hero.indexOf('<h1>') < hero.indexOf('<video'), 'the headline must come first (reading order); CSS puts the clip above it on a phone');
     for (const a of ['muted', 'playsinline', 'data-brand', 'disablepictureinpicture', 'disableremoteplayback']) assert.ok(a in v, `video lacks ${a}`);
     // preload="none" + a script-started play(), NOT autoplay + metadata: this index.html is also the installed app and the team sign-in, #site is display:none
     // there, and an autoplay video in a hidden page still downloads its whole file on every launch (measured: 0.8-1.3 MB per app start)
     assert.equal(v.preload, 'none');
-    assert.ok(!('autoplay' in v), 'an autoplay attribute would download the clip in the hidden app / login view');
-    assert.ok(!/<script/.test(hero), 'no script belongs inside the hero');
-    assert.equal(v.poster, 'site/img/brand/brand-reveal-poster.webp');
+    for (const a of ['autoplay', 'loop', 'controls', 'poster', 'src', 'tabindex', 'controlslist', 'fetchpriority']) assert.ok(!(a in v), `video must not carry ${a}`);
     assert.equal(v['aria-label'], 'Barro Kitchens logo animation');
     assert.equal(v.width, '720'); assert.equal(v.height, '720');
-    for (const a of ['loop', 'controls', 'tabindex', 'src', 'controlslist', 'autoplay']) assert.ok(!(a in v), `video must not carry ${a}`);
+    assert.ok(!/<script/.test(hero), 'no script belongs inside the hero');
     assert.ok(!/<(audio|track)\b/.test(hero));
+    assert.ok(!hero.includes('brand-reveal-poster'), 'there is no poster: nothing can linger as a big ghost when play() is refused');
+  });
+
+  it('leaves nothing of the old small mark in the hero: no .hero-mark anywhere, the text column\'s own spacing is back (48px under the header, 24px under the 23, 32px above the buttons, no phone-only trims), and the desktop scrim still opens up on the right so the photo shows', () => {
+    for (const [label, text] of [['index.html', home.html], ['css/site.css', siteCss], ['js/site.js', siteJs]]) assert.ok(!/hero-mark/.test(text), `${label} still mentions .hero-mark`);
+    const heroIn = home.S.elements.filter((e) => e.chain.length && e.chain[e.chain.length - 1].attrs.class === 'site-wrap hero-in').map((e) => e.attrs.class);
+    assert.deepEqual(heroIn, ['hero-copy'], 'the text column holds only the copy');
+    assert.ok(siteCss.includes('#site .hero-in{width:100%;padding-top:calc(var(--site-head) + 48px);padding-bottom:calc(clamp(48px,9vh,104px) + var(--proof-lift))}'));
+    assert.ok(siteCss.includes('#site .hero-years{display:flex;align-items:flex-end;gap:16px;margin-bottom:24px}'));
+    assert.ok(siteCss.includes('#site .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}'));
+    assert.ok(!/@media \(max-width:899px\)\{\s*#site \.hero-years/.test(siteCss), 'the phone-only spacing trims that made room for the mark are back');
+    assert.ok(!/#site \.hero-in\{[^}]*display:flex/.test(siteCss), 'the text column is no longer a flex column that orders a mark above the copy');
+    assert.ok(siteCss.includes('rgba(11,27,63,.18) 80%,rgba(11,27,63,.06) 100%)'), 'the desktop scrim must open up on the right so the hero photo is visible');
+    assert.ok(/#hero\{position:relative;isolation:isolate;display:flex;align-items:flex-end;/.test(siteCss));
   });
 
   it('offers both files as sources — the 480px one first, under 900px; the 720px one otherwise — each gated on prefers-reduced-motion: no-preference, so a visitor who asked for less motion downloads no video', () => {
@@ -704,9 +772,9 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
       ['site/img/brand/brand-reveal-720.mp4', 'video/mp4', '(prefers-reduced-motion:no-preference)'],
     ]);
     for (const s of sources) assert.ok(exists(s.attrs.src), `${s.attrs.src} is missing`);
-    assert.ok(exists('site/img/brand/brand-reveal-poster.webp') && exists('site/img/brand/brand-reveal-poster.jpg'));
-    // the 900px threshold is the same one the layout flips at (the clip becomes the right column), so the file matches the size on screen
-    assert.ok(/@media \(min-width:900px\)\{\s*#site \.hero-in\{display:flex;/.test(siteCss));
+    assert.ok(exists('site/img/brand/brand-reveal-poster.webp') && exists('site/img/brand/brand-reveal-poster.jpg'), 'the poster artwork stays in the brand folder (unused by the page: the intro has no poster)');
+    // the 900px threshold is the same one the layout flips at (the overlay moves to the open photo on the right), so the file matches the size on screen
+    assert.ok(/@media \(min-width:900px\)\{\s*#site #hero h1\{[^}]*\}[\s\S]*?#site \.hero-ghost\{top:calc\(43vh - 18vw\);top:calc\(43svh - min\(27vmin,18vw\)\);left:auto;/.test(siteCss));
   });
 
   it('(the MP4 reader behind the next test) sees an audio track when there is one, and reads size and duration from the boxes', () => {
@@ -720,7 +788,7 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
     assert.deepEqual(mp4Info(withAudio).handlers, ['vide', 'soun']);
   });
 
-  it('ships the files the owner supplied, as is: 720x720 and 480x480, 10.0 s, H.264 video only — NO audio track — and light enough (1.5 MB / 1 MB, poster 40 KB)', () => {
+  it('ships the files the owner supplied, as is: 720x720 and 480x480, 10.0 s, H.264 video only — NO audio track — and light enough (1.5 MB / 1 MB)', () => {
     for (const [rel, w, maxBytes] of [['site/img/brand/brand-reveal-720.mp4', 720, 1.5e6], ['site/img/brand/brand-reveal-480.mp4', 480, 1.0e6]]) {
       const buf = mp4(rel), info = mp4Info(buf);
       assert.deepEqual(info.handlers, ['vide'], `${rel}: tracks ${info.handlers.join()} (an audio track would break "muted, silent")`);
@@ -729,23 +797,31 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
       assert.ok(buf.length < maxBytes, `${rel}: ${buf.length} bytes`);
       assert.ok(buf.includes(Buffer.from('avc1')), `${rel} is not H.264`);
     }
+    // "fast start": the movie box precedes the media data, so a play() on a preload="none" clip can begin after the first range request
+    for (const rel of ['site/img/brand/brand-reveal-720.mp4', 'site/img/brand/brand-reveal-480.mp4']) { const b = mp4(rel); assert.ok(b.indexOf(Buffer.from('moov')) > 0 && b.indexOf(Buffer.from('moov')) < b.indexOf(Buffer.from('mdat')), `${rel}: moov after mdat`); }
     assert.ok(mp4('site/img/brand/brand-reveal-poster.webp').length < 40000);
     assert.deepEqual(B.webpSize(mp4('site/img/brand/brand-reveal-poster.webp')), { width: 720, height: 720 });
   });
 
   it('never plays with sound: muted in the markup, no script unmutes it or sets a volume, and only js/site.js ever starts the clip', () => {
     for (const f of ['js/site.js', 'js/catalogue.js', 'js/quote-request.js']) assert.ok(!/\.muted\s*=\s*false|\.volume\s*=|unmute/i.test(read(f)), `${f} touches the video's sound`);
-    for (const f of ['js/catalogue.js', 'js/quote-request.js', 'js/app.js']) assert.ok(!/#hero video|vid\.play|video\.play\(/.test(read(f)), `${f} starts the clip`);
+    for (const f of ['js/catalogue.js', 'js/quote-request.js', 'js/app.js']) assert.ok(!/hero-ghost|#hero video|vid\.play|video\.play\(/.test(read(f)), `${f} starts the clip`);
     assert.ok('muted' in video[0].attrs && !('autoplay' in video[0].attrs));
-    assert.ok(!/\.muted\s*=/.test(read('js/site.js').replace(/\/\*[\s\S]*?\*\//g, '')));
+    assert.ok(!/\.muted\s*=/.test(siteJs.replace(/\/\*[\s\S]*?\*\//g, '')));
+    // started by play() and nothing else: no script switches autoplay on either
+    assert.ok(!/\.autoplay\s*=|setAttribute\(\s*['"]autoplay/.test(siteJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')), 'js/site.js turns autoplay on');
   });
 
-  it('keeps the hero PHOTO the LCP image (fetchpriority high, eager) and the clip off the critical path: preload none, a 20 KB poster, no preload link, no fetchpriority on the video', () => {
+  it('keeps the hero PHOTO the LCP image (fetchpriority high, eager) and the overlay off the critical path: no poster, preload none, hidden and at opacity 0 until the clip plays — a <video> that is not drawn can never be the largest paint — no preload link, no fetchpriority on the video', () => {
     const bg = home.S.elements.find((e) => e.tag === 'img' && /hero-bg/.test(e.attrs.class || ''));
     assert.equal(bg.attrs.fetchpriority, 'high');
     assert.ok(!('loading' in bg.attrs && bg.attrs.loading === 'lazy'));
     assert.ok(!home.S.elements.some((e) => e.tag === 'link' && /brand-reveal/.test(e.attrs.href || '')), 'a <link rel=preload> would put the clip on the critical path');
     assert.ok(!('fetchpriority' in video[0].attrs));
+    // nothing of the overlay is drawn at first paint: hidden in the markup, opacity 0 in the stylesheet, and the stylesheet never shows it by itself
+    assert.ok('hidden' in ghosts[0].attrs);
+    assert.ok(/#site \.hero-ghost\{[^}]*;opacity:0;/.test(siteCss));
+    assert.equal([...siteCss.matchAll(/#site \.hero-ghost\.is-on\{/g)].length, 2, 'only the .is-on state (set by js/site.js once the clip plays) gives it any opacity');
   });
 
   it('is NEVER precached: not site/img/brand/, no video file, in sw.js PRECACHE or precache-manifest.json — and CHECK 9 guards it by name', () => {
@@ -756,49 +832,66 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
     assert.ok(!/brand-reveal|site\/img\/brand/.test(read('js/config.js')), 'config.js PAGE_SCRIPTS lists it');
   });
 
-  it('starts the clip from js/site.js only when the hero is ON SCREEN (IntersectionObserver) and motion is allowed — never in a hidden page (installed app, team sign-in: #site is display:none), never under prefers-reduced-motion — and swallows a refused play(), so the poster stays', () => {
-    const run = ({ reduced = false, io = true, visible = true, view = 'site', rejectPlay = false }) => {
-      const calls = [];
-      const vid = { play: () => { calls.push('play()'); return rejectPlay ? Promise.reject(new Error('NotAllowedError')) : Promise.resolve(); } };
-      class FakeIO { constructor(cb) { this.cb = cb; calls.push('observer'); } observe(el) { assert.equal(el, vid); calls.push('observe'); if (visible) this.cb([{ isIntersecting: false }, { isIntersecting: true }]); } disconnect() { calls.push('disconnect'); } }
-      const doc = { readyState: 'complete', documentElement: { scrollTop: 0, getAttribute: (k) => (k === 'data-view' ? view : null) }, getElementById: () => null, querySelector: (sel) => (sel === '#hero video' ? vid : null), querySelectorAll: () => [], addEventListener() {} };
-      const win = { matchMedia: (q) => ({ matches: reduced && /prefers-reduced-motion: reduce/.test(q) }), addEventListener() {}, innerWidth: 1440, pageYOffset: 0 };
-      const sandbox = { document: doc, window: win };
-      if (io) { win.IntersectionObserver = FakeIO; sandbox.IntersectionObserver = FakeIO; }
-      vm.runInNewContext(siteJs, sandbox);
-      return calls;
-    };
-    assert.deepEqual(run({}), ['observer', 'observe', 'disconnect', 'play()'], 'visible hero, motion allowed: observe, then play once');
-    assert.deepEqual(run({ visible: false }), ['observer', 'observe'], 'a hidden or scrolled-away hero never starts the clip');
-    assert.deepEqual(run({ reduced: true }), [], 'prefers-reduced-motion: no observer, no play()');
-    assert.deepEqual(run({ io: false, view: 'site' }), ['play()'], 'no IntersectionObserver: start only if the website is the current view');
-    for (const view of ['boot', 'login', 'app']) assert.deepEqual(run({ io: false, view }), [], `no IntersectionObserver, data-view=${view}`);
-    assert.deepEqual(run({ rejectPlay: true }), ['observer', 'observe', 'disconnect', 'play()'], 'a rejected play() (blocked autoplay) must not throw');
-  });
-
-  it('feathers the clip into the hero with a radial mask (and the -webkit- prefix) that is fully opaque over the whole logo and zero at the edges of the square, over a soft pool — and never takes a click, a focus or a 4-digit z-index', () => {
-    const rule = siteCss.match(/#site \.hero-mark video\{([^}]*)\}/)[1];
+  // ── the stylesheet ─────────────────────────────────────────────────────────────────────────────────────────
+  it('draws the overlay big and translucent, centred across the hero and in the middle of its first screen, feathered by a circular mask and never taking a click: absolute, z-index -1 (above the photo and the scrim, below every line of text), opacity 0 until the clip plays', () => {
+    const base = siteCss.match(/#site \.hero-ghost\{([^}]*)\}/)[1].split(';');
+    for (const decl of ['position:absolute', 'z-index:-1', 'right:0', 'bottom:auto', 'left:0', 'margin:0 auto', 'opacity:0', 'pointer-events:none']) assert.ok(base.includes(decl), `.hero-ghost lacks ${decl}`);
+    // the vertical position is a constant of the VIEWPORT (the middle of the hero's first screen), never a percentage of the hero: the hero grows by tens of px when the web fonts
+    // swap in after load, and a box centred in it would move with it — a measured layout shift (CLS 0.021 -> 0.026). A plain vh fallback comes before the svh version.
+    assert.ok(base.includes('top:calc(46svh - min(35vw,45svh))') && base.includes('top:calc(46vh - 35vw)') && base.indexOf('top:calc(46vh - 35vw)') < base.indexOf('top:calc(46svh - min(35vw,45svh))'));
+    assert.ok(!base.some((d) => /^(top|bottom):\d+(\.\d+)?%$/.test(d)) && !base.includes('margin:auto') && !base.includes('bottom:0') && !base.includes('top:0'), 'positioned from the hero\'s own height: it would move when the fonts swap');
+    assert.ok(base.includes('width:min(70vw,90svh)') && base.includes('height:min(70vw,90svh)'), 'about 70vw across on a phone (never taller than the viewport)');
+    // a browser that does not know svh drops the min() declaration: the plain-vw one before it keeps the box 70vw across instead of stretching it over the whole hero
+    assert.ok(base.includes('width:70vw') && base.includes('height:70vw') && base.indexOf('width:70vw') < base.indexOf('width:min(70vw,90svh)') && base.indexOf('height:70vw') < base.indexOf('height:min(70vw,90svh)'));
+    assert.ok(base.some((d) => /^transition:opacity \.7s ease-out$/.test(d)), 'the fade-in is a .7 s opacity transition');
+    // a circular, feathered mask (and the -webkit- prefix): fully opaque over the cube and its flame, zero at the middle of every edge of the clip's square, so no square edge shows
     for (const prop of ['-webkit-mask-image', 'mask-image']) {
-      const m = rule.match(new RegExp(`(?:^|;)${prop}:radial-gradient\\(closest-side,#000 (\\d+)%,transparent 100%\\)`));
+      const m = base.join(';').match(new RegExp(`(?:^|;)${prop}:radial-gradient\\(closest-side,#000 (\\d+)%,transparent 100%\\)`));
       assert.ok(m, `${prop} is not a closest-side radial gradient ending transparent at 100%`);
-      // the logo, measured over all 10 s of the clip, reaches 88% of the radius (the cube while it is forged); the opaque stop must hold it, and a stop
-      // near 100% would leave no fade at all
-      assert.ok(Number(m[1]) >= 84 && Number(m[1]) <= 92, `${prop}: opaque stop ${m[1]}%`);
+      assert.ok(Number(m[1]) >= 55 && Number(m[1]) <= 70, `${prop}: opaque stop ${m[1]}% (the cube and its flame sit inside 62% of the radius)`);
     }
-    assert.ok(/pointer-events:none/.test(rule) && /aspect-ratio:1\/1/.test(rule));
-    assert.ok(/#site \.hero-mark::before\{[^}]*z-index:-1[^}]*radial-gradient\(closest-side/.test(siteCss), 'the soft pool behind the clip is gone');
-    assert.ok(!/z-index:\s*-?\d{4}/.test(siteCss), 'a 4-digit z-index (CHECK 1) — the pool sits at z-index:-1 inside the hero\'s own stacking context');
+    assert.ok(/#site \.hero-ghost video\{[^}]*pointer-events:none[^}]*\}/.test(siteCss));
+    assert.ok(/#site \.hero-ghost\.is-off\{opacity:0;transition-duration:\.22s\}/.test(siteCss), 'the quick fade (scrolled away, no fly)');
+    assert.ok(!/z-index:\s*-?\d{4}/.test(siteCss), 'a 4-digit z-index (CHECK 1)');
+    // above the scrim and the photo, below the text: negative z-index inside the hero's own stacking context (isolation:isolate); the sticky header (z-index 2) is above all of it
+    assert.ok(/#site \.hero-bg\{[^}]*z-index:-2/.test(siteCss) && /#site \.hero-scrim\{[^}]*z-index:-1/.test(siteCss));
+    assert.ok(/#hero\{[^}]*isolation:isolate/.test(siteCss));
+    assert.ok(/#site-header\{position:sticky;top:0;z-index:2;/.test(siteCss), 'the header must stay above the overlay');
+    assert.ok(!/mix-blend-mode/.test(siteCss.replace(/\/\*[\s\S]*?\*\//g, '')), 'plain alpha: screen blending was tried and erases the dark navy face of the cube');
   });
 
-  // Owner 2026-10-22: the logo took too much space and hid the hero photo — now small, and the scrim opens up on the right.
-  it('sizes it small (owner 2026-10-22): 150-180px above the headline on a phone; from 900px a 120-150px mark above the 23 years, on the dark text side, so the photo shows on the right', () => {
-    assert.ok(siteCss.includes('#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(150px,42vw,180px);margin:0 auto -8px}'));
-    assert.ok(siteCss.includes('#site .hero-in{display:flex;flex-direction:column;align-items:flex-start;'));
-    assert.ok(/#site \.hero-mark\{order:-1;width:clamp\(120px,9vw,150px\);margin:0 0 6px -12px\}/.test(siteCss));
-    assert.ok(siteCss.includes('rgba(11,27,63,.18) 80%,rgba(11,27,63,.06) 100%)'), 'the desktop scrim must open up on the right so the hero photo is visible');
-    // spacing trimmed on a phone so the extra height stays near the clip's own
-    assert.ok(/@media \(max-width:899px\)\{\s*#site \.hero-years\{margin-bottom:16px\}\s*#site \.hero-cta\{margin-top:24px\}/.test(siteCss));
-    assert.ok(siteCss.includes('padding-top:calc(var(--site-head) - 6px);padding-bottom:calc(clamp(32px,5vh,96px) + var(--proof-lift))}'));
+  it('keeps it translucent but readable: opacity .25 behind the text on a phone, .35 over the open photo from 900px — both inside the owner\'s 0.25-0.35 — and from 900px sits in that open part, clear of the text, about 54vmin across (the owner\'s 46-60) and never wider than 36vw', () => {
+    const states = [...siteCss.matchAll(/#site \.hero-ghost\.is-on\{opacity:([.\d]+)\}/g)].map((m) => Number(m[1]));
+    assert.deepEqual(states, [0.25, 0.35]);
+    for (const o of states) assert.ok(o >= 0.25 && o <= 0.35);
+    const desktop = siteCss.match(/@media \(min-width:900px\)\{\s*#site #hero h1\{[^}]*\}[\s\S]*?(#site \.hero-ghost\{[^}]*\})[\s\S]*?(#site \.hero-ghost\.is-on\{opacity:\.35\})/);
+    assert.ok(desktop, 'the 900px rules for the overlay are gone');
+    const m = desktop[1].match(/top:calc\(43vh - 18vw\);top:calc\(43svh - min\((\d+)vmin,18vw\)\);left:auto;right:clamp\(16px,2vw,40px\);width:36vw;height:36vw;width:min\((\d+)vmin,36vw\);height:min\(\2vmin,36vw\);margin:0/);
+    assert.ok(m, 'from 900px: right-hand, clear of the text, vertically a constant of the viewport');
+    assert.equal(Number(m[1]) * 2, Number(m[2]), 'the top offset is half the size (the box is centred on 43svh)');
+    m.splice(1, 1);
+    assert.ok(Number(m[1]) >= 46 && Number(m[1]) <= 60, `${m[1]}vmin is outside the owner's 46-60`);
+    // the finished-hero layout: the text is the same width as before, the overlay never changes it (absolute, no flow)
+    assert.ok(!/#site \.hero-ghost\{[^}]*position:(relative|static)/.test(siteCss));
+  });
+
+  it('shows nothing without script and nothing under reduced motion: hidden in the markup (and #site [hidden] beats every rule), hidden again by the stylesheet under prefers-reduced-motion, and its sources carry the same media gate; the no-script style sheet never shows it', () => {
+    assert.ok('hidden' in ghosts[0].attrs);
+    assert.ok(siteCss.includes('#site [hidden]{display:none !important}'));
+    const rm = siteCss.match(/@media \(prefers-reduced-motion:reduce\)\{([\s\S]*?)\n\}/)[1];
+    assert.ok(/#site \.hero-ghost\{display:none !important\}/.test(rm), 'reduced motion does not hide the overlay');
+    assert.ok(!/<noscript>[\s\S]*?hero-ghost[\s\S]*?<\/noscript>/.test(home.html), 'the no-script block mentions the overlay');
+    for (const s of sources) assert.ok(/prefers-reduced-motion:no-preference/.test(s.attrs.media), `${s.attrs.src}: no reduced-motion gate`);
+    // js/site.js agrees: reduced motion or a data-saver request starts nothing (the behaviour is run below)
+    assert.ok(/reducedMotion\(\) \|\| dataSaver\(\)/.test(siteJs));
+  });
+
+  it('is absent from the app: #site is display:none in every view but "site" (so the boot, sign-in and app views never draw it), the app kit holds none of it, and the clip is named in no app file', () => {
+    assert.ok(siteCss.includes('#site{display:none}') && siteCss.includes('html[data-view="site"] #site{display:block}'));
+    const kit = home.html.match(/<template id="app-kit">([\s\S]*?)<\/template>/)[1];
+    assert.ok(!/hero-ghost|brand-reveal|<video|\.mp4/.test(kit), 'the app kit carries the intro');
+    for (const f of ['js/app.js', 'js/config.js', 'sw.js', 'css/styles.css', 'css/tokens.css']) assert.ok(!/hero-ghost|brand-reveal/.test(read(f)), `${f} knows the intro`);
+    assert.ok(ghosts[0].chain.some((e) => e.attrs.id === 'hero') && home.S.elements.find((e) => e.attrs.id === 'hero').chain.some((e) => e.attrs.id === 'site'), 'the overlay is inside #site');
   });
 
   it('plays under the page\'s own CSP with no media-src change: the files are same-origin relative paths and default-src is \'self\'', () => {
@@ -806,8 +899,232 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
     const dir = Object.fromEntries(csp.split(';').map((x) => x.trim()).filter(Boolean).map((x) => [x.split(/\s+/)[0], x.split(/\s+/).slice(1)]));
     assert.ok(dir['default-src'].includes("'self'"));
     assert.ok(!('media-src' in dir) || dir['media-src'].includes("'self'"));
-    assert.ok(dir['img-src'].includes("'self'"));
-    for (const u of [video[0].attrs.poster, ...sources.map((x) => x.attrs.src)]) assert.ok(/^site\/img\/brand\//.test(u), `${u} is not a same-origin path`);
+    for (const u of sources.map((x) => x.attrs.src)) assert.ok(/^site\/img\/brand\//.test(u), `${u} is not a same-origin path`);
+  });
+
+  // ── the behaviour (js/site.js run in a fake browser: tests/fixtures/hero-intro-env.mjs) ──────────────────────────────────
+  describe('behaviour', () => {
+    const E = (o) => makeEnv(siteJs, o);
+    const cap = 6500;
+
+    it('starts only after the page has loaded — at once if it already has, on the load event otherwise — and only when the HERO is on screen (the overlay itself is hidden until it plays)', () => {
+      const done = E({ readyState: 'complete' });
+      assert.deepEqual(done.log.filter((l) => /^(observer|observe|disconnect|play)/.test(l)), ['observer', 'observe hero'], 'the observer watches the hero, not the hidden overlay');
+      assert.equal(done.plays(), 0, 'nothing plays until the hero is on screen');
+      done.intersect(false); assert.equal(done.plays(), 0, 'a hero that is not on screen never starts it');
+      done.intersect(true); assert.equal(done.plays(), 1);
+      assert.equal(done.ghost.hidden, false);
+      assert.ok(!done.classes.has('is-on'), 'the overlay stays at opacity 0 until the clip is really playing');
+      const loading = E({ readyState: 'interactive' });
+      loading.intersect(true);
+      assert.equal(loading.plays(), 0, 'a page that is still loading must wait for the load event');
+      assert.equal(loading.waitingForLoad(), 1);
+      loading.load();
+      assert.equal(loading.plays(), 1);
+      assert.equal(loading.waitingForLoad(), 0);
+    });
+
+    it('fades in only when the clip is really playing, flies after about six and a half seconds (measured from that moment) or when the clip ends, whichever is first, and plays ONCE', () => {
+      const e = E({});
+      e.intersect(true); e.tick(10000);
+      assert.equal(e.flights().length, 0, 'no fly while the clip has not started to play');
+      const g = E({});
+      g.intersect(true); g.fire('video', 'playing');
+      assert.ok(g.classes.has('is-on'));
+      g.tick(cap - 1); assert.equal(g.flights().length, 0, 'not before the cap');
+      g.tick(1); assert.equal(g.flights().length, 1, 'the fly starts at the cap');
+      assert.equal(g.plays(), 1);
+      // a second "playing" (the clip resumes after buffering) changes nothing
+      g.fire('video', 'playing'); assert.equal(g.flights().length, 1);
+      // the clip ends before the cap: the fly starts at once
+      const ended = E({});
+      ended.intersect(true); ended.fire('video', 'playing'); ended.tick(3000);
+      ended.fire('video', 'ended'); assert.equal(ended.flights().length, 1);
+      ended.tick(cap * 2); assert.equal(ended.flights().length, 1, 'one fly only');
+      // the cap is 6-7 s (the owner: "about 6-7 s"; a 10 s watermark is too long)
+      assert.ok(cap >= 6000 && cap <= 7000);
+      assert.ok(/max: 6500,/.test(siteJs));
+    });
+
+    it('flies to the header logo, #site-brand img: its exact position and size, measured with getBoundingClientRect when the fly starts, by transform and opacity only, 700-900 ms, ease-in-out, fading out as it lands — and lights that logo for ~400 ms', () => {
+      const ghostRect = { left: 896, top: 144, width: 486, height: 486 }, logoRect = { left: 146, top: 18, width: 36, height: 36 };
+      const e = E({ ghostRect, logoRect, opacity: 0.35 });
+      e.intersect(true); e.fire('video', 'playing'); e.tick(cap);
+      assert.ok(e.log.includes('qs #site-brand img'), 'the target is #site-brand img');
+      assert.ok(!e.log.some((l) => /^qs /.test(l) && !['qs #hero .hero-ghost', 'qs #site-brand img'].includes(l)), 'no other lookup');
+      const [flight] = e.flights();
+      const { keyframes, options } = flight;
+      // FLIP: the last frame puts the overlay's box exactly on the logo's box (centre and size)
+      const last = keyframes[keyframes.length - 1], first = keyframes[0];
+      const { dx, dy, s } = parseTransform(last.transform);
+      assert.ok(Math.abs(ghostRect.left + ghostRect.width / 2 + dx - (logoRect.left + logoRect.width / 2)) < 1e-9);
+      assert.ok(Math.abs(ghostRect.top + ghostRect.height / 2 + dy - (logoRect.top + logoRect.height / 2)) < 1e-9);
+      assert.ok(Math.abs(ghostRect.width * s - logoRect.width) < 1e-9);
+      assert.deepEqual(parseTransform(first.transform), { dx: 0, dy: 0, s: 1 });
+      // only transform and opacity are animated; the fade ends at 0 and starts from the overlay's own opacity
+      for (const kf of keyframes) assert.ok(Object.keys(kf).every((k) => ['transform', 'opacity', 'offset'].includes(k)), `animated ${Object.keys(kf)}`);
+      assert.equal(first.opacity, 0.35); assert.equal(last.opacity, 0);
+      assert.ok(keyframes.every((k, i) => i === 0 || k.opacity <= keyframes[i - 1].opacity), 'it only fades out');
+      assert.ok(options.duration >= 700 && options.duration <= 900, `fly of ${options.duration} ms`);
+      assert.equal(options.easing, 'cubic-bezier(.65, 0, .35, 1)');
+      assert.equal(options.fill, 'forwards');
+      // the header logo glows as it lands: a ~400 ms scale + box-shadow pulse that starts before the overlay arrives
+      const [pulse] = e.pulses();
+      assert.ok(pulse && pulse.options.duration >= 350 && pulse.options.duration <= 450, 'the pulse is about 400 ms');
+      assert.ok(pulse.options.delay > 0 && pulse.options.delay < options.duration);
+      for (const kf of pulse.keyframes) assert.ok(Object.keys(kf).every((k) => ['transform', 'boxShadow', 'offset'].includes(k)));
+      // landed: nothing of the intro stays — no listener, no timer, no source (the download stops), the overlay is out of the page
+      assert.ok(!e.removed(), 'still in the page while it flies');
+      flight.finish();
+      assert.ok(e.removed());
+      assert.equal(e.listening(), 0);
+      assert.deepEqual(e.video.children, []);
+      assert.ok(e.log.includes('pause()'));
+      e.tick(60000); assert.equal(e.flights().length, 1, 'nothing runs after the landing');
+      // the safety timer removes it even if the animation never reports its end
+      const stuck = E({});
+      stuck.intersect(true); stuck.fire('video', 'playing'); stuck.tick(cap); stuck.tick(849); assert.ok(!stuck.removed()); stuck.tick(400); assert.ok(stuck.removed());
+    });
+
+    it('uses the geometry at the moment of the fly, not at the start: the overlay and the logo are measured again after the clip has run', () => {
+      const e = E({ ghostRect: { left: 896, top: 144, width: 486, height: 486 } });
+      e.intersect(true); e.fire('video', 'playing'); e.tick(2000);
+      // the fonts load and the hero is taller: the overlay (centred) and the logo have moved by the time of the fly
+      let calls = 0;
+      const moved = { left: 900, top: 150, width: 480, height: 480 };
+      e.ghost.getBoundingClientRect = () => { calls++; return { ...moved, right: moved.left + moved.width, bottom: moved.top + moved.height }; };
+      e.tick(cap - 2000);
+      const { dx, dy, s } = parseTransform(e.flights()[0].keyframes.at(-1).transform);
+      assert.ok(calls >= 1);
+      assert.ok(Math.abs(moved.left + moved.width / 2 + dx - 164) < 1e-9 && Math.abs(moved.top + moved.height / 2 + dy - 36) < 1e-9 && Math.abs(moved.width * s - 36) < 1e-9);
+    });
+
+    it('skips the intro — no play(), the overlay removed at once — for a reduced-motion visitor, a data-saver visitor and a hidden tab; and removes it the moment the tab is hidden while it runs', () => {
+      for (const o of [{ reduced: true }, { saveData: true }]) {
+        const e = E(o);
+        assert.ok(e.removed(), JSON.stringify(o));
+        assert.ok(!e.log.includes('observer'), 'no observer is even created');
+        assert.equal(e.plays(), 0);
+        assert.equal(e.animations.length, 0);
+      }
+      assert.ok(!E({ saveData: false }).removed(), 'saveData:false is not a data-saver request');
+      const hiddenAtStart = E({ visibility: 'hidden' });
+      hiddenAtStart.intersect(true);
+      assert.equal(hiddenAtStart.plays(), 0, 'a hidden tab never plays');
+      assert.ok(hiddenAtStart.removed());
+      const mid = E({});
+      mid.intersect(true); mid.fire('video', 'playing'); mid.tick(2000);
+      mid.hide();
+      assert.ok(mid.removed(), 'hidden mid-play: gone at once');
+      assert.equal(mid.flights().length, 0);
+      assert.equal(mid.listening(), 0);
+      mid.tick(60000); assert.equal(mid.flights().length, 0);
+    });
+
+    it('skips the intro when autoplay is refused or play() throws: the overlay is removed, it never fades in and nothing lingers — there is no poster to show', async () => {
+      for (const play of ['reject', 'throw']) {
+        const e = E({ play });
+        e.intersect(true);
+        await e.flush();
+        assert.equal(e.plays(), 1, play);
+        assert.ok(e.removed(), `${play}: the overlay must be gone`);
+        assert.ok(!e.classes.has('is-on'), `${play}: it must never have been shown`);
+        assert.equal(e.animations.length, 0);
+        assert.equal(e.listening(), 0);
+      }
+    });
+
+    it('gives up quietly when the clip does not start within 5 s (a slow connection): no late ghost, the download is dropped', () => {
+      const e = E({});
+      e.intersect(true);
+      e.tick(4999); assert.ok(!e.removed());
+      e.tick(1); assert.ok(e.removed());
+      assert.ok(!e.classes.has('is-on'));
+      assert.deepEqual(e.video.children, []);
+      assert.equal(e.listening(), 0);
+    });
+
+    it('ends with a quick fade — no fly — when the visitor scrolls away before the end, and when the clip errors or is paused by the browser; a nudge of the page (within the header\'s 24px) does not end it', () => {
+      const e = E({});
+      e.intersect(true); e.fire('video', 'playing'); e.tick(1000);
+      e.scrollTo(10); assert.ok(!e.classes.has('is-off'), 'a small scroll is ignored');
+      e.scrollTo(300);
+      assert.ok(e.classes.has('is-off'), 'scrolled away: quick fade');
+      assert.equal(e.flights().length, 0, 'no fly');
+      assert.ok(!e.removed(), 'the fade runs first');
+      assert.equal(e.listening(), 0, 'it stops listening at once');
+      e.tick(299); assert.ok(!e.removed());
+      e.tick(1); assert.ok(e.removed());
+      e.tick(60000); assert.equal(e.flights().length, 0);
+      for (const ev of ['error', 'pause']) {
+        const x = E({});
+        x.intersect(true); x.fire('video', 'playing'); x.fire('video', ev);
+        assert.ok(x.classes.has('is-off'), ev);
+        assert.equal(x.flights().length, 0);
+      }
+      // a pause at the very end of the clip is the clip ending, not an interruption
+      const atEnd = E({});
+      atEnd.intersect(true); atEnd.fire('video', 'playing'); atEnd.video.ended = true; atEnd.fire('video', 'pause');
+      assert.ok(!atEnd.classes.has('is-off'));
+    });
+
+    it('does not fly when it cannot land: the header has gone solid (scrolled past 24px at the cap), there is no #site-brand img, no Element.animate, or the logo is outside the hero — a quick fade instead', () => {
+      const cases = [['scrolled past 24px at the cap', { y: 0 }, (e) => { e.win.pageYOffset = 40; e.doc.documentElement.scrollTop = 40; }],
+        ['no header logo', { logo: false }, () => {}], ['no Element.animate', { animate: false }, () => {}],
+        ['logo outside the hero', { logoRect: { left: 146, top: -300, width: 36, height: 36 } }, () => {}]];
+      for (const [label, o, prep] of cases) {
+        const e = E(o);
+        e.intersect(true); e.fire('video', 'playing'); e.tick(1000); prep(e); e.tick(cap - 1000);
+        assert.equal(e.flights().length, 0, label);
+        assert.ok(e.classes.has('is-off'), `${label}: quick fade`);
+        e.tick(400); assert.ok(e.removed(), label);
+      }
+    });
+
+    it('stops at once, with nothing left behind, if the page is scrolled while the overlay is flying (its target would have moved)', () => {
+      const e = E({});
+      e.intersect(true); e.fire('video', 'playing'); e.tick(cap);
+      const [flight] = e.flights();
+      assert.ok(!e.removed());
+      e.scrollTo(200);
+      assert.ok(e.removed());
+      assert.ok(flight.cancelled);
+      assert.equal(e.listening(), 0);
+    });
+
+    it('never starts in the app: with data-view boot, login or app the overlay is removed at the load event and nothing plays (with or without IntersectionObserver), even if the observer reports the hero as visible', () => {
+      for (const view of ['boot', 'login', 'app']) {
+        const e = E({ view, readyState: 'interactive' });
+        assert.equal(e.plays(), 0);
+        e.load(); e.intersect(true);                  // hypothetically visible: the website view check still refuses
+        assert.equal(e.plays(), 0, view);
+        assert.ok(e.removed(), view);
+        const noIO = E({ view, io: false });
+        noIO.load(); noIO.tick(60000);
+        assert.equal(noIO.plays(), 0, `${view} without IntersectionObserver`);
+        // ... and the app does no work for it at all: no load listener waits for the website view, the overlay is left alone (hidden, costing nothing)
+        const early = E({ view, io: false, readyState: 'interactive' });
+        assert.equal(early.waitingForLoad(), 0, `${view} without IntersectionObserver: nothing waits for the load event`);
+        assert.ok(!early.removed() && early.ghost.hidden === true, `${view}: the overlay is untouched`);
+      }
+      // the website view without IntersectionObserver: it starts after load, because the website is the current view
+      const site = E({ io: false, readyState: 'interactive' });
+      assert.equal(site.plays(), 0); site.load(); assert.equal(site.plays(), 1);
+      // and a hero that is never on screen (the app's #site is display:none, so the observer never fires) never plays or downloads anything
+      const hidden = E({ view: 'login' });
+      assert.equal(hidden.plays(), 0);
+      assert.ok(!hidden.removed(), 'it stays hidden in the document, costing nothing');
+      assert.equal(hidden.ghost.hidden, true);
+    });
+
+    it('plays once per visit — after the landing nothing starts it again — and the intro never reads storage, the network or the service worker', () => {
+      assert.ok(!/serviceWorker|localStorage|sessionStorage|indexedDB|fetch\(|XMLHttpRequest/.test(siteJs.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')));
+      const e = E({});
+      e.intersect(true); e.fire('video', 'playing'); e.tick(cap); e.flights()[0].finish();
+      assert.ok(e.removed());
+      e.intersect(true); e.load();
+      assert.equal(e.plays(), 1, 'one play per visit');
+    });
   });
 });
 

@@ -995,13 +995,14 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
   });
 
   it('has the title, description, canonical, robots and Open Graph tags the owner specified', () => {
-    assert.match(cat, /<title>Commercial Kitchen Equipment Catalogue \| Barro Industries<\/title>/);
+    // owner ruling 2026-10-22: "Barro Kitchens" is a permanent, historic name of the business, so it is in the title (the full pins are in tests/site-public-surface.test.mjs)
+    assert.match(cat, /<title>Commercial Kitchen Equipment Catalogue \| Barro Kitchens by Barro Industries<\/title>/);
     assert.match(catHead, /<meta name="description" content="[^"]{60,}">/);
     assert.match(catHead, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
     assert.match(catHead, /<meta name="robots" content="index,follow">/);
     for (const p of ['og:title', 'og:description', 'og:url', 'og:image', 'og:type', 'og:site_name']) assert.ok(catHead.includes(`property="${p}"`), p);
     assert.ok(catHead.includes('property="og:url" content="https://barroindustries.com/catalogue/"'));
-    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment Catalogue | Barro Industries"'));
+    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment Catalogue | Barro Kitchens by Barro Industries"'));
     assert.ok(catHead.includes('property="og:site_name" content="Barro Industries"'));
     // the hero project photo as an absolute URL, with the large Twitter card (owner, 2026-10-21; the full set of tag pins is in tests/site-public-surface.test.mjs)
     assert.ok(catHead.includes('property="og:image" content="https://barroindustries.com/site/img/projects/ispsc/01.webp"'));
@@ -1069,7 +1070,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
 
   it('keeps the premium copy: the intro line the owner suggested, and "Premium" in the meta description', () => {
     assert.ok(catBlock.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
-    assert.match(catHead, /name="description" content="Browse premium commercial kitchen equipment in SS304 or SS316 stainless steel/);
+    assert.match(catHead, /name="description" content="Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel/);
   });
 
   it('(local only) is exactly what a fresh build produces from the private master and the photo map', { skip: (() => { try { return resolveMaster() ? false : 'the private master (products-database.json) is not present'; } catch (_) { return 'no master'; } })() }, () => {
@@ -1208,7 +1209,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     for (const fact of ['food-grade SS304', 'laboratory-grade SS316', 'brushed, mirror or satin', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
       assert.ok(text.includes(fact) || text.includes(fact.replace(/ /g, ' ')), `the specific "${fact}" is missing`);
     }
-    assert.match(homeHead, /name="description" content="Premium stainless-steel commercial kitchens[^"]*food-grade SS304 and laboratory-grade SS316/);
+    assert.match(homeHead, /name="description" content="Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens[^"]*food-grade SS304 and laboratory-grade SS316/);
   });
 
   it('keeps exhaust, fresh-air, gas lines and fire suppression as SERVICES on the homepage (owner ruling) — they are only gone from the catalogue', () => {
