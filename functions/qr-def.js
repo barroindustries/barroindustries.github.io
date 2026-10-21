@@ -34,7 +34,9 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
 
-  var VERSION = 1;
+  // 2 (2026-10-21): the request lines gained the configurable families ({ familyId, config, dims, qty, note } beside the plain SKU
+  // lines) and the absorbed SKUs are no longer quotable on their own. A page still on 1 is refused with "please reload".
+  var VERSION = 2;
 
   // ── 4.1 INTAKE — option VALUES are stored; LABELS are shown ─────────────
   var INTAKE = {
@@ -76,8 +78,9 @@
   var LIMITS = {
     maxItems: 40,              // lines per request
     maxQtyPerLine: 20,         // qty (or runs) per line
-    maxQtyPerProduct: 20,      // units of ONE product across ALL its lines (qty x runs, summed). A basket of 40 identical lines would otherwise
-                               // multiply one product's list price 800-fold and turn the rounded range into an exact-price oracle.
+    maxQtyPerProduct: 20,      // units of ONE product across ALL its lines (qty x runs, summed) — and of ONE configurable family across all its
+                               // lines. A basket of 40 identical lines would otherwise multiply one product's list price 800-fold and turn the
+                               // rounded range into an exact-price oracle.
     maxNote: 240,              // per-item note
     minDimMm: 100, dimStepMm: 10,                        // sizes are integers, multiples of 10, >= 100
     maxDimFactor: 3, maxDimAbsMm: { W: 6000, D: 3000, H: 3000 },   // per dimension: <= min(default x 3, max(abs cap, default)) — a default above the cap can only shrink; if that

@@ -62,7 +62,8 @@ const rejectsWith = async (p, code, msgRe) => {
 };
 
 // ── fake master: REAL published ids, FAKE figures ───────────────────────────
-const P_LEN = 'CE-001', P_FIX = 'PW-001', P_NOD = 'PW-012', P_ZERO = 'CE-017', P_SPEC = 'BA-001';
+// FIXED products only: the SKUs a configurable family absorbed (e.g. CE-001, PW-001, BA-001) are no longer quotable as plain lines.
+const P_LEN = 'CE-009', P_FIX = 'RF-003', P_NOD = 'CE-031', P_ZERO = 'CE-024', P_SPEC = 'BA-011';
 function seedMaster(over) {
   const base = (data) => ({ unit: 'pc', formula: {}, specs: [], measurement: {}, ...data });
   fake.seed(`products/${P_LEN}`, base({ title: 'Fake Stove', category: 'cooking_line', basePrice: 7770, formulaType: 'per_length', measurement: { W: 1200, D: 600, H: 800 }, formula: { baseLengthMm: 1200, pricePerExtraMm: 3.3, rateW100: 50, rateD100: 31, rateH100: 0 } }));
@@ -755,5 +756,380 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
       assert.ok(n.dedupKey.startsWith(`cir_${res.refNo}_`));
       assert.ok(!('senderUid' in n));
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONFIGURABLE FAMILIES (owner ruling 2026-10-21) through the REAL callables, against the in-memory Firestore.
+//  A configured line { familyId, config, dims, qty, note } is validated STRICTLY, priced from the family's primary SKU + the PRIVATE sheet
+//  product_pricing/{family} (Admin read, same cache), and "priced after review" (left out of the figure, counted) when the sheet is not
+//  approved, was approved against another schema, is absent, or has a BLANK cell for an option that was chosen. FAKE, deliberately odd
+//  figures (so a leak into a response or a notification cannot hide behind a round number).
+// ═══════════════════════════════════════════════════════════════════════════
+describe('qr callables — the configurable product families', { skip: SKIP }, () => {
+  const FAMS = require('../functions/qr-families.js');
+  const PFX = require('../functions/product-families.js');
+  const seedFamilies = () => {
+    const base = (data) => ({ unit: 'pc', formula: {}, specs: [], measurement: {}, ...data });
+    fake.seed('products/PW-001', base({ title: 'SS Preparation Table (1 Layer)', category: 'prep_washing', basePrice: 10007, formulaType: 'per_length', measurement: { W: 900, D: 600, H: 850 }, formula: { baseLengthMm: 900, pricePerExtraMm: 10, rateD100: 500, rateH100: 500 } }));
+    fake.seed('products/PW-004', base({ title: 'SS Wash Sink (Single)', category: 'prep_washing', basePrice: 20011, formulaType: 'per_length', measurement: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 12, rateD100: 400, rateH100: 0 } }));
+    fake.seed('products/CE-001', base({ title: 'SS Open Top Stove (1 Burner)', category: 'cooking_line', basePrice: 18013, formulaType: 'per_length', measurement: { W: 600, D: 700, H: 850 }, formula: { baseLengthMm: 600, pricePerExtraMm: 8, rateD100: 600, rateH100: 0 } }));
+    fake.seed('products/PW-015', base({ title: 'SS Storage Cabinet', category: 'prep_washing', basePrice: 40019, formulaType: 'per_length', measurement: { W: 600, D: 500, H: 1800 }, formula: { baseLengthMm: 600, pricePerExtraMm: 15, rateD100: 500, rateH100: 300 } }));
+    fake.seed('products/PW-023', base({ title: 'SS Wall Shelf', category: 'prep_washing', basePrice: 14503, formulaType: 'fixed', measurement: { W: 2908, D: 480, H: 38 } }));
+    fake.seed('products/PW-010', base({ title: 'SS Dish Rack', category: 'prep_washing', basePrice: 16703, formulaType: 'per_length', measurement: { W: 600, D: 500, H: 1600 }, formula: { baseLengthMm: 600, pricePerExtraMm: 8, rateD100: 400, rateH100: 300 } }));
+    const c = (flat, perW100) => ({ flat, perW100: perW100 == null ? null : perW100 });
+    fake.seed('product_pricing/prep_table', { familyId: 'prep_table', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { layers: { 2: c(8111, 101), 3: c(16231, 207) }, upper: { 1: c(3077, null), 2: c(null, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/sink', { familyId: 'sink', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { basins: { 2: c(6173, null), 3: c(null, null), 4: c(null, null) }, alignment: { left: c(0, null), right: c(0, null) }, undershelf: { true: c(2503, null) }, upper: { true: c(3011, null) }, faucet: { prerinse: c(4519, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/stove', { familyId: 'stove', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { positions: { wok: c(29111, null), hp_small: c(null, null), hp_large: c(37123, null), lp_small: c(16057, null), lp_large: c(null, null), soup: c(null, null) }, addons: { griller: c(null, null), griddle: c(15091, null), oven: c(22093, null), fryer: c(null, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/cabinet', { familyId: 'cabinet', schemaVersion: 1, approved: false, options: { type: { wall: c(5003, null) }, doors: { sliding: c(2003, null) }, shelves: { 1: c(-3001, null), 2: c(-1501, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/rack', { familyId: 'rack', schemaVersion: 99, approved: true, approvedBy: 'u_pres', options: { tiers: { 3: c(-1009, null), 5: c(1009, null), 6: c(2009, null) }, wheels: { false: c(-907, null) } }, size: { perW100: null } });
+    // wall_shelf: NO sheet at all
+  };
+  beforeEach(() => {
+    mock.timers.enable({ apis: ['Date'], now: T0 });
+    fake.reset();
+    seedMaster();
+    seedUsers();
+    seedFamilies();
+    counter = 0;
+    fns = loadFunctions();
+  });
+  afterEach(() => { mock.timers.reset(); });
+
+  const sinkCfg = (over) => ({ basins: 2, alignment: 'center', undershelf: false, upper: false, faucet: 'prerinse', ...(over || {}) });
+  const famLine = (familyId, config, dims, qty, note) => ({ familyId, config, dims: dims || {}, qty: qty || 1, ...(note ? { note } : {}) });
+  const fixedLine = () => ({ id: P_FIX, qty: 1, size: null, runs: null, specs: [], note: '' });
+  const estimate = async (items, over) => { const token = await newSession(); return fns.qrEstimate.run(estimatePayload(token, { items, ...(over || {}) }), ctx()); };
+  const readyToken = async () => { const t = await newSession(); tick(21000); return t; };
+  const submit = async (items) => { const token = await readyToken(); const res = await fns.qrSubmit.run(submitPayload(token, { items }), ctx()); return { res, doc: fake.read(`quote_requests/${res.refNo}`) }; };
+
+  it('the six families the server knows ARE the ones the page ships (same generated file), and every primary is seeded as a loadable, non-quotable product', () => {
+    assert.deepEqual(FAMS.order, ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']);
+    for (const f of FAMS.order) assert.ok(!ALLOW.ids.includes(FAMS.families[f].primary), `${f}'s primary must not be quotable as a plain line`);
+  });
+
+  describe('estimates', () => {
+    it('a CONFIGURED SINK (2 sinks, pre-rinse, 1000 mm) + a fixed item: priced from the primary + the sheet, shown as the rounded range', async () => {
+      const r = await estimate([famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), fixedLine()]);
+      // exact = PW-004 at 1000 mm (20,011 + 500 x 12) + 6,173 + 4,519 = 36,703; + the fixed item 4,217 = 40,920 -> 0.90 / 1.15 -> 35,000 .. 50,000
+      assert.equal(r.shown, true);
+      assert.deepEqual([r.low, r.high, r.step], [35000, 50000, 5000]);
+      assert.equal(r.pricedCount, 2);
+      assert.equal(r.reviewCount, 0);
+      assert.equal(r.customSizeCount, 0, '1000 mm IS the usual length for two sinks: not a custom size');
+      assert.deepEqual(Object.keys(r).sort(), RESPONSE_KEYS, 'the response key set is exactly the spec\'s');
+      const longer = await estimate([famLine('sink', sinkCfg(), { W: 1200, D: 500, H: 850 }), fixedLine()]);
+      assert.equal(longer.customSizeCount, 1, '1200 mm for two sinks IS custom');
+      const tall = await estimate([famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 900 }), fixedLine()]);
+      assert.equal(tall.customSizeCount, 1, 'a different height is custom');
+    });
+    it('a CONFIGURED STOVE (wok + HP large + LP small, 1400 mm): the default position nets out, so only the wok and the HP burner are added', async () => {
+      const r = await estimate([famLine('stove', { positions: ['wok', 'hp_large', 'lp_small'], addons: [] }, { W: 1400, D: 700, H: 850 })]);
+      // CE-001 at 1400 mm: 18,013 + 800 x 8 = 24,413; + wok 29,111 + HP large 37,123 = 90,647 -> shown on its own (>= 50,000)
+      assert.equal(r.shown, true);
+      assert.deepEqual([r.low, r.high], [80000, 105000]);                                  // 0.90 x = 81,582 -> 80,000 · 1.15 x = 104,244 -> 105,000
+      assert.equal(r.pricedCount, 1);
+    });
+    it('a CONFIGURED PREPARATION TABLE (3 layers, 1 upper shelf, 1800 mm): the layer amount scales with the length beyond the standard', async () => {
+      const r = await estimate([famLine('prep_table', { layers: 3, upper: 1 }, { W: 1800, D: 600, H: 850 }), fixedLine()]);
+      // PW-001 at 1800: 10,007 + 900 x 10 = 19,007; layers 3: 16,231 + 207 x 9 = 18,094; upper 1: 3,077 -> 40,178; + 4,217 = 44,395 -> 35,000 .. 55,000
+      assert.deepEqual([r.low, r.high], [35000, 55000]);
+      assert.equal(r.pricedCount, 2);
+    });
+    it('the default configuration at the default size prices as the primary SKU alone (no sheet figure is added)', async () => {
+      const r = await estimate([famLine('prep_table', { layers: 1, upper: 0 }, { W: 900, D: 600, H: 850 }, 5)]);
+      // 5 x 10,007 = 50,035 -> shown (>= 50,000): 45,000 .. 60,000
+      assert.equal(r.shown, true);
+      assert.deepEqual([r.low, r.high], [45000, 60000]);
+    });
+    it('an UNAPPROVED family is "priced after review": the line is left out of the figure and counted, and a fixed item still estimates', async () => {
+      const r = await estimate([famLine('cabinet', { type: 'floor', doors: 'swing', shelves: 3 }, {}), fixedLine(), { id: P_LEN, qty: 1, size: null, runs: null, specs: [], note: '' }]);
+      assert.equal(r.pricedCount, 2);                                                       // the two fixed items
+      assert.equal(r.reviewCount, 1);                                                       // the cabinet
+      assert.ok(r.notes.includes(QR.COPY.reviewCount(1)));
+      assert.equal(r.shown, true);
+      assert.deepEqual([r.low, r.high], [10000, 15000]);                                    // 7,770 + 4,217 = 11,987 -> 0.90 x = 10,788 -> 10,000 · 1.15 x = 13,785 -> 15,000
+    });
+    it('a family whose sheet was approved against ANOTHER schema version, and a family with NO sheet, are priced after review too', async () => {
+      const r = await estimate([famLine('rack', { tiers: 4, wheels: true }, {}), famLine('wall_shelf', { tiers: 1, surface: 'solid' }, {}), fixedLine(), famLine('prep_table', { layers: 1, upper: 0 }, {}, 3)]);
+      assert.equal(r.reviewCount, 2);
+      assert.equal(r.pricedCount, 2);
+    });
+    it('a BLANK cell for a chosen option unprices the whole line (no partial figure); the other options of the same family still price', async () => {
+      const blank = await estimate([famLine('sink', sinkCfg({ basins: 3 }), { W: 1500, D: 500, H: 850 }), fixedLine()]);
+      assert.equal(blank.reviewCount, 1);                                                   // 3 sinks: the cell is blank
+      assert.equal(blank.pricedCount, 1);
+      const fine = await estimate([famLine('sink', sinkCfg({ basins: 2 }), { W: 1000, D: 500, H: 850 }), fixedLine()]);
+      assert.equal(fine.reviewCount, 0);
+      const noWok = await estimate([famLine('stove', { positions: ['soup', 'lp_small'], addons: [] }, { W: 1000, D: 700, H: 850 }), fixedLine()]);
+      assert.equal(noWok.reviewCount, 1, 'the soup burner has no amount yet');
+    });
+    it('a blank cell is NEVER read as zero: the estimate with the blank option is not the estimate of the same basket without it', async () => {
+      const a = await estimate([famLine('sink', sinkCfg({ basins: 3 }), { W: 1500, D: 500, H: 850 }), { id: P_LEN, qty: 5, size: null, runs: null, specs: [], note: '' }]);
+      const b = await estimate([{ id: P_LEN, qty: 5, size: null, runs: null, specs: [], note: '' }, fixedLine()]);
+      assert.equal(a.pricedCount, 1);
+      assert.equal(a.reviewCount, 1);
+      assert.equal(b.reviewCount, 0);
+    });
+    it('NO sheet figure and no per-line price reaches any response: no cell amount, no base, no delta, no missing-option name', async () => {
+      const token = await newSession();
+      const r = await fns.qrEstimate.run(estimatePayload(token, { items: [famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), famLine('stove', { positions: ['soup'], addons: [] }, {}), fixedLine()] }), ctx());
+      const json = JSON.stringify(r);
+      assert.ok(!/exact|unitPrice|lineTotal|basePrice|priceAdder|formula|lines|deltas|missing|perW100|flat|base/i.test(json), json);
+      const nums = new Set();
+      JSON.stringify(r, (k, v) => { if (typeof v === 'number') nums.add(v); return v; });
+      for (const secret of [6173, 4519, 36703, 26011, 20011, 29111, 37123, 16057, 4217, 40920]) assert.ok(!nums.has(secret), `${secret} leaked`);
+      assert.ok(!/Pre-rinse|soup|Soup|Burner/i.test(json), 'an option name leaked');
+    });
+    it('government intake: the same estimate plus the procurement note (families change nothing there)', async () => {
+      const token = await newSession();
+      const items = [famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), fixedLine()];
+      const priv = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+      const gov = await fns.qrEstimate.run(estimatePayload(token, { items, entityType: 'government' }), ctx());
+      assert.deepEqual([gov.low, gov.high], [priv.low, priv.high]);
+      assert.ok(gov.notes.includes(QR.COPY.governmentNote));
+    });
+    it('the sheet is read ONCE per cache window with the products; approving a family is picked up after the 10-minute TTL (never sooner, never stale beyond it)', async () => {
+      const items = [famLine('cabinet', { type: 'floor', doors: 'swing', shelves: 3 }, { W: 600, D: 500, H: 1800 }, 2)];
+      const token = await newSession();
+      const before = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+      assert.equal(before.shown, false);                                                    // unpriced: 0 priced lines -> the gate
+      assert.equal(before.reviewCount, 1);
+      fake.seed('product_pricing/cabinet', { ...fake.read('product_pricing/cabinet'), approved: true, approvedBy: 'u_pres' });
+      assert.equal((await fns.qrEstimate.run(estimatePayload(token, { items }), ctx())).reviewCount, 1, 'still cached');
+      tick(600001);
+      const after = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+      assert.equal(after.reviewCount, 0);
+      assert.equal(after.pricedCount, 1);                                                   // 2 x 40,019 = 80,038 -> shown
+      assert.equal(after.shown, true);
+    });
+    it('if the sheets cannot be read, every family line is priced after review — and the fixed items still estimate (the safe direction)', async () => {
+      const orig = fake.db.collection;
+      fake.db.collection = (name) => (name === 'product_pricing' ? { doc: () => ({ get: async () => { throw new Error('pricing down'); } }), limit: () => ({ get: async () => { throw new Error('pricing down'); } }) } : orig(name));
+      try {
+        const r = await estimate([famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), fixedLine(), { id: P_LEN, qty: 1, size: null, runs: null, specs: [], note: '' }]);
+        assert.equal(r.reviewCount, 1);
+        assert.equal(r.pricedCount, 2);
+        assert.equal(r.shown, true);
+      } finally { fake.db.collection = orig; }
+    });
+    it('ONE unreadable sheet only unprices ITS family (each sheet is its own read); the others keep pricing', async () => {
+      const orig = fake.db.collection;
+      fake.db.collection = (name) => {
+        if (name !== 'product_pricing') return orig(name);
+        const c = orig(name);
+        return { doc: (id) => (id === 'sink' ? { get: async () => { throw new Error('one doc down'); } } : c.doc(id)), limit: c.limit };
+      };
+      try {
+        const r = await estimate([famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), famLine('stove', { positions: ['wok'], addons: [] }, { W: 1000, D: 700, H: 850 }), fixedLine()]);
+        assert.equal(r.reviewCount, 1, 'only the sink');
+        assert.equal(r.pricedCount, 2, 'the stove and the fixed item');
+      } finally { fake.db.collection = orig; }
+    });
+    it('STRAY documents in product_pricing can never crowd a real sheet out: the sheets are read BY ID, not by a collection scan', async () => {
+      for (let i = 0; i < 80; i++) fake.seed(`product_pricing/aaa_junk_${String(i).padStart(3, '0')}`, { approved: true, approvedBy: 'u_pres', junk: i, options: {} });
+      const r = await estimate([famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), fixedLine()]);
+      assert.equal(r.reviewCount, 0);
+      assert.equal(r.pricedCount, 2);
+    });
+    it('a refresh that FAILS keeps serving the cached PRODUCT LIST but never the cached option SHEETS: a sheet un-approved meanwhile must not keep pricing (fails closed), and the fixed items still estimate', async () => {
+      const items = [famLine('stove', { positions: ['wok'], addons: [] }, { W: 1400, D: 700, H: 850 }), fixedLine()];
+      const token = await newSession();
+      const before = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+      assert.deepEqual([before.pricedCount, before.reviewCount], [2, 0], 'priced while the sheet is approved');
+      fake.seed('product_pricing/stove', { ...fake.read('product_pricing/stove'), approved: false, approvedBy: null });       // someone un-approves it
+      const orig = fake.db.collection;
+      fake.db.collection = (name) => (name === 'products' ? { limit: () => ({ get: async () => { throw new Error('boom'); } }) } : orig(name));
+      try {
+        tick(11 * 60 * 1000);                                                                                            // stale: the cached products cover the failed refresh
+        const during = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+        assert.deepEqual([during.pricedCount, during.reviewCount], [1, 1], 'the stove is left out: the cached sheets are NOT served');
+        tick(8 * 3600e3);                                                                                                // still within 24 h, still failing: still withheld
+        const later = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+        assert.deepEqual([later.pricedCount, later.reviewCount], [1, 1]);
+      } finally { fake.db.collection = orig; }
+    });
+    it('a SOFT width rule (the stove) never prices a body shorter than its burners need: six woks asked at 600 mm are priced at the usual length and the staff line says so', async () => {
+      const six = { positions: ['wok', 'wok', 'wok', 'wok', 'wok', 'wok'], addons: [] };
+      const asked = await submit([famLine('stove', six, { W: 600, D: 700, H: 850 })]);
+      const usual = await submit([famLine('stove', six, { W: 1600, D: 700, H: 850 })]);
+      const a = asked.doc.internal.lines[0], u = usual.doc.internal.lines[0];
+      // CE-001 at 1600 mm (400 + 6 x 200): 18,013 + 1,000 x 8 = 26,013; six woks (+6 x 29,111) minus the standard LP burner (16,057) = 184,622
+      assert.equal(a.priced, true);
+      assert.equal(a.unitPrice, 26013 + 6 * 29111 - 16057);
+      assert.equal(a.unitPrice, u.unitPrice, 'the same figure as the usual length');
+      assert.ok(a.warnings.length === 1 && /Asked for 600 mm; priced at the usual 1600 mm length for these burners/.test(a.warnings[0]), JSON.stringify(a.warnings));
+      assert.deepEqual(u.warnings, [], 'no warning when the length is already the usual one');
+      assert.equal(asked.doc.items[0].size.W, 600, 'the visitor\'s request is stored as asked');
+    });
+    it('a custom width or height the primary has NO RATE for makes the configured line priced after review (it is never priced as if the size were free)', async () => {
+      const prep = fake.read('products/PW-001');
+      fake.seed('products/PW-001', { ...prep, formula: { baseLengthMm: 900, pricePerExtraMm: 10 } });                        // the width / height rates are gone
+      const r = await estimate([famLine('prep_table', { layers: 1, upper: 0 }, { W: 900, D: 700, H: 850 }), fixedLine()]);
+      assert.equal(r.reviewCount, 1);
+      const std = await estimate([famLine('prep_table', { layers: 1, upper: 0 }, { W: 900, D: 600, H: 850 }, 5)]);
+      assert.equal(std.reviewCount, 0, 'the standard size needs no rate');
+    });
+    it('a wall-shelf depth other than the standard has no price in the sheet, so it is priced after review; the standard depth and any length are priced', async () => {
+      fake.seed('product_pricing/wall_shelf', { familyId: 'wall_shelf', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { tiers: { 2: { flat: 3001, perW100: null }, 3: { flat: 6007, perW100: null } }, surface: { slotted: { flat: 1009, perW100: null } } }, size: { perW100: 479 } });
+      const fine = await estimate([famLine('wall_shelf', { tiers: 2, surface: 'solid' }, { W: 1800, D: 450 }, 4), fixedLine()]);
+      assert.equal(fine.reviewCount, 0);
+      const deeper = await estimate([famLine('wall_shelf', { tiers: 2, surface: 'solid' }, { W: 1800, D: 600 }, 4), fixedLine()]);
+      assert.equal(deeper.reviewCount, 1, 'depth is not priced by the sheet');
+    });
+    it('FIXED items still estimate exactly as before (the plain-line path is unchanged): two priced products -> the same range as the pre-family test', async () => {
+      const r = await estimate([{ id: P_LEN, qty: 1, size: null, runs: null, specs: [], note: '' }, { id: P_FIX, qty: 2, size: { W: 1000 }, runs: null, specs: [], note: '' }]);
+      assert.deepEqual([r.low, r.high, r.step], [10000, 20000, 5000]);
+      assert.equal(r.pricedCount, 2);
+    });
+  });
+
+  describe('INVALID configurations are rejected (strict allowlist; nothing unknown is ignored)', () => {
+    const bad = async (item, re) => {
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), item] }), ctx()), (e) => { assert.equal(e.code, 'invalid-argument', e.message); if (re) assert.match(e.message, re); return true; });
+    };
+    it('an unknown family id collapses to the SAME message an unknown product gets, and names the id so the page can remove the line', async () => {
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), famLine('toaster', {}, {})] }), ctx()), (e) => { assert.equal(e.message, Q.GONE_MSG); assert.deepEqual(e.details, { itemIds: ['toaster'] }); return true; });
+      for (const fid of ['__proto__', 'constructor', 'hasOwnProperty', '', 'SINK', 'sink ']) await bad(famLine(fid, {}, {}), /no longer in the catalogue/);
+    });
+    it('an unknown option key, an unknown option value, a wrong type, a missing config: all refused with a clear message', async () => {
+      await bad(famLine('sink', { ...sinkCfg(), wheels: true }, {}), /not an option of this product/);
+      await bad(famLine('sink', sinkCfg({ faucet: 'bidet' }), {}), /Choose one of the available options for "Faucet"/);
+      await bad(famLine('sink', sinkCfg({ basins: '2' }), {}), /Choose one of the available options for "Sinks"/);
+      await bad(famLine('sink', sinkCfg({ undershelf: 'true' }), {}), /Undershelf/);
+      await bad(famLine('sink', sinkCfg({ basins: 9 }), {}), /Sinks/);
+      await bad({ familyId: 'sink', dims: {}, qty: 1 }, /must be a set of choices/);
+      await bad({ familyId: 'sink', config: 'x', dims: {}, qty: 1 }, /must be a set of choices/);
+      await bad({ familyId: 'sink', config: [], dims: {}, qty: 1 }, /must be a set of choices/);
+      await bad(famLine('stove', { positions: [], addons: [] }, {}), /Burner positions/);
+      await bad(famLine('stove', { positions: Array(7).fill('wok'), addons: [] }, {}), /Burner positions/);
+      await bad(famLine('stove', { positions: ['wok', 'laser'], addons: [] }, {}), /Burner positions/);
+      await bad(famLine('stove', { positions: ['wok'], addons: ['oven', 'oven'] }, {}), /Add-ons/);
+    });
+    it('sizes: out of range, off the step, not a number, an axis the family does not have, the sink\'s hard length rule, the oven\'s minimums', async () => {
+      await bad(famLine('sink', sinkCfg(), { W: 99999 }), /Length must be a whole number/);
+      await bad(famLine('sink', sinkCfg(), { W: 1005 }), /Length must be a whole number/);
+      await bad(famLine('sink', sinkCfg(), { W: 'wide' }), /Length must be a whole number/);
+      await bad(famLine('sink', sinkCfg(), { W: 1000, Q: 5 }), /no "Q" size/);
+      await bad(famLine('wall_shelf', { tiers: 1, surface: 'solid' }, { H: 38 }), /no "H" size/);
+      await bad(famLine('sink', sinkCfg({ basins: 2 }), { W: 900, D: 500, H: 850 }), /at least 1000 mm for these sinks/);
+      await bad(famLine('stove', { positions: ['wok'], addons: ['oven'] }, { W: 1000, D: 600, H: 850 }), /width must be at least 700 mm/);
+      await bad({ familyId: 'sink', config: sinkCfg(), dims: 7, qty: 1 }, /length \/ width \/ height/);
+    });
+    it('a line is EITHER a product OR a family: id with familyId, size with dims, specs on a family line, unknown keys, a stored price — all refused', async () => {
+      await bad({ id: P_FIX, familyId: 'sink', config: sinkCfg(), qty: 1 }, /unknown field "id"/);
+      await bad({ familyId: 'sink', config: sinkCfg(), size: { W: 1000 }, qty: 1 }, /unknown field "size"/);
+      await bad({ familyId: 'sink', config: sinkCfg(), specs: [], qty: 1 }, /unknown field "specs"/);
+      await bad({ familyId: 'sink', config: sinkCfg(), unitPrice: 5, qty: 1 }, /unknown field "unitPrice"/);
+      await bad({ familyId: 'sink', config: sinkCfg(), name: 'Free sink', qty: 1 }, /unknown field "name"/);
+      await bad({ familyId: 'sink', config: sinkCfg(), dims: {}, qty: 1, family: 'x' }, /unknown field/);
+      await bad({ id: P_FIX, qty: 1, family: 'sink', config: sinkCfg() }, /unknown field/);
+    });
+    it('quantity and note: 1..20 whole units, a note of at most 240 characters of text', async () => {
+      for (const q of [0, -1, 21, 1.5, '2', null]) await bad({ familyId: 'sink', config: sinkCfg(), dims: { W: 1000 }, qty: q }, /quantity must be a whole number/);
+      await bad({ familyId: 'sink', config: sinkCfg(), dims: { W: 1000 }, qty: 1, note: 'x'.repeat(241) }, /note is too long/);
+      await bad({ familyId: 'sink', config: sinkCfg(), dims: { W: 1000 }, qty: 1, note: 5 }, /note must be text/);
+    });
+    it('ONE FAMILY, ONE MULTIPLIER: 20 units of a family across ALL its lines (any options, any size) is the ceiling — 21 is refused, 40 lines x 20 is refused', async () => {
+      const L = (q, w) => famLine('sink', sinkCfg({ basins: 1 }), { W: w, D: 500, H: 850 }, q);
+      const token = await newSession();
+      const ok = await fns.qrEstimate.run(estimatePayload(token, { items: [L(10, 500), L(10, 600)] }), ctx());
+      assert.equal(ok.ok, true);
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [L(10, 500), L(10, 600), L(1, 700)] }), ctx()), (e) => { assert.equal(e.code, 'invalid-argument'); assert.match(e.message, /at most 20 of one product.*your list has 21/); return true; });
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: Array.from({ length: 40 }, () => L(20, 500)) }), ctx()), (e) => e.code === 'invalid-argument');
+      // a different family has its own allowance
+      const two = await fns.qrEstimate.run(estimatePayload(token, { items: [L(20, 500), famLine('prep_table', { layers: 1, upper: 0 }, {}, 20)] }), ctx());
+      assert.equal(two.ok, true);
+    });
+    it('a body whose fields hide on a smuggled __proto__ (the decoder quirk) is refused before it can dodge the allowlists — a family line included', async () => {
+      if (!decodeWire) return;
+      const token = await newSession();
+      const smuggled = decodeWire(JSON.parse('{"familyId":"sink","__proto__":{"config":{"basins":2},"dims":{"W":1000},"qty":3}}'));
+      await rejectsWith(fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), smuggled] }), ctx()), 'invalid-argument', /not in the expected format/);
+      const smuggledCfg = decodeWire(JSON.parse('{"familyId":"sink","qty":1,"dims":{},"config":{"__proto__":{"basins":2},"basins":1}}'));
+      await rejectsWith(fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), smuggledCfg] }), ctx()), 'invalid-argument', /not in the expected format/);
+    });
+    it('a plain SKU line for a SKU a family absorbed is refused like any unknown product (a stale page cannot use it): PW-001, CE-001, PW-004 …', async () => {
+      for (const id of ['PW-001', 'CE-001', 'PW-004', 'BA-001', 'PW-015', 'PW-023', 'PW-010', 'CE-017']) await bad({ id, qty: 1, size: null, runs: null, specs: [], note: '' }, /no longer in the catalogue/);
+    });
+    it('a refused request never burns anything it should not: the response to a bad line is an error, the session stays usable', async () => {
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine('sink', sinkCfg({ faucet: 'x' }), {})] }), ctx()));
+      const ok = await fns.qrEstimate.run(estimatePayload(token, { items: [famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), fixedLine()] }), ctx());
+      assert.equal(ok.ok, true);
+    });
+  });
+
+  describe('qrSubmit stores the configured lines (price-free for the client, exact for staff) and returns only the receipt', () => {
+    it('the stored items carry the family, the validated configuration, the size and the plain-words options; the internal lines show how each figure was built', async () => {
+      const { res, doc } = await submit([famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }, 1, 'near the window'), fixedLine()]);
+      assert.deepEqual(Object.keys(res).sort(), ['estimate', 'ok', 'receivedAt', 'refNo', 'submittedOnManila']);
+      assert.deepEqual(doc.items[0], {
+        n: 1, kind: 'family', id: 'PW-004', familyId: 'sink', name: 'Sink', cat: 'washing', unit: 'pc', qty: 1, runs: null,
+        size: { W: 1000, D: 500, H: 850 }, sizeCustom: false, config: sinkCfg(),           // 1000 mm is the usual length for two sinks
+        specs: [{ label: 'Sinks', value: '2' }, { label: 'Sink position', value: 'Centre' }, { label: 'Undershelf', value: 'Without' }, { label: 'Upper shelf', value: 'Without' }, { label: 'Faucet', value: 'Pre-rinse spray' }],
+        note: 'near the window',
+      });
+      assert.equal(doc.items[1].id, P_FIX);                                                 // the fixed item keeps its shape
+      assert.ok(!('kind' in doc.items[1]));
+      assert.equal(doc.internal.exactTotal, 36703 + 4217);
+      assert.deepEqual(doc.internal.lines[0], { n: 1, id: 'PW-004', kind: 'family', familyId: 'sink', formulaType: 'per_length', unitPrice: 36703, lineTotal: 36703, priced: true, sizeAdjusted: true, warnings: [], base: 26011, deltas: [{ key: 'basins:2', amount: 6173 }, { key: 'faucet:prerinse', amount: 4519 }], missing: [], reason: null });
+      assert.deepEqual(doc.internal.lines[1].unitPrice, 4217);
+      assert.equal(doc.summary.itemCount, 2);
+      assert.equal(doc.estimate.pricedCount, 2);
+    });
+    it('an unpriced configured line is stored with WHY (the staff screen shows it): an unapproved sheet, a blank cell, a stale schema, no sheet', async () => {
+      const { doc } = await submit([famLine('cabinet', { type: 'floor', doors: 'swing', shelves: 3 }, {}), famLine('sink', sinkCfg({ basins: 3 }), { W: 1500, D: 500, H: 850 }), famLine('rack', { tiers: 4, wheels: true }, {}), famLine('wall_shelf', { tiers: 1, surface: 'solid' }, {}), fixedLine()]);
+      const byFam = Object.fromEntries(doc.internal.lines.filter((l) => l.kind === 'family').map((l) => [l.familyId, l]));
+      assert.equal(byFam.cabinet.reason, 'not_approved');
+      assert.equal(byFam.sink.reason, 'missing_input');
+      assert.deepEqual(byFam.sink.missing, ['Sinks: 3']);
+      assert.equal(byFam.rack.reason, 'not_approved');
+      assert.equal(byFam.wall_shelf.reason, 'not_approved');
+      for (const l of Object.values(byFam)) { assert.equal(l.priced, false); assert.equal(l.unitPrice, 0); }
+      assert.equal(doc.internal.exactTotal, 4217);
+      assert.equal(doc.estimate.reviewCount, 4);
+    });
+    it('what the CLIENT is shown is the rounded range only; the notification (lock screens!) carries no figure and no option names', async () => {
+      const { res } = await submit([famLine('stove', { positions: ['wok', 'hp_large', 'lp_small'], addons: [] }, { W: 1400, D: 700, H: 850 })]);
+      assert.deepEqual(res.estimate, { low: 80000, high: 105000 });
+      assert.ok(!/90647|29111|37123|exact|internal/i.test(JSON.stringify(res)));
+      const notes = fake.paths('notifications/').map((p) => fake.read(p));
+      assert.ok(notes.length >= 2);
+      for (const n of notes) assert.ok(!/90,?647|29,?111|37,?123|wok|Wok/.test(`${n.title} ${n.body}`), 'a figure or an option name reached a notification');
+    });
+    it('the stored configuration is the VALIDATED one: add-ons are put in the family\'s order, defaults are filled in, and a client-supplied extra never survives', async () => {
+      const { doc } = await submit([famLine('stove', { addons: ['fryer', 'griddle'], positions: ['lp_small', 'wok'] }, { W: 1300, D: 700, H: 850 }), fixedLine()]);
+      assert.deepEqual(doc.items[0].config, { positions: ['lp_small', 'wok'], addons: ['griddle', 'fryer'] });
+      assert.equal(doc.items[0].specs[0].value, '1. Low-pressure burner, small, 2. Wok burner');
+      assert.equal(doc.items[0].specs[1].value, 'Griddle, Fryer');
+    });
+    it('a re-price at submit uses the sheet AS IT IS THEN (an edit between the estimate and the submit is honoured), never what the page reported', async () => {
+      const token = await readyToken();
+      const items = [famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 }), fixedLine()];
+      const est = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+      fake.seed('product_pricing/sink', { ...fake.read('product_pricing/sink'), approved: false });
+      tick(600001);                                                                          // the master + sheets are re-read after the TTL
+      const res = await fns.qrSubmit.run(submitPayload(token, { items, lastEstimate: { low: est.low, high: est.high, basketHash: est.basketHash } }), ctx());
+      const doc = fake.read(`quote_requests/${res.refNo}`);
+      assert.equal(doc.estimate.reviewCount, 1, 'the sheet was un-approved: the sink is now priced after review');
+      assert.equal(doc.internal.exactTotal, 4217);
+      assert.equal(doc.estimateMismatch, true, 'the figure the page saw no longer matches');
+    });
+    it('the stored request has no field the rules allowlist could not hold and nothing undefined (the strict fake rejects undefined) — a mixed basket round-trips', async () => {
+      const { doc } = await submit([famLine('prep_table', { layers: 2, upper: 1 }, { W: 1200, D: 600, H: 850 }, 2), famLine('rack', { tiers: 6, wheels: false }, { W: 800, D: 500, H: 1600 }), fixedLine()]);
+      assert.equal(doc.items.length, 3);
+      assert.equal(doc.items[2].id, P_FIX);
+      assert.deepEqual(doc.items.map((i) => i.n), [1, 2, 3]);
+    });
+  });
+
+  it('the server and the page validate with the SAME helper (the functions/ mirror is byte-identical) — a configuration the helper accepts, the callable prices', async () => {
+    const cfg = PFX.validateConfiguration(FAMS.families.sink, { basins: 2, faucet: 'prerinse' }).config;
+    const r = await estimate([famLine('sink', cfg, { W: 1000, D: 500, H: 850 }), fixedLine()]);
+    assert.equal(r.reviewCount, 0);
+    assert.equal(fs.readFileSync(path.join(ROOT, 'functions/product-families.js'), 'utf8'), fs.readFileSync(path.join(ROOT, 'js/product-families.js'), 'utf8'));
   });
 });

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.317';
+window.APP_VERSION = '14.0.318';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1638,8 +1638,10 @@ window.PAGE_SCRIPTS = {
   // ── Inventory — new department (INVENTORY-DEPT-SPEC-2026-08-31). Its Count
   // Form tab calls js/letterhead.js's buildLetterhead/openPrintableDoc
   // unguarded (moved in from production.js's Count Form, same reach). ──
-  'dept:Inventory': ['js/screens/inventory.js', 'js/letterhead.js'],
-  'inventory':      ['js/screens/inventory.js', 'js/letterhead.js'],   // legacy standalone route
+  // The Family Pricing tab (President / Finance) edits the private option sheets of the six configurable catalogue products: it needs the family
+  // definitions + their helpers + the pricing core (for its "try a configuration" check) and its own screen file.
+  'dept:Inventory': ['js/screens/inventory.js', 'js/letterhead.js', 'js/qr-families.js', 'js/product-families.js', 'js/pricing-core.js', 'js/screens/family-pricing.js'],
+  'inventory':      ['js/screens/inventory.js', 'js/letterhead.js', 'js/qr-families.js', 'js/product-families.js', 'js/pricing-core.js', 'js/screens/family-pricing.js'],   // legacy standalone route
 
   'dept:Ventures': ['js/screens/ventures.js'],
 

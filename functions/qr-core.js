@@ -23,6 +23,14 @@
 // whose id is not in it (exhaust, fresh air, gas line, fire suppression, the
 // excluded items, legacy placeholder docs, anything new nobody has published), so
 // the same "no longer in the catalogue" refusal applies to all of them.
+//
+// PRODUCT FAMILIES (owner ruling 2026-10-21): six products are CONFIGURABLE. The published SKUs a family absorbs are no longer
+// quotable as plain lines (qr-published.json lists only the FIXED items); a visitor quotes the family instead, with a line
+// { familyId, config, dims, qty, note }. The family definitions are functions/qr-families.js (GENERATED from scripts/public-families.json,
+// mirrored from js/), the logic that validates a line against one is functions/product-families.js (mirrored), and the price is
+// pricing-core's priceConfiguredItem(): the family's primary SKU through the unchanged machinery plus the signed option deltas of the
+// PRIVATE sheet product_pricing/{family}. A family whose sheet is not approved, or an option whose cell is blank, is "priced after
+// review" — the line is excluded from the estimate and counted in the tray note, exactly like an unpriced SKU (O6).
 'use strict';
 
 const crypto = require('crypto');
@@ -30,6 +38,8 @@ const portal = require('./portal-core');
 const cir = require('./cir-core');
 const QR = require('./qr-def');
 const pricing = require('./pricing-core');
+const PF = require('./product-families');
+const FAMILIES = require('./qr-families');
 const PUBLISHED = require('./qr-published.json');
 
 const { INTAKE, LIMITS, ESTIMATE, COPY, PRIVACY_NOTICE } = QR;
@@ -275,6 +285,40 @@ function buildProductIndex(docs, published) {
   return byId;
 }
 
+/** The primary SKU id of every family — these products are LOADED (the price of a configured line starts from one) but are not quotable on their own. */
+function familyPrimaryIds(families) {
+  const f = families || FAMILIES;
+  return new Set((f.order || []).map((id) => f.families[id].primary));
+}
+
+/**
+ * [{id, data}] -> { byId, primaries }. `byId` = the QUOTABLE fixed SKUs (qr-published.json), `primaries` = Map familyId -> the normalised
+ * primary SKU of each family (loaded even though it is absorbed). Any other product doc is dropped.
+ */
+function buildCatalogueIndex(docs, opts) {
+  const o = opts || {};
+  const quotable = o.quotable || publishedIds();
+  const families = o.families || FAMILIES;
+  const primaryIds = familyPrimaryIds(families);
+  const all = buildProductIndex(docs, new Set([...quotable, ...primaryIds]));
+  const byId = new Map();
+  all.forEach((p, id) => { if (quotable.has(id)) byId.set(id, p); });
+  const primaries = new Map();
+  (families.order || []).forEach((fid) => { const p = all.get(families.families[fid].primary); if (p) primaries.set(fid, p); });
+  return { byId, primaries };
+}
+
+/** [{id, data}] (product_pricing docs) -> Map familyId -> the SANITISED sheet (see pricing-core.normalisePricingDoc). Unknown family ids are dropped. */
+function buildPricingIndex(docs, families) {
+  const f = families || FAMILIES;
+  const out = new Map();
+  (docs || []).forEach((d) => {
+    if (!d || typeof d.id !== 'string' || !has(f.families, d.id)) return;
+    out.set(d.id, pricing.normalisePricingDoc(f.families[d.id], d.data));
+  });
+  return out;
+}
+
 /** productMeta/config.constants (the multiplier) — a plain object, never null. */
 function constantsOf(meta) { return isPlainObject(meta) && isPlainObject(meta.constants) ? meta.constants : {}; }
 /** O7 kill-switch: the estimate is on unless productMeta/config.quoteRequest.estimateEnabled === false. */
@@ -297,14 +341,23 @@ function productsCacheState(cache, nowMs) {
 // ──────────────────────────────────────────────────────────────────────────
 
 const ITEM_KEYS = ['id', 'qty', 'size', 'runs', 'specs', 'note'];
+const FAMILY_ITEM_KEYS = ['familyId', 'config', 'dims', 'qty', 'note'];
 const GONE_MSG = 'An item in your list is no longer in the catalogue — remove it and try again.';
 
 /**
- * raw items -> { ok, errors, items, badIds }. `byId` is a Map of PUBLISHED, normalised products.
+ * raw items -> { ok, errors, items, badIds }. `byId` is a Map of the QUOTABLE (fixed), normalised products.
  * `items[]` is the stored (client-facing, price-free) shape of §8.1; name / cat / unit are re-derived from the master and
- * anything the client sent for them is ignored. A present `family` / `config` is refused, not ignored (Phase 0 seam).
+ * anything the client sent for them is ignored.
+ * A line is EITHER a plain product line { id, qty, size, runs, specs, note } OR a configured-family line
+ * { familyId, config, dims, qty, note } — never both. opts = { families, primaries }: the family definitions (js/qr-families.js) and the Map
+ * familyId -> primary SKU the pricing starts from; without them a family line is refused. A family line is validated STRICTLY against the
+ * family (an unknown option, value or size key is an error, never ignored) and stored with its configuration, its size and the plain-words
+ * option list (`specs`: the same {label, value} rows a product line uses, so every consumer prints it without learning a new shape).
  */
-function normaliseItems(rawItems, byId) {
+function normaliseItems(rawItems, byId, opts) {
+  const o = opts || {};
+  const families = o.families || null;
+  const primaries = o.primaries || new Map();
   const errors = [];
   const badIds = [];
   const items = [];
@@ -313,9 +366,44 @@ function normaliseItems(rawItems, byId) {
   rawItems.forEach((raw, idx) => {
     const n = idx + 1;
     if (!isPlainObject(raw)) { errors.push(`Item ${n} is malformed.`); return; }
+    if (has(raw, 'familyId')) {
+      const extraF = Object.keys(raw).filter((k) => !FAMILY_ITEM_KEYS.includes(k));
+      if (extraF.length) { errors.push(`Item ${n} has an unknown field "${String(extraF[0]).slice(0, 30)}".`); return; }
+      const fid = typeof raw.familyId === 'string' ? raw.familyId : '';
+      const fam = families && has(families.families, fid) ? families.families[fid] : null;
+      const primary = fam ? primaries.get(fid) : undefined;
+      if (!fam || !primary) { if (!errors.includes(GONE_MSG)) errors.push(GONE_MSG); badIds.push(fid.slice(0, 40)); return; }
+      const qtyF = raw.qty;
+      if (!Number.isInteger(qtyF) || qtyF < 1 || qtyF > LIMITS.maxQtyPerLine) { errors.push(`"${fam.label}": quantity must be a whole number from 1 to ${LIMITS.maxQtyPerLine}.`); return; }
+      let noteF = '';
+      if (has(raw, 'note') && raw.note != null && raw.note !== '') {
+        if (typeof raw.note !== 'string') { errors.push(`"${fam.label}": the note must be text.`); return; }
+        noteF = stripText(raw.note);
+        if (noteF.length > LIMITS.maxNote) { errors.push(`"${fam.label}": the note is too long (${LIMITS.maxNote} characters at most).`); return; }
+      }
+      const v = PF.validateLine(fam, raw.config, raw.dims);
+      if (!v.ok) { v.errors.slice(0, 2).forEach((e) => errors.push(`"${fam.label}": ${e}`)); return; }
+      items.push({
+        n,
+        kind: 'family',
+        id: primary.id,
+        familyId: fid,
+        name: fam.label,
+        cat: fam.category,
+        unit: fam.unit || 'pc',
+        qty: qtyF,
+        runs: null,
+        size: Object.assign({}, v.dims),
+        sizeCustom: v.custom,
+        config: v.config,
+        specs: PF.describe(fam, v.config),
+        note: noteF,
+      });
+      return;
+    }
     const extra = Object.keys(raw).filter((k) => !ITEM_KEYS.includes(k));
     if (extra.length) {
-      errors.push(extra.some((k) => k === 'family' || k === 'config') ? `Item ${n} cannot be configured yet.` : `Item ${n} has an unknown field "${extra[0]}".`);
+      errors.push(`Item ${n} has an unknown field "${String(extra[0]).slice(0, 30)}".`);
       return;
     }
     const id = typeof raw.id === 'string' ? raw.id : '';
@@ -350,26 +438,38 @@ function normaliseItems(rawItems, byId) {
   // (different sizes — a fixed-price product ignores size — or different notes). Without this, 40 lines x qty 20 = 800 units of one
   // product would multiply its list price 800-fold and turn the rounded range into an exact-price oracle that also defeats the
   // minimum-basket gate. Units are qty x runs, summed per product id.
+  // A configurable family counts as ONE product here: every line of the same family, whatever its options and size, shares one cap.
+  const unitKey = (it) => (it.kind === 'family' ? 'family:' + it.familyId : it.id);
   const unitsById = new Map();
-  items.forEach((it) => unitsById.set(it.id, (unitsById.get(it.id) || 0) + it.qty * (it.runs == null ? 1 : it.runs)));
-  unitsById.forEach((units, id) => {
+  items.forEach((it) => unitsById.set(unitKey(it), (unitsById.get(unitKey(it)) || 0) + it.qty * (it.runs == null ? 1 : it.runs)));
+  unitsById.forEach((units, key) => {
     if (units > LIMITS.maxQtyPerProduct) {
-      const line = items.find((x) => x.id === id);
-      errors.push(`"${line ? line.name : id}": you can request at most ${LIMITS.maxQtyPerProduct} of one product in a quote (your list has ${units}).`);
+      const line = items.find((x) => unitKey(x) === key);
+      errors.push(`"${line ? line.name : key}": you can request at most ${LIMITS.maxQtyPerProduct} of one product in a quote (your list has ${units}).`);
     }
   });
   return { ok: errors.length === 0, errors, items, badIds };
 }
 
-/** sha256 of the canonical, order-independent JSON of [id, size, runs, specs, qty] per line (the note never changes a price). */
+/**
+ * sha256 of the canonical, order-independent JSON of [id, size, runs, specs, qty] per line (the note never changes a price).
+ * A configured-family line hashes its family, size and CANONICAL configuration instead (the burner order matters, an add-on's order does not).
+ */
 function basketHash(items) {
-  const canon = (items || []).map((it) => JSON.stringify([
-    it.id,
-    it.size ? ['W', 'D', 'H'].map((k) => (has(it.size, k) ? it.size[k] : null)) : null,
-    it.runs == null ? null : it.runs,
-    (it.specs || []).map((s) => [s.label, s.value]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
-    it.qty,
-  ])).sort();
+  const canon = (items || []).map((it) => {
+    const size = it.size ? ['W', 'D', 'H'].map((k) => (has(it.size, k) ? it.size[k] : null)) : null;
+    if (it.kind === 'family') {
+      const fam = has(FAMILIES.families, it.familyId) ? FAMILIES.families[it.familyId] : null;
+      return JSON.stringify(['family:' + it.familyId, size, null, fam ? PF.canonicalConfig(fam, it.config) : JSON.stringify(it.config || null), it.qty]);
+    }
+    return JSON.stringify([
+      it.id,
+      size,
+      it.runs == null ? null : it.runs,
+      (it.specs || []).map((s) => [s.label, s.value]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+      it.qty,
+    ]);
+  }).sort();
   return crypto.createHash('sha256').update(JSON.stringify(canon)).digest('hex');
 }
 
@@ -379,12 +479,38 @@ function basketHash(items) {
  *      distinctPriced, customSizeCount, basketHash }
  * Lines with no list price (unitPrice 0) are EXCLUDED from `exact` and counted in reviewCount (O6).
  */
-function computeBasket(items, byId, constants, cfg) {
+function computeBasket(items, byId, constants, cfg, ctx) {
   void cfg;
+  const c = ctx || {};
+  const families = c.families || FAMILIES;
   const lines = [];
   let exact = 0, pricedCount = 0, reviewCount = 0, customSizeCount = 0;
   const distinct = new Set();
   (items || []).forEach((it, i) => {
+    if (it.kind === 'family') {
+      // A configured line: the family's primary SKU through the unchanged machinery + the signed deltas of the PRIVATE sheet. No sheet,
+      // an unapproved sheet or a blank cell -> unpriced ("priced after review"), never a partial figure.
+      const fam = has(families.families, it.familyId) ? families.families[it.familyId] : null;
+      const primary = c.primaries && c.primaries.get(it.familyId);
+      const sheet = c.pricing && c.pricing.get ? c.pricing.get(it.familyId) : null;
+      // A SOFT width rule (the stove) lets a visitor ask for a body shorter than the burners need: the line is priced at the usual length, not at
+      // the cheaper one asked for, and the staff line says so.
+      let size = it.size;
+      const lineWarnings = [];
+      const mw = fam ? PF.minWidth(fam, it.config) : null;
+      if (mw && !mw.hard && size && typeof size.W === 'number' && size.W < mw.mm) {
+        lineWarnings.push(`Asked for ${size.W} mm; priced at the usual ${mw.mm} mm length for these ${mw.noun}.`);
+        size = Object.assign({}, size, { W: mw.mm });
+      }
+      const r = fam && primary
+        ? pricing.priceConfiguredItem(primary, fam, it.config, size, sheet, constants || {}, { schemaVersion: families.version })
+        : { unitPrice: 0, priced: false, reason: 'no_family', base: 0, missing: [], deltas: [], sizeAdjusted: false };
+      const total = r.unitPrice * it.qty;
+      if (r.priced) { exact += total; pricedCount++; distinct.add('family:' + it.familyId); } else reviewCount++;
+      if (it.sizeCustom) customSizeCount++;
+      lines.push({ n: it.n || i + 1, id: it.id, kind: 'family', familyId: it.familyId, formulaType: primary ? primary.formulaType : 'fixed', unitPrice: r.unitPrice, lineTotal: total, priced: r.priced, sizeAdjusted: r.sizeAdjusted, warnings: lineWarnings, base: r.base, deltas: r.deltas, missing: r.missing, reason: r.reason });
+      return;
+    }
     const product = byId.get(it.id);
     const v = pricing.validateSelection(product, { size: it.size, runs: it.runs, specs: it.specs }, LIMITS);
     const r = pricing.priceCatalogItem(product, v.sel, constants || {});
@@ -552,6 +678,7 @@ function privacyNoticeSha256() {
 
 module.exports = {
   QR_DEF: QR,
+  FAMILIES,
   RATE,
   PRODUCTS_TTL_MS,
   PRODUCTS_MAX_STALE_MS,
@@ -566,8 +693,11 @@ module.exports = {
   validateIntake,
   validateContact,
   publishedIds,
+  familyPrimaryIds,
   normaliseProductDoc,
   buildProductIndex,
+  buildCatalogueIndex,
+  buildPricingIndex,
   constantsOf,
   estimateEnabledOf,
   productsCacheState,

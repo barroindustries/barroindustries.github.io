@@ -15,9 +15,16 @@
    Safety: the page's CSP forbids inline script and inline style, so this file builds every node with createElement +
    textContent (never innerHTML) and styles nothing by attribute — all looks are classes in css/quote-request.css.
    Visitor-typed text and island text can therefore never be parsed as HTML. The draft in localStorage
-   (barro-qr-draft-v1) is treated as untrusted on load: every line is re-validated against the island and re-derived
+   (barro-qr-draft-v2; a v1 draft is converted once) is treated as untrusted on load: every line is re-validated against the island and re-derived
    (names/units come from the island, never from storage). No analytics, no cookies, no third-party script beyond the
    two pinned Firebase compat scripts that carry the callables.
+
+   CONFIGURABLE PRODUCTS (owner ruling 2026-10-21): six products — preparation table, sink, stove, cabinet, wall shelving, rack — are ONE card
+   each with a "Configure & add" button that opens a configurator sheet (segmented buttons and chips, a burner-by-burner list for the stove,
+   a live preview image at the top: js/qr-preview.js). The options come from window.QR_FAMILIES (js/qr-families.js) and are checked with
+   window.ProductFamilies (js/product-families.js) — the very same files the server validates with. A configured line is sent as
+   { familyId, config, dims, qty, note }; the server re-validates every key and value. The SKUs a family absorbed are no longer cards: a
+   draft saved before this change is converted line by line to the closest configuration (a notice says so).
 
    QA seam: ?mock=1 resolves every call locally (no Firebase init); sim=gate|disabled|ratelimit|error|dup|slow|stale|
    expired|unauth exercises each state. It never reaches a backend and is harmless in production.
@@ -48,6 +55,11 @@
   island.products.forEach(function (p) {
     if (p && typeof p.id === 'string' && typeof p.name === 'string') byId[p.id] = p;
   });
+  // The six configurable families (js/qr-families.js) and their pure helpers (js/product-families.js). Without them only the fixed items work.
+  var PF = window.ProductFamilies, FAMS = window.QR_FAMILIES, PV = window.QR_PREVIEW;
+  var famEnabled = !!(PF && FAMS && FAMS.families && FAMS.order);          // the preview module is optional: without it the sheet simply has no picture
+  var previews = (island && island.previews && typeof island.previews === 'object') ? island.previews : {};
+  function famById(id) { return famEnabled && typeof id === 'string' && Object.prototype.hasOwnProperty.call(FAMS.families, id) ? FAMS.families[id] : null; }
 
   // ── config ────────────────────────────────────────────────────────────────
   // Firebase config is public by design (rules are the boundary) — copied verbatim from sales/clientinformationrequest/.
@@ -61,7 +73,8 @@
     appId: '1:700081895848:web:265511313b4ff74575459d'
   };
   var REGION = 'asia-east1';
-  var DRAFT_KEY = 'barro-qr-draft-v1';
+  var DRAFT_KEY = 'barro-qr-draft-v2';
+  var OLD_DRAFT_KEY = 'barro-qr-draft-v1';       // read once to convert a draft saved before the families existed, then removed
   var qs = new URLSearchParams(location.search);
   var MOCK = qs.get('mock') === '1';
   var SIM = MOCK ? (qs.get('sim') || '') : '';
@@ -156,25 +169,31 @@
     if (!it.size) return false;
     return dimKeys(p).some(function (k) { return it.size[k] !== p.dims[k]; });
   }
-  function lineKey(it) { return JSON.stringify([it.id, it.size, it.runs, it.specs]); }
+  // A configurable family line: { uid, familyId, name, cat, unit, config, dims, qty, note }. Everything below tells the two kinds apart by `familyId`.
+  function isFam(it) { return !!(it && it.familyId); }
+  function famCustom(fam, it) { var d = PF.standardDims(fam, it.config); return Object.keys(d).some(function (k) { return it.dims[k] !== d[k]; }); }
+  function lineKey(it) { return isFam(it) ? JSON.stringify([it.familyId, it.dims, PF.canonicalConfig(famById(it.familyId), it.config)]) : JSON.stringify([it.id, it.size, it.runs, it.specs]); }
   // One product, ONE multiplier: the units of a product (qty x runs) across ALL of its lines are capped at LIMITS.maxQtyPerProduct
   // — the server refuses more, because many lines of one product would turn the rounded range into an exact-price oracle.
+  // A configurable family counts as ONE product here (its key is 'family:<id>'): every line of it shares one cap.
   function unitsOf(it) { return it.runs != null ? it.qty * it.runs : it.qty; }
-  function productUnits(id, exceptUid) {
-    return draft.items.reduce(function (n, it) { return it.id === id && it.uid !== exceptUid ? n + unitsOf(it) : n; }, 0);
+  function unitKey(it) { return isFam(it) ? 'family:' + it.familyId : it.id; }
+  function productUnits(key, exceptUid) {
+    return draft.items.reduce(function (n, it) { return unitKey(it) === key && it.uid !== exceptUid ? n + unitsOf(it) : n; }, 0);
   }
   function capUnits(items) {
     var used = Object.create(null), out = [], dropped = 0;
     items.forEach(function (it) {
-      var left = LIMITS.maxQtyPerProduct - (used[it.id] || 0);
+      var key = unitKey(it);
+      var left = LIMITS.maxQtyPerProduct - (used[key] || 0);
       if (it.runs != null) {
         if (left < 1) { dropped++; return; }
         if (it.runs > left) { it.runs = left; dropped++; }
-        used[it.id] = (used[it.id] || 0) + it.runs; out.push(it); return;
+        used[key] = (used[key] || 0) + it.runs; out.push(it); return;
       }
       if (left < 1) { dropped++; return; }
       if (it.qty > left) { it.qty = left; dropped++; }
-      used[it.id] = (used[it.id] || 0) + it.qty; out.push(it);
+      used[key] = (used[key] || 0) + it.qty; out.push(it);
     });
     return { items: out, dropped: dropped };
   }
@@ -182,7 +201,7 @@
   // ═══════════════════════════ DRAFT (localStorage; never a price) ═══════════════════════════
   var draft = freshDraft();
   function freshDraft() {
-    return { v: 1, intake: null, intakeDone: false, contact: null, consent: null, items: [], sessionToken: null, sessionCreatedAtIso: null, sessionLocalAtMs: null, startedAtMs: Date.now(), savedAtMs: 0 };
+    return { v: 2, intake: null, intakeDone: false, contact: null, consent: null, items: [], sessionToken: null, sessionCreatedAtIso: null, sessionLocalAtMs: null, startedAtMs: Date.now(), savedAtMs: 0 };
   }
   function ls(fn) { try { return fn(window.localStorage); } catch (_) { return undefined; } }
 
@@ -215,17 +234,51 @@
     if (typeof raw.note === 'string') out.note = raw.note.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, LIMITS.maxNote);
     return out;
   }
+  // A saved CONFIGURED line: rebuilt from the family definition, never trusted. A line that is no longer valid for its family is dropped (and counted).
+  function sanitizeFamilyItem(raw) {
+    var fam = isObj(raw) ? famById(raw.familyId) : null;
+    if (!fam) return null;
+    var v = PF.validateLine(fam, raw.config, raw.dims);
+    if (!v.ok) return null;
+    var qty = Number(raw.qty);
+    if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || qty > LIMITS.maxQtyPerLine) qty = 1;
+    var note = typeof raw.note === 'string' ? raw.note.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, LIMITS.maxNote) : '';
+    return { uid: typeof raw.uid === 'string' ? raw.uid.slice(0, 40) : uid(), familyId: fam.id, name: fam.label, cat: fam.category || '', unit: fam.unit || 'pc', config: v.config, dims: v.dims, qty: qty, note: note };
+  }
+  var convertedLines = 0;
+  // A line saved by the PREVIOUS page (before the families existed): a fixed item stays as it is; a SKU a family absorbed becomes that family at the
+  // closest configuration (its saved size kept where valid); anything else is no longer in the catalogue.
+  function migrateV1Item(raw) {
+    if (!isObj(raw) || typeof raw.id !== 'string') return null;
+    if (byId[raw.id]) return sanitizeItem(raw);
+    var m = famEnabled ? PF.migrateAbsorbed(FAMS, raw.id, raw) : null;
+    if (!m) return null;
+    var it = sanitizeFamilyItem({ uid: raw.uid, familyId: m.familyId, config: m.config, dims: m.dims, qty: raw.qty, note: raw.note });
+    if (it) convertedLines++;
+    return it;
+  }
   function sanitizeText(v, max) { return typeof v === 'string' ? v.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').slice(0, max) : ''; }
   function loadDraft() {
     var raw = ls(function (s) { return s.getItem(DRAFT_KEY); });
+    var legacy = false;
+    if (!raw) { raw = ls(function (s) { return s.getItem(OLD_DRAFT_KEY); }); legacy = !!raw; }
     if (!raw) return;
     var d;
     try { d = JSON.parse(raw); } catch (_) { return; }
-    if (!isObj(d) || d.v !== 1) return;
+    if (!isObj(d) || d.v !== (legacy ? 1 : 2)) return;
     var out = freshDraft();
-    var dropped = 0;
-    if (Array.isArray(d.items)) d.items.slice(0, LIMITS.maxItems).forEach(function (x) { var it = sanitizeItem(x); if (it) out.items.push(it); else dropped++; });
+    var dropped = 0, held = 0;
+    if (Array.isArray(d.items)) d.items.slice(0, LIMITS.maxItems).forEach(function (x) {
+      // The family files did not load: a saved CONFIGURED line cannot be rebuilt, but it must not be destroyed either — the stored draft is kept as it is
+      // (see saveDraftNow) and the visitor is asked to reload.
+      if (!legacy && !famEnabled && isObj(x) && x.familyId) { held++; return; }
+      if (legacy && !famEnabled && isObj(x) && typeof x.id === 'string' && !byId[x.id]) { held++; return; }              // an old line that only the family files could convert
+      var it = legacy ? migrateV1Item(x) : (isObj(x) && x.familyId ? sanitizeFamilyItem(x) : sanitizeItem(x));
+      if (it) out.items.push(it); else dropped++;
+    });
     var capped = capUnits(out.items); out.items = capped.items;
+    var seenUid = Object.create(null);
+    out.items.forEach(function (it) { if (seenUid[it.uid]) it.uid = uid(); seenUid[it.uid] = true; });          // a tampered draft must not hold two lines with one id
     if (isObj(d.intake)) {
       var i = d.intake;
       out.intake = { need: sanitizeText(i.need, 40), needOther: sanitizeText(i.needOther, 120), useFor: sanitizeText(i.useFor, 40), useForOther: sanitizeText(i.useForOther, 120), entityType: sanitizeText(i.entityType, 20), targetDate: sanitizeText(i.targetDate, 10), targetFlexible: i.targetFlexible === true, address: sanitizeText(i.address, INTAKE.address.max), notes: sanitizeText(i.notes, INTAKE.notes.max) };
@@ -248,12 +301,21 @@
     }
     if (typeof d.startedAtMs === 'number' && isFinite(d.startedAtMs)) out.startedAtMs = Math.min(d.startedAtMs, Date.now());
     draft = out;
-    if (dropped) pendingToast = 'Some items in your saved quote are no longer in the catalogue and were removed.';
-    else if (capped.dropped) pendingToast = 'Some quantities in your saved quote were reduced to the limit of ' + LIMITS.maxQtyPerProduct + ' per product.';
+    if (held) holdStored = true;
+    // ONE notice that says everything that happened to the saved quote (it used to say only the first thing)
+    var notes = [];
+    if (held) notes.push('Part of this page did not load, so your configured items are on hold. Reload the page to continue — nothing has been lost.');
+    if (convertedLines) notes.push((convertedLines === 1 ? 'An item' : convertedLines + ' items') + ' in your saved quote ' + (convertedLines === 1 ? 'is now a configurable product and was' : 'are now configurable products and were') + ' set to the closest options.');
+    if (dropped) notes.push('Some items in your saved quote are no longer in the catalogue and were removed.');
+    if (capped.dropped) notes.push('Some quantities were reduced to the limit of ' + LIMITS.maxQtyPerProduct + ' per product (every size and option of one product counts together).');
+    if (notes.length) pendingToast = notes.join(' ') + (convertedLines ? ' Please check ' + (convertedLines === 1 ? 'it' : 'them') + ' in your quote.' : '');
+    if (legacy && !holdStored) { saveDraftNow(); ls(function (s) { s.removeItem(OLD_DRAFT_KEY); }); }          // the converted draft now lives under the new key
   }
   var saveTimer = 0;
+  var holdStored = false;                // true while configured lines that could not be rebuilt sit in storage: nothing is written over them
   function saveDraftNow() {
     clearTimeout(saveTimer);
+    if (holdStored) return;
     draft.savedAtMs = Date.now();
     ls(function (s) {
       // items are stored as the visitor chose them; name/cat/unit are re-derived on load. No prices, no estimate, no range.
@@ -261,7 +323,7 @@
     });
   }
   function saveDraft() { clearTimeout(saveTimer); saveTimer = setTimeout(saveDraftNow, 300); }
-  function clearDraft() { clearTimeout(saveTimer); ls(function (s) { s.removeItem(DRAFT_KEY); }); }
+  function clearDraft() { clearTimeout(saveTimer); ls(function (s) { s.removeItem(DRAFT_KEY); s.removeItem(OLD_DRAFT_KEY); }); }
   var pendingToast = '';
 
   // ═══════════════════════════ BACKEND SEAM (real callables, or ?mock=1) ═══════════════════════════
@@ -313,7 +375,10 @@
           if (SIM === 'ratelimit') return Promise.reject({ code: 'resource-exhausted', message: 'Estimate paused for today — you can still submit your list.' });
           if (SIM === 'error') return Promise.reject({ code: 'unavailable', message: 'x' });
           var items = payload.items || [];
-          var custom = items.filter(function (it) { var p = byId[it.id]; return p && it.size && dimKeys(p).some(function (k) { return it.size[k] !== p.dims[k]; }); }).length;
+          var custom = items.filter(function (it) {
+            if (it.familyId) { var fm = famById(it.familyId); return !!(fm && it.dims && PF.validateLine(fm, it.config, it.dims).custom); }
+            var p = byId[it.id]; return p && it.size && dimKeys(p).some(function (k) { return it.size[k] !== p.dims[k]; });
+          }).length;
           var shown = SIM === 'gate' ? false : (SIM === 'disabled' ? false : items.length >= 2);
           var notes = [COPY.vatExclusive, COPY.deliveryExcluded];
           if (payload.entityType === 'government') notes.push(COPY.governmentNote);
@@ -338,7 +403,7 @@
           if (SIM === 'error') return Promise.reject({ code: 'unavailable', message: 'x' });
           if (SIM === 'expired' && mockSubmitTries === 1) return Promise.reject({ code: 'failed-precondition', message: 'Your session expired — reload the page (your list is saved on this device).' });
           if (SIM === 'unauth' && mockSubmitTries === 1) return Promise.reject({ code: 'unauthenticated', message: 'Please reload the page.' });
-          if (SIM === 'stale') return Promise.reject({ code: 'invalid-argument', message: 'An item in your list is no longer in the catalogue — remove it and try again.', details: { itemIds: [payload.items[0].id] } });
+          if (SIM === 'stale') return Promise.reject({ code: 'invalid-argument', message: 'An item in your list is no longer in the catalogue — remove it and try again.', details: { itemIds: [payload.items[0].familyId || payload.items[0].id] } });
           var now = Date.now();
           var iso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
           var abc = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', suf = '';
@@ -384,12 +449,12 @@
   var lastShown = null;                              // { low, high, basketHash } of the last figure the page DISPLAYED (sent at submit)
   function entityNow() { return draft.intake && draft.intake.entityType === 'government' ? 'government' : 'private'; }
   function basketKey() {
-    var rows = draft.items.map(function (it) { return JSON.stringify([it.id, it.size, it.runs, it.specs, it.qty]); }).sort();
+    var rows = draft.items.map(function (it) { return isFam(it) ? JSON.stringify(['family', it.familyId, it.dims, PF.canonicalConfig(famById(it.familyId), it.config), it.qty]) : JSON.stringify([it.id, it.size, it.runs, it.specs, it.qty]); }).sort();
     return entityNow() + '|' + rows.join('~');
   }
-  function itemPayload(it) { return { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs, note: it.note }; }
+  function itemPayload(it) { return isFam(it) ? { familyId: it.familyId, config: it.config, dims: it.dims, qty: it.qty, note: it.note } : { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs, note: it.note }; }
   // An estimate does not need the free-text note (it never changes a price), and nothing is sent before the visitor agrees to send.
-  function estimateItemPayload(it) { return { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs }; }
+  function estimateItemPayload(it) { return isFam(it) ? { familyId: it.familyId, config: it.config, dims: it.dims, qty: it.qty } : { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs }; }
   function setEst(status, data) { est = { status: status, data: data || null }; renderTray(); if (sheet.kind === 'review' && sheet.refresh) sheet.refresh(); }
   function scheduleEstimate() {
     clearTimeout(estTimer);
@@ -424,7 +489,7 @@
   }
   // lines the server says are no longer in the catalogue: flagged in the review sheet and left for the visitor to remove
   function markGone(ids) {
-    draft.items.forEach(function (it) { it.gone = ids.indexOf(it.id) >= 0; });
+    draft.items.forEach(function (it) { it.gone = isFam(it) ? ids.indexOf(it.familyId) >= 0 : ids.indexOf(it.id) >= 0; });
     if (sheet.kind === 'review' && sheet.refreshItems) sheet.refreshItems();
   }
 
@@ -438,6 +503,8 @@
     if (est.status === 'error') return { kind: 'msg', text: 'Estimate unavailable right now — you can still submit.' };
     if (d && d.shown) return { kind: 'fig', text: peso(d.low) + ' – ' + peso(d.high), notes: Array.isArray(d.notes) ? d.notes : [] };
     if (d && d.reason === 'disabled') return { kind: 'msg', text: COPY.disabledMessage, notes: Array.isArray(d.notes) ? d.notes.filter(function (n) { return n !== COPY.vatExclusive && n !== COPY.vatInclusive && n !== COPY.deliveryExcluded; }) : [] };
+    // every line is priced after review: adding more of the same can never produce a figure, so do not promise one
+    if (d && d.pricedCount === 0 && d.reviewCount > 0) return { kind: 'msg', text: 'Priced after review — send your request and we will prepare your quotation.', notes: [] };
     return { kind: 'msg', text: COPY.gateMessage, notes: Array.isArray(d && d.notes) ? d.notes.filter(function (n) { return n !== COPY.vatExclusive && n !== COPY.vatInclusive && n !== COPY.deliveryExcluded; }) : [] };
   }
 
@@ -456,6 +523,16 @@
   if (MOCK) root.appendChild(el('div', { class: 'qr-mock', text: 'MOCK MODE' + (SIM ? ' · ' + SIM : '') }));
 
   function itemCount() { return draft.items.reduce(function (n, it) { return n + (it.runs != null ? 1 : it.qty); }, 0); }
+  // One line of the quote as words, for the review sheet and the receipt: a product line shows its size and its options; a configured line shows
+  // the chosen options (the one-line summary) and its size.
+  function lineName(it) { return it.name; }
+  function lineCode(it) { return isFam(it) ? 'Configurable' : it.id; }
+  function lineSizeText(it) { var fam = isFam(it) ? famById(it.familyId) : null; return fam ? PF.sizeTextLabelled(fam, it.dims) : sizeText(it); }
+  function lineSpecsText(it) {
+    if (isFam(it)) { var fam = famById(it.familyId); return fam ? PF.summaryParts(fam, it.config).join(' · ') : ''; }
+    return it.specs.map(function (s) { return s.label + ': ' + s.value; }).join(' · ');
+  }
+  function lineCustom(it) { if (isFam(it)) { var fam = famById(it.familyId); return !!fam && famCustom(fam, it); } var p = byId[it.id]; return !!p && isCustom(p, it); }
   function renderTray() {
     var n = draft.items.length;
     var has = n > 0;
@@ -483,10 +560,15 @@
   }
   var toastTimer = 0;
   function toast(msg) {
+    // shown while a sheet is open (a phone's bottom sheet): sit just above the sheet's footer buttons instead of over its text
+    var foot = sheet.kind ? sheetEl.querySelector('.qr-sheet-foot') : null;
+    if (foot) doc.documentElement.style.setProperty('--qr-toast-b', (Math.ceil(foot.getBoundingClientRect().height) + 12) + 'px');
+    else doc.documentElement.style.removeProperty('--qr-toast-b');
     toastEl.textContent = msg; toastEl.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.hidden = true; }, 3800);
+    toastTimer = setTimeout(function () { toastEl.hidden = true; }, Math.max(3800, 1800 + String(msg).length * 40));      // a long notice stays up long enough to read
   }
+  function hideToast() { clearTimeout(toastTimer); toastEl.hidden = true; }
   var cards = [];
   function injectAddButtons() {
     [].slice.call(doc.querySelectorAll('.cat-card[data-id]')).forEach(function (card) {
@@ -496,10 +578,18 @@
       card.appendChild(el('button', { type: 'button', class: 'qr-add', 'data-id': id, 'aria-label': 'Add to quote: ' + p.name, text: 'Add to quote' }));
       cards.push({ card: card, id: id });
     });
+    // the six configurable products: one card each, one "Configure & add" button that opens the configurator sheet
+    [].slice.call(doc.querySelectorAll('.cat-card[data-family]')).forEach(function (card) {
+      var fid = card.getAttribute('data-family');
+      var fam = famById(fid);
+      if (!fam || card.querySelector('.qr-add')) return;
+      card.appendChild(el('button', { type: 'button', class: 'qr-add qr-add-config', 'data-family': fid, 'aria-label': 'Configure and add to quote: ' + fam.label, text: 'Configure & add' }));
+      cards.push({ card: card, id: 'family:' + fid });
+    });
   }
   function renderBadges() {
     var counts = Object.create(null);
-    draft.items.forEach(function (it) { counts[it.id] = (counts[it.id] || 0) + (it.runs != null ? 1 : it.qty); });
+    draft.items.forEach(function (it) { var k = unitKey(it); counts[k] = (counts[k] || 0) + (it.runs != null ? 1 : it.qty); });
     cards.forEach(function (c) {
       if (counts[c.id]) c.card.setAttribute('data-qr-count', String(counts[c.id])); else c.card.removeAttribute('data-qr-count');
     });
@@ -531,6 +621,12 @@
     var syncKeyboard = function () {
       var inset = vv.scale && vv.scale > 1.01 ? 0 : Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
       doc.documentElement.style.setProperty('--qr-kb', inset + 'px');
+      // with the keyboard up a configurator sheet has almost no room: its preview shrinks to the caption line (css) and the field being typed into is
+      // brought into view (the sheet body's scroll-padding keeps it clear of the preview and the footer)
+      var kbOpen = inset > 80;
+      doc.documentElement.classList.toggle('qr-kb-open', kbOpen);
+      var ae = doc.activeElement;
+      if (kbOpen && sheet.kind && ae && sheetEl.contains(ae) && typeof ae.scrollIntoView === 'function') { try { ae.scrollIntoView({ block: 'nearest' }); } catch (_) { /* nothing to do */ } }
     };
     vv.addEventListener('resize', syncKeyboard); vv.addEventListener('scroll', syncKeyboard); syncKeyboard();
   }
@@ -540,6 +636,7 @@
   }
   function openSheet(kind, trigger, opts) {
     var opening = !sheet.kind;
+    if (opening) hideToast();                      // a toast belongs to the page: one left over from the last action must not sit on top of the sheet that opens next
     sheet.kind = kind;
     sheet.refresh = null; sheet.refreshItems = null;
     sheet.onClose = (opts && opts.onClose) || null;
@@ -561,6 +658,7 @@
     if (restoreFocus !== false && trig && doc.contains(trig) && typeof trig.focus === 'function') { try { trig.focus(); } catch (_) { /* nothing to do */ } }
     sheet.trigger = null;
     if (cb) cb();
+    if (pendingToast && !sheet.kind) { var held_ = pendingToast; pendingToast = ''; toast(held_); }          // a notice about the saved quote waited for the sheet that opened first
   }
   on(backdrop, 'click', function () { if (sheet.closable) closeSheet(); });
   doc.addEventListener('keydown', function (e) {
@@ -759,7 +857,7 @@
     var existing = editUid ? draft.items.filter(function (i) { return i.uid === editUid; })[0] : null;
     var ks = dimKeys(p);
     var run = isRunProduct(p);
-    var others = productUnits(p.id, existing ? existing.uid : null);               // units of this product already on OTHER lines
+    var others = productUnits(unitKey({ id: p.id }), existing ? existing.uid : null);               // units of this product already on OTHER lines
     var room = LIMITS.maxQtyPerProduct - others;                                    // what this line may still take (one product, one multiplier)
     var unitsMsg = function () { return 'You can request up to ' + LIMITS.maxQtyPerProduct + ' of one product in a quote — your list already has ' + others + (room > 0 ? ', which leaves ' + room + '.' : '.'); };
     var f0 = {
@@ -769,7 +867,9 @@
       qty: existing ? existing.qty : 1,
       note: existing ? existing.note : ''
     };
-    openSheet('item', trigger);
+    var finished = false;                                      // set once a button (Add / Save / Cancel) has dealt with the sheet; × / Esc / the backdrop leave it false
+    // an Edit opened from the review goes BACK to the review however the sheet is left
+    openSheet('item', trigger, retReview ? { onClose: function () { if (!finished) openReview(trigger); } } : null);
     var f = frame(existing ? 'Edit item' : 'Add to your quote', null, null);
     f.body.appendChild(el('div', { class: 'qr-itemhead' }, el('p', { class: 'qr-item-name', text: p.name }), el('p', { class: 'qr-item-code', text: p.id })));
 
@@ -892,9 +992,10 @@
         draft.items.push(it);
       }
       saveDraftNow(); refreshAll(); scheduleEstimate();
+      finished = true;
       closeSheet(!retReview);
-      toast(existing ? 'Item updated.' : 'Added to your quote.');
       if (retReview) openReview(trigger);
+      toast(existing ? 'Item updated.' : 'Added to your quote.');          // after the review reopens: opening a sheet clears a toast
     }
     var addBtn = on(el('button', { type: 'button', class: 'qr-btn qr-btn-primary', text: existing ? 'Save changes' : 'Add to quote' }), 'click', function () {
       var it = build();
@@ -919,10 +1020,314 @@
       addBtn.disabled = true;
       f.body.insertBefore(el('p', { class: 'qr-banner qr-banner-err', role: 'alert', text: 'Your quote already holds the most we can take online for this item (' + LIMITS.maxQtyPerProduct + '). Edit that line instead, or call ' + PHONE + ' for a larger order.' }), f.body.firstChild);
     }
-    f.foot.appendChild(on(el('button', { type: 'button', class: 'qr-btn qr-btn-outline', text: 'Cancel' }), 'click', function () { closeSheet(!retReview); if (retReview) openReview(trigger); }));
+    f.foot.appendChild(on(el('button', { type: 'button', class: 'qr-btn qr-btn-outline', text: 'Cancel' }), 'click', function () { finished = true; closeSheet(!retReview); if (retReview) openReview(trigger); }));
     f.foot.appendChild(addBtn);
     var firstEditable = ks.filter(function (k) { return !dimFields[k].fixed; })[0];
     focusFirst(f, firstEditable ? dimFields[firstEditable].input : (run ? runInput : f.body.querySelector('select,input')));
+  }
+
+  // ═══════════════════════════ CONFIGURATOR SHEET (the six configurable products) ═══════════════════════════
+  // One sheet for every family, driven entirely by window.QR_FAMILIES: a live preview image at the top, then one control per option group —
+  // segmented buttons for a choice, a burner-by-burner list for a "slots" group (each position its own type chips + Remove, "+ Add burner"),
+  // toggle chips for add-ons — then the size, the quantity and a note. The server re-validates everything; this sheet only makes a valid request easy.
+  function cap1(t) { return t.charAt(0).toUpperCase() + t.slice(1); }
+  function openConfigurator(familyId, trigger, editUid, retReview) {
+    var fam = famById(familyId);
+    if (!fam) return;
+    var existing = editUid ? draft.items.filter(function (i) { return i.uid === editUid; })[0] : null;
+    var ukey = 'family:' + fam.id;
+    var others = productUnits(ukey, existing ? existing.uid : null);               // units of this family already on OTHER lines (one family, one cap)
+    var room = LIMITS.maxQtyPerProduct - others;
+    var unitsMsg = function () { return 'You can request up to ' + LIMITS.maxQtyPerProduct + ' of one product in a quote — your list already has ' + others + (room > 0 ? ', which leaves ' + room + '.' : '.'); };
+    var usualW0 = existing ? PF.standardDims(fam, existing.config).W : null;
+    var st = {
+      config: existing ? clone(existing.config) : PF.defaultConfig(fam),
+      dims: existing ? clone(existing.dims) : PF.defaultDims(fam),
+      qty: existing ? existing.qty : 1,
+      note: existing ? existing.note : '',
+      wTouched: !!existing && existing.dims.W !== usualW0      // a line whose length is the usual one for its options keeps following them; a length of the visitor's own is kept
+    };
+    var finished = false;                                      // set once a button (Add / Save / Cancel) has dealt with the sheet; × / Esc / the backdrop leave it false
+    // an Edit opened from the review goes BACK to the review however the sheet is left (× and Esc used to drop the visitor out of the whole quote)
+    openSheet('configure', trigger, retReview ? { onClose: function () { if (!finished) openReview(trigger); } } : null);
+    var f = frame(fam.label, fam.description, existing ? 'Edit your selection' : 'Configure and add');
+    var errBanner = el('div', { class: 'qr-banner qr-banner-err', role: 'alert', hidden: true });
+    var pv = PV ? PV.create({ family: fam, manifest: previews[fam.id] || {} }) : { el: null, update: function () { /* the preview module did not load: the sheet works without a picture */ } };
+    if (pv.el) {
+      f.body.classList.add('has-preview');           // css: the body's scroll-padding keeps every option heading clear of the pinned preview
+      f.body.appendChild(pv.el);
+    }
+    f.body.appendChild(errBanner);
+
+    var syncers = [];
+    var dupeBox = null;
+    function syncAll() { syncers.forEach(function (fn) { fn(); }); }
+
+    // ── a choice: segmented buttons (real radio inputs, so the arrow keys and screen readers work) ──
+    function renderChoice(g) {
+      var fs = el('fieldset', { class: 'qr-fs qr-group' }, el('legend', { text: g.label }));
+      if (g.options.length > 4) {                                   // never the case today; a long list falls back to a select
+        var sel = el('select', { class: 'qr-select', 'aria-label': g.label });
+        g.options.forEach(function (o, i) { sel.appendChild(el('option', { value: String(i), text: o.l })); });
+        on(sel, 'change', function () { st.config[g.key] = g.options[Number(sel.value)].v; changed(); });
+        syncers.push(function () { sel.value = String(Math.max(0, PF.optionIndex(g, st.config[g.key]))); });
+        fs.appendChild(sel);
+        return fs;
+      }
+      var name = nid('g');
+      var seg = el('div', { class: 'qr-seg qr-seg-' + g.options.length });
+      var labs = [];
+      g.options.forEach(function (o, i) {
+        var radio = el('input', { type: 'radio', name: name, value: String(i) });
+        var lab = el('label', { class: 'qr-seg-btn' }, radio, el('span', { class: 'qr-seg-l', text: o.l }), o.hint ? el('span', { class: 'qr-seg-h', text: o.hint }) : null);
+        on(radio, 'change', function () { if (radio.checked) { st.config[g.key] = o.v; changed(); } });
+        labs.push({ lab: lab, radio: radio, o: o });
+        seg.appendChild(lab);
+      });
+      syncers.push(function () { labs.forEach(function (x) { var on_ = st.config[g.key] === x.o.v; x.radio.checked = on_; x.lab.classList.toggle('is-on', on_); }); });
+      fs.appendChild(seg);
+      return fs;
+    }
+
+    // ── slots: "Burner 1 … Burner N", each with its own type chips and a Remove; "+ Add burner" up to the maximum ──
+    function renderSlots(g) {
+      var unitName = (g.unit && g.unit.one) || 'position';
+      var fs = el('fieldset', { class: 'qr-fs qr-group' }, el('legend', { text: g.label }));
+      var list = el('ol', { class: 'qr-slots' });
+      var count = el('p', { class: 'qr-hint qr-slot-count', 'aria-live': 'polite' });
+      var addBtn = on(el('button', { type: 'button', class: 'qr-btn qr-btn-outline qr-btn-sm qr-add-slot', text: '+ Add ' + unitName }), 'click', function () {
+        var arr = st.config[g.key];
+        if (arr.length >= g.maxSlots) return;
+        arr.push(arr[arr.length - 1] || g.default[0]);                       // a new position starts as a copy of the last one
+        paint(arr.length - 1);
+        changed();
+      });
+      function paint(focusIdx) {
+        var arr = st.config[g.key];
+        clear(list);
+        arr.forEach(function (v, i) {
+          var name = nid('s');
+          var chips = el('div', { class: 'qr-chips', role: 'radiogroup', 'aria-label': 'Type of ' + unitName + ' ' + (i + 1) });
+          g.options.forEach(function (o) {
+            var radio = el('input', { type: 'radio', name: name, value: o.v });
+            radio.checked = v === o.v;
+            var chip = el('label', { class: 'qr-chip' + (v === o.v ? ' is-on' : ''), title: o.f || o.l }, radio, el('span', { text: o.l }));
+            on(radio, 'change', function () {
+              if (!radio.checked) return;
+              arr[i] = o.v;
+              [].slice.call(chips.children).forEach(function (c) { c.classList.toggle('is-on', c === chip); });
+              changed();
+            });
+            chips.appendChild(chip);
+          });
+          var rm = on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet qr-btn-sm', 'aria-label': 'Remove ' + unitName + ' ' + (i + 1), text: 'Remove' }), 'click', function () {
+            if (arr.length <= g.minSlots) return;
+            arr.splice(i, 1);
+            paint(Math.min(i, arr.length - 1));
+            changed();
+          });
+          if (arr.length <= g.minSlots) rm.disabled = true;
+          list.appendChild(el('li', { class: 'qr-slot' }, el('div', { class: 'qr-slot-head' }, el('span', { class: 'qr-slot-n', text: cap1(unitName) + ' ' + (i + 1) }), rm), chips));
+        });
+        addBtn.disabled = arr.length >= g.maxSlots;
+        count.textContent = arr.length + ' of ' + g.maxSlots + ' ' + (g.unit && g.unit.many || 'positions') + '.';
+        if (typeof focusIdx === 'number') {
+          var target = list.children[focusIdx] && list.children[focusIdx].querySelector('input:checked');
+          if (target) { try { target.focus(); } catch (_) { /* nothing to do */ } }
+        }
+      }
+      paint();
+      fs.appendChild(list); fs.appendChild(el('div', { class: 'qr-slot-foot' }, addBtn, count));
+      return fs;
+    }
+
+    // ── add-ons: toggle chips (checkboxes) ──
+    function renderMulti(g) {
+      var fs = el('fieldset', { class: 'qr-fs qr-group' }, el('legend', { text: g.label }));
+      var chips = el('div', { class: 'qr-chips' });
+      var boxes = [];
+      g.options.forEach(function (o) {
+        var cb = el('input', { type: 'checkbox', value: o.v });
+        var chip = el('label', { class: 'qr-chip' }, cb, el('span', { text: o.l }));
+        on(cb, 'change', function () {
+          var picked = {};
+          boxes.forEach(function (b) { if (b.cb.checked) picked[b.o.v] = true; });
+          st.config[g.key] = g.options.map(function (x) { return x.v; }).filter(function (v) { return picked[v]; });
+          changed();
+        });
+        boxes.push({ cb: cb, chip: chip, o: o });
+        chips.appendChild(chip);
+      });
+      syncers.push(function () { boxes.forEach(function (b) { var on_ = st.config[g.key].indexOf(b.o.v) >= 0; b.cb.checked = on_; b.chip.classList.toggle('is-on', on_); }); });
+      fs.appendChild(chips);
+      return fs;
+    }
+
+    var groupEls = [];
+    fam.groups.forEach(function (g) {
+      var node = g.type === 'slots' ? renderSlots(g) : g.type === 'multi' ? renderMulti(g) : renderChoice(g);
+      groupEls.push(node);
+      f.body.appendChild(node);
+    });
+
+    // ── size ──
+    var dimFields = {};
+    var customTag = el('span', { class: 'qr-custom', hidden: true, text: 'Custom size' });
+    var noteMsg = el('p', { class: 'qr-hint', hidden: true, text: COPY.customSizeNote });
+    var axes = PF.DIM_KEYS.filter(function (k) { return fam.dims[k]; });
+    var dimsFs = el('fieldset', { class: 'qr-fs' }, el('legend', null, 'Size (mm)', customTag));
+    var grid = el('div', { class: 'qr-dims' + (axes.length === 2 ? ' qr-dims-2' : '') });
+    axes.forEach(function (k) {
+      var spec = fam.dims[k];
+      var input = el('input', { class: 'qr-input', type: 'number', inputmode: 'numeric', step: spec.step, min: spec.min, max: spec.max, value: st.dims[k] });
+      var fld = field(spec.label, input);
+      on(input, 'input', function () {
+        var n = input.value === '' ? NaN : Number(input.value);
+        setErr(fld, ''); errBanner.hidden = true;
+        st.dims[k] = n;
+        if (k === 'W') st.wTouched = true;
+        refreshSize();
+      });
+      dimFields[k] = { fld: fld, input: input };
+      grid.appendChild(fld);
+    });
+    dimsFs.appendChild(grid);
+    var stdTxt = axes.map(function (k) { return fam.dims[k].label + ' ' + fam.dims[k].default; }).join(' · ');
+    var wHint = el('p', { class: 'qr-hint qr-wide-hint', 'aria-live': 'polite' });
+    var useBtn = on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet qr-btn-sm', hidden: true }), 'click', function () {
+      var mw = PF.minWidth(fam, st.config);
+      if (mw) { setW(mw.mm); st.wTouched = true; refreshSize(); }
+    });
+    dimsFs.appendChild(el('p', { class: 'qr-hint', text: 'Standard size: ' + stdTxt + ' mm. Each dimension in steps of ' + fam.dims.W.step + '.' }));
+    dimsFs.appendChild(wHint); dimsFs.appendChild(useBtn); dimsFs.appendChild(noteMsg);
+    dimsFs.appendChild(on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet', text: 'Reset to standard size' }), 'click', function () {
+      st.dims = PF.standardDims(fam, st.config); st.wTouched = false;
+      applyUsualLength();
+      axes.forEach(function (k) { dimFields[k].input.value = st.dims[k]; setErr(dimFields[k].fld, ''); });
+      refreshSize();
+    }));
+    f.body.appendChild(dimsFs);
+
+    function setW(n) { st.dims.W = n; if (dimFields.W) dimFields.W.input.value = n; }
+    // The options set a usual minimum length (sinks x 500 mm, burners + add-ons): a new line follows it until the visitor types a length of their
+    // own; a HARD rule (sinks) always raises a length that has fallen below it, with the hint saying so.
+    function applyUsualLength() {
+      var mw = PF.minWidth(fam, st.config);
+      if (mw) {
+        if (!st.wTouched) setW(Math.max(fam.dims.W.default, mw.mm));
+        else if (mw.hard && isFinite(st.dims.W) && st.dims.W < mw.mm) setW(mw.mm);
+      }
+      // an oven needs depth and height: a smaller one is raised at once (it could not be sent otherwise)
+      var fm0 = PF.forcedMins(fam, st.config);
+      Object.keys(fm0).forEach(function (k) {
+        if (k === 'W' || !dimFields[k]) return;
+        if (isFinite(st.dims[k]) && st.dims[k] < fm0[k]) { st.dims[k] = fm0[k]; dimFields[k].input.value = fm0[k]; }
+      });
+    }
+    function refreshSize() {
+      var std = PF.standardDims(fam, st.config);
+      var cust = axes.some(function (k) { return st.dims[k] !== std[k]; });
+      customTag.hidden = !cust; noteMsg.hidden = !cust;
+      var mw = PF.minWidth(fam, st.config);
+      var msg = '';
+      if (mw) {
+        msg = (mw.hard ? 'Minimum length for these ' + mw.noun + ': ' : 'Usual length for these ' + mw.noun + ': ') + mw.mm + ' mm.';
+        if (!mw.hard && isFinite(st.dims.W) && st.dims.W < mw.mm) msg += ' Yours is shorter — we will confirm the layout in your quotation.';
+        useBtn.hidden = !(isFinite(st.dims.W) && st.dims.W !== mw.mm);
+        useBtn.textContent = 'Use ' + mw.mm + ' mm';
+      } else useBtn.hidden = true;
+      var fm = PF.forcedMins(fam, st.config);
+      var fmKeys = Object.keys(fm);
+      if (fmKeys.length) msg += (msg ? ' ' : '') + 'With these options the ' + fmKeys.map(function (k) { return fam.dims[k].label.toLowerCase() + ' is at least ' + fm[k] + ' mm'; }).join(' and the ') + '.';
+      wHint.textContent = msg; wHint.hidden = !msg;
+    }
+    function changed() { errBanner.hidden = true; if (dupeBox) dupeBox.hidden = true; applyUsualLength(); syncAll(); pv.update(st.config); refreshSize(); }
+
+    // ── quantity + note ──
+    var qtyMax = Math.max(1, Math.min(LIMITS.maxQtyPerLine, room));
+    st.qty = Math.min(st.qty, qtyMax);
+    var qtyInput = el('input', { class: 'qr-input', type: 'number', inputmode: 'numeric', step: 1, min: 1, max: qtyMax, value: st.qty, 'aria-label': 'Quantity' });
+    var minus = on(el('button', { type: 'button', 'aria-label': 'Decrease quantity', text: '−' }), 'click', function () { st.qty = Math.max(1, (Number(qtyInput.value) || 1) - 1); qtyInput.value = st.qty; });
+    var plus = on(el('button', { type: 'button', 'aria-label': 'Increase quantity', text: '+' }), 'click', function () { st.qty = Math.min(qtyMax, (Number(qtyInput.value) || 1) + 1); qtyInput.value = st.qty; });
+    var qtyFld = el('div', { class: 'qr-field' }, el('span', { class: 'qr-label', text: 'Quantity' }), el('div', { class: 'qr-stepper' }, minus, qtyInput, plus));
+    qtyFld._err = el('p', { class: 'qr-err', role: 'alert', hidden: true }); qtyFld._control = qtyInput; qtyFld.appendChild(qtyFld._err);
+    on(qtyInput, 'input', function () { var n = Number(qtyInput.value); if (isFinite(n)) st.qty = n; setErr(qtyFld, ''); });
+    if (others > 0) qtyFld.appendChild(el('p', { class: 'qr-hint', text: unitsMsg() }));
+    f.body.appendChild(qtyFld);
+    var note = el('input', { class: 'qr-input', type: 'text', maxlength: LIMITS.maxNote, autocomplete: 'off', value: st.note });
+    on(note, 'input', function () { st.note = note.value; });
+    f.body.appendChild(field(['Note ', el('span', { class: 'qr-opt', text: '(optional)' })], note, { hint: 'Anything we should know about this item.' }));
+    dupeBox = el('div', { class: 'qr-dupe', hidden: true });
+    f.body.appendChild(dupeBox);
+
+    function build() {
+      var ok = true, firstBad = null;
+      function bad(fld, msg, control) { setErr(fld, msg); ok = false; if (!firstBad) firstBad = control; }
+      var dims = {};
+      axes.forEach(function (k) {
+        var inp = dimFields[k].input;
+        dims[k] = inp.value === '' ? NaN : Number(inp.value);
+      });
+      var v = PF.validateLine(fam, st.config, dims);
+      v.errors.forEach(function (msg) {
+        var hit = axes.filter(function (k) { return msg.toLowerCase().indexOf(fam.dims[k].label.toLowerCase()) >= 0; })[0];
+        if (hit) bad(dimFields[hit].fld, msg, dimFields[hit].input);
+        else { errBanner.textContent = msg; errBanner.hidden = false; ok = false; if (!firstBad) firstBad = errBanner; }
+      });
+      var qty = Number(qtyInput.value);
+      if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || qty > LIMITS.maxQtyPerLine) bad(qtyFld, 'Quantity must be a whole number from 1 to ' + LIMITS.maxQtyPerLine + '.', qtyInput);
+      else if (qty + others > LIMITS.maxQtyPerProduct) bad(qtyFld, unitsMsg(), qtyInput);
+      if (!ok) { try { if (firstBad.focus) firstBad.focus(); if (firstBad === errBanner) errBanner.scrollIntoView({ block: 'nearest' }); } catch (_) { /* nothing to do */ } return null; }
+      return { uid: existing ? existing.uid : uid(), familyId: fam.id, name: fam.label, cat: fam.category || '', unit: fam.unit || 'pc', config: clone(v.config), dims: clone(v.dims), qty: qty, note: note.value.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, LIMITS.maxNote) };
+    }
+    function commit(it, mode) {
+      var tgt = mode === 'merge' ? draft.items.filter(function (x) { return lineKey(x) === lineKey(it) && x.uid !== it.uid; })[0] : null;
+      if (mode === 'merge' && tgt) {
+        tgt.qty = Math.min(LIMITS.maxQtyPerLine, tgt.qty + it.qty);                      // the unit cap was checked in build(), which counted that line
+      } else if (existing) {
+        draft.items[draft.items.indexOf(existing)] = it;
+      } else if (draft.items.length >= LIMITS.maxItems) {
+        toast('A quote can have up to ' + LIMITS.maxItems + ' lines — remove one first.'); return;
+      } else {
+        draft.items.push(it);
+      }
+      saveDraftNow(); refreshAll(); scheduleEstimate();
+      finished = true;
+      closeSheet(!retReview);
+      if (retReview) openReview(trigger);
+      toast(existing ? 'Item updated.' : 'Added to your quote.');
+    }
+    var addBtn = on(el('button', { type: 'button', class: 'qr-btn qr-btn-primary', text: existing ? 'Save changes' : 'Add to quote' }), 'click', function () {
+      var it = build();
+      if (!it) return;
+      var same = !existing && draft.items.filter(function (x) { return lineKey(x) === lineKey(it); })[0];
+      if (same) {
+        clear(dupeBox);
+        dupeBox.hidden = false;
+        dupeBox.appendChild(el('p', { text: 'This exact item is already in your quote (×' + same.qty + ').' }));
+        var finish = function (mode) { var again = build(); if (again) commit(again, mode); };
+        var row = el('div', { class: 'qr-row-actions' },
+          on(el('button', { type: 'button', class: 'qr-btn qr-btn-primary qr-btn-sm', text: 'Add to that line' }), 'click', function () { finish('merge'); }),
+          on(el('button', { type: 'button', class: 'qr-btn qr-btn-outline qr-btn-sm', text: 'Add as a new line' }), 'click', function () { finish('new'); }));
+        dupeBox.appendChild(row);
+        try { row.firstChild.focus(); } catch (_) { /* nothing to do */ }
+        return;
+      }
+      commit(it, 'new');
+    });
+    if (room < 1 && !existing) {
+      addBtn.disabled = true;
+      f.body.insertBefore(el('p', { class: 'qr-banner qr-banner-err', role: 'alert', text: 'Your quote already holds the most we can take online for this product (' + LIMITS.maxQtyPerProduct + '). Edit that line instead, or call ' + PHONE + ' for a larger order.' }), f.body.firstChild);
+    }
+    f.foot.appendChild(on(el('button', { type: 'button', class: 'qr-btn qr-btn-outline', text: 'Cancel' }), 'click', function () { finished = true; closeSheet(!retReview); if (retReview) openReview(trigger); }));
+    f.foot.appendChild(addBtn);
+
+    applyUsualLength();
+    syncAll();
+    pv.update(st.config);
+    refreshSize();
+    var firstRadio = f.body.querySelector('.qr-group input:checked') || f.body.querySelector('.qr-group input');      // the SELECTED option first (Space would otherwise change the choice)
+    focusFirst(f, firstRadio);
   }
 
   // ═══════════════════════════ REVIEW ═══════════════════════════
@@ -945,18 +1350,17 @@
       clear(itemsBox);
       var ul = el('ul', { class: 'qr-items' });
       draft.items.forEach(function (it) {
-        var p = byId[it.id];
         var meta = [];
-        meta.push(el('span', { text: sizeText(it) }));
-        if (p && isCustom(p, it)) meta.push(el('span', { class: 'qr-custom', text: 'custom' }));
-        var specs = it.specs.map(function (s) { return s.label + ': ' + s.value; }).join(' · ');
+        meta.push(el('span', { text: lineSizeText(it) }));
+        if (lineCustom(it)) meta.push(el('span', { class: 'qr-custom', text: 'custom' }));
+        var specs = lineSpecsText(it);
         var li = el('li', { class: 'qr-item' + (it.gone ? ' is-gone' : '') },
-          el('p', { class: 'qr-item-name', text: it.name }),
-          el('p', { class: 'qr-item-code', text: it.id }),
+          el('p', { class: 'qr-item-name', text: lineName(it) }),
+          el('p', { class: 'qr-item-code', text: lineCode(it) }),
           el('p', { class: 'qr-item-meta' }, meta, specs ? [el('br'), specs] : null, it.runs == null ? [el('br'), 'Quantity: ' + it.qty] : null, it.note ? [el('br'), 'Note: ' + it.note] : null),
           it.gone ? el('p', { class: 'qr-err', role: 'alert', text: 'No longer in the catalogue — please remove it.' }) : null,
           el('div', { class: 'qr-item-acts' },
-            on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet qr-btn-sm', 'aria-label': 'Edit ' + it.name, text: 'Edit' }), 'click', function () { closeSheet(false); openItem(it.id, trigger, it.uid, true); }),
+            on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet qr-btn-sm', 'aria-label': 'Edit ' + it.name, text: 'Edit' }), 'click', function () { closeSheet(false); if (isFam(it)) openConfigurator(it.familyId, trigger, it.uid, true); else openItem(it.id, trigger, it.uid, true); }),
             on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet qr-btn-sm', 'aria-label': 'Remove ' + it.name, text: 'Remove' }), 'click', function () {
               draft.items = draft.items.filter(function (x) { return x.uid !== it.uid; });
               saveDraftNow(); refreshAll(); scheduleEstimate();
@@ -1118,7 +1522,7 @@
     var notes = [D.ESTIMATE.vatBasis === 'inclusive' ? COPY.vatInclusive : COPY.vatExclusive];
     if (!D.ESTIMATE.deliveryIncluded) notes.push(COPY.deliveryExcluded);
     if (snap.entity === 'government') notes.push(COPY.governmentNote);
-    if (snap.items.some(function (it) { var p = byId[it.id]; return p && isCustom(p, it); })) notes.push(COPY.customSizeNote);
+    if (snap.items.some(lineCustom)) notes.push(COPY.customSizeNote);
     if (est.status === 'ok' && est.data && est.data.reviewCount > 0 && basketKey() === snap.basketKey) notes.push(COPY.reviewCount(est.data.reviewCount));
     return notes;
   }
@@ -1157,10 +1561,9 @@
     }
     var ul = el('ul', { class: 'qr-items' });
     r.items.forEach(function (it) {
-      var p = byId[it.id];
-      var specs = it.specs.map(function (s) { return s.label + ': ' + s.value; }).join(' · ');
-      ul.appendChild(el('li', { class: 'qr-item' }, el('p', { class: 'qr-item-name', text: it.name }), el('p', { class: 'qr-item-code', text: it.id }),
-        el('p', { class: 'qr-item-meta' }, sizeText(it) + (p && isCustom(p, it) ? ' (custom)' : ''), specs ? [el('br'), specs] : null, it.runs == null ? [el('br'), 'Quantity: ' + it.qty] : null, it.note ? [el('br'), 'Note: ' + it.note] : null)));
+      var specs = lineSpecsText(it);
+      ul.appendChild(el('li', { class: 'qr-item' }, el('p', { class: 'qr-item-name', text: lineName(it) }), el('p', { class: 'qr-item-code', text: lineCode(it) }),
+        el('p', { class: 'qr-item-meta' }, lineSizeText(it) + (lineCustom(it) ? ' (custom)' : ''), specs ? [el('br'), specs] : null, it.runs == null ? [el('br'), 'Quantity: ' + it.qty] : null, it.note ? [el('br'), 'Note: ' + it.note] : null)));
     });
     f.body.appendChild(ul);
     var it = r.intake || {}, c = r.contact || {};
@@ -1201,7 +1604,7 @@
     var t = e.target && e.target.closest ? e.target : null;
     if (!t) return;
     var add = t.closest('.qr-add');
-    if (add) { e.preventDefault(); openItem(add.getAttribute('data-id'), add); return; }
+    if (add) { e.preventDefault(); if (add.getAttribute('data-family')) openConfigurator(add.getAttribute('data-family'), add); else openItem(add.getAttribute('data-id'), add); return; }
     var cta = t.closest('[data-qr-start]');
     if (cta) {
       if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;     // let a new-tab click through
@@ -1215,10 +1618,10 @@
   injectAddButtons();
   refreshAll();
   syncOffline();
-  if (pendingToast) { toast(pendingToast); pendingToast = ''; }
   if (draft.items.length) scheduleEstimate();
   var hashIsQuote = location.hash.slice(1) === 'quote';            // a bare #quote anchor asks for the intake too
   var wantStart = qs.get('quote') === '1' || hashIsQuote;
+  if (pendingToast && !wantStart) { toast(pendingToast); pendingToast = ''; }          // with ?quote=1 a sheet opens at once: the notice is shown when it closes
   if (wantStart) {
     try {
       qs.delete('quote');

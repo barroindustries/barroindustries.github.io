@@ -16,7 +16,14 @@
   --qr-edge:rgba(11,27,63,.35);--qr-hover:rgba(11,27,63,.08);--qr-scrim:rgba(11,27,63,.55);
   --qr-shadow:0 -10px 30px rgba(11,27,63,.12);--qr-shadow-lg:0 -18px 50px rgba(11,27,63,.3);--qr-shadow-pop:0 10px 30px rgba(11,27,63,.3);
   --qr-danger:#9B1C1C;--qr-err-bg:#FFF5F5;--qr-ok:#1F6B3A;--qr-warn:#7A4B00;--qr-mock:#B45309;
+  --qr-pv-h:clamp(150px,30vh,300px);--qr-pv-h:clamp(150px,30dvh,300px);--qr-pv-cap:0px;--qr-pv-pad:124px;      /* the configurator's preview: height, the caption line under it (compact layouts only), the scroll padding below it */
   font-family:var(--qr-sans);color:var(--qr-ink);
+}
+@media (max-width:719px),(max-height:640px){
+  #qr-root{--qr-pv-h:clamp(112px,22vh,184px);--qr-pv-h:clamp(112px,22dvh,184px);--qr-pv-cap:28px}   /* a phone, or a short window: about a fifth of the screen, never more than a quarter */
+}
+@media (max-height:520px){
+  #qr-root{--qr-pv-h:28px;--qr-pv-cap:28px;--qr-pv-pad:52px}                                          /* a landscape phone: no room for a picture, so the preview is just its caption line */
 }
 #qr-root *,#qr-root *::before,#qr-root *::after{box-sizing:border-box}
 #qr-root [hidden]{display:none !important}
@@ -41,6 +48,10 @@
   padding:5px 10px;border-radius:999px;background:var(--site-navy,#0B1B3F);color:var(--site-bg,#fff);font:600 12px/1 var(--site-sans,Inter,system-ui,sans-serif);letter-spacing:.02em;
 }
 #site .cat-card{position:relative}
+
+/* "Configure & add" on a configurable product: the same button, filled, so the six configurable cards read as the main ones */
+#site .cat-card .qr-add.qr-add-config{background:var(--site-navy,#0B1B3F);color:var(--site-bg,#fff)}
+#site .cat-card .qr-add.qr-add-config:hover{background:var(--site-navy-2,#17306A);border-color:var(--site-navy-2,#17306A)}
 
 @media (max-width:420px){
   #site .cat-card .qr-add{margin:12px 12px 0;padding:0 8px;gap:6px;font-size:13px;white-space:nowrap}
@@ -131,6 +142,7 @@ html.qr-lock,html.qr-lock body{overflow:hidden}
   animation:qr-rise .14s ease-out;
 }
 #qr-root .qr-sheet-head{display:flex;align-items:flex-start;gap:12px;padding:16px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));border-bottom:1px solid var(--qr-line)}
+#qr-root .qr-sheet-titlebox{flex:1 1 auto;min-width:0}                          /* so the close button stays at the right edge even when there is no description line */
 #qr-root .qr-sheet-head h2{flex:1 1 auto;min-width:0;margin:0;font:500 22px/1.2 var(--qr-serif);letter-spacing:-.01em;color:var(--qr-accent)}
 #qr-root .qr-sheet-sub{margin:4px 0 0;font:400 13px/1.4 var(--qr-sans);color:var(--qr-muted)}
 #qr-root .qr-step{margin:0 0 4px;font:600 12px/1.3 var(--qr-sans);letter-spacing:.14em;text-transform:uppercase;color:var(--qr-gold-ink)}
@@ -160,6 +172,112 @@ html.qr-lock,html.qr-lock body{overflow:hidden}
 #qr-root .qr-custom{display:inline-block;margin-left:8px;padding:3px 8px;border-radius:999px;background:var(--qr-soft);border:1px solid var(--qr-gold);font:600 11px/1 var(--qr-sans);letter-spacing:.04em;text-transform:uppercase;color:var(--qr-gold-ink)}
 #qr-root .qr-dupe{margin:14px 0 0;padding:12px;border:1px solid var(--qr-gold);border-radius:8px;background:var(--qr-soft)}
 #qr-root .qr-dupe p{margin:0 0 10px;font-size:14px;line-height:1.45}
+
+/* ── configurator sheet (the six configurable products) ──────────────────── */
+/* segmented buttons: one real radio per option, laid over its button so the whole button is the target and the arrow keys work */
+#qr-root .qr-group{margin-bottom:18px}
+#qr-root .qr-seg{display:grid;gap:8px;grid-template-columns:repeat(4,minmax(0,1fr))}
+#qr-root .qr-seg-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+#qr-root .qr-seg-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+#qr-root .qr-seg-btn{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:52px;padding:8px 6px;text-align:center;border:1px solid var(--qr-edge);border-radius:8px;background:var(--qr-bg);cursor:pointer;transition:background-color .15s,border-color .15s,box-shadow .15s}
+#qr-root .qr-seg-btn input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+#qr-root .qr-seg-btn:hover{border-color:var(--qr-accent)}
+#qr-root .qr-seg-btn.is-on{border-color:var(--qr-accent);background:var(--qr-soft);box-shadow:inset 0 0 0 1px var(--qr-accent)}
+#qr-root .qr-seg-btn:focus-within{outline:2px solid var(--qr-accent);outline-offset:2px}
+#qr-root .qr-seg-l{font:600 16px/1.2 var(--qr-sans);color:var(--qr-ink);overflow-wrap:anywhere}
+#qr-root .qr-seg-h{font:400 12px/1.3 var(--qr-sans);color:var(--qr-muted)}
+#qr-root .qr-seg-btn.is-on .qr-seg-l{color:var(--qr-accent)}
+/* chips: add-ons (checkbox) and a burner's type (radio) */
+#qr-root .qr-chips{display:flex;flex-wrap:wrap;gap:8px}
+#qr-root .qr-chip{position:relative;display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid var(--qr-edge);border-radius:999px;background:var(--qr-bg);color:var(--qr-ink);font:500 14px/1.2 var(--qr-sans);cursor:pointer;transition:background-color .15s,border-color .15s,color .15s}
+#qr-root .qr-chip input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+#qr-root .qr-chip:hover{border-color:var(--qr-accent)}
+#qr-root .qr-chip.is-on{border-color:var(--qr-accent);background:var(--qr-accent);color:var(--qr-on-accent)}
+#qr-root .qr-chip:focus-within{outline:2px solid var(--qr-accent);outline-offset:2px}
+/* the burner list */
+#qr-root .qr-slots{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:10px}
+#qr-root .qr-slot{padding:10px 12px 12px;border:1px solid var(--qr-line);border-radius:10px;background:var(--qr-soft)}
+#qr-root .qr-slot-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px}
+#qr-root .qr-slot-n{font:600 13px/1.2 var(--qr-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--qr-gold-ink)}
+#qr-root .qr-slot-head .qr-btn-quiet{margin-right:-10px}
+#qr-root .qr-slot-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
+#qr-root .qr-slot-foot .qr-hint{margin:0}
+#qr-root .qr-dims-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+#qr-root .qr-wide-hint{color:var(--qr-ink)}
+
+/* the preview image: ~4:3, contained on a soft neutral ground, pinned to the top of the sheet so it stays in view while the options below change.
+   top:-16px = the sheet body's top padding, so it pins flush under the header (a sticky box is held at the padding's inner edge, which would leave a 16px band for scrolled content to show through).
+   On a phone it is COMPACT (--qr-pv-h, about 22% of the screen): a wider, shorter stage, the drawing's own text rows are replaced by ONE caption line (the options, ellipsised),
+   and the sheet body's scroll-padding keeps every option heading clear of it when a control scrolls into view. */
+#qr-root .qr-preview{
+  position:sticky;top:-16px;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;height:var(--qr-pv-h);
+  margin:-16px calc(-1 * max(16px,env(safe-area-inset-right))) 20px calc(-1 * max(16px,env(safe-area-inset-left)));
+  background:#F1F0EC;border-bottom:1px solid var(--qr-line);overflow:hidden;box-shadow:0 8px 10px -9px rgba(11,27,63,.28);
+}
+#qr-root .qr-sheet-body.has-preview{scroll-padding-top:calc(var(--qr-pv-h) + var(--qr-pv-pad))}      /* the preview plus a burner card's heading above its second row of chips */
+#qr-root .qr-pv-stage{position:relative;flex:none;height:calc(var(--qr-pv-h) - var(--qr-pv-cap));aspect-ratio:4/3;max-width:100%;overflow:hidden}
+#qr-root .qr-pv-cap{display:none;flex:none;box-sizing:border-box;width:100%;max-width:100%;height:var(--qr-pv-cap);margin:0;padding:0 16px;font:500 12.5px/var(--qr-pv-cap) var(--qr-sans);color:var(--qr-ink);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:719px),(max-height:640px){
+  #qr-root .qr-pv-stage{aspect-ratio:400/236}                                  /* the drawing area plus the title: the options rows and the note below it are not drawn */
+  #qr-root .qr-pv-cap{display:block}
+  #qr-root .qr-pv-opts,#qr-root .qr-pv-note,#qr-root .qr-pv-frame{display:none}
+  #qr-root .qr-pv-line{stroke-width:3.2}#qr-root .qr-pv-thin{stroke-width:2.2}
+  #qr-root .qr-pv-insets{bottom:34px}
+  #qr-root [data-kind="configure"] .qr-sheet-sub{display:none}                  /* the card the visitor just tapped already said it; the room goes to the options */
+}
+@media (max-height:520px){
+  #qr-root .qr-pv-stage,#qr-root .qr-pv-insets{display:none}                     /* the caption line is all that is left of the preview */
+  #qr-root .qr-preview{margin-bottom:8px}
+}
+/* the on-screen keyboard is up (js/quote-request.js sets html.qr-kb-open when the visual viewport lost more than 80px): the sheet is then only as tall as what is left,
+   so the preview collapses to its caption line exactly as on a landscape phone, and the scroll padding shrinks with it. Higher specificity than the blocks above, so it wins in any order. */
+html.qr-kb-open #qr-root{--qr-pv-h:28px;--qr-pv-cap:28px;--qr-pv-pad:52px}
+html.qr-kb-open #qr-root .qr-pv-cap{display:block}
+html.qr-kb-open #qr-root .qr-pv-stage,html.qr-kb-open #qr-root .qr-pv-insets{display:none}
+html.qr-kb-open #qr-root .qr-preview{margin-bottom:8px}
+#qr-root .qr-pv-layer{position:absolute;inset:0;opacity:0;transition:opacity .22s ease}
+#qr-root .qr-pv-layer.is-in{opacity:1}
+#qr-root .qr-pv-layer.is-out{opacity:0}
+#qr-root .qr-pv-photo{display:block;width:100%;height:100%;object-fit:contain}
+#qr-root .qr-pv-svg{display:block;width:100%;height:100%}
+#qr-root .qr-pv-both{position:relative;width:100%;height:100%}
+#qr-root .qr-pv-diagram{position:absolute;left:8px;bottom:8px;width:44%;border-radius:8px;overflow:hidden;box-shadow:0 6px 18px rgba(11,27,63,.22);background:#fff}
+#qr-root .qr-pv-insets{position:absolute;right:10px;bottom:10px;display:flex;gap:6px}
+#qr-root .qr-pv-inset{display:block;width:64px;height:48px;object-fit:cover;border:2px solid #fff;border-radius:6px;background:#fff;box-shadow:0 4px 12px rgba(11,27,63,.2)}
+/* the generated placeholder (inline SVG, 400 x 300 units): navy line art on a pale navy-tinted card, the family name in the serif */
+#qr-root .qr-pv-bg{fill:#EEF1F7}
+#qr-root .qr-pv-frame{fill:none;stroke:rgba(11,27,63,.14);stroke-width:1.5}
+#qr-root .qr-pv-title{font-family:var(--qr-serif);font-weight:500;font-size:26px;fill:var(--qr-accent);letter-spacing:-.01em}
+#qr-root .qr-pv-opts{font-family:var(--qr-sans);font-weight:500;font-size:14.5px;fill:var(--qr-ink)}
+#qr-root .qr-pv-note{font-family:var(--qr-sans);font-weight:500;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;fill:var(--qr-muted)}
+#qr-root .qr-pv-line{fill:none;stroke:var(--qr-accent);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+#qr-root .qr-pv-thin{stroke-width:1.6}
+#qr-root .qr-pv-fill{fill:var(--qr-accent);stroke:var(--qr-accent);stroke-width:1}
+#qr-root .qr-pv-soft{fill:#C9D3E6;stroke:var(--qr-accent);stroke-width:1.6}
+#qr-root .qr-pv-basin{fill:#FFFFFF;stroke:var(--qr-accent);stroke-width:2.2}
+#qr-root .qr-pv-body{fill:#FFFFFF;stroke:var(--qr-accent);stroke-width:2.4}
+#qr-root .qr-pv-b{stroke:var(--qr-accent);stroke-width:2.4}
+#qr-root .qr-pv-b-hp{fill:var(--qr-accent)}
+#qr-root .qr-pv-b-lp{fill:#FFFFFF}
+#qr-root .qr-pv-b-wok{fill:#FFFFFF;stroke-width:3.2}
+#qr-root .qr-pv-b-soup{fill:#E3C85A;stroke:var(--qr-accent)}
+#qr-root .qr-pv-b-ring{fill:none;stroke:var(--qr-accent);stroke-width:2}
+#qr-root .qr-pv-b-text{font-family:var(--qr-sans);font-weight:700;font-size:12px;fill:var(--qr-ink);pointer-events:none}
+#qr-root .qr-pv-b-hp + .qr-pv-b-text{fill:#FFFFFF}
+#qr-root .qr-pv-b-num{font-family:var(--qr-sans);font-weight:600;font-size:11px;fill:var(--qr-muted)}
+#qr-root .qr-pv-add{fill:#F6F3EA;stroke:var(--qr-accent);stroke-width:2}
+#qr-root .qr-pv-grate{stroke:var(--qr-accent);stroke-width:2.2;stroke-linecap:round}
+#qr-root .qr-pv-plate{fill:#C9D3E6;stroke:var(--qr-accent);stroke-width:1.4}
+#qr-root .qr-pv-add-text{font-family:var(--qr-sans);font-weight:600;font-size:11px;fill:var(--qr-ink)}
+#qr-root .qr-pv-oven{fill:#F6F3EA;stroke:var(--qr-accent);stroke-width:2.4}
+#qr-root .qr-pv-handle{stroke:var(--qr-accent);stroke-width:2.2;stroke-linecap:round}
+#qr-root .qr-pv-hatch{fill:#DADFEA;stroke:var(--qr-accent);stroke-width:1.4}
+#qr-root .qr-pv-panel{fill:#EEF1F7;stroke:var(--qr-accent);stroke-width:1.8}
+#qr-root .qr-pv-panel-2{fill:#E2E8F3}
+#qr-root .qr-pv-dot{fill:var(--qr-accent)}
+#qr-root .qr-pv-dash{fill:none;stroke:var(--qr-accent);stroke-width:1.4;stroke-dasharray:5 5;opacity:.55}
+#qr-root .qr-pv-slot{fill:#EEF1F7}
+#qr-root .qr-pv-wheel{fill:#FFFFFF;stroke:var(--qr-accent);stroke-width:2.2}
 
 /* review sheet */
 #qr-root .qr-items{margin:0 0 16px;padding:0;list-style:none}
@@ -200,12 +318,24 @@ html.qr-lock,html.qr-lock body{overflow:hidden}
   padding:12px 18px;border-radius:8px;background:var(--qr-accent);color:var(--qr-on-accent);font:500 14px/1.4 var(--qr-sans);box-shadow:var(--qr-shadow-pop);
   pointer-events:none;
 }
+@media (max-width:719px){
+  html.qr-lock #qr-root .qr-toast{bottom:calc(var(--qr-kb,0px) + var(--qr-toast-b,84px))}                /* above the open sheet's footer buttons (set from the footer's height) */
+}
+@media (min-width:720px){
+  html.qr-lock #qr-root .qr-toast{top:10px;bottom:auto}                  /* the sheet is a centred dialog: the strip above it is clear, the strip at the bottom is not */
+}
 #qr-root .qr-offline{position:fixed;left:0;right:0;top:0;z-index:50;padding:8px 16px;background:var(--qr-warn);color:var(--qr-on-accent);text-align:center;font:500 13.5px/1.4 var(--qr-sans)}
 #qr-root .qr-mock{position:fixed;left:50%;top:0;z-index:50;transform:translateX(-50%);padding:3px 10px;border-radius:0 0 6px 6px;background:var(--qr-mock);color:var(--qr-on-accent);font:600 11px/1.2 var(--qr-sans);opacity:.92;pointer-events:none}
+
+/* a selected segment or chip is shown by its fill; in forced-colours (Windows high contrast) every fill is replaced, so the selection gets a heavy system-colour outline */
+@media (forced-colors:active){
+  #qr-root .qr-seg-btn.is-on,#qr-root .qr-chip.is-on{outline:3px solid Highlight;outline-offset:-3px;font-weight:700}
+}
 
 @media (prefers-reduced-motion:reduce){
   #qr-root .qr-sheet{animation:none}
   #qr-root .qr-btn,#site .cat-card .qr-add{transition:none}
+  #qr-root .qr-pv-layer,#qr-root .qr-seg-btn,#qr-root .qr-chip{transition:none}      /* the preview changes at once, without the cross-fade */
 }
 
 /* ── printing the receipt ("Save receipt as PDF"): only the receipt prints ─── */

@@ -43,3 +43,8 @@ firebase-debug.log
 # docs, seeded); costs live in `product_costs`, which firestore.rules restricts
 # to finance/admin. The private master copy is ~/Desktop/barro-private/.
 products-database.json
+
+# PRIVATE price-bearing local output — NEVER commit (this repository is public).
+# scripts/derive-family-pricing.js writes the derived starting values for the product-family option sheets here
+# (private/family-pricing.seed.json); the owner imports it from the app, it is never read from the repo.
+/private/

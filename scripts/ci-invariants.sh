@@ -540,6 +540,37 @@ else
       cat_fail=1
     fi
   done
+  # The configurator preview photos (the owner's shot list): every file the manifest or the data island names must exist, as the image AND its
+  # -thumb, under site/img/configurator/<family>/<key>.webp — and the island must carry exactly the manifest, so a hand edit of either cannot drift.
+  # (The /site/img/ PRECACHE guard below already forbids precaching any of them.)
+  cfg_img_problems=$(node - <<'NODEEOF'
+const fs = require('fs');
+const out = [];
+try {
+  const man = fs.existsSync('scripts/configurator-previews.json') ? JSON.parse(fs.readFileSync('scripts/configurator-previews.json', 'utf8')) : { images: {} };
+  const page = fs.readFileSync('catalogue/index.html', 'utf8');
+  const m = page.match(/<script type="application\/json" id="qr-catalogue">([\s\S]*?)<\/script>/);
+  const island = m ? JSON.parse(m[1]) : null;
+  const want = {};
+  Object.keys(man.images || {}).forEach(f => Object.keys(man.images[f]).forEach(k => { want[f + '/' + k] = man.images[f][k]; }));
+  Object.keys(want).forEach(key => {
+    const p = want[key];
+    if (!/^site\/img\/configurator\/[a-z0-9_]+\/[a-z0-9_-]+\.webp$/.test(p)) out.push('configurator-previews.json: ' + key + ' has a path outside site/img/configurator/');
+    if (!fs.existsSync(p)) out.push('missing preview image for ' + key);
+    if (!fs.existsSync(p.replace(/\.webp$/, '-thumb.webp'))) out.push('missing preview thumb for ' + key);
+  });
+  const have = {};
+  const pv = island && island.previews ? island.previews : {};
+  Object.keys(pv).forEach(f => Object.keys(pv[f]).forEach(k => { have[f + '/' + k] = pv[f][k].s; }));
+  if (JSON.stringify(Object.keys(have).sort()) !== JSON.stringify(Object.keys(want).sort())) out.push('the data island previews differ from scripts/configurator-previews.json — run: node scripts/build-catalogue.js');
+} catch (e) { out.push('configurator preview check error: ' + e.message); }
+out.forEach(x => console.log(x));
+NODEEOF
+)
+  if [ -n "$cfg_img_problems" ]; then
+    echo "$cfg_img_problems" | sed 's/^/FAIL: /'
+    cat_fail=1
+  fi
 fi
 
 # The homepage lists NO products: no catalogue markers, cards or groups survive in index.html.
@@ -587,9 +618,10 @@ fi
 # only ever receives the server's rounded {low, high} range. FAIL output carries line numbers only.
 # The pattern also catches the loose spellings a price takes in a script: a peso sign / "PHP" then a digit (spaces tolerated), a
 # thousands-separated number (84,120), and the figure names the server keeps on the staff-only block. The four files are every
-# PUBLIC script the catalogue page can load (the quote UI, its shared definition, the catalogue filter, the site chrome).
+# PUBLIC script the catalogue page can load (the quote UI, its shared definition, the catalogue filter, the site chrome, and — since the
+# configurable product families — the family helpers, the generated family definitions and the preview widget).
 QR_VOCAB='basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|formulaType|unitPrice|lineTotal|exactTotal|listPrice|₱[[:space:]]*[0-9]|PHP ?[0-9]|\b[0-9]{1,3}(,[0-9]{3})+\b|pricing-core'
-for qrf in js/quote-request.js js/qr-def.js js/catalogue.js js/site.js; do
+for qrf in js/quote-request.js js/qr-def.js js/catalogue.js js/site.js js/product-families.js js/qr-families.js js/qr-preview.js; do
   if [ ! -f "$qrf" ]; then
     echo "FAIL: public quote-request file $qrf is missing."
     cat_fail=1
@@ -627,9 +659,11 @@ else
     brand_fail=1
   fi
 fi
-PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js css/quote-request.css js/quote-request.js js/qr-def.js"
+PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js css/quote-request.css js/quote-request.js js/qr-def.js js/product-families.js js/qr-families.js js/qr-preview.js"
 [ -f scripts/product-photos.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/product-photos.json"
 [ -f scripts/public-categories.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-categories.json"
+[ -f scripts/public-families.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-families.json"
+[ -f scripts/configurator-previews.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/configurator-previews.json"
 for pub in $PUBLIC_FILES; do
   if [ ! -f "$pub" ]; then
     echo "FAIL: public-site file $pub is missing."
@@ -640,7 +674,7 @@ for pub in $PUBLIC_FILES; do
   fi
 done
 if [ "$brand_fail" -eq 0 ]; then
-  echo "PASS: no partner-brand reference in the public site surfaces (index.html <head> + #site section, catalogue/index.html, robots.txt, sitemap.xml, css/site.css, js/site.js, css/catalogue.css, js/catalogue.js, css/quote-request.css, js/quote-request.js, js/qr-def.js, scripts/product-photos.json, scripts/public-categories.json)"
+  echo "PASS: no partner-brand reference in the public site surfaces (index.html <head> + #site section, catalogue/index.html, robots.txt, sitemap.xml, css/site.css, js/site.js, css/catalogue.css, js/catalogue.js, css/quote-request.css, js/quote-request.js, js/qr-def.js, js/product-families.js, js/qr-families.js, js/qr-preview.js, scripts/product-photos.json, scripts/public-categories.json, scripts/public-families.json, scripts/configurator-previews.json)"
 fi
 if [ "$cat_fail" -ne 0 ] || [ "$brand_fail" -ne 0 ]; then
   overall_fail=1
@@ -648,21 +682,24 @@ fi
 
 echo
 # ═══════════════════════════════════════════════════════════════════════
-# CHECK 10 — QR MIRRORS (PUBLIC-QUOTE-REQUEST-SPEC.md §7.1)
+# CHECK 10 — QR MIRRORS (PUBLIC-QUOTE-REQUEST-SPEC.md §7.1; the configurable families added 2026-10-21)
 # ═══════════════════════════════════════════════════════════════════════
-# The public "Get a quote" flow shares TWO files between the browser side and the Cloud Functions, and functions/ only
+# The public "Get a quote" flow shares FOUR files between the browser side and the Cloud Functions, and functions/ only
 # ships its own directory (firebase.json), so each is mirrored by a plain `cp` and nothing but this check keeps the two
 # copies equal:
-#   js/qr-def.js       <-> functions/qr-def.js        the intake / limits / estimate-range / notice definition
-#   js/pricing-core.js <-> functions/pricing-core.js  the catalogue-item pricing math the Quote Builder AND the server share
+#   js/qr-def.js            <-> functions/qr-def.js            the intake / limits / estimate-range / notice definition
+#   js/pricing-core.js      <-> functions/pricing-core.js      the catalogue-item pricing math the Quote Builder AND the server share
+#   js/product-families.js  <-> functions/product-families.js  the family helpers (validate a configuration, preview keys, …) — price-free
+#   js/qr-families.js       <-> functions/qr-families.js       the six family definitions, GENERATED from scripts/public-families.json by
+#                                                              scripts/build-catalogue.js (which writes both copies)
 # A drift means the page and the server validated, or priced, different things. pricing-core is under the money-core
 # contract (pinned + mutation-tested tests/pricing-core.test.mjs). Also: the server's published-product allowlist
 # (functions/qr-published.json, GENERATED by scripts/build-catalogue.js) must list exactly the products on the committed
 # catalogue's "Add to quote" data island — so nothing can be quotable without being on the page, or on the page without
 # being quotable, and no list is ever kept by hand.
-echo "=== [10/10] QR MIRRORS: functions/qr-def.js and functions/pricing-core.js byte-identical to js/; published-id allowlist == catalogue island ==="
+echo "=== [10/10] QR MIRRORS: functions/ copies of qr-def, pricing-core, product-families, qr-families byte-identical to js/; published-id allowlist == catalogue island; every published SKU absorbed or fixed exactly once ==="
 qr_fail=0
-for qrm in qr-def.js pricing-core.js; do
+for qrm in qr-def.js pricing-core.js product-families.js qr-families.js; do
   if [ ! -f "js/$qrm" ]; then
     echo "FAIL: js/$qrm is missing."
     qr_fail=1
@@ -691,6 +728,18 @@ try {
     const b = island.products.map(p => p.id).sort().join(',');
     if (!Array.isArray(allow.ids) || allow.ids.length === 0) out.push('functions/qr-published.json has no ids');
     if (a !== b) out.push('functions/qr-published.json does not list exactly the products in the catalogue data island — run: node scripts/build-catalogue.js');
+    // Every PUBLISHED SKU (scripts/public-categories.json "products") is either FIXED (a card of its own: the island) or ABSORBED by exactly one
+    // family (js/qr-families.js) — never both, never neither, and no family names a SKU that is not published.
+    const pub = Object.keys(JSON.parse(fs.readFileSync('scripts/public-categories.json', 'utf8')).products).sort();
+    const fams = require(process.cwd() + '/js/qr-families.js');
+    const absorbed = [];
+    Object.keys(fams.families).forEach(f => Object.keys(fams.families[f].absorbed).forEach(id => absorbed.push(id)));
+    const fixed = island.products.map(p => p.id);
+    if (new Set(absorbed).size !== absorbed.length) out.push('a SKU is absorbed by two families');
+    const both = absorbed.filter(id => fixed.includes(id));
+    if (both.length) out.push('a SKU is both absorbed by a family and a card of its own: ' + both.join(' '));
+    const union = absorbed.concat(fixed).sort();
+    if (JSON.stringify(union) !== JSON.stringify(pub)) out.push('the absorbed + fixed SKUs are not exactly the published SKUs of scripts/public-categories.json — run: node scripts/build-catalogue.js (it refuses an unclassified SKU)');
   }
 } catch (e) { out.push('published-id check error: ' + e.message); }
 out.forEach(x => console.log(x));
@@ -701,7 +750,7 @@ if [ -n "$qr_pub_problems" ]; then
   qr_fail=1
 fi
 if [ "$qr_fail" -eq 0 ]; then
-  echo "PASS: functions/qr-def.js and functions/pricing-core.js are byte-identical to js/qr-def.js and js/pricing-core.js; functions/qr-published.json matches the catalogue data island"
+  echo "PASS: functions/qr-def.js, pricing-core.js, product-families.js and qr-families.js are byte-identical to their js/ originals; functions/qr-published.json matches the catalogue data island; every published SKU is absorbed by one family or a fixed card, exactly once"
 else
   overall_fail=1
 fi

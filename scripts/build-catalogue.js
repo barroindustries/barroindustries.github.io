@@ -64,10 +64,18 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const PF = require('../js/product-families.js');          // the pure family helpers (validation, preview keys) — shared with the page and the server
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CATALOGUE_HTML = path.join(REPO_ROOT, 'catalogue', 'index.html');
 const PHOTO_MAP_FILE = path.join(__dirname, 'product-photos.json');
+// PRODUCT FAMILIES (owner ruling 2026-10-21): six configurable products + every other published SKU as a fixed item.
+// scripts/public-families.json is the source; js/qr-families.js (+ the byte-identical functions/qr-families.js) is GENERATED from it.
+const FAMILIES_FILE = path.join(__dirname, 'public-families.json');
+const FAMILIES_JS = path.join(REPO_ROOT, 'js', 'qr-families.js');
+const FAMILIES_JS_MIRROR = path.join(REPO_ROOT, 'functions', 'qr-families.js');
+// Configurator preview images (owner's shot list): scripts/configurator-previews.json maps a preview key to site/img/configurator/<family>/<key>.webp.
+const PREVIEWS_FILE = path.join(__dirname, 'configurator-previews.json');
 // The server-side allowlist of PUBLISHED product ids (PUBLIC-QUOTE-REQUEST-SPEC.md, "Add to quote" is for published
 // products only). Generated from publishedProductIds() — the SAME computation that decides which cards reach the page —
 // so the Cloud Functions never keep a second, hand-maintained list. Ids only: no price, no formula.
@@ -230,6 +238,8 @@ const RULE_TEXT = {
   shape: 'missing or malformed value',
   unmapped: 'not in scripts/public-categories.json — map it to a public category, or list it under excludedProducts',
   stale: 'scripts/public-categories.json names a product the master does not have',
+  family: 'not classified in scripts/public-families.json — absorb it into a family or list it under "fixed"',
+  familyStale: 'scripts/public-families.json names a product the master does not have or the catalogue does not publish',
 };
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -380,8 +390,9 @@ function publicProduct(p, ctx) {
   if (notes) out.notes = notes;
 
   // specs[].label / specs[].options / specs[].default ONLY — never priceAdder. `default` is the option LABEL the
-  // Quote Builder pre-selects (spec H6: the one allowlist change, so the public "Add to quote" sheet can pre-select
-  // it); it is emitted only when it is one of the options, and is scanned like every other emitted string.
+  // Quote Builder pre-selects; it is emitted only when it is one of the options, and is scanned like every other emitted string.
+  // Since 2026-10-21 neither the cards nor the data island SHOW these (a fixed item is quantity + size + note only); they stay in
+  // this allowlist so every master option string is still money- and brand-scanned and a priceAdder can never pass.
   if (Array.isArray(p.specs)) {
     const specs = [];
     for (const s of p.specs) {
@@ -580,6 +591,360 @@ function publishedProductIds(db, pub, excludedCategories) {
   return out;
 }
 
+// ── product families (owner ruling 2026-10-21) ─────────────────────────────
+// Six configurable products; every other published SKU stays a fixed item. scripts/public-families.json is the source of truth
+// (options, defaults, size limits, the SKUs each family ABSORBS, preview rules) and holds no price of any kind.
+const FAMILY_ID_RE = /^[a-z][a-z0-9_]{1,30}$/;
+const GROUP_KEY_RE = /^[a-z][a-zA-Z0-9_]{0,30}$/;
+const PREVIEW_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,78}$/;
+const FAMILY_TOP_KEYS = ['_readme', 'version', 'order', 'families', 'fixed'];
+const FAMILY_KEYS = ['label', 'category', 'description', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
+const GROUP_KEYS = ['key', 'label', 'type', 'default', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
+const OPTION_KEYS = ['v', 'l', 'f', 's', 'hint', 'short', 'w'];
+const GROUP_TYPES = ['choice', 'slots', 'multi'];
+// the fields of a family that reach the public/server file js/qr-families.js, in a fixed order (deterministic output)
+const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
+
+const isPlainObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isIntNum = (n) => typeof n === 'number' && Number.isInteger(n);
+const isPrimitiveValue = (v) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
+
+// Every string anywhere inside a value, with its path — the public text of a family is scanned like any other emitted string.
+function stringPaths(value, prefix, out) {
+  if (typeof value === 'string') { out.push([prefix, value]); return out; }
+  if (Array.isArray(value)) { value.forEach((x, i) => stringPaths(x, `${prefix}[${i}]`, out)); return out; }
+  if (isPlainObj(value)) { for (const k of Object.keys(value)) stringPaths(value[k], prefix ? `${prefix}.${k}` : k, out); }
+  return out;
+}
+
+/**
+ * checkFamily(id, f, add) -> normalised family (id added, sizeBasis defaulted, photo dropped) or null. Pushes plain-text problems
+ * (ids and keys only, never a value) through add(message).
+ */
+function checkFamily(fid, f, add) {
+  const at = (m) => add(`family "${fid}": ${m}`);
+  if (!FAMILY_ID_RE.test(fid)) { at('the family id must be lower-case letters, digits and underscores'); return null; }
+  if (!isPlainObj(f)) { at('must be an object'); return null; }
+  for (const k of Object.keys(f)) if (!FAMILY_KEYS.includes(k)) at(`unknown key "${k}"`);
+  const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+  if (!nonEmpty(f.label)) at('"label" must be a non-empty string');
+  if (!PUBLIC_CATEGORY_IDS.includes(f.category)) at(`"category" must be one of ${PUBLIC_CATEGORY_IDS.join(', ')}`);
+  if (!nonEmpty(f.description)) at('"description" must be a non-empty string');
+  if (!(f.photo === null || (typeof f.photo === 'string' && ID_RE.test(f.photo)))) at('"photo" must be null or a product id');
+  if (!(typeof f.primary === 'string' && ID_RE.test(f.primary))) at('"primary" must be a product id');
+  if (!nonEmpty(f.unit)) at('"unit" must be a non-empty string');
+  if (f.sizeBasis !== undefined && f.sizeBasis !== 'primary' && f.sizeBasis !== 'linear') at('"sizeBasis" must be "primary" or "linear"');
+
+  // groups
+  const groups = Array.isArray(f.groups) ? f.groups : null;
+  if (!groups || !groups.length) { at('"groups" must be a non-empty array'); return null; }
+  const seenKeys = new Set();
+  let groupsOk = true;
+  groups.forEach((g, i) => {
+    const gt = `groups[${i}]`;
+    if (!isPlainObj(g)) { at(`${gt} must be an object`); groupsOk = false; return; }
+    for (const k of Object.keys(g)) if (!GROUP_KEYS.includes(k)) { at(`${gt}: unknown key "${k}"`); groupsOk = false; }
+    if (typeof g.key !== 'string' || !GROUP_KEY_RE.test(g.key)) { at(`${gt}: bad "key"`); groupsOk = false; }
+    else if (seenKeys.has(g.key)) { at(`${gt}: duplicate key "${g.key}"`); groupsOk = false; }
+    else seenKeys.add(g.key);
+    if (!nonEmpty(g.label)) { at(`${gt}: "label" must be a non-empty string`); groupsOk = false; }
+    if (!GROUP_TYPES.includes(g.type)) { at(`${gt}: "type" must be one of ${GROUP_TYPES.join(', ')}`); groupsOk = false; return; }
+    if (!Array.isArray(g.options) || !g.options.length || g.options.length > 12) { at(`${gt}: "options" must be 1 to 12 entries`); groupsOk = false; return; }
+    const seenV = [];
+    g.options.forEach((o, j) => {
+      const ot = `${gt}.options[${j}]`;
+      if (!isPlainObj(o)) { at(`${ot} must be an object`); groupsOk = false; return; }
+      for (const k of Object.keys(o)) if (!OPTION_KEYS.includes(k)) { at(`${ot}: unknown key "${k}"`); groupsOk = false; }
+      if (!isPrimitiveValue(o.v)) { at(`${ot}: "v" must be a string, number or boolean`); groupsOk = false; }
+      else if (seenV.some((x) => x === o.v)) { at(`${ot}: duplicate value`); groupsOk = false; }
+      else seenV.push(o.v);
+      if (g.type !== 'choice' && typeof o.v !== 'string') { at(`${ot}: a ${g.type} option value must be a string`); groupsOk = false; }
+      if (!nonEmpty(o.l)) { at(`${ot}: "l" must be a non-empty string`); groupsOk = false; }
+      for (const k of ['f', 's', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
+      if (o.w !== undefined && !(isIntNum(o.w) && o.w >= 0 && o.w <= 5000)) { at(`${ot}: "w" must be a whole number of mm from 0 to 5000`); groupsOk = false; }
+    });
+    if (g.type === 'slots') {
+      if (!(isIntNum(g.minSlots) && isIntNum(g.maxSlots) && g.minSlots >= 1 && g.maxSlots >= g.minSlots && g.maxSlots <= 12)) { at(`${gt}: minSlots / maxSlots must be whole numbers, 1 <= min <= max <= 12`); groupsOk = false; }
+    } else if (g.minSlots !== undefined || g.maxSlots !== undefined) { at(`${gt}: minSlots / maxSlots belong to a slots group only`); groupsOk = false; }
+  });
+  if (!groupsOk) return null;
+
+  // dims
+  const dims = isPlainObj(f.dims) ? f.dims : null;
+  if (!dims || !dims.W) { at('"dims" must be an object with at least W'); return null; }
+  let dimsOk = true;
+  for (const k of Object.keys(dims)) {
+    const d = dims[k];
+    if (!['W', 'D', 'H'].includes(k)) { at(`dims: unknown axis "${k}"`); dimsOk = false; continue; }
+    if (!isPlainObj(d) || !nonEmpty(d.label) || !['min', 'max', 'step', 'default'].every((x) => isIntNum(d[x]))) { at(`dims.${k} needs a label and whole-number min, max, step, default`); dimsOk = false; continue; }
+    if (!(d.step >= 1 && d.step <= 100 && d.min >= 1 && d.min <= d.default && d.default <= d.max && d.min % d.step === 0 && d.max % d.step === 0 && d.default % d.step === 0)) { at(`dims.${k}: min <= default <= max, all on the step`); dimsOk = false; }
+  }
+  if (!dimsOk) return null;
+
+  const fam = { id: fid };
+  for (const k of FAMILY_PUBLIC_KEYS) if (k !== 'id' && f[k] !== undefined) fam[k] = f[k];
+  if (!fam.sizeBasis) fam.sizeBasis = 'primary';
+  const gOf = (key) => PF.groupOf(fam, key);
+
+  // defaults must be a valid configuration
+  const dc = PF.validateConfiguration(fam, PF.defaultConfig(fam));
+  if (!dc.ok) at(`the defaults are not a valid configuration (${dc.errors.length} problem(s))`);
+
+  // widthRule
+  if (f.widthRule !== undefined) {
+    const r = f.widthRule;
+    if (!isPlainObj(r) || !Array.isArray(r.terms) || !r.terms.length) at('"widthRule" needs a non-empty "terms" array');
+    else {
+      for (const k of Object.keys(r)) if (!['hard', 'allowance', 'noun', 'terms'].includes(k)) at(`widthRule: unknown key "${k}"`);
+      if (r.hard !== undefined && typeof r.hard !== 'boolean') at('widthRule.hard must be true or false');
+      if (r.allowance !== undefined && !(isIntNum(r.allowance) && r.allowance >= 0)) at('widthRule.allowance must be a whole number >= 0');
+      if (r.noun !== undefined && !nonEmpty(r.noun)) at('widthRule.noun must be a non-empty string');
+      r.terms.forEach((t, i) => {
+        const g = isPlainObj(t) ? gOf(t.group) : null;
+        if (!g) { at(`widthRule.terms[${i}]: unknown group`); return; }
+        if (t.perUnit !== undefined) {
+          if (!(isIntNum(t.perUnit) && t.perUnit > 0 && g.type === 'choice' && g.options.every((o) => typeof o.v === 'number'))) at(`widthRule.terms[${i}]: "perUnit" needs a positive whole number and a numeric choice group`);
+        } else if (!((g.type === 'slots' || g.type === 'multi') && g.options.every((o) => isIntNum(o.w)))) at(`widthRule.terms[${i}]: a term without "perUnit" needs a slots / multi group whose options all carry "w"`);
+      });
+    }
+  }
+  // minDimWhen
+  if (f.minDimWhen !== undefined) {
+    if (!Array.isArray(f.minDimWhen)) at('"minDimWhen" must be an array');
+    else f.minDimWhen.forEach((rule, i) => {
+      const g = isPlainObj(rule) ? gOf(rule.group) : null;
+      if (!g || !PF.optionOf(g, rule.includes)) { at(`minDimWhen[${i}]: needs a known group and one of its option values in "includes"`); return; }
+      if (!isPlainObj(rule.min) || !Object.keys(rule.min).length || !Object.keys(rule.min).every((k) => dims[k] && isIntNum(rule.min[k]) && rule.min[k] >= dims[k].min && rule.min[k] <= dims[k].max)) at(`minDimWhen[${i}]: "min" must name the family's own axes with values inside their limits`);
+    });
+  }
+  // specMap (old saved option -> new option)
+  if (f.specMap !== undefined) {
+    if (!isPlainObj(f.specMap)) at('"specMap" must be an object');
+    else for (const label of Object.keys(f.specMap)) {
+      const m = f.specMap[label];
+      const g = isPlainObj(m) ? gOf(m.group) : null;
+      if (!g || g.type !== 'choice' || !isPlainObj(m.values) || !Object.keys(m.values).every((k) => PF.optionOf(g, m.values[k]))) at(`specMap["${label}"]: needs a choice group and values that are its options`);
+    }
+  }
+  // preview rules
+  if (f.preview !== undefined) {
+    const p = f.preview;
+    if (!isPlainObj(p) || !isPlainObj(p.tokens) || !Array.isArray(p.chain) || !p.chain.length) at('"preview" needs "tokens" and a non-empty "chain"');
+    else {
+      for (const k of Object.keys(p)) if (!['tokens', 'chain', 'insets', 'insetEach', 'liveDiagram'].includes(k)) at(`preview: unknown key "${k}"`);
+      for (const name of Object.keys(p.tokens)) {
+        const t = p.tokens[name];
+        const kinds = ['from', 'count', 'firstOf'].filter((k) => isPlainObj(t) && t[k] !== undefined);
+        if (kinds.length !== 1) { at(`preview.tokens.${name}: exactly one of from / count / firstOf`); continue; }
+        const g = gOf(t[kinds[0]]);
+        if (!g) { at(`preview.tokens.${name}: unknown group`); continue; }
+        if (kinds[0] === 'count' && g.type !== 'slots') at(`preview.tokens.${name}: "count" needs a slots group`);
+        if (kinds[0] === 'firstOf') {
+          if (g.type !== 'multi' || !Array.isArray(t.order) || !t.order.length || !t.order.every((x) => PF.optionOf(g, x))) at(`preview.tokens.${name}: "firstOf" needs a multi group and an "order" of its options`);
+        }
+        if (kinds[0] === 'from') {
+          if (g.type !== 'choice') at(`preview.tokens.${name}: "from" needs a choice group`);
+          else if (t.map !== undefined && !(isPlainObj(t.map) && g.options.every((o) => typeof t.map[String(o.v)] === 'string'))) at(`preview.tokens.${name}: "map" must give a string for every option of the group`);
+        }
+      }
+      const declared = new Set(Object.keys(p.tokens));
+      const refs = (tpl) => [...String(tpl).matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[1]);
+      p.chain.forEach((tpl, i) => { if (typeof tpl !== 'string' || !refs(tpl).every((n) => declared.has(n))) at(`preview.chain[${i}]: uses a token that is not declared`); });
+      (p.insets || []).forEach((ins, i) => {
+        if (!isPlainObj(ins) || typeof ins.template !== 'string' || !refs(ins.template).every((n) => declared.has(n))) { at(`preview.insets[${i}]: bad template`); return; }
+        if (ins.when !== undefined && !(isPlainObj(ins.when) && Object.keys(ins.when).every((k) => { const g = gOf(k); return g && PF.optionOf(g, ins.when[k]); }))) at(`preview.insets[${i}]: "when" must name a group and one of its option values`);
+      });
+      if (p.insetEach !== undefined) {
+        const ie = p.insetEach;
+        const g = isPlainObj(ie) && isPlainObj(ie.over) ? gOf(ie.over.kinds) : null;
+        if (!g || g.type !== 'slots' || !isPlainObj(ie.over.map) || !Object.keys(ie.over.map).every((k) => PF.optionOf(g, k) && typeof ie.over.map[k] === 'string') || typeof ie.template !== 'string' || !refs(ie.template).every((n) => n === 'kind')) at('preview.insetEach: needs a slots group, a value -> kind map and a template using only {kind}');
+      }
+      if (!p.tokens || !Object.keys(p.tokens).length) at('preview.tokens must declare at least one token');
+    }
+  }
+  // absorbed SKUs: each strictly valid; the primary is one of them and IS the family's default configuration
+  const ab = isPlainObj(f.absorbed) ? f.absorbed : null;
+  if (!ab || !Object.keys(ab).length) at('"absorbed" must be a non-empty object of { sku: configuration }');
+  else {
+    for (const sku of Object.keys(ab)) {
+      if (!ID_RE.test(sku)) { at(`absorbed: "${sku}" is not a product id`); continue; }
+      const v = PF.validateConfiguration(fam, ab[sku]);
+      if (!v.ok) at(`absorbed["${sku}"]: not a valid configuration (${v.errors.length} problem(s))`);
+      else if (Object.keys(ab[sku]).sort().join() !== fam.groups.map((g) => g.key).sort().join()) at(`absorbed["${sku}"]: must state every option, and only the family's own`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(ab, f.primary)) at('the primary SKU must be one of the absorbed SKUs');
+    else if (PF.canonicalConfig(fam, ab[f.primary]) !== PF.canonicalConfig(fam, PF.defaultConfig(fam))) at('the primary SKU\'s configuration must equal the family defaults (the zero point the option deltas are measured from)');
+  }
+  // generated preview keys must be safe file-name stems that start with the family id
+  if (f.preview) {
+    try {
+      const keys = PF.allPreviewKeys(fam);
+      if (!keys.length) at('preview: the rules produce no keys');
+      keys.forEach((k) => { if (!PREVIEW_KEY_RE.test(k) || !k.startsWith(`${fid}-`)) at(`preview: a generated key is not a safe file name starting "${fid}-"`); });
+    } catch (e) { at('preview: the rules could not be evaluated'); }
+  }
+  // public text guard: every string of the family goes to the public page (and the server file)
+  for (const [where, text] of stringPaths(fam, '', [])) {
+    if (BRAND_RE.test(text) || brandInPath(text)) at(`${where}: partner-brand reference`);     // brandInPath also looks through hyphens / underscores (a file-name stem)
+    if (isMoneyish(text)) at(`${where}: pricing pattern`);
+  }
+  return fam;
+}
+
+/**
+ * loadPublicFamilies({ file, source, published, master }) -> {
+ *   version, order, families:{id: family}, fixed:{sku: label}, absorbedIds:Set, familyOfSku:Map, photoOf:{id: productId|null }, fixedIds:Set }
+ * Throws ONE aggregated Error (ids and keys only, never a value) on any problem. `published` (a Set of the published product ids) makes
+ * the mapping COMPLETE: every published SKU is absorbed by exactly one family or listed under "fixed", never both, never neither.
+ * `master` (the parsed private master) additionally checks the primaries and that sizeBasis matches the primary's formula type.
+ */
+function loadPublicFamilies(opts) {
+  opts = opts || {};
+  const file = opts.file || FAMILIES_FILE;
+  const rel = path.relative(REPO_ROOT, file) || file;
+  let j = opts.source;
+  if (j === undefined) {
+    if (!fs.existsSync(file)) throw new Error(`${rel} not found — it defines the six configurable product families`);
+    try { j = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
+    catch (e) { throw new Error(`${rel} is not valid JSON: ${e.message}`); }
+  }
+  const problems = [];
+  const add = (m) => problems.push(m);
+  if (!isPlainObj(j)) throw new Error(`${rel} must be a JSON object`);
+  for (const k of Object.keys(j)) if (!FAMILY_TOP_KEYS.includes(k)) add(`unknown top-level key "${k}"`);
+  if (!(isIntNum(j.version) && j.version >= 1)) add('"version" must be a whole number >= 1');
+  if (!isPlainObj(j.families) || !Object.keys(j.families).length) add('"families" must be a non-empty object');
+  const famIds = isPlainObj(j.families) ? Object.keys(j.families) : [];
+  if (!Array.isArray(j.order) || j.order.length !== famIds.length || !j.order.every((id) => famIds.includes(id)) || new Set(j.order).size !== j.order.length) add('"order" must list every family id exactly once');
+  const families = {};
+  const familyOfSku = new Map();
+  const photoOf = {};
+  for (const id of famIds) {
+    const fam = checkFamily(id, j.families[id], add);
+    if (!fam) continue;
+    families[id] = fam;
+    photoOf[id] = j.families[id].photo === undefined ? null : j.families[id].photo;
+    for (const sku of Object.keys(fam.absorbed || {})) {
+      if (familyOfSku.has(sku)) add(`"${sku}" is absorbed by two families ("${familyOfSku.get(sku)}" and "${id}")`);
+      else familyOfSku.set(sku, id);
+    }
+  }
+  const fixed = isPlainObj(j.fixed) ? j.fixed : null;
+  if (!fixed) add('"fixed" must be an object of { sku: group label }');
+  else for (const sku of Object.keys(fixed)) {
+    if (!ID_RE.test(sku)) add(`fixed: "${sku}" is not a product id`);
+    else if (typeof fixed[sku] !== 'string' || !fixed[sku].trim()) add(`fixed["${sku}"]: the group label must be a non-empty string`);
+    else if (familyOfSku.has(sku)) add(`"${sku}" is both absorbed by "${familyOfSku.get(sku)}" and listed under fixed`);
+  }
+  if (opts.published) {
+    const pub = opts.published;
+    const classified = new Set([...familyOfSku.keys(), ...(fixed ? Object.keys(fixed) : [])]);
+    for (const id of pub) if (!classified.has(id)) add(`${id}: a published product that is neither absorbed by a family nor listed under "fixed" — decide which`);
+    for (const id of classified) if (!pub.has(id)) add(`${id}: not a published product (stale entry, or it was excluded in scripts/public-categories.json)`);
+  }
+  if (opts.master && Array.isArray(opts.master.products)) {
+    const byId = new Map(opts.master.products.map((p) => [str(p && p.id), p]));
+    for (const id of Object.keys(families)) {
+      const f = families[id];
+      const prim = byId.get(f.primary);
+      if (!prim) { add(`family "${id}": the primary ${f.primary} is not in the master`); continue; }
+      const lengthRule = prim.formulaType === 'per_length';
+      if (lengthRule && f.sizeBasis === 'linear') add(`family "${id}": sizeBasis is "linear" but ${f.primary} already prices by length — use "primary"`);
+      if (!lengthRule && f.sizeBasis !== 'linear') add(`family "${id}": ${f.primary} has no length rule of its own — set sizeBasis to "linear"`);
+      const ph = photoOf[id];
+      if (ph && !byId.has(ph)) add(`family "${id}": the photo product ${ph} is not in the master`);
+    }
+  }
+  if (problems.length) throw new Error(`${rel}: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
+  const absorbedIds = new Set(familyOfSku.keys());
+  return { version: j.version, order: j.order.slice(), families, fixed, absorbedIds, familyOfSku, photoOf, fixedIds: new Set(Object.keys(fixed)) };
+}
+
+/** The text of js/qr-families.js (and its byte-identical mirror functions/qr-families.js): the family definitions as one UMD module. Deterministic. */
+function renderFamiliesJs(fams) {
+  const out = { version: fams.version, order: fams.order.slice(), families: {} };
+  for (const id of fams.order) {
+    const f = fams.families[id];
+    const o = {};
+    for (const k of FAMILY_PUBLIC_KEYS) if (f[k] !== undefined) o[k] = f[k];
+    out.families[id] = o;
+  }
+  const json = JSON.stringify(out, null, 2);
+  return [
+    '// js/qr-families.js — GENERATED by scripts/build-catalogue.js from scripts/public-families.json. DO NOT HAND-EDIT.',
+    '// Edit scripts/public-families.json, then run: node scripts/build-catalogue.js (it also writes the byte-identical mirror',
+    '// functions/qr-families.js — ci-invariants CHECK 10). The six configurable product families of the public catalogue: their',
+    '// options, defaults, size limits, the SKUs each one absorbs, and the preview-image rules. It holds NO price of any kind: the option',
+    '// amounts are kept in private staff data that no public page loads. Logic that walks these definitions: js/product-families.js.',
+    '(function (root, factory) {',
+    '  var api = factory();',
+    "  if (typeof module === 'object' && module && module.exports) module.exports = api;   // functions/ + tests",
+    '  if (root) root.QR_FAMILIES = api;',
+    "})(typeof window !== 'undefined' ? window : null, function () {",
+    "  'use strict';",
+    '  return ' + json.replace(/\n/g, '\n  ') + ';',
+    '});',
+    ''
+  ].join('\n');
+}
+
+// ── configurator preview images ─────────────────────────────────────────────
+const PREVIEW_PATH_RE = /^site\/img\/configurator\/([a-z][a-z0-9_]{1,30})\/([a-z0-9][a-z0-9_-]{0,78})\.webp$/;
+/**
+ * loadPreviewManifest({ file, root, families }) -> { previews:{ family:{ key:{ src, thumb, width, height, mainWidth } } }, count }
+ * The owner drops a WebP named by the preview key into site/img/configurator/<family>/ (+ a -thumb sibling) and adds a line to
+ * scripts/configurator-previews.json. ABSENT file or empty "images" = no photos yet (the generated placeholders show). Present entries are
+ * validated hard: a real family, a key the family's preview rules can actually ask for (so no unknown option value), the exact path, both
+ * files present and readable WebP of the same shape. ONE aggregated Error on any problem (families, keys and paths only).
+ */
+function loadPreviewManifest(opts) {
+  opts = opts || {};
+  const file = opts.file || PREVIEWS_FILE;
+  const root = opts.root || REPO_ROOT;
+  const fams = opts.families;
+  const previews = {};
+  if (!fs.existsSync(file)) return { previews, count: 0 };
+  const rel = path.relative(root, file) || file;
+  let j;
+  try { j = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
+  catch (e) { throw new Error(`${rel} is not valid JSON: ${e.message}`); }
+  if (!isPlainObj(j)) throw new Error(`${rel} must be a JSON object with an "images" object`);
+  const problems = [];
+  for (const k of Object.keys(j)) if (!['_readme', 'images'].includes(k)) problems.push(`unknown top-level key "${k}"`);
+  if (!isPlainObj(j.images)) problems.push('"images" must be an object of { family: { key: path } }');
+  let count = 0;
+  const sizeCache = new Map();
+  const sizeOf = (p) => { if (!sizeCache.has(p)) { let s = null; try { s = webpSize(fs.readFileSync(path.join(root, p))); } catch (_) { /* reported by the exists check */ } sizeCache.set(p, s); } return sizeCache.get(p); };
+  if (isPlainObj(j.images)) {
+    for (const fid of Object.keys(j.images)) {
+      const fam = fams && fams.families && fams.families[fid];
+      if (!fam) { problems.push(`${fid}: not a product family`); continue; }
+      if (!isPlainObj(j.images[fid])) { problems.push(`${fid}: must be an object of { key: path }`); continue; }
+      const valid = new Set(PF.allPreviewKeys(fam));
+      for (const key of Object.keys(j.images[fid])) {
+        const val = j.images[fid][key];
+        const tag = `${fid}/${key}`;
+        if (!valid.has(key)) { problems.push(`${tag}: not a preview key this family can ask for (an unknown option value?)`); continue; }
+        const expect = `site/img/configurator/${fid}/${key}.webp`;
+        if (typeof val !== 'string' || val !== expect) { problems.push(`${tag}: the path must be exactly ${expect}`); continue; }
+        if (brandInPath(val) || isMoneyish(val)) { problems.push(`${tag}: the path trips a pricing / partner-brand guard`); continue; }
+        const thumb = thumbPathOf(val);
+        let ok = true;
+        for (const f of [val, thumb]) if (!fs.existsSync(path.join(root, f))) { problems.push(`${tag}: missing file ${f}`); ok = false; }
+        if (!ok) continue;
+        const m = sizeOf(val), t = sizeOf(thumb);
+        if (!m || !t) { problems.push(`${tag}: ${!m ? val : thumb} is not a readable WebP`); continue; }
+        if (Math.abs(m.width / m.height - t.width / t.height) > 0.03) { problems.push(`${tag}: the image and its thumb have different shapes`); continue; }
+        if (t.width >= m.width) { problems.push(`${tag}: the thumb must be narrower than the image`); continue; }
+        (previews[fid] = previews[fid] || {})[key] = { src: val, thumb, width: t.width, height: t.height, mainWidth: m.width };
+        count++;
+      }
+    }
+  }
+  if (problems.length) throw new Error(`${rel}: ${problems.length} problem(s):\n  ${problems.join('\n  ')}`);
+  return { previews, count };
+}
+
 // ── rendering ───────────────────────────────────────────────────────────────
 function dimsText(dd) {
   if (!dd) return '';
@@ -593,14 +958,42 @@ function dimsText(dd) {
 const PHOTO_SIZES = '(min-width:1024px) 260px, (min-width:720px) 30vw, 46vw';
 const SEARCH_ICON = '<svg class="cat-search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>';
 
+const PHOTO_FIGURE = (photo, name) =>
+  `<figure class="cat-photo"><img src="/${esc(photo.thumb)}" srcset="/${esc(photo.thumb)} ${photo.width}w, /${esc(photo.src)} ${photo.mainWidth}w" sizes="${PHOTO_SIZES}" width="${photo.width}" height="${photo.height}" alt="${esc(name)}" loading="lazy" decoding="async"><figcaption>Representative image</figcaption></figure>`;
+
+// The card of a CONFIGURABLE family: one card per family, the "Configurable" tag, the options it offers as a description list (this is also
+// what the live search reads), and the names/codes of the SKUs it absorbed in data-kw (search only — never shown). The "Configure & add"
+// button is added at run time by js/quote-request.js (like "Add to quote" on a fixed item), so the card needs no script to read.
+function renderFamilyCard(fam, cat, photo, keywords) {
+  const mark = photo
+    ? PHOTO_FIGURE(photo, fam.label)
+    : `<div class="cat-tile" aria-hidden="true"><span>${esc(cat.initial)}</span></div>`;
+  const rows = [];
+  for (const g of fam.groups) {
+    if (g.type === 'slots') rows.push([g.label, `Up to ${g.maxSlots} ${g.unit ? g.unit.many : 'positions'}, each chosen one by one`]);
+    else rows.push([g.label, g.options.map((o) => o.l).join(' / ')]);
+  }
+  // the size line names the axes THIS family really has (wall shelving has a length and a depth, no height)
+  const axes = ['W', 'D', 'H'].filter((k) => fam.dims && fam.dims[k]).map((k) => String(fam.dims[k].label).toLowerCase());
+  const axesText = axes.length > 1 ? axes.slice(0, -1).join(', ') + ' and ' + axes[axes.length - 1] : (axes[0] || 'size');
+  rows.push(['Size', 'Made to your ' + axesText]);
+  return `<li class="cat-card cat-card-family${photo ? ' has-photo' : ''}" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + mark +
+    `<p class="cat-code cat-tag">Configurable</p>` +
+    `<h3>${esc(fam.label)}</h3>` +
+    `<p class="cat-notes">${esc(fam.description)}</p>` +
+    `<dl class="cat-specs">${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('')}</dl>` +
+    `</li>`;
+}
+
 function renderCard(p, cat, photo) {
   const mark = photo
-    ? `<figure class="cat-photo"><img src="/${esc(photo.thumb)}" srcset="/${esc(photo.thumb)} ${photo.width}w, /${esc(photo.src)} ${photo.mainWidth}w" sizes="${PHOTO_SIZES}" width="${photo.width}" height="${photo.height}" alt="${esc(p.name)}" loading="lazy" decoding="async"><figcaption>Representative image</figcaption></figure>`
+    ? PHOTO_FIGURE(photo, p.name)
     : `<div class="cat-tile" aria-hidden="true"><span>${esc(cat.initial)}</span></div>`;
   const meta = [dimsText(p.defaultDimensions), p.unit ? `per ${p.unit}` : ''].filter(Boolean).join(' · ');
   const rows = [];
   if (p.material) for (const k of MATERIAL_KEYS) if (p.material[k]) rows.push([MATERIAL_LABELS[k], p.material[k]]);
-  if (p.specs) for (const s of p.specs) rows.push([s.label, s.options.join(' / ')]);
+  // The master's ad-hoc option lists (p.specs) are NOT shown any more (owner ruling 2026-10-21): a fixed item is quantity + size + note only,
+  // and the configurable options live on the six family cards. publicProduct() still scans every spec string, so a guard hit is still refused.
   return `<li class="cat-card${photo ? ' has-photo' : ''}" data-id="${esc(p.id)}">` + mark +
     `<p class="cat-code">${esc(p.id)}</p>` +
     `<h3>${esc(p.name)}</h3>` +
@@ -614,9 +1007,12 @@ function renderCard(p, cat, photo) {
  * renderCatalogue(db[, opts]) -> the HTML block (string) that goes between the
  * CATALOGUE markers of catalogue/index.html: the intro + search, the category nav
  * (desktop sidebar / mobile chip bar) and one section per PUBLIC category holding EVERY product.
- * opts: { report, noteOverrides, textFixes, photos, publicCategories, excludedCategories }.
+ * opts: { report, noteOverrides, textFixes, photos, publicCategories, excludedCategories, families }.
  *   photos            loadPhotoMap().photos (or a fixture)
  *   publicCategories  loadPublicCategories() (default: scripts/public-categories.json)
+ *   families          loadPublicFamilies() — when given, an ABSORBED SKU gets no card of its own (its family's card stands for it),
+ *                     each family is ONE "Configurable" card placed first in its category, and every other published SKU must be
+ *                     listed under "fixed" (a SKU in neither place refuses the build). Absent -> every published SKU is a card (v1).
  * Products in an excluded master category, or listed under excludedProducts, are skipped entirely.
  * Throws one aggregated CatalogueGuardError listing EVERY violating product.
  */
@@ -633,6 +1029,8 @@ function renderCatalogue(db, opts) {
     throw new Error('master JSON must have "categories" and "products" arrays');
   }
   const pub = opts.publicCategories || loadPublicCategories({ ids: db.products.map(p => str(p && p.id)).filter(Boolean) });
+  const fams = opts.families || null;
+  const absorbedIds = fams ? fams.absorbedIds : new Set();
 
   const violations = [];
   const add = makeSink(violations);
@@ -656,7 +1054,8 @@ function renderCatalogue(db, opts) {
     scanEmitted(add, lbl, 'category.label', label);
   });
 
-  const groupById = new Map(PUBLIC_CATEGORIES.map(c => [c.id, { id: c.id, label: c.label, initial: c.label.charAt(0).toUpperCase(), products: [] }]));
+  const groupById = new Map(PUBLIC_CATEGORIES.map(c => [c.id, { id: c.id, label: c.label, initial: c.label.charAt(0).toUpperCase(), products: [], familyCards: [] }]));
+  const absorbed = [];
   const skipped = { categories: {}, categoryIds: [], products: [] };
   const rawIds = new Set();
   const seenIds = new Set();
@@ -677,22 +1076,39 @@ function renderCatalogue(db, opts) {
     if (!masterCats.has(p.category)) { add(p.id, 'category', 'shape'); continue; }
     const target = has(pub.products, p.id) ? groupById.get(pub.products[p.id]) : null;
     if (!target) { add(p.id, 'publicCategory', 'unmapped'); continue; }
+    if (fams) {
+      if (absorbedIds.has(p.id)) { absorbed.push(p); continue; }          // a family's card stands for it
+      if (!fams.fixedIds.has(p.id)) { add(p.id, 'families', 'family'); continue; }
+    }
     target.products.push(p);
   }
   // a mapping that names a product the master does not have is stale
   for (const id of [...Object.keys(pub.products), ...Object.keys(pub.excludedProducts)]) {
     if (!rawIds.has(id)) add(id, 'publicCategory', 'stale');
   }
+  if (fams) {
+    const seen = new Set([...seenIds]);
+    for (const id of [...absorbedIds, ...fams.fixedIds]) if (!seen.has(id)) add(id, 'families', 'familyStale');
+    for (const fid of fams.order) {
+      const f = fams.families[fid];
+      const grp = groupById.get(f.category);
+      if (!grp) { add(fid, 'category', 'shape'); continue; }
+      grp.familyCards.push(f);
+    }
+  }
   if (violations.length) throw new CatalogueGuardError(violations);
 
   // Order: the five public categories as ruled; inside each, the master's own category order and then id — so
   // "Cooking" opens with the cooking line (stoves, fryers, ovens) and bakery items follow, not the other way round.
   // A category with no product is left out.
-  const groups = [...groupById.values()].filter(c => c.products.length);
+  const groups = [...groupById.values()].filter(c => c.products.length || c.familyCards.length);
   const masterOrder = new Map(db.categories.map((c, i) => [str(c && c.id), i]));
   const byOrder = (a, b) => (masterOrder.get(a.category) - masterOrder.get(b.category)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   for (const g of groups) g.products.sort(byOrder);
-  const total = groups.reduce((n, g) => n + g.products.length, 0);
+  const cardsIn = (g) => g.familyCards.length + g.products.length;
+  const total = groups.reduce((n, g) => n + cardsIn(g), 0);
+  // the names and codes a family's search text carries: the SKUs it absorbed (never shown on the card)
+  const keywordsOf = (fid) => absorbed.filter(a => fams.familyOfSku.get(a.id) === fid).map(a => `${a.id} ${a.name}`).join(' ');
   const nCats = groups.length;
 
   const lines = [];
@@ -717,16 +1133,17 @@ function renderCatalogue(db, opts) {
   lines.push('<p class="cat-nav-title" aria-hidden="true">Categories</p>');
   lines.push('<ul>');
   for (const g of groups) {
-    lines.push(`<li><a class="cat-link" href="#cat-${esc(g.id)}" data-cat="${esc(g.id)}"><span class="cat-link-name">${esc(g.label)}</span><span class="cat-link-n" data-total="${g.products.length}">${g.products.length}</span></a></li>`);
+    lines.push(`<li><a class="cat-link" href="#cat-${esc(g.id)}" data-cat="${esc(g.id)}"><span class="cat-link-name">${esc(g.label)}</span><span class="cat-link-n" data-total="${cardsIn(g)}">${cardsIn(g)}</span></a></li>`);
   }
   lines.push('</ul>');
   lines.push('</nav>');
   lines.push('<div class="cat-main">');
   for (const g of groups) {
-    const n = g.products.length;
+    const n = cardsIn(g);
     lines.push(`<section class="cat-group" id="cat-${esc(g.id)}" data-cat="${esc(g.id)}" aria-labelledby="cat-h-${esc(g.id)}">`);
     lines.push(`<h2 id="cat-h-${esc(g.id)}">${esc(g.label)} <span class="cat-count">${n}</span></h2>`);
     lines.push('<ul class="cat-grid">');
+    for (const f of g.familyCards) lines.push(renderFamilyCard(f, g, fams.photoOf[f.id] ? photoOf(fams.photoOf[f.id]) : null, keywordsOf(f.id)));
     for (const p of g.products) lines.push(renderCard(p, g, photoOf(p.id)));
     lines.push('</ul>');
     lines.push('</section>');
@@ -751,8 +1168,10 @@ function renderCatalogue(db, opts) {
   // Overrides / fixes recorded for a product that is not published are SKIPPED, not "unused"
   const notPublished = new Set([...skipped.categoryIds, ...skipped.products]);
   report.total = total;
-  report.categories = groups.map(g => ({ id: g.id, label: g.label, count: g.products.length }));
-  report.published = groups.flatMap(g => g.products.map(p => ({ id: p.id, category: g.id })));
+  report.categories = groups.map(g => ({ id: g.id, label: g.label, count: cardsIn(g) }));
+  report.published = groups.flatMap(g => g.products.map(p => ({ id: p.id, category: g.id })));       // the FIXED items (every published SKU when no families)
+  report.families = groups.flatMap(g => g.familyCards.map(f => ({ id: f.id, category: g.id })));
+  report.absorbed = absorbed.map(a => ({ id: a.id, family: fams.familyOfSku.get(a.id) }));
   report.skipped = { categories: skipped.categories, categoryProducts: skipped.categoryIds.length, products: skipped.products };
   report.overrides = applied;
   report.unusedOverrides = Object.keys(overrides).filter(k => !applied.some(a => a.id === k) && !notPublished.has(k));
@@ -767,17 +1186,20 @@ function renderCatalogue(db, opts) {
     }
   }
   report.droppedMaterialKeys = droppedMaterialKeys;
-  report.photos = groups.reduce((n, g) => n + g.products.filter(p => photoOf(p.id)).length, 0);
+  report.photos = groups.reduce((n, g) => n + g.products.filter(p => photoOf(p.id)).length + g.familyCards.filter(f => fams.photoOf[f.id] && photoOf(fams.photoOf[f.id])).length, 0);
   return html;
 }
 
 /**
  * renderCatalogueData(db[, opts]) -> the "Add to quote" data island (PUBLIC-QUOTE-REQUEST-SPEC.md §3.4): ONE JSON string
- * (one product per line) holding, for every PUBLISHED product, ONLY
- *   { id, name, cat, unit, dims?, specs?: [{ label, options, default? }] }
- * and nothing else — price-free BY CONSTRUCTION: every product goes through the SAME publicProduct() allowlist, the same
+ * {"v":2,"products":[…one product per line…],"previews":{…}} where, for every FIXED published product (every published product
+ * when no families are given), `products` holds ONLY
+ *   { id, name, cat, unit, dims? }
+ * and nothing else (no master option lists: a fixed item is quantity + size + note only, owner ruling 2026-10-21) — price-free BY CONSTRUCTION: every product goes through the SAME publicProduct() allowlist, the same
  * TEXT_FIXES / NOTE_OVERRIDES and the same money / partner-brand scans as the cards, and the finished string is scanned
- * again. It walks the SAME product set as renderCatalogue() by calling it (so the guard errors, the exclusions, the
+ * again. The six configurable FAMILIES are not in the island: the page reads them from js/qr-families.js (window.QR_FAMILIES).
+ * `previews` is the validated configurator-photo manifest, { family: { key: { s: image, t: thumb, w, h, m } } } — empty until the owner adds photos.
+ * It walks the SAME product set as renderCatalogue() by calling it (so the guard errors, the exclusions, the
  * public-category map and the page order are identical, and a product can never be quotable without being on the page).
  *   cat   the PUBLIC category id (preparation / washing / cooking / storage / refrigeration) — the page's own grouping
  *   unit  as the master has it, 'pc' when blank (the Quote Builder's own fallback)
@@ -796,11 +1218,19 @@ function renderCatalogueData(db, opts) {
     const p = publicProduct(byId.get(id), { noteOverrides: overrides, textFixes: fixes });
     const out = { id: p.id, name: p.name, cat: category, unit: p.unit || 'pc' };
     if (p.defaultDimensions) out.dims = Object.assign({}, p.defaultDimensions);
-    if (p.specs) out.specs = p.specs.map(sp => (sp.default ? { label: sp.label, options: sp.options.slice(), default: sp.default } : { label: sp.label, options: sp.options.slice() }));
     return out;
   });
   const body = products.map(x => JSON.stringify(x)).join(',\n');
-  const json = (`{"v":1,"products":[\n${body}\n]}`).replace(/</g, '\\u003c');
+  const pv = {};
+  const prevSrc = opts.previews || {};
+  for (const fid of Object.keys(prevSrc).sort()) {
+    pv[fid] = {};
+    for (const key of Object.keys(prevSrc[fid]).sort()) {
+      const x = prevSrc[fid][key];
+      pv[fid][key] = { s: x.src, t: x.thumb, w: x.width, h: x.height, m: x.mainWidth };
+    }
+  }
+  const json = (`{"v":2,"products":[\n${body}\n],"previews":${JSON.stringify(pv)}}`).replace(/</g, '\\u003c');
   const last = [];
   const addLast = makeSink(last);
   if (BRAND_RE.test(json) || brandInPath(json)) addLast('(data island)', 'json', 'brand');
@@ -816,7 +1246,7 @@ function renderCatalogueData(db, opts) {
 function renderPublishedIds(published) {
   const ids = [...published].sort();
   return JSON.stringify({
-    _readme: 'GENERATED by scripts/build-catalogue.js from publishedProductIds() — the same computation that decides which products reach /catalogue/. Do not hand-edit; run: node scripts/build-catalogue.js. The quote-request callables accept ONLY these product ids; everything else (exhaust, fresh air, gas line, fire suppression, the excluded items, anything unmapped) is refused. Ids only — no prices.',
+    _readme: 'GENERATED by scripts/build-catalogue.js from publishedProductIds() minus the SKUs the product families absorb — the same computation that decides which FIXED products reach /catalogue/ as their own card. Do not hand-edit; run: node scripts/build-catalogue.js. The quote-request callables accept these ids as plain lines (quantity + size + note); the configurable families are quoted through js/qr-families.js instead, and everything else (exhaust, fresh air, gas line, fire suppression, the excluded items, the absorbed SKUs, anything unmapped) is refused. Ids only — no prices.',
     count: ids.length,
     ids,
   }, null, 2) + '\n';
@@ -878,13 +1308,17 @@ function main(argv) {
   const ids = Array.isArray(db.products) ? db.products.map(p => str(p && p.id)).filter(Boolean) : [];
   const pub = loadPublicCategories({ ids });              // throws on a bad category map
   const published = publishedProductIds(db, pub);
+  const fams = loadPublicFamilies({ published, master: db });   // throws unless every published SKU is absorbed or fixed, exactly once
   const photoMap = loadPhotoMap({ ids, skipIds: ids.filter(id => !published.has(id)) });   // throws on a bad photo map; {} when the file is absent
+  const previewMap = loadPreviewManifest({ families: fams });                              // throws on a bad preview manifest; {} when none yet
 
   const report = {};
-  const block = renderCatalogue(db, { report, photos: photoMap.photos, publicCategories: pub });   // throws before anything is written
+  const block = renderCatalogue(db, { report, photos: photoMap.photos, publicCategories: pub, families: fams });   // throws before anything is written
 
-  const island = renderCatalogueData(db, { photos: photoMap.photos, publicCategories: pub });   // same guards, same product set
-  const idsJson = renderPublishedIds(published);
+  const island = renderCatalogueData(db, { photos: photoMap.photos, publicCategories: pub, families: fams, previews: previewMap.previews });   // same guards, same product set
+  const quotable = new Set([...published].filter(id => !fams.absorbedIds.has(id)));   // the FIXED items: plain lines on the server
+  const idsJson = renderPublishedIds(quotable);
+  const familiesJs = renderFamiliesJs(fams);
 
   const html = fs.readFileSync(CATALOGUE_HTML, 'utf8');
   const next = injectIsland(injectIntoHtml(html, block), island);
@@ -893,10 +1327,16 @@ function main(argv) {
   const prevIds = fs.existsSync(PUBLISHED_IDS_FILE) ? fs.readFileSync(PUBLISHED_IDS_FILE, 'utf8') : '';
   const idsChanged = prevIds !== idsJson;
   if (idsChanged) fs.writeFileSync(PUBLISHED_IDS_FILE, idsJson);
+  const famWrite = (file) => {
+    const prev = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    if (prev !== familiesJs) fs.writeFileSync(file, familiesJs);
+    return prev !== familiesJs;
+  };
+  const famChanged = famWrite(FAMILIES_JS) | famWrite(FAMILIES_JS_MIRROR);
 
   console.log(`build-catalogue: ${path.relative(process.cwd(), input) || input}`);
   for (const c of report.categories) console.log(`  ${c.label.padEnd(24)} ${String(c.count).padStart(3)}`);
-  console.log(`  ${'TOTAL'.padEnd(24)} ${String(report.total).padStart(3)}   (${report.categories.length} categories)`);
+  console.log(`  ${'TOTAL'.padEnd(24)} ${String(report.total).padStart(3)}   (${report.categories.length} categories: ${report.families.length} configurable famil${report.families.length === 1 ? 'y' : 'ies'} + ${report.published.length} fixed items; ${report.absorbed.length} published SKUs absorbed into the families and no longer cards of their own)`);
   const exCats = Object.entries(report.skipped.categories).map(([c, n]) => `${c} ${n}`).join(', ');
   console.log(`  not published: ${report.skipped.categoryProducts} product(s) in excluded categor${Object.keys(report.skipped.categories).length === 1 ? 'y' : 'ies'} (${exCats || 'none'}) + ${report.skipped.products.length} listed under excludedProducts in scripts/public-categories.json`);
   if (report.overrides.length) {
@@ -920,12 +1360,15 @@ function main(argv) {
   }
   console.log(`  product photos: ${report.photos} card(s) mapped to ${photoMap.files} image(s)${photoMap.skipped ? `; ${photoMap.skipped} mapping entr${photoMap.skipped === 1 ? 'y' : 'ies'} skipped (product not published)` : ''}${fs.existsSync(PHOTO_MAP_FILE) ? '' : ' (scripts/product-photos.json absent — every card keeps its placeholder tile)'}`);
   console.log(`  catalogue/index.html: ${changed ? 'catalogue block / data island updated' : 'already up to date'} (${Buffer.byteLength(block)} bytes of markup, ${Buffer.byteLength(island)} bytes of "Add to quote" data)`);
-  console.log(`  functions/qr-published.json: ${idsChanged ? 'updated' : 'already up to date'} (${published.size} published product ids — the only ids the quote-request callables accept)`);
+  console.log(`  functions/qr-published.json: ${idsChanged ? 'updated' : 'already up to date'} (${quotable.size} fixed product ids — the plain lines the quote-request callables accept)`);
+  console.log(`  js/qr-families.js + functions/qr-families.js: ${famChanged ? 'updated' : 'already up to date'} (${fams.order.length} families, ${fams.absorbedIds.size} absorbed SKUs)`);
+  console.log(`  configurator previews: ${previewMap.count} photo(s) in scripts/configurator-previews.json${fs.existsSync(PREVIEWS_FILE) ? '' : ' (file absent — every sheet shows its generated placeholder)'}`);
 }
 
 module.exports = {
   publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, injectIntoHtml, injectIsland, stripJsonComments, esc, webpSize, loadPhotoMap,
   loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
+  loadPublicFamilies, renderFamiliesJs, loadPreviewManifest, renderFamilyCard, FAMILIES_FILE, FAMILIES_JS, FAMILIES_JS_MIRROR, PREVIEWS_FILE,
   NOTE_OVERRIDES, TEXT_FIXES, MATERIAL_KEYS, MONEY_RE, FORMULA_RE, BRAND_RE, START_MARKER, END_MARKER,
   QR_PLACEHOLDER, QR_START_MARKER, QR_END_MARKER, PUBLISHED_IDS_FILE,
   CatalogueGuardError,

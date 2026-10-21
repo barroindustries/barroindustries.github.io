@@ -14,10 +14,18 @@
 //      (a frozen oracle). A seeded sweep of thousands of synthetic selections must give the identical price and the
 //      identical warning sentence.
 //   5. the functions/ mirror is byte-identical (ci-invariants CHECK 10 enforces the same).
+//   6. PRODUCT FAMILIES (owner ruling 2026-10-21): normalisePricingDoc + priceConfiguredItem — a configured price = the primary SKU
+//      through the UNCHANGED machinery + signed option deltas from a private sheet; an unapproved sheet / a stale schema / a BLANK cell
+//      is "priced after review" (never zero, never a partial figure); an option equal to the family default adds nothing (identity).
+//   7. REGRESSION: the four original exports are pinned by the SHA-256 of their source (taken before the families were added), on top of
+//      the frozen-oracle parity sweep above, so adding the configured price provably changed nothing about SKU pricing or the Quote Builder.
 //
 // Mutation-tested (scratch copy of js/pricing-core.js, never the shared tree) — each of these must fail >= 1 test:
 //   flip `>` to `>=` in the D/H surcharge · drop Math.max(0, …) · apply the multiplier AFTER the adders ·
-//   change lowFactor to 0.95 (in qr-def) · make `ceil` a `round` · let a size below minDimMm pass.
+//   change lowFactor to 0.95 (in qr-def) · make `ceil` a `round` · let a size below minDimMm pass ·
+//   (families) read a blank cell as 0 · price an unapproved sheet · skip the schema-version check · charge the chosen value instead of
+//   chosen-minus-default · drop the baseline subtraction for slots · let perW100 charge below the standard length (non-linear family) ·
+//   flip the sign of the linear length rate · stop clamping the total at 0 · edit any of the four original functions.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -27,6 +35,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -655,18 +664,22 @@ describe('the functions/ mirrors', () => {
   const same = (a, b) => assert.ok(fs.readFileSync(path.join(ROOT, a)).equals(fs.readFileSync(path.join(ROOT, b))), `${b} is not byte-identical to ${a} — edit ${a}, then: cp ${a} ${b}`);
   it('functions/pricing-core.js is byte-identical to js/pricing-core.js', () => same('js/pricing-core.js', 'functions/pricing-core.js'));
   it('functions/qr-def.js is byte-identical to js/qr-def.js', () => same('js/qr-def.js', 'functions/qr-def.js'));
-  it('the functions copy loads under Node and exports the same four functions', () => {
+  it('functions/product-families.js and functions/qr-families.js are byte-identical to their js/ originals', () => {
+    same('js/product-families.js', 'functions/product-families.js');
+    same('js/qr-families.js', 'functions/qr-families.js');
+  });
+  it('the functions copy loads under Node and exports the four original functions plus the two additive family functions', () => {
     const F = require('../functions/pricing-core.js');
-    assert.deepEqual(Object.keys(F).sort(), ['estimateGate', 'estimateRange', 'priceCatalogItem', 'validateSelection']);
+    assert.deepEqual(Object.keys(F).sort(), ['estimateGate', 'estimateRange', 'normalisePricingDoc', 'priceCatalogItem', 'priceConfiguredItem', 'validateSelection']);
   });
   it('loading pricing-core under Node does NOT create a window global (it would change how libraries in the Cloud Functions process behave)', () => {
     const out = vm.runInNewContext("var module={exports:{}}; (function(){ " + fs.readFileSync(path.join(ROOT, 'js/pricing-core.js'), 'utf8') + "\n})(); typeof window", {});
     assert.equal(out, 'undefined');
   });
-  it('in a browser it attaches window.priceCatalogItem / validateSelection / estimateRange / estimateGate', () => {
+  it('in a browser it attaches window.priceCatalogItem / validateSelection / estimateRange / estimateGate / priceConfiguredItem / normalisePricingDoc', () => {
     const win = {};
     vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'js/pricing-core.js'), 'utf8'), { window: win });
-    for (const k of ['priceCatalogItem', 'validateSelection', 'estimateRange', 'estimateGate']) assert.equal(typeof win[k], 'function', k);
+    for (const k of ['priceCatalogItem', 'validateSelection', 'estimateRange', 'estimateGate', 'priceConfiguredItem', 'normalisePricingDoc']) assert.equal(typeof win[k], 'function', k);
   });
 });
 
@@ -692,5 +705,325 @@ describe('qr-def.js — the ruled values (R2, R3, O1–O3)', () => {
   it('a pricing figure never appears in the definitions that ship to the public page', () => {
     const src = fs.readFileSync(path.join(ROOT, 'js/qr-def.js'), 'utf8');
     assert.ok(!/basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|formulaType/.test(src));
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PRODUCT FAMILIES — the configured price. SYNTHETIC family, product and sheet (made-up round numbers): the real sheet is private.
+// ═══════════════════════════════════════════════════════════════════════════
+const { priceConfiguredItem, normalisePricingDoc } = P;
+const syn = () => ({
+  id: 'syn', label: 'Synthetic', category: 'preparation', unit: 'pc', primary: 'S-P', sizeBasis: 'primary',
+  dims: { W: { label: 'Length', min: 500, max: 4000, step: 10, default: 900 }, D: { label: 'Width', min: 400, max: 1200, step: 10, default: 600 }, H: { label: 'Height', min: 600, max: 1100, step: 10, default: 850 } },
+  groups: [
+    { key: 'layers', label: 'Layers', type: 'choice', default: 1, options: [{ v: 1, l: '1' }, { v: 2, l: '2' }, { v: 3, l: '3' }] },
+    { key: 'wheels', label: 'Wheels', type: 'choice', default: false, options: [{ v: true, l: 'With' }, { v: false, l: 'Without' }] },
+    { key: 'kind', label: 'Kind', type: 'choice', default: 'a', options: [{ v: 'a', l: 'A' }, { v: 'b', l: 'B' }] },
+    { key: 'burners', label: 'Burners', type: 'slots', minSlots: 1, maxSlots: 4, default: ['lp'], options: [{ v: 'lp', l: 'LP', f: 'Low pressure' }, { v: 'wok', l: 'Wok', f: 'Wok burner' }, { v: 'hp', l: 'HP', f: 'High pressure' }] },
+    { key: 'addons', label: 'Add-ons', type: 'multi', default: [], options: [{ v: 'oven', l: 'Oven' }, { v: 'fryer', l: 'Fryer' }] },
+  ],
+});
+const FAM = syn();
+const PRIMARY = perLength({ id: 'S-P', basePrice: 1000, defaultDimensions: { W: 900, D: 600, H: 850 }, formula: { baseLengthMm: 900, pricePerExtraMm: 2, rateD100: 30, rateH100: 0 } });
+const STD = { layers: 1, wheels: false, kind: 'a', burners: ['lp'], addons: [] };
+const DIMS = { W: 900, D: 600, H: 850 };
+const SHEET = (over) => ({
+  approved: true, schemaVersion: 1,
+  options: {
+    layers: { 2: { flat: 100, perW100: 10 }, 3: { flat: 250, perW100: 20 } },
+    wheels: { true: { flat: 40, perW100: null } },
+    kind: { b: { flat: -30, perW100: null } },
+    burners: { lp: { flat: 300, perW100: null }, wok: { flat: 500, perW100: null }, hp: { flat: 450, perW100: null } },
+    addons: { oven: { flat: 700, perW100: null }, fryer: { flat: 900, perW100: null } },
+  },
+  size: { perW100: null }, ...(over || {}),
+});
+const OPT = { schemaVersion: 1 };
+const priceIt = (cfg, dims, sheet, fam, prod) => priceConfiguredItem(prod || PRIMARY, fam || FAM, { ...STD, ...cfg }, dims || DIMS, sheet === undefined ? SHEET() : sheet, {}, OPT);
+const baseOf = (dims) => priceCatalogItem(PRIMARY, { dims, runs: null, specIdx: [] }, {}).unitPrice;
+
+describe('normalisePricingDoc — a staff-written Firestore doc is sanitised before it is ever used', () => {
+  it('keeps only the groups and values the family defines, as { flat, perW100 } numbers (blank = null)', () => {
+    const d = normalisePricingDoc(FAM, SHEET());
+    assert.equal(d.approved, true);
+    assert.equal(d.schemaVersion, 1);
+    assert.deepEqual(d.options.layers, { 1: { flat: null, perW100: null }, 2: { flat: 100, perW100: 10 }, 3: { flat: 250, perW100: 20 } });
+    assert.deepEqual(d.options.wheels, { true: { flat: 40, perW100: null }, false: { flat: null, perW100: null } });
+    assert.deepEqual(Object.keys(d.options).sort(), ['addons', 'burners', 'kind', 'layers', 'wheels']);
+    assert.deepEqual(d.size, { perW100: null });
+  });
+  it('drops unknown groups / values and never throws on junk', () => {
+    const d = normalisePricingDoc(FAM, { approved: true, schemaVersion: 1, options: { nope: { x: { flat: 1 } }, layers: { 9: { flat: 5 }, 2: { flat: 7 } } } });
+    assert.equal(d.options.nope, undefined);
+    assert.equal(d.options.layers[9], undefined);
+    assert.equal(d.options.layers[2].flat, 7);
+    for (const junk of [null, undefined, 5, 'x', [], { options: 7 }, { options: [] }, { options: { layers: 'x' } }, { options: { layers: { 2: 'x' } } }]) assert.doesNotThrow(() => normalisePricingDoc(FAM, junk), JSON.stringify(junk));
+    assert.doesNotThrow(() => normalisePricingDoc(null, null));
+  });
+  it('a figure that is not a finite number within +/-1e8 is BLANK (null) — never a number: NaN, Infinity, strings, booleans, huge values', () => {
+    const bad = [NaN, Infinity, -Infinity, '12', true, [], {}, 1e9, -1e9, null, undefined];
+    for (const b of bad) assert.equal(normalisePricingDoc(FAM, { options: { layers: { 2: { flat: b, perW100: b } } } }).options.layers[2].flat, null, String(b));
+    assert.equal(normalisePricingDoc(FAM, { options: { layers: { 2: { flat: 0 } } } }).options.layers[2].flat, 0);         // an explicit zero is a figure
+    assert.equal(normalisePricingDoc(FAM, { options: { layers: { 2: { flat: -45.5 } } } }).options.layers[2].flat, -45.5);  // signed
+  });
+  it('approved is true ONLY for the boolean true; schemaVersion only for an integer', () => {
+    for (const a of ['true', 1, 'yes', {}, [], null, undefined, false]) assert.equal(normalisePricingDoc(FAM, { approved: a }).approved, false, String(a));
+    for (const v of ['1', 1.5, NaN, null, undefined, Infinity]) assert.equal(normalisePricingDoc(FAM, { schemaVersion: v }).schemaVersion, null, String(v));
+    assert.equal(normalisePricingDoc(FAM, { schemaVersion: 3 }).schemaVersion, 3);
+  });
+  it('never mutates its input', () => {
+    const raw = SHEET(); const snap = JSON.stringify(raw);
+    normalisePricingDoc(FAM, raw);
+    assert.equal(JSON.stringify(raw), snap);
+  });
+});
+
+describe('priceConfiguredItem — IDENTITY: the family default at any size prices exactly as the primary SKU alone (G1)', () => {
+  it('default configuration -> priceCatalogItem of the primary, at the default size and at custom sizes, whatever the sheet holds', () => {
+    for (const dims of [DIMS, { W: 1500, D: 600, H: 850 }, { W: 900, D: 900, H: 850 }, { W: 700, D: 500, H: 700 }, { W: 4000, D: 1200, H: 1100 }]) {
+      const want = baseOf(dims);
+      for (const sheet of [SHEET(), SHEET({ options: {} }), { approved: true, schemaVersion: 1 }, SHEET({ options: { layers: { 2: { flat: 99999 } } } })]) {
+        const r = priceIt({}, dims, sheet);
+        assert.equal(r.unitPrice, want, JSON.stringify(dims));
+        assert.equal(r.priced, true);
+        assert.deepEqual(r.missing, []);
+        assert.deepEqual(r.deltas, []);
+        assert.equal(r.base, want);
+      }
+    }
+  });
+  it('the multiplier of productMeta (material price index) scales the primary exactly as it does for a plain SKU, and the option amounts are added AFTER it', () => {
+    const c = { materialPriceIndexMultiplier: 1.07 };
+    const dims = { W: 1200, D: 600, H: 850 };
+    const plain = priceCatalogItem(PRIMARY, { dims, runs: null, specIdx: [] }, c).unitPrice;
+    const r = priceConfiguredItem(PRIMARY, FAM, { ...STD, wheels: true }, dims, SHEET(), c, OPT);
+    assert.equal(r.base, plain);
+    assert.equal(r.unitPrice, plain + 40);
+  });
+  it('the primary\'s own option defaults are used (a spec adder at its default is in the base, exactly as a plain SKU prices)', () => {
+    const withSpec = { ...PRIMARY, specs: [{ label: 'Finish', options: ['A', 'B'], default: 'B', priceAdder: [0, 75] }] };
+    const want = priceCatalogItem(withSpec, { dims: DIMS, runs: null, specIdx: [1] }, {}).unitPrice;
+    assert.equal(priceConfiguredItem(withSpec, FAM, STD, DIMS, SHEET(), {}, OPT).unitPrice, want);
+  });
+});
+
+describe('priceConfiguredItem — option deltas (flat + perW100 x length beyond the standard), signed, additive', () => {
+  it('a choice: the chosen value\'s amount, only when it differs from the family default; the default value needs no cell', () => {
+    assert.equal(priceIt({ layers: 2 }).unitPrice, baseOf(DIMS) + 100);
+    assert.equal(priceIt({ layers: 3 }).unitPrice, baseOf(DIMS) + 250);
+    assert.equal(priceIt({ wheels: true }).unitPrice, baseOf(DIMS) + 40);
+    assert.equal(priceIt({ kind: 'b' }).unitPrice, baseOf(DIMS) - 30);                                  // signed: cheaper
+    const sheet = SHEET(); delete sheet.options.layers;                                                    // no cell at all for the DEFAULT value is fine
+    assert.equal(priceIt({ layers: 1 }, DIMS, sheet).priced, true);
+  });
+  it('perW100 charges for length BEYOND the standard length only (a non-linear family never discounts below it), and a blank perW100 is none', () => {
+    const wide = { W: 1500, D: 600, H: 850 };
+    assert.equal(priceIt({ layers: 2 }, wide).unitPrice, baseOf(wide) + 100 + 10 * 6);                  // 600 mm beyond 900 = 6 x per-100
+    assert.equal(priceIt({ layers: 3 }, wide).unitPrice, baseOf(wide) + 250 + 20 * 6);
+    assert.equal(priceIt({ wheels: true }, wide).unitPrice, baseOf(wide) + 40);                         // wheels have no perW100
+    const narrow = { W: 700, D: 600, H: 850 };
+    assert.equal(priceIt({ layers: 2 }, narrow).unitPrice, baseOf(narrow) + 100);                       // shorter than standard: no length part, no discount
+  });
+  it('a multi group adds each selected add-on; the order of the selection does not matter', () => {
+    assert.equal(priceIt({ addons: ['oven'] }).unitPrice, baseOf(DIMS) + 700);
+    assert.equal(priceIt({ addons: ['oven', 'fryer'] }).unitPrice, baseOf(DIMS) + 1600);
+    assert.equal(priceIt({ addons: ['fryer', 'oven'] }).unitPrice, baseOf(DIMS) + 1600);
+  });
+  it('slots: the cost of each chosen position minus the default positions (net counts) — the default layout is the zero point', () => {
+    assert.equal(priceIt({ burners: ['lp'] }).unitPrice, baseOf(DIMS));
+    assert.equal(priceIt({ burners: ['lp', 'lp'] }).unitPrice, baseOf(DIMS) + 300);                    // one more low-pressure position
+    assert.equal(priceIt({ burners: ['wok'] }).unitPrice, baseOf(DIMS) + 500 - 300);                   // a wok REPLACES the default position
+    assert.equal(priceIt({ burners: ['wok', 'wok', 'lp'] }).unitPrice, baseOf(DIMS) + 2 * 500);        // lp cancels the default; two woks added
+    assert.equal(priceIt({ burners: ['hp', 'lp', 'wok', 'hp'] }).unitPrice, baseOf(DIMS) + 2 * 450 + 500);
+    assert.equal(priceIt({ burners: ['lp', 'wok'] }).unitPrice, priceIt({ burners: ['wok', 'lp'] }).unitPrice, 'position ORDER is a layout, not a price');
+  });
+  it('several options add up, and every delta is listed for the staff view', () => {
+    const r = priceIt({ layers: 2, wheels: true, addons: ['oven'], burners: ['lp', 'lp'] });
+    assert.equal(r.unitPrice, baseOf(DIMS) + 100 + 40 + 700 + 300);
+    assert.deepEqual(r.deltas.map((d) => d.key).sort(), ['addons:oven', 'burners:lp', 'layers:2', 'wheels:true']);
+    assert.equal(r.deltas.reduce((n, d) => n + d.amount, 0), 100 + 40 + 700 + 300);
+  });
+  it('D / H beyond the primary default go through the primary\'s own surcharge rules (unchanged machinery), then the options', () => {
+    const big = { W: 900, D: 900, H: 850 };
+    assert.equal(priceIt({ layers: 2 }, big).unitPrice, baseOf(big) + 100);
+    assert.ok(baseOf(big) > baseOf(DIMS));
+  });
+  it('rounds once at the end and clamps a negative total at 0', () => {
+    const frac = SHEET({ options: { kind: { b: { flat: 0.4, perW100: null } } } });
+    assert.equal(priceIt({ kind: 'b' }, DIMS, frac).unitPrice, baseOf(DIMS));                           // 1000.4 -> 1000
+    const half = SHEET({ options: { kind: { b: { flat: 0.5, perW100: null } } } });
+    assert.equal(priceIt({ kind: 'b' }, DIMS, half).unitPrice, baseOf(DIMS) + 1);                       // 1000.5 -> 1001 (half up)
+    const huge = SHEET({ options: { kind: { b: { flat: -5000000, perW100: null } } } });
+    const r = priceIt({ kind: 'b' }, DIMS, huge);
+    assert.equal(r.unitPrice, 0);
+    assert.equal(r.priced, false);
+  });
+});
+
+describe('priceConfiguredItem — "priced after review": an unapproved sheet and a BLANK cell price NOTHING (G2/G3)', () => {
+  it('a blank cell is never zero: the line is unpriced, unitPrice 0, and the missing option is NAMED', () => {
+    const sheet = SHEET({ options: { layers: { 2: { flat: null, perW100: 10 } } } });
+    const r = priceIt({ layers: 2 }, DIMS, sheet);
+    assert.equal(r.priced, false);
+    assert.equal(r.unitPrice, 0);
+    assert.equal(r.reason, 'missing_input');
+    assert.deepEqual(r.missing, ['Layers: 2']);
+    // an explicit zero IS a figure
+    const zero = priceIt({ layers: 2 }, DIMS, SHEET({ options: { layers: { 2: { flat: 0, perW100: null } } } }));
+    assert.equal(zero.priced, true);
+    assert.equal(zero.unitPrice, baseOf(DIMS));
+  });
+  it('an absent value, an absent group and an absent sheet entry are blank too; one blank among several unprices the whole line (no partial figure)', () => {
+    assert.equal(priceIt({ layers: 3 }, DIMS, SHEET({ options: { layers: { 2: { flat: 1 } } } })).priced, false);
+    assert.equal(priceIt({ wheels: true }, DIMS, SHEET({ options: {} })).priced, false);
+    const mixed = priceIt({ layers: 2, kind: 'b', addons: ['oven', 'fryer'] }, DIMS, SHEET({ options: { layers: { 2: { flat: 100 } }, kind: { b: { flat: -30 } }, addons: { oven: { flat: 700 } } } }));
+    assert.equal(mixed.priced, false);
+    assert.equal(mixed.unitPrice, 0);
+    assert.deepEqual(mixed.missing, ['Add-ons: Fryer']);
+  });
+  it('a slots group names the position type that has no cost; only net-nonzero types need a cell', () => {
+    const noWok = SHEET(); noWok.options.burners.wok = { flat: null, perW100: null };
+    assert.deepEqual(priceIt({ burners: ['wok'] }, DIMS, noWok).missing, ['Burners: Wok burner']);
+    assert.equal(priceIt({ burners: ['lp', 'hp'] }, DIMS, noWok).priced, true);                         // no wok anywhere: not needed
+    const noLp = SHEET(); noLp.options.burners.lp = { flat: null, perW100: null };
+    assert.equal(priceIt({ burners: ['lp'] }, DIMS, noLp).priced, true);                                // the default layout needs nothing
+    assert.equal(priceIt({ burners: ['wok'] }, DIMS, noLp).priced, false);                              // wok replaces lp: lp's cost is needed to net it out
+  });
+  it('no sheet / not approved / approved against another schema version / a non-boolean "approved" / no schema supplied by the caller -> not_approved, nothing priced', () => {
+    for (const sheet of [null, undefined, {}, SHEET({ approved: false }), SHEET({ approved: 'true' }), SHEET({ approved: 1 }), SHEET({ schemaVersion: 2 }), SHEET({ schemaVersion: null })]) {
+      const r = priceConfiguredItem(PRIMARY, FAM, STD, DIMS, sheet, {}, OPT);
+      assert.equal(r.priced, false, JSON.stringify(sheet));
+      assert.equal(r.unitPrice, 0);
+      assert.equal(r.reason, 'not_approved');
+    }
+    assert.equal(priceConfiguredItem(PRIMARY, FAM, STD, DIMS, SHEET(), {}, {}).reason, 'not_approved', 'no schemaVersion from the caller fails CLOSED');
+    assert.equal(priceConfiguredItem(PRIMARY, FAM, STD, DIMS, SHEET(), {}, undefined).reason, 'not_approved');
+  });
+  it('a primary SKU with no list price cannot be configured into a figure (no_base_price)', () => {
+    const r = priceConfiguredItem({ ...PRIMARY, basePrice: 0 }, FAM, STD, DIMS, SHEET(), {}, OPT);
+    assert.equal(r.priced, false);
+    assert.equal(r.reason, 'no_base_price');
+  });
+  it('the size basis must STILL describe the primary: a linear family on a length-priced primary, or a non-linear family on a primary with no length rule, is left for review (size_basis)', () => {
+    const fixedPrim = { id: 'S-F', formulaType: 'fixed', basePrice: 2000, unit: 'pc', defaultDimensions: { W: 2000, D: 600, H: 850 }, formula: {}, specs: [] };
+    const a = priceConfiguredItem(PRIMARY, { ...FAM, sizeBasis: 'linear' }, STD, DIMS, SHEET({ size: { perW100: 100 } }), {}, OPT);       // linear, but the primary prices its own length
+    assert.deepEqual([a.priced, a.reason, a.unitPrice], [false, 'size_basis', 0]);
+    const b = priceConfiguredItem(fixedPrim, FAM, STD, DIMS, SHEET(), {}, OPT);                                                          // non-linear, but the primary has no length rule
+    assert.deepEqual([b.priced, b.reason, b.unitPrice], [false, 'size_basis', 0]);
+    assert.equal(priceConfiguredItem(PRIMARY, FAM, STD, DIMS, SHEET(), {}, OPT).priced, true, 'the consistent pairing prices');
+    // the approval check still comes first
+    assert.equal(priceConfiguredItem(fixedPrim, FAM, STD, DIMS, { ...SHEET(), approved: false }, {}, OPT).reason, 'not_approved');
+  });
+  it('a custom width or height the primary has NO RATE for is an unknown cost, not a free one: the line is left for review (priceCatalogItem alone would price the standard size and only warn)', () => {
+    const noRate = { ...PRIMARY, formula: { baseLengthMm: 900, pricePerExtraMm: 2 } };                                                  // no rateD100 / rateH100
+    const r = priceConfiguredItem(noRate, FAM, STD, { W: 900, D: 700, H: 900 }, SHEET(), {}, OPT);
+    assert.equal(r.priced, false);
+    assert.equal(r.reason, 'missing_input');
+    assert.deepEqual(r.missing, ['Size (width)', 'Size (height)']);
+    // shrinking never needed a rate, and the standard size is fine
+    assert.equal(priceConfiguredItem(noRate, FAM, STD, { W: 900, D: 500, H: 800 }, SHEET(), {}, OPT).priced, true);
+    assert.equal(priceConfiguredItem(noRate, FAM, STD, DIMS, SHEET(), {}, OPT).priced, true);
+    // with the rates on file it prices as before (the plain path is unchanged: it still only warns)
+    const plain = priceCatalogItem(noRate, { dims: { W: 900, D: 700, H: 900 }, runs: null, specIdx: [] }, {});
+    assert.equal(plain.priced, true);
+    assert.ok(plain.warnings.length >= 1);
+  });
+  it('a total that is not above zero is not a price (no_price), with no figure', () => {
+    const neg = SHEET({ options: { ...SHEET().options, wheels: { true: { flat: -5000, perW100: null } } } });
+    const r = priceConfiguredItem(PRIMARY, FAM, { ...STD, wheels: true }, DIMS, neg, {}, OPT);
+    assert.deepEqual([r.priced, r.unitPrice, r.reason], [false, 0, 'no_price']);
+  });
+  it('sizeAdjusted says whether the size differs from the family default (informational)', () => {
+    assert.equal(priceIt({}, DIMS).sizeAdjusted, false);
+    assert.equal(priceIt({}, { ...DIMS, W: 1000 }).sizeAdjusted, true);
+    assert.equal(priceConfiguredItem(PRIMARY, FAM, STD, DIMS, null, {}, OPT).sizeAdjusted, false);
+  });
+});
+
+describe('priceConfiguredItem — a LINEAR family (the primary SKU has no length rule of its own)', () => {
+  const lin = { ...syn(), sizeBasis: 'linear' };
+  const fixedPrim = { id: 'S-F', formulaType: 'fixed', basePrice: 2000, unit: 'pc', defaultDimensions: { W: 2000, D: 480, H: 38 }, formula: {}, specs: [] };
+  const linDims = { W: 1000, D: 600, H: 850 };                       // the synthetic family's own default width and height: only the LENGTH varies below
+  const sheet = (size, over) => SHEET({ size: { perW100: size }, ...(over || {}) });
+  const run = (cfg, dims, sh) => priceConfiguredItem(fixedPrim, lin, { ...STD, ...cfg }, dims, sh, {}, OPT);
+  it('length is priced from the sheet, in BOTH directions from the standard length: base + perW100 x (W - standard) / 100', () => {
+    assert.equal(run({}, { ...linDims, W: 2000 }, sheet(100)).unitPrice, 2000);                         // at the standard length: just the base
+    assert.equal(run({}, { ...linDims, W: 1000 }, sheet(100)).unitPrice, 2000 - 1000);                  // shorter: cheaper
+    assert.equal(run({}, { ...linDims, W: 3000 }, sheet(100)).unitPrice, 2000 + 1000);
+  });
+  it('a blank length rate unprices every line whose length is not the standard one — and names "Size"; the standard length needs no rate', () => {
+    const r = run({}, { ...linDims, W: 1000 }, sheet(null));
+    assert.equal(r.priced, false);
+    assert.deepEqual(r.missing, ['Size']);
+    assert.equal(run({}, { ...linDims, W: 2000 }, sheet(null)).priced, true);
+  });
+  it('an option\'s perW100 scales with length in BOTH directions here (so a shelf tier costs less on a shorter shelf)', () => {
+    // 2 layers: flat 100 + 10 per 100 mm beyond/below the standard 2000 mm. At 1000 mm: 100 + 10 x (-10) = 0
+    assert.equal(run({ layers: 2 }, { ...linDims, W: 1000 }, sheet(100)).unitPrice, 2000 - 1000 + 100 + 10 * -10);
+    assert.equal(run({ layers: 2 }, { ...linDims, W: 3000 }, sheet(100)).unitPrice, 2000 + 1000 + 100 + 10 * 10);
+  });
+  it('a size other than the length that differs from the family default has NO price in a linear family\'s sheet, so the line is left for review ("Size (width)"), never priced as if it were free', () => {
+    const r = run({}, { ...linDims, D: 610 }, sheet(100));
+    assert.equal(r.priced, false);
+    assert.equal(r.reason, 'missing_input');
+    assert.deepEqual(r.missing, ['Size (width)']);
+    assert.equal(r.unitPrice, 0);
+    const both = run({}, { ...linDims, D: 700, H: 900 }, sheet(100));
+    assert.deepEqual(both.missing, ['Size (width)', 'Size (height)']);
+    // the standard width and height are fine, and so is any length
+    assert.equal(run({}, { ...linDims, W: 2500 }, sheet(100)).priced, true);
+  });
+  it('a non-linear family never charges a length rate even if the sheet carries one', () => {
+    const r = priceConfiguredItem(PRIMARY, FAM, STD, { W: 1500, D: 600, H: 850 }, SHEET({ size: { perW100: 99999 } }), {}, OPT);
+    assert.equal(r.unitPrice, baseOf({ W: 1500, D: 600, H: 850 }));
+  });
+});
+
+describe('priceConfiguredItem — robustness and purity', () => {
+  it('never throws, whatever it is given, and never mutates its inputs', () => {
+    for (const bad of [null, undefined, 5, 'x', [], {}]) {
+      assert.doesNotThrow(() => priceConfiguredItem(bad, bad, bad, bad, bad, bad, bad));
+      assert.equal(priceConfiguredItem(bad, bad, bad, bad, bad, bad, bad).priced, false);
+    }
+    const args = [structuredClone(PRIMARY), structuredClone(FAM), { ...STD, layers: 2 }, { ...DIMS }, SHEET(), { materialPriceIndexMultiplier: 1 }, { ...OPT }];
+    const snap = JSON.stringify(args);
+    priceConfiguredItem(...args);
+    assert.equal(JSON.stringify(args), snap);
+  });
+  it('is deterministic: the same inputs give the same answer, field for field', () => {
+    const a = priceIt({ layers: 3, burners: ['wok', 'hp'], addons: ['fryer'] }, { W: 1700, D: 700, H: 850 });
+    const b = priceIt({ layers: 3, burners: ['wok', 'hp'], addons: ['fryer'] }, { W: 1700, D: 700, H: 850 });
+    assert.deepEqual(a, b);
+  });
+});
+
+describe('REGRESSION — adding the configured price changed NOTHING about SKU pricing (and so nothing about the Quote Builder)', () => {
+  // The SHA-256 of the SOURCE of each original export, taken from js/pricing-core.js as it stood BEFORE the families were added. The parity
+  // sweep above (frozen oracle of the old computePrice) proves the behaviour; this pins the bytes, so an edit to any of them — even a
+  // behaviour-neutral one — is a conscious, re-pinned money change and never a side effect of the family work.
+  const PINS = {
+    priceCatalogItem: 'b061bfcd78405c49d79dabb4c0350f3a42fb3831beb8f42967932328565baaa5',
+    validateSelection: '5dbb75aebac44e96afc9ffdf7b2eadcf9a48925dd9f8d5b83170f154cb18baa9',
+    estimateRange: '2f5ee6821c9919a2c6cbc18a81d2a7581d78fb445a0a39858504a72ff763e164',
+    estimateGate: '89c0db1041afea2fd1ace59c919016ed0d094711da49a5dbfbdc4ab4a132472d',
+  };
+  const src = fs.readFileSync(path.join(ROOT, 'js/pricing-core.js'), 'utf8');
+  const grab = (name) => { const m = src.match(new RegExp('\\n  function ' + name + '\\([\\s\\S]*?\\n  }\\n')); assert.ok(m, `${name} not found`); return m[0]; };
+  for (const name of Object.keys(PINS)) {
+    it(`${name} is byte-identical to its pre-families source`, () => {
+      assert.equal(crypto.createHash('sha256').update(grab(name)).digest('hex'), PINS[name]);
+    });
+  }
+  it('the Quote Builder prices through priceCatalogItem only — it neither loads nor names the configured-price function (its delegation is untouched)', () => {
+    const qb = fs.readFileSync(path.join(ROOT, 'quote-builder-v2.html'), 'utf8');
+    assert.ok(/window\.priceCatalogItem\(/.test(qb), 'computePrice no longer delegates to priceCatalogItem');
+    assert.ok(!/priceConfiguredItem|normalisePricingDoc|product_pricing/.test(qb), 'the Quote Builder was changed by the family work');
+  });
+  it('a plain SKU priced after the new functions are called is priced exactly as before (no shared state)', () => {
+    const before = priceCatalogItem(PRIMARY, { dims: { W: 1300, D: 700, H: 850 }, runs: null, specIdx: [] }, {});
+    priceConfiguredItem(PRIMARY, FAM, { ...STD, layers: 3 }, { W: 1300, D: 700, H: 850 }, SHEET(), {}, OPT);
+    normalisePricingDoc(FAM, SHEET());
+    assert.deepEqual(priceCatalogItem(PRIMARY, { dims: { W: 1300, D: 700, H: 850 }, runs: null, specIdx: [] }, {}), before);
   });
 });

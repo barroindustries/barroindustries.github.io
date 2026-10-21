@@ -57,6 +57,7 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .cat-photo figcaption{position:absolute;left:12px;bottom:8px;color:var(--site-muted);font-size:11px;letter-spacing:.02em}
 
 #site .cat-code{margin:16px 18px 6px;color:var(--site-gold-ink);font:600 11.5px/1.2 var(--site-sans);letter-spacing:.12em;text-transform:uppercase}
+#site .cat-code.cat-tag{display:inline-block;align-self:flex-start;margin:16px 18px 6px;padding:4px 10px;border-radius:999px;background:var(--site-navy);color:#fff;letter-spacing:.1em}
 #site .cat-card h3{margin:0 18px 8px;color:var(--site-ink);font:600 15px/1.35 var(--site-sans);letter-spacing:0}
 #site .cat-meta{margin:0 18px;color:var(--site-muted);font-size:13px}
 #site .cat-notes{margin:8px 18px 0;color:var(--site-muted);font-size:13px;line-height:1.5}
@@ -64,6 +65,10 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .cat-specs dt{display:inline;color:var(--site-ink);font-weight:600}
 #site .cat-specs dt::after{content:": "}
 #site .cat-specs dd{display:inline;color:var(--site-muted)}
+#site .cat-card-family > .cat-specs{margin-bottom:14px}                         /* air between the last option row and "Configure & add", even in the tallest card of a row */
+@media (max-width:719px){
+  #site .cat-grid > .cat-card:only-child{grid-column:1 / -1}                   /* a category with ONE card (Preparation, Washing) fills the row on a phone instead of leaving an empty column */
+}
 
 /* no results */
 #site .cat-empty{max-width:34rem;padding:44px 0 12px}

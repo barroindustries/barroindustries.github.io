@@ -27,6 +27,13 @@
 //  wrong code path. So: CommonJS `module.exports` under Node, window.* in a
 //  browser — the js/cir-forms.js pattern.
 //
+//  ADDITIVE (2026-10-21, product families — specs/PRODUCT-CONFIGURATOR-SPEC.md as simplified by the owner): normalisePricingDoc() and
+//  priceConfiguredItem() price a CONFIGURED product = the family's primary SKU priced by priceCatalogItem() (untouched, byte-identical)
+//  plus the signed option deltas of the family's PRIVATE option sheet (Firestore product_pricing/{family}, finance tier, never shipped to a
+//  browser that is not staff). A family whose sheet is not approved, and any option whose cell is blank, prices NOTHING ("priced after
+//  review") — a blank cell is never read as zero. Nothing below changes what priceCatalogItem / validateSelection / estimateRange /
+//  estimateGate return; tests/pricing-core.test.mjs pins that.
+//
 //  priceCatalogItem is BYTE-EQUIVALENT to quote-builder-v2.html computePrice()
 //  as it stood on 2026-10-21 (the DOM reads replaced by an explicit `sel`),
 //  including every quirk: shrinking D/H never discounts; a missing rateD100 /
@@ -46,6 +53,8 @@
     root.validateSelection = api.validateSelection;
     root.estimateRange = api.estimateRange;
     root.estimateGate = api.estimateGate;
+    root.priceConfiguredItem = api.priceConfiguredItem;
+    root.normalisePricingDoc = api.normalisePricingDoc;
     root.PricingCore = api;
   }
 })(typeof window !== 'undefined' ? window : null, function () {
@@ -283,10 +292,167 @@
     return { shown: !!shown, reason: shown ? null : 'gate' };
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  PRODUCT FAMILIES — the private option sheet and the configured price.
+  //
+  //  A family (js/qr-families.js) names a PRIMARY SKU and a zero-point configuration (the group defaults = the primary SKU as it is
+  //  sold). The sheet holds, per option value, a signed amount RELATIVE to that zero point:
+  //     delta = flat + perW100 x max(0, W - refW) / 100        (refW = the primary's standard length; perW100 is optional, blank = 0)
+  //  `choice` groups price the chosen value when it differs from the default; `multi` groups price each selected value; `slots` groups
+  //  price each position (a sheet value is the cost of ONE position of that type) as the difference between the chosen positions and the
+  //  default ones, so only values with a net count need a cell. A family whose primary SKU carries no length rule of its own
+  //  (sizeBasis 'linear') prices the length through sheet.size.perW100, both directions from refW.
+  //  Pure; never throws; never mutates its inputs.
+  // ─────────────────────────────────────────────────────────────────────────
+  var MAX_CELL = 1e8;     // a sheet figure beyond +/-100 million is corrupt, not a price
+  function cellNum(v) { return (typeof v === 'number' && isFinite(v) && Math.abs(v) <= MAX_CELL) ? v : null; }
+
+  // normalisePricingDoc(family, raw) -> { approved:bool, schemaVersion:int|null, options:{ group:{ value:{ flat:number|null, perW100:number|null } } },
+  //                                       size:{ perW100:number|null } }
+  //   Keeps only the groups and values the family defines; a figure that is not a finite number within +/-1e8 becomes null (blank). `approved`
+  //   is true only for the boolean true. The Firestore doc is staff-written, so it is sanitised before it is ever used.
+  function normalisePricingDoc(family, raw) {
+    var r = isObj(raw) ? raw : {};
+    var out = { approved: r.approved === true, schemaVersion: (typeof r.schemaVersion === 'number' && isFinite(r.schemaVersion) && Math.floor(r.schemaVersion) === r.schemaVersion) ? r.schemaVersion : null, options: {}, size: { perW100: null } };
+    var opts = isObj(r.options) ? r.options : {};
+    ((family && family.groups) || []).forEach(function (g) {
+      var src = has(opts, g.key) && isObj(opts[g.key]) ? opts[g.key] : {};
+      var dst = {};
+      (g.options || []).forEach(function (o) {
+        var k = String(o.v);
+        var c = has(src, k) && isObj(src[k]) ? src[k] : null;
+        dst[k] = { flat: c ? cellNum(c.flat) : null, perW100: c ? cellNum(c.perW100) : null };
+      });
+      out.options[g.key] = dst;
+    });
+    if (isObj(r.size)) out.size.perW100 = cellNum(r.size.perW100);
+    return out;
+  }
+
+  function defaultSpecIdx(p) {
+    return (Array.isArray(p.specs) ? p.specs : []).map(function (sp) {
+      var opts = sp && Array.isArray(sp.options) ? sp.options : [];
+      if (!opts.length) return null;
+      var i = opts.indexOf(sp.default);
+      return i < 0 ? 0 : i;
+    });
+  }
+
+  // priceConfiguredItem(product, family, config, dims, pricing, constants, opts)
+  //   product  the family's PRIMARY SKU, normalised like priceCatalogItem's (id, formulaType, basePrice, defaultDimensions, formula, specs)
+  //   family   one entry of QR_FAMILIES.families
+  //   config   a configuration ALREADY validated by ProductFamilies.validateLine (this function trusts its shape, and still never throws)
+  //   dims     the validated { W, D?, H? } in mm
+  //   pricing  the raw product_pricing/{family} doc (or null)
+  //   opts     { schemaVersion }  the QR_FAMILIES.version the sheet must have been approved against
+  // -> { unitPrice:int, priced:bool, reason:null|'not_approved'|'size_basis'|'no_base_price'|'missing_input'|'no_price', base:int, missing:string[], deltas:[{ key, amount }], sizeAdjusted:bool }
+  //   Unpriced means unitPrice 0 and the caller shows "priced after review". `missing` names the options (and the sizes) whose cell or rate is blank:
+  //   a blank is never zero. Also left for review: a size basis that no longer matches the primary SKU, a custom width / height the primary has no
+  //   rate for, any non-length size of a linear family (its sheet prices the length only), and a total that is not above zero.
+  function priceConfiguredItem(product, family, config, dims, pricing, constants, opts) {
+    var out = { unitPrice: 0, priced: false, reason: null, base: 0, missing: [], deltas: [], sizeAdjusted: false };
+    var p = isObj(product) ? product : {};
+    var fam = isObj(family) ? family : {};
+    var cfg = isObj(config) ? config : {};
+    var d = isObj(dims) ? dims : {};
+    var o = isObj(opts) ? opts : {};
+
+    var famDims = isObj(fam.dims) ? fam.dims : {};
+    Object.keys(famDims).forEach(function (k) { if (isObj(famDims[k]) && d[k] != null && d[k] !== famDims[k].default) out.sizeAdjusted = true; });
+
+    // the sheet must exist, be approved, and have been approved against THIS schema (a changed family needs a new approval)
+    var doc = normalisePricingDoc(fam, pricing);
+    if (!doc.approved || typeof o.schemaVersion !== 'number' || doc.schemaVersion !== o.schemaVersion) { out.reason = 'not_approved'; return out; }
+
+    // The family's size basis must still describe the primary SKU: 'linear' exactly when the primary has no length rule of its own. The build checks
+    // this against the master; a primary edited AFTERWARDS (to or from per_length) would otherwise stop pricing the length, or price it twice.
+    if ((fam.sizeBasis === 'linear') === (p.formulaType === 'per_length')) { out.reason = 'size_basis'; return out; }
+
+    // the primary SKU through the existing machinery, at the requested size, with its own option defaults
+    var base = priceCatalogItem(p, { dims: d, runs: null, specIdx: defaultSpecIdx(p) }, constants);
+    out.base = base.unitPrice;
+    if (!base.priced) { out.reason = 'no_base_price'; return out; }
+    // a custom width / height the primary has no rate for is priced by priceCatalogItem at the STANDARD size (it only warns): for a configured line
+    // that is an unknown cost, not a free one
+    (Array.isArray(base.missingRateLabels) ? base.missingRateLabels : []).forEach(function (lab) {
+      var m = 'Size (' + String(lab).toLowerCase() + ')';
+      if (out.missing.indexOf(m) < 0) out.missing.push(m);
+    });
+
+    var dd = isObj(p.defaultDimensions) ? p.defaultDimensions : {};
+    var refW = (p.formulaType === 'per_length' && isObj(p.formula) && isFinitePos(p.formula.baseLengthMm)) ? p.formula.baseLengthMm
+      : (isFinitePos(dd.W) ? dd.W : (isObj(famDims.W) ? famDims.W.default : 0));
+    var W = isFinitePos(d.W) ? d.W : refW;
+    // a linear family's amounts scale with length in BOTH directions; every other family only charges for length ABOVE the standard
+    // (the same "shrinking never discounts" rule priceCatalogItem applies to the primary SKU)
+    var lenExtra = fam.sizeBasis === 'linear' ? (W - refW) : Math.max(0, W - refW);
+    // a linear family's sheet prices the LENGTH only: any other size that differs from the standard has no price to add, so it is left for review
+    if (fam.sizeBasis === 'linear') {
+      Object.keys(famDims).forEach(function (k) {
+        if (k === 'W' || !isObj(famDims[k])) return;
+        if (d[k] != null && d[k] !== famDims[k].default) {
+          var m = 'Size (' + String(famDims[k].label || k).toLowerCase() + ')';
+          if (out.missing.indexOf(m) < 0) out.missing.push(m);
+        }
+      });
+    }
+
+    var total = base.unitPrice;
+    function cellFor(group, valueKey) {
+      var g = doc.options[group];
+      return g && has(g, valueKey) ? g[valueKey] : null;
+    }
+    function priceCell(g, valueKey, times) {
+      var group = g.key;
+      var c = cellFor(group, valueKey);
+      if (!c || c.flat === null) {
+        var opt = (g.options || []).filter(function (x) { return String(x.v) === valueKey; })[0];
+        var label = g.label + (opt ? ': ' + (opt.f || opt.l) : '');
+        if (out.missing.indexOf(label) < 0) out.missing.push(label);
+        return;
+      }
+      var amount = times * (c.flat + (c.perW100 === null ? 0 : c.perW100) * lenExtra / 100);
+      total += amount;
+      out.deltas.push({ key: group + ':' + valueKey, amount: amount });
+    }
+    (Array.isArray(fam.groups) ? fam.groups : []).forEach(function (g) {
+      var v = cfg[g.key];
+      if (g.type === 'choice') {
+        if (v === g.default) return;                              // the zero point: no cell needed, no delta
+        priceCell(g, String(v), 1);
+      } else if (g.type === 'multi') {
+        (Array.isArray(v) ? v : []).forEach(function (x) { priceCell(g, String(x), 1); });
+      } else if (g.type === 'slots') {
+        var net = Object.create(null);
+        (Array.isArray(v) ? v : []).forEach(function (x) { net[x] = (net[x] || 0) + 1; });
+        (Array.isArray(g.default) ? g.default : []).forEach(function (x) { net[x] = (net[x] || 0) - 1; });
+        Object.keys(net).forEach(function (x) { if (net[x] !== 0) priceCell(g, x, net[x]); });
+      }
+    });
+    // a family whose primary SKU has no length rule of its own prices the length from the sheet, signed, relative to the standard length
+    if (fam.sizeBasis === 'linear' && W !== refW) {
+      if (doc.size.perW100 === null) { if (out.missing.indexOf('Size') < 0) out.missing.push('Size'); }
+      else {
+        var sz = doc.size.perW100 * (W - refW) / 100;
+        total += sz;
+        out.deltas.push({ key: 'size:W', amount: sz });
+      }
+    }
+    if (out.missing.length) { out.reason = 'missing_input'; return out; }
+    var unit = Math.max(0, Math.round(total));
+    if (!isFinite(unit)) unit = 0;
+    out.unitPrice = unit;
+    out.priced = unit > 0;
+    if (!out.priced) out.reason = 'no_price';
+    return out;
+  }
+
   return {
     priceCatalogItem: priceCatalogItem,
     validateSelection: validateSelection,
     estimateRange: estimateRange,
-    estimateGate: estimateGate
+    estimateGate: estimateGate,
+    priceConfiguredItem: priceConfiguredItem,
+    normalisePricingDoc: normalisePricingDoc
   };
 });

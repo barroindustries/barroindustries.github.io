@@ -1428,6 +1428,25 @@ service cloud.firestore {
       allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
     }
 
+    // Product-family option sheets (specs/PRODUCT-CONFIGURATOR-SPEC.md, simplified 2026-10-21): the PRIVATE price deltas behind the six
+    // configurable catalogue products. Same tier as product_costs; never partner, never public (the Cloud Function reads it with the Admin SDK).
+    // Approval is attributable and cannot ride along with an edit: a write that leaves `approved` true must name its writer in approvedBy and
+    // must not change the figures (options / size) in the same write, so a changed figure always needs a fresh approval. A sheet can only be
+    // created under one of the six family ids (a stray document can never crowd a real one out). No delete.
+    match /product_pricing/{familyId} {
+      allow read: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
+      allow create: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance())
+        && familyId in ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']
+        && request.resource.data.get('approved', false) == false;
+      allow update: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance())
+        && request.resource.data.get('approved', false) is bool
+        && (request.resource.data.get('approved', false) != true
+            || (request.resource.data.get('approvedBy', '') == request.auth.uid
+                && request.resource.data.get('options', null) == resource.data.get('options', null)
+                && request.resource.data.get('size', null) == resource.data.get('size', null)));
+      allow delete: if false;
+    }
+
     // [RN-99] Material Price List (COSTING PHASE 1, 2026-08-26) ─ -> docs/firestore-rules-notes.md#rn-99
     match /material_prices/{docId} {
       allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance() || isPurchasingDept());

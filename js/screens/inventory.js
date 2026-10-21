@@ -61,6 +61,9 @@ window.renderInventoryDept = async function (currentUser, currentRole, subtab = 
   const c = deptContainer();
   const tabs = ['Stock', 'Raw Materials', 'Finished Products', 'Movements', 'Count Form'];
   if (['president', 'manager', 'finance'].includes(currentRole)) tabs.push('Job Costing');
+  // Family Pricing: the private option amounts behind the configurable catalogue products. Same tier as firestore.rules `product_pricing`
+  // (president / manager / finance, or a non-secretary Finance member) — the screen re-checks it and says so if it is not allowed.
+  if (['president', 'manager', 'finance'].includes(currentRole) || (currentRole !== 'secretary' && currentRole !== 'partner' && (window.currentDepts || []).includes('Finance'))) tabs.push('Family Pricing');
   subtab = tabs.includes(subtab) ? subtab : 'Stock';
   c.innerHTML = `
     <div class="page-header">
@@ -75,7 +78,7 @@ window.renderInventoryDept = async function (currentUser, currentRole, subtab = 
       'Finished Products is the live selling-price catalog — prices are edited by the President in Product Database.',
       'Count Form records a physical count and posts variances, correcting on-hand quantities with each correction logged to history.',
       'Job Costing (Finance/admin) tracks materials + labor vs revenue per project.'
-    ])}
+    ].concat(tabs.includes('Family Pricing') ? ['Family Pricing holds the private option amounts behind the configurable catalogue products (sink, stove, preparation table, cabinet, wall shelving, rack) and their approval — the public estimate uses a family only once it is approved.'] : []))}
     ${window.chipTabs(tabs.map(s => ({ key: s, label: s })), subtab)}
     <div id="inv-content">${window.skeletonHtml('rows')}</div>
   `;
@@ -92,6 +95,7 @@ async function loadInvContent(currentUser, currentRole, sub) {
     if (sub === 'Movements')         return await renderMovements(el);
     if (sub === 'Count Form')        return await renderCountForm(el, currentRole);
     if (sub === 'Job Costing')       return await renderJobs(el);
+    if (sub === 'Family Pricing')    return await window.renderFamilyPricing(el, currentUser, currentRole);
     return await renderStock(el);
   } catch (e) {
     console.error('Inventory load error', e);

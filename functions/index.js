@@ -4023,7 +4023,12 @@ exports.cirAdminDelete = functions
 //  Pricing source: Firestore `products` + `productMeta/config`, read here by the
 //  Admin SDK (rules do not apply) and cached per instance — the same docs the
 //  Quote Builder prices from (quote-builder-v2.html loadDatabase()). Only
-//  PUBLISHED product ids (functions/qr-published.json) are quotable.
+//  PUBLISHED product ids (functions/qr-published.json) are quotable as plain
+//  lines. The six CONFIGURABLE families (functions/qr-families.js) are quoted as
+//  { familyId, config, dims, qty, note } lines and priced from their primary SKU
+//  plus the signed option deltas of the PRIVATE sheet `product_pricing/{family}`
+//  (same Admin read, same cache; an unapproved sheet or a blank cell = priced
+//  after review). The sheet is read here and nowhere near a response.
 //
 //  Region is asia-east1 on all four — MANDATORY on the client:
 //    firebase.app().functions('asia-east1').httpsCallable('qrEstimate')(…)
@@ -4110,7 +4115,7 @@ async function qrPurgeStaleAbuse(db, nowMs) {
 // ── product master cache (§5.0) ───────────────────────────────────────────
 // One read of `products` (limit 1000, the Quote Builder's own limit) + productMeta/config per instance per 10 minutes.
 // A failed refresh may be covered by a cache younger than 24 hours; anything older fails CLOSED ('unavailable').
-let _qrProductsCache = null;                                    // { byId: Map, constants, estimateEnabled, loadedAt }
+let _qrProductsCache = null;                                    // { byId: Map, primaries: Map, pricing: Map, constants, estimateEnabled, loadedAt }
 const _qrEstimateLru = qr.createLru(256, 10 * 60 * 1000);       // basketHash+entity+version+loadedAt -> { basket, range, gate }
 let _qrEstimateCalls = 0;                                       // per-instance counter for the every-20th forensic sample
 
@@ -4118,21 +4123,31 @@ async function qrLoadProducts(db, nowMs) {
   const state = qr.productsCacheState(_qrProductsCache, nowMs);
   if (state === 'fresh') return _qrProductsCache;
   try {
-    const [snap, metaSnap] = await Promise.all([
+    const [snap, metaSnap, sheetDocs] = await Promise.all([
       db.collection('products').limit(1000).get(),
       db.collection('productMeta').doc('config').get(),
+      // The private option sheets of the configurable families, ONE READ PER FAMILY BY ID (never a collection scan: a stray document can
+      // never crowd a real sheet out). A failed read must not take the plain products down with it: that family is simply "priced after
+      // review" (the safe direction — a line is left out of the figure, never guessed).
+      Promise.all(qr.FAMILIES.order.map((fid) => db.collection('product_pricing').doc(fid).get()
+        .then((d) => (d.exists ? { id: fid, data: d.data() } : null))
+        .catch((e) => { console.error('[qrLoadProducts] product_pricing/' + fid + ' read failed — that family is priced after review:', e.message); return null; }))),
     ]);
     const meta = metaSnap.exists ? metaSnap.data() : {};
-    const byId = qr.buildProductIndex(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+    const idx = qr.buildCatalogueIndex(snap.docs.map((d) => ({ id: d.id, data: d.data() })));
+    const byId = idx.byId;
     // An empty index means the master (or functions/qr-published.json) is not what we think it is — refuse, never "price nothing".
     if (byId.size === 0) throw new Error('no published products resolved from the product master');
-    _qrProductsCache = { byId, constants: qr.constantsOf(meta), estimateEnabled: qr.estimateEnabledOf(meta), loadedAt: nowMs };
+    const pricing = qr.buildPricingIndex(sheetDocs.filter(Boolean));
+    _qrProductsCache = { byId, primaries: idx.primaries, pricing, constants: qr.constantsOf(meta), estimateEnabled: qr.estimateEnabledOf(meta), loadedAt: nowMs };
     return _qrProductsCache;
   } catch (e) {
     console.error('[qrLoadProducts] refresh failed:', e.message);
     if (state === 'stale') {
-      console.error('[qrLoadProducts] serving the cached product master (< 24 h old)');
-      return _qrProductsCache;
+      // The list prices may be a little old; an APPROVAL may not be: a sheet someone has just un-approved must never keep pricing because a
+      // refresh failed. So the cached products are served, the cached option sheets are NOT (every family is priced after review).
+      console.error('[qrLoadProducts] serving the cached product master (< 24 h old); option sheets withheld — every family priced after review');
+      return Object.assign({}, _qrProductsCache, { pricing: new Map(), degraded: true });
     }
     throw new functions.https.HttpsError('unavailable', QR_SOMETHING_WRONG_MSG);
   }
@@ -4269,7 +4284,7 @@ exports.qrEstimate = functions
     }
 
     // 5. Items against the PUBLISHED master.
-    const norm = qr.normaliseItems(d.items, products.byId);
+    const norm = qr.normaliseItems(d.items, products.byId, { families: qr.FAMILIES, primaries: products.primaries });
     if (!norm.ok) {
       const err = new functions.https.HttpsError('invalid-argument', norm.errors.slice(0, 3).join(' '), norm.badIds.length ? { itemIds: norm.badIds } : undefined);
       throw err;
@@ -4278,10 +4293,10 @@ exports.qrEstimate = functions
     // 6. Price (LRU by basket hash + entity + estimate version + master load time, so a master refresh is never served stale).
     const cfg = qr.QR_DEF.ESTIMATE;
     const hash = qr.basketHash(norm.items);
-    const key = [hash, d.entityType, cfg.version, products.loadedAt].join('|');
+    const key = [hash, d.entityType, cfg.version, products.loadedAt, products.degraded ? 'sheets-withheld' : ''].join('|');
     let hit = _qrEstimateLru.get(key, nowMs);
     if (!hit) {
-      const basket = qr.computeBasket(norm.items, products.byId, products.constants, cfg);
+      const basket = qr.computeBasket(norm.items, products.byId, products.constants, cfg, { families: qr.FAMILIES, primaries: products.primaries, pricing: products.pricing });
       hit = { basket, range: qr.rangeFor(basket.exact, cfg), gate: qr.gateFor(basket, cfg) };
       _qrEstimateLru.set(key, hit, nowMs);
     }
@@ -4391,14 +4406,14 @@ exports.qrSubmit = functions
 
     // 6. Items against the PUBLISHED master.
     const products = await qrLoadProducts(db, nowMs);
-    const norm = qr.normaliseItems(d.items, products.byId);
+    const norm = qr.normaliseItems(d.items, products.byId, { families: qr.FAMILIES, primaries: products.primaries });
     if (!norm.ok) {
       throw new functions.https.HttpsError('invalid-argument', norm.errors.slice(0, 3).join(' '), norm.badIds.length ? { itemIds: norm.badIds } : undefined);
     }
 
     // 7. Price AGAIN, at submit time. This is what is stored — never anything the page reported.
     const cfg = qr.QR_DEF.ESTIMATE;
-    const basket = qr.computeBasket(norm.items, products.byId, products.constants, cfg);
+    const basket = qr.computeBasket(norm.items, products.byId, products.constants, cfg, { families: qr.FAMILIES, primaries: products.primaries, pricing: products.pricing });
     const range = qr.rangeFor(basket.exact, cfg);
     const gate = products.estimateEnabled ? qr.gateFor(basket, cfg) : { shown: false, reason: 'disabled' };
     const pe = qr.publicEstimate(basket, range, gate, cfg, intake.entityType, nowMs);

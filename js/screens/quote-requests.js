@@ -35,6 +35,14 @@
    (no prices), and the figure the VISITOR saw is the rounded range in `estimate`. Nothing here is
    ever copied into a notification, a print "client copy", or a URL.
 
+   CONFIGURED LINES (owner ruling 2026-10-21): six catalogue products are configurable (preparation table, sink, stove, cabinet, wall
+   shelving, rack). A line the visitor configured carries `familyId` (the family), `config` (the chosen options), `size`, and `specs` — the
+   same {label, value} rows a product line uses, in plain words, built by the server from the family definition — so it prints here with no
+   new shape to learn: the family name, each chosen option, the size. `id` is the family's PRIMARY catalogue SKU (the price starts from it).
+   For staff, a priced configured line also shows how the figure was built (primary SKU's list price at that size + the option amounts),
+   and an unpriced one says WHY ("the option sheet is not approved" / "no amount entered yet for: Faucet: Pre-rinse spray"). Open in Quote
+   Builder maps a configured line to its primary SKU with the options in the line's description (the builder has no configurator yet).
+
    Role gating (spec §7.4, same as CIR §5.2):
      qrCanWrite()  — president/manager/owner, OR a non-secretary member of the Sales department.
                      Deliberately NOT canEditDept('Sales') (that resolves through isAdmin(), which
@@ -371,6 +379,7 @@ function _qrItemsTableHtml(doc, withPrices) {
       ? escHtml(size) + (it.sizeCustom ? ' <span class="badge badge-amber">custom</span>' : '')
       : '<span style="color:var(--text-muted)">Standard size</span>';
     const specs = (Array.isArray(it.specs) ? it.specs : []).map(s => `${escHtml(s && s.label)}: ${escHtml(s && s.value)}`).join('<br>');
+    const isFamily = !!(it && it.familyId);
     let priceCells = '';
     if (withPrices) {
       const line = _qrLineFor(doc, it, i);
@@ -385,11 +394,17 @@ function _qrItemsTableHtml(doc, withPrices) {
       if (line && Array.isArray(line.warnings) && line.warnings.length) {
         unit += ` <span title="${escHtml(line.warnings.join(' '))}">${emojiIcon('⚠️', 14)}</span>`;
       }
+      // staff-only: how a configured figure was built, or why it is not priced
+      if (isFamily && line) unit += _qrFamilyLineNoteHtml(line);
       priceCells = `<td style="white-space:nowrap">${unit}</td><td style="white-space:nowrap;text-align:right">${total}</td>`;
     }
+    // the catalogue base item is a staff detail (it is what the figure starts from): the client copy names the product and flags it Configurable, nothing more
+    const nameCell = isFamily
+      ? `<strong>${escHtml(it.name || '')}</strong> <span class="badge badge-blue">Configurable</span>${withPrices ? `<div style="font-size:11px;color:var(--text-muted)">Catalogue base: <span style="font-family:monospace">${escHtml(it.id || '')}</span></div>` : ''}`
+      : `<strong>${escHtml(it.name || '')}</strong><div style="font-family:monospace;font-size:11px;color:var(--text-muted)">${escHtml(it.id || '')}</div>`;
     return `<tr>
       <td>${Number(it.n) || i + 1}</td>
-      <td><strong>${escHtml(it.name || '')}</strong><div style="font-family:monospace;font-size:11px;color:var(--text-muted)">${escHtml(it.id || '')}</div></td>
+      <td>${nameCell}</td>
       <td>${sizeHtml}</td>
       <td style="font-size:12px">${specs}</td>
       <td>${Number(it.qty) || 0}${it.unit ? ' <span style="font-size:11px;color:var(--text-muted)">' + escHtml(it.unit) + '</span>' : ''}</td>
@@ -406,6 +421,23 @@ function _qrItemsTableHtml(doc, withPrices) {
     ? '<p style="font-size:11px;color:var(--text-muted);margin:6px 0 0">Internal list prices at submission — never shown to the client.</p>'
     : '';
   return `<div class="table-wrap"><table class="data-table">${`<thead>${head}</thead>`}<tbody>${rows}</tbody>${foot}</table></div>${caption}`;
+}
+
+// Staff-only (rendered only inside the withPrices branch): how a configured line's figure was built, or why it has none. Every value is a number or an
+// escaped string from the server-written `internal.lines[]`; nothing here ever reaches a client copy.
+function _qrFamilyLineNoteHtml(line) {
+  const small = (t) => `<div style="font-size:11px;color:var(--text-muted);white-space:normal;max-width:260px">${t}</div>`;
+  if (line.priced) {
+    const base = Number(line.base);
+    const opts = (Array.isArray(line.deltas) ? line.deltas : []).reduce((n, d) => n + (Number(d && d.amount) || 0), 0);
+    return small(`Base ${escHtml(_qrPeso(base))} at this size ${opts >= 0 ? '+' : '−'} options ${escHtml(_qrPeso(Math.abs(Math.round(opts))))}`);
+  }
+  if (line.reason === 'not_approved') return small('The option sheet for this product is not approved yet.');
+  if (line.reason === 'missing_input') return small('No amount entered yet for: ' + (Array.isArray(line.missing) ? line.missing : []).map(escHtml).join('; ') + '.');
+  if (line.reason === 'no_base_price') return small('The catalogue base item has no list price.');
+  if (line.reason === 'size_basis') return small('The family\'s size basis no longer matches its base item — Finance should check the product.');
+  if (line.reason === 'no_price') return small('The configured total is not above zero — Finance should check the amounts.');
+  return '';
 }
 
 function _qrEstimateCardHtml(doc) {
@@ -643,13 +675,32 @@ window.qrConvert = async function (refNo) {
   }
 };
 
-// One request line -> the exact item shape quote-builder-v2's addItemFromCalc() pushes. `priceManual` is deliberately NOT
-// set (the builder's auto-pricer may reprice a costed line, exactly as if staff had picked the item); an unpriced line
-// (unitPrice 0) opens as a line staff must price. No cost fields: the builder takes the live cost basis by product id.
+// One request line -> the exact item shape quote-builder-v2's addItemFromCalc() pushes. A FIXED line deliberately has no `priceManual`
+// (the builder's auto-pricer may reprice a costed line, exactly as if staff had picked the item); an unpriced line (unitPrice 0) opens as a line
+// staff must price. A CONFIGURED line is ALWAYS priceManual: it lands as its primary SKU, so the auto-pricer would otherwise replace the
+// configured figure (or fill an unpriced one) with the BARE SKU's price, which is wrong for the chosen options. No cost fields: the builder
+// takes the live cost basis by product id.
 function _qrToBuilderItem(it, line) {
   const unitPrice = line && line.priced ? Number(line.unitPrice) || 0 : 0;
   const specs = (Array.isArray(it.specs) ? it.specs : []).map(s => ({ label: String(s && s.label || ''), value: String(s && s.value || '') }));
   const qty = Math.max(1, parseInt(it.qty, 10) || 1);
+  if (it && it.familyId) {
+    // A CONFIGURED line: the builder has no configurator yet, so it lands as its primary catalogue SKU (the id the price started from) with the chosen
+    // options in the line description. priceManual ALWAYS: a priced one keeps its figure, an unpriced one stays at zero for staff to price — in neither case
+    // may the builder's auto-pricer put the bare SKU's price on a configured product.
+    const out = {
+      id: String(it.id || ''), category: String(it.cat || ''), name: String(it.name || '') + ' (configured)',
+      dims: _qrDimString(it),
+      specs: specs, specStr: specs.map(s => s.label + ': ' + s.value).filter(Boolean).join(', '),
+      qty: qty, unit: String(it.unit || 'pc'),
+      unitPrice: unitPrice, amount: unitPrice * qty,
+      leadTime: '—', laborHours: null,
+      formulaType: String((line && line.formulaType) || 'fixed'),
+      notes: String(it.note || '')
+    };
+    out.priceManual = true;
+    return out;
+  }
   return {
     id: String(it.id || ''), category: String(it.cat || ''), name: String(it.name || ''),
     dims: _qrDimString(it),
