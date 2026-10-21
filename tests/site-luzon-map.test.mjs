@@ -4,7 +4,7 @@
 //      HTML list. The pins are projected from real coordinates (equirectangular, standard parallel 15.6 N) and the coastline is
 //      checked against real landmarks (towns that must be land, bays that must be water), real extents and real areas, so a
 //      hand edit of the outline cannot quietly make Luzon look wrong. Labels must not collide.
-//   2. The owner's credibility figure "500+ projects in 23 years": in the proof bar and in About, nowhere else.
+//   2. No project-count claim anywhere (the owner withdrew "500+ projects": it cannot be documented).
 //   3. "Trusted by state universities": typography only, exactly the two institutions the owner named.
 //   4. "How we work": six numbered steps, no durations (a TODO-NEIL comment per step holds the slot).
 //   5. "Warranty & after-sales": the owner's two facts in two cards, nothing added (KitchenShield™ keeps its mark).
@@ -329,34 +329,25 @@ describe('JSON-LD: the 13 areas served, the verified Google Maps place, and noth
   });
 });
 
-describe('The "500+ projects" figure: the proof bar and About, nowhere else', () => {
+describe('No project-count claim (owner, 2026-10-21: "500+ projects" removed, it cannot be documented)', () => {
   const proof = homeSite.match(/<ul class="proof-bar"[\s\S]*?<\/ul>/)[0];
   const items = [...proof.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(m => visibleText(m[1]));
 
-  it('keeps four proof items with 23 years first and the 500+ figure second', () => {
-    assert.equal(items.length, 4);
-    assert.equal(items[0], '23 years in business');
-    assert.equal(items[1], '500+ projects completed over 23 years');
-    assert.match(proof, /<span class="proof-num">500\+<\/span> projects/);
-    assert.ok(!items.some(t => /end-to-end/i.test(t)), 'the End-to-end item should have been replaced');
+  it('keeps the four original proof items, 23 years first and End-to-end restored', () => {
+    assert.deepEqual(items.map(t => t.split(' ')[0]), ['23', 'SS304', 'Made', 'End-to-end']);
   });
 
-  it('says it once in About, in a full sentence, beside the family-business line', () => {
+  it('About keeps the family-business line and the SEC-registered wording, with no project count', () => {
     const t = visibleText(about);
-    assert.ok(t.includes('The company began as a family business. We have completed more than 500 projects in 23 years.'));
-    assert.ok(t.includes('Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'), 'the existing SEC-registered wording must stay as it is');
+    assert.ok(t.includes('The company began as a family business.'));
+    assert.ok(t.includes('Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
   });
 
-  it('appears nowhere else: exactly two mentions in the page text, none in the head, JSON-LD, meta, alt or aria text, and not derived into other numbers', () => {
+  it('states no number of projects, clients or customers anywhere a visitor or crawler reads', () => {
     const text = visibleText(homeSite);
-    const noPaths = (html) => html.replace(/\sd="[^"]*"/g, '');                // SVG path data is only coordinates
-    assert.equal((text.match(/\b500\b/g) || []).length, 2, 'the 500 figure must appear exactly twice (proof bar + About)');
-    assert.equal((noPaths(homeSite).match(/\b500\b/g) || []).length, 2, 'the 500 figure appears in an attribute or comment too');
-    // (the head's Google Fonts URL carries 500..600 weights, so look only at what a visitor or a crawler reads: title, meta text, JSON-LD)
-    assert.ok(!/\b500\b/.test(home.match(/<title>[^<]*<\/title>/)[0] + attrText(homeHead) + JSON.stringify(ld)), 'the 500 figure is in the head tags or the JSON-LD');
-    assert.ok(!/\b500\b/.test(attrText(homeSite)));
-    for (const [label, html] of [['luzon', luzon], ['projects', projects], ['process', process_], ['warranty', warranty], ['contact', contact]]) assert.ok(!/\b500\b/.test(noPaths(html)), `${label} mentions 500`);
-    assert.ok(!/\b(1000|1,000|600|700|800|900|1k|thousand)\+?\s+(projects|clients|customers)/i.test(text), 'a derived project number is on the page');
+    const re = /\b\d[\d,]*\+?\s+(projects|clients|customers|kitchens installed)/i;
+    assert.ok(!re.test(text), 'a project-count claim is on the page');
+    assert.ok(!re.test(home.match(/<title>[^<]*<\/title>/)[0] + attrText(homeHead) + JSON.stringify(ld) + attrText(homeSite)));
   });
 });
 

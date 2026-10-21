@@ -141,8 +141,8 @@
        CSS beside new JS and a shipped CSS change looked like it never landed.
        A new version = a new cache key, so even a stale SW must hit the network.
        Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-  <link rel="stylesheet" href="css/tokens.css?v=14.0.319"/>
-  <link rel="stylesheet" href="css/styles.css?v=14.0.319"/>
+  <link rel="stylesheet" href="css/tokens.css?v=14.0.320"/>
+  <link rel="stylesheet" href="css/styles.css?v=14.0.320"/>
   <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet. Loads AFTER
        styles.css so its #site rules win ties. No ?v= on purpose: .githooks/pre-commit
        only rewrites the tokens/styles links, and this file is small enough to win the
@@ -209,9 +209,9 @@
   <div class="site-wrap">
     <ul class="proof-bar" aria-label="Key facts">
       <li><span class="proof-val"><span class="proof-num">23</span> years</span><span class="proof-sub">in business</span></li>
-      <li><span class="proof-val"><span class="proof-num">500+</span> projects</span><span class="proof-sub">completed over 23 years</span></li>
       <li><span class="proof-val">SS304</span><span class="proof-sub"><span class="nowrap">High-quality,</span> <span class="nowrap">food-grade,</span> <span class="nowrap">No.4 brushed finish</span></span></li>
       <li><span class="proof-val">Made to order</span><span class="proof-sub">Built to your exact dimensions</span></li>
+      <li><span class="proof-val">End-to-end</span><span class="proof-sub">Design · fabricate · deliver · install</span></li>
     </ul>
   </div>
 </div>
@@ -467,7 +467,7 @@
       <h2>About Barro Industries</h2>
       <p class="about-years"><span class="about-years-num">23</span><span class="about-years-label">years in business</span></p>
       <p class="site-lead">Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
-      <p class="about-note">The company began as a family business. We have completed more than 500 projects in 23 years.</p>
+      <p class="about-note">The company began as a family business.</p>
       <p class="values">Excellence · Integrity · People first · Growth</p>
       <p class="tagline">Building the Future, Brick by Brick.</p>
     </div>
@@ -642,7 +642,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.319 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.320 · Barro Industries</div>
   </div>
 </div>
 
