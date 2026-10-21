@@ -318,7 +318,10 @@ describe('JSON-LD: the 13 areas served, the verified Google Maps place, and noth
   });
 
   it('keeps La Union only where the owner allowed it: the map section, the DMMMSU project entry in #projects (owner, 2026-10-21) and areaServed — never the contact section, footer, address or head tags', () => {
-    const outsideMap = homeSite.replace(luzon, '').replace(projects, '');
+    // Owner 2026-10-22: the About line names where the family business began (Baguio City and La Union) — allowed there, once.
+    const ABOUT_ORIGIN = '<p class="about-note">The company began as a family business in Baguio City and La Union.</p>';
+    assert.ok(homeSite.includes(ABOUT_ORIGIN));
+    const outsideMap = homeSite.replace(luzon, '').replace(projects, '').replace(ABOUT_ORIGIN, '');
     assert.ok(!/La\s*Union|San\s*Fernando/i.test(outsideMap), 'La Union / San Fernando appears in #site outside the map section and the projects');
     // in #projects it is the DMMMSU description and nothing else: not the ISPSC entry, a heading, a photo's alt text or a tag
     assert.equal((projects.match(/La\s*Union/gi) || []).length, 1, 'La Union appears more than once in #projects');
@@ -343,7 +346,7 @@ describe('No project-count claim (owner, 2026-10-21: "500+ projects" removed, it
 
   it('About keeps the family-business line and the SEC-registered wording, with no project count', () => {
     const t = visibleText(about);
-    assert.ok(t.includes('The company began as a family business.'));
+    assert.ok(t.includes('The company began as a family business in Baguio City and La Union.'));
     assert.ok(t.includes('Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.'));
   });
 

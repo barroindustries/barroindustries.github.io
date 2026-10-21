@@ -1414,7 +1414,7 @@ describe('the public contact details (owner ruling: hello@ and ONE address and n
     // Owner ruling 2026-10-21: La Union is a PROJECT location ("Projects across Luzon", section #luzon, the JSON-LD areaServed, and — owner's answer, same day —
     // the DMMMSU project entry in section #projects), never an address.
     // Everything else on these surfaces (the contact section, the footer, the JSON-LD address, the other head tags) stays guarded.
-    const withoutPlaces = { 'index.html <head>': homeHead.replace(/"areaServed":\[[^\]]*\],?/, ''), 'index.html #site': homeSite.replace(/<section id="luzon"[\s\S]*?<\/section>/, '').replace(/<section id="projects"[\s\S]*?<\/section>/, ''), 'catalogue page': cat };
+    const withoutPlaces = { 'index.html <head>': homeHead.replace(/"areaServed":\[[^\]]*\],?/, ''), 'index.html #site': homeSite.replace('<p class="about-note">The company began as a family business in Baguio City and La Union.</p>', '').replace(/<section id="luzon"[\s\S]*?<\/section>/, '').replace(/<section id="projects"[\s\S]*?<\/section>/, ''), 'catalogue page': cat };
     for (const [label, text] of Object.entries(withoutPlaces)) assert.ok(!/La\s*Union|San\s*Fernando/i.test(text), `${label} names another location`);
     for (const f of files) assert.ok(!/La\s*Union|San\s*Fernando|0960/i.test(read(f)), `${f} names another location or number`);
   });

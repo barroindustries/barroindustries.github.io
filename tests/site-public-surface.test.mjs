@@ -706,7 +706,7 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
     for (const s of sources) assert.ok(exists(s.attrs.src), `${s.attrs.src} is missing`);
     assert.ok(exists('site/img/brand/brand-reveal-poster.webp') && exists('site/img/brand/brand-reveal-poster.jpg'));
     // the 900px threshold is the same one the layout flips at (the clip becomes the right column), so the file matches the size on screen
-    assert.ok(/@media \(min-width:900px\)\{\s*#site \.hero-in\{display:grid;/.test(siteCss));
+    assert.ok(/@media \(min-width:900px\)\{\s*#site \.hero-in\{display:flex;/.test(siteCss));
   });
 
   it('(the MP4 reader behind the next test) sees an audio track when there is one, and reads size and duration from the boxes', () => {
@@ -790,10 +790,12 @@ describe('6 · the hero logo animation: a muted video that plays once, holds its
     assert.ok(!/z-index:\s*-?\d{4}/.test(siteCss), 'a 4-digit z-index (CHECK 1) — the pool sits at z-index:-1 inside the hero\'s own stacking context');
   });
 
-  it('sizes it as owner asked: 220-260px centred above the headline on a phone, the right column (300-460px, about 380-460 on a laptop) from 900px, and the hero does not balloon', () => {
-    assert.ok(siteCss.includes('#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(220px,60vw,260px);margin:0 auto -16px}'));
-    assert.ok(siteCss.includes('#site .hero-in{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,460px);'));
-    assert.ok(/#site \.hero-mark\{order:0;width:100%;margin:0\}/.test(siteCss));
+  // Owner 2026-10-22: the logo took too much space and hid the hero photo — now small, and the scrim opens up on the right.
+  it('sizes it small (owner 2026-10-22): 150-180px above the headline on a phone; from 900px a 120-150px mark above the 23 years, on the dark text side, so the photo shows on the right', () => {
+    assert.ok(siteCss.includes('#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(150px,42vw,180px);margin:0 auto -8px}'));
+    assert.ok(siteCss.includes('#site .hero-in{display:flex;flex-direction:column;align-items:flex-start;'));
+    assert.ok(/#site \.hero-mark\{order:-1;width:clamp\(120px,9vw,150px\);margin:0 0 6px -12px\}/.test(siteCss));
+    assert.ok(siteCss.includes('rgba(11,27,63,.18) 80%,rgba(11,27,63,.06) 100%)'), 'the desktop scrim must open up on the right so the hero photo is visible');
     // spacing trimmed on a phone so the extra height stays near the clip's own
     assert.ok(/@media \(max-width:899px\)\{\s*#site \.hero-years\{margin-bottom:16px\}\s*#site \.hero-cta\{margin-top:24px\}/.test(siteCss));
     assert.ok(siteCss.includes('padding-top:calc(var(--site-head) - 6px);padding-bottom:calc(clamp(32px,5vh,96px) + var(--proof-lift))}'));

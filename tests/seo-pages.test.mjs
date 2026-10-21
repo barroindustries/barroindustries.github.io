@@ -615,7 +615,9 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
       for (const t of p.S.texts) {
         if (!LU.test(t.text)) continue;
         if (inHead(t.chain)) { if (!(isWork(p) && t.chain[t.chain.length - 1].tag === 'title')) bad.push('head text'); continue; }
-        if (!(inId(t.chain, 'luzon') || (isWork(p) && !chrome(t.chain)) || (showsProjectCards(p) && inCard(t.chain)))) bad.push(t.text.trim().slice(0, 60));
+        // Owner 2026-10-22: the FAQ's history answer says the family business began in Baguio City and La Union.
+        const faqOrigin = p.path === '/faq/' && !chrome(t.chain) && /began as a family business in Baguio City and La Union\./.test(t.text);
+        if (!(inId(t.chain, 'luzon') || (isWork(p) && !chrome(t.chain)) || (showsProjectCards(p) && inCard(t.chain)) || faqOrigin)) bad.push(t.text.trim().slice(0, 60));
       }
       for (const e of p.S.elements) {
         if (e.tag === 'meta') { if (LU.test(e.attrs.content || '') && !(isWork(p) && metaKeys.has(e.attrs.name || e.attrs.property))) bad.push(`meta ${e.attrs.name || e.attrs.property}`); continue; }
@@ -628,7 +630,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
         const type = [].concat(n['@type']).join();
         const { areaServed, ...rest } = n;
         if (type === 'LocalBusiness') assert.ok(!LU.test(JSON.stringify(n.address)) && !LU.test(JSON.stringify(rest)), `${p.path}: La Union in the business address`);
-        else if (!isWork(p)) assert.ok(!LU.test(JSON.stringify(rest)), `${p.path}: La Union in the ${type} JSON-LD`);
+        else if (!isWork(p) && !(p.path === '/faq/' && type === 'FAQPage')) assert.ok(!LU.test(JSON.stringify(rest)), `${p.path}: La Union in the ${type} JSON-LD`);
       }
       assert.ok(publicStrings(p).filter((s) => s.kind !== 'json-ld').length > 5);
     });

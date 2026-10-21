@@ -128,8 +128,8 @@
          CSS beside new JS and a shipped CSS change looked like it never landed.
          A new version = a new cache key, so even a stale SW must hit the network.
          Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-    <link rel="stylesheet" href="css/tokens.css?v=14.0.324"/>
-    <link rel="stylesheet" href="css/styles.css?v=14.0.324"/>
+    <link rel="stylesheet" href="css/tokens.css?v=14.0.325"/>
+    <link rel="stylesheet" href="css/styles.css?v=14.0.325"/>
 
     <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
          Firebase messaging loaded lazily in notifications.js when FCM is configured.
@@ -481,8 +481,8 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
    opaque out to 86% of the radius — the finished logo sits inside 80%, and over all 10 seconds only the cube's top corners while it is first "forged"
    come near the rim and the flame tip touches the top edge for a moment (frames checked at 1.2, 1.8, 2.1, 2.4, 2.7, 3, 4 and 9.95 s) — over a soft dark
    pool behind it, so the rim of the disc dissolves into the photo. Not clickable, not focusable, no controls. */
-#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(220px,60vw,260px);margin:0 auto -16px}
-#site .hero-mark::before{content:"";position:absolute;inset:-60%;z-index:-1;border-radius:50%;background:radial-gradient(closest-side,rgba(5,11,28,.9),rgba(5,11,28,.8) 36%,rgba(5,11,28,.55) 52%,rgba(5,11,28,.25) 74%,rgba(5,11,28,0));pointer-events:none}
+#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(150px,42vw,180px);margin:0 auto -8px}
+#site .hero-mark::before{content:"";position:absolute;inset:-60%;z-index:-1;border-radius:50%;background:radial-gradient(closest-side,rgba(5,11,28,.55),rgba(5,11,28,.4) 40%,rgba(5,11,28,.15) 70%,rgba(5,11,28,0));pointer-events:none}
 #site .hero-mark video{display:block;width:100%;height:auto;aspect-ratio:1/1;pointer-events:none;-webkit-mask-image:radial-gradient(closest-side,#000 86%,transparent 100%);mask-image:radial-gradient(closest-side,#000 86%,transparent 100%)}
 #site .hero-years{display:flex;align-items:flex-end;gap:16px;margin-bottom:24px}
 #site .hero-years-num{color:var(--site-gold);font:500 clamp(5rem,9vw + 1.6rem,8.25rem)/.8 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.03em}
@@ -495,8 +495,8 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .hero-cta{margin-top:24px}
 }
 @media (min-width:900px){
-  #site .hero-in{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,460px);column-gap:clamp(24px,4vw,64px);align-items:center;padding-top:calc(var(--site-head) + 48px);padding-bottom:calc(clamp(48px,9vh,104px) + var(--proof-lift))}
-  #site .hero-mark{order:0;width:100%;margin:0}
+  #site .hero-in{display:flex;flex-direction:column;align-items:flex-start;padding-top:calc(var(--site-head) + 48px);padding-bottom:calc(clamp(48px,9vh,104px) + var(--proof-lift))}
+  #site .hero-mark{order:-1;width:clamp(120px,9vw,150px);margin:0 0 6px -12px}
   #site #hero h1{font-size:clamp(2rem,2.8vw + .7rem,3.5rem)}
 }
 
@@ -752,7 +752,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .site-brand-name{font-size:21px}
   #hero{min-height:clamp(640px,86svh,940px)}
   #site .hero-bg{object-position:56% 52%}
-  #site .hero-scrim{background:linear-gradient(180deg,rgba(11,27,63,.7) 0,rgba(11,27,63,0) 170px),linear-gradient(90deg,rgba(11,27,63,.95) 0%,rgba(11,27,63,.9) 46%,rgba(11,27,63,.82) 72%,rgba(11,27,63,.3) 100%),linear-gradient(0deg,rgba(11,27,63,.55) 0,rgba(11,27,63,0) 42%)}
+  #site .hero-scrim{background:linear-gradient(180deg,rgba(11,27,63,.7) 0,rgba(11,27,63,0) 170px),linear-gradient(90deg,rgba(11,27,63,.94) 0%,rgba(11,27,63,.88) 38%,rgba(11,27,63,.55) 58%,rgba(11,27,63,.18) 80%,rgba(11,27,63,.06) 100%),linear-gradient(0deg,rgba(11,27,63,.55) 0,rgba(11,27,63,0) 42%)}
   #site .svc{grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:clamp(40px,6vw,88px)}
   #site .svc:nth-child(even){grid-template-columns:minmax(0,5fr) minmax(0,7fr)}
   #site .svc:nth-child(even) .svc-media{order:2}
@@ -1196,7 +1196,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <h2>About Barro Industries</h2>
       <p class="about-years"><span class="about-years-num">23</span><span class="about-years-label">years in business</span></p>
       <p class="site-lead">Barro Industries OPC is an SEC-registered manufacturing company built on precision, quality and a commitment to long-term growth.</p>
-      <p class="about-note">The company began as a family business.</p>
+      <p class="about-note">The company began as a family business in Baguio City and La Union.</p>
       <p class="values">Excellence · Integrity · People first · Growth</p>
       <p class="tagline">Building the Future, Brick by Brick.</p>
     </div>
@@ -1381,7 +1381,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.324 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.325 · Barro Industries</div>
   </div>
 </div>
 
