@@ -102,6 +102,8 @@ const brandHit = (text) => BRAND_RE.test(text.replace(/[\s\-_./]+/g, ' '));
 const stripJsComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
 const phoneDigits = (text) => [...text.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map(m => m[0].replace(/\D/g, '').replace(/^63/, '0'));
 
+// the public content pages (services, work, areas, faq): static HTML, pinned in tests/seo-pages.test.mjs; here only their place in the sitemap
+const CONTENT_PAGES = ['services/', 'services/commercial-kitchen-fit-out/', 'services/stainless-steel-fabrication/', 'services/exhaust-and-fresh-air-systems/', 'services/lpg-gas-line-installation/', 'services/kitchen-fire-suppression/', 'services/institutional-and-government-supply/', 'work/', 'work/ispsc-2026/', 'work/dmmmsu-2022-2023/', 'areas-we-serve/', 'faq/'];
 const home = read('index.html');
 const homeSite = home.slice(home.indexOf('<div id="site"'), home.indexOf('<!-- /#site -->'));
 const homeHead = home.slice(0, home.indexOf('</head>'));
@@ -993,13 +995,17 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
   });
 
   it('has the title, description, canonical, robots and Open Graph tags the owner specified', () => {
-    assert.match(cat, /<title>Product Catalogue — Barro Kitchens \| Barro Industries<\/title>/);
+    assert.match(cat, /<title>Commercial Kitchen Equipment Catalogue \| Barro Industries<\/title>/);
     assert.match(catHead, /<meta name="description" content="[^"]{60,}">/);
     assert.match(catHead, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
     assert.match(catHead, /<meta name="robots" content="index,follow">/);
     for (const p of ['og:title', 'og:description', 'og:url', 'og:image', 'og:type', 'og:site_name']) assert.ok(catHead.includes(`property="${p}"`), p);
     assert.ok(catHead.includes('property="og:url" content="https://barroindustries.com/catalogue/"'));
-    assert.ok(catHead.includes('property="og:title" content="Product Catalogue — Barro Kitchens | Barro Industries"'));
+    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment Catalogue | Barro Industries"'));
+    assert.ok(catHead.includes('property="og:site_name" content="Barro Industries"'));
+    // the hero project photo as an absolute URL, with the large Twitter card (owner, 2026-10-21; the full set of tag pins is in tests/site-public-surface.test.mjs)
+    assert.ok(catHead.includes('property="og:image" content="https://barroindustries.com/site/img/projects/ispsc/01.webp"'));
+    assert.ok(catHead.includes('name="twitter:card" content="summary_large_image"'));
     assert.match(cat, /<html lang="en" data-view="site">/);
   });
 
@@ -1007,6 +1013,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('<link rel="stylesheet" href="/css/site.css">') && cat.includes('<link rel="stylesheet" href="/css/catalogue.css">') && cat.includes('<link rel="stylesheet" href="/css/quote-request.css">'));
     const scripts = [...cat.matchAll(/<script\b[^>]*>/g)].map(m => m[0]);
     assert.deepEqual(scripts, [
+      '<script type="application/ld+json">',                                                              // the JSON-LD ItemList in the <head>: data, never executed
       '<script type="application/json" id="qr-catalogue">',                                               // the data island: JSON, never executed
       '<script defer src="/js/site.js">', '<script defer src="/js/catalogue.js">',
       '<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js">',           // the two pinned compat scripts that carry the callables
@@ -1037,26 +1044,32 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.equal(cat.split(B.QR_START_MARKER).length - 1, 1);
     assert.equal(cat.split(B.QR_END_MARKER).length - 1, 1);
     const ctas = [...cat.matchAll(/<a [^>]*data-qr-start[^>]*>([^<]*)<\/a>/g)].map(m => m[0]);
-    assert.equal(ctas.length, 3, 'the CTA section, the footer, and the empty search state');
+    assert.equal(ctas.length, 4, 'the header button, the CTA section, the footer, and the empty search state');
     for (const a of ctas) assert.ok(a.includes('href="/catalogue/?quote=1"'), a);
     assert.ok(!/href="\/sales\/clientinformationrequest\/">(Request a quote|Get a quote)</.test(cat), 'a Get-a-quote link still skips the intake');
     assert.ok(/<a href="\/sales\/clientinformationrequest\/">full project brief<\/a>/.test(cat), 'the project brief form is no longer reachable from the catalogue page');
   });
 
-  it('has the header the owner asked for: brand and Home to /, Login to /#login (a link, not the homepage button), the CTA to the intake', () => {
+  it('has the header the owner asked for: brand and Home to /, "Get a quote" top right (no Login anywhere in it), the footer link to /#login, the CTA to the intake', () => {
     assert.ok(cat.includes('<a href="/" id="site-brand">'));
-    assert.ok(cat.includes('<a href="/">Home</a>'));
-    assert.ok(/<a class="site-btn site-btn-outline site-btn-sm" id="site-login-link" href="\/#login">Login<\/a>/.test(cat));
-    assert.ok(!cat.includes('id="site-login-btn"') && !cat.includes('id="site-footer-login"'), 'the homepage Login ids would let site.js hijack the link');
-    assert.ok(cat.includes('<a href="/#login">Staff login</a>'));
+    assert.ok(cat.includes('<p class="foot-links"><a href="/">Home</a>'), 'Home is the first footer link');
+    const catNav = cat.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
+    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']], 'the catalogue nav is the same six links as every other public page');
+    assert.ok(catNav.includes('<a href="/catalogue/" aria-current="page">Catalogue</a>'));
+    // owner 2026-10-21: the top-right slot is "Get a quote" (the intake), Login moved to the footer as "Team portal" (details: tests/site-public-surface.test.mjs)
+    assert.ok(cat.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>'));
+    assert.ok(!/\bLogin\b/i.test(cat.match(/<header id="site-header">[\s\S]*?<\/header>/)[0]), 'the header still says Login');
+    assert.ok(!cat.includes('id="site-login-btn"') && !cat.includes('id="site-login-link"') && !cat.includes('id="site-footer-login"') && !cat.includes('id="site-team-portal"'), 'a homepage / old Login id would let site.js hijack the link');
+    assert.ok(cat.includes('<a class="foot-portal" href="/#login">Team portal</a>'));
+    assert.ok(!/Staff login/.test(cat));
     assert.ok(/<a class="site-btn site-btn-primary" href="\/catalogue\/\?quote=1" data-qr-start>Request a quote<\/a>/.test(cat));
     assert.ok(cat.includes('<h2>Can’t find it? Request a quote</h2>'));
     assert.ok(cat.includes('id="cat-top"') && cat.includes('aria-label="Back to top"'));
   });
 
   it('keeps the premium copy: the intro line the owner suggested, and "Premium" in the meta description', () => {
-    assert.ok(catBlock.includes('Premium SS304 equipment, built to your specifications.'));
-    assert.match(catHead, /name="description" content="Browse premium SS304/);
+    assert.ok(catBlock.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
+    assert.match(catHead, /name="description" content="Browse premium commercial kitchen equipment in SS304 or SS316 stainless steel/);
   });
 
   it('(local only) is exactly what a fresh build produces from the private master and the photo map', { skip: (() => { try { return resolveMaster() ? false : 'the private master (products-database.json) is not present'; } catch (_) { return 'no master'; } })() }, () => {
@@ -1165,11 +1178,13 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(!/href="#catalogue"|href="[^"]*#cat-/.test(homeSite), 'a deep link into the catalogue is on the homepage');
   });
 
-  it('has the nav Services · Projects · About · Catalogue · Contact, with Login top right', () => {
+  it('has the nav Services · Our work · Areas we serve · Catalogue · FAQ · Contact (the first four and the FAQ are the public content pages), with "Get a quote" top right', () => {
     const labels = [...nav.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map(m => [m[1], m[2]]);
-    assert.deepEqual(labels, [['#services', 'Services'], ['#projects', 'Projects'], ['#about', 'About'], ['/catalogue/', 'Catalogue'], ['#contact', 'Contact']]);
-    assert.ok(/<button type="button" id="site-login-btn" class="site-btn site-btn-outline site-btn-sm">Login<\/button>/.test(homeSite));
-    assert.ok(homeSite.indexOf('id="site-login-btn"') > homeSite.indexOf('id="site-nav"'));
+    assert.deepEqual(labels, [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['#contact', 'Contact']]);
+    const cta = '<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>';
+    assert.ok(homeSite.includes(cta));
+    assert.ok(homeSite.indexOf(cta) > homeSite.indexOf('id="site-nav"') && homeSite.indexOf(cta) < homeSite.indexOf('id="site-menu-btn"'));
+    assert.ok(!/id="site-login-btn"/.test(homeSite), 'the old header Login button is back');
   });
 
   it('puts "23 years in business" first in the hero and the proof bar, and mentions the family business only in About', () => {
@@ -1190,10 +1205,10 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     const n = (visibleText(homeSite).match(/high-quality/gi) || []).length;
     assert.ok(n >= 3 && n <= 5, `"high-quality" appears ${n} times`);
     const text = visibleText(homeSite);
-    for (const fact of ['food-grade SS304', 'No.4 brushed finish', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
+    for (const fact of ['food-grade SS304', 'laboratory-grade SS316', 'brushed, mirror or satin', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
       assert.ok(text.includes(fact) || text.includes(fact.replace(/ /g, ' ')), `the specific "${fact}" is missing`);
     }
-    assert.match(homeHead, /name="description" content="Premium stainless-steel kitchens[^"]*high-quality SS304/);
+    assert.match(homeHead, /name="description" content="Premium stainless-steel commercial kitchens[^"]*food-grade SS304 and laboratory-grade SS316/);
   });
 
   it('keeps exhaust, fresh-air, gas lines and fire suppression as SERVICES on the homepage (owner ruling) — they are only gone from the catalogue', () => {
@@ -1228,7 +1243,8 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.deepEqual(ld.address, { '@type': 'PostalAddress', streetAddress: '21 Capricorn St., Tandang Sora', addressLocality: 'Quezon City', postalCode: '1116', addressRegion: 'Metro Manila', addressCountry: 'PH' });
     // geo is allowed since 2026-10-21: the owner supplied the verified Google Maps coordinates (pinned in tests/site-luzon-map.test.mjs)
     for (const k of ['priceRange', 'aggregateRating', 'openingHours']) assert.ok(!(k in ld), `${k} must not be claimed`);
-    assert.deepEqual(ld.sameAs, ['https://www.facebook.com/barrokitchens']);
+    assert.deepEqual(ld.sameAs, ['https://www.facebook.com/barrokitchens', ld.hasMap]);
+    assert.ok(/^https:\/\/www\.google\.com\/maps\/place\//.test(ld.hasMap));
     assert.equal(ld.email, 'hello@barroindustries.com');
     assert.equal(ld.telephone, '+63 927 683 6300');
   });
@@ -1260,7 +1276,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     for (const [label, html] of [['homepage', homeSite], ['catalogue page', cat.slice(cat.indexOf('<body'))]]) {
       // the owner's programme name KitchenShield™ (warranty section, 2026-10-21) is the one other mark; the header brand stays the only other ™
       assert.equal((visibleText(html).replace(/KitchenShield™/g, 'KitchenShield').match(/™/g) || []).length, 1, `${label}: ™ count`);
-      assert.ok(html.includes('<span class="site-brand-sub">Barro Kitchens™</span>'), `${label}: the ™ is not in the header brand`);
+      assert.ok(html.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'), `${label}: the ™ is not in the header brand`);
       const segments = stripTags(html, '\u0001').split('\u0001').map(s => s.trim()).filter(Boolean);
       for (const s of segments) assert.ok(!/\S {2,}\S/.test(s), `${label}: doubled space in "${s.slice(0, 50)}"`);
       assert.ok(!/ -- |\s-\s(?=[A-Za-z])/.test(visibleText(html)), `${label}: a hyphen used as a dash`);
@@ -1283,7 +1299,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(!sw.includes("'/site/img/") && !sw.includes("'/catalogue/") && !sw.includes('catalogue.js') && !sw.includes('catalogue.css'));
   });
 
-  it('robots.txt allows /catalogue/ and sitemap.xml lists it with the homepage', () => {
+  it('robots.txt allows /catalogue/ and sitemap.xml lists it with the homepage and the 12 public content pages (tests/seo-pages.test.mjs pins those)', () => {
     const robots = read('robots.txt');
     for (const p of ['/q/', '/t/', '/v/', '/track.html', '/sales/', '/projects/', '/partners/', '/parterns/', '/ventures/', '/docs/', '/specs/', '/quote-builder-v2.html', '/quote-builder.html']) {
       assert.ok(robots.includes(`Disallow: ${p}\n`), `robots.txt must disallow ${p}`);
@@ -1293,8 +1309,8 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(/^Allow: \/$/m.test(robots));
     assert.ok(robots.includes('Sitemap: https://barroindustries.com/sitemap.xml'));
     const sm = read('sitemap.xml');
-    assert.deepEqual(sm.match(/<loc>[^<]+<\/loc>/g), ['<loc>https://barroindustries.com/</loc>', '<loc>https://barroindustries.com/catalogue/</loc>']);
-    assert.equal((sm.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g) || []).length, 2);
+    assert.deepEqual(sm.match(/<loc>[^<]+<\/loc>/g), ['', 'catalogue/', ...CONTENT_PAGES].map(u => `<loc>https://barroindustries.com/${u}</loc>`));
+    assert.equal((sm.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g) || []).length, 2 + CONTENT_PAGES.length);
   });
 
   it('the 13 project photos exist (26 files), every one is used in #projects, and every image the homepage references exists', () => {
@@ -1384,14 +1400,15 @@ describe('the public contact details (owner ruling: hello@ and ONE address and n
     for (const [label, text] of Object.entries(surfaces)) assert.ok(!/0960/.test(text), `${label} carries 0960`);
   });
 
-  it('shows ONLY the Quezon City address; La Union is a project location (the map section and areaServed), never an address, and San Fernando is never named', () => {
+  it('shows ONLY the Quezon City address; La Union is a project location (the map section, the DMMMSU project entry and areaServed), never an address, and San Fernando is never named', () => {
     const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila';
     assert.ok(homeSite.includes(`<address>${ADDRESS}, Philippines</address>`));
     assert.ok(homeSite.includes(`<p>${ADDRESS}, Philippines</p>`));
     assert.ok(cat.includes(`<p>${ADDRESS}, Philippines</p>`));
-    // Owner ruling 2026-10-21: La Union is a PROJECT location ("Projects across Luzon", section #luzon, and the JSON-LD areaServed), never an address.
+    // Owner ruling 2026-10-21: La Union is a PROJECT location ("Projects across Luzon", section #luzon, the JSON-LD areaServed, and — owner's answer, same day —
+    // the DMMMSU project entry in section #projects), never an address.
     // Everything else on these surfaces (the contact section, the footer, the JSON-LD address, the other head tags) stays guarded.
-    const withoutPlaces = { 'index.html <head>': homeHead.replace(/"areaServed":\[[^\]]*\],?/, ''), 'index.html #site': homeSite.replace(/<section id="luzon"[\s\S]*?<\/section>/, ''), 'catalogue page': cat };
+    const withoutPlaces = { 'index.html <head>': homeHead.replace(/"areaServed":\[[^\]]*\],?/, ''), 'index.html #site': homeSite.replace(/<section id="luzon"[\s\S]*?<\/section>/, '').replace(/<section id="projects"[\s\S]*?<\/section>/, ''), 'catalogue page': cat };
     for (const [label, text] of Object.entries(withoutPlaces)) assert.ok(!/La\s*Union|San\s*Fernando/i.test(text), `${label} names another location`);
     for (const f of files) assert.ok(!/La\s*Union|San\s*Fernando|0960/i.test(read(f)), `${f} names another location or number`);
   });
@@ -1402,8 +1419,9 @@ describe('js/site.js and js/catalogue.js stay small, dependency-free and standal
 
   it('site.js keeps only the header, menu, login, reveal, year and lightbox code — the catalogue code moved to catalogue.js', () => {
     for (const dead of ['cat-chip', 'cat-search', 'cat-empty', 'cat-more', 'data-filter', 'data-searching', 'cat-group', 'setFilter', 'runSearch']) assert.ok(!site.includes(dead), `site.js still has ${dead}`);
-    for (const live of ["$('site-login-btn')", "$('site-footer-login')", "$('site-menu-btn')", "$('site-lightbox')", "$('site-year')", '.reveal']) assert.ok(site.includes(live), `site.js lost ${live}`);
-    assert.ok(site.includes("if (!$('login-screen')) return;"), 'the Login hand-off is not guarded for the standalone catalogue page');
+    for (const live of ["$('site-team-portal')", "$('site-menu-btn')", "$('site-lightbox')", "$('site-year')", '.reveal']) assert.ok(site.includes(live), `site.js lost ${live}`);
+    for (const gone of ["$('site-login-btn')", "$('site-footer-login')"]) assert.ok(!site.includes(gone), `site.js still binds ${gone}, which no longer exists`);
+    assert.ok(site.includes("if (!$('login-screen')) return;"), 'the Team portal hand-off is not guarded for the standalone catalogue page');
   });
 
   it('neither script writes HTML, fetches data, touches storage, or evaluates strings', () => {
@@ -1461,11 +1479,17 @@ describe('index.html head script — the first-paint view decision (spec §4.2)'
     it(name, () => assert.deepEqual(decide(env), { view, standalone, wantLogin }));
   }
 
-  it('the catalogue page\'s Login link (/#login) lands on the staff login view for a signed-out visitor, and on the app for a signed-in one', () => {
-    const href = cat.match(/id="site-login-link" href="([^"]+)"/)[1];
+  it('the catalogue page\'s footer "Team portal" link (/#login) lands on the login view for a signed-out visitor, and on the app for a signed-in one', () => {
+    const href = cat.match(/<a class="foot-portal" href="([^"]+)">Team portal<\/a>/)[1];
     assert.equal(href, '/#login');
     const hash = href.slice(href.indexOf('#'));
     assert.deepEqual(decide({ hash }), { view: 'login', standalone: false, wantLogin: true });
     assert.deepEqual(decide({ hash, hint: true }), { view: 'boot', standalone: false, wantLogin: true });
+  });
+
+  it('the homepage footer "Team portal" link goes to /#login too, so a click with no script still reaches the login view', () => {
+    const href = homeSite.match(/<a class="foot-portal" href="([^"]+)" id="site-team-portal">Team portal<\/a>/)[1];
+    assert.equal(href, '/#login');
+    assert.deepEqual(decide({ hash: '#login' }), { view: 'login', standalone: false, wantLogin: true });
   });
 });

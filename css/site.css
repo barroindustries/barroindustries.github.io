@@ -82,7 +82,8 @@ html[data-standalone] #login-site-back{display:none !important}
 #site .site-brand-text{display:flex;flex-direction:column;min-width:0}
 #site .site-brand-name{overflow:hidden;text-overflow:ellipsis;font:600 19px/1.1 var(--site-serif);letter-spacing:-.005em;white-space:nowrap}
 #site .site-brand-sub{overflow:hidden;margin-top:4px;color:var(--site-muted);font:600 9.5px/1 var(--site-sans);letter-spacing:.17em;text-overflow:ellipsis;text-transform:uppercase;white-space:nowrap}
-#site #site-login-btn,#site #site-login-link,#site #site-menu-btn{flex:none}
+#site .site-head-cta,#site #site-menu-btn{flex:none}
+#site .site-head-cta{white-space:nowrap}
 #site #site-nav{display:none;position:absolute;top:var(--site-head);left:0;right:0;flex-direction:column;padding:4px 16px 14px;background:#fff;border-bottom:1px solid var(--site-line);box-shadow:0 18px 30px rgba(11,27,63,.08)}
 #site #site-nav.is-open{display:flex}
 #site #site-nav a{padding:14px 4px;border-top:1px solid var(--site-line);color:var(--site-navy);font-weight:500;text-decoration:none}
@@ -93,6 +94,8 @@ html[data-standalone] #login-site-back{display:none !important}
 #site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-btn-outline,
 #site.is-home #site-header:not(.is-solid):not(.is-menu-open) #site-menu-btn{border-color:rgba(255,255,255,.75);color:#fff}
 #site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-btn-outline:hover{background:rgba(255,255,255,.16)}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-head-cta{background:#fff;border-color:#fff;color:var(--site-navy)}
+#site.is-home #site-header:not(.is-solid):not(.is-menu-open) .site-head-cta:hover{background:var(--site-paper);border-color:var(--site-paper)}
 #site.is-home #site-header:not(.is-solid):not(.is-menu-open) a:focus-visible,
 #site.is-home #site-header:not(.is-solid):not(.is-menu-open) button:focus-visible{outline-color:#fff}
 
@@ -100,13 +103,30 @@ html[data-standalone] #login-site-back{display:none !important}
 #hero{position:relative;isolation:isolate;display:flex;align-items:flex-end;margin-top:calc(var(--site-head) * -1);min-height:560px;min-height:max(560px,70svh);overflow:hidden;background:var(--site-navy);color:#fff}
 #site .hero-bg{position:absolute;inset:0;z-index:-2;width:100%;height:100%;max-width:none;object-fit:cover;object-position:46% 50%}
 #site .hero-scrim{position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(11,27,63,.72) 0,rgba(11,27,63,.8) 50%,rgba(11,27,63,.93) 100%)}
-#site .hero-in{width:100%;padding-top:calc(var(--site-head) + 48px);padding-bottom:calc(clamp(48px,9vh,104px) + var(--proof-lift))}
+#site .hero-in{display:flex;flex-direction:column;width:100%;padding-top:calc(var(--site-head) - 6px);padding-bottom:calc(clamp(32px,5vh,96px) + var(--proof-lift))}
+/* the logo-reveal animation (owner, 2026-10-21): above the headline on a phone, the right column from 900px. The clip is a dark navy square, so it is
+   feathered into the hero twice: a circular mask that reaches zero exactly at the middle of each edge of the square (so no edge survives) and is fully
+   opaque out to 86% of the radius — the finished logo sits inside 80%, and over all 10 seconds only the cube's top corners while it is first "forged"
+   come near the rim and the flame tip touches the top edge for a moment (frames checked at 1.2, 1.8, 2.1, 2.4, 2.7, 3, 4 and 9.95 s) — over a soft dark
+   pool behind it, so the rim of the disc dissolves into the photo. Not clickable, not focusable, no controls. */
+#site .hero-mark{position:relative;order:-1;flex:none;width:clamp(220px,60vw,260px);margin:0 auto -16px}
+#site .hero-mark::before{content:"";position:absolute;inset:-60%;z-index:-1;border-radius:50%;background:radial-gradient(closest-side,rgba(5,11,28,.9),rgba(5,11,28,.8) 36%,rgba(5,11,28,.55) 52%,rgba(5,11,28,.25) 74%,rgba(5,11,28,0));pointer-events:none}
+#site .hero-mark video{display:block;width:100%;height:auto;aspect-ratio:1/1;pointer-events:none;-webkit-mask-image:radial-gradient(closest-side,#000 86%,transparent 100%);mask-image:radial-gradient(closest-side,#000 86%,transparent 100%)}
 #site .hero-years{display:flex;align-items:flex-end;gap:16px;margin-bottom:24px}
 #site .hero-years-num{color:var(--site-gold);font:500 clamp(5rem,9vw + 1.6rem,8.25rem)/.8 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.03em}
 #site .hero-years-label{padding:0 0 4px 16px;border-left:1px solid var(--site-line-gold);color:var(--site-gold-lite);font:600 12px/1.5 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
 #site #hero h1{max-width:15em;margin-bottom:22px;color:#fff;font-size:clamp(2.2rem,4.2vw + .7rem,4.1rem);line-height:1.06;letter-spacing:-.02em}
 #site .hero-lead{max-width:34em;color:rgba(255,255,255,.92);font-size:clamp(1.0625rem,.4vw + 1rem,1.25rem);line-height:1.6}
 #site .hero-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:32px}
+@media (max-width:899px){
+  #site .hero-years{margin-bottom:16px}
+  #site .hero-cta{margin-top:24px}
+}
+@media (min-width:900px){
+  #site .hero-in{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,460px);column-gap:clamp(24px,4vw,64px);align-items:center;padding-top:calc(var(--site-head) + 48px);padding-bottom:calc(clamp(48px,9vh,104px) + var(--proof-lift))}
+  #site .hero-mark{order:0;width:100%;margin:0}
+  #site #hero h1{font-size:clamp(2rem,2.8vw + .7rem,3.5rem)}
+}
 
 /* proof bar: a white card that lifts over the bottom of the hero (a serif value, a muted line, inset gold rules) */
 #site{--proof-lift:44px}
@@ -280,11 +300,21 @@ html[data-standalone] #login-site-back{display:none !important}
 #site .contact-dirs{grid-column:2;display:flex;flex-wrap:wrap;gap:4px 22px}
 #site .contact-dir{font-size:14px}
 
+/* links to the public content pages (/services/, /work/, /areas-we-serve/, /faq/): an arrow link under a section lead, a row of them under a card
+   or a CTA, the muted "Also: …" line under the fit-out card, and the link after a project gallery. Plain links, no script. */
+#site .sec-link{margin-top:22px}
+#site .link-row{display:flex;flex-wrap:wrap;gap:12px 28px;margin-top:20px}
+#site .svc-body .svc-also{margin-top:14px;color:var(--site-muted);font-size:.9375rem;line-height:1.6}
+#site .svc-also a{color:var(--site-navy);font-weight:500;text-decoration-color:var(--site-gold);text-underline-offset:3px}
+#site .proj-more{margin-top:26px}
+#site .proj-all{margin-top:clamp(40px,5vw,64px)}
+
 /* footer */
 #site-footer{padding:52px 0 60px;border-top:1px solid var(--site-line);background:var(--site-paper);color:var(--site-muted);font-size:14px}
 #site .foot-in{display:grid;grid-template-columns:minmax(0,1fr);gap:26px}
 #site .foot-name{margin-bottom:6px;color:var(--site-navy);font:600 17px/1.2 var(--site-serif)}
-#site .foot-links{display:flex;flex-wrap:wrap;gap:10px 26px}
+#site .foot-links{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 26px}
+#site #site-footer a.foot-portal{color:var(--site-muted);font-size:13px;font-weight:400}
 #site #site-footer a{color:var(--site-navy);font-weight:500;text-decoration:none}
 #site #site-footer a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
 #site .foot-legal{padding-top:22px;border-top:1px solid var(--site-line)}
@@ -303,7 +333,7 @@ html[data-standalone] #login-site-back{display:none !important}
 #login-site-back{display:flex;align-items:center;gap:6px;min-height:44px;margin:-8px auto 6px -6px;padding:0 8px;border:0;border-radius:8px;background:none;color:var(--text-muted);font:600 13px/1 var(--font);cursor:pointer}
 #login-site-back:hover{color:var(--text)}
 
-/* phones (<= 420px): a compact header — smaller brand, compact Login — so the menu button is always fully visible */
+/* phones (<= 420px): a compact header — smaller brand, compact "Get a quote" — so the menu button is always fully visible */
 @media (max-width:420px){
   #site .site-header-in{gap:8px}
   #site #site-brand{gap:8px}
@@ -311,6 +341,19 @@ html[data-standalone] #login-site-back{display:none !important}
   #site .site-brand-name{font-size:17px}
   #site .site-brand-sub{margin-top:3px;font-size:8.5px;letter-spacing:.13em}
   #site .site-btn-sm{padding:0 12px;font-size:13px}
+}
+/* 360px phones: the name drops one notch so "Barro Industries" stays whole beside the "Get a quote" button */
+@media (max-width:369px){
+  #site .site-brand-name{font-size:16px}
+}
+/* under 360px (a 320px phone) the name wraps onto two lines instead of being cut off, and the logo, gaps and button tighten a little, so the
+   whole brand, the "Get a quote" button and the menu button all stay on screen */
+@media (max-width:359px){
+  #site .site-header-in,#site #site-brand{gap:6px}
+  #site #site-brand img{width:28px;height:28px}
+  #site .site-brand-name{font-size:15px;line-height:1.05;overflow:visible;text-overflow:clip;white-space:normal}
+  #site .site-brand-sub{font-size:8px;letter-spacing:.08em}
+  #site .site-btn-sm{padding:0 10px;font-size:12.5px}
 }
 /* responsive: proof bar 2x2 from 600px and four columns from 1024px; 720px grids; 900px side-by-side rows + inline nav */
 @media (min-width:600px){
@@ -345,8 +388,18 @@ html[data-standalone] #login-site-back{display:none !important}
   #site .about-media{position:relative;isolation:isolate}
   #site .about-media::after{content:"";position:absolute;z-index:-1;inset:18px -18px -18px 18px;border:1px solid var(--site-gold);border-radius:4px}
   #site .contact-grid{grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:clamp(48px,7vw,112px);align-items:start}
-  #site .foot-in{grid-template-columns:minmax(0,1fr) auto;align-items:start}
+  #site .foot-in{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);align-items:start}
+  #site .foot-links{justify-content:flex-end}
   #site .foot-legal{grid-column:1/-1}
+}
+@media (min-width:900px) and (max-width:1099px){
+  /* six links, the button and the wordmark share one row: a little less room between the links keeps "Barro Industries" whole at 900px */
+  #site #site-nav{gap:20px}
+  #site #site-nav a{font-size:14px}
+}
+@media (min-width:1100px){
+  /* wide enough for every footer link on one row; below this the links wrap inside the right half, so the address and the badges keep their room */
+  #site .foot-in{grid-template-columns:minmax(0,1fr) auto}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}

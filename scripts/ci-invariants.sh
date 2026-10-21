@@ -606,6 +606,14 @@ if grep -nF -- "'/site/img/" sw.js >/dev/null 2>&1; then
   grep -nF -- "'/site/img/" sw.js | sed 's/^/    /'
   cat_fail=1
 fi
+# The hero's logo-reveal animation (site/img/brand/: two mp4 files and a poster, 2026-10-21) is NOT precached either: an app install would download
+# ~2 MB of marketing video it never shows (the app never shows the website). The generic '/site/img/ guard above already catches the folder; this one
+# names the rule for the brand folder and for ANY video file, wherever it lives. (sw.js leaves media requests to the browser's own range handling.)
+if grep -nE -- "'/site/img/brand/|\.(mp4|webm|mov|m4v)'" sw.js >/dev/null 2>&1; then
+  echo "FAIL: sw.js PRECACHE lists the hero logo animation ('/site/img/brand/…') or a video file. They are deliberately NOT precached — an app install would download megabytes of marketing video it never shows:"
+  grep -nE -- "'/site/img/brand/|\.(mp4|webm|mov|m4v)'" sw.js | sed 's/^/    /'
+  cat_fail=1
+fi
 if grep -nE -- "'/catalogue/|'/js/catalogue\.js'|'/css/catalogue\.css'|'/js/quote-request\.js'|'/css/quote-request\.css'" sw.js >/dev/null 2>&1; then
   echo "FAIL: sw.js PRECACHE lists the standalone /catalogue/ page or its assets (incl. the quote-request UI). They are deliberately NOT precached (not part of the app shell, and the pre-commit manifest generator only maps '/', '/t/' and '/v/' to an index.html):"
   grep -nE -- "'/catalogue/|'/js/catalogue\.js'|'/css/catalogue\.css'|'/js/quote-request\.js'|'/css/quote-request\.css'" sw.js | sed 's/^/    /'
@@ -642,6 +650,52 @@ if [ "$cat_fail" -eq 0 ]; then
   echo "PASS: public pages carry no pricing tokens; the homepage lists no products; photos and the catalogue page are not precached"
 fi
 
+# The public CONTENT pages (2026-10-21): /services/ + its six service pages, /work/ + its two project pages, /areas-we-serve/ and /faq/. Static,
+# standalone HTML like /catalogue/ (their own shared stylesheet, css/pages.css, and the shared js/site.js — never an app script). The same
+# rulings apply: R1 NO PRICES (the whole file, head and body, plus the plain words price / pricing / cost), R5 no partner company (checked below
+# with the other public surfaces), ONE phone / ONE email / the Quezon City address (no Gmail, no 0960, no San Fernando address), and none of
+# them in the service worker's PRECACHE. FAIL output carries line numbers only. tests/seo-pages.test.mjs pins the rest of their content.
+SEO_PAGES='services/index.html services/commercial-kitchen-fit-out/index.html services/stainless-steel-fabrication/index.html services/exhaust-and-fresh-air-systems/index.html services/lpg-gas-line-installation/index.html services/kitchen-fire-suppression/index.html services/institutional-and-government-supply/index.html work/index.html work/ispsc-2026/index.html work/dmmmsu-2022-2023/index.html areas-we-serve/index.html faq/index.html'
+seo_fail=0
+for sp in $SEO_PAGES; do
+  if [ ! -f "$sp" ]; then
+    echo "FAIL: public content page $sp is missing."
+    seo_fail=1
+    continue
+  fi
+  sp_head_e=$(grep -nF -- '</head>' "$sp" | head -1 | cut -d: -f1)
+  # the head is scanned with the FULL token list too (JSON-LD sits in it); only the Google Fonts URL (opsz,wght@9..144,500..600) is exempt
+  sp_price_lines=$( { sed -n "1,${sp_head_e:-0}p" "$sp" | grep -niE "$CAT_TOKENS" | grep -v 'fonts\.googleapis\.com' | cut -d: -f1
+                      sed -n "$((${sp_head_e:-0} + 1)),\$p" "$sp" | grep -niE "$CAT_TOKENS|pric(e|ing)|[^a-z]costs?[^a-z]" | cut -d: -f1 | awk -v off="${sp_head_e:-0}" '{print $1 + off}'; } | sort -un | head -10 | tr '\n' ' ')
+  if [ -n "$sp_price_lines" ]; then
+    echo "FAIL: $sp matches the pricing-token list (line(s): $sp_price_lines). Offending text withheld on purpose."
+    seo_fail=1
+  fi
+  if grep -qiE 'gmail|0960|san[[:space:]]*fernando|purok|carlatan' "$sp"; then
+    echo "FAIL: $sp carries a contact detail that is not allowed on the public site (a Gmail address, the 0960 number or an old La Union / San Fernando address). Offending text withheld on purpose."
+    seo_fail=1
+  fi
+  if grep -qE '<script[^>]*src="[^"]*(app|config|firebase|departments|modules|drive|notifications|quote-request|catalogue)[^"]*"' "$sp"; then
+    echo "FAIL: $sp loads an app, Firebase or catalogue script. The content pages load only the shared /js/site.js."
+    seo_fail=1
+  fi
+done
+if [ ! -f css/pages.css ]; then
+  echo "FAIL: css/pages.css (the content pages' stylesheet) is missing."
+  seo_fail=1
+fi
+if grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/css/pages\.css'" sw.js >/dev/null 2>&1; then
+  echo "FAIL: sw.js PRECACHE lists a public content page or its stylesheet. Like /catalogue/, they are deliberately NOT precached (not part of the app shell):"
+  grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/css/pages\.css'" sw.js | sed 's/^/    /'
+  seo_fail=1
+fi
+if [ "$seo_fail" -eq 0 ]; then
+  echo "PASS: the 12 public content pages (/services/, /work/, /areas-we-serve/, /faq/) carry no pricing tokens, no disallowed contact detail and no app script, and are not precached"
+else
+  cat_fail=1
+fi
+
+
 # Partner-brand guard over every PUBLIC surface: the <head> (title / meta / OG / Twitter /
 # JSON-LD), the #site section (copy, project photo alt text), the whole catalogue page (copy,
 # generated products, alt text) and the files that exist only for the public site.
@@ -660,6 +714,7 @@ else
   fi
 fi
 PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js css/quote-request.css js/quote-request.js js/qr-def.js js/product-families.js js/qr-families.js js/qr-preview.js"
+PUBLIC_FILES="$PUBLIC_FILES css/pages.css $SEO_PAGES"
 [ -f scripts/product-photos.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/product-photos.json"
 [ -f scripts/public-categories.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-categories.json"
 [ -f scripts/public-families.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-families.json"

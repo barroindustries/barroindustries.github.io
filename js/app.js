@@ -773,7 +773,7 @@ window._wantLogin = window._wantLogin || false;   // the head script may already
 function _setView(v) { try { document.documentElement.setAttribute('data-view', v); } catch (_) {} }
 function _isStandalone() { return document.documentElement.hasAttribute('data-standalone'); }
 // Byte-identical to the static <title> in index.html (app.js must not depend on site.js).
-const SITE_TITLE = 'Barro Industries — Commercial Kitchen Equipment & Stainless Fabrication, Metro Manila';
+const SITE_TITLE = 'Barro Industries — Premium Stainless-Steel Commercial Kitchens, Metro Manila';
 function showSite() {
   hideSplash();
   _setView('site');
@@ -802,7 +802,7 @@ function showSignedOut() {
   try { localStorage.removeItem('bi-auth-hint'); } catch (_) {}
   if (_isStandalone() || window._wantLogin) showLogin(); else showSite();
 }
-// Wired by js/site.js (Login button / footer link) and by the login screen's back link.
+// Wired by js/site.js (the footer "Team portal" link) and by the login screen's back link.
 window.openLoginFromSite = function () { window._wantLogin = true; showLogin(); };
 window.backToSiteFromLogin = function () {
   window._wantLogin = false;
@@ -834,6 +834,7 @@ function showRemovedUserScreen() {
   if (!el) {
     el = document.createElement('div');
     el.id = 'removed-user-screen';
+    el.setAttribute('data-nosnippet', '');   // app-only markup, like the static screens in index.html: never quoted in a search snippet
     document.body.appendChild(el);
   }
   el.style.cssText = 'position:fixed;inset:0;z-index:var(--z-splash);display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#0F1114);color:var(--text,#fff);text-align:center';

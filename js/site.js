@@ -3,8 +3,9 @@
    never read window.* at parse time — only inside handlers. Controls are bound by id or by class
    delegation (no inline handlers); everything below is a class or attribute toggle, and the only
    text it writes uses textContent (no innerHTML).
-   It does five things: the footer year, the Login hand-off, the phone menu, the transparent-over-the-
-   hero header, and the project lightbox, plus the Luzon-map pin highlight and a quiet fade-up on scroll. Catalogue filtering and
+   It does five things: the footer year, the Team portal hand-off, the phone menu, the transparent-over-the-
+   hero header, and the project lightbox, plus the Luzon-map pin highlight, a quiet fade-up on scroll and the start
+   of the hero's logo animation. Catalogue filtering and
    search live in js/catalogue.js; every piece of this file is a no-op when its elements are absent. */
 (function () {
   'use strict';
@@ -21,10 +22,11 @@
     var yr = $('site-year');
     if (yr) yr.textContent = String(new Date().getFullYear());
 
-    // ── Login (§9.1): the direct attribute write makes the switch instant even if app.js has not
+    // ── Team portal (§9.1): the discreet footer link is the ONLY way into the sign-in from the website (the header
+    // carries "Get a quote" now, 2026-10-21). The direct attribute write makes the switch instant even if app.js has not
     // executed yet; openLoginFromSite() then keeps its state (title, etc.) in sync. Only on the
     // homepage: where there is no login screen in this document (the standalone /catalogue/ page)
-    // the link is left alone and its href (/#login) takes the visitor to the staff login.
+    // the link is left alone and its href (/#login) takes the visitor to the team sign-in.
     function openLogin(e) {
       if (!$('login-screen')) return;
       e.preventDefault();
@@ -32,8 +34,7 @@
       d.documentElement.setAttribute('data-view', 'login');
       if (window.openLoginFromSite) window.openLoginFromSite();
     }
-    on($('site-login-btn'), 'click', openLogin);
-    on($('site-footer-login'), 'click', openLogin);
+    on($('site-team-portal'), 'click', openLogin);
 
     // ── Phone menu: toggles #site-nav (and turns the header solid while it is open); a nav link,
     // Escape, or a wide viewport closes it.
@@ -61,6 +62,23 @@
         window.requestAnimationFrame(function () { busy = false; solidify(); });
       });
       solidify();
+    }
+
+    // ── Hero logo reveal (the <video> in #hero): muted, plays ONCE and holds its final frame; the poster IS that frame. It is started here, not by an
+    // autoplay attribute: this same index.html is the installed app and the team sign-in, where <html data-view> is boot / login / app and #site is
+    // display:none, and an autoplay video in a hidden page still downloads its megabyte on every launch (measured). preload="none" fetches nothing
+    // until play(), and play() is called only when the hero is actually on screen (IntersectionObserver: a hidden or scrolled-away hero never starts
+    // it) and never under prefers-reduced-motion. In every other case — reduced motion, a blocked play(), a failed download, no script — the poster
+    // (the finished logo) is what shows. Without IntersectionObserver it starts only if the website is the current view.
+    var vid = d.querySelector('#hero video');
+    if (vid && !reducedMotion() && typeof vid.play === 'function') {
+      var start = function () { var p = vid.play(); if (p && p.catch) p.catch(function () {}); };
+      if ('IntersectionObserver' in window) {
+        var seen = new IntersectionObserver(function (es) {
+          for (var j = 0; j < es.length; j++) { if (es[j].isIntersecting) { seen.disconnect(); start(); return; } }
+        }, { threshold: 0.3 });
+        seen.observe(vid);
+      } else if (d.documentElement.getAttribute('data-view') === 'site') start();
     }
 
     // ── Scroll reveal: a quiet fade-up on first view. Off entirely under prefers-reduced-motion, and

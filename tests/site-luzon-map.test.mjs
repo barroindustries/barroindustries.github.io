@@ -317,9 +317,13 @@ describe('JSON-LD: the 13 areas served, the verified Google Maps place, and noth
     assert.ok(ld.geo.latitude > 14.65 && ld.geo.latitude < 14.72 && ld.geo.longitude > 121.0 && ld.geo.longitude < 121.08);
   });
 
-  it('keeps La Union only where the owner allowed it: the map section and areaServed — never the contact section, footer, address or head tags', () => {
-    const outsideMap = homeSite.replace(luzon, '');
-    assert.ok(!/La\s*Union|San\s*Fernando/i.test(outsideMap), 'La Union / San Fernando appears in #site outside the map section');
+  it('keeps La Union only where the owner allowed it: the map section, the DMMMSU project entry in #projects (owner, 2026-10-21) and areaServed — never the contact section, footer, address or head tags', () => {
+    const outsideMap = homeSite.replace(luzon, '').replace(projects, '');
+    assert.ok(!/La\s*Union|San\s*Fernando/i.test(outsideMap), 'La Union / San Fernando appears in #site outside the map section and the projects');
+    // in #projects it is the DMMMSU description and nothing else: not the ISPSC entry, a heading, a photo's alt text or a tag
+    assert.equal((projects.match(/La\s*Union/gi) || []).length, 1, 'La Union appears more than once in #projects');
+    assert.ok(projects.includes('<p>Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).</p>'));
+    assert.equal((projects.match(/<section\b/g) || []).length, 1, 'a nested <section> would break the La Union guard');
     const headNoAreas = homeHead.replace(/"areaServed":\[[^\]]*\],?/, '');
     assert.ok(!/La\s*Union|San\s*Fernando/i.test(headNoAreas), 'La Union / San Fernando appears in the head outside areaServed');
     assert.ok(/La Union/.test(luzon) && ld.areaServed.some(a => a.name === 'La Union'));
@@ -422,7 +426,7 @@ describe('Warranty & after-sales: the owner\'s two facts, exactly', () => {
     assert.equal((homeSite.match(/KitchenShield™/g) || []).length, 1);
     assert.equal((homeSite.match(/KitchenShield/g) || []).length, 1);
     assert.equal((visibleText(homeSite).match(/™/g) || []).length, 2);
-    assert.ok(homeSite.includes('<span class="site-brand-sub">Barro Kitchens™</span>'));
+    assert.ok(homeSite.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'));
   });
 
   it('comes after How we work, before About, as two navy cards', () => {
