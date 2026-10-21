@@ -204,6 +204,19 @@ html[data-standalone] #login-site-back{display:none !important}
 #site .trust-name{flex:0 0 100%;color:var(--site-navy);font:500 1.1875rem/1.35 var(--site-serif);letter-spacing:-.005em}
 #site .trust-sep{display:none;color:var(--site-gold);font:600 1.75rem/1 var(--site-sans)}
 
+/* registrations: the owner's three stated facts — PhilGEPS-registered, SEC-registered, VAT-registered — as plain-text pills, each with the same generic
+   shield-and-check line-icon (inline SVG, decorative). No agency logo or seal (the agencies restrict them) and no registration number (none given). */
+#site .regs{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+#site .regs li{display:inline-flex;align-items:center;gap:7px;padding:7px 14px 7px 10px;border:1px solid var(--site-line-gold);border-radius:999px;background:#fff;color:var(--site-navy);font:600 13px/1.2 var(--site-sans);letter-spacing:.01em;white-space:nowrap}
+#site .regs-ic{flex:none;color:var(--site-gold-ink)}
+/* directly under the proof bar: a slim row, the label first (small gold caps, like the "Trusted by" label), then the pills */
+#site .regs-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:18px 4px 0}
+#site .regs-label{color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+/* under the "Trusted by state universities" line, and in both footers */
+#site .regs-trust{margin-top:16px}
+#site .regs-foot{margin-top:16px}
+#site .regs-foot li{font-size:12.5px}
+
 /* how we work: a numbered timeline, vertical on a phone and one horizontal line from 1024px.
    Each step carries a TODO-NEIL comment where a typical duration can go; nothing about time is shown. */
 #site .steps{display:grid;grid-template-columns:minmax(0,1fr);list-style:none}
@@ -338,6 +351,7 @@ html[data-standalone] #login-site-back{display:none !important}
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}
   #site .proof-bar li{padding:26px 22px}
+  #site .regs-row{padding-left:22px}
   #site .proof-bar li:nth-child(n+3)::after{content:none}
   #site .proof-bar li+li::before{content:"";top:24%;bottom:24%;left:0;right:auto;width:1px;height:auto}
   #site .proof-val{font-size:1.75rem}
@@ -345,6 +359,7 @@ html[data-standalone] #login-site-back{display:none !important}
 }
 @media (min-width:1280px){
   #site .proof-bar li{padding:26px 28px}
+  #site .regs-row{padding-left:28px}
   #site .proof-val{font-size:2rem}
   #site .proj-gallery .is-lead a{aspect-ratio:21/9}
 }

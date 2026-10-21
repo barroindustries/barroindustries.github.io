@@ -955,19 +955,53 @@ function dimsText(dd) {
   return have.map(k => `${k} ${dd[k]}`).join(' × ') + ' mm';
 }
 
-const PHOTO_SIZES = '(min-width:1024px) 260px, (min-width:720px) 30vw, 46vw';
+// A FIXED card is compact and horizontal: a narrow image "well" on the left (the photo when there is one, otherwise a small category
+// line-icon — never a big letter), then the code / name / size line, then a labelled Notes block (and a labelled Specifications list when
+// the master carries material rows), then "Add to quote" (appended at run time by js/quote-request.js as the card's last child).
+// A CONFIGURABLE card (renderFamilyCard) is the wide featured card: same parts, a bigger photo. The layout lives in css/catalogue.css.
+const PHOTO_SIZES = '(min-width:720px) 96px, 80px';                                                  // the fixed card's image well
+const FEATURE_PHOTO_SIZES = '(min-width:1024px) 360px, (min-width:720px) 45vw, calc(100vw - 34px)';   // the featured card's photo
 const SEARCH_ICON = '<svg class="cat-search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>';
 
-const PHOTO_FIGURE = (photo, name) =>
-  `<figure class="cat-photo"><img src="/${esc(photo.thumb)}" srcset="/${esc(photo.thumb)} ${photo.width}w, /${esc(photo.src)} ${photo.mainWidth}w" sizes="${PHOTO_SIZES}" width="${photo.width}" height="${photo.height}" alt="${esc(name)}" loading="lazy" decoding="async"><figcaption>Representative image</figcaption></figure>`;
+const PHOTO_FIGURE = (photo, name, sizes) =>
+  `<figure class="cat-photo"><img src="/${esc(photo.thumb)}" srcset="/${esc(photo.thumb)} ${photo.width}w, /${esc(photo.src)} ${photo.mainWidth}w" sizes="${sizes || PHOTO_SIZES}" width="${photo.width}" height="${photo.height}" alt="${esc(name)}" loading="lazy" decoding="async"><figcaption>Representative image</figcaption></figure>`;
 
-// The card of a CONFIGURABLE family: one card per family, the "Configurable" tag, the options it offers as a description list (this is also
-// what the live search reads), and the names/codes of the SKUs it absorbed in data-kw (search only — never shown). The "Configure & add"
-// button is added at run time by js/quote-request.js (like "Add to quote" on a fixed item), so the card needs no script to read.
+// The placeholder for a product with no photo yet: one line-icon per public category (24 x 24, stroke only, path / circle only — the tags the
+// page's generated block is allowed to carry; numbers separated by spaces, never a comma, so CHECK 9's "thousands separator" scan stays quiet).
+// Decorative (the tile is aria-hidden): the card's name and code say what the product is. A category with no icon gets a plain box.
+const TILE_ICONS = Object.freeze({
+  preparation: '<path d="M2.5 8h19v2.6h-19z"/><path d="M5 10.6V20M19 10.6V20M5 15.4h14"/>',
+  washing: '<path d="M9 11.5V6.2A2.2 2.2 0 0 1 11.2 4H14a2.5 2.5 0 0 1 2.5 2.5V8"/><path d="M16.5 8v1.6"/><path d="M3 12h18l-1.3 6.2a2.2 2.2 0 0 1-2.2 1.8h-11a2.2 2.2 0 0 1-2.2-1.8z"/>',
+  cooking: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  storage: '<path d="M5 3h14v17H5z"/><path d="M12 3v17"/><path d="M7 20v1.8M17 20v1.8"/><circle cx="9.6" cy="12" r=".7"/><circle cx="14.4" cy="12" r=".7"/>',
+  refrigeration: '<path d="M12 2.5v19M9.2 4.6 12 6.8l2.8-2.2M9.2 19.4 12 17.2l2.8 2.2"/><path transform="rotate(60 12 12)" d="M12 2.5v19M9.2 4.6 12 6.8l2.8-2.2M9.2 19.4 12 17.2l2.8 2.2"/><path transform="rotate(120 12 12)" d="M12 2.5v19M9.2 4.6 12 6.8l2.8-2.2M9.2 19.4 12 17.2l2.8 2.2"/>',
+});
+const TILE_ICON_DEFAULT = '<path d="M4 8l8-4 8 4v9l-8 4-8-4z"/><path d="M4 8l8 4 8-4M12 12v9"/>';
+const TILE = (categoryId) =>
+  `<div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${has(TILE_ICONS, categoryId) ? TILE_ICONS[categoryId] : TILE_ICON_DEFAULT}</svg></div>`;
+
+// The labels above the product notes. The owner's own word for the field is "notes" (2026-10-21: "put notes, it is very important"), and it
+// is always accurate — a note can be a specification ("SS1.2mm top, 0.8mm lower"), a remark ("Larger variant of CE-012") or a status ("Pending
+// full spec confirmation per project"). The material rows (grade, gauge, finish …) are specifications. Nothing is ever shortened: the page
+// shows the whole note, and a card with no note shows no label and no placeholder.
+const LABEL_NOTES = 'Notes';
+const LABEL_SPECS = 'Specifications';
+const LABEL = (text) => `<p class="cat-label">${text}</p>`;
+const SPEC_LIST = (rows) => `<dl class="cat-specs">${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('')}</dl>`;
+
+// The material line of every configurable card. NOT a new claim: it is the owner's own public statement on the homepage proof bar
+// ("SS304 — High-quality, food-grade, No.4 brushed finish", 2026-10-21) and the catalogue lede ("Premium SS304 equipment"), and the master
+// notes of the SKUs each family absorbed say SS304 throughout. tests/catalogue-layout.test.mjs pins it to the homepage wording, so a card can
+// never claim a material the homepage does not.
+const FAMILY_MATERIAL = 'SS304 food-grade stainless, No.4 brushed finish';
+
+// The card of a CONFIGURABLE family: one card per family, rendered as the wide FEATURED card (css/catalogue.css: the full row, the photo on
+// the left, the text on the right) — the "Configurable" tag, the name, the family description (the lead paragraph), then a labelled
+// Specifications list: the options it offers, the size line and the material (this is also what the live search reads), and the names/codes
+// of the SKUs it absorbed in data-kw (search only — never shown). The "Configure & add" button is added at run time by js/quote-request.js
+// (like "Add to quote" on a fixed item), so the card needs no script to read.
 function renderFamilyCard(fam, cat, photo, keywords) {
-  const mark = photo
-    ? PHOTO_FIGURE(photo, fam.label)
-    : `<div class="cat-tile" aria-hidden="true"><span>${esc(cat.initial)}</span></div>`;
+  const mark = photo ? PHOTO_FIGURE(photo, fam.label, FEATURE_PHOTO_SIZES) : TILE((cat && cat.id) || fam.category);
   const rows = [];
   for (const g of fam.groups) {
     if (g.type === 'slots') rows.push([g.label, `Up to ${g.maxSlots} ${g.unit ? g.unit.many : 'positions'}, each chosen one by one`]);
@@ -977,29 +1011,25 @@ function renderFamilyCard(fam, cat, photo, keywords) {
   const axes = ['W', 'D', 'H'].filter((k) => fam.dims && fam.dims[k]).map((k) => String(fam.dims[k].label).toLowerCase());
   const axesText = axes.length > 1 ? axes.slice(0, -1).join(', ') + ' and ' + axes[axes.length - 1] : (axes[0] || 'size');
   rows.push(['Size', 'Made to your ' + axesText]);
-  return `<li class="cat-card cat-card-family${photo ? ' has-photo' : ''}" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + mark +
-    `<p class="cat-code cat-tag">Configurable</p>` +
-    `<h3>${esc(fam.label)}</h3>` +
-    `<p class="cat-notes">${esc(fam.description)}</p>` +
-    `<dl class="cat-specs">${rows.map((r) => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('')}</dl>` +
+  rows.push(['Material', FAMILY_MATERIAL]);
+  return `<li class="cat-card cat-card-family cat-card-feature${photo ? ' has-photo' : ''}" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + mark +
+    `<div class="cat-head"><p class="cat-code cat-tag">Configurable</p><h3>${esc(fam.label)}</h3><p class="cat-lead">${esc(fam.description)}</p></div>` +
+    `<div class="cat-body">${LABEL(LABEL_SPECS)}${SPEC_LIST(rows)}</div>` +
     `</li>`;
 }
 
 function renderCard(p, cat, photo) {
-  const mark = photo
-    ? PHOTO_FIGURE(photo, p.name)
-    : `<div class="cat-tile" aria-hidden="true"><span>${esc(cat.initial)}</span></div>`;
+  const mark = photo ? PHOTO_FIGURE(photo, p.name) : TILE(cat && cat.id);
   const meta = [dimsText(p.defaultDimensions), p.unit ? `per ${p.unit}` : ''].filter(Boolean).join(' · ');
   const rows = [];
   if (p.material) for (const k of MATERIAL_KEYS) if (p.material[k]) rows.push([MATERIAL_LABELS[k], p.material[k]]);
   // The master's ad-hoc option lists (p.specs) are NOT shown any more (owner ruling 2026-10-21): a fixed item is quantity + size + note only,
   // and the configurable options live on the six family cards. publicProduct() still scans every spec string, so a guard hit is still refused.
+  // The note is shown whole, under its label; a product with no note (or no material rows) shows no label and no placeholder for it.
+  const body = (p.notes ? LABEL(LABEL_NOTES) + `<p class="cat-notes">${esc(p.notes)}</p>` : '') + (rows.length ? LABEL(LABEL_SPECS) + SPEC_LIST(rows) : '');
   return `<li class="cat-card${photo ? ' has-photo' : ''}" data-id="${esc(p.id)}">` + mark +
-    `<p class="cat-code">${esc(p.id)}</p>` +
-    `<h3>${esc(p.name)}</h3>` +
-    (meta ? `<p class="cat-meta">${esc(meta)}</p>` : '') +
-    (p.notes ? `<p class="cat-notes">${esc(p.notes)}</p>` : '') +
-    (rows.length ? `<dl class="cat-specs">${rows.map(r => `<div><dt>${esc(r[0])}</dt><dd>${esc(r[1])}</dd></div>`).join('')}</dl>` : '') +
+    `<div class="cat-head"><p class="cat-code">${esc(p.id)}</p><h3>${esc(p.name)}</h3>${meta ? `<p class="cat-meta">${esc(meta)}</p>` : ''}</div>` +
+    (body ? `<div class="cat-body">${body}</div>` : '') +
     `</li>`;
 }
 
@@ -1054,7 +1084,7 @@ function renderCatalogue(db, opts) {
     scanEmitted(add, lbl, 'category.label', label);
   });
 
-  const groupById = new Map(PUBLIC_CATEGORIES.map(c => [c.id, { id: c.id, label: c.label, initial: c.label.charAt(0).toUpperCase(), products: [], familyCards: [] }]));
+  const groupById = new Map(PUBLIC_CATEGORIES.map(c => [c.id, { id: c.id, label: c.label, products: [], familyCards: [] }]));
   const absorbed = [];
   const skipped = { categories: {}, categoryIds: [], products: [] };
   const rawIds = new Set();
@@ -1142,7 +1172,8 @@ function renderCatalogue(db, opts) {
     const n = cardsIn(g);
     lines.push(`<section class="cat-group" id="cat-${esc(g.id)}" data-cat="${esc(g.id)}" aria-labelledby="cat-h-${esc(g.id)}">`);
     lines.push(`<h2 id="cat-h-${esc(g.id)}">${esc(g.label)} <span class="cat-count">${n}</span></h2>`);
-    lines.push('<ul class="cat-grid">');
+    // two or more configurable products in one category sit side by side (css: .cat-grid-multi); a lone one is the wide featured card
+    lines.push(`<ul class="cat-grid${g.familyCards.length > 1 ? ' cat-grid-multi' : ''}">`);
     for (const f of g.familyCards) lines.push(renderFamilyCard(f, g, fams.photoOf[f.id] ? photoOf(fams.photoOf[f.id]) : null, keywordsOf(f.id)));
     for (const p of g.products) lines.push(renderCard(p, g, photoOf(p.id)));
     lines.push('</ul>');
@@ -1369,6 +1400,7 @@ module.exports = {
   publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, injectIntoHtml, injectIsland, stripJsonComments, esc, webpSize, loadPhotoMap,
   loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
   loadPublicFamilies, renderFamiliesJs, loadPreviewManifest, renderFamilyCard, FAMILIES_FILE, FAMILIES_JS, FAMILIES_JS_MIRROR, PREVIEWS_FILE,
+  TILE_ICONS, FAMILY_MATERIAL, LABEL_NOTES, LABEL_SPECS,
   NOTE_OVERRIDES, TEXT_FIXES, MATERIAL_KEYS, MONEY_RE, FORMULA_RE, BRAND_RE, START_MARKER, END_MARKER,
   QR_PLACEHOLDER, QR_START_MARKER, QR_END_MARKER, PUBLISHED_IDS_FILE,
   CatalogueGuardError,

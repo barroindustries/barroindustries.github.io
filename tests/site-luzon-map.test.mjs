@@ -449,14 +449,17 @@ describe('The Google listing: Contact links, JSON-LD, and no iframe', () => {
 });
 
 describe('No government-agency logos or seals', () => {
-  it('uses no image whose name, alt or class suggests SEC / DTI / PhilGEPS / BIR / a seal, and the About text keeps "SEC-registered" as plain words', () => {
+  it('uses no image whose name, alt or class suggests SEC / DTI / PhilGEPS / BIR / a seal, and the registrations are plain words', () => {
     const imgs = [...homeSite.matchAll(/<img\b[^>]*>/g)].map(m => m[0]);
     assert.ok(imgs.length > 10);
     for (const tag of imgs.filter(x => /\ssrc="/.test(x))) {        // the empty lightbox <img> has no src until a photo opens
       assert.ok(!/\b(sec|dti|philgeps|bir|bureau|seal|certificate|accreditation|iso)\b/i.test(tag.replace(/srcset="[^"]*"/, '')), `an agency-style image: ${tag.slice(0, 90)}`);
       assert.ok(/site\/img\/(projects|barro-kitchens-96)/.test(tag), `an unexpected image source: ${tag.slice(0, 90)}`);
     }
-    assert.ok(!/\b(DTI|PhilGEPS|BIR)\b/.test(visibleText(homeSite)), 'a registration is named in the copy');
+    // Owner 2026-10-21: the company IS PhilGEPS-, SEC- and VAT-registered, shown as plain TEXT badges (pinned in tests/site-registrations.test.mjs).
+    // DTI and BIR are still not claimed, and PhilGEPS appears only inside the words "PhilGEPS-registered".
+    assert.ok(!/\b(DTI|BIR)\b/.test(visibleText(homeSite)), 'a registration the owner did not state is named in the copy');
+    assert.ok(!/\bPhilGEPS\b(?!-registered)/.test(visibleText(homeSite)), 'PhilGEPS is named outside the "PhilGEPS-registered" badge words');
     assert.ok(visibleText(about).includes('SEC-registered'));
     const dirs = fs.readdirSync(path.join(ROOT, 'site/img'));
     assert.ok(!dirs.some(n => /sec|dti|philgeps|bir|seal|logo-gov/i.test(n)), 'an agency logo folder exists under site/img');

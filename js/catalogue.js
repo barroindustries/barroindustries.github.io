@@ -25,10 +25,11 @@
     var cards = [].slice.call(layout.querySelectorAll('.cat-card'));
     var idle = status ? status.textContent : '';
 
-    // What a card can be found by: its code, name, size line, notes and spec rows (not the photo caption). A configurable product's card also
-    // carries the names and codes of the products it replaced in data-kw (never shown), so "PW-006" or "double sink" still finds the Sink.
+    // What a card can be found by: its code, name, size line, notes (a configurable card's lead paragraph too) and spec rows — not the photo
+    // caption and not the "Notes" / "Specifications" labels. A configurable product's card also carries the names and codes of the products it
+    // replaced in data-kw (never shown), so "PW-006" or "double sink" still finds the Sink.
     var haystack = cards.map(function (c) {
-      var parts = c.querySelectorAll('.cat-code, h3, .cat-meta, .cat-notes, .cat-specs'), s = c.getAttribute('data-kw') || '';
+      var parts = c.querySelectorAll('.cat-code, h3, .cat-meta, .cat-notes, .cat-lead, .cat-specs'), s = c.getAttribute('data-kw') || '';
       for (var i = 0; i < parts.length; i++) s += ' ' + parts[i].textContent;
       return s.toLowerCase().replace(/\s+/g, ' ');
     });

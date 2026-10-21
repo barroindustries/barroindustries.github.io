@@ -376,8 +376,12 @@ describe('the five public categories (owner ruling 2026-10-21: "just the equipme
     assert.deepEqual(order, ['washing', 'cooking', 'storage', 'refrigeration']);          // no "preparation" section: nothing is in it
     for (const p of products) assert.equal((out.match(new RegExp(`<p class="cat-code">${p.id}</p>`, 'g')) || []).length, 1);
     assert.ok(out.includes('4 products in 4 categories'));
-    // tile initials are the public labels' first letters
-    for (const [id, initial] of [['T-950', 'R'], ['T-951', 'S'], ['T-952', 'W'], ['T-953', 'C']]) assert.ok(out.includes(`<span>${initial}</span></div><p class="cat-code">${id}</p>`), id);
+    // a card with no photo gets the line-icon of its public category in a neutral tile — never a big letter
+    for (const [id, catId] of [['T-950', 'refrigeration'], ['T-951', 'storage'], ['T-952', 'washing'], ['T-953', 'cooking']]) {
+      const card = out.split('<li class="cat-card').find(c => c.includes(`<p class="cat-code">${id}</p>`));
+      assert.ok(card.includes('<div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24"') && card.includes(B.TILE_ICONS[catId]), `${id}: wrong tile icon`);
+      assert.ok(!/<span>[A-Z]<\/span>/.test(card), `${id}: still a letter tile`);
+    }
   });
 
   it('publishedProductIds is exactly the products that reach the page', () => {
@@ -542,9 +546,9 @@ describe('renderCatalogue — the /catalogue/ block', () => {
     assert.ok(!html.includes('Basin Depth') && !html.includes('250mm / 300mm'), 'a master option list is on a fixed card');
   });
 
-  it('puts the product code in its own element and gives an unmapped card the navy placeholder with the category initial', () => {
-    assert.ok(html.includes('<li class="cat-card" data-id="T-001"><div class="cat-tile" aria-hidden="true"><span>C</span></div><p class="cat-code">T-001</p>'));
-    assert.ok(html.includes('<div class="cat-tile" aria-hidden="true"><span>P</span></div><p class="cat-code">T-002</p>'));
+  it('puts the product code in its own element at the head of the card, and gives an unmapped card the category line-icon in a neutral tile', () => {
+    assert.ok(html.includes(`<li class="cat-card" data-id="T-001"><div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${B.TILE_ICONS.cooking}</svg></div><div class="cat-head"><p class="cat-code">T-001</p><h3>`));
+    assert.ok(html.includes(`<li class="cat-card" data-id="T-002"><div class="cat-tile" aria-hidden="true"><svg class="cat-ic" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${B.TILE_ICONS.preparation}</svg></div><div class="cat-head"><p class="cat-code">T-002</p><h3>`));
   });
 
   it('a mapped card shows a lazy, sized, srcset photo with the "Representative image" caption instead of the tile', () => {
@@ -1304,7 +1308,9 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(all.length > used.size);
     for (const r of all) assert.ok(exists(r), `missing ${r}`);
     assert.ok((projects.match(/<li class="is-lead">/g) || []).length === 2, 'each project has exactly one lead image');
-    assert.ok((projects.match(/<li/g) || []).length === 13);
+    // the 13 photos are the items of the two galleries (the registration pills under "Trusted by" are list items too, so count the galleries only)
+    const galleryItems = [...projects.matchAll(/<ul class="proj-gallery">([\s\S]*?)<\/ul>/g)].reduce((n, m) => n + (m[1].match(/<li/g) || []).length, 0);
+    assert.equal(galleryItems, 13);
   });
 });
 

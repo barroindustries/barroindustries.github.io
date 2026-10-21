@@ -217,30 +217,33 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     assert.ok(/"l":"Centre"/.test(all));
     assert.ok(!/\b(color|gray|meter|catalog)\b/i.test(all));
   });
-  it('the family cards say "Configurable" and carry the options as a description list — and sizes read "Made to your length, width and height"', () => {
-    const html = B.renderFamilyCard(FAMS.families.sink, { initial: 'W' }, null, 'PW-004 SS Wash Sink');
-    assert.match(html, /<li class="cat-card cat-card-family" data-family="sink" data-kw="PW-004 SS Wash Sink">/);
-    assert.match(html, /<p class="cat-code cat-tag">Configurable<\/p>/);
+  it('the family cards are the wide FEATURED card: the "Configurable" tag, the name, the description, then a labelled Specifications list — and sizes read "Made to your length, width and height"', () => {
+    const html = B.renderFamilyCard(FAMS.families.sink, { id: 'washing' }, null, 'PW-004 SS Wash Sink');
+    assert.match(html, /<li class="cat-card cat-card-family cat-card-feature" data-family="sink" data-kw="PW-004 SS Wash Sink">/);
+    assert.match(html, /<div class="cat-head"><p class="cat-code cat-tag">Configurable<\/p><h3>Sink<\/h3><p class="cat-lead">Stainless steel sink table\./);
+    assert.match(html, /<div class="cat-body"><p class="cat-label">Specifications<\/p><dl class="cat-specs">/);
     assert.match(html, /<dt>Sinks<\/dt><dd>1 \/ 2 \/ 3 \/ 4<\/dd>/);
     assert.match(html, /<dt>Size<\/dt><dd>Made to your length, width and height<\/dd>/);
+    // the material line is the owner's own homepage statement, last in the list
+    assert.ok(html.endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl></div></li>`), 'the Material row is not last');
     // the size line names the axes the family really has: wall shelving has no height
-    const shelf = B.renderFamilyCard(FAMS.families.wall_shelf, { initial: 'S' }, null, '');
+    const shelf = B.renderFamilyCard(FAMS.families.wall_shelf, { id: 'storage' }, null, '');
     assert.match(shelf, /<dt>Size<\/dt><dd>Made to your length and depth<\/dd>/);
     assert.ok(!/height/i.test(shelf.slice(shelf.indexOf('<dt>Size'))), 'wall shelving must not promise a height');
     for (const f of ORDER) {
       const axes = ['W', 'D', 'H'].filter((k) => fam(f).dims[k]).length;
-      const card = B.renderFamilyCard(fam(f), { initial: 'P' }, null, '');
+      const card = B.renderFamilyCard(fam(f), { id: fam(f).category }, null, '');
       assert.equal(/Made to your [a-z]+, [a-z]+ and [a-z]+</.test(card), axes === 3, f);
     }
-    const stove = B.renderFamilyCard(FAMS.families.stove, { initial: 'C' }, null, '');
+    const stove = B.renderFamilyCard(FAMS.families.stove, { id: 'cooking' }, null, '');
     assert.match(stove, /Up to 6 burners, each chosen one by one/);
     assert.match(stove, /<dt>Add-ons<\/dt><dd>Griller \/ Griddle \/ Oven \/ Fryer<\/dd>/);
   });
   it('a family card escapes everything and never carries a price word', () => {
     const evil = { ...FAMS.families.sink, label: 'A <b>&"\'', description: 'x <script>' };
-    const html = B.renderFamilyCard(evil, { initial: 'W' }, null, 'k"><x');
+    const html = B.renderFamilyCard(evil, { id: 'washing' }, null, 'k"><x');
     assert.ok(!/<b>|<script|"><x/.test(html));
-    for (const f of ORDER) assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup|₱/i.test(B.renderFamilyCard(fam(f), { initial: 'P' }, null, '')), f);
+    for (const f of ORDER) assert.ok(!/pric(?:e|ing)|\bcosts?\b|markup|₱/i.test(B.renderFamilyCard(fam(f), { id: fam(f).category }, null, '')), f);
   });
 });
 
@@ -931,10 +934,12 @@ describe('js/qr-preview.js — the live preview image (placeholder + photo), run
     assert.match(page, /Math\.max\(3800, 1800 \+ String\(msg\)\.length \* 40\)/);
     assert.match(page, /if \(pendingToast && !sheet\.kind\)/);
   });
-  it('CATALOGUE LAYOUT (css): a category with a single card fills the row on a phone, and a configurable card keeps air above its button', () => {
+  it('CATALOGUE LAYOUT (css): one column and the compact card on a phone; a configurable card is the stacked full-width card there, a wide featured row from 720px, and a row of cards where a category holds several (the full layout pins live in tests/catalogue-layout.test.mjs)', () => {
     const css = read('css/catalogue.css');
-    assert.match(css, /@media \(max-width:719px\)\{\s*#site \.cat-grid > \.cat-card:only-child\{grid-column:1 \/ -1\}/);
-    assert.match(css, /#site \.cat-card-family > \.cat-specs\{margin-bottom:14px\}/);
+    assert.match(css, /#site \.cat-grid\{display:grid;grid-template-columns:minmax\(0,1fr\);gap:10px\}/);
+    assert.match(css, /#site \.cat-card-feature\{grid-column:1 \/ -1;display:flex;flex-direction:column\}/);
+    assert.match(css, /#site \.cat-card-feature\{grid-column:1 \/ -1;display:grid;grid-template-columns:minmax\(0,45fr\) minmax\(0,55fr\)/);
+    assert.match(css, /#site \.cat-grid-multi\{grid-template-columns:repeat\(auto-fit,minmax\(240px,1fr\)\)/);
   });
   it('the CSS switches the cross-fade off under prefers-reduced-motion, and uses no inline style or 4-digit z-index', () => {
     const css = read('css/quote-request.css');

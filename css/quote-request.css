@@ -32,7 +32,7 @@
 /* ── "Add to quote" on every catalogue card ─────────────────────────────── */
 #site .cat-card .qr-add{
   display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  margin:14px 18px 0;margin-top:auto;min-height:44px;padding:0 16px;
+  margin:0 12px 12px;min-height:40px;padding:0 16px;
   border:1px solid var(--site-navy,#0B1B3F);border-radius:6px;background:transparent;
   color:var(--site-navy,#0B1B3F);font:600 14px/1 var(--site-sans,Inter,system-ui,sans-serif);letter-spacing:.02em;cursor:pointer;
   transition:background-color .15s,color .15s;
@@ -40,22 +40,31 @@
 #site .cat-card .qr-add::before{content:"+";font-size:18px;line-height:1;font-weight:500}
 #site .cat-card .qr-add:hover{background:var(--site-navy,#0B1B3F);color:var(--site-bg,#fff)}
 #site .cat-card .qr-add:focus-visible{outline:2px solid var(--site-navy,#0B1B3F);outline-offset:3px}
-/* the button sits under the notes / specs; a little air above it even in a tall card */
-#site .cat-card > .cat-specs + .qr-add,#site .cat-card > .cat-notes + .qr-add,#site .cat-card > .cat-meta + .qr-add{margin-top:auto}
+/* where the button sits is the card's own grid (css/catalogue.css): it is the last child, directly under the Notes block */
 #site .cat-card[data-qr-count]{border-color:var(--site-gold,#C9A227)}
 #site .cat-card[data-qr-count]::after{
-  content:"In your quote \00D7  " attr(data-qr-count);position:absolute;top:10px;left:10px;
+  content:"In your quote \00D7  " attr(data-qr-count);position:absolute;top:8px;right:8px;
   padding:5px 10px;border-radius:999px;background:var(--site-navy,#0B1B3F);color:var(--site-bg,#fff);font:600 12px/1 var(--site-sans,Inter,system-ui,sans-serif);letter-spacing:.02em;
 }
+/* the featured (configurable) card: the badge sits on its photo, top left */
+#site .cat-card.cat-card-feature[data-qr-count]::after{top:10px;right:auto;left:10px}
 #site .cat-card{position:relative}
 
 /* "Configure & add" on a configurable product: the same button, filled, so the six configurable cards read as the main ones */
 #site .cat-card .qr-add.qr-add-config{background:var(--site-navy,#0B1B3F);color:var(--site-bg,#fff)}
 #site .cat-card .qr-add.qr-add-config:hover{background:var(--site-navy-2,#17306A);border-color:var(--site-navy-2,#17306A)}
+/* on a featured card the button is a little larger and keeps its own margins (more specific than the generic rule above) */
+#site .cat-card.cat-card-feature > .qr-add{margin:14px 16px 16px;min-height:44px}
 
 @media (max-width:420px){
-  #site .cat-card .qr-add{margin:12px 12px 0;padding:0 8px;gap:6px;font-size:13px;white-space:nowrap}
+  #site .cat-card .qr-add{margin:0 12px 12px;padding:0 8px;gap:6px;font-size:13px;white-space:nowrap}
   #site .cat-card .qr-add::before{font-size:16px}
+}
+@media (min-width:720px){
+  /* a fixed item is a single spec row: the button sits in its own column, centred on the row */
+  #site .cat-card > .qr-add{margin:0 14px;min-height:40px}
+  #site .cat-card[data-qr-count]::after{top:6px;padding:4px 9px}
+  #site .cat-card.cat-card-feature > .qr-add{margin:20px clamp(22px,3vw,40px) 0;padding:0 24px;font-size:15px}
 }
 
 /* ── the tray ───────────────────────────────────────────────────────────── */

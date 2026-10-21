@@ -141,8 +141,8 @@
        CSS beside new JS and a shipped CSS change looked like it never landed.
        A new version = a new cache key, so even a stale SW must hit the network.
        Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-  <link rel="stylesheet" href="css/tokens.css?v=14.0.320"/>
-  <link rel="stylesheet" href="css/styles.css?v=14.0.320"/>
+  <link rel="stylesheet" href="css/tokens.css?v=14.0.321"/>
+  <link rel="stylesheet" href="css/styles.css?v=14.0.321"/>
   <!-- PUBLIC-WEBSITE-SPEC.md §5.4 — the public website's only stylesheet. Loads AFTER
        styles.css so its #site rules win ties. No ?v= on purpose: .githooks/pre-commit
        only rewrites the tokens/styles links, and this file is small enough to win the
@@ -213,6 +213,14 @@
       <li><span class="proof-val">Made to order</span><span class="proof-sub">Built to your exact dimensions</span></li>
       <li><span class="proof-val">End-to-end</span><span class="proof-sub">Design · fabricate · deliver · install</span></li>
     </ul>
+    <div class="regs-row">
+      <p class="regs-label" id="regs-h">Registrations</p>
+      <ul class="regs" aria-labelledby="regs-h">
+        <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>PhilGEPS-registered</li>
+        <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>SEC-registered</li>
+        <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>VAT-registered</li>
+      </ul>
+    </div>
   </div>
 </div>
 
@@ -355,6 +363,11 @@
       <h2>Completed projects</h2>
     </header>
     <p class="trust reveal"><span class="trust-label">Trusted by state universities:</span> <span class="trust-name">Don Mariano Marcos Memorial State University (DMMMSU)</span> <span class="trust-sep" aria-hidden="true">·</span> <span class="trust-name">Ilocos Sur Polytechnic State College (ISPSC)</span></p>
+    <ul class="regs regs-trust reveal" aria-label="Registrations">
+      <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>PhilGEPS-registered</li>
+      <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>SEC-registered</li>
+      <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>VAT-registered</li>
+    </ul>
     <article class="proj reveal" id="proj-ispsc-2026">
       <div class="proj-head">
         <p class="proj-tag">ISPSC 2026</p>
@@ -498,6 +511,11 @@
     <div class="foot-brand">
       <p class="foot-name">Barro Industries OPC</p>
       <p>21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines</p>
+      <ul class="regs regs-foot" aria-label="Registrations">
+        <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>PhilGEPS-registered</li>
+        <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>SEC-registered</li>
+        <li><svg class="regs-ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v5.2c0 4.3 2.9 7.7 7 9.8 4.1-2.1 7-5.5 7-9.8V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>VAT-registered</li>
+      </ul>
     </div>
     <p class="foot-links"><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a><a href="/catalogue/?quote=1" data-qr-start>Get a quote</a><a href="/#login" id="site-footer-login">Staff login</a></p>
     <p class="foot-legal">© <span id="site-year">2026</span> Barro Industries OPC. Barro Kitchens is a brand of Barro Industries OPC.</p>
@@ -642,7 +660,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.320 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.321 · Barro Industries</div>
   </div>
 </div>
 
