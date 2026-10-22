@@ -840,8 +840,10 @@ describe('privacy notice + the functions/ mirrors', () => {
   it('privacyNoticeSha256 is sha256 of JSON.stringify(sections) and the version is the ruled one', () => {
     const want = crypto.createHash('sha256').update(JSON.stringify(QR.PRIVACY_NOTICE.sections)).digest('hex');
     assert.equal(Q.privacyNoticeSha256(), want);
-    assert.equal(QR.PRIVACY_NOTICE.version, '2026-10-21.1');
+    assert.equal(QR.PRIVACY_NOTICE.version, '2026-10-22.1');           // 2026-10-21.1 -> 2026-10-22.1: the privacy contact became hello@barroindustries.com
     assert.equal(QR.PRIVACY_NOTICE.sections.length, 8);
+    assert.match(QR.PRIVACY_NOTICE.sections[0].body, /0927 683 6300, hello@barroindustries\.com\.$/);
+    assert.ok(!/gmail/i.test(JSON.stringify(QR.PRIVACY_NOTICE)), 'the notice still names the Gmail address');
   });
   it('the eight headings are CIR\'s and the unchanged sections are byte-for-byte CIR\'s', () => {
     const CIR = require('../functions/cir-forms.js').PRIVACY_NOTICE;

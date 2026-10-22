@@ -517,6 +517,17 @@ describe('PRIVACY_NOTICE', () => {
     assert.match(portal.PRIVACY_NOTICE.version, /^\d{4}-\d{2}-\d{2}\.\d+$/);
   });
 
+  it('is version 2026-10-22.1: the privacy contact became the domain address (the version a signed acceptance records)', () => {
+    assert.equal(portal.PRIVACY_NOTICE.version, '2026-10-22.1');
+    assert.match(portal.PRIVACY_NOTICE.sections[0].body, /Contact for privacy matters: the President, 0927 683 6300, hello@barroindustries\.com\.$/);
+    assert.ok(!/gmail/i.test(JSON.stringify(portal.PRIVACY_NOTICE)), 'the notice still names the Gmail address');
+  });
+
+  it('the text a signer is shown changes the hash that is recorded with the acceptance', () => {
+    const before = require('node:crypto').createHash('sha256').update(JSON.stringify(portal.PRIVACY_NOTICE.sections.map((s, i) => (i === 0 ? { ...s, body: s.body.replace('hello@barroindustries.com', 'barroindustries@gmail.com') } : s)))).digest('hex');
+    assert.notEqual(portal.privacyNoticeSha256(), before);
+  });
+
   it('sections include the required substrings', () => {
     const text = JSON.stringify(portal.PRIVACY_NOTICE.sections);
     for (const needle of ['Barro Industries OPC', '0927 683 6300', 'National Privacy Commission', 'portability', 'erasure']) {

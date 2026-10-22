@@ -2,6 +2,7 @@
 
 _Architect: Fable 5.1 · 2026-09-26 · Status: SPEC (nothing built yet)_
 _Implementers: Sonnet subagents, one workstream each (see §6). Verifiers: adversarial, per workstream._
+_**2026-10-22 update:** the public form is now the general **project brief** (§9). §1.7 (the commissary questionnaire) and §4 (the original nameplate page) describe version 1 and the page that served it; the callables (§2), rules (§3) and the Sales › Briefs screen (§5) stand._
 
 > **Read before anything else:** CLAUDE.md, STATUS.md (2026-09-26 client-portal entry), then
 > `projects/chibabs/projectconfirmation/index.html`, `functions/index.js` lines 2560–3102
@@ -999,3 +1000,94 @@ Neil ruled on all four in session. These are binding; implement them, do not re-
   promise so a human deletes them; build NO scheduled purge job. §5.8 and §1.6 stand as written.
 - **R4 — Naming/placement.** Tab name **`Briefs`**, second chip on the Sales page; Photos stays part 6
   of 10, right after "The site". As written — no change.
+
+
+---
+
+## 9. Project brief v2 — the general questionnaire (2026-10-22)
+
+**Owner ruling (2026-10-22):** "fix the project brief, it's not uniform with the website, and also the information shown and asked is too specific to commissary; there are different types of projects: restaurant, cafe, commissary, hospital, school etc."
+
+The public page now serves **`FORMS.project_brief_v2`** (`formVersion: 1`), a NEW key beside `commissary_brief`, per §1.4 ("a second questionnaire is a new FORMS key — no migration"). **v1 stays in `js/cir-forms.js` verbatim** — every brief already stored under it renders with its original definition in Sales › Briefs, and a test pins its hash. The five callables, the rate limits and global caps, the draft → photo → submit flow, the security shape (§0), the rules (§3), the Storage layout and the notification recipients are **unchanged**.
+
+### 9.1 What the form asks
+
+Step 1 is **"What type of project is this?"** (`project_type`, required): Restaurant · Café · Bakery · Commissary / central kitchen · Hotel or resort · Catering · Hospital or clinic · School or university · Laboratory · Government office or LGU · Home or residential · Other (specify). The steps after it are the **common parts every project answers** plus **one short conditional part for that type**.
+
+| Step | Part | Questions |
+|---|---|---|
+| 1 | Project type | `project_type`* |
+| 2 | About you | `name`*, `position`, `company`, `phone`, `email` — **a mobile number or an email address is required** (`requireOneOf`) |
+| 3 | Location | `city`*, `province`*, `site_address` (street / landmark), `site_status` (new build · renovation · replacing equipment) |
+| 4 | **Conditional part** (below) | 3–5 questions (a single description box for Other), shown for that type only |
+| 5 | What you need | `scope`* (full kitchen design and build · individual equipment · custom fabrication · exhaust and fresh air · LPG gas line · fire suppression · repair or maintenance) |
+| 6 | Space and utilities | `area_sqm`, `dimensions`, `floor_plan` (yes / no), `utilities` (LPG · natural gas · electricity · water supply · drainage · existing exhaust · not sure yet) |
+| 7 | Material, timing and buying | `material` (SS304 food grade, our standard · SS316 laboratory grade · not sure yet), `finish` (brushed · mirror · satin · not sure yet), `timeline` (as soon as possible … not sure yet), `target_date`, **`budget`** (optional; six client-stated bands, see below), `buyer_type` (private · government — with the procurement-rules note for government buyers) |
+| 8 | Photos | the existing Photos part, same four groups, same limits |
+| 9 | Notes and send | `notes`, the privacy consent |
+
+(`*` = required. Everything else is optional. Required in all: type, name, mobile-or-email, city, province, scope — plus a description when the type is "Other".)
+
+| Type(s) | Conditional part ("4") | Questions |
+|---|---|---|
+| Restaurant · Café · Bakery · Catering | Your menu and service (`food`) | cuisine or menu style · seats or covers · meals or orders per day · service style (dine-in, takeaway, delivery, buffet or banquet, events) · main cooking methods |
+| Commissary / central kitchen | Your commissary | outlets you supply · outlets planned in three years · production volume per day · menu categories · what the commissary will do (the useful v1 process list) |
+| Hotel or resort | Your hotel or resort | kitchens or food outlets · number of rooms · banquet capacity · food services you offer |
+| Hospital or clinic | Your hospital or clinic | meals prepared per day · patients served · staff served · special diets and tray service · infection-control requirements |
+| School or university | Your school or university | what you need (canteen or kitchen / laboratory) · canteen meals per day · laboratory type · laboratory stations · sinks, gas and exhaust — with the SS316 note |
+| Laboratory | Your laboratory | laboratory type · workstations or benches · exposed to chemicals? (yes / no / not sure) · sinks, gas and exhaust — with the SS316 note |
+| Government office or LGU | Your government project | purpose (canteen or staff kitchen · feeding programme · something else) · people served per day · procurement mode (public bidding · small value procurement · negotiated or direct contracting · not sure) · bid or reference number |
+| Home or residential | Your home kitchen | kitchen type (outdoor · dirty · full indoor · not sure) · type of home (house · townhouse · condominium or apartment · something else) · what you would like (sink, work table, stove, hood, cabinets, shelving) |
+| Other (specify) | Your project | `other_description`* — "describe your project" |
+
+**The optional budget question (owner ruling, 2026-10-22).** Part 7 asks "Approximate budget (optional)" — a single choice of six **client-stated bands**: Under ₱500,000 · ₱500,000 – ₱1,000,000 · ₱1,000,000 – ₱3,000,000 · ₱3,000,000 – ₱10,000,000 · Over ₱10,000,000 · Prefer not to say / not sure (stored keys `under_500k`, `500k_to_1m`, `1m_to_3m`, `3m_to_10m`, `over_10m`, `not_sure`). They are the *client's* budget bands, **not Barro prices**; the server accepts the value only from that list (anything else is refused; a value that is not text is read as "not answered", like every optional select). The push notification never carries it (it names the project type and the location); Sales › Briefs shows it in the at-a-glance card, under the type in the list and in the Convert note.
+
+**The one allowance.** Public surfaces carry no pricing (ci-invariants CHECK 9 and the homepage / catalogue / content-page checks ban price words and peso amounts), so the brief needs a narrow exception for exactly these six labels: `scripts/brief-budget-bands.json` lists the question (label, hint, six options); `scripts/check-brief-copy.js` — run by CHECK 9 and by `tests/brief-budget.test.mjs` — lets exactly that question through (it must equal the file field for field), holds every other string of `FORMS.project_brief_v2` to the no-price-words rule, and refuses an allowance file that holds anything but bands. The allowance covers this one definition only: the v1 questionnaire, the brief's own page / css / js, the catalogue, the content pages and the homepage keep their ban (tests pin that none of them can carry a band). To change a band: edit the allowance file, the `budget` field in `js/cir-forms.js` (then `cp` the mirror) and the pinned list in `tests/brief-budget.test.mjs`.
+
+### 9.2 Definition schema additions (`js/cir-forms.js`, mirrored at `functions/cir-forms.js`)
+
+- **`section.when: { key, in: [values] }`** — the section belongs to those values of the (earlier, validated) controlling answer only. **`section.short`** is the progress label.
+- **`select` fields may carry `ui: 'cards'`** (the type picker) **or `ui: 'choice'`** (radio pills); option **`d`** is a card's one-line description. Stored option values are stable snake_case keys; labels may be reworded later.
+- **`requireOneOf: [{ keys, message }]`** — at least one of the listed fields must be answered.
+- **`summaryKeys`** entries may be a field key (a select's **label** is stored), `{ join: [keys] }` ("City, Province") or `{ first: [keys] }` (the exact date, else the timeline). v2 adds `summary.location` and `summary.budget` (the chosen band's label; empty when skipped).
+- **`NOTICES`** (new export) — every privacy-notice version the server will accept; `PRIVACY_NOTICE` is the current one.
+
+### 9.3 Server (`functions/cir-core.js`, `functions/index.js`)
+
+- `validateAnswers` is two-pass. Sections without `when` are validated as before; a conditional section is validated (its `required` fields now required) **only when the submitted type matches**, and if it does **not** match, **any key of that section in the payload is rejected** (`"<label>" does not apply to this project type`) — never silently dropped, even a blank one. Unknown keys are rejected, **including names that exist on `Object.prototype`** (`constructor`, `toString`, `__proto__` … — the lookup table is prototype-less). `cirSubmit` logs a mismatch or an unknown key to `cir_abuse` (`bad_payload`); the page never sends either.
+- `cir.getForm(formId)` / `cir.noticeFor(version)` look up **own keys only**; `cirStartDraft`, `cirUploadPhoto` and `cirSubmit` use them, so an id like `constructor` is "Unknown form", not a table member.
+- **Privacy notice `2026-10-22.1`** (the consent line and the "What we collect" / "Why" sections say "project", not "kitchen", and "What we collect" now names the budget range the client chooses to share; **the privacy contact is the domain address `hello@barroindustries.com`, not the Gmail one** — see 9.8; the other five sections are byte-for-byte the original, and `js/qr-def.js`'s mirrored sections still match). `2026-10-22.1` has not been live: it first ships with this redesign, so it carries the contact change too. The original **`2026-09-26.1` is kept verbatim** in `NOTICES`: `cirSubmit` accepts **any known version** and records `consent.noticeVersion` / `noticeSha256` against the text that version names — a page opened before the redesign still submits, with its own consent recorded. An unknown version is still "reload".
+- `buildNotification`: `… · <project type> · <city, province> · Ref …` (a v1 brief keeps its budget there; a v2 brief's push never carries its budget — it names the location, and a test pins that).
+
+### 9.4 The public page — `sales/clientinformationrequest/index.html`, `css/project-brief.css`, `js/project-brief.js`
+
+- **The website's design**: `css/site.css` + `css/pages.css` + `css/project-brief.css` (scoped to `#site.pg-brief`, the site's tokens only), Fraunces + Inter, the **same header and footer as the 12 content pages** (byte-identical, a test pins it; the footer carries the "Message us" Messenger link right after Facebook, "Team portal" last). Standalone: no app script, **noindex**, not precached.
+- **Strict CSP like `/catalogue/`** (`script-src 'self' https://www.gstatic.com`, `connect-src` the one functions host, `img-src … blob:` for photo thumbnails; **no inline script / style / handler**): the page script builds every node with `createElement` + `textContent`, so visitor text can never become markup. CHECK 9 and `tests/project-brief-page.test.mjs` enforce it.
+- A **stepped form** (a segmented bar on a phone, a timeline from 960 px): each step is checked on **Next**; the browser Back button walks the steps; the answers **autosave on the device** (never image bytes); photos behave exactly as before (decode, shrink to JPEG ≤ 900 KB, one at a time, 20 photos / 12 MB). The page sends **only the parts that apply to the chosen type**, holds a fast visitor for the seconds left of the server's 15 s floor (so a real brief is not dropped by the bot check), and a conditional part is built when its type is first chosen (kept after). The **receipt** shows the reference, the answers as labels, "Save receipt as PDF", "Send another brief" and **"Questions? Message us on Messenger"** (`https://m.me/barrokitchens`, `data-brand`, inline SVG, no Meta logo, no script).
+- `?mock=1` (QA seam, never reaches a backend) and `sim=` are unchanged.
+
+### 9.5 Sales › Briefs (`js/screens/client-info-requests.js`)
+
+Walks the definition the brief was submitted under (`_cirDef`, own-key). A v2 brief shows **only the part for its type**, numbered 1…9; the **project type is a pill in the header and the first cell of an "at a glance" card** (type, location, timing, budget, what is wanted) and a **pill column in the list** beside a Location column (v1 rows show the business type and, under it, the budget). Convert to client and Prefill Quote Builder read the facts through `_cirFacts` / `_cirClientAddress` (v1 and v2); Print is titled "PROJECT BRIEF" (v2) / "CLIENT INFORMATION REQUEST" (v1) and prints the consent line of the notice that was ticked. An answer that belongs to another type's part (the server never lets one in) is listed under "Other answers", escaped.
+
+### 9.6 In-flight v1
+
+The server still serves `commissary_brief` (start, upload, submit) and still accepts the original notice version, so a **page already open before the deploy keeps working**. A half-filled v1 draft on a visitor's device is not restored (a different questionnaire), but the new page **keeps its five contact details** (name, role, organisation, mobile, e-mail) and removes the rest. No migration of stored briefs.
+
+### 9.7 Deploy
+
+Rules, Storage rules and indexes are **unchanged**. Deploy the **nine callables that read a changed definition or notice BEFORE pushing the page** (the new brief page asks `cirStartDraft` for `project_brief_v2`, the old functions answer "Unknown form"; the new catalogue page sends `QR_DEF.VERSION` 3, the old quote-request functions answer "please reload"):
+`~/.npm-global/bin/firebase deploy --only functions:cirStartDraft,functions:cirUploadPhoto,functions:cirSubmit,functions:qrStartSession,functions:qrEstimate,functions:qrSubmit,functions:portalUnlock,functions:portalState,functions:portalSign` (selective, as always), then `bash scripts/release.sh record functions`, then `bash scripts/release.sh push`. Not needed: `cirRemovePhoto`, `cirAdminDelete`, `qrAdminDelete`, `portalAdminRotateCode` (none reads the changed definitions or notices).
+
+### 9.8 The privacy contact — three notices, one controller section (2026-10-22)
+
+Owner ruling: the privacy contact in the notices is the domain address **hello@barroindustries.com**, not `barroindustries@gmail.com`. Three notices carry it and share their controller section word for word, so all three changed and all three versions moved to **`2026-10-22.1`** (a consent records the version and the sha256 of the text shown):
+
+| Notice | Where | Live until now | New version | What a stale page / old consent does |
+|---|---|---|---|---|
+| Project brief | `js/cir-forms.js` (+ `functions/cir-forms.js`) | `2026-09-26.1` | `2026-10-22.1` | The original text stays in `NOTICES` **verbatim** (Gmail address included — it is what stored briefs were shown): `cirSubmit` accepts either version and records the sha256 of the one named, so a page opened before the deploy still submits. |
+| Public quote request | `js/qr-def.js` (+ `functions/qr-def.js`) | `2026-10-21.1` | `2026-10-22.1`, `QR_DEF.VERSION` 2 → 3 | Current version only (the design it was built with): a page still on 2 gets "This page was updated — please reload"; a saved draft keeps its items and details but drops its consent tick. |
+| Client portal | `functions/portal-core.js` (the page renders the server's text; the demo copy in `projects/chibabs/projectconfirmation/index.html` was updated to match) | `2026-09-26.1` | `2026-10-22.1` | Current version only: `portalSign` answers "The privacy notice was updated — please reload and review it again" to a page that showed the old one. |
+
+`tests/privacy-notices.test.mjs` pins all of it (the three controller sections identical and naming the domain address, no Gmail address in any current notice, the versions, each hash following its text, the original brief notice kept verbatim, the strict checks, the draft behaviour, the portal page's demo copy). Other occurrences of the Gmail address are **not** notices and were left alone: the quote builder's and the letterheads' contact lines (`js/config.js`, `js/screens/sales.js`, `quote-builder-v2.html`), the acceptance e-mail's signature in `functions/portal-core.js`, and the partner pages.
+

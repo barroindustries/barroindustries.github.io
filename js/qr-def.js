@@ -36,7 +36,10 @@
 
   // 2 (2026-10-21): the request lines gained the configurable families ({ familyId, config, dims, qty, note } beside the plain SKU
   // lines) and the absorbed SKUs are no longer quotable on their own. A page still on 1 is refused with "please reload".
-  var VERSION = 2;
+  // 3 (2026-10-22): the privacy notice's contact is now the domain address hello@barroindustries.com instead of the Gmail one (notice
+  // version 2026-10-22.1). A page still on 2 is refused with "please reload"; a saved draft keeps its items and contact details but
+  // drops its consent tick, so the visitor agrees to the new wording (js/quote-request.js loadDraft).
+  var VERSION = 3;
 
   // ── 4.1 INTAKE — option VALUES are stored; LABELS are shown ─────────────
   var INTAKE = {
@@ -111,11 +114,11 @@
   // Everything else is byte-for-byte CIR's: controller, lawful basis, sharing,
   // rights.
   var PRIVACY_NOTICE = {
-    version: '2026-10-21.1',
+    version: '2026-10-22.1',
     consentLine: 'I agree to Barro Industries using these details and my item list to prepare an estimate and a quotation, in line with the Data Privacy Act of 2012 (RA 10173).',
     sections: [
       { heading: 'Who is responsible for your data',
-        body: 'Personal Information Controller: Barro Industries OPC (SEC-registered, Metro Manila), trading as Barro Kitchens. Contact for privacy matters: the President, 0927 683 6300, barroindustries@gmail.com.' },
+        body: 'Personal Information Controller: Barro Industries OPC (SEC-registered, Metro Manila), trading as Barro Kitchens. Contact for privacy matters: the President, 0927 683 6300, hello@barroindustries.com.' },
       { heading: 'What we collect on this page',
         body: 'Your name, company or agency, mobile number, e-mail, delivery address, your answers about what you need and what it is for, the items, sizes and notes you add to your quote, the date and time you send it, and your device\'s IP address and browser identifier.' },
       { heading: 'Why',

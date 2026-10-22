@@ -427,12 +427,15 @@ function validateSignaturePng(dataUrl) {
 //  acceptance can never drift from what the page actually rendered.
 // ──────────────────────────────────────────────────────────────────────────
 
+// 2026-10-22.1: the privacy contact is now the domain address hello@barroindustries.com instead of the Gmail one (owner, 2026-10-22); the
+// same change was made to the project brief's and the public quote request's notices, whose controller section is byte-identical to this one.
+// portalSign accepts only the CURRENT version: a page that loaded the old notice is asked to reload and review the new one.
 const PRIVACY_NOTICE = {
-  version: '2026-09-26.1',
+  version: '2026-10-22.1',
   sections: [
     { heading: 'Who is responsible for your data', body:
       'Personal Information Controller: Barro Industries OPC (SEC-registered, Metro Manila), trading as Barro Kitchens. ' +
-      'Contact for privacy matters: the President, 0927 683 6300, barroindustries@gmail.com.' },
+      'Contact for privacy matters: the President, 0927 683 6300, hello@barroindustries.com.' },
     { heading: 'What we collect on this page', body:
       'Your name, e-mail, mobile number, designation and company; your drawn or typed signature; the agreements you tick; ' +
       'the date and time you sign; your device\'s IP address and browser identifier; and the access code you enter ' +

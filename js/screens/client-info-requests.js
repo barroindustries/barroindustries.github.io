@@ -64,6 +64,14 @@
    permanently delete the brief and its photos can also see the forensic
    block on it; flagged here as a deliberate reading, not a re-ask.
 
+   TWO FORM VERSIONS (2026-10-22, spec §9). A brief renders with the definition it was SUBMITTED under — `window.CIR_FORMS[sub.formId]`:
+   `commissary_brief` (the original, commissary-only questionnaire; every brief stored under it renders exactly as before) or
+   `project_brief_v2` (the general project brief: a project type, common parts and ONE conditional part for that type). A section with
+   `when: { key, in }` is shown only when the brief's own answer matches (the same rule as cir-core's sectionApplies — a brief can never
+   hold an answer for another type's part, but should one ever turn up it is listed under "Other answers", never hidden). The list and
+   the detail show the PROJECT TYPE prominently (summary.bizType holds its label; summary.location the city and province). Convert to
+   client and Prefill Quote Builder read the facts they need through `_cirFacts` / `_cirClientAddress`, which work for both versions.
+
    SPEC AMBIGUITY FLAGGED #1 — `fillEmptyOnly`. Spec §5.6 step 4 calls
    `fillEmptyOnly({ company, phone, email, address })` as if it were an
    existing shared helper ("fill-empty-only exactly as the two precedents").
@@ -248,6 +256,52 @@ function _cirOptionLabel(field, value) {
   return null;
 }
 
+// The definition a brief was submitted under — own keys only ('constructor' / '__proto__' are not forms).
+function _cirDef(formId) {
+  const all = window.CIR_FORMS;
+  return (all && typeof formId === 'string' && Object.prototype.hasOwnProperty.call(all, formId)) ? all[formId] : null;
+}
+// A section with `when: { key, in: [...] }` applies only when the brief's own answer to `key` is one of the listed values (the SAME
+// rule as functions/cir-core.js sectionApplies, which validated the brief on the way in). No `when` = always.
+function _cirSectionApplies(sec, answers) {
+  const w = sec && sec.when;
+  if (!w) return true;
+  const v = answers ? answers[w.key] : undefined;
+  return typeof v === 'string' && Array.isArray(w.in) && w.in.indexOf(v) !== -1;
+}
+function _cirFindField(def, key) {
+  let found = null;
+  ((def && def.sections) || []).forEach(sec => (sec.fields || []).forEach(f => { if (!found && f.key === key) found = f; }));
+  return found;
+}
+// The facts the list, the detail header, Convert and the notes need — from the summary the server built, falling back to the answers
+// (so it works for a brief of either form version, and for one whose summary is thin).
+function _cirFacts(sub, def) {
+  const s = sub.summary || {}, a = sub.answers || {};
+  let type = s.bizType || a.biz_type || '';
+  if (!type && a.project_type) { const f = _cirFindField(def, 'project_type'); const l = f ? _cirOptionLabel(f, a.project_type) : null; type = l != null ? l : String(a.project_type); }
+  const scopeField = _cirFindField(def, 'scope');
+  const scope = Array.isArray(a.scope) ? a.scope.map(v => { const l = scopeField ? _cirOptionLabel(scopeField, v) : null; return l != null ? l : String(v); }) : [];
+  // The budget the CLIENT stated. v1 stores its (string) option as the answer; v2 stores a band KEY and puts the band's LABEL in the summary, so a
+  // brief whose summary is thin is resolved through the definition (an unknown key is shown as it is, never hidden). Empty when they gave none.
+  let budget = s.budget || '';
+  if (!budget && a.budget) { const bf = _cirFindField(def, 'budget'); const l = bf ? _cirOptionLabel(bf, a.budget) : null; budget = l != null ? l : String(a.budget); }
+  return {
+    type: type,
+    location: s.location || s.siteAddress || a.site_address || '',   // v2: "City, Province"; v1: the site address
+    street: s.location ? (s.siteAddress || '') : '',                  // v2's optional street / landmark
+    target: s.targetDate || a.target_date || '',
+    budget: budget,
+    scope: scope
+  };
+}
+// The address to put on a client record / quote: v1 has the client's own office address; v2 asks only where the project is.
+function _cirClientAddress(sub) {
+  const s = sub.summary || {}, a = sub.answers || {};
+  if (a.address) return a.address;
+  return [s.siteAddress, s.location].filter(Boolean).join(', ') || a.site_address || '';
+}
+
 // ══════════════════════ LIST VIEW ══════════════════════
 function _cirListShellHtml() {
   return `
@@ -263,7 +317,7 @@ function _cirListShellHtml() {
     </div>
     <div id="cir-filter-row" style="margin-bottom:10px"></div>
     <div style="margin-bottom:12px">
-      <input type="text" id="cir-search" placeholder="Search ref, company, name, email, phone…"
+      <input type="text" id="cir-search" placeholder="Search ref, company, name, project type, place…"
         style="width:100%;max-width:360px;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px" />
     </div>
     <div id="cir-table-root">${window.skeletonHtml('table')}</div>
@@ -331,7 +385,7 @@ function _cirFilteredRows() {
     const q = _cirSearch;
     rows = rows.filter(r => {
       const s = r.summary || {};
-      const hay = [r.id, s.company, s.name, s.email, s.phone].map(x => (x || '').toLowerCase()).join(' ');
+      const hay = [r.id, s.company, s.name, s.email, s.phone, s.bizType, s.location].map(x => (x || '').toLowerCase()).join(' ');
       return hay.indexOf(q) !== -1;
     });
   }
@@ -359,9 +413,9 @@ function _cirTableHtml(rows) {
       <tr class="cir-row" data-ref="${escHtml(r.id)}" onclick="cirOpen('${refEsc}')" style="cursor:pointer">
         <td class="tc-avatar" style="font-family:monospace;white-space:nowrap">${escHtml(r.id)}</td>
         <td class="tc-detail" data-label="Received">${escHtml(r.submittedOnManila || '')}<div style="font-size:11px;color:var(--text-muted)">${escHtml(cirAge(r.createdAt))}</div>${staleBadge}</td>
-        <td class="tc-name"><strong>${escHtml(s.company || '')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(s.name || '')}${s.phone ? ' · ' + escHtml(s.phone) : ''}${s.email ? ' · ' + escHtml(s.email) : ''}</div></td>
-        <td class="tc-detail" data-label="Business">${escHtml(s.bizType || '')}</td>
-        <td class="tc-detail" data-label="Budget">${escHtml(s.budget || '')}</td>
+        <td class="tc-name"><strong>${escHtml(s.company || s.name || '')}</strong><div style="font-size:11px;color:var(--text-muted)">${[s.company ? s.name : '', s.phone, s.email].filter(Boolean).map(escHtml).join(' · ')}</div></td>
+        <td class="tc-detail" data-label="Project type">${s.bizType ? `<span class="badge badge-blue" style="font-size:12px;white-space:normal">${escHtml(s.bizType)}</span>` : ''}${s.budget ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">Budget ${escHtml(s.budget)}</div>` : ''}</td>
+        <td class="tc-detail" data-label="Location">${escHtml(s.location || s.siteAddress || '')}</td>
         <td class="tc-detail" data-label="Target">${escHtml(_cirFormatDate(s.targetDate || ''))}</td>
         <td class="tc-detail" data-label="Photos">${Number(s.photoCount) || 0}</td>
         <td class="tc-net">${cirStatusPill(r.status)}</td>
@@ -369,7 +423,7 @@ function _cirTableHtml(rows) {
   }).join('');
   return `
     <div class="table-wrap"><table class="data-table table-cards">
-      <thead><tr><th>Ref</th><th>Received</th><th>Company / Contact</th><th>Business</th><th>Budget</th><th>Target</th><th>Photos</th><th>Status</th></tr></thead>
+      <thead><tr><th>Ref</th><th>Received</th><th>Company / Contact</th><th>Project type</th><th>Location</th><th>Target</th><th>Photos</th><th>Status</th></tr></thead>
       <tbody>${trs}</tbody>
     </table></div>`;
 }
@@ -412,7 +466,7 @@ function _cirRenderDetail() {
   const root = _cirContainer || deptContainer();
   const sub = _cirCurrent;
   if (!root || !sub) return;
-  const def = (window.CIR_FORMS && window.CIR_FORMS[sub.formId]) || null;
+  const def = _cirDef(sub.formId);
   const canWrite = cirCanWrite();
   const canDelete = cirCanDelete();
   const isSeniorStaff = cirCanDelete(); // see header comment — reused as the "technical details" gate
@@ -446,7 +500,7 @@ function _cirRenderDetail() {
 
   const consent = sub.consent || {};
   const consentHtml = `
-    <div class="card"><h4 style="margin-top:0">Consent</h4>
+    <div class="card" style="padding:14px 16px"><h4 style="margin-top:0">Consent</h4>
       <p style="font-size:13px">Data-privacy consent given ${escHtml(_cirManilaDT(consent.consentedAt))} &middot; notice v${escHtml(consent.noticeVersion || '')}</p>
     </div>`;
 
@@ -454,7 +508,7 @@ function _cirRenderDetail() {
   if (isSeniorStaff) {
     const client = sub.client || {};
     technicalHtml = `
-      <details class="card"><summary style="cursor:pointer;font-weight:700">Technical details</summary>
+      <details class="card" style="padding:14px 16px"><summary style="cursor:pointer;font-weight:700">Technical details</summary>
         <table class="data-table cir-kv" style="margin-top:8px"><tbody>
           <tr><td style="width:38%;color:var(--text-muted)">IP</td><td>${escHtml(client.ip || '')}</td></tr>
           <tr><td style="width:38%;color:var(--text-muted)">User agent</td><td style="word-break:break-all">${escHtml(client.userAgent || '')}</td></tr>
@@ -467,12 +521,15 @@ function _cirRenderDetail() {
   }
 
   const notesHtml = _cirNotesHtml(_cirNotes || [], refNoEsc, canWrite);
+  const facts = _cirFacts(sub, def);
+  const typePill = facts.type ? `<span class="badge badge-blue" style="font-size:13px;padding:3px 10px;white-space:normal;vertical-align:middle">${escHtml(facts.type)}</span>` : '';
+  const glanceHtml = _cirGlanceHtml(facts);
 
   root.innerHTML = `
     <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px">
       <button class="btn-icon" onclick="cirBackToList()" title="Back">${emojiIcon('arrow-left', 18)}</button>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:16px">${escHtml(s.company || '')}</div>
+        <div style="font-weight:700;font-size:16px">${escHtml(s.company || s.name || '')} ${typePill}</div>
         <div style="font-size:12px;color:var(--text-muted)">${contactBits.join(' &middot; ')}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
           <span style="font-family:monospace">${escHtml(sub.id)}</span> &middot;
@@ -480,9 +537,10 @@ function _cirRenderDetail() {
         </div>
       </div>
     </div>
-    <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:14px 16px">
       ${statusSelectHtml}${convertHtml}${prefillHtml}${printHtml}${deleteHtml}
     </div>
+    ${glanceHtml}
     <div style="margin-top:12px">${bodyHtml}</div>
     ${consentHtml}
     ${technicalHtml}
@@ -490,6 +548,20 @@ function _cirRenderDetail() {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [root] });
   _cirHydratePhotos(root);
+}
+
+// The brief at a glance, above the full answers: what kind of project, where, when, and what is wanted. Every value is escaped.
+function _cirGlanceHtml(facts) {
+  const cell = (label, inner) => `<div style="min-width:0"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:3px">${escHtml(label)}</div>${inner}</div>`;
+  const cells = [];
+  cells.push(cell('Project type', `<div style="font-size:17px;font-weight:700">${escHtml(facts.type || '—')}</div>`));
+  cells.push(cell('Location', `<div>${escHtml(facts.location || '—')}</div>${facts.street ? `<div style="font-size:12px;color:var(--text-muted)">${escHtml(facts.street)}</div>` : ''}`));
+  if (facts.target) cells.push(cell('Timing', `<div>${escHtml(_cirFormatDate(facts.target))}</div>`));
+  if (facts.budget) cells.push(cell('Budget', `<div>${escHtml(facts.budget)}</div>`));   // v1: the client's chosen range; v2: the band the client chose (optional) — either way theirs, never a Barro figure
+  const scope = facts.scope.length
+    ? `<div style="margin-top:12px">${cell('Wants', facts.scope.map(l => `<span class="badge badge-gray" style="margin:2px 4px 2px 0;display:inline-block">${escHtml(l)}</span>`).join(''))}</div>`
+    : '';
+  return `<div class="card" style="margin-top:12px;padding:14px 16px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px">${cells.join('')}</div>${scope}</div>`;
 }
 
 function _cirNotesHtml(notes, refNoEsc, canWrite) {
@@ -503,7 +575,7 @@ function _cirNotesHtml(notes, refNoEsc, canWrite) {
       <textarea id="cir-note-text" rows="2" placeholder="Add an internal note…" style="width:100%;box-sizing:border-box"></textarea>
       <button class="btn-primary btn-sm" style="margin-top:6px" onclick="cirAddNote('${refNoEsc}')">Add note</button>
     </div>` : '';
-  return `<div class="card"><h4 style="margin-top:0">Notes</h4>${rows}${addForm}</div>`;
+  return `<div class="card" style="padding:14px 16px"><h4 style="margin-top:0">Notes</h4>${rows}${addForm}</div>`;
 }
 
 // ── Photo tile hydration (screen mode only — print mode resolves URLs
@@ -611,10 +683,10 @@ window.cirConvert = async function (refNo) {
 
     const FV = firebase.firestore.FieldValue;
     const existing = await window.Clients.findByName(name);
-    const scopeStr = Array.isArray(a.scope) ? a.scope.join(', ') : '';
+    const facts = _cirFacts(sub, _cirDef(sub.formId));
     const briefNote = ('Client brief ' + refNo + ' (' + (sub.submittedOnManila || '') + '): ' +
-      [a.biz_type, 'site: ' + (a.site_address || ''), 'budget: ' + (a.budget || '—'),
-        'target: ' + (a.target_date || '—'), 'scope: ' + scopeStr].filter(Boolean).join(' · ')).slice(0, 1000);
+      [facts.type, facts.location ? 'site: ' + facts.location : '', facts.budget ? 'budget: ' + facts.budget : '',
+        facts.target ? 'target: ' + _cirFormatDate(facts.target) : '', facts.scope.length ? 'scope: ' + facts.scope.join(', ') : ''].filter(Boolean).join(' · ')).slice(0, 1000);
 
     let clientId;
     if (existing) {
@@ -671,7 +743,7 @@ window.cirPrefillQuote = function (refNo) {
   window._qbReopenState = {
     clientName: s.name || '',
     clientCompany: s.company || '',
-    clientAddress: a.address || a.site_address || '',
+    clientAddress: _cirClientAddress(sub),
     clientPhone: s.phone || '',
     clientEmail: s.email || ''
   };
@@ -702,9 +774,9 @@ window.cirDelete = async function (refNo) {
 window.cirPrint = async function (refNo) {
   try {
     const sub = (_cirCurrent && _cirCurrent.id === refNo) ? _cirCurrent : await cirFetchOne(refNo);
-    const def = (window.CIR_FORMS && window.CIR_FORMS[sub.formId]) || null;
+    const def = _cirDef(sub.formId);
     const s = sub.summary || {};
-    const company = s.company || '';
+    const company = s.company || s.name || '';
     const photos = sub.photos || [];
     const urlMap = {};
     await Promise.all(photos.map(ph => {
@@ -715,15 +787,18 @@ window.cirPrint = async function (refNo) {
     const userName = (window.userProfile && window.userProfile.displayName) || '';
     const lh = window.buildLetterhead ? window.buildLetterhead({
       orientation: 'portrait',
-      docTitle: 'CLIENT INFORMATION REQUEST',
+      docTitle: String((def && def.eyebrow) || 'Client information request').toUpperCase(),      // "PROJECT BRIEF" (v2) / "CLIENT INFORMATION REQUEST" (v1)
       dateLabel: 'Received ' + (sub.submittedOnManila || ''),
-      extraMeta: [refNo, company],
+      extraMeta: [refNo, company, _cirFacts(sub, def).type].filter(Boolean),
       signatures: [{ label: 'Reviewed by', name: userName, title: 'Sales' }],
       footerNote: 'Barro Industries Operating System · Generated ' + new Date().toLocaleString('en-PH', { timeZone: 'Asia/Manila' }) + ' · Contains personal data (RA 10173) — handle accordingly.'
     }) : null;
 
     const consent = sub.consent || {};
-    const consentLine = (window.CIR_PRIVACY_NOTICE && window.CIR_PRIVACY_NOTICE.consentLine) || '';
+    // the consent line of the notice version this visitor actually ticked (a v1 brief shows the original wording)
+    const notices = window.CIR_NOTICES || {};
+    const noticeUsed = (typeof consent.noticeVersion === 'string' && Object.prototype.hasOwnProperty.call(notices, consent.noticeVersion)) ? notices[consent.noticeVersion] : window.CIR_PRIVACY_NOTICE;
+    const consentLine = (noticeUsed && noticeUsed.consentLine) || '';
     const consentHtml = `<p style="font-size:11px;color:#555;margin-top:10px">Consent: ${escHtml(consentLine)} (Notice v${escHtml(consent.noticeVersion || '')}, given ${escHtml(_cirManilaDT(consent.consentedAt))})</p>`;
 
     const bodyHtml = (lh ? lh.headerHTML : '') +
@@ -752,8 +827,10 @@ window.cirPrint = async function (refNo) {
 // silently dropped.
 function cirRenderAnswers(def, sub, mode, photoUrlMap) {
   if (!def) return '<div class="empty-state"><p>Form definition unavailable — reload the app.</p></div>';
-  let html = (def.sections || []).map((sec, i) => _cirRenderSection(sec, i + 1, sub, mode, photoUrlMap)).join('');
-  html += _cirOtherAnswersHtml(def, sub, mode);
+  // only the parts that apply to THIS brief (a hospital brief shows the hospital part, not the other eight), numbered in order
+  const parts = (def.sections || []).filter(sec => _cirSectionApplies(sec, sub.answers));
+  let html = parts.map((sec, i) => _cirRenderSection(sec, i + 1, sub, mode, photoUrlMap)).join('');
+  html += _cirOtherAnswersHtml(parts, sub, mode);
   return html;
 }
 
@@ -788,7 +865,7 @@ function _cirRenderSection(sec, idx, sub, mode, photoUrlMap) {
     inner = parts.join('');
   }
   if (mode === 'print') return `<section style="margin-bottom:14px"><h4>${idx}. ${escHtml(sec.title)}</h4>${inner}</section>`;
-  return `<div class="card"><h4 style="margin-top:0">${idx}. ${escHtml(sec.title)}</h4>${inner}</div>`;
+  return `<div class="card" style="padding:14px 16px"><h4 style="margin-top:0">${idx}. ${escHtml(sec.title)}</h4>${inner}</div>`;
 }
 
 function _cirRenderField(f, sub, mode, photoUrlMap) {
@@ -892,15 +969,15 @@ function _cirRenderPhotosBlock(f, sub, mode, photoUrlMap) {
   }).join('');
 }
 
-// Answer keys not defined by ANY section's fields (an older/newer
-// formVersion) — never dropped, never crash the renderer, always escaped.
-function _cirOtherAnswersHtml(def, sub, mode) {
+// Answer keys not shown by any PART that applies to this brief (an older/newer formVersion, or — which the server never lets in — an
+// answer belonging to another project type's part) — never dropped, never crash the renderer, always escaped.
+function _cirOtherAnswersHtml(parts, sub, mode) {
   const known = {};
-  (def.sections || []).forEach(sec => (sec.fields || []).forEach(f => { if (f.type !== 'photos') known[f.key] = true; }));
+  (parts || []).forEach(sec => (sec.fields || []).forEach(f => { if (f.type !== 'photos') known[f.key] = true; }));
   const extra = Object.keys(sub.answers || {}).filter(k => !known[k]);
   if (!extra.length) return '';
   const rows = extra.map(k => `<tr><td style="width:38%;color:var(--text-muted)">${escHtml(k)}</td><td>${escHtml(JSON.stringify(sub.answers[k]))}</td></tr>`).join('');
   const title = 'Other answers (older form version)';
   if (mode === 'print') return `<section style="margin-bottom:14px"><h4>${escHtml(title)}</h4><table class="data-table cir-kv"><tbody>${rows}</tbody></table></section>`;
-  return `<div class="card"><h4 style="margin-top:0">${escHtml(title)}</h4><table class="data-table cir-kv"><tbody>${rows}</tbody></table></div>`;
+  return `<div class="card" style="padding:14px 16px"><h4 style="margin-top:0">${escHtml(title)}</h4><table class="data-table cir-kv"><tbody>${rows}</tbody></table></div>`;
 }

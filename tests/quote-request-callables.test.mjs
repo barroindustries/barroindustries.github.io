@@ -138,6 +138,8 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
       assert.ok(!JSON.stringify(doc).includes('198.51.100.7'), 'a raw IP is stored');
     });
     it('refuses a stale page (defVersion mismatch)', async () => {
+      assert.equal(QR.VERSION, 3, 'the definition version moved with the 2026-10-22 notice change');
+      await rejectsWith(fns.qrStartSession.run({ defVersion: QR.VERSION - 1 }, ctx()), 'failed-precondition', /updated/);   // a page loaded before the notice change
       await rejectsWith(fns.qrStartSession.run({ defVersion: 999 }, ctx()), 'failed-precondition', /updated/);
       await rejectsWith(fns.qrStartSession.run({}, ctx()), 'failed-precondition');
       await rejectsWith(fns.qrStartSession.run(undefined, ctx()), 'failed-precondition');
@@ -478,6 +480,7 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
       assert.equal(doc.internal.materialPriceIndexMultiplier, 1);
       assert.equal(doc.consent.agreed, true);
       assert.equal(doc.consent.noticeSha256, Q.privacyNoticeSha256());
+      assert.equal(doc.consent.noticeVersion, '2026-10-22.1', 'the consent records the version of the wording it was given against');
       assert.equal(doc.client.ipHash.length, 64);
       assert.equal(doc.client.ip, '198.51.100.7');
       assert.equal(doc.client.fillMs, 91000);
@@ -622,6 +625,8 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
       const t = await readySession();
       await rejectsWith(fns.qrSubmit.run(submitPayload(t, { consent: { agreed: false, noticeVersion: QR.PRIVACY_NOTICE.version } }), ctx()), 'invalid-argument', /consent/);
       await rejectsWith(fns.qrSubmit.run(submitPayload(t, { consent: { agreed: true, noticeVersion: 'old' } }), ctx()), 'failed-precondition', /privacy notice/);
+      // the wording that was live until 2026-10-22 (it named the Gmail address) is no longer accepted: the page is asked to show the new one
+      await rejectsWith(fns.qrSubmit.run(submitPayload(t, { consent: { agreed: true, noticeVersion: '2026-10-21.1' } }), ctx()), 'failed-precondition', /The privacy notice was updated — please reload and review it again/);
       await rejectsWith(fns.qrSubmit.run(submitPayload(t, { consent: undefined }), ctx()), 'invalid-argument');
       assert.equal(fake.list('quote_requests').length, 0);
     });

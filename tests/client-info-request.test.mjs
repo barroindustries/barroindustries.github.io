@@ -415,11 +415,13 @@ describe('buildNotification', () => {
     assert.ok(n.body.length <= 2000);
   });
 
-  it('falls back to sensible placeholders when bizType/budget are blank', () => {
+  it('falls back to sensible placeholders when the project type / location are blank', () => {
+    // 2026-10-22: the wording is general now ("project type", "location") — the brief is no longer commissary-only
+    // and the project brief (v2) has no budget question. A v1 brief with a budget still shows its budget (below).
     const doc = { refNo: 'CIR-260926-ABCDEF', summary: { name: 'Joseph', company: '' } };
     const n = cir.buildNotification(doc);
-    assert.ok(n.body.includes('business type not given'));
-    assert.ok(n.body.includes('budget not given'));
+    assert.ok(n.body.includes('project type not given'));
+    assert.ok(n.body.includes('location not given'));
     assert.ok(n.title.includes('Joseph')); // falls back to name when company is blank
   });
 });

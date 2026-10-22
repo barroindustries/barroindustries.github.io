@@ -1,0 +1,230 @@
+/* css/project-brief.css — the public PROJECT BRIEF at /sales/clientinformationrequest/ (redesign 2026-10-22).
+   Loads AFTER css/site.css (tokens, header, buttons, footer, eyebrow, lead) and css/pages.css (page hero, breadcrumb), on the same
+   light navy / warm off-white / gold-hairline design as "/", /catalogue/ and /services/. This file adds ONLY the form: the progress
+   timeline, the type picker, the fields, the pills, the photo tiles, the consent block and the receipt. Scoped to #site.pg-brief,
+   so nothing here can reach the app, and it does not redraw the header or the footer that css/site.css owns.
+   Not precached by the service worker (a standalone public page, like css/catalogue.css). No inline style anywhere: the page's CSP has no
+   'unsafe-inline', and js/project-brief.js builds every node with createElement + textContent and styles nothing by attribute.
+   No 4-digit z-index (CHECK 1). Phone first: every grid is minmax(0,1fr) and nothing is wider than the viewport from 320px up. */
+
+#site.pg-brief{
+  --brief-edge:#7C869B;            /* the border of a control: 3.6:1 on white, so a field can be seen (WCAG 1.4.11) */
+  --brief-err:#9B1C1C;             /* an error: 8:1 on white */
+  --brief-ok:#1F6B45;
+  --brief-radius:6px;
+}
+
+/* ── hero: the page-hero of the content pages, text only, with three quiet facts under the lead ── */
+#site .brief-hero .pg-hero-copy{max-width:46rem}
+#site .brief-hero h1{margin-bottom:18px}
+#site .brief-facts{display:flex;flex-wrap:wrap;gap:14px 36px;margin-top:28px;padding-top:20px;border-top:1px solid var(--site-line-gold)}
+#site .brief-facts li{display:flex;flex-direction:column;gap:2px}
+#site .brief-facts b{color:var(--site-navy);font:500 1.2rem/1.2 var(--site-serif);letter-spacing:-.01em}
+#site .brief-facts span{color:var(--site-muted);font-size:14px;line-height:1.4}
+
+/* ── the form area ── */
+#site .brief-sec{padding:clamp(28px,4vw,56px) 0 clamp(56px,7vw,96px)}
+/* Until js/project-brief.js has drawn the form (it then adds .is-ready) its place is kept free, the height of the first step, a little under, at each
+   width, so the footer does not jump down when the form appears: measured on a phone, the page's layout-shift score was 0.52 without this. Only while
+   scripting is on, so a visitor without JavaScript sees the short <noscript> note and no empty band. */
+@media (scripting:enabled){
+  #site #brief-root:not(.is-ready){min-height:1500px}
+}
+@media (scripting:enabled) and (min-width:414px){#site #brief-root:not(.is-ready){min-height:1100px}}
+@media (scripting:enabled) and (min-width:600px){#site #brief-root:not(.is-ready){min-height:850px}}
+@media (scripting:enabled) and (min-width:960px){#site #brief-root:not(.is-ready){min-height:900px}}
+@media (scripting:enabled) and (min-width:1280px){#site #brief-root:not(.is-ready){min-height:770px}}
+#site .brief-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:22px;scroll-margin-top:calc(var(--site-head) + 10px)}
+#site .brief-col{min-width:0}
+/* once the brief is sent the progress column is gone: the receipt takes the whole row, at a readable width */
+#site .brief-layout.is-done{grid-template-columns:minmax(0,1fr);max-width:820px;margin:0 auto}
+#site .brief-card{padding:clamp(22px,4.2vw,44px);border:1px solid var(--site-line);border-top:2px solid var(--site-gold);border-radius:var(--site-radius);background:#fff;box-shadow:0 24px 48px -24px rgba(11,27,63,.18),0 2px 8px rgba(11,27,63,.05);scroll-margin-top:calc(var(--site-head) + 14px)}
+@media (min-width:960px){
+  #site .brief-layout{grid-template-columns:240px minmax(0,1fr);gap:clamp(36px,5vw,72px);align-items:start}
+  #site .brief-aside{position:sticky;top:calc(var(--site-head) + 28px)}
+}
+
+/* ── progress: a segmented bar on a phone, the "How we work" timeline (gold hairline, round markers) from 960px ── */
+#site .brief-count{margin-bottom:10px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .brief-now{margin-bottom:12px;color:var(--site-navy);font:500 1.15rem/1.25 var(--site-serif);letter-spacing:-.01em}
+#site .brief-nav{display:flex;gap:4px;list-style:none}
+#site .brief-nav-item{flex:1 1 0;min-width:0}
+#site .brief-nav-btn{position:relative;display:block;width:100%;height:24px;padding:0;border:0;background:none;color:var(--site-muted);font:500 15px/1.3 var(--site-sans);text-align:left;cursor:pointer}
+#site .brief-nav-btn::before{content:"";position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;background:var(--site-line)}
+#site .brief-nav-btn:disabled{cursor:default}
+#site .brief-nav-item.is-done .brief-nav-btn::before{background:var(--site-navy)}
+#site .brief-nav-item.is-current .brief-nav-btn::before{background:var(--site-gold)}
+#site .brief-nav-num,#site .brief-nav-label{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+@media (min-width:960px){
+  #site .brief-now{display:none}
+  #site .brief-nav{flex-direction:column;gap:0;border-left:1px solid var(--site-line-gold)}
+  #site .brief-nav-item{flex:none}
+  #site .brief-nav-btn{display:flex;align-items:baseline;gap:12px;height:auto;min-height:44px;padding:10px 0 10px 20px}
+  #site .brief-nav-btn::before{left:-5px;right:auto;top:50%;width:9px;height:9px;margin-top:-4px;border:1px solid var(--site-gold);border-radius:50%;background:#fff}
+  #site .brief-nav-item.is-done .brief-nav-btn::before{border-color:var(--site-navy);background:var(--site-navy)}
+  #site .brief-nav-item.is-current .brief-nav-btn::before{border-color:var(--site-gold);background:var(--site-gold)}
+  #site .brief-nav-num,#site .brief-nav-label{position:static;width:auto;height:auto;margin:0;overflow:visible;clip:auto;white-space:normal}
+  #site .brief-nav-num{flex:none;color:var(--site-gold-ink);font:500 15px/1.3 var(--site-serif);font-variant-numeric:tabular-nums}
+  #site .brief-nav-item.is-done .brief-nav-btn{color:var(--site-navy)}
+  #site .brief-nav-item.is-current .brief-nav-btn{color:var(--site-navy);font-weight:600}
+  #site .brief-nav-item:not(.is-done):not(.is-current) .brief-nav-btn:disabled{color:#767D8A}
+  #site .brief-nav-btn:not(:disabled):hover .brief-nav-label{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+}
+#site .brief-nav-btn:focus-visible{outline:2px solid var(--site-navy);outline-offset:2px}
+
+/* ── banners (offline, an expired draft) ── */
+#site .brief-banner{margin-bottom:16px;padding:12px 16px;border:1px solid var(--site-line);border-left:3px solid var(--site-gold);border-radius:var(--brief-radius);background:var(--site-paper);color:var(--site-ink);font-size:14.5px;line-height:1.5}
+#site .brief-banner.is-err{border-left-color:var(--brief-err)}
+
+/* ── one step ── */
+#site .brief-step-head{margin-bottom:clamp(20px,3vw,30px)}
+#site .brief-step h2{margin-bottom:10px;font-size:clamp(1.65rem,1.4vw + 1.2rem,2.3rem);line-height:1.12;letter-spacing:-.018em}
+#site .brief-step h2:focus{outline:none}
+#site .brief-step-hint{max-width:40em;color:var(--site-muted);font-size:1.0625rem;line-height:1.6}
+#site .brief-note-req{margin-bottom:18px;color:var(--site-muted);font-size:14px}
+#site .brief-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:22px 20px}
+@media (min-width:640px){
+  #site .brief-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #site .brief-field.is-full,#site .brief-fieldset,#site .brief-photos{grid-column:1/-1}
+}
+#site .brief-field,#site .brief-fieldset{min-width:0}
+#site .brief-fieldset{border:0}
+
+/* ── fields ── */
+#site .brief-label,#site .brief-fieldset legend{display:block;margin-bottom:8px;padding:0;color:var(--site-navy);font:600 14.5px/1.4 var(--site-sans)}
+#site .brief-req{color:var(--site-gold-ink)}
+#site .brief-hint{margin-top:6px;color:var(--site-muted);font-size:13.5px;line-height:1.5}
+#site .brief-fieldset .brief-hint{margin:-2px 0 10px}
+#site .brief-field input[type=text],
+#site .brief-field input[type=tel],
+#site .brief-field input[type=email],
+#site .brief-field input[type=number],
+#site .brief-field input[type=date],
+#site .brief-field select,
+#site .brief-field textarea,
+#site .brief-ph-cap{width:100%;min-height:48px;padding:0 14px;border:1px solid var(--brief-edge);border-radius:var(--brief-radius);background:#fff;color:var(--site-ink);font:400 16px/1.4 var(--site-sans);-webkit-appearance:none;appearance:none}
+#site .brief-field select{padding-right:40px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%230B1B3F' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m1 1.5 5 5 5-5'/%3E%3C/svg%3E") no-repeat right 16px center}
+#site .brief-field textarea{display:block;min-height:96px;padding:12px 14px;resize:vertical}
+#site .brief-field input::placeholder,#site .brief-field textarea::placeholder{color:#767D8A;opacity:1}
+#site .brief-field input:focus,#site .brief-field select:focus,#site .brief-field textarea:focus,#site .brief-ph-cap:focus{outline:2px solid var(--site-navy);outline-offset:2px;border-color:var(--site-navy)}
+#site .brief-field input[aria-invalid="true"],#site .brief-field select[aria-invalid="true"],#site .brief-field textarea[aria-invalid="true"]{border-color:var(--brief-err)}
+#site .brief-field-err{margin-top:7px;color:var(--brief-err);font-size:14px;font-weight:500;line-height:1.45}
+#site .brief-consent-err{margin:10px 0 0}
+
+/* ── pills (a choice of one, or several) ── */
+#site .brief-chips{display:flex;flex-wrap:wrap;gap:8px 10px}
+#site .brief-pill{position:relative;display:inline-flex;max-width:100%}
+#site .brief-pill input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+#site .brief-pill span{display:inline-flex;align-items:center;max-width:100%;min-height:44px;padding:9px 18px;border:1px solid var(--brief-edge);border-radius:22px;background:#fff;color:var(--site-navy);font:500 15px/1.3 var(--site-sans);user-select:none;transition:background-color .2s,border-color .2s,color .2s}
+#site .brief-pill:hover span{border-color:var(--site-navy)}
+#site .brief-pill input:checked+span{border-color:var(--site-navy);background:var(--site-navy);color:#fff}
+#site .brief-pill input:focus-visible+span{outline:2px solid var(--site-navy);outline-offset:3px}
+#site .brief-fieldset.is-invalid .brief-pill span,#site .brief-fieldset.is-invalid .brief-opt-body{border-color:var(--brief-err)}
+
+/* ── the type picker: twelve cards ── */
+#site .brief-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,148px),1fr));gap:10px}
+@media (min-width:640px){
+  #site .brief-cards{grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr));gap:12px}
+  #site .brief-opt-body{padding:18px 18px 17px}
+  #site .brief-opt-title{font-size:1.15rem}
+  #site .brief-opt-body::after{top:18px;right:16px}
+}
+#site .brief-opt{position:relative;display:flex;min-width:0}
+#site .brief-opt input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+#site .brief-opt-body{display:flex;flex-direction:column;gap:5px;width:100%;padding:16px 14px 15px;border:1px solid var(--site-line);border-radius:var(--site-radius);background:#fff;transition:border-color .2s,box-shadow .2s,background-color .2s}
+#site .brief-opt:hover .brief-opt-body{border-color:rgba(11,27,63,.4);box-shadow:0 10px 28px rgba(11,27,63,.07)}
+#site .brief-opt-title{padding-right:22px;color:var(--site-navy);font:500 1.08rem/1.25 var(--site-serif);letter-spacing:-.01em}
+#site .brief-opt-desc{color:var(--site-muted);font-size:14px;line-height:1.45}
+#site .brief-opt-body::after{content:"";position:absolute;top:17px;right:13px;width:16px;height:16px;border:1px solid var(--brief-edge);border-radius:50%;background:#fff}
+#site .brief-opt input:checked+.brief-opt-body{border-color:var(--site-navy);background:var(--site-paper);box-shadow:inset 0 0 0 1px var(--site-navy)}
+#site .brief-opt input:checked+.brief-opt-body::after{border-color:var(--site-gold);background:radial-gradient(circle,var(--site-gold) 0 4px,#fff 4.5px)}
+#site .brief-opt input:focus-visible+.brief-opt-body{outline:2px solid var(--site-navy);outline-offset:3px}
+
+/* ── photos ── */
+#site .brief-photos{display:flex;flex-direction:column;gap:18px}
+#site .brief-ph-count{color:var(--site-muted);font-size:14px}
+#site .brief-ph-group{padding:18px;border:1px solid var(--site-line);border-radius:var(--site-radius);background:var(--site-paper)}
+#site .brief-ph-group h3{margin-bottom:4px;font:500 1.2rem/1.25 var(--site-serif);letter-spacing:-.01em}
+#site .brief-ph-group p{margin-bottom:12px;color:var(--site-muted);font-size:14px;line-height:1.5}
+#site .brief-ph-actions{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:4px}
+#site .brief-ph-take{display:none}
+@media (pointer:coarse){#site .brief-ph-take{display:inline-flex}}
+#site .brief-ph-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,128px),1fr));gap:10px}
+#site .brief-ph-grid:not(:empty){margin-top:12px}
+#site .brief-ph-tile{display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--site-line);border-radius:var(--brief-radius);background:#fff}
+#site .brief-ph-tile img,#site .brief-ph-blank{display:block;width:100%;aspect-ratio:1;object-fit:cover;background:#E9E6DF}
+#site .brief-ph-blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px;color:var(--site-muted);font-size:11px;line-height:1.3;text-align:center}
+#site .brief-ph-blank svg{width:26px;height:26px}
+#site .brief-ph-cap{min-height:36px;padding:0 10px;border:0;border-top:1px solid var(--site-line);border-radius:0;font-size:13px}
+#site .brief-ph-status{padding:5px 10px 2px;color:var(--site-muted);font-size:12px;line-height:1.35}
+#site .brief-ph-status.is-err{color:var(--brief-err)}
+#site .brief-ph-retry{display:block;width:100%;padding:5px 10px 2px;border:0;background:none;color:var(--brief-err);font:inherit;font-size:12px;line-height:1.35;text-align:left;text-decoration:underline;cursor:pointer}
+#site .brief-ph-foot{display:flex;justify-content:flex-end;padding:0 4px 4px}
+#site .brief-ph-del{min-width:36px;min-height:36px;border:0;background:none;color:var(--site-muted);font:400 22px/1 var(--site-sans);cursor:pointer}
+#site .brief-ph-del:hover,#site .brief-ph-del:focus-visible{color:var(--brief-err)}
+
+/* ── consent + the notice ── */
+#site .brief-consent{display:flex;align-items:flex-start;gap:12px;margin-top:26px;padding-top:22px;border-top:1px solid var(--site-line-gold);color:var(--site-ink);font-size:15px;line-height:1.55;cursor:pointer}
+#site .brief-consent input{flex:none;width:22px;height:22px;margin-top:2px;accent-color:var(--site-navy);cursor:pointer}
+#site .brief-notice{margin-top:14px;color:var(--site-muted);font-size:14px}
+#site .brief-notice summary{display:inline-block;color:var(--site-navy);font-weight:600;cursor:pointer;text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+#site .brief-notice-sec{margin-top:14px}
+#site .brief-notice-sec h4{margin-bottom:3px;color:var(--site-navy);font:600 13.5px/1.4 var(--site-sans);letter-spacing:0}
+#site .brief-notice-sec p{line-height:1.55}
+#site .brief-notice-ver{margin-top:12px;font-size:12.5px}
+
+/* ── actions: Back (outline) and Next / Send (solid navy), the "saved" note and any message under them ── */
+#site .brief-actions{display:flex;gap:12px;margin-top:clamp(26px,3.4vw,40px);padding-top:22px;border-top:1px solid var(--site-line)}
+#site .brief-actions .site-btn{flex:0 0 auto}
+#site .brief-actions .brief-next{flex:1 1 auto}
+#site .brief-actions .site-btn[hidden]{display:none}
+#site .brief-actions .site-btn:disabled{opacity:.6;cursor:not-allowed}
+#site .brief-saved{margin-top:14px;color:var(--site-muted);font-size:13px}
+#site .brief-err{margin-top:14px;color:var(--brief-err);font-size:14.5px;font-weight:500;line-height:1.5}
+#site .brief-err:empty{display:none}
+#site .brief-err .site-btn{margin-left:10px;min-height:36px;padding:0 14px;font-size:13px}
+@media (min-width:640px){
+  #site .brief-actions .brief-next{flex:none;min-width:170px;margin-left:auto}
+}
+#site .hp{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden}
+
+/* ── the receipt ── */
+#site .brief-done h2{margin-bottom:10px;font-size:clamp(1.8rem,1.6vw + 1.3rem,2.5rem)}
+#site .brief-done-mark{display:grid;place-items:center;width:52px;height:52px;margin-bottom:18px;border:1px solid var(--site-gold);border-radius:50%;background:var(--site-paper);color:var(--site-navy)}
+#site .brief-done-lead{max-width:38em;color:var(--site-muted);font-size:1.0625rem}
+#site .brief-ref-label{margin:24px 0 4px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .brief-ref{margin-bottom:6px;color:var(--site-navy);font:600 clamp(1.5rem,3.4vw + .6rem,2.2rem)/1.15 var(--site-sans);font-variant-numeric:tabular-nums;letter-spacing:.04em;overflow-wrap:anywhere}
+#site .brief-received{margin-bottom:22px;color:var(--site-muted);font-size:14.5px}
+#site .brief-done .brief-actions{margin-top:0;padding-top:0;border-top:0}
+#site .brief-done .brief-actions{flex-wrap:wrap}
+#site .brief-done .brief-actions .site-btn{flex:1 1 100%}
+@media (min-width:480px){#site .brief-done .brief-actions .site-btn{flex:0 0 auto}}
+#site .brief-help{margin-top:22px;padding-top:20px;border-top:1px solid var(--site-line);font-size:15px;line-height:1.75}
+#site .brief-help a{color:var(--site-navy);font-weight:600}
+#site .brief-msgr:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+#site .brief-print-contact{display:none}
+#site .brief-sum{margin-top:26px;padding-top:6px;border-top:1px solid var(--site-line-gold)}
+#site .brief-sum-sec{margin-top:20px}
+#site .brief-sum-sec h3{margin-bottom:6px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.16em;text-transform:uppercase}
+#site .brief-sum-row{display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding:9px 0;border-bottom:1px solid var(--site-line);font-size:14.5px;line-height:1.5}
+#site .brief-sum-row dt{color:var(--site-muted)}
+#site .brief-sum-row dd{color:var(--site-ink);overflow-wrap:anywhere;white-space:pre-wrap}
+@media (min-width:640px){#site .brief-sum-row{grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:4px 20px}}
+
+/* ── the load error and the QA badge ── */
+#site .brief-fail h2{margin-bottom:10px;font-size:1.6rem}
+#site .brief-mock{position:fixed;right:10px;bottom:10px;z-index:9;padding:5px 10px;border-radius:4px;background:var(--site-navy);color:#fff;font:600 11px/1.3 var(--site-sans);opacity:.9}
+
+@media (prefers-reduced-motion:reduce){
+  #site .brief-pill span,#site .brief-opt-body{transition:none}
+}
+
+/* ── print: the page chrome never prints; "Save receipt as PDF" prints the receipt, and Ctrl+P on a step prints that step ── */
+@media print{
+  #site #site-header,#site #site-footer,#site .brief-hero,#site .brief-aside,#site .skip-link,#site .brief-mock,#site .brief-banner,
+  #site .brief-done .brief-actions,#site .brief-help{display:none !important}
+  #site.pg-brief .brief-layout{display:block}
+  #site .brief-card{padding:0;border:0;box-shadow:none}
+  #site .brief-sum-row{break-inside:avoid}
+  #site .brief-print-contact{display:block;margin-top:28px;padding-top:12px;border-top:1px solid var(--site-line);color:var(--site-muted);font-size:12px}
+}

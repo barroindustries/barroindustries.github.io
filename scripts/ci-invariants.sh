@@ -695,6 +695,73 @@ else
   cat_fail=1
 fi
 
+# The public PROJECT BRIEF (/sales/clientinformationrequest/, redesign 2026-10-22): a standalone public page on the website's design with its own
+# stylesheet (css/project-brief.css) and script (js/project-brief.js), reached from a "full project brief" link on the public pages. Like /catalogue/
+# it is NOT part of the app shell (never precached), it carries no pricing vocabulary, and its CSP stays strict: no inline script, no inline style, no
+# event-handler attribute, and only the scripts below. tests/project-brief-page.test.mjs pins the rest (design parity, the Messenger link, the wiring).
+# FAIL output carries line numbers only.
+BRIEF_PAGE='sales/clientinformationrequest/index.html'
+brief_fail=0
+for bf in "$BRIEF_PAGE" css/project-brief.css js/project-brief.js; do
+  if [ ! -f "$bf" ]; then
+    echo "FAIL: public project-brief file $bf is missing."
+    brief_fail=1
+    continue
+  fi
+  brief_price_lines=$(grep -nE '₱|PHP ?[0-9]|basePrice|priceAdder|pricePer|formulaType|unitPrice|exactTotal|listPrice|pricing-core' "$bf" | cut -d: -f1 | head -10 | tr '\n' ' ')
+  if [ -n "$brief_price_lines" ]; then
+    echo "FAIL: $bf carries pricing vocabulary (line(s): $brief_price_lines). The public project brief must hold no price, no peso amount and no pricing field. Offending text withheld on purpose."
+    brief_fail=1
+  fi
+done
+if [ -f "$BRIEF_PAGE" ]; then
+  brief_inline=$(grep -nE '<script' "$BRIEF_PAGE" | grep -v ' src=' | cut -d: -f1 | head -5 | tr '\n' ' ')
+  if [ -n "$brief_inline" ]; then
+    echo "FAIL: $BRIEF_PAGE has an inline <script> (line(s): $brief_inline). Its CSP allows no inline script: the code lives in js/project-brief.js."
+    brief_fail=1
+  fi
+  brief_style=$(grep -nE '<style|[[:space:]]style=|[[:space:]]on[a-z]+=' "$BRIEF_PAGE" | cut -d: -f1 | head -5 | tr '\n' ' ')
+  if [ -n "$brief_style" ]; then
+    echo "FAIL: $BRIEF_PAGE has an inline <style>, a style attribute or an event-handler attribute (line(s): $brief_style). Its CSP allows none of them: the look lives in css/project-brief.css."
+    brief_fail=1
+  fi
+  for brief_src in $(grep -oE '<script[^>]*src="[^"]+"' "$BRIEF_PAGE" | sed -E 's/.*src="([^"]+)"/\1/'); do
+    if ! printf '%s' "$brief_src" | grep -qE '^(/js/site\.js|/js/cir-forms\.js|/js/project-brief\.js|https://www\.gstatic\.com/firebasejs/[0-9.]+/firebase-(app|functions)-compat\.js)$'; then
+      echo "FAIL: $BRIEF_PAGE loads $brief_src. The project brief may load only the shared site.js and cir-forms.js, its own script and the two Firebase compat scripts (app, functions) — never an app script or another SDK."
+      brief_fail=1
+    fi
+  done
+  if ! grep -q 'http-equiv="Content-Security-Policy"' "$BRIEF_PAGE" || grep 'http-equiv="Content-Security-Policy"' "$BRIEF_PAGE" | grep -q "unsafe-inline\|unsafe-eval"; then
+    echo "FAIL: $BRIEF_PAGE must carry a Content-Security-Policy meta without 'unsafe-inline' / 'unsafe-eval'."
+    brief_fail=1
+  fi
+  if ! grep -q 'name="robots" content="noindex' "$BRIEF_PAGE"; then
+    echo "FAIL: $BRIEF_PAGE must stay noindex (it is an intake form, not a landing page)."
+    brief_fail=1
+  fi
+fi
+if grep -nE -- "'/sales/|'/js/project-brief\.js'|'/css/project-brief\.css'" sw.js >/dev/null 2>&1; then
+  echo "FAIL: sw.js PRECACHE lists the public project brief or its assets. Like /catalogue/, they are deliberately NOT precached (not part of the app shell):"
+  grep -nE -- "'/sales/|'/js/project-brief\.js'|'/css/project-brief\.css'" sw.js | sed 's/^/    /'
+  brief_fail=1
+fi
+# The page renders FORMS.project_brief_v2 (js/cir-forms.js), so the DEFINITION is held to the same rule (the three files above never contain it).
+# The one allowance: the client's optional "Approximate budget" question — peso bands the CLIENT picks to tell us what they expect to spend, i.e.
+# client-stated budget bands, not prices. scripts/check-brief-copy.js lets exactly that question through (it must equal
+# scripts/brief-budget-bands.json field for field) and scans every other string; the allowance covers this one definition only — the page files
+# above, the catalogue, the content pages, the homepage and the other checks keep their ban untouched. tests/brief-budget.test.mjs pins all of it.
+if [ ! -f scripts/check-brief-copy.js ] || [ ! -f scripts/brief-budget-bands.json ]; then
+  echo "FAIL: scripts/check-brief-copy.js or scripts/brief-budget-bands.json is missing (the project brief definition would go unscanned)."
+  brief_fail=1
+else
+  brief_copy_out=$(node scripts/check-brief-copy.js 2>&1) || { echo "$brief_copy_out"; brief_fail=1; }
+fi
+if [ "$brief_fail" -eq 0 ]; then
+  echo "PASS: the public project brief (page, css, js) carries no pricing tokens, no inline script / style / handler, loads only the allowed scripts, stays noindex, and is not precached; its definition holds no price word except the client-stated budget bands"
+else
+  cat_fail=1
+fi
+
 
 # Partner-brand guard over every PUBLIC surface: the <head> (title / meta / OG / Twitter /
 # JSON-LD), the #site section (copy, project photo alt text), the whole catalogue page (copy,
@@ -715,6 +782,7 @@ else
 fi
 PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js css/quote-request.css js/quote-request.js js/qr-def.js js/product-families.js js/qr-families.js js/qr-preview.js"
 PUBLIC_FILES="$PUBLIC_FILES css/pages.css $SEO_PAGES"
+PUBLIC_FILES="$PUBLIC_FILES $BRIEF_PAGE css/project-brief.css js/project-brief.js"
 [ -f scripts/product-photos.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/product-photos.json"
 [ -f scripts/public-categories.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-categories.json"
 [ -f scripts/public-families.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-families.json"

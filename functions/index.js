@@ -3432,7 +3432,7 @@ exports.cirStartDraft = functions
     const nowMs = Date.now();
 
     const formId = (data && typeof data.formId === 'string') ? data.formId : '';
-    const formDef = cir.FORMS[formId];
+    const formDef = cir.getForm(formId);   // own-key lookup: 'constructor' / '__proto__' are not forms
     if (!formDef) {
       throw new functions.https.HttpsError('invalid-argument', 'Unknown form.');
     }
@@ -3525,7 +3525,7 @@ exports.cirUploadPhoto = functions
     if (!draftData || draftData.submittedAt != null || !createdMs0 || (nowMs - createdMs0) > cir.LIMITS.draftTtlMs) {
       throw new functions.https.HttpsError('failed-precondition', sessionExpiredMsg);
     }
-    const groupKeys = cirGroupKeysOf(cir.FORMS[draftData.formId]);
+    const groupKeys = cirGroupKeysOf(cir.getForm(draftData.formId));
     const group = (data && typeof data.group === 'string') ? data.group : '';
     if (!groupKeys.includes(group)) {
       throw new functions.https.HttpsError('invalid-argument', 'Invalid photo group.');
@@ -3569,7 +3569,7 @@ exports.cirUploadPhoto = functions
         if (!cur || cur.submittedAt != null) return { outcome: 'expired' };
         const curCreatedMs = cur.createdAt && typeof cur.createdAt.toMillis === 'function' ? cur.createdAt.toMillis() : 0;
         if (!curCreatedMs || (nowMs - curCreatedMs) > cir.LIMITS.draftTtlMs) return { outcome: 'expired' };
-        if (!cirGroupKeysOf(cir.FORMS[cur.formId]).includes(group)) return { outcome: 'bad_group' };
+        if (!cirGroupKeysOf(cir.getForm(cur.formId)).includes(group)) return { outcome: 'bad_group' };
         const curPhotoCount = cur.photoCount || 0;
         const curBytesTotal = cur.bytesTotal || 0;
         if (curPhotoCount + 1 > cir.LIMITS.maxPhotos) return { outcome: 'too_many' };
@@ -3689,7 +3689,7 @@ exports.cirSubmit = functions
       throw new functions.https.HttpsError('unauthenticated', 'Please reload the page.');
     }
     const formId = (data && typeof data.formId === 'string') ? data.formId : '';
-    const formDef = cir.FORMS[formId];
+    const formDef = cir.getForm(formId);
     if (!formDef) {
       throw new functions.https.HttpsError('invalid-argument', 'Unknown form.');
     }
@@ -3700,7 +3700,10 @@ exports.cirSubmit = functions
     if (consent.agreed !== true) {
       throw new functions.https.HttpsError('invalid-argument', 'Please tick the data privacy consent.');
     }
-    if (consent.noticeVersion !== cir.PRIVACY_NOTICE.version) {
+    // Any notice version the server still knows (the current one, or a kept legacy one: a page opened before the
+    // 2026-10-22 redesign still sends the original) — recorded below against the text that version names.
+    const notice = cir.noticeFor(consent.noticeVersion);
+    if (!notice) {
       throw new functions.https.HttpsError('failed-precondition', 'The privacy notice was updated — please reload and review it again.');
     }
 
@@ -3713,7 +3716,7 @@ exports.cirSubmit = functions
     // 3. Validate answers.
     const av = cir.validateAnswers(formDef, data && data.answers);
     if (!av.ok) {
-      if (av.errors.some((e) => e.indexOf('Unknown field') === 0)) {
+      if (av.errors.some((e) => e.indexOf('Unknown field') === 0 || / does not apply to this project type$/.test(e))) {
         cirLogAbuse(db, 'bad_payload', portalSha256Hex(ip), { errors: av.errors.slice(0, 5) }).catch(() => {});
       }
       throw new functions.https.HttpsError('invalid-argument', av.errors.slice(0, 5).join(' '));
@@ -3834,8 +3837,8 @@ exports.cirSubmit = functions
       photos: finalPhotos,
       consent: {
         agreed: true,
-        noticeVersion: consent.noticeVersion,
-        noticeSha256: cir.privacyNoticeSha256(),
+        noticeVersion: notice.version,
+        noticeSha256: notice.sha256,
         consentedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       client: {

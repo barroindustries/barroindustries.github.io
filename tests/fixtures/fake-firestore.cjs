@@ -11,7 +11,9 @@
 //     (tests mock Date, so server time is controllable).
 // Supported surface: collection().doc().{get,set,create,update,delete,collection}, collection().add(),
 // where(field,'==' | 'array-contains',v), orderBy(field,dir), limit(n), get(), runTransaction, batch,
-// FieldValue.serverTimestamp, admin.storage().bucket() as inert stubs.
+// FieldValue.serverTimestamp, FieldValue.delete (an update() key whose value is delete() removes that field, dotted
+// paths included — cirRemovePhoto uses it), admin.storage().bucket() as inert stubs (a test that needs real objects
+// replaces `fake.admin.storage` before loading the functions).
 'use strict';
 
 class FakeTimestamp {
@@ -20,11 +22,12 @@ class FakeTimestamp {
   toDate() { return new Date(this._ms); }
 }
 const SERVER_TS = Object.freeze({ __sentinel: 'serverTimestamp' });
+const DELETE_FIELD = Object.freeze({ __sentinel: 'deleteField' });
 
 function clone(v) {
   if (v === null || typeof v !== 'object') return v;
   if (v instanceof FakeTimestamp) return new FakeTimestamp(v._ms);
-  if (v === SERVER_TS) return v;
+  if (v === SERVER_TS || v === DELETE_FIELD) return v;
   if (Array.isArray(v)) return v.map(clone);
   const o = {};
   for (const k of Object.keys(v)) o[k] = clone(v[k]);
@@ -33,13 +36,14 @@ function clone(v) {
 
 function assertWritable(v, where) {
   if (v === undefined) throw new Error(`Cannot use "undefined" as a Firestore value (found at ${where}). Use null or omit the field.`);
-  if (v === null || typeof v !== 'object' || v === SERVER_TS || v instanceof FakeTimestamp) return;
+  if (v === null || typeof v !== 'object' || v === SERVER_TS || v === DELETE_FIELD || v instanceof FakeTimestamp) return;
   if (Array.isArray(v)) { v.forEach((x, i) => { if (Array.isArray(x)) throw new Error(`Nested arrays are not supported (at ${where}[${i}])`); assertWritable(x, `${where}[${i}]`); }); return; }
   for (const k of Object.keys(v)) assertWritable(v[k], `${where}.${k}`);
 }
 
 function resolveSentinels(v, nowMs) {
   if (v === SERVER_TS) return new FakeTimestamp(nowMs);
+  if (v === DELETE_FIELD) return v;
   if (v === null || typeof v !== 'object' || v instanceof FakeTimestamp) return v;
   if (Array.isArray(v)) return v.map((x) => resolveSentinels(x, nowMs));
   const o = {};
@@ -90,11 +94,11 @@ function createFake() {
       if (!map.has(path)) throw err(5, 'NOT_FOUND', `No document to update: ${path}`);
       const cur = clone(map.get(path));
       for (const k of Object.keys(data)) {
-        if (k.indexOf('.') < 0) { cur[k] = data[k]; continue; }
+        if (k.indexOf('.') < 0) { if (data[k] === DELETE_FIELD) delete cur[k]; else cur[k] = data[k]; continue; }
         const parts = k.split('.');
         let o = cur;
         for (let i = 0; i < parts.length - 1; i++) { if (typeof o[parts[i]] !== 'object' || o[parts[i]] === null) o[parts[i]] = {}; o = o[parts[i]]; }
-        o[parts[parts.length - 1]] = data[k];
+        if (data[k] === DELETE_FIELD) delete o[parts[parts.length - 1]]; else o[parts[parts.length - 1]] = data[k];
       }
       map.set(path, cur);
     }
@@ -204,7 +208,7 @@ function createFake() {
     // the module the tests splice in for require('firebase-admin')
     admin: null,
   };
-  const FieldValue = { serverTimestamp: () => SERVER_TS };
+  const FieldValue = { serverTimestamp: () => SERVER_TS, delete: () => DELETE_FIELD };
   const firestore = Object.assign(() => db, { FieldValue });
   const bucket = { file: () => ({ save: async () => {}, move: async () => {}, delete: async () => {} }), deleteFiles: async () => {} };
   fake.admin = { initializeApp() {}, firestore, storage: () => ({ bucket: () => bucket }), auth: () => ({}), messaging: () => ({}) };

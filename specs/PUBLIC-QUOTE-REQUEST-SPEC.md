@@ -235,7 +235,9 @@ var ESTIMATE = {
 };
 ```
 
-### 4.5 `PRIVACY_NOTICE` (version `'2026-10-21.1'`)
+### 4.5 `PRIVACY_NOTICE` (version `'2026-10-22.1'`; was `'2026-10-21.1'`)
+
+> **2026-10-22:** the controller section's privacy contact is now `hello@barroindustries.com` instead of the Gmail address (owner ruling; the project brief's and the client portal's notices changed with it, spec `CLIENT-INFO-REQUEST-SPEC.md` §9.8). The notice version moved to `2026-10-22.1` and `QR_DEF.VERSION` to 3: a page still on 2 is refused with "please reload".
 
 `consentLine`: "I agree to Barro Industries using these details and my item list to prepare an estimate and a quotation, in line with the Data Privacy Act of 2012 (RA 10173)."
 `sections`: copy CIR's eight headings verbatim with these substitutions — "What we collect on this page": "Your name, company or agency, mobile number, e-mail, delivery address, your answers about what you need and what it is for, the items, sizes and notes you add to your quote, the date and time you send it, and your device's IP address and browser identifier."; "Why": "To estimate and prepare a quotation for the items you selected and to contact you about it."; "How long we keep it": "If no project follows, up to twenty-four (24) months from our last contact with you, then deleted. If a project follows, for the life of the project and ten (10) years after turnover. You may ask us to delete this request at any time."; "Security": "… This page stores a draft of your list and your details only in your own browser — never prices — and no advertising cookies." Everything else byte-for-byte from CIR (controller, lawful basis, sharing, rights).

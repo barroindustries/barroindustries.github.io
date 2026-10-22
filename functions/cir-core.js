@@ -15,7 +15,30 @@
 
 const crypto = require('crypto');
 const portal = require('./portal-core');
-const { FORMS, PRIVACY_NOTICE, LIMITS } = require('./cir-forms');
+const { FORMS, PRIVACY_NOTICE, NOTICES, LIMITS } = require('./cir-forms');
+
+// ──────────────────────────────────────────────────────────────────────────
+//  Form and notice lookups — OWN keys only. `FORMS[formId]` on a plain object
+//  also resolves 'constructor', 'toString', '__proto__' … to a truthy
+//  Object.prototype member, which every `if (!formDef)` guard would then
+//  accept as a form. A caller-supplied id is only ever looked up through here.
+// ──────────────────────────────────────────────────────────────────────────
+const _hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+/** The form definition for `formId`, or null (never an inherited member). */
+function getForm(formId) {
+  return (typeof formId === 'string' && _hasOwn(FORMS, formId)) ? FORMS[formId] : null;
+}
+
+/** The privacy notice a consent was given against — `version` must be one the
+ *  server knows (the current notice or a kept legacy one) — as
+ *  { version, sha256 } where sha256 is of THAT notice's sections, so the stored
+ *  consent record matches the text the visitor was actually shown. null when
+ *  the version is unknown (a stale or forged page → "reload"). */
+function noticeFor(version) {
+  if (typeof version !== 'string' || !_hasOwn(NOTICES, version)) return null;
+  return { version, sha256: crypto.createHash('sha256').update(JSON.stringify(NOTICES[version].sections)).digest('hex') };
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 //  Rate limiting config (§2.1) — per-scope buckets, all fail CLOSED via
@@ -98,6 +121,22 @@ function _allFields(formDef) {
   return out;
 }
 
+/** The answerable (non-photo) fields of one section. */
+function _sectionFields(sec) {
+  return (sec && sec.fields ? sec.fields : []).filter((f) => f.type !== 'photos');
+}
+
+/** Does this section apply, given the answers collected so far? A section with
+ *  no `when` always applies; one with `when: { key, in: [...] }` applies only
+ *  when the (already validated) controlling answer is one of the listed values.
+ *  Exported: the staff screen's walker applies the SAME rule to a stored brief. */
+function sectionApplies(sec, answers) {
+  const w = sec && sec.when;
+  if (!w) return true;
+  const v = answers ? answers[w.key] : undefined;
+  return typeof v === 'string' && Array.isArray(w.in) && w.in.indexOf(v) !== -1;
+}
+
 /** Normalises a field/column's `options` array (mixed string / {v,l} entries)
  *  into [{v,l}], preserving definition order — the order chips are re-sorted
  *  into and the allowlist chips/table-selects are checked against. */
@@ -124,15 +163,16 @@ function validateAnswers(formDef, rawAnswers) {
   const clean = {};
   const raw = (rawAnswers && typeof rawAnswers === 'object' && !Array.isArray(rawAnswers)) ? rawAnswers : {};
   const fields = _allFields(formDef);
-  const fieldsByKey = {};
+  const fieldsByKey = Object.create(null);   // no inherited 'constructor' / '__proto__' / 'toString' "fields"
   fields.forEach((f) => { fieldsByKey[f.key] = f; });
 
-  // Unknown-key check — every raw key must belong to a real (non-photos) field.
+  // Unknown-key check — every raw key must belong to a real (non-photos) field
+  // of the WHOLE form (all conditional sections included).
   Object.keys(raw).forEach((k) => {
     if (!fieldsByKey[k]) errors.push(`Unknown field "${k}"`);
   });
 
-  fields.forEach((f) => {
+  const validateField = (f) => {
     const has = Object.prototype.hasOwnProperty.call(raw, f.key);
     const v = has ? raw[f.key] : undefined;
 
@@ -251,6 +291,31 @@ function validateAnswers(formDef, rawAnswers) {
       default:
         break;
     }
+  };
+
+  // Pass 1 — the sections that apply to every project (no `when`), in definition order.
+  const sections = (formDef && formDef.sections) ? formDef.sections : [];
+  sections.forEach((sec) => { if (!sec.when) _sectionFields(sec).forEach(validateField); });
+
+  // Pass 2 — the conditional sections. One that applies to the submitted type is
+  // validated like any other (its `required` fields are required NOW); one that
+  // does not is rejected if the payload carries ANY of its keys — a conditional
+  // answer is accepted only for the project type it belongs to, and is never
+  // silently dropped (the page never sends one, so only a stale/forged payload can).
+  sections.forEach((sec) => {
+    if (!sec.when) return;
+    if (sectionApplies(sec, clean)) { _sectionFields(sec).forEach(validateField); return; }
+    _sectionFields(sec).forEach((f) => {
+      if (Object.prototype.hasOwnProperty.call(raw, f.key)) errors.push(`"${f.label}" does not apply to this project type`);
+    });
+  });
+
+  // Form-level "at least one of these" rules (e.g. a mobile number OR an email).
+  (formDef && Array.isArray(formDef.requireOneOf) ? formDef.requireOneOf : []).forEach((g) => {
+    const keys = g && Array.isArray(g.keys) ? g.keys : [];
+    if (keys.length && !keys.some((k) => Object.prototype.hasOwnProperty.call(clean, k))) {
+      errors.push(g.message || `One of ${keys.join(', ')} is required`);
+    }
   });
 
   return { ok: errors.length === 0, errors, clean };
@@ -357,16 +422,35 @@ function fingerprintDay(email, phone, manilaDateStr) {
 //  buildSummary / buildNotification
 // ──────────────────────────────────────────────────────────────────────────
 
+/** One field's value as summary text: a number as its digits, a string as is — except a `select`, whose
+ *  OPTION LABEL is stored (the list should read "Hospital or clinic", not a key) — and a `chips` field as its
+ *  labels joined by ", ". Anything else (or a blank) is ''. For a form whose option values equal their labels
+ *  (v1) this is the old behaviour exactly. */
+function _summaryText(formDef, clean, fieldKey) {
+  const v = clean ? clean[fieldKey] : undefined;
+  if (v == null) return '';
+  const f = _allFields(formDef).find((x) => x.key === fieldKey);
+  const label = (val) => {
+    const hit = f ? _optionEntries(f.options).find((o) => o.v === val) : null;
+    return hit ? hit.l : val;
+  };
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'string') return (f && f.type === 'select') ? label(v) : v;
+  if (Array.isArray(v) && f && f.type === 'chips') return v.map(label).join(', ');
+  return '';
+}
+
+/** summaryKeys: { outKey: 'field_key' | { join: [keys] } | { first: [keys] } } — see js/cir-forms.js. */
 function buildSummary(formDef, clean, photoCount) {
   const keys = (formDef && formDef.summaryKeys) || {};
   const out = {};
   Object.keys(keys).forEach((outKey) => {
-    const fieldKey = keys[outKey];
-    const v = clean ? clean[fieldKey] : undefined;
-    if (v == null) out[outKey] = '';
-    else if (typeof v === 'number') out[outKey] = String(v);
-    else if (typeof v === 'string') out[outKey] = v;
-    else out[outKey] = '';
+    const spec = keys[outKey];
+    if (typeof spec === 'string') { out[outKey] = _summaryText(formDef, clean, spec); return; }
+    const list = spec && Array.isArray(spec.join) ? spec.join : (spec && Array.isArray(spec.first) ? spec.first : null);
+    if (!list) { out[outKey] = ''; return; }
+    const parts = list.map((k) => _summaryText(formDef, clean, k)).filter((t) => t !== '');
+    out[outKey] = spec.join ? parts.join(', ') : (parts[0] || '');
   });
   out.photoCount = Number.isFinite(photoCount) ? photoCount : 0;
   return out;
@@ -386,13 +470,13 @@ function buildNotification(sub) {
   const ref = doc.refNo || '';
   const company = _notifSafe(summary.company);
   const name = _notifSafe(summary.name);
-  const bizType = _notifSafe(summary.bizType);
-  const budget = _notifSafe(summary.budget);
+  const projectType = _notifSafe(summary.bizType);    // v2: "Hospital or clinic"; v1: "Bakery / pastry"
+  const where = _notifSafe(summary.location) || _notifSafe(summary.budget);   // v2: "Quezon City, Metro Manila"; v1 has no location, so its budget
 
   let title = `📥 New client brief — ${company || name || 'unnamed client'}`;
   if (title.length > 200) title = title.slice(0, 200);
 
-  let body = `${name || 'A prospective client'} · ${bizType || 'business type not given'} · ${budget || 'budget not given'} · Ref ${ref}. Open Sales → Briefs.`;
+  let body = `${name || 'A prospective client'} · ${projectType || 'project type not given'} · ${where || 'location not given'} · Ref ${ref}. Open Sales → Briefs.`;
   if (body.length > 2000) body = body.slice(0, 2000);
 
   return { title, body, icon: '📥', type: 'client_info_request', link: 'dept:Sales' };
@@ -405,8 +489,12 @@ function privacyNoticeSha256() {
 module.exports = {
   FORMS,
   PRIVACY_NOTICE,
+  NOTICES,
   LIMITS,
   RATE,
+  getForm,
+  noticeFor,
+  sectionApplies,
   refNo,
   photoId,
   draftPath,
