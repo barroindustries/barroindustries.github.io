@@ -225,7 +225,10 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     assert.match(html, /<dt>Sinks<\/dt><dd>1 \/ 2 \/ 3 \/ 4<\/dd>/);
     assert.match(html, /<dt>Size<\/dt><dd>Made to your length, width and height<\/dd>/);
     // the material line is the owner's own homepage statement, last in the list
-    assert.ok(html.endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl></div></li>`), 'the Material row is not last');
+    assert.ok(html.endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl><p class="cat-learn"><a class="link-arrow" href="/products/stainless-steel-sinks/">Learn more about stainless steel sinks</a></p></div></li>`), 'the Material row is not last, or the "Learn more" link is not after it');
+    // a family with no product page yet simply has no link (a new family needs its page first)
+    const nopage = B.renderFamilyCard({ ...FAMS.families.sink, id: 'no_page_yet' }, { id: 'washing' }, null, '');
+    assert.ok(nopage.endsWith(`</dd></div></dl></div></li>`) && !nopage.includes('cat-learn'));
     // the size line names the axes the family really has: wall shelving has no height
     const shelf = B.renderFamilyCard(FAMS.families.wall_shelf, { id: 'storage' }, null, '');
     assert.match(shelf, /<dt>Size<\/dt><dd>Made to your length and depth<\/dd>/);

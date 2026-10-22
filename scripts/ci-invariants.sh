@@ -655,7 +655,7 @@ fi
 # rulings apply: R1 NO PRICES (the whole file, head and body, plus the plain words price / pricing / cost), R5 no partner company (checked below
 # with the other public surfaces), ONE phone / ONE email / the Quezon City address (no Gmail, no 0960, no San Fernando address), and none of
 # them in the service worker's PRECACHE. FAIL output carries line numbers only. tests/seo-pages.test.mjs pins the rest of their content.
-SEO_PAGES='services/index.html services/commercial-kitchen-fit-out/index.html services/stainless-steel-fabrication/index.html services/exhaust-and-fresh-air-systems/index.html services/lpg-gas-line-installation/index.html services/kitchen-fire-suppression/index.html services/institutional-and-government-supply/index.html work/index.html work/ispsc-2026/index.html work/dmmmsu-2022-2023/index.html areas-we-serve/index.html faq/index.html'
+SEO_PAGES='services/index.html services/commercial-kitchen-fit-out/index.html services/stainless-steel-fabrication/index.html services/exhaust-and-fresh-air-systems/index.html services/lpg-gas-line-installation/index.html services/kitchen-fire-suppression/index.html services/institutional-and-government-supply/index.html work/index.html work/ispsc-2026/index.html work/dmmmsu-2022-2023/index.html areas-we-serve/index.html faq/index.html guides/index.html guides/commissary-kitchen-requirements-philippines/index.html guides/ss304-vs-ss316-stainless-steel/index.html'
 seo_fail=0
 for sp in $SEO_PAGES; do
   if [ ! -f "$sp" ]; then
@@ -684,13 +684,67 @@ if [ ! -f css/pages.css ]; then
   echo "FAIL: css/pages.css (the content pages' stylesheet) is missing."
   seo_fail=1
 fi
-if grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/css/pages\.css'" sw.js >/dev/null 2>&1; then
-  echo "FAIL: sw.js PRECACHE lists a public content page or its stylesheet. Like /catalogue/, they are deliberately NOT precached (not part of the app shell):"
-  grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/css/pages\.css'" sw.js | sed 's/^/    /'
+if grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/guides|'/downloads|'/css/guides\.css'|'/css/pages\.css'" sw.js >/dev/null 2>&1; then
+  echo "FAIL: sw.js PRECACHE lists a public content page, a guide, a download or their stylesheets. Like /catalogue/, they are deliberately NOT precached (not part of the app shell):"
+  grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/guides|'/downloads|'/css/guides\.css'|'/css/pages\.css'" sw.js | sed 's/^/    /'
   seo_fail=1
 fi
 if [ "$seo_fail" -eq 0 ]; then
-  echo "PASS: the 12 public content pages (/services/, /work/, /areas-we-serve/, /faq/) carry no pricing tokens, no disallowed contact detail and no app script, and are not precached"
+  echo "PASS: the 15 public content pages (/services/, /work/, /areas-we-serve/, /faq/, /guides/) carry no pricing tokens, no disallowed contact detail and no app script, and are not precached"
+else
+  cat_fail=1
+fi
+
+# The PRODUCT pages and the FRESH-AIR page (SEO build, 2026-10-22): /products/ + its six product pages, and /services/fresh-air-systems/. Static pages in
+# the same design as the content pages above, so the same rulings apply: R1 NO PRICES (the whole file; the plain words price / pricing / cost too), ONE
+# phone / ONE email / the Quezon City address, no app script, never precached — with ONE allowance: the owner's own sentence "Prices depend on size and
+# options." (the hub and the six product pages carry it in their estimate block and in their first FAQ answer) is taken out of the body before the plain
+# words are scanned, so the word appears nowhere else on them; the fresh-air page has no allowance at all. The head (JSON-LD included) is scanned with the
+# full token list. FAIL output carries line numbers only. tests/seo-products.test.mjs pins the rest of their content.
+PRODUCT_PAGES='products/index.html products/stainless-steel-sinks/index.html products/stainless-steel-work-tables/index.html products/commercial-gas-stoves/index.html products/stainless-steel-cabinets/index.html products/stainless-steel-shelving/index.html products/stainless-steel-racks/index.html services/fresh-air-systems/index.html'
+prod_fail=0
+prod_body() {  # $1 = page, $2 = its first body line
+  if [ "${1#products/}" != "$1" ]; then sed -n "$2,\$p" "$1" | sed 's/Prices depend on size and options\.//g'; else sed -n "$2,\$p" "$1"; fi
+}
+# The head, up to line $2. The generated inline stylesheet (<style id="page-css">: css/site.css + css/pages.css copied verbatim, kept current by
+# scripts/inline-page-css.js --check below) is not page content, so its lines are blanked first (the numbering stays true) — like the homepage,
+# whose check scans #site, not its inline stylesheet. The two css files are scanned for the partner company with the other public files below.
+prod_head() {
+  sed -n "1,$2p" "$1" | awk '/<!-- PAGE-CSS:START/{skip=1; print ""; next} /<!-- PAGE-CSS:END -->/{skip=0; print ""; next} skip{print ""; next} {print}'
+}
+for pp in $PRODUCT_PAGES; do
+  if [ ! -f "$pp" ]; then
+    echo "FAIL: public product page $pp is missing."
+    prod_fail=1
+    continue
+  fi
+  pp_head_e=$(grep -nF -- '</head>' "$pp" | head -1 | cut -d: -f1)
+  pp_price_lines=$( { prod_head "$pp" "${pp_head_e:-0}" | grep -niE "$CAT_TOKENS" | grep -v 'fonts\.googleapis\.com' | cut -d: -f1
+                      prod_body "$pp" "$((${pp_head_e:-0} + 1))" | grep -niE "$CAT_TOKENS|pric(e|ing)|[^a-z]costs?[^a-z]" | cut -d: -f1 | awk -v off="${pp_head_e:-0}" '{print $1 + off}'; } | sort -un | head -10 | tr '\n' ' ')
+  if [ -n "$pp_price_lines" ]; then
+    echo "FAIL: $pp matches the pricing-token list (line(s): $pp_price_lines). Offending text withheld on purpose."
+    prod_fail=1
+  fi
+  if grep -qiE 'gmail|0960|san[[:space:]]*fernando|purok|carlatan' "$pp"; then
+    echo "FAIL: $pp carries a contact detail that is not allowed on the public site (a Gmail address, the 0960 number or an old La Union / San Fernando address). Offending text withheld on purpose."
+    prod_fail=1
+  fi
+  if grep -qE '<script[^>]*src="[^"]*(app|config|firebase|departments|modules|drive|notifications|quote-request|catalogue)[^"]*"' "$pp"; then
+    echo "FAIL: $pp loads an app, Firebase or catalogue script. The product pages load only the shared /js/site.js."
+    prod_fail=1
+  fi
+done
+if grep -nE -- "'/products|'/services/fresh-air|'/site/img/seo/|'/js/late-fonts\.js'" sw.js >/dev/null 2>&1; then
+  echo "FAIL: sw.js PRECACHE lists a product page, the fresh-air page, their social images or js/late-fonts.js. Like the other public pages, they are deliberately NOT precached (not part of the app shell):"
+  grep -nE -- "'/products|'/services/fresh-air|'/site/img/seo/|'/js/late-fonts\.js'" sw.js | sed 's/^/    /'
+  prod_fail=1
+fi
+# Their stylesheet is INLINE (scripts/inline-page-css.js): a stale block, or a CSP hash that does not match it, would ship stale or unstyled pages.
+if ! node scripts/inline-page-css.js --check; then
+  prod_fail=1
+fi
+if [ "$prod_fail" -eq 0 ]; then
+  echo "PASS: the 8 product and fresh-air pages carry no pricing tokens (only the owner's sentence \"Prices depend on size and options.\", and only on the hub and the six product pages), no disallowed contact detail and no app script, and are not precached"
 else
   cat_fail=1
 fi
@@ -781,7 +835,7 @@ else
   fi
 fi
 PUBLIC_FILES="$CAT_PAGE robots.txt sitemap.xml css/site.css js/site.js css/catalogue.css js/catalogue.js css/quote-request.css js/quote-request.js js/qr-def.js js/product-families.js js/qr-families.js js/qr-preview.js"
-PUBLIC_FILES="$PUBLIC_FILES css/pages.css $SEO_PAGES"
+PUBLIC_FILES="$PUBLIC_FILES css/pages.css css/guides.css js/late-fonts.js llms.txt $SEO_PAGES $PRODUCT_PAGES"
 PUBLIC_FILES="$PUBLIC_FILES $BRIEF_PAGE css/project-brief.css js/project-brief.js"
 [ -f scripts/product-photos.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/product-photos.json"
 [ -f scripts/public-categories.json ] && PUBLIC_FILES="$PUBLIC_FILES scripts/public-categories.json"

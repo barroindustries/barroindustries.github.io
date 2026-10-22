@@ -175,7 +175,10 @@ describe('the configurable cards: featured, with a labelled Specifications list 
     for (const m of fams) {
       assert.match(m[0], /<div class="cat-head"><p class="cat-code cat-tag">Configurable<\/p><h3>[^<]+<\/h3><p class="cat-lead">[^<]{40,}<\/p><\/div>/, m[1]);
       assert.match(m[0], /<div class="cat-body"><p class="cat-label">Specifications<\/p><dl class="cat-specs">/, m[1]);
-      assert.ok(m[0].includes(`<div><dt>Size</dt><dd>Made to your `) && m[0].endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl></div></li>`), `${m[1]}: Size / Material rows`);
+      // SEO build 2026-10-22: the card ends with a "Learn more" link to the family's product page, inside the same panel, after the Specifications list
+      const page = B.FAMILY_PAGES[m[1]];
+      assert.ok(page, `${m[1]}: no product page in FAMILY_PAGES`);
+      assert.ok(m[0].includes(`<div><dt>Size</dt><dd>Made to your `) && m[0].endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl><p class="cat-learn"><a class="link-arrow" href="${page.path}">Learn more about ${page.about}</a></p></div></li>`), `${m[1]}: Size / Material rows, then the "Learn more" link`);
     }
   });
 

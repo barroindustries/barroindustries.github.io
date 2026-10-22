@@ -199,13 +199,13 @@ describe('uniform with the website: the same header and the same footer as /serv
     for (const p of CONTENT) assert.equal(footer(read(p)), mine, `${p}: the footer differs from the project brief's`);
   });
 
-  it('header: the brand lockup, the six nav links, "Get a quote" top right beside the menu button, no login control', () => {
+  it('header: the brand lockup, the seven nav links, "Get a quote" top right beside the menu button, no login control', () => {
     const h = header(html);
     assert.match(h, /<a href="\/" id="site-brand"><img src="\/site\/img\/barro-kitchens-96\.webp" width="36" height="36" alt="Barro Industries logo">/);
     assert.match(h, /<span class="site-brand-name">Barro Industries<\/span>/);
     assert.equal((h.match(/<span data-brand>Barro Kitchens<\/span>/g) || []).length, 1);
     assert.deepEqual([...h.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0].matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]),
-      [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']]);
+      [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']]);
     assert.ok(h.indexOf('id="site-nav"') < h.indexOf('site-head-cta') && h.indexOf('site-head-cta') < h.indexOf('id="site-menu-btn"'));
     assert.match(h, /<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="\/catalogue\/\?quote=1">Get a quote<\/a>/);
     assert.ok(!/#login|Login|Staff|Team portal/.test(h));
@@ -218,9 +218,9 @@ describe('uniform with the website: the same header and the same footer as /serv
     assert.ok(f.includes('21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila, Philippines'));
     assert.deepEqual([...f.matchAll(/<\/svg>(PhilGEPS-registered|SEC-registered|VAT-registered)<\/li>/g)].map((m) => m[1]), ['PhilGEPS-registered', 'SEC-registered', 'VAT-registered']);
     const row = f.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
-    assert.deepEqual([...row.matchAll(/<a\b[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/a>/g)].map((m) => m[1]), ['Home', 'Services', 'Our work', 'Areas we serve', 'FAQ', 'Catalogue', 'Facebook', 'Message us', 'Get a quote', 'Team portal']);
+    assert.deepEqual([...row.matchAll(/<a\b[^>]*>(?:<svg[\s\S]*?<\/svg>)?([^<]+)<\/a>/g)].map((m) => m[1]), ['Home', 'Services', 'Products', 'Our work', 'Areas we serve', 'FAQ', 'Guides', 'Catalogue', 'Facebook', 'Message us', 'Get a quote', 'Team portal']);
     assert.ok(row.endsWith('<a class="foot-portal" href="/#login">Team portal</a></p>'), '"Team portal" must be last');
-    assert.match(f, /<p class="foot-legal">© <span id="site-year">\d{4}<\/span> Barro Industries OPC\.<\/p>/);
+    assert.match(f, /<p class="foot-legal">© <span id="site-year">\d{4}<\/span> Barro Industries OPC \(<span data-brand-legacy>Barro Kitchens<\/span>\)\. All photos, designs and content on this site are our own work and may not be copied or reused without written permission\.<\/p>/);   // owner 2026-10-22: the copyright notice
   });
 
   it('reuses css/site.css and css/pages.css: the page hero, the breadcrumb, the eyebrow, the lead and the site buttons carry the site\'s own classes', () => {

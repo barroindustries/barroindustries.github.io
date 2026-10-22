@@ -182,6 +182,23 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 #site .svc-body p{color:var(--site-muted);font-size:1.0625rem}
 #site .svc-body p+p{margin-top:20px}
 
+/* stainless-steel fabrication spotlight (right after Services): a navy band, one large project photo and what we fabricate, with two buttons.
+   A phone sees the photo first, then the words; from 900px the photo is on the left behind a gold frame, as in the About section. */
+#site .fab{background:var(--site-navy);color:#fff}
+#site .fab-in{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(32px,5vw,56px);align-items:center}
+#site .fab-media{margin:0}
+#site .fab-photo{position:relative;isolation:isolate}
+#site .fab-media img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:4px;background:var(--site-navy-2)}
+#site .fab-media figcaption{margin-top:14px;color:rgba(255,255,255,.8);font-size:13px;line-height:1.5}
+#site .fab a:not(.site-btn){color:#fff;text-decoration-color:var(--site-gold);text-underline-offset:3px}
+#site .fab .eyebrow{color:var(--site-gold-lite)}
+#site .fab h2{margin-bottom:18px;color:#fff}
+#site .fab .site-lead{max-width:34em;color:rgba(255,255,255,.88)}
+#site .fab-list{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+#site .fab-list li{padding:8px 16px;border:1px solid var(--site-line-gold);border-radius:999px;color:#fff;font:600 14px/1.2 var(--site-sans);letter-spacing:.01em}
+#site .fab-grades{max-width:34em;margin-top:22px;color:rgba(255,255,255,.88);font-size:1rem;line-height:1.6}
+#site .fab-cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+
 /* projects: an editorial gallery — one lead image, then a tight grid */
 #site .proj{margin-top:clamp(48px,7vw,88px)}
 #site .proj+.proj{padding-top:clamp(48px,7vw,88px);border-top:1px solid var(--site-line)}
@@ -346,10 +363,11 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 #site .foot-in{display:grid;grid-template-columns:minmax(0,1fr);gap:26px}
 #site .foot-name{margin-bottom:6px;color:var(--site-navy);font:600 17px/1.2 var(--site-serif)}
 #site .foot-links{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 26px}
+#site .foot-files{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:16px}   /* the three PDF downloads, under the registrations (owner, 2026-10-22) */
 #site #site-footer a.foot-portal{color:var(--site-muted);font-size:13px;font-weight:400}
 #site #site-footer a{color:var(--site-navy);font-weight:500;text-decoration:none}
 #site #site-footer a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
-#site .foot-legal{padding-top:22px;border-top:1px solid var(--site-line)}
+#site .foot-legal{padding-top:22px;border-top:1px solid var(--site-line);font-size:13px;line-height:1.55}   /* the copyright notice (owner, 2026-10-22): small, in the footer's own colours */
 
 /* scroll reveal: js/site.js adds .js-reveal to #site only when motion is allowed */
 #site.js-reveal .reveal{opacity:0;transform:translateY(18px);transition:opacity .8s cubic-bezier(.2,.6,.2,1),transform .8s cubic-bezier(.2,.6,.2,1)}
@@ -416,6 +434,9 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .svc{grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:clamp(40px,6vw,88px)}
   #site .svc:nth-child(even){grid-template-columns:minmax(0,5fr) minmax(0,7fr)}
   #site .svc:nth-child(even) .svc-media{order:2}
+  #site .fab-in{grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:clamp(48px,6vw,96px)}
+  #site .fab-media figcaption{margin-top:30px}
+  #site .fab-photo::after{content:"";position:absolute;z-index:-1;inset:16px -16px -16px 16px;border:1px solid var(--site-gold);border-radius:4px}
   #site .about-in{grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:clamp(48px,7vw,112px)}
   #site .about-media{position:relative;isolation:isolate}
   #site .about-media::after{content:"";position:absolute;z-index:-1;inset:18px -18px -18px 18px;border:1px solid var(--site-gold);border-radius:4px}
@@ -425,13 +446,11 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   #site .foot-legal{grid-column:1/-1}
 }
 @media (min-width:900px) and (max-width:1099px){
-  /* six links, the button and the wordmark share one row: a little less room between the links keeps "Barro Industries" whole at 900px */
-  #site #site-nav{gap:20px}
+  /* seven links, the button and the wordmark share one row: a little less room between the links keeps "Barro Industries" whole at 900px.
+     (The footer's eleven links wrap inside its right half at every width from 900px, so the address and the badges keep their room.) */
+  #site #site-nav{gap:14px;margin-right:4px}
   #site #site-nav a{font-size:14px}
-}
-@media (min-width:1100px){
-  /* wide enough for every footer link on one row; below this the links wrap inside the right half, so the address and the badges keep their room */
-  #site .foot-in{grid-template-columns:minmax(0,1fr) auto}
+  #site .site-brand-name{font-size:20px}
 }
 @media (min-width:1024px){
   #site .proof-bar{grid-template-columns:repeat(4,minmax(0,1fr))}

@@ -1055,7 +1055,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('<a href="/" id="site-brand">'));
     assert.ok(cat.includes('<p class="foot-links"><a href="/">Home</a>'), 'Home is the first footer link');
     const catNav = cat.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
-    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']], 'the catalogue nav is the same six links as every other public page');
+    assert.deepEqual([...catNav.matchAll(/<a href="([^"]+)"(?: aria-current="page")?>([^<]+)<\/a>/g)].map(m => [m[1], m[2]]), [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['/#contact', 'Contact']], 'the catalogue nav is the same seven links as every other public page');
     assert.ok(catNav.includes('<a href="/catalogue/" aria-current="page">Catalogue</a>'));
     // owner 2026-10-21: the top-right slot is "Get a quote" (the intake), Login moved to the footer as "Team portal" (details: tests/site-public-surface.test.mjs)
     assert.ok(cat.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>'));
@@ -1179,9 +1179,9 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(!/href="#catalogue"|href="[^"]*#cat-/.test(homeSite), 'a deep link into the catalogue is on the homepage');
   });
 
-  it('has the nav Services · Our work · Areas we serve · Catalogue · FAQ · Contact (the first four and the FAQ are the public content pages), with "Get a quote" top right', () => {
+  it('has the nav Services · Products · Our work · Areas we serve · Catalogue · FAQ · Contact (all but the catalogue and Contact are the public content pages), with "Get a quote" top right', () => {
     const labels = [...nav.matchAll(/<a href="([^"]+)">([^<]+)<\/a>/g)].map(m => [m[1], m[2]]);
-    assert.deepEqual(labels, [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['#contact', 'Contact']]);
+    assert.deepEqual(labels, [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ'], ['#contact', 'Contact']]);
     const cta = '<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1" data-qr-start>Get a quote</a>';
     assert.ok(homeSite.includes(cta));
     assert.ok(homeSite.indexOf(cta) > homeSite.indexOf('id="site-nav"') && homeSite.indexOf(cta) < homeSite.indexOf('id="site-menu-btn"'));
@@ -1213,7 +1213,7 @@ describe('the committed homepage (index.html): a business feature first, NO prod
   });
 
   it('keeps exhaust, fresh-air, gas lines and fire suppression as SERVICES on the homepage (owner ruling) — they are only gone from the catalogue', () => {
-    const SYSTEMS = /exhaust and fresh-air systems, gas lines and fire suppression/;
+    const SYSTEMS = /exhaust and fresh-air systems, gas lines, fire suppression and custom stainless-steel fabrication/;   // SEO build 2026-10-22: the hero lead adds the fabrication
     assert.match(visibleText(hero), SYSTEMS, 'the hero lead no longer names them');
     assert.match(visibleText(homeSite.match(/<article class="svc[^>]*>[\s\S]*?<\/article>/)[0]), /exhaust hoods and ducting, fresh-air systems, gas lines and fire suppression/, 'the fit-out service card no longer names them');
     assert.match(homeHead, /name="description" content="[^"]*exhaust and fresh-air systems, gas lines and fire suppression/, 'the meta description no longer names them');
@@ -1310,8 +1310,12 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     assert.ok(/^Allow: \/$/m.test(robots));
     assert.ok(robots.includes('Sitemap: https://barroindustries.com/sitemap.xml'));
     const sm = read('sitemap.xml');
-    assert.deepEqual(sm.match(/<loc>[^<]+<\/loc>/g), ['', 'catalogue/', ...CONTENT_PAGES].map(u => `<loc>https://barroindustries.com/${u}</loc>`));
-    assert.equal((sm.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g) || []).length, 2 + CONTENT_PAGES.length);
+    // the first two and the 12 content pages are listed, in this order; the product pages and the fresh-air page (tests/seo-products.test.mjs) and any later page sit between or after them
+    const want = ['', 'catalogue/', ...CONTENT_PAGES].map(u => `<loc>https://barroindustries.com/${u}</loc>`);
+    const locs = sm.match(/<loc>[^<]+<\/loc>/g);
+    assert.deepEqual(locs.filter(l => want.includes(l)), want);
+    assert.equal(new Set(locs).size, locs.length, 'a URL is listed twice');
+    assert.equal((sm.match(/<lastmod>\d{4}-\d{2}-\d{2}<\/lastmod>/g) || []).length, locs.length);
   });
 
   it('the 13 project photos exist (26 files), every one is used in #projects, and every image the homepage references exists', () => {

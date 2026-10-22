@@ -370,12 +370,13 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
     assert.ok(hd && cd && hd !== cd, 'the two descriptions must be distinct');
     for (const [p, d] of [[home, hd], [catalogue, cd]]) {
       assert.equal(p.metaCount('description'), 1);
-      assert.ok(d.length >= 100 && d.length <= 220, `${p.file}: description length ${d.length}`);
+      assert.ok(d.length >= 100 && d.length <= 260, `${p.file}: description length ${d.length}`);   // 260: the homepage's now names the fabrication too (SEO build 2026-10-22); Google shows the first ~155 characters
       assert.ok(maxRepeat(d) <= 2, `${p.file}: a word is repeated in the description`);
       assert.ok(/\.$/.test(d), 'the description is a finished sentence');
     }
-    assert.ok(/^Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens to order in Metro Manila: food-grade SS304 and laboratory-grade SS316, exhaust and fresh-air systems, gas lines and fire suppression\.$/.test(hd));
-    assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, storage and refrigeration/.test(cd));
+    assert.ok(/^Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens and custom stainless steel fabrication in Metro Manila: food-grade SS304 and laboratory-grade SS316, exhaust and fresh-air systems, gas lines and fire suppression\.$/.test(hd));
+    assert.ok(hd.includes('stainless steel fabrication'), 'the homepage description names the fabrication (SEO build 2026-10-22)');
+    assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, storage and refrigeration, for restaurants, hotels and bakeries\. Request a quote\.$/.test(cd));
     // the permanent name, once, in each (owner ruling 2026-10-22)
     for (const d of [hd, cd]) assert.equal((d.match(/Barro Kitchens/g) || []).length, 1);
   });
@@ -431,11 +432,12 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
     const sm = read('sitemap.xml');
     const locs = [...sm.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
     assert.deepEqual(locs.slice(0, 2), [home.url, catalogue.url]);
-    assert.equal(locs.length, 14, 'the home page, the catalogue and the 12 content pages (services, work, areas-we-serve, faq)');
-    assert.equal(new Set(locs).size, 14);
+    // the home page, the catalogue and the 12 content pages (services, work, areas-we-serve, faq), plus the product pages and the fresh-air page (tests/seo-products.test.mjs) and any later page
+    assert.ok(locs.length >= 14, `only ${locs.length} URLs`);
+    assert.equal(new Set(locs).size, locs.length, 'a URL is listed twice');
     for (const u of locs.slice(2)) assert.ok(exists(u.replace('https://barroindustries.com/', '') + 'index.html'), `${u} is in the sitemap but has no page`);
     const mods = [...sm.matchAll(/<lastmod>([^<]+)<\/lastmod>/g)].map((m) => m[1]);
-    assert.equal(mods.length, 14);
+    assert.equal(mods.length, locs.length);
     for (const d of mods) {
       assert.match(d, /^\d{4}-\d{2}-\d{2}$/);
       assert.ok(!Number.isNaN(Date.parse(d)) && Date.parse(d) <= Date.now() + 36e5 * 36, `lastmod ${d} is not a date or is in the future`);
@@ -468,8 +470,8 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
   });
 
   it('on "/": a LocalBusiness named "Barro Industries" (legal name Barro Industries OPC, alternate names [Barro Kitchens, Barro Kitchens by Barro Industries], brand Barro Kitchens) with sameAs = Facebook + the Google Maps place, and a WebSite node with the same alternate names', () => {
-    assert.equal(home.ld.length, 2);
-    const [lb, ws] = home.ld;
+    assert.equal(home.ld.length, 3);   // LocalBusiness, WebSite, and (owner 2026-10-22) the copyright block: the homepage's photographs as ImageObjects
+    const [lb, ws, imgs] = home.ld;
     assert.equal(lb['@type'], 'LocalBusiness');
     assert.equal(lb.name, 'Barro Industries');
     assert.equal(lb.legalName, 'Barro Industries OPC');
@@ -478,7 +480,18 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     assert.deepEqual(lb.sameAs, ['https://www.facebook.com/barrokitchens', lb.hasMap]);
     assert.ok(lb.hasMap.startsWith('https://www.google.com/maps/place/'));
     assert.equal(lb.url, home.url);
-    assert.deepEqual(ws, { '@context': 'https://schema.org', '@type': 'WebSite', name: 'Barro Industries', alternateName: ['Barro Kitchens', 'Barro Kitchens by Barro Industries'], url: 'https://barroindustries.com/' });
+    assert.deepEqual(ws, { '@context': 'https://schema.org', '@type': 'WebSite', name: 'Barro Industries', alternateName: ['Barro Kitchens', 'Barro Kitchens by Barro Industries'], url: 'https://barroindustries.com/', copyrightHolder: { '@id': 'https://barroindustries.com/#business' }, copyrightYear: 2026 });
+    // the copyright block: every project photograph the page shows, each an ImageObject with its creator, credit, notice, holder and the usage-terms page (#copyright = the footer notice)
+    assert.equal(imgs['@context'], 'https://schema.org');
+    assert.ok(imgs['@graph'].length >= 13, 'the 13 project photographs');
+    for (const n of imgs['@graph']) {
+      assert.deepEqual(Object.keys(n), ['@type', 'contentUrl', 'creator', 'creditText', 'copyrightNotice', 'copyrightHolder', 'license', 'acquireLicensePage']);
+      assert.equal(n['@type'], 'ImageObject');
+      assert.match(n.contentUrl, /^https:\/\/barroindustries\.com\/site\/img\/projects\/(ispsc|dmmmsu)\/\d\d\.webp$/);
+      assert.deepEqual([n.creator, n.creditText, n.copyrightNotice, n.copyrightHolder, n.license, n.acquireLicensePage], [{ '@type': 'Organization', name: 'Barro Industries OPC' }, 'Barro Industries OPC', '© 2026 Barro Industries OPC', { '@id': 'https://barroindustries.com/#business' }, 'https://barroindustries.com/#copyright', 'https://barroindustries.com/#copyright']);
+    }
+    assert.equal(new Set(imgs['@graph'].map((n) => n.contentUrl)).size, imgs['@graph'].length);
+    assert.ok(home.html.includes('<p class="foot-legal" id="copyright">'), 'the usage-terms page the markup points at: the homepage footer notice, #copyright');
   });
 
   it('on /catalogue/: one ItemList with a ListItem per card, in page order — name and the #cat-… anchor of its category, no other key', () => {
@@ -532,7 +545,7 @@ describe('4 · the brand: "Barro Industries" is the primary public name; "Barro 
   const ldHits = (ld) => { const out = []; (function walk(v, p) { if (typeof v === 'string') { if (v.includes(BRAND)) out.push(p); } else if (v && typeof v === 'object') for (const k of Object.keys(v)) walk(v[k], p ? `${p}.${k}` : k); })(ld, ''); return out; };
 
   it('wraps every VISIBLE mention in the body either in a bare <span data-brand> that holds exactly the name — SWAPPABLE: homepage header sub-line + footer, catalogue header sub-line + eyebrow + footer — or inside a data-brand-legacy element — PERMANENT: the homepage About line; the two markers are distinct and never on one element', () => {
-    for (const [p, nSwap, nLegacy] of [[home, 2, 1], [catalogue, 3, 0]]) {
+    for (const [p, nSwap, nLegacy] of [[home, 2, 2], [catalogue, 3, 1]]) {   // the permanent mentions: the About line (homepage only) and the footer's copyright notice (both pages)
       const visible = p.S.texts.filter((t) => inBody(t.chain) && t.text.includes(BRAND));
       const swap = visible.filter((t) => 'data-brand' in t.chain[t.chain.length - 1].attrs);
       const legacy = visible.filter((t) => t.chain.some((e) => 'data-brand-legacy' in e.attrs));
@@ -552,6 +565,7 @@ describe('4 · the brand: "Barro Industries" is the primary public name; "Barro 
       assert.ok(p.html.includes('<span class="site-brand-sub"><span data-brand>Barro Kitchens</span>™</span>'), `${p.file}: the header sub-line`);
     }
     assert.ok(home.footer.includes('<span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.'));
+    for (const p of [home, catalogue]) assert.ok(p.footer.includes('Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.'), `${p.file}: the copyright notice in the footer`);
     assert.ok(catalogue.footer.includes('<span data-brand>Barro Kitchens</span> is a brand of Barro Industries OPC.'));
     assert.ok(catalogue.html.includes('<p class="eyebrow"><span data-brand>Barro Kitchens</span></p>'));
     // the permanent line: ONE grammatical sentence in the About copy, right after the family-business line, marked data-brand-legacy
@@ -581,8 +595,8 @@ describe('4 · the brand: "Barro Industries" is the primary public name; "Barro 
   });
 
   it('pins the exact inventory of places the brand name appears, so a rename is a find-and-replace of this list — what it SWAPS (data-brand) and what it KEEPS (permanent)', () => {
-    // index.html, 19 in all. KEEPS (permanent): <title>, og:title, twitter:title (3), description, og:description, twitter:description (3), the PERMANENT note (a comment, 3 mentions),
-    //   JSON-LD LocalBusiness.alternateName x2 and WebSite.alternateName x2 (4), the About line (1). SWAPS or is brand artwork: the header sub-line and the footer line (2 spans),
+    // index.html, 20 in all. KEEPS (permanent): <title>, og:title, twitter:title (3), description, og:description, twitter:description (3), the PERMANENT note (a comment, 3 mentions),
+    //   JSON-LD LocalBusiness.alternateName x2 and WebSite.alternateName x2 (4), the About line (1), the footer's copyright notice (1; data-brand-legacy). SWAPS or is brand artwork: the header sub-line and the footer line (2 spans),
     //   LocalBusiness.brand.name (1), the header logo's alt (1) and the animation's aria-label (1).
     const metaNames = home.S.elements.filter((e) => e.tag === 'meta' && count(e.attrs.content || '')).map((e) => e.attrs.name || e.attrs.property).sort();
     assert.deepEqual(metaNames, ['description', 'og:description', 'og:title', 'twitter:description', 'twitter:title']);
@@ -596,14 +610,14 @@ describe('4 · the brand: "Barro Industries" is the primary public name; "Barro 
     assert.equal(count(homeNotes[0].text), 3);
     assert.match(homeNotes[0].text, /^ PERMANENT \(owner ruling, 2026-10-22\)/);
     assert.equal(home.S.scripts.filter((s) => s.attrs.type !== 'application/ld+json' && s.body.includes(BRAND)).length, 0, 'a script names the brand');
-    assert.equal(count(home.html), 19);
-    // catalogue/index.html, 11: <title>, og:title, twitter:title, 3 descriptions, the PERMANENT note (1), 3 visible spans, 1 logo alt; nothing in the ItemList or the data island
+    assert.equal(count(home.html), 20);
+    // catalogue/index.html, 12: <title>, og:title, twitter:title, 3 descriptions, the PERMANENT note (1), 3 visible spans, the footer's copyright notice (1), 1 logo alt; nothing in the ItemList or the data island
     assert.deepEqual(catalogue.S.attrs.filter((a) => a.tag !== 'meta' && a.value.includes(BRAND)).map((a) => `${a.tag}[${a.name}]=${a.value}`), ['img[alt]=Barro Kitchens logo']);
     assert.equal(catalogue.S.elements.filter((e) => e.tag === 'meta' && count(e.attrs.content || '')).length, 5);
     assert.equal(catalogue.S.comments.filter((c) => c.text.includes(BRAND)).length, 1);
     assert.equal(catalogue.S.scripts.filter((s) => s.body.includes(BRAND)).length, 0);
     assert.equal(count(catalogue.head), 7);
-    assert.equal(count(catalogue.html), 11);
+    assert.equal(count(catalogue.html), 12);
     // the places outside the two pages: the intake's privacy notice (and its byte-identical mirror in functions/) and the generator's one constant
     assert.equal(count(read('js/qr-def.js')), 1);
     assert.equal(read('functions/qr-def.js'), read('js/qr-def.js'));
@@ -611,8 +625,8 @@ describe('4 · the brand: "Barro Industries" is the primary public name; "Barro 
     assert.equal(B.SITE_BRAND_NAME, BRAND);
     assert.equal((read('scripts/build-catalogue.js').match(/'Barro Kitchens'/g) || []).length, 1, 'the generator holds the brand in exactly one constant');
     const total = count(home.html) + count(catalogue.html) + count(read('js/qr-def.js')) + 1;
-    assert.equal(home.S.elements.filter((e) => e.tag === 'script' && e.attrs.type === 'application/ld+json').length, 2);
-    assert.equal(total, 19 + 11 + 1 + 1, 'the brand appears somewhere new: wrap it in <span data-brand> (swappable) or data-brand-legacy (permanent), or list it here, so a rename still finds every place');
+    assert.equal(home.S.elements.filter((e) => e.tag === 'script' && e.attrs.type === 'application/ld+json').length, 3);
+    assert.equal(total, 20 + 12 + 1 + 1, 'the brand appears somewhere new: wrap it in <span data-brand> (swappable) or data-brand-legacy (permanent), or list it here, so a rename still finds every place');
   });
 
   it('writes the PERMANENT rule down where the permanent name lives — the homepage head and the catalogue head — in a comment: if the brand is renamed, the new brand is ADDED and "Barro Kitchens" STAYS as alternateName ("formerly Barro Kitchens"), and data-brand marks what a rename swaps, data-brand-legacy what it keeps', () => {

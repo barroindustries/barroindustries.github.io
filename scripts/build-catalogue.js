@@ -1010,11 +1010,23 @@ const SPEC_LIST = (rows) => `<dl class="cat-specs">${rows.map((r) => `<div><dt>$
 // and tests/site-public-surface.test.mjs pin it to the homepage wording, so a card can never claim a material the homepage does not.
 const FAMILY_MATERIAL = 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish';
 
+// The product page of each configurable family (SEO build, 2026-10-22: /products/ and one page per product, written by hand and pinned by
+// tests/seo-products.test.mjs, which also checks that these six are the six families of scripts/public-families.json). A family card ends with a
+// "Learn more" link to its page. A family with no page here simply has no link (a new family needs its page first).
+const FAMILY_PAGES = Object.freeze({
+  prep_table: { path: '/products/stainless-steel-work-tables/', about: 'stainless steel work tables' },
+  sink:       { path: '/products/stainless-steel-sinks/',       about: 'stainless steel sinks' },
+  stove:      { path: '/products/commercial-gas-stoves/',       about: 'commercial gas stoves' },
+  cabinet:    { path: '/products/stainless-steel-cabinets/',    about: 'stainless steel cabinets' },
+  wall_shelf: { path: '/products/stainless-steel-shelving/',    about: 'stainless steel shelving' },
+  rack:       { path: '/products/stainless-steel-racks/',       about: 'stainless steel racks' },
+});
+
 // The card of a CONFIGURABLE family: one card per family, rendered as the wide FEATURED card (css/catalogue.css: the full row, the photo on
 // the left, the text on the right) — the "Configurable" tag, the name, the family description (the lead paragraph), then a labelled
-// Specifications list: the options it offers, the size line and the material (this is also what the live search reads), and the names/codes
-// of the SKUs it absorbed in data-kw (search only — never shown). The "Configure & add" button is added at run time by js/quote-request.js
-// (like "Add to quote" on a fixed item), so the card needs no script to read.
+// Specifications list: the options it offers, the size line and the material (this is also what the live search reads), then the "Learn more"
+// link to the product page, and the names/codes of the SKUs it absorbed in data-kw (search only — never shown). The "Configure & add" button is
+// added at run time by js/quote-request.js (like "Add to quote" on a fixed item), so the card needs no script to read.
 function renderFamilyCard(fam, cat, photo, keywords) {
   const mark = photo ? PHOTO_FIGURE(photo, fam.label, FEATURE_PHOTO_SIZES) : TILE((cat && cat.id) || fam.category);
   const rows = [];
@@ -1029,8 +1041,14 @@ function renderFamilyCard(fam, cat, photo, keywords) {
   rows.push(['Material', FAMILY_MATERIAL]);
   return `<li class="cat-card cat-card-family cat-card-feature${photo ? ' has-photo' : ''}" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + mark +
     `<div class="cat-head"><p class="cat-code cat-tag">Configurable</p><h3>${esc(fam.label)}</h3><p class="cat-lead">${esc(fam.description)}</p></div>` +
-    `<div class="cat-body">${LABEL(LABEL_SPECS)}${SPEC_LIST(rows)}</div>` +
+    `<div class="cat-body">${LABEL(LABEL_SPECS)}${SPEC_LIST(rows)}${learnMore(fam)}</div>` +
     `</li>`;
+}
+
+// "Learn more" under a family's specifications: a plain link to its product page (no script, no price word: CHECK 9 scans this block)
+function learnMore(fam) {
+  const page = has(FAMILY_PAGES, fam.id) ? FAMILY_PAGES[fam.id] : null;
+  return page ? `<p class="cat-learn"><a class="link-arrow" href="${esc(page.path)}">Learn more about ${esc(page.about)}</a></p>` : '';
 }
 
 function renderCard(p, cat, photo) {
@@ -1161,8 +1179,10 @@ function renderCatalogue(db, opts) {
   lines.push('<section class="cat-intro" id="catalogue-top">');
   lines.push('<div class="site-wrap">');
   lines.push(`<p class="eyebrow"><span data-brand>${esc(SITE_BRAND_NAME)}</span></p>`);
-  lines.push('<h1>Product catalogue</h1>');
-  lines.push('<p class="cat-lede">Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications. Default sizes are in millimetres. Ask us for a quotation on any item.</p>');
+  // SEO build, 2026-10-22: the H1 and the opening sentence carry the page's keyword ("commercial kitchen equipment") and who it is for; the sentences after
+  // it are the owner's own, unchanged (tests/catalogue-layout.test.mjs, catalogue-public.test.mjs and site-public-surface.test.mjs pin them).
+  lines.push('<h1>Commercial kitchen equipment catalogue</h1>');
+  lines.push('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens: preparation, washing, cooking, storage and refrigeration. Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications. Default sizes are in millimetres. Ask us for a quotation on any item.</p>');
   lines.push('<form class="cat-search" id="cat-search-form" role="search">');
   lines.push('<label class="sr-only" for="cat-search">Search products</label>');
   lines.push(SEARCH_ICON);
@@ -1475,7 +1495,7 @@ module.exports = {
   publicProduct, renderCatalogue, renderCatalogueData, renderPublishedIds, renderItemListLd, injectIntoHtml, injectIsland, injectItemList, stripJsonComments, esc, webpSize, loadPhotoMap,
   loadPublicCategories, publishedProductIds, PUBLIC_CATEGORIES, EXCLUDED_CATEGORIES,
   loadPublicFamilies, renderFamiliesJs, loadPreviewManifest, renderFamilyCard, FAMILIES_FILE, FAMILIES_JS, FAMILIES_JS_MIRROR, PREVIEWS_FILE,
-  TILE_ICONS, FAMILY_MATERIAL, LABEL_NOTES, LABEL_SPECS,
+  TILE_ICONS, FAMILY_MATERIAL, FAMILY_PAGES, LABEL_NOTES, LABEL_SPECS,
   NOTE_OVERRIDES, TEXT_FIXES, MATERIAL_KEYS, MONEY_RE, FORMULA_RE, BRAND_RE, START_MARKER, END_MARKER,
   QR_PLACEHOLDER, QR_START_MARKER, QR_END_MARKER, LD_START_MARKER, LD_END_MARKER, SITE_BRAND_NAME, PUBLISHED_IDS_FILE,
   CatalogueGuardError,

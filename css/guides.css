@@ -1,0 +1,103 @@
+/* css/guides.css — the /guides/ pages: long-form articles (and their index). Loads AFTER css/site.css (tokens, header, buttons, footer) and css/pages.css
+   (breadcrumb, page hero, tables, FAQ, cards, closing call to action); this file adds only what a long article needs on top of those: a reading column, a
+   contents block, lists, notes, a checklist, two "choose" cards and the byline. Scoped to #site (every rule starts with "#site"), so nothing here can reach the app.
+   Not precached by the service worker, like css/pages.css. No inline style anywhere (the pages' CSP has no 'unsafe-inline'). No 4-digit z-index (CHECK 1).
+   Phone first: every grid is minmax(0,1fr), nothing is wider than the viewport. */
+
+/* ── the hero of an article: its headline is a sentence, so it is set a size smaller than a hub's ── */
+#site .pg-hero.art-hero h1{font-size:clamp(1.95rem,2.5vw + 1rem,2.85rem);line-height:1.1}
+
+/* ── byline under the headline: who wrote it and when ── */
+#site .art-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:18px;color:var(--site-muted);font:600 12px/1.5 var(--site-sans);letter-spacing:.14em;text-transform:uppercase}
+#site .art-meta span[aria-hidden]{color:var(--site-gold)}
+
+/* ── the reading layout: a contents block on the left from 1024px, above the article on a phone ── */
+#site .art-wrap{display:grid;grid-template-columns:minmax(0,1fr);gap:clamp(28px,4vw,40px)}
+@media (min-width:1024px){
+  #site .art-wrap{grid-template-columns:minmax(0,15.5rem) minmax(0,44rem);justify-content:center;column-gap:clamp(48px,6vw,88px);align-items:start}
+  #site .art-toc{position:sticky;top:calc(var(--site-head) + 28px)}
+}
+
+/* ── contents ── */
+#site .art-toc{padding:22px 22px 18px;border:1px solid var(--site-line);border-radius:var(--site-radius);background:var(--site-paper)}
+#site .art-toc-title{margin-bottom:10px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .art-toc ol{list-style:none;counter-reset:toc}
+#site .art-toc li{counter-increment:toc;border-top:1px solid var(--site-line)}
+#site .art-toc li:first-child{border-top:0}
+#site .art-toc a{display:flex;gap:12px;padding:9px 0;color:var(--site-navy);font-size:15px;line-height:1.4;text-decoration:none}
+#site .art-toc a::before{content:counter(toc,decimal-leading-zero);flex:none;min-width:1.6em;color:var(--site-gold-ink);font:600 12px/1.9 var(--site-sans);letter-spacing:.06em}
+#site .art-toc a:hover{text-decoration:underline;text-decoration-color:var(--site-gold);text-underline-offset:4px}
+
+/* ── the article column ── */
+#site .art{min-width:0;max-width:44rem}
+#site .art>*+*,#site .art section>*+*{margin-top:18px}
+#site .art p,#site .art li{color:var(--site-ink);font-size:1.0625rem;line-height:1.72}
+#site .art h2{margin-top:clamp(44px,5.4vw,64px);margin-bottom:0;font-size:clamp(1.75rem,1.5vw + 1.25rem,2.35rem);scroll-margin-top:calc(var(--site-head) + 12px)}
+#site .art h2+*{margin-top:16px}
+#site .art h3{margin-top:34px;margin-bottom:0;font-size:clamp(1.25rem,.6vw + 1.1rem,1.5rem);line-height:1.25}
+#site .art h3+*{margin-top:10px}
+#site .art a{color:var(--site-navy);text-decoration-color:var(--site-gold);text-underline-offset:3px}
+#site .art a:hover{text-decoration-thickness:2px}
+#site .art strong{color:var(--site-navy);font-weight:600}
+
+/* lists: a gold dot, or a ringed number */
+#site .art ul>li,#site .art ol>li{position:relative}
+#site .art ul>li{padding-left:26px}
+#site .art ul>li::before{content:"";position:absolute;left:4px;top:.78em;width:7px;height:7px;border-radius:50%;background:var(--site-gold)}
+#site .art ol{list-style:none;counter-reset:art}
+#site .art ol>li{padding-left:40px;counter-increment:art}
+#site .art ol>li::before{content:counter(art);position:absolute;left:0;top:.2em;width:26px;height:26px;border:1px solid var(--site-gold);border-radius:50%;color:var(--site-gold-ink);font:600 12.5px/24px var(--site-sans);text-align:center}
+#site .art li+li{margin-top:10px}
+
+/* ── a short summary at the top, and a quiet note ── */
+#site .art-keys{padding:22px 24px 24px;border:1px solid var(--site-line-gold);border-radius:var(--site-radius);background:var(--site-paper)}
+#site .art-keys-title{margin-bottom:10px;color:var(--site-gold-ink);font:600 12px/1.4 var(--site-sans);letter-spacing:.18em;text-transform:uppercase}
+#site .art-keys li{font-size:1.0625rem}
+#site .art-note{padding:16px 20px;border-left:3px solid var(--site-gold);background:var(--site-paper);color:var(--site-muted)}
+#site .art-note p{color:var(--site-muted);font-size:1rem;line-height:1.65}
+
+/* ── a table inside the article: the same stacked-card table as the service pages, set a little tighter ── */
+#site .art .pg-table-wrap{margin-top:22px}
+#site .art .pg-table td{font-size:1rem}
+@media (min-width:720px){
+  #site .art .pg-table tbody th{width:24%}
+}
+#site .art .pg-table td a{font-weight:500}
+#site .art-fig{margin-top:26px}
+#site .art-fig figcaption{margin-top:10px;color:var(--site-muted);font-size:13px;line-height:1.5}
+#site .art-fig img{width:100%;border-radius:4px;background:#E9E6DF}
+
+/* ── the checklist: an empty box before each line ── */
+#site .art-check{border-top:1px solid var(--site-line-gold)}
+#site .art ul.art-check>li{padding:13px 0 13px 40px;border-bottom:1px solid var(--site-line)}
+#site .art ul.art-check>li+li{margin-top:0}
+#site .art ul.art-check>li::before{left:2px;top:1.02em;width:20px;height:20px;border:1.5px solid var(--site-navy);border-radius:4px;background:#fff}
+
+/* ── two "choose" cards side by side from 720px ── */
+#site .art-pick{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-top:22px}
+#site .art-pick>div{padding:22px 22px 24px;border:1px solid var(--site-line);border-top:2px solid var(--site-gold);border-radius:6px;background:#fff}
+#site .art .art-pick h3{margin:0 0 10px;font-size:1.3rem}
+#site .art-pick ul>li:last-child{margin-bottom:0}
+@media (min-width:720px){
+  #site .art-pick{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+}
+
+/* ── the questions at the foot of an article: the same entries as /faq/, in the article's column ── */
+#site .art .faq-list{max-width:none;margin-top:16px}
+#site .art .faq-item{padding:22px 0 24px}
+#site .art .faq-item h3{margin:0 0 10px;font-size:clamp(1.2rem,.6vw + 1.05rem,1.4rem)}
+#site .art .faq-item p{margin:0}
+#site .art .faq-item p+p{margin-top:12px}
+
+/* ── a closing paragraph with the three ways to start ── */
+#site .art-next{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}
+
+/* ── the guides index: one wide card per guide ── */
+#site .art-cards{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+@media (min-width:900px){
+  #site .art-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
+}
+
+/* ── the copyright notice at the foot of an article (and of the index) ── */
+#site .art .art-copy{margin-top:22px;color:var(--site-muted);font-size:13.5px;line-height:1.6}   /* the last question above it already ends in a hairline */
+#site .art-copy-index{margin-top:clamp(32px,4vw,48px);padding-top:18px;border-top:1px solid var(--site-line);color:var(--site-muted);font-size:13.5px;line-height:1.6;max-width:44rem}

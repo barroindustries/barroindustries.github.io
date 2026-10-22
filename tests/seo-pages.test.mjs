@@ -160,7 +160,8 @@ function publicStrings(p) {
   for (const t of p.S.texts) if (inBody(t.chain)) out.push({ kind: 'text', value: decode(t.text) });
   for (const a of p.S.attrs) if (['alt', 'title', 'aria-label', 'content', 'placeholder'].includes(a.name)) out.push({ kind: `<${a.tag} ${a.name}>`, value: decode(a.value) });
   for (const c of p.S.comments) out.push({ kind: 'comment', value: c.text });
-  for (const s of p.S.scripts) if (s.attrs.type === 'application/ld+json') out.push({ kind: 'json-ld', value: s.body });
+  // the copyright markup (2026-10-22) is schema.org vocabulary, not copy: the key "license" and the type "Organization" are not claims or a US spelling
+  for (const s of p.S.scripts) if (s.attrs.type === 'application/ld+json') out.push({ kind: 'json-ld', value: s.body.replace(/"license":\s*"https:\/\/barroindustries\.com\/#copyright"/g, '""').replace(/"@type":\s*"Organization"/g, '"@type": ""') });
   return out;
 }
 const firstHit = (p, re) => { const hit = publicStrings(p).find((s) => re.test(s.value)); return hit ? `${hit.kind}: "${(hit.value.match(re) || [])[0]}"` : null; };
@@ -198,16 +199,17 @@ describe('the 12 pages exist, and nothing else lives in their folders', () => {
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) (e.isDirectory() ? walk(`${d}/${e.name}`) : files.push(`${d}/${e.name}`)); };
     for (const d of ['services', 'work', 'areas-we-serve', 'faq']) walk(d);
-    assert.deepEqual(files.sort(), PAGE_PATHS.map((p) => p.slice(1) + 'index.html').sort());
+    // (the fresh-air page, added 2026-10-22 beside these, is pinned by tests/seo-products.test.mjs)
+    assert.deepEqual(files.sort(), [...PAGE_PATHS.map((p) => p.slice(1) + 'index.html'), 'services/fresh-air-systems/index.html'].sort());
     assert.ok(!PAGE_PATHS.some((p) => p.startsWith('/projects/')));
   });
 });
 
 describe('<head>: title, description, canonical, Open Graph, Twitter, CSP, fonts', () => {
-  it('has one title of 45-65 characters ending "| Barro Industries", and every title is different', () => {
+  it('has one title of 45-75 characters ending "| Barro Industries", and every title is different', () => {
     each((p) => {
       assert.equal(p.titleCount, 1, `${p.path}: title count`);
-      assert.ok(p.title.length >= 45 && p.title.length <= 65, `${p.path}: title is ${p.title.length} characters`);
+      assert.ok(p.title.length >= 45 && p.title.length <= 75, `${p.path}: title is ${p.title.length} characters`);   // 75: the fabrication page's names both places people search (SEO build 2026-10-22)
       assert.ok(p.title.endsWith(' | Barro Industries'), `${p.path}: title does not end "| Barro Industries"`);
       assert.ok(!/\s{2,}/.test(p.title));
     });
@@ -656,7 +658,7 @@ describe('the owner\'s content rules (every page: text, alt text, meta, JSON-LD,
   it('names only DMMMSU and ISPSC as clients — their full names, no logos, no other institution, company or agency', () => {
     const ALLOWED = new Set(['Don Mariano Marcos Memorial State University', 'Ilocos Sur Polytechnic State College']);
     each((p) => {
-      for (const t of p.S.texts.filter((x) => inBody(x.chain))) for (const m of decode(t.text).matchAll(/\b((?:[A-Z][A-Za-z.'’&-]*\s+){0,7}(?:University|College|Institute|Hospital|Corporation|Company|Academy|Foundation|Hotel|Mall|Bank))\b/g)) assert.ok(ALLOWED.has(m[1]), `${p.path}: another institution is named: ${m[1]}`);
+      for (const t of p.S.texts.filter((x) => inBody(x.chain))) for (const m of decode(t.text).replace(/\bCompany profile \(PDF\)/g, '').matchAll(/\b((?:[A-Z][A-Za-z.'’&-]*\s+){0,7}(?:University|College|Institute|Hospital|Corporation|Company|Academy|Foundation|Hotel|Mall|Bank))\b/g)) assert.ok(ALLOWED.has(m[1]), `${p.path}: another institution is named: ${m[1]}`);
     });
     noHit(/\b(Lorma|ITRMC|Bethany|Casa Carmelo|Cosmos|Chibab|Aboy|Florante|Vhia|Plaza Premium|Jollibee|Starbucks|Mcdonald|Marriott|Hilton|Shangri)\b/i, 'a client other than DMMMSU and ISPSC');
     // images: only the brand mark, the project photos and the catalogue's representative pictures; nothing that is an agency logo or a seal
@@ -789,10 +791,14 @@ describe('the brand: "Barro Kitchens" is one swappable <span data-brand> per pag
   const BRAND = 'Barro Kitchens';
   const count = (s) => (s.match(/Barro\s+Kitchens/gi) || []).length;
 
-  it('wraps the one visible mention in a bare <span data-brand> that holds exactly the name, inside the header\'s brand lockup, with the ™ after it — the swap point of a rename', () => {
+  it('wraps the first visible mention in a bare <span data-brand> that holds exactly the name, inside the header\'s brand lockup, with the ™ after it — the swap point of a rename — and the second, in the footer\'s copyright notice, in a bare <span data-brand-legacy> (what a rename KEEPS)', () => {
     each((p) => {
       const visible = p.S.texts.filter((t) => count(t.text));
-      assert.equal(visible.length, 1, `${p.path}: visible mentions`);
+      assert.equal(visible.length, 2, `${p.path}: visible mentions`);
+      const legacy = visible[1].chain[visible[1].chain.length - 1];
+      assert.deepEqual(legacy.attrs, { 'data-brand-legacy': '' }, `${p.path}: the notice's mention must be a bare <span data-brand-legacy>`);
+      assert.equal(visible[1].text, BRAND);
+      assert.ok(visible[1].chain.some((e) => e.tag === 'p' && e.attrs.class === 'foot-legal'), `${p.path}: the second mention is not in the footer's legal line`);
       const parent = visible[0].chain[visible[0].chain.length - 1];
       assert.deepEqual(parent.attrs, { 'data-brand': '' }, `${p.path}: the wrapper must be a bare <span data-brand>`);
       assert.equal(visible[0].text, BRAND);
@@ -801,8 +807,8 @@ describe('the brand: "Barro Kitchens" is one swappable <span data-brand> per pag
       // the only OTHER data-brand elements are the Messenger "Message us" links: their URL carries the brand's handle (m.me/barrokitchens), so a rename must find them
       // too (owner 2026-10-22; the full list of where they sit is pinned in the "Message us" block below)
       for (const e of p.S.elements.filter((x) => x.tag !== 'span' && 'data-brand' in x.attrs)) assert.deepEqual([e.tag, e.attrs.href], ['a', MSGR], `${p.path}: a data-brand element that is not the brand span or the Messenger link`);
-      // data-brand-legacy (what a rename KEEPS) is for the homepage's About line only: these pages carry none
-      assert.equal(p.S.elements.filter((e) => 'data-brand-legacy' in e.attrs).length, 0, `${p.path}: data-brand-legacy`);
+      // data-brand-legacy (what a rename KEEPS): on these pages only the footer's copyright notice carries it ("Barro Industries OPC (Barro Kitchens)": the rights holder's trading name stays)
+      assert.equal(p.S.elements.filter((e) => 'data-brand-legacy' in e.attrs).length, 1, `${p.path}: data-brand-legacy`);
     });
   });
 
@@ -819,16 +825,16 @@ describe('the brand: "Barro Kitchens" is one swappable <span data-brand> per pag
     });
   });
 
-  it('keeps the whole inventory to 8 per page (1 visible span + 3 in the meta description + 4 in the JSON-LD) = 96 in all, so a rename is a find-and-replace of a known list; the hyphenated names are file paths and the Facebook and Messenger addresses only', () => {
+  it('keeps the whole inventory to 9 per page (1 visible span + 1 in the footer notice + 3 in the meta description + 4 in the JSON-LD) = 108 in all, so a rename is a find-and-replace of a known list; the hyphenated names are file paths and the Facebook and Messenger addresses only', () => {
     let total = 0;
     each((p) => {
-      assert.equal(count(p.html), 8, `${p.path}: brand occurrences`);
+      assert.equal(count(p.html), 9, `${p.path}: brand occurrences`);
       total += count(p.html);
       assert.equal(count(p.head), 7, `${p.path}: in the head: 3 descriptions + 4 in the JSON-LD`);
       const slugs = [...p.html.matchAll(/[A-Za-z0-9/._:-]*barro-?kitchens[A-Za-z0-9/._-]*/gi)].map((m) => m[0]).sort();
       assert.deepEqual(slugs.filter((s) => !/^https:\/\/(www\.facebook\.com|m\.me)\/barrokitchens$/.test(s)), ['/site/img/barro-kitchens-96.webp', 'https://barroindustries.com/icons/barro-kitchens.png'].sort(), `${p.path}: the hyphenated brand names`);
     });
-    assert.equal(total, 96);
+    assert.equal(total, 108);
   });
 
   it('carries the same permanent alternate names on every page as on the homepage — ["Barro Kitchens", "Barro Kitchens by Barro Industries"] — and the homepage says in a comment that they STAY when the brand is renamed', () => {
@@ -850,7 +856,7 @@ describe('the brand: "Barro Kitchens" is one swappable <span data-brand> per pag
       assert.equal(p.meta('og:site_name'), 'Barro Industries');
       assert.ok(p.footer.includes('<p class="foot-name">Barro Industries OPC</p>'));
       assert.ok(p.header.includes('<span class="site-brand-name">Barro Industries</span>'));
-      assert.ok(p.footer.includes('© <span id="site-year">2026</span> Barro Industries OPC.'));
+      assert.ok(p.footer.includes('© <span id="site-year">2026</span> Barro Industries OPC (<span data-brand-legacy>Barro Kitchens</span>). All photos, designs and content on this site are our own work and may not be copied or reused without written permission.</p>'));
     });
   });
 });
@@ -864,11 +870,11 @@ describe('header and footer: the same on every page, "Get a quote" top right and
     assert.equal(f.size, 1, 'the footers differ');
   });
 
-  it('has the brand link home, the six nav links, "Get a quote" to the intake as the button at the top right, then the menu button — and no Login anywhere in the header', () => {
+  it('has the brand link home, the seven nav links, "Get a quote" to the intake as the button at the top right, then the menu button — and no Login anywhere in the header', () => {
     each((p) => {
       assert.ok(p.header.includes('<a href="/" id="site-brand">'));
       assert.deepEqual([...p.header.matchAll(/<nav id="site-nav" aria-label="Main">([\s\S]*?)<\/nav>/g)][0][1].match(/<a [^>]*>[^<]*<\/a>/g).map((a) => a.replace(/ aria-current="[^"]*"/, '')), [
-        '<a href="/services/">Services</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
+        '<a href="/services/">Services</a>', '<a href="/products/">Products</a>', '<a href="/work/">Our work</a>', '<a href="/areas-we-serve/">Areas we serve</a>', '<a href="/catalogue/">Catalogue</a>', '<a href="/faq/">FAQ</a>', '<a href="/#contact">Contact</a>']);
       assert.ok(p.header.includes('<a class="site-btn site-btn-primary site-btn-sm site-head-cta" href="/catalogue/?quote=1">Get a quote</a>'));
       assert.ok(p.header.indexOf('id="site-nav"') < p.header.indexOf('site-head-cta') && p.header.indexOf('site-head-cta') < p.header.indexOf('id="site-menu-btn"'));
       assert.ok(p.header.includes('<button type="button" id="site-menu-btn" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">'));
@@ -888,7 +894,7 @@ describe('header and footer: the same on every page, "Get a quote" top right and
 
   it('has the footer links to Home, the hubs, the FAQ, the catalogue, Facebook, "Message us" (Messenger), "Get a quote" and the discreet "Team portal"', () => {
     const f = byPath('/faq/').footer;
-    assert.ok(f.includes(`<p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a>${msgLink('', 'Message us')}<a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>`));
+    assert.ok(f.includes(`<p class="foot-links"><a href="/">Home</a><a href="/services/">Services</a><a href="/products/">Products</a><a href="/work/">Our work</a><a href="/areas-we-serve/">Areas we serve</a><a href="/faq/">FAQ</a><a href="/guides/">Guides</a><a href="/catalogue/">Catalogue</a><a href="https://www.facebook.com/barrokitchens" rel="noopener" target="_blank">Facebook</a>${msgLink('', 'Message us')}<a href="/catalogue/?quote=1">Get a quote</a><a class="foot-portal" href="/#login">Team portal</a></p>`));
   });
 });
 
@@ -957,13 +963,13 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
   const nav = (html) => html.match(/<nav id="site-nav"[\s\S]*?<\/nav>/)[0];
   const footLinks = (html) => html.match(/<p class="foot-links">[\s\S]*?<\/p>/)[0];
   const hrefsIn = (html) => [...html.matchAll(/<a\b[^>]*\shref="([^"]+)"/g)].map((m) => m[1]);
-  const SIX = [['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ']];
+  const NAV = [['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/catalogue/', 'Catalogue'], ['/faq/', 'FAQ']];
 
-  it('has the same six header links on the homepage, the catalogue and the 12 pages: Services, Our work, Areas we serve, Catalogue, FAQ, Contact (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
+  it('has the same seven header links on the homepage, the catalogue and the 12 pages: Services, Products, Our work, Areas we serve, Catalogue, FAQ, Contact (an in-page anchor on the homepage, /#contact elsewhere), and "Get a quote" before the menu button', () => {
     const labels = (html) => [...nav(html).matchAll(/<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    assert.deepEqual(labels(homeHtml), [...SIX, ['#contact', 'Contact']].map((x) => x));
-    assert.deepEqual(labels(catalogue), [...SIX, ['/#contact', 'Contact']]);
-    for (const p of PAGES) assert.deepEqual(labels(p.html), [...SIX, ['/#contact', 'Contact']], p.path);
+    assert.deepEqual(labels(homeHtml), [...NAV, ['#contact', 'Contact']].map((x) => x));
+    assert.deepEqual(labels(catalogue), [...NAV, ['/#contact', 'Contact']]);
+    for (const p of PAGES) assert.deepEqual(labels(p.html), [...NAV, ['/#contact', 'Contact']], p.path);
     for (const html of [homeHtml, catalogue, ...PAGES.map((p) => p.html)]) {
       const header = html.match(/<header id="site-header">[\s\S]*?<\/header>/)[0];
       assert.ok(header.indexOf('id="site-nav"') < header.indexOf('site-head-cta') && header.indexOf('site-head-cta') < header.indexOf('id="site-menu-btn"'));
@@ -971,10 +977,10 @@ describe('the homepage and the catalogue are wired to the 12 pages (the pages li
     }
   });
 
-  it('has one footer link row on the catalogue and the 12 pages (Home, Services, Our work, Areas we serve, FAQ, Catalogue, Facebook, Message us, Get a quote, Team portal) and the homepage\'s without Home — "Team portal" last everywhere', () => {
+  it('has one footer link row on the catalogue and the 12 pages (Home, Services, Products, Our work, Areas we serve, FAQ, Catalogue, Facebook, Message us, Get a quote, Team portal) and the homepage\'s without Home — "Team portal" last everywhere', () => {
     // the Message us link carries an inline icon: take the <svg> out so the row reads as its words
     const rows = (html) => [...footLinks(html).replace(/<svg[\s\S]*?<\/svg>/g, '').matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
-    const FULL = [['/', 'Home'], ['/services/', 'Services'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']];
+    const FULL = [['/', 'Home'], ['/services/', 'Services'], ['/products/', 'Products'], ['/work/', 'Our work'], ['/areas-we-serve/', 'Areas we serve'], ['/faq/', 'FAQ'], ['/guides/', 'Guides'], ['/catalogue/', 'Catalogue'], [FB, 'Facebook'], [MSGR, 'Message us'], ['/catalogue/?quote=1', 'Get a quote'], ['/#login', 'Team portal']];
     assert.deepEqual(rows(catalogue), FULL);
     assert.deepEqual(rows(homeHtml), FULL.slice(1));
     for (const p of PAGES) assert.deepEqual(rows(p.html), FULL, p.path);
@@ -1138,10 +1144,10 @@ describe('scripts and styles: only the shared /js/site.js, no inline script or s
     // the header is css/site.css's (one design for every public page): its rule for the narrowest phone, and the 900-1099px squeeze that keeps six links, the button and the whole wordmark on one row
     const site = read('css/site.css').replace(/\/\*[\s\S]*?\*\//g, '');
     assert.match(site, /@media \(max-width:359px\)\{[^@]*#site \.site-brand-name\{[^}]*white-space:normal/);
-    assert.match(site, /@media \(min-width:900px\) and \(max-width:1099px\)\{\s*#site #site-nav\{gap:20px\}\s*#site #site-nav a\{font-size:14px\}\s*\}/);
-    // the footer: nine links wrap inside the right half from 900px (so the address and the badges keep their room), and sit on one row from 1100px
+    assert.match(site, /@media \(min-width:900px\) and \(max-width:1099px\)\{\s*#site #site-nav\{gap:14px;margin-right:4px\}\s*#site #site-nav a\{font-size:14px\}\s*#site \.site-brand-name\{font-size:20px\}\s*\}/);
+    // the footer: its eleven links wrap inside the right half from 900px at every width (so the address and the badges keep their room): there is no one-row layout any more
     assert.match(site, /@media \(min-width:900px\)\{[^@]*#site \.foot-in\{grid-template-columns:minmax\(0,1fr\) minmax\(0,1\.1fr\);[^}]*\}\s*#site \.foot-links\{justify-content:flex-end\}/);
-    assert.match(site, /@media \(min-width:1100px\)\{\s*#site \.foot-in\{grid-template-columns:minmax\(0,1fr\) auto\}\s*\}/);
+    assert.ok(!/@media \(min-width:1100px\)\{\s*#site \.foot-in\{/.test(site), 'the footer has a one-row layout again: eleven links no longer fit beside the address');
     assert.ok(!/site-brand-name|site-head-cta|#site-menu-btn|foot-portal|foot-links|foot-in/.test(css.replace(/#site #site-nav a\[aria-current\]/, '')), 'pages.css redraws the header or the footer that css/site.css owns');
     assert.match(css, /@media \(prefers-reduced-motion:reduce\)/);
   });
@@ -1262,12 +1268,14 @@ describe('sitemap and robots: the new paths are crawlable and listed', () => {
   it('lists the home page, the catalogue and all 12 pages in sitemap.xml, once each, with a lastmod date, and every listed page exists', () => {
     const sm = read('sitemap.xml');
     const locs = [...sm.matchAll(/<url>\s*<loc>([^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>\s*<\/url>/g)].map((m) => ({ loc: m[1], lastmod: m[2] }));
-    assert.deepEqual(locs.map((l) => l.loc), [BASE + '/', BASE + '/catalogue/', ...PAGE_PATHS.map((p) => BASE + p)]);
+    // these 14 are listed in this order; the product pages and the fresh-air page (tests/seo-products.test.mjs) and any later page sit between or after them
+    const want = [BASE + '/', BASE + '/catalogue/', ...PAGE_PATHS.map((p) => BASE + p)];
+    assert.deepEqual(locs.map((l) => l.loc).filter((u) => want.includes(u)), want);
     for (const l of locs) {
       assert.match(l.lastmod, /^\d{4}-\d{2}-\d{2}$/, `${l.loc}: lastmod`);
       assert.ok(exists(l.loc.replace(BASE + '/', '') + 'index.html'), `${l.loc} has no page`);
     }
-    assert.equal(sm.split('<url>').length - 1, 14);
+    assert.ok(sm.split('<url>').length - 1 >= 14 && new Set(locs.map((l) => l.loc)).size === locs.length);
     assert.ok(!/brilliant/i.test(sm));
   });
 });

@@ -90,6 +90,8 @@ body{margin:0;background:#fff;color:#0E1116}
 #site .cat-specs dt{color:var(--site-ink);font-weight:600}
 #site .cat-specs dt::after{content:": "}
 #site .cat-specs dd{color:var(--cat-ink)}
+/* a configurable card's "Learn more" link to its product page (SEO build, 2026-10-22): under the specification rows, inside the same panel */
+#site .cat-learn{margin:12px 0 0;font-size:14.5px;line-height:1.5}
 
 /* a CONFIGURABLE card on a phone: the normal stacked card at the full width — photo on top, then the text, then the button */
 #site .cat-card-feature{grid-column:1 / -1;display:flex;flex-direction:column}
