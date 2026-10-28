@@ -97,7 +97,8 @@ describe('1 · the app kit: an inert <template> holding exactly what the app nee
   });
 
   it('lists the app scripts in the EXACT old load order (load order is load-bearing — CLAUDE.md), each a plain external `defer` script with the old SRI hash', () => {
-    assert.deepEqual(kitScripts.map((s) => s.attrs.src), EXPECTED_KIT_SCRIPTS.map((e) => e[0]), 'the kit script list or its order changed');
+    // local srcs carry the hook's ?v= cache-bust (2026-10-29), stripped for the order comparison and pinned in the stylesheet test below
+    assert.deepEqual(kitScripts.map((s) => s.attrs.src.split('?')[0]), EXPECTED_KIT_SCRIPTS.map((e) => e[0]), 'the kit script list or its order changed');
     kitScripts.forEach((s, i) => {
       const [src, integrity] = EXPECTED_KIT_SCRIPTS[i];
       assert.ok('defer' in s.attrs && !('async' in s.attrs) && !('type' in s.attrs), `${src}: must be a plain defer script`);
@@ -105,7 +106,7 @@ describe('1 · the app kit: an inert <template> holding exactly what the app nee
       else assert.ok(!('integrity' in s.attrs), `${src}: local scripts carry no SRI`);
     });
     // the documented chain: Firebase SDK + icons -> firebase-config -> config -> drive -> notifications -> departments -> app -> modules
-    const order = kitScripts.map((s) => s.attrs.src);
+    const order = kitScripts.map((s) => s.attrs.src.split('?')[0]);
     const at = (f) => order.indexOf(f);
     const chain = ['firebase-app-compat', 'firebase-auth-compat', 'firebase-firestore-compat', 'firebase-storage-compat', 'firebase-functions-compat', 'lucide.min.js', 'js/firebase-config.js', 'js/config.js', 'js/drive.js', 'js/notifications.js', 'js/departments.js', 'js/app.js', 'js/modules.js']
       .map((f) => order.findIndex((u) => u.includes(f)));
@@ -119,6 +120,7 @@ describe('1 · the app kit: an inert <template> holding exactly what the app nee
     assert.match(sheets[0], /^css\/tokens\.css\?v=\d+\.\d+\.\d+$/);
     assert.match(sheets[1], /^css\/styles\.css\?v=\d+\.\d+\.\d+$/);
     assert.equal(sheets[0].split('v=')[1], sheets[1].split('v=')[1], 'the two ?v= differ — the hook rewrites both');
+    for (const s of kitScripts) if (!/^https:/.test(s.attrs.src)) assert.equal(s.attrs.src.split('?v=')[1], sheets[0].split('v=')[1], `${s.attrs.src}: every local kit script carries the stylesheets' ?v= (the hook rewrites all of them)`);
     const hints = kitLinks.filter((l) => l.attrs.rel !== 'stylesheet').map((l) => `${l.attrs.rel} ${l.attrs.href}`);
     assert.deepEqual(hints, ['preconnect https://www.gstatic.com', 'preconnect https://firestore.googleapis.com', 'preconnect https://firebasestorage.googleapis.com',
       'preconnect https://cdn.jsdelivr.net', 'dns-prefetch https://unpkg.com', 'preload icons/barro-kitchens.png']);
@@ -129,7 +131,7 @@ describe('1 · the app kit: an inert <template> holding exactly what the app nee
 
   it('every kit file exists, is in sw.js PRECACHE (the stylesheets by their exact ?v= URL), and the version string the hook rewrites is still in the document exactly once', () => {
     const sw = read('sw.js');
-    for (const s of kitScripts) if (!/^https:/.test(s.attrs.src)) { assert.ok(exists(s.attrs.src), `${s.attrs.src} is missing`); assert.ok(sw.includes(`'/${s.attrs.src}'`), `${s.attrs.src} is not in PRECACHE`); }
+    for (const s of kitScripts) if (!/^https:/.test(s.attrs.src)) { assert.ok(exists(s.attrs.src.split('?')[0]), `${s.attrs.src} is missing`); assert.ok(sw.includes(`'/${s.attrs.src}'`), `${s.attrs.src} is not in PRECACHE with the same ?v=`); }
     for (const l of kitLinks.filter((x) => x.attrs.rel === 'stylesheet')) { assert.ok(exists(l.attrs.href.split('?')[0])); assert.ok(sw.includes(`'/${l.attrs.href}'`), `${l.attrs.href} is not in PRECACHE with the same ?v=`); }
     assert.equal(html.split(' · Barro Industries').length - 1, 1, 'the hook greps v<version> · Barro Industries in index.html');
     assert.ok(html.includes('css/styles.css?v='), 'the hook greps css/styles.css?v= in index.html');

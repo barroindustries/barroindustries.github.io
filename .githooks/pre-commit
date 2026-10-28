@@ -152,6 +152,23 @@ for _cssfile in "$INDEX" "$SW"; do
 done
 echo "[css] Cache-bust set to ?v=${NEW_VERSION}"
 
+# ── App-kit JS cache-bust (2026-10-29) ───────────────────────────────────────
+# Same contract as the CSS block above, for every  js/<path>.js?v=X.Y.Z  — the
+# app-kit <script> srcs in index.html and their PRECACHE entries in sw.js.
+# GitHub Pages sends max-age=600, so a bare src ran the previous release's code
+# from the browser cache for up to 10 minutes after a deploy. Lazy PAGE_SCRIPTS
+# files are versioned at runtime by js/config.js's ensureScript instead.
+for _jsfile in "$INDEX" "$SW"; do
+  if grep -q 'js/app.js?v=' "$_jsfile"; then
+    sed -i '' -E "s#(js/[A-Za-z0-9_./-]+\.js)\?v=[0-9][0-9.]*#\1?v=${NEW_VERSION}#g" "$_jsfile"
+    if ! grep -q "js/app.js?v=${NEW_VERSION}" "$_jsfile"; then
+      echo "[js] ERROR: failed to rewrite the JS cache-bust in $_jsfile — blocking commit"
+      exit 1
+    fi
+  fi
+done
+echo "[js] Cache-bust set to ?v=${NEW_VERSION}"
+
 # Stage both files
 git add "$CONFIG" "$INDEX"
 

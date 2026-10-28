@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.346';
+const CACHE_VER = 'bi-ops-v14.0.347';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -36,39 +36,40 @@ const PRECACHE = [
   '/track.html',
   '/t/',
   '/t/index.html',
-  // ?v= must match index.html's <link> hrefs exactly — the SW caches by URL,
-  // so an unversioned entry here would never serve the versioned request and
-  // the app would lose offline CSS. Both sides are rewritten by the hook.
-  '/css/tokens.css?v=14.0.346',
-  '/css/styles.css?v=14.0.346',
+  // ?v= must match index.html's app-kit <link> hrefs and <script> srcs exactly
+  // — the SW caches by URL (the ignoreSearch fallback on the JS/CSS route is
+  // only a safety net). Both sides are rewritten by the hook. Lazy PAGE_SCRIPTS
+  // files stay bare here; js/config.js's ensureScript versions them at runtime.
+  '/css/tokens.css?v=14.0.347',
+  '/css/styles.css?v=14.0.347',
   '/css/site.css',
   '/manifest.json',
   '/quote-builder-v2.html',
-  '/js/firebase-config.js',
+  '/js/firebase-config.js?v=14.0.347',
   '/js/site.js',
-  '/js/errlog.js',
-  '/js/config.js',
-  '/js/ui-states.js',
-  '/js/ui-status-meta.js',
+  '/js/errlog.js?v=14.0.347',
+  '/js/config.js?v=14.0.347',
+  '/js/ui-states.js?v=14.0.347',
+  '/js/ui-status-meta.js?v=14.0.347',
   '/js/gestures.js',
   '/js/qrcode.js',
-  '/js/statutory-tables.js',
+  '/js/statutory-tables.js?v=14.0.347',
   '/js/letterhead.js',
-  '/js/print-docs.js',
+  '/js/print-docs.js?v=14.0.347',
   '/js/bir.js',
-  '/js/finance-ledger.js',
-  '/js/drive.js',
-  '/js/notifications.js',
-  '/js/meetings.js',
-  '/js/calendar-feed.js',
-  '/js/svc-approvals.js',
-  '/js/ui-crud-table.js',
-  '/js/money-core.js',
+  '/js/finance-ledger.js?v=14.0.347',
+  '/js/drive.js?v=14.0.347',
+  '/js/notifications.js?v=14.0.347',
+  '/js/meetings.js?v=14.0.347',
+  '/js/calendar-feed.js?v=14.0.347',
+  '/js/svc-approvals.js?v=14.0.347',
+  '/js/ui-crud-table.js?v=14.0.347',
+  '/js/money-core.js?v=14.0.347',
   '/js/pricing-core.js',
   '/js/pay-policy.js',
   '/js/statutory-status.js',
-  '/js/geo-core.js',
-  '/js/departments.js',
+  '/js/geo-core.js?v=14.0.347',
+  '/js/departments.js?v=14.0.347',
   '/js/screens/design.js',
   '/js/screens/tasks.js',
   '/js/screens/sales.js',
@@ -96,14 +97,14 @@ const PRECACHE = [
   '/js/screens/production.js',
   '/js/screens/inventory.js',
   '/js/screens/finance.js',
-  '/js/screens/dept-budgets.js',
+  '/js/screens/dept-budgets.js?v=14.0.347',
   '/js/screens/statutory-rates.js',
   '/js/screens/approvals.js',
   '/js/screens/govit.js',
   '/js/screens/partners.js',
   '/js/migrations.js',
-  '/js/app.js',
-  '/js/modules.js',
+  '/js/app.js?v=14.0.347',
+  '/js/modules.js?v=14.0.347',
   '/js/screens/people.js',
   '/js/screens/notes.js',
   '/js/screens/todo.js',
@@ -116,9 +117,9 @@ const PRECACHE = [
   '/js/screens/client-info-requests.js',
   '/js/screens/quote-requests.js',
   '/js/screens/family-pricing.js',
-  '/js/screens/dashboards.js',
+  '/js/screens/dashboards.js?v=14.0.347',
   '/js/screens/layoff.js',
-  '/js/chat.js',
+  '/js/chat.js?v=14.0.347',
   '/js/screens/worker.js',
   '/icons/bi-logo.svg',
   '/icons/icon-192.png',
@@ -238,13 +239,23 @@ async function precacheDeployDiff() {
     // try/catch keeps the outcome deterministic: good entries land, bad ones
     // are warned and skipped (the runtime network-first strategy still serves
     // them while online), and no fallback ever races this loop.
+    //
+    // Entries are compared by their BARE path: the app-kit JS/CSS entries carry
+    // ?v=APP_VERSION, which changes every release, so keying on the full URL
+    // would re-download every one of them on every install. The old response is
+    // read back under its exact OLD key (from the previous manifest), never via
+    // ignoreSearch, so a stray runtime copy can't be carried forward.
+    const bare = p => p.split('?')[0];
+    const prevKeyByBare = {};
+    for (const k of Object.keys(prevManifest.files)) prevKeyByBare[bare(k)] = k;
     const results = await Promise.all(PRECACHE.map(async path => {
       try {
         const newHash = manifest.files[path];
-        const oldHash = prevManifest.files[path];
+        const oldKey = prevKeyByBare[bare(path)];
+        const oldHash = oldKey && prevManifest.files[oldKey];
         const canCopyForward = !!newHash && !!oldHash && newHash === oldHash && !PRECACHE_ALWAYS_FRESH.includes(path);
         if (canCopyForward) {
-          const oldResponse = await prevCache.match(path);
+          const oldResponse = await prevCache.match(oldKey);
           if (oldResponse) {
             await newCache.put(path, oldResponse.clone());
             return true;

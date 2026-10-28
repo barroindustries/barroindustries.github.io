@@ -11,6 +11,9 @@
 //   2. SW         sw.js's JS/CSS route opts into the ignoreSearch fallback (so a versioned lazy request still finds its bare PRECACHE copy
 //                 offline), and every install-time precache fetch revalidates (cache: 'no-cache') instead of reading the browser's HTTP cache.
 //   3. PRECACHE   every PAGE_SCRIPTS file is still in sw.js PRECACHE as its bare '/path' (what the ignoreSearch fallback matches).
+//   4. APP KIT    every local <script> in index.html's app-kit carries ?v=<APP_VERSION> and is precached under that exact URL; the pre-commit hook
+//                 rewrites js/*.js?v= in index.html and sw.js; sw.js's deploy-diff compares entries by bare path (so a per-release ?v= does not
+//                 re-download every unchanged kit file) and reads the old response back under its exact old key.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -87,5 +90,31 @@ describe('sw.js agrees with versioned lazy scripts', () => {
     const { win } = loadConfig();
     const precache = new Set([...sw.slice(sw.indexOf('const PRECACHE = ['), sw.indexOf('\n];', sw.indexOf('const PRECACHE = ['))).matchAll(/'(\/[^']*)'/g)].map((m) => m[1]));
     for (const files of Object.values(win.PAGE_SCRIPTS)) for (const f of files) assert.ok(precache.has('/' + f), `/${f} is not in sw.js PRECACHE`);
+  });
+});
+
+describe('index.html app-kit scripts carry ?v=APP_VERSION (2026-10-29)', () => {
+  const html = read('index.html');
+  const kit = html.slice(html.indexOf('<template id="app-kit">'), html.indexOf('</template>'));
+  const local = [...kit.replace(/<!--[\s\S]*?-->/g, '').matchAll(/<script defer src="(js\/[^"]+)"><\/script>/g)].map((m) => m[1]);
+  it('every local kit script is versioned with the current APP_VERSION and precached under that exact URL', () => {
+    const { win } = loadConfig();
+    const sw = read('sw.js');
+    assert.ok(local.length >= 20, 'kit scripts not found');
+    for (const src of local) {
+      assert.equal(src, `${src.split('?')[0]}?v=${win.APP_VERSION}`, `${src} is not versioned with APP_VERSION ${win.APP_VERSION}`);
+      assert.ok(sw.includes(`'/${src}'`), `/${src} is not in sw.js PRECACHE with the same ?v=`);
+    }
+  });
+  it('the pre-commit hook rewrites js/*.js?v= in index.html and sw.js', () => {
+    const hook = read('.githooks/pre-commit');
+    assert.ok(hook.includes('for _jsfile in "$INDEX" "$SW"; do'), 'the JS cache-bust loop is gone');
+    assert.ok(hook.includes('s#(js/[A-Za-z0-9_./-]+\\.js)\\?v=[0-9][0-9.]*#\\1?v=${NEW_VERSION}#g'), 'the JS cache-bust sed changed');
+  });
+  it("sw.js's deploy-diff compares by bare path and copies forward under the exact old key", () => {
+    const sw = read('sw.js');
+    assert.match(sw, /const oldKey = prevKeyByBare\[bare\(path\)\];/);
+    assert.match(sw, /const oldHash = oldKey && prevManifest\.files\[oldKey\];/);
+    assert.match(sw, /await prevCache\.match\(oldKey\)/);
   });
 });
