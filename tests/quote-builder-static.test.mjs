@@ -2210,7 +2210,7 @@ describe('FAMILIES-2 — the five new families go through the same pipeline: chi
       open(b, id);
       assert.match(b.el('cfgPriceArea').innerHTML, /website basis/, `${id}: priced`);
       assert.equal(b.el('cfgAddBtn').disabled, false, id);
-      assert.match(b.el('cfgTitle').innerHTML, new RegExp(`Configure: <strong>${f.label.replace(/[,]/g, '[,]')}</strong>`), id);
+      assert.ok(b.el('cfgTitle').innerHTML.includes(`Configure: <strong id="cfgTitleName">${PF.lineTitle(f, b.plain('cfgState.config'))}</strong>`), id);
       b.run('cfgCommit()');
       const it = b.plain('items[0]');
       assert.equal(b.run('items.length'), 1, id);
@@ -2792,5 +2792,27 @@ describe('GRADE-TITLES — Material is drawn first, a 316 line is "Priced after 
     const cfg = makeEnv().plain('TOUR_STEPS').find((s) => s.target === '#configPanel').body;
     assert.match(cfg, /Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade — and each line is named for what it is on the quote \(SS Sink, SS Griddle…\)\./);
     assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(li + ' ' + cfg + ' ' + makeEnv().plain('WHATS_NEW')[0].items.join(' ')), false);
+  });
+});
+
+// GRADE-TITLES follow-up (owner 2026-10-28): the panel header shows the line's live title, and a website hand-off's configured lines arrive titled (a filed quote is never retitled).
+describe('GRADE-TITLES follow-up — panel header title and hand-off retitle', () => {
+  const gAt2 = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
+  const oAt2 = (id, key, v) => FAM.families[id].groups[gAt2(id, key)].options.findIndex((o) => o.v === v);
+  it('the header reads the title and follows the add-ons', () => {
+    const b = builder();
+    b.run(`openConfigurator('stove', {})`);
+    assert.equal(b.run(`document.getElementById('cfgTitleName').textContent`), 'SS Range Stove');
+    b.run(`cfgToggleMulti(${gAt2('stove', 'addons')}, ${oAt2('stove', 'addons', 'fryer')}, true)`);
+    assert.equal(b.run(`document.getElementById('cfgTitleName').textContent`), 'SS Range Stove Combination (Fryer)');
+  });
+  it('a hand-off state retitles its configured lines; a non-hand-off load keeps the stored name', () => {
+    const line = { id: 'PW-004', category: 'prep_washing', name: 'Sink', familyId: 'sink', config: {}, size: { W: 500, D: 500, H: 850 }, qty: 1, unit: 'pc', unitPrice: 0, priceBasis: 'manual', needsPrice: true };
+    const b = builder();
+    b.run(`loadEditableState({ currentCo: 'BK', handoff: true, items: [${JSON.stringify(line)}] })`);
+    assert.equal(b.run('items[0].name'), 'SS Sink');
+    const c = builder();
+    c.run(`loadEditableState({ currentCo: 'BK', items: [${JSON.stringify(line)}] })`);
+    assert.equal(c.run('items[0].name'), 'Sink');
   });
 });

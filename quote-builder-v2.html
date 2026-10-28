@@ -4407,7 +4407,7 @@ function cfgRenderAll(){
   const fam = cfgFamily(st.familyId); if (!fam) return;
   const primary = cfgPrimary(fam);
   const title = document.getElementById('cfgTitle');
-  if (title) title.innerHTML = `⚙ ${st.editItem ? 'Edit' : 'Configure'}: <strong>${txtEsc(fam.label)}</strong> <span class="formula-badge">${txtEsc(fam.primary)}</span>` +
+  if (title) title.innerHTML = `⚙ ${st.editItem ? 'Edit' : 'Configure'}: <strong id="cfgTitleName">${txtEsc(window.ProductFamilies.lineTitle(fam, st.config) || fam.label)}</strong> <span class="formula-badge">${txtEsc(fam.primary)}</span>` +
     (primary ? '' : ' <span class="ms-chip warn" style="font-size:10px;">base product not in the catalogue</span>');
   const nt = document.getElementById('cfgNotice');
   if (nt) { nt.style.display = st.notice ? '' : 'none'; nt.textContent = st.notice || ''; }
@@ -4439,6 +4439,8 @@ function cfgRefresh(){
   const ev = cfgEvaluate(st), fam = ev.fam;
   const pv = document.getElementById('cfgPreview');
   if (pv) pv.textContent = PF.summaryLine(fam, ev.v.config, ev.v.dims);
+  const tn = document.getElementById('cfgTitleName');          // the header follows the line's title (a stove becomes "… Combination (Fryer)" as add-ons are ticked)
+  if (tn) tn.textContent = PF.lineTitle(fam, ev.v.config) || fam.label;
   const split = cfgSplitErrors(fam, ev.v.errors);
   const mw = PF.minWidth(fam, ev.v.config), fm = PF.forcedMins(fam, ev.v.config), fx = PF.forcedMaxes(fam, ev.v.config);
   PF.DIM_KEYS.forEach(k => {
@@ -8880,6 +8882,8 @@ function loadEditableState(state, opts){
   opts=opts||{};
   try{
     items=normalizeLoadedItems(state.items||[]);
+    // A website hand-off (fresh, never filed) carries the server's stored name ("Sink"): give its configured lines their title. Filed quotes keep theirs.
+    if(state.handoff===true) items.forEach(it=>{ const fam=it&&it.familyId&&cfgFamily(it.familyId); const t=fam&&window.ProductFamilies&&window.ProductFamilies.lineTitle?window.ProductFamilies.lineTitle(fam,it.config):''; if(t) it.name=t; });
     termsContent=state.termsContent||{};
     termsEnabled=state.termsEnabled||termsEnabled;
     quotePhotos=state.photos||[];
