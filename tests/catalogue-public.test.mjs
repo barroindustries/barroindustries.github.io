@@ -1006,7 +1006,7 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     for (const [label, text] of [['block chrome', visibleText(chrome)], ['hand-written page', publicCopy(catHand)], ['head', attrText(catHead)]]) {
       assert.ok(!/exhaust|fresh[- ]air|gas lines?|fire[- ]suppression/i.test(text), `${label} still mentions a removed category`);
     }
-    assert.match(catHead, /name="description" content="[^"]*preparation, washing, cooking, ventilation, storage and refrigeration/);   // the six public categories (Ventilation added 2026-10-28)
+    assert.match(catHead, /name="description" content="[^"]*range hoods/);   // the Ventilation category (added 2026-10-28) is in the description by its product: since the owner's shortening of 2026-10-28 the description names products, not the six categories
   });
 
   it('every published product lands in EXACTLY ONE of the six public categories, as scripts/public-categories.json says (and nothing else is on the page)', () => {
@@ -1036,13 +1036,13 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
 
   it('has the title, description, canonical, robots and Open Graph tags the owner specified', () => {
     // owner ruling 2026-10-22: "Barro Kitchens" is a permanent, historic name of the business, so it is in the title (the full pins are in tests/site-public-surface.test.mjs)
-    assert.match(cat, /<title>Commercial Kitchen Equipment Catalogue \| Barro Kitchens by Barro Industries<\/title>/);
+    assert.match(cat, /<title>Commercial Kitchen Equipment \| Barro Kitchens by Barro Industries<\/title>/);   // 65 characters since the owner's shortening of 2026-10-28 (it read "... Equipment Catalogue | ...", 75)
     assert.match(catHead, /<meta name="description" content="[^"]{60,}">/);
     assert.match(catHead, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
     assert.match(catHead, /<meta name="robots" content="index,follow">/);
     for (const p of ['og:title', 'og:description', 'og:url', 'og:image', 'og:type', 'og:site_name']) assert.ok(catHead.includes(`property="${p}"`), p);
     assert.ok(catHead.includes('property="og:url" content="https://barroindustries.com/catalogue/"'));
-    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment Catalogue | Barro Kitchens by Barro Industries"'));
+    assert.ok(catHead.includes('property="og:title" content="Commercial Kitchen Equipment | Barro Kitchens by Barro Industries"'));
     assert.ok(catHead.includes('property="og:site_name" content="Barro Industries"'));
     // the hero project photo as an absolute URL, with the large Twitter card (owner, 2026-10-21; the full set of tag pins is in tests/site-public-surface.test.mjs)
     assert.ok(catHead.includes('property="og:image" content="https://barroindustries.com/site/img/projects/ispsc/01.webp"'));
@@ -1108,9 +1108,9 @@ describe('the committed /catalogue/ page (R1, R5, marker integrity, every produc
     assert.ok(cat.includes('id="cat-top"') && cat.includes('aria-label="Back to top"'));
   });
 
-  it('keeps the premium copy: the intro line the owner suggested, and "Premium" in the meta description', () => {
+  it('keeps the premium copy: the intro line the owner suggested, and the owner\'s short product-led meta description (2026-10-28), which leads with the grades and no longer says "premium" (the homepage description still does)', () => {
     assert.ok(catBlock.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
-    assert.match(catHead, /name="description" content="Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel/);
+    assert.match(catHead, /name="description" content="Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: /);
   });
 
   it('(local only) is exactly what a fresh build produces from the private master and the photo map', { skip: (() => { try { return resolveMaster() ? false : 'the private master (products-database.json) is not present'; } catch (_) { return 'no master'; } })() }, () => {

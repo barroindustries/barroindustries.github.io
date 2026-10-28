@@ -1,4 +1,5 @@
-/* js/late-fonts.js — the web fonts of the standalone public pages that opt in (the /products/ pages and /services/fresh-air-systems/), requested AFTER the page has loaded.
+/* js/late-fonts.js — the web fonts of the standalone public pages that opt in (every page with a PAGE-CSS block, see scripts/inline-page-css.js: the product pages, /services/ and
+   its service pages, /work/ and its project pages, /areas-we-serve/, /faq/ and the guides), requested AFTER the page has loaded.
    The homepage does the same with an inline script (see the note beside it in index.html). These pages keep a strict CSP with no inline script, so the same
    few lines live here, in a file of their own, and every opted-in page loads it with the other deferred script.
    Why late: a Google Fonts <link> in the head is a third-party stylesheet behind a connection of its own, and it blocks the first paint; worse, the font files

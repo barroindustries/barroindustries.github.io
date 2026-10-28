@@ -4,7 +4,8 @@
    (the visitor's query is compared and echoed with textContent, never parsed as markup).
    What it does: live search over every product, a scroll-spy that highlights the current category
    (a sticky sidebar from 1024px, a sticky chip bar on phones), deep links such as #cat-baking
-   that land under the sticky header, and a back-to-top button. */
+   that land under the sticky header, the Configure deep link ?configure=<family> (a product page's
+   "Configure" button: it presses that family card's own "Configure & add" button), and a back-to-top button. */
 (function () {
   'use strict';
   var d = document;
@@ -176,6 +177,55 @@
       var polls = 0, poll = window.setInterval(function () { realign(); if (++polls >= 14 || moved) window.clearInterval(poll); }, 250);
     }
     on(window, 'hashchange', function () { moved = true; setActive(idOf(pick())); });
+
+    // ── Configure deep link. A product page's "Configure" button goes to /catalogue/?configure=<family>#cat-… . When the value names a
+    // configurable family card of this page, that family's configurator opens at once: this presses the card's own "Configure & add" button,
+    // so the sheet, its focus handling and its closing are js/quote-request.js's, exactly as for a visitor's own click (none of it is copied
+    // here). Anything else — no value, an unknown family, a fixed product's code — does nothing, and the visitor stays on the category the
+    // #cat-… names (which is also where a browser without script lands). quote-request.js is a LATER deferred script and adds the button when
+    // it runs, so the button is pressed once every deferred script has run (DOMContentLoaded; "load" and an immediate try cover the rest).
+    var wanted = '', asked = /[?&]configure=([^&#]*)/.exec(location.search || '');
+    if (asked) { try { wanted = decodeURIComponent(asked[1]); } catch (_) { wanted = ''; } }   // a malformed escape asks for nothing
+    var pressed = !wanted;
+    function dropConfigure() {                       // like ?quote=1: take it out of the address, so a reload does not open the sheet again
+      try {
+        var rest = (location.search || '').replace(/^\?/, '').split('&').filter(function (p) { return p && p.split('=')[0] !== 'configure'; }).join('&');
+        window.history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + (location.hash || ''));
+      } catch (_) { /* no history API, or not allowed: the address keeps the query, which is harmless */ }
+    }
+    // A page opened at a #fragment has its keyboard focus CLEARED by the browser (Chrome does it at the first rendering after the parser has
+    // finished, i.e. a moment after the sheet gave its first control the focus), which would leave the dialog open with the focus on <body>.
+    // Before the visitor has touched anything, that control gets the focus back: as soon as the browser reports the clearing (focusout),
+    // and by a check after the first frame and at load for a page that has no system focus to report it (a background tab). Never once the
+    // visitor has moved on (a key, a click, a scroll, a touch), when the focus went to another control, or when the sheet has gone.
+    function keepFocus(given) {
+      if (!given || given === d.body) return;
+      var back = function () {
+        setTimeout(function () {
+          if (!moved && given.isConnected && (!d.activeElement || d.activeElement === d.body)) { try { given.focus(); } catch (_) { /* nothing to do */ } }
+        }, 0);
+      };
+      on(d, 'focusout', function (e) { if (e.target === given) back(); }, true);
+      window.requestAnimationFrame(back);
+      on(window, 'load', back);
+    }
+    function pressConfigure() {
+      if (pressed) return;
+      for (var i = 0; i < cards.length; i++) {
+        if (cards[i].getAttribute('data-family') !== wanted) continue;
+        var btn = cards[i].querySelector('.qr-add-config');
+        if (!btn) return;                            // quote-request.js has not added it yet (or did not load): try again later
+        pressed = true;
+        dropConfigure();
+        btn.click();
+        keepFocus(d.activeElement);                  // the control the sheet has just focused
+        return;
+      }
+      pressed = true;                                // no family card of that name: nothing to wait for
+    }
+    pressConfigure();
+    on(d, 'DOMContentLoaded', pressConfigure);
+    on(window, 'load', pressConfigure);
 
     // ── Back to top
     if (topBtn) {

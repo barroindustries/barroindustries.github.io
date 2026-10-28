@@ -122,9 +122,13 @@ describe('the head: a noindex intake page on the site\'s own card', () => {
       'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..600&family=Inter:wght@400;500;600&display=swap',
       '/css/site.css', '/css/pages.css', '/css/project-brief.css',
     ]);
+    // the content pages no longer LINK these three (2026-10-28 first-paint work: site.css + pages.css are inline in their PAGE-CSS block, the fonts are in a <noscript> link and
+    // requested late by js/late-fonts.js), so "the same" is read from the sources their marker names and the fonts URL their <noscript> carries; this page still links all three
     const svc = read('services/commercial-kitchen-fit-out/index.html');
-    const svcLinks = [...svc.slice(0, svc.indexOf('</head>')).matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]);
-    assert.deepEqual(links.slice(0, 3), svcLinks.slice(0, 3), 'the same fonts, site.css and pages.css as /services/');
+    const svcHead = svc.slice(0, svc.indexOf('</head>'));
+    assert.deepEqual([...svcHead.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]), [links[0]], 'the content page requests only the fonts, in its <noscript>');
+    assert.ok(svcHead.includes(`<noscript><link rel="stylesheet" href="${links[0]}"></noscript>`), 'the same fonts as /services/ (its <noscript> link)');
+    assert.deepEqual(svcHead.match(/<!-- PAGE-CSS:START ([^—]*?) —/)[1].trim().split(/\s+/).map((f) => '/' + f), links.slice(1, 3), 'the same site.css and pages.css as /services/ (its inline PAGE-CSS sources)');
     for (const l of links.slice(1)) assert.ok(exists(l.slice(1)), `${l} is missing`);
   });
 });

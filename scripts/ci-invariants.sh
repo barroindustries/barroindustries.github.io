@@ -656,7 +656,20 @@ fi
 # rulings apply: R1 NO PRICES (the whole file, head and body, plus the plain words price / pricing / cost), R5 no partner company (checked below
 # with the other public surfaces), ONE phone / ONE email / the Quezon City address (no Gmail, no 0960, no San Fernando address), and none of
 # them in the service worker's PRECACHE. FAIL output carries line numbers only. tests/seo-pages.test.mjs pins the rest of their content.
-SEO_PAGES='services/index.html services/commercial-kitchen-fit-out/index.html services/stainless-steel-fabrication/index.html services/exhaust-and-fresh-air-systems/index.html services/lpg-gas-line-installation/index.html services/kitchen-fire-suppression/index.html services/institutional-and-government-supply/index.html work/index.html work/ispsc-2026/index.html work/dmmmsu-2022-2023/index.html areas-we-serve/index.html faq/index.html guides/index.html guides/commissary-kitchen-requirements-philippines/index.html guides/ss304-vs-ss316-stainless-steel/index.html'
+# Since 2026-10-28 their stylesheets are inline in the head too (the generated PAGE-CSS block: css text, not page content), so the head scan below goes through page_head(),
+# which blanks that block first (the numbering stays true) — like the homepage, whose check scans #site, not its inline stylesheet. The css files themselves are scanned for
+# the partner company with the other public files further down; the FIRST PAINT block after the product pages keeps the block itself current.
+page_head() {  # $1 = page, $2 = the line of its </head>
+  sed -n "1,$2p" "$1" | awk '/<!-- PAGE-CSS:START/{skip=1; print ""; next} /<!-- PAGE-CSS:END -->/{skip=0; print ""; next} skip{print ""; next} {print}'
+}
+SEO_PAGES='services/index.html services/commercial-kitchen-fit-out/index.html services/stainless-steel-fabrication/index.html services/exhaust-and-fresh-air-systems/index.html services/lpg-gas-line-installation/index.html services/kitchen-fire-suppression/index.html services/institutional-and-government-supply/index.html work/index.html work/ispsc-2026/index.html work/dmmmsu-2022-2023/index.html areas-we-serve/index.html faq/index.html guides/index.html guides/commissary-kitchen-requirements-philippines/index.html guides/ss304-vs-ss316-stainless-steel/index.html guides/how-to-plan-a-commercial-kitchen-layout/index.html guides/commercial-kitchen-equipment-checklist/index.html'
+# ONE allowance among these pages (2026-10-28): the equipment-list guide answers the price question with the owner's own sentence, "Prices depend on size and options.", the same sentence the
+# product pages use (see PRODUCT_PAGES below), in its last FAQ answer. It is taken out of the BODY before the plain words are scanned, so the word appears nowhere else on that page;
+# every other page here has no allowance at all, and the head (JSON-LD included) is scanned with the full token list on all of them.
+PRICE_LINE_GUIDE='guides/commercial-kitchen-equipment-checklist/index.html'
+sp_body() {  # $1 = page, $2 = its first body line
+  if [ "$1" = "$PRICE_LINE_GUIDE" ]; then sed -n "$2,\$p" "$1" | sed 's/Prices depend on size and options\.//g'; else sed -n "$2,\$p" "$1"; fi
+}
 seo_fail=0
 for sp in $SEO_PAGES; do
   if [ ! -f "$sp" ]; then
@@ -666,8 +679,8 @@ for sp in $SEO_PAGES; do
   fi
   sp_head_e=$(grep -nF -- '</head>' "$sp" | head -1 | cut -d: -f1)
   # the head is scanned with the FULL token list too (JSON-LD sits in it); only the Google Fonts URL (opsz,wght@9..144,500..600) is exempt
-  sp_price_lines=$( { sed -n "1,${sp_head_e:-0}p" "$sp" | grep -niE "$CAT_TOKENS" | grep -v 'fonts\.googleapis\.com' | cut -d: -f1
-                      sed -n "$((${sp_head_e:-0} + 1)),\$p" "$sp" | grep -niE "$CAT_TOKENS|pric(e|ing)|[^a-z]costs?[^a-z]" | cut -d: -f1 | awk -v off="${sp_head_e:-0}" '{print $1 + off}'; } | sort -un | head -10 | tr '\n' ' ')
+  sp_price_lines=$( { page_head "$sp" "${sp_head_e:-0}" | grep -niE "$CAT_TOKENS" | grep -v 'fonts\.googleapis\.com' | cut -d: -f1
+                      sp_body "$sp" "$((${sp_head_e:-0} + 1))" | grep -niE "$CAT_TOKENS|pric(e|ing)|[^a-z]costs?[^a-z]" | cut -d: -f1 | awk -v off="${sp_head_e:-0}" '{print $1 + off}'; } | sort -un | head -10 | tr '\n' ' ')
   if [ -n "$sp_price_lines" ]; then
     echo "FAIL: $sp matches the pricing-token list (line(s): $sp_price_lines). Offending text withheld on purpose."
     seo_fail=1
@@ -691,7 +704,7 @@ if grep -nE -- "'/services|'/work|'/areas-we-serve|'/faq|'/guides|'/downloads|'/
   seo_fail=1
 fi
 if [ "$seo_fail" -eq 0 ]; then
-  echo "PASS: the 15 public content pages (/services/, /work/, /areas-we-serve/, /faq/, /guides/) carry no pricing tokens, no disallowed contact detail and no app script, and are not precached"
+  echo "PASS: the 17 public content pages (/services/, /work/, /areas-we-serve/, /faq/, /guides/) carry no pricing tokens (only the equipment-list guide carries the owner's sentence \"Prices depend on size and options.\"), no disallowed contact detail and no app script, and are not precached"
 else
   cat_fail=1
 fi
@@ -707,11 +720,9 @@ prod_fail=0
 prod_body() {  # $1 = page, $2 = its first body line
   if [ "${1#products/}" != "$1" ]; then sed -n "$2,\$p" "$1" | sed 's/Prices depend on size and options\.//g'; else sed -n "$2,\$p" "$1"; fi
 }
-# The head, up to line $2. The generated inline stylesheet (<style id="page-css">: css/site.css + css/pages.css copied verbatim, kept current by
-# scripts/inline-page-css.js --check below) is not page content, so its lines are blanked first (the numbering stays true) — like the homepage,
-# whose check scans #site, not its inline stylesheet. The two css files are scanned for the partner company with the other public files below.
+# The head, up to line $2, without the generated inline stylesheet (page_head(), defined above the content pages: the block is css text, not page content).
 prod_head() {
-  sed -n "1,$2p" "$1" | awk '/<!-- PAGE-CSS:START/{skip=1; print ""; next} /<!-- PAGE-CSS:END -->/{skip=0; print ""; next} skip{print ""; next} {print}'
+  page_head "$1" "$2"
 }
 for pp in $PRODUCT_PAGES; do
   if [ ! -f "$pp" ]; then
@@ -740,15 +751,70 @@ if grep -nE -- "'/products|'/services/fresh-air|'/site/img/seo/|'/js/late-fonts\
   grep -nE -- "'/products|'/services/fresh-air|'/site/img/seo/|'/js/late-fonts\.js'" sw.js | sed 's/^/    /'
   prod_fail=1
 fi
-# Their stylesheet is INLINE (scripts/inline-page-css.js): a stale block, or a CSP hash that does not match it, would ship stale or unstyled pages.
-if ! node scripts/inline-page-css.js --check; then
-  prod_fail=1
-fi
+# Their stylesheet is INLINE (scripts/inline-page-css.js): a stale block, or a CSP hash that does not match it, would ship stale or unstyled pages. The generator's --check covers
+# every page that has a block (these 13 and, since 2026-10-28, the 12 content pages and the 3 guides), so it runs once for all of them in the FIRST PAINT block below.
 if [ "$prod_fail" -eq 0 ]; then
   echo "PASS: the 13 product and fresh-air pages carry no pricing tokens (only the owner's sentence \"Prices depend on size and options.\", and only on the hub and the eleven product pages), no disallowed contact detail and no app script, and are not precached"
 else
   cat_fail=1
 fi
+
+# FIRST PAINT of the standalone content pages (the product pages 2026-10-22; /services/, /work/, /areas-we-serve/, /faq/ and the guides 2026-10-28). A <link rel="stylesheet"> in the head blocks
+# the first paint (Lighthouse mobile 82-86 with the links, 97-100 without), so EVERY static page of the public site except the homepage (CHECK 11) and /catalogue/ keeps its stylesheets INLINE
+# (the generated <style id="page-css"> block between PAGE-CSS markers, scripts/inline-page-css.js, its sha256 in the CSP) and requests its Google Fonts after the page has loaded (js/late-fonts.js,
+# plus a <noscript> link). The folders are WALKED here, not just read from the two lists above, so a page added tomorrow is held to the rule the day it appears. tests/page-first-paint.test.mjs pins
+# the rest; this is the coarse net: a page with no block, a <link> that loads a stylesheet or preloads a file outside a <noscript> line, no late-fonts script, a <noscript> fonts link that is not the URL
+# js/late-fonts.js requests, a script without defer — and the generator's --check, which fails (naming every page) when css/site.css, css/pages.css or css/guides.css was edited without
+# re-running it, or a block or CSP hash was edited by hand. FAIL output carries file names only.
+# FIRST-PAINT:BEGIN (tests/page-first-paint.test.mjs runs the code between this marker and FIRST-PAINT:END against scratch trees with broken pages, so each test below is itself tested)
+fp_fail=0
+fp_n=0
+fp_want=$(echo $SEO_PAGES $PRODUCT_PAGES | wc -w | tr -d ' ')
+FP_LINK_RE='<link[^>]*rel=.?[a-z ]*(stylesheet|preload|modulepreload|prefetch)'
+# the Google Fonts URL that js/late-fonts.js requests after the load: every page's <noscript> link must carry the very same one
+fp_url=$(grep -o "var URL = '[^']*'" js/late-fonts.js 2>/dev/null | head -1 | sed "s/^var URL = '//; s/'\$//")
+if [ -z "$fp_url" ]; then
+  echo "FAIL: cannot read the Google Fonts URL from js/late-fonts.js (expected a line  var URL = '…';)."
+  fp_fail=1
+fi
+for fp in $(find services work areas-we-serve faq guides products -name index.html 2>/dev/null | sort); do
+  fp_n=$((fp_n + 1))
+  if ! grep -qF -- '<!-- PAGE-CSS:START ' "$fp" || ! grep -qF -- '<!-- PAGE-CSS:END -->' "$fp"; then
+    echo "FAIL: $fp has no PAGE-CSS block, so its stylesheet links block the first paint. FIX: follow 'HOW A PAGE OPTS IN' in scripts/inline-page-css.js (markers, <noscript> fonts link, js/late-fonts.js), then run  node scripts/inline-page-css.js"
+    fp_fail=1
+  fi
+  fp_links=$(grep -niE "$FP_LINK_RE" "$fp" | grep -v '<noscript>' | cut -d: -f1 | head -5 | tr '\n' ' ')
+  if [ -n "$fp_links" ]; then
+    echo "FAIL: $fp has a <link> that loads a stylesheet or preloads a file outside a <noscript> (line(s): $fp_links). It blocks the first paint: the stylesheets are inline (PAGE-CSS) and the fonts come from js/late-fonts.js."
+    fp_fail=1
+  fi
+  if ! grep -qF -- '<script defer src="/js/late-fonts.js"></script>' "$fp"; then
+    echo "FAIL: $fp does not load <script defer src=\"/js/late-fonts.js\"></script>: the Google Fonts are requested by that script after the page has loaded (the <noscript> link is only for visitors without JavaScript)."
+    fp_fail=1
+  fi
+  if ! grep -qF -- "<noscript><link rel=\"stylesheet\" href=\"$fp_url\"></noscript>" "$fp"; then
+    echo "FAIL: $fp has no <noscript><link rel=\"stylesheet\" href=\"…\"></noscript> carrying the Google Fonts URL of js/late-fonts.js (a visitor without JavaScript would get no web fonts)."
+    fp_fail=1
+  fi
+  fp_scripts=$(grep -nE '<script[^>]*[[:space:]]src=' "$fp" | grep -vE '<script[^>]*[[:space:]]defer([[:space:]>])' | cut -d: -f1 | head -5 | tr '\n' ' ')
+  if [ -n "$fp_scripts" ]; then
+    echo "FAIL: $fp loads a script without defer (line(s): $fp_scripts). A parser-blocking script holds the first paint."
+    fp_fail=1
+  fi
+done
+if [ "$fp_n" -lt "$fp_want" ]; then
+  echo "FAIL: only $fp_n index.html files found under services/ work/ areas-we-serve/ faq/ guides/ products/, but CHECK 9 lists $fp_want pages — the walk is broken or a page was removed without updating SEO_PAGES / PRODUCT_PAGES."
+  fp_fail=1
+fi
+if ! node scripts/inline-page-css.js --check; then
+  fp_fail=1
+fi
+if [ "$fp_fail" -eq 0 ]; then
+  echo "PASS: all $fp_n static pages under services/ work/ areas-we-serve/ faq/ guides/ products/ have their stylesheets inline (PAGE-CSS), link no stylesheet or preload outside a <noscript>, load js/late-fonts.js, and every inline block + CSP hash is current"
+else
+  cat_fail=1
+fi
+# FIRST-PAINT:END
 
 # The public PROJECT BRIEF (/sales/clientinformationrequest/, redesign 2026-10-22): a standalone public page on the website's design with its own
 # stylesheet (css/project-brief.css) and script (js/project-brief.js), reached from a "full project brief" link on the public pages. Like /catalogue/

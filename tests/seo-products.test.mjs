@@ -31,7 +31,9 @@
 //   · the options on each product page are the ones in scripts/public-families.json (a change there fails here until the page says the same), the option
 //     rows are the family's PUBLIC groups (PF.publicGroups: the staff-only 1.2 mm top plate is never listed), and a Construction row says how the made-to-order
 //     piece is built (PF.constructionLine at the defaults); the hub and the FAQ answer say the standard construction in the owner's words (2026-10-28);
-//   · the price-intent block: the sentence, a link to the right catalogue category (where "Configure & add" opens the configurator) and "Message us";
+//   · the price-intent block: the sentence, a link to the right catalogue category (where "Configure & add" opens the configurator) and "Message us"; the link is
+//     /catalogue/?configure=<the page's own family id>#cat-<category> (2026-10-28: js/catalogue.js opens that family's configurator, pinned in tests/catalogue-layout.test.mjs;
+//     the #cat- anchor stays for a browser without script), and the query URL is in no sitemap and never the catalogue's canonical;
 //   · links resolve, every product page links to the hub, to two other products, a service, a project and the catalogue; the same header and
 //     footer as /services/; only the shared /js/site.js; nothing in the service worker's PRECACHE; all 13 in sitemap.xml.
 //
@@ -351,7 +353,7 @@ describe('<head>: title, description, canonical, Open Graph, Twitter, CSP, fonts
 
   it('has a CSP that allows the site\'s own files, the one inline stylesheet by its sha256 and the two font hosts, and nothing else (no unsafe-*, no connections)', () => {
     const norm = (c) => c.replace(/ 'sha256-[A-Za-z0-9+\/=]+'/g, '');
-    const servicesCsp = SERVICES.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
+    const servicesCsp = norm(SERVICES.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1]);   // /services/ carries its own stylesheet hash since 2026-10-28 (tests/page-first-paint.test.mjs)
     each((p) => {
       assert.equal(p.html.match(/<meta http-equiv="Content-Security-Policy"/g).length, 1);
       const csp = p.html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]*)">/)[1];
@@ -1074,7 +1076,7 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
       const sec = byPath(`/products/${s}/`).section('estimate');
       const hrefs = [...sec.matchAll(/<a class="site-btn site-btn-primary" href="([^"]+)">([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]);
       assert.equal(hrefs.length, 1, `${s}: the configurator button`);
-      assert.equal(hrefs[0][0], `/catalogue/#${FAMILIES[s].cat}`, `${s}: the configurator link`);
+      assert.equal(hrefs[0][0], `/catalogue/?configure=${FAMILIES[s].fam}#${FAMILIES[s].cat}`, `${s}: the configurator link`);   // the family opens its configurator (js/catalogue.js); the #cat- anchor stays for a browser without script
       assert.ok(catIds.has(FAMILIES[s].cat), `${s}: ${FAMILIES[s].cat} is not in the catalogue`);
       assert.match(hrefs[0][1], /^Configure (a|an|wall) [a-z, ]+$/);
       // the card the link lands on is the family's own configurable card, and it opens the configurator without the intake sheet first
@@ -1084,6 +1086,28 @@ describe('the price-intent block: the owner\'s sentence, a link to where the con
     }
     assert.ok(/data-family/.test(read('js/quote-request.js')) && /openConfigurator\(add\.getAttribute\('data-family'\)/.test(read('js/quote-request.js')), 'the quote request no longer opens a configurator from a card button');
     assert.ok(/if \(!draft\.intakeDone\) \{ openIntake\(trigger, 'review'\); return; \}/.test(read('js/quote-request.js')), 'the details are asked at the review, not before the configurator');
+  });
+
+  it('sends each product page\'s Configure button to /catalogue/?configure=<the page\'s own family id>#<its category> — a real family of scripts/public-families.json, in the category it really belongs to, one button per page, every family reached exactly once — and keeps the bare /catalogue/ canonical and the sitemap free of the query URL', () => {
+    const famIds = Object.keys(FAMS.families);
+    const reached = [];
+    for (const s of PRODUCT_SLUGS) {
+      const p = byPath(`/products/${s}/`);
+      const buttons = [...p.main.matchAll(/<a class="site-btn site-btn-primary" href="([^"]+)">Configure[^<]*<\/a>/g)].map((m) => m[1]);
+      assert.equal(buttons.length, 1, `${s}: Configure buttons`);
+      const m = buttons[0].match(/^\/catalogue\/\?configure=([a-z_]+)#(cat-[a-z]+)$/);
+      assert.ok(m, `${s}: "${buttons[0]}" is not /catalogue/?configure=<family>#cat-<category>`);
+      assert.ok(famIds.includes(m[1]), `${s}: "${m[1]}" is not a family of scripts/public-families.json`);
+      assert.equal(m[1], FAMILIES[s].fam, `${s}: the button opens another page's configurator`);
+      assert.equal(m[2], 'cat-' + FAMS.families[m[1]].category, `${s}: the anchor is not the category of ${m[1]}`);
+      assert.equal((p.html.match(/\?configure=/g) || []).length, 1, `${s}: a second ?configure= link, or one outside the Configure button`);
+      reached.push(m[1]);
+    }
+    assert.deepEqual(reached.slice().sort(), famIds.slice().sort(), 'a family has no product page with a Configure button of its own (or two pages share one)');
+    assert.ok(!byPath('/products/').html.includes('?configure='), 'the hub links to no configurator');
+    // the deep link is a convenience, not a page: search engines are told the bare catalogue is the page, and it is the only catalogue URL in the sitemap
+    assert.match(catalogue, /<link rel="canonical" href="https:\/\/barroindustries\.com\/catalogue\/">/);
+    assert.ok(!/\?configure=/.test(read('sitemap.xml')) && /<loc>https:\/\/barroindustries\.com\/catalogue\/<\/loc>/.test(read('sitemap.xml')), 'the sitemap lists a ?configure= URL, or no longer lists /catalogue/');
   });
 
   it('has "Message us" (Messenger) beside the configurator button, written like every other Messenger link, and a second one in the footer', () => {
@@ -1250,7 +1274,7 @@ describe('links: every internal link resolves, the hub lists every product, ever
       assert.ok(others.length >= 2, `${s}: related products ${others.length}`);
       assert.ok(h.some((u) => /^\/services\/[a-z-]+\/$/.test(u)), `${s}: no link to a service`);
       assert.ok(h.some((u) => /^\/work\/(ispsc|dmmmsu)/.test(u)), `${s}: no link to a project`);
-      assert.ok(h.filter((u) => u.startsWith(`/catalogue/#${FAMILIES[s].cat}`)).length >= 2, `${s}: links to its catalogue category`);
+      assert.ok(h.filter((u) => u.startsWith('/catalogue/') && u.endsWith(`#${FAMILIES[s].cat}`)).length >= 2, `${s}: links to its catalogue category`);   // the Configure button (/catalogue/?configure=<family>#<category>) and the category chip
       assert.ok(h.includes('/services/commercial-kitchen-fit-out/') || h.includes('/services/stainless-steel-fabrication/'));
     }
     assert.ok(byPath('/products/commercial-gas-stoves/') && ['/services/lpg-gas-line-installation/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/kitchen-fire-suppression/'].every((u) => hrefs(byPath('/products/commercial-gas-stoves/')).includes(u)), 'the stove page does not link to its gas line, hood, fresh air and fire suppression pages');
@@ -1258,7 +1282,7 @@ describe('links: every internal link resolves, the hub lists every product, ever
 
   it('points the category links only at categories the catalogue has (the six public categories)', () => {
     const ok = new Set(['cat-preparation', 'cat-washing', 'cat-cooking', 'cat-ventilation', 'cat-storage', 'cat-refrigeration']);
-    each((p) => { for (const u of hrefs(p).filter((x) => x.startsWith('/catalogue/#'))) assert.ok(ok.has(u.split('#')[1]), `${p.path}: ${u}`); });
+    each((p) => { for (const u of hrefs(p).filter((x) => x.startsWith('/catalogue/#') || /^\/catalogue\/\?configure=[a-z_]+#/.test(x))) assert.ok(ok.has(u.split('#')[1]), `${p.path}: ${u}`); });   // the Configure button's anchor too
   });
 });
 
@@ -1388,10 +1412,10 @@ describe('guides and downloads: the footer of every public page, sitemap.xml, ro
   })(ROOT, 0);
   const PDFS = [['Company profile (PDF)', 'barro-industries-company-profile.pdf'], ['Catalogue (PDF)', 'barro-industries-catalogue.pdf'], ['Portfolio (PDF)', 'barro-industries-portfolio.pdf']];
   const FILES_ROW = `<p class="foot-files">${PDFS.map(([t, f]) => `<a href="/downloads/${f}">${t}</a>`).join('')}</p>`;
-  const GUIDES = ['guides/', 'guides/commissary-kitchen-requirements-philippines/', 'guides/ss304-vs-ss316-stainless-steel/'];
+  const GUIDES = ['guides/', 'guides/commissary-kitchen-requirements-philippines/', 'guides/ss304-vs-ss316-stainless-steel/', 'guides/how-to-plan-a-commercial-kitchen-layout/', 'guides/commercial-kitchen-equipment-checklist/'];
   const GUIDE_SS = '/guides/ss304-vs-ss316-stainless-steel/', GUIDE_COM = '/guides/commissary-kitchen-requirements-philippines/';
 
-  it('puts "Guides" right after FAQ in the footer link row and the three PDFs under the registrations, written the same way, on every public page (found by its footer: the homepage, the catalogue, the brief page, the 14 content pages, the 13 product and fresh-air pages and the 3 guides)', () => {
+  it('puts "Guides" right after FAQ in the footer link row and the three PDFs under the registrations, written the same way, on every public page (found by its footer: the homepage, the catalogue, the brief page, the 14 content pages, the 13 product and fresh-air pages and the 5 guide pages)', () => {
     assert.ok(publicPages.length >= 31, `only ${publicPages.length} public pages have the site footer`);
     for (const must of ['index.html', 'catalogue/index.html', 'sales/clientinformationrequest/index.html', 'faq/index.html', ...PAGE_PATHS.map((x) => x.slice(1) + 'index.html'), ...GUIDES.map((g) => g + 'index.html')]) assert.ok(publicPages.includes(must), `${must}: no site footer found`);
     for (const f of publicPages) {
@@ -1427,7 +1451,7 @@ describe('guides and downloads: the footer of every public page, sitemap.xml, ro
     assert.ok(!/(^|;)\s*(color|background[a-z-]*|border[a-z-]*)\s*:/.test(m[1]), 'the PDF row brings its own colour');
   });
 
-  it('lists the guides index and the two articles in sitemap.xml, once each, with a lastmod and a page behind each — and no PDF, no PDF source and no brief page', () => {
+  it('lists the guides index and the four articles in sitemap.xml, once each, with a lastmod and a page behind each — and no PDF, no PDF source and no brief page', () => {
     const sm = read('sitemap.xml');
     const locs = [...sm.matchAll(/<url>\s*<loc>([^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>\s*<\/url>/g)].map((m) => ({ loc: m[1], lastmod: m[2] }));
     for (const g of GUIDES) {

@@ -16,12 +16,19 @@
 //      made-to-order piece is built, at the family defaults), then Material last — and never the staff-only top plate or the word "staff".
 //   7. CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4.1, 2026-10-28): a row for an option that applies only for some values of an earlier choice ends
 //      with its condition — "Fry baskets: 1 / 2 / 3 (Type is Fryer)" — and a gated group is still ONE row.
+//   8. THE CONFIGURE DEEP LINK (2026-10-28): /catalogue/?configure=<family>#cat-… — the Configure button of a product page — makes the REAL js/catalogue.js
+//      press that family card's own "Configure & add" button (the one js/quote-request.js adds) once every deferred script has run, takes the
+//      parameter out of the address, and does nothing for a missing, unknown or malformed value. The sheet itself is quote-request.js's, not a copy.
 //
 // Mutation-tested (scratch copies, never the shared tree): a line-clamp on the notes, the notes at 13px, a paler notes colour, a card with a
 // fixed height, the "Notes" label dropped from the generator, the Material row changed, .cat-lead removed from the search haystack, the multi
 // grid class dropped, the old 3-column grid restored, a letter tile restored — each must fail here. 2026-10-28: the card listing the staff-only
 // group, the Construction row dropped or moved below Material — each must fail here too. 2026-10-28 (cf2-ws1-mut/): the card row losing its condition suffix, Ventilation
-// after Storage, the hood card without its "Learn more" link — each must fail here too.
+// after Storage, the hood card without its "Learn more" link — each must fail here too. 2026-10-28 (the Configure deep link, 28 mutants of js/catalogue.js, all killed): the card
+// matched by data-id, an unknown family falling back to the sink, no immediate try / no DOMContentLoaded / no load registration, the address never cleaned / cleaned of every
+// parameter or of the #cat- anchor, no decoding, a malformed escape that throws, a button pressed twice or never, any .qr-add pressed, the parameter read from the fragment or
+// from "xconfigure=", the focus never given back / given back after the visitor acted / to a control that left / over another control / on any focusout / with no focusout, first-frame
+// or load check, quote-request.js's button class renamed, catalogue.js loaded after it, a copy of the configurator code — each must fail here.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -437,20 +444,28 @@ function parseHtml(html) {
   return root;
 }
 
-function runCatalogueScript() {
+// opts (all optional; the defaults are what the search tests have always run with): readyState ('interactive' is what a DEFERRED script such as the real one sees), search
+// ('?configure=sink'), hash ('#cat-washing'), noHistory (a browser with no history.replaceState), noRaf (a page whose animation frames never come), buttonsFirst (quote-request.js has already run). The result also carries what the Configure deep link needs: addButtons() is
+// js/quote-request.js running (a "Configure & add" button in every family card, an "Add to quote" button in every fixed card — each press is recorded in `clicks`), fire() is the
+// browser dispatching DOMContentLoaded and then load (fireReady() / fireLoad() one at a time), and `replaced` holds every history.replaceState call. A press also does what the sheet does: it focuses its first control
+// (`control`, which becomes document.activeElement); clearFocus() is the browser clearing that focus the way Chrome does for a page opened at a #fragment (a focusout to nothing, the
+// active element back on <body>); interact(event) is the visitor touching the page (keydown, mousedown, wheel, touchstart); flush() runs the timers the script has set.
+function runCatalogueScript(opts = {}) {
   const tree = parseHtml(block);
   const byId = {};
   const index = (n) => { if (n.attrs && n.attrs.id) byId[n.attrs.id] = n; n.children.forEach(index); };
   index(tree);
-  const timers = [];
+  const timers = [], clicks = [], replaced = [], onReady = [], onLoad = [], onFocusOut = [], winHandlers = {};
   const win = {
     innerWidth: 1440, innerHeight: 900, pageYOffset: 0,
-    matchMedia: () => ({ matches: false }), requestAnimationFrame: (fn) => { fn(); }, getComputedStyle: () => ({ position: 'static', scrollMarginTop: '0' }),
-    addEventListener() {}, scrollTo() {}, setInterval: () => 0, clearInterval() {},
+    matchMedia: () => ({ matches: false }), requestAnimationFrame: (fn) => { if (!opts.noRaf) fn(); }, getComputedStyle: () => ({ position: 'static', scrollMarginTop: '0' }),
+    addEventListener(ev, fn) { if (ev === 'load') onLoad.push(fn); (winHandlers[ev] = winHandlers[ev] || []).push(fn); }, scrollTo() {}, setInterval: () => 0, clearInterval() {},
+    history: opts.noHistory ? undefined : { replaceState: (...args) => { replaced.push(args); } },
   };
-  const doc = { readyState: 'complete', getElementById: (id) => byId[id] || null, addEventListener() {}, fonts: null };
-  const sandbox = { window: win, document: doc, location: { hash: '' }, Date, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: (id) => { timers[id - 1] = null; }, setInterval: () => 0, clearInterval() {} };
-  vm.runInNewContext(catJs, sandbox);
+  const body = { tag: 'body' };
+  const control = { tag: 'input', isConnected: true, focusCalls: 0, focus() { this.focusCalls++; doc.activeElement = this; } };
+  const doc = { readyState: opts.readyState || 'complete', body, activeElement: body, getElementById: (id) => byId[id] || null, addEventListener(ev, fn) { if (ev === 'DOMContentLoaded') onReady.push(fn); if (ev === 'focusout') onFocusOut.push(fn); }, fonts: null };
+  const sandbox = { window: win, document: doc, location: { hash: opts.hash || '', search: opts.search || '', pathname: '/catalogue/' }, Date, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: (id) => { timers[id - 1] = null; }, setInterval: () => 0, clearInterval() {} };
   const input = byId['cat-search'];
   const cards = tree.querySelectorAll('.cat-card');
   const idOf = (c) => c.getAttribute('data-id') || c.getAttribute('data-family');
@@ -460,7 +475,25 @@ function runCatalogueScript() {
     for (let i = 0; i < timers.length; i++) if (timers[i]) { const f = timers[i]; timers[i] = null; f(); }
     return cards.filter((c) => !c.classList.contains('is-hidden')).map(idOf);
   };
-  return { search, byId, tree, idOf, cards };
+  const addButtons = (only) => {
+    for (const c of cards) {
+      const fam = c.getAttribute('data-family'), id = fam || c.getAttribute('data-id');
+      if (only && !only.includes(id)) continue;
+      const btn = parseHtml(fam ? `<button type="button" class="qr-add qr-add-config" data-family="${fam}">Configure &amp; add</button>` : `<button type="button" class="qr-add" data-id="${id}">Add to quote</button>`).children[0];
+      btn.click = () => { clicks.push((fam ? 'family:' : 'item:') + id); doc.activeElement = control; };
+      btn.parent = c; c.children.push(btn);
+    }
+  };
+  if (opts.buttonsFirst) addButtons();                       // js/quote-request.js ran BEFORE catalogue.js (not the page's order, but a page that is already complete)
+  vm.runInNewContext(catJs, sandbox);
+  const fireReady = () => { for (const f of onReady) f(); };
+  const fireLoad = () => { for (const f of onLoad) f(); };
+  const fire = () => { fireReady(); fireLoad(); };
+  const focusOutOf = (target, to = null) => { for (const f of onFocusOut) f({ target, relatedTarget: to }); };
+  const clearFocus = (to = null) => { const was = doc.activeElement; doc.activeElement = to || body; focusOutOf(was, to); };
+  const interact = (ev = 'keydown') => { for (const f of winHandlers[ev] || []) f({}); };
+  const flush = () => { for (let i = 0; i < timers.length; i++) if (timers[i]) { const f = timers[i]; timers[i] = null; f(); } };
+  return { search, byId, tree, idOf, cards, clicks, replaced, addButtons, fire, fireReady, fireLoad, doc, body, control, clearFocus, focusOutOf, interact, flush };
 }
 
 describe('search finds every card — the featured ones included — by running the real js/catalogue.js on the real page', () => {
@@ -518,5 +551,185 @@ describe('search finds every card — the featured ones included — by running 
     assert.equal((block.match(/data-kw="/g) || []).length, 11);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
     assert.ok(!/<li class="cat-card[^>]*><div/.test(block.replace(/<li class="cat-card[^>]*>(?:<figure|<div class="cat-tile")/g, '')), 'a card starts with something other than its image well');
+  });
+});
+
+// ── THE CONFIGURE DEEP LINK (2026-10-28): /catalogue/?configure=<family>#cat-… — the Configure button of a product page ───────────────────
+// js/catalogue.js presses the family card's OWN "Configure & add" button (the one js/quote-request.js adds), so the configurator is the visitor's
+// own code path, not a copy. 'interactive' is the readyState a DEFERRED script sees: quote-request.js, a later deferred script, has not run yet.
+describe('?configure=<family> opens that family\'s configurator by pressing its card\'s own "Configure & add" button, once — the real js/catalogue.js on the real page', () => {
+  const run = (search, extra = {}) => runCatalogueScript({ readyState: 'interactive', search, hash: '#cat-washing', ...extra });
+
+  it('waits for js/quote-request.js (a later deferred script), then presses the button when every deferred script has run — once, however many of DOMContentLoaded and load follow', () => {
+    const env = run('?configure=sink');
+    assert.deepEqual(env.clicks, [], 'there is nothing to press before quote-request.js has run');
+    assert.deepEqual(env.replaced, [], 'the address was changed before the sheet was opened');
+    env.addButtons();
+    env.fire();
+    assert.deepEqual(env.clicks, ['family:sink']);
+    env.fire();
+    assert.deepEqual(env.clicks, ['family:sink'], 'the button was pressed again');
+  });
+
+  it('presses at DOMContentLoaded — not at load, not later — and a button that only arrives after it is still pressed at load', () => {
+    const early = run('?configure=sink');
+    early.addButtons();
+    early.fireReady();                                       // every deferred script has run: the sheet opens now, without waiting for the images
+    assert.deepEqual(early.clicks, ['family:sink'], 'the button was not pressed at DOMContentLoaded');
+    early.fireLoad();
+    assert.deepEqual(early.clicks, ['family:sink']);
+    const late = run('?configure=sink');
+    late.fireReady();                                        // nothing to press yet
+    assert.deepEqual(late.clicks, []);
+    late.addButtons();                                       // quote-request.js was slow: its button arrives before load
+    late.fireLoad();
+    assert.deepEqual(late.clicks, ['family:sink'], 'a button added after DOMContentLoaded was never pressed');
+  });
+
+  it('presses it at once, in the script itself, when quote-request.js has already added the button (a page that is already complete)', () => {
+    const env = runCatalogueScript({ readyState: 'complete', search: '?configure=stove', hash: '#cat-cooking', buttonsFirst: true });
+    assert.deepEqual(env.clicks, ['family:stove'], 'the button was not pressed when the script ran');
+    assert.deepEqual(env.replaced, [[null, '', '/catalogue/#cat-cooking']]);
+    env.fire();
+    assert.deepEqual(env.clicks, ['family:stove'], 'pressed again');
+  });
+
+  it('opens each of the eleven families by its own id — that family\'s button and no other — and the ids are the ones on the cards', () => {
+    assert.equal(FAMS.order.length, 11);
+    for (const id of FAMS.order) {
+      const env = run('?configure=' + id);
+      env.addButtons(); env.fire();
+      assert.deepEqual(env.clicks, ['family:' + id], id);
+      assert.ok(env.cards.some((c) => c.getAttribute('data-family') === id), `${id} has no card`);
+    }
+  });
+
+  it('does nothing — presses no button of any card and leaves the address alone — for no value, an empty one, an unknown family, a fixed product\'s code, another case, a stray space, a malformed escape or another parameter', () => {
+    const ignored = ['', '?', '?configure', '?configure=', '?configure=nope', '?configure=BA-006', '?configure=ba-006', '?configure=Sink', '?configure=sink%20', '?configure=%E0%A4%A', '?configure=%',
+      '?configure[]=sink', '?configures=sink', '?xconfigure=sink', '?quote=1', '?mock=1&sim=ok'];
+    for (const search of ignored) {
+      const env = run(search);
+      env.addButtons(); env.fire();                          // every card has its button, as it would on the live page
+      assert.deepEqual(env.clicks, [], `"${search}" pressed a button`);
+      assert.deepEqual(env.replaced, [], `"${search}" changed the address`);
+    }
+    for (const hash of ['#cat-washing?configure=sink', '#cat-washing&configure=sink', '#configure=sink']) {   // a fragment is never a query
+      const env = run('', { hash });
+      env.addButtons(); env.fire();
+      assert.deepEqual(env.clicks, [], `"${hash}" pressed a button`);
+    }
+  });
+
+  it('finds the value among other parameters and decodes it — and takes ONLY it out of the address when the sheet opens (the rest of the query and the #cat- anchor stay), so a reload does not open it again', () => {
+    const env = run('?mock=1&configure=%68ood&x=2', { hash: '#cat-ventilation' });
+    env.addButtons(); env.fire();
+    assert.deepEqual(env.clicks, ['family:hood']);
+    assert.deepEqual(env.replaced, [[null, '', '/catalogue/?mock=1&x=2#cat-ventilation']]);
+    const alone = run('?configure=rack', { hash: '#cat-storage' });
+    alone.addButtons(); alone.fire();
+    assert.deepEqual(alone.replaced, [[null, '', '/catalogue/#cat-storage']]);
+    const first = run('?configure=cabinet&mock=1', { hash: '' });
+    first.addButtons(); first.fire();
+    assert.deepEqual(first.replaced, [[null, '', '/catalogue/?mock=1']]);
+  });
+
+  it('waits, and leaves the address alone, when the family card has no button (quote-request.js did not load); the visitor stays on the category the #cat- anchor names', () => {
+    const env = run('?configure=sink');
+    env.fire();                                              // no quote-request.js: no button anywhere
+    assert.deepEqual(env.clicks, []);
+    assert.deepEqual(env.replaced, []);
+    env.addButtons(['sink']); env.fire();                    // a button arriving later (the load event) is still pressed
+    assert.deepEqual(env.clicks, ['family:sink']);
+  });
+
+  it('presses only the Configure & add button of the family card: a card of another family, or a fixed product\'s "Add to quote", is never pressed', () => {
+    const env = run('?configure=wok_range');
+    env.addButtons(); env.fire();
+    assert.deepEqual(env.clicks, ['family:wok_range']);
+    assert.ok(env.clicks.every((c) => c.startsWith('family:')));
+  });
+
+  it('still opens the sheet in a browser with no history.replaceState (the address then keeps the query)', () => {
+    const env = run('?configure=dish_table', { noHistory: true });
+    env.addButtons(); env.fire();
+    assert.deepEqual(env.clicks, ['family:dish_table']);
+  });
+
+  it('puts the keyboard focus back into the sheet when the browser clears it a moment after the sheet opened (Chrome does, for a page opened at a #fragment, measured in Chrome 2026-10-28) — each time it happens, until the visitor touches the page', () => {
+    const env = run('?configure=sink');
+    env.addButtons(); env.fire();
+    env.flush();                                             // the checks after the first frame and at load have run: nothing was cleared yet
+    assert.equal(env.doc.activeElement, env.control, 'the sheet focused its first control');
+    assert.equal(env.control.focusCalls, 0);
+    env.clearFocus();                                        // the browser's #fragment handling: a focusout to nothing, the active element back on <body>
+    assert.equal(env.doc.activeElement, env.body);
+    env.flush();
+    assert.equal(env.doc.activeElement, env.control, 'the focus was not given back to the sheet');
+    assert.equal(env.control.focusCalls, 1);
+    env.clearFocus(); env.flush();                           // a page shown late (a background tab) is cleared late
+    assert.equal(env.doc.activeElement, env.control, 'a second clearing was not answered');
+    assert.equal(env.control.focusCalls, 2);
+  });
+
+  it('also checks after the first frame and at load, for a page that has no system focus to report the clearing (a background tab fires no focusout): the focus is given back there too', () => {
+    const frame = run('?configure=sink');
+    frame.addButtons(); frame.fireReady();                   // the press: the check after the first frame is scheduled, load has not come yet
+    frame.doc.activeElement = frame.body;                    // cleared silently: no focusout
+    frame.flush();
+    assert.equal(frame.doc.activeElement, frame.control, 'the check after the first frame did not give the focus back');
+    const loaded = run('?configure=sink', { noRaf: true });  // no frame ever comes (a hidden tab): only the load event is left to check
+    loaded.addButtons(); loaded.fireReady();
+    loaded.fireLoad();
+    loaded.doc.activeElement = loaded.body;
+    loaded.flush();
+    assert.equal(loaded.doc.activeElement, loaded.control, 'the check at load did not give the focus back');
+  });
+
+  it('never fights the visitor for the focus: nothing is given back after a key, a click, a scroll or a touch, when focus went to another control, when it is another element that lost it, or when the sheet is gone', () => {
+    for (const ev of ['keydown', 'mousedown', 'wheel', 'touchstart']) {
+      const env = run('?configure=sink');
+      env.addButtons(); env.fire();
+      env.interact(ev);
+      env.clearFocus(); env.flush();
+      assert.equal(env.doc.activeElement, env.body, `${ev}: the focus was given back after the visitor had acted`);
+    }
+    const late = run('?configure=sink');                     // the visitor clicks between the clearing and the restore
+    late.addButtons(); late.fire();
+    late.clearFocus(); late.interact('mousedown'); late.flush();
+    assert.equal(late.doc.activeElement, late.body, 'the focus came back after the visitor had clicked');
+    const other = run('?configure=sink');                    // the focus went to another control: not cleared, moved
+    other.addButtons(); other.fire();
+    const elsewhere = { tag: 'button', isConnected: true, focus() { other.doc.activeElement = this; } };
+    other.clearFocus(elsewhere); other.flush();
+    assert.equal(other.doc.activeElement, elsewhere, 'the focus was taken from a control the visitor chose');
+    const gone = run('?configure=sink');                     // the sheet was closed: its control left the page
+    gone.addButtons(); gone.fire();
+    gone.control.isConnected = false;
+    gone.clearFocus(); gone.flush();
+    assert.equal(gone.doc.activeElement, gone.body);
+    assert.equal(gone.control.focusCalls, 0);
+    const stray = run('?configure=sink');                    // some OTHER element lost its focus: not the control the sheet focused
+    stray.addButtons(); stray.fire();
+    stray.flush();                                           // the checks after the first frame and at load have run, with the focus where it belongs
+    stray.doc.activeElement = stray.body;
+    stray.focusOutOf({ tag: 'a' }); stray.flush();
+    assert.equal(stray.doc.activeElement, stray.body);
+    assert.equal(stray.control.focusCalls, 0);
+  });
+
+  it('uses the visitor\'s own code path, not a copy of it: catalogue.js presses the .qr-add-config button that js/quote-request.js adds to each family card and answers with its configurator, and holds no configurator code itself', () => {
+    assert.match(catJs, /querySelector\('\.qr-add-config'\)/);
+    assert.match(catJs, /btn\.click\(\)/);
+    const qr = read('js/quote-request.js');
+    assert.ok(qr.includes("class: 'qr-add qr-add-config'"), 'the button quote-request.js adds to a family card');
+    assert.ok(/var add = t\.closest\('\.qr-add'\);\s*if \(add\) \{ e\.preventDefault\(\); if \(add\.getAttribute\('data-family'\)\) openConfigurator\(add\.getAttribute\('data-family'\), add\);/.test(qr), 'quote-request.js no longer opens a configurator when that button is pressed');
+    const code = catJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*$/gm, '$1');
+    assert.ok(!/QR_FAMILIES|ProductFamilies|openConfigurator|openSheet|publicGroups|localStorage|sessionStorage/.test(code), 'catalogue.js holds configurator or storage code');
+  });
+
+  it('depends on the real script order: the page loads catalogue.js BEFORE quote-request.js, both deferred, so the button is pressed at DOMContentLoaded and not earlier', () => {
+    const a = page.indexOf('<script defer src="/js/catalogue.js">'), b = page.indexOf('<script defer src="/js/quote-request.js">');
+    assert.ok(a > 0 && b > a, 'catalogue.js must come before quote-request.js, both defer');
+    assert.match(catJs, /on\(d, 'DOMContentLoaded', pressConfigure\);\s*on\(window, 'load', pressConfigure\);/);
   });
 });

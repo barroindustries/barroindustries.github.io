@@ -345,7 +345,8 @@ describe('2 · header: "Get a quote" top right, no Login · footer: a discreet "
 describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitemap, robots', () => {
   it('gives each page its own keyword-rich title: the exact titles, distinct, short enough, not stuffed — and both carry "Barro Kitchens by Barro Industries" (owner ruling 2026-10-22: Barro Kitchens is a permanent, historic name of the business)', () => {
     assert.equal(home.title, 'Stainless Steel Kitchen Equipment | Barro Kitchens by Barro Industries');   // owner ruling 2026-10-28: the search words lead, the permanent name follows (Google shows ~60 characters)
-    assert.equal(catalogue.title, 'Commercial Kitchen Equipment Catalogue | Barro Kitchens by Barro Industries');
+    assert.equal(catalogue.title, 'Commercial Kitchen Equipment | Barro Kitchens by Barro Industries');   // owner ruling 2026-10-28: 65 characters (was 75, "Catalogue" dropped), so Google shows nearly all of it
+    assert.ok(catalogue.title.length <= 65, `the catalogue title is ${catalogue.title.length} characters: Google cuts a title at about 60`);
     assert.notEqual(home.title, catalogue.title);
     for (const p of [home, catalogue]) {
       assert.ok(p.title.length >= 30 && p.title.length <= 90, `${p.file}: title length ${p.title.length}`);
@@ -375,9 +376,27 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
     }
     assert.ok(/^Premium commercial kitchen equipment and stainless steel fabrication in SS304 or SS316, built to order in Quezon City by Barro Kitchens by Barro Industries\.$/.test(hd));   // owner ruling 2026-10-28: 156 characters, so Google shows all of it
     assert.ok(hd.includes('stainless steel fabrication'), 'the homepage description names the fabrication (SEO build 2026-10-22)');
-    assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, ventilation, storage and refrigeration, for restaurants, hotels and bakeries\. Request a quote\.$/.test(cd));   // the six public categories (Ventilation added 2026-10-28)
+    assert.ok(/^Commercial kitchen equipment in SS304 or SS316 stainless steel, built to order by Barro Kitchens: sinks, work tables, gas stoves, range hoods and shelving\.$/.test(cd));   // owner ruling 2026-10-28: 155 characters (was 227), so Google shows all of it; the products it names are checked in the next test
     // the permanent name, once, in each (owner ruling 2026-10-22)
     for (const d of [hd, cd]) assert.equal((d.match(/Barro Kitchens/g) || []).length, 1);
+  });
+
+  it('keeps the catalogue description to what a search result shows (140-158 characters, grade order SS304 before SS316) and names only products the public catalogue really has: each is a configurable family with a card on the page and a product page of its own', () => {
+    const cd = catalogue.meta('description');
+    assert.ok(cd.length >= 140 && cd.length <= 158, `the catalogue description is ${cd.length} characters: Google shows about 155`);
+    assert.ok(cd.indexOf('SS304') >= 0 && cd.indexOf('SS304') < cd.indexOf('SS316'), 'SS304 comes before SS316');
+    assert.ok(!/premium|best|leading|certified|award|guarantee|#1|brilliant\s*steel|₱|pric(e|ing)|cost/i.test(cd), 'a claim, a price word or the partner company is in the description');
+    // the products it lists, after the colon: "sinks, work tables, gas stoves, range hoods and shelving"
+    const listed = cd.slice(cd.indexOf(': ') + 2).replace(/\.$/, '').split(/, | and /);
+    assert.ok(listed.length >= 3, 'the description lists no products');
+    const fams = JSON.parse(read('scripts/public-families.json')).families;
+    for (const term of listed) {
+      const ids = Object.keys(B.FAMILY_PAGES).filter((id) => B.FAMILY_PAGES[id].about.includes(term));   // "stainless steel sinks" is the page about "sinks"
+      assert.equal(ids.length, 1, `"${term}" is not exactly one product of the public catalogue`);
+      assert.ok(fams[ids[0]], `${term}: ${ids[0]} is not a family of scripts/public-families.json`);
+      assert.ok(catalogue.html.includes(`data-family="${ids[0]}"`), `${term}: the catalogue page has no ${ids[0]} card`);
+      assert.ok(exists(B.FAMILY_PAGES[ids[0]].path.slice(1) + 'index.html'), `${term}: ${B.FAMILY_PAGES[ids[0]].path} does not exist`);
+    }
   });
 
   it('declares one absolute canonical URL per page, equal to the page\'s own address', () => {

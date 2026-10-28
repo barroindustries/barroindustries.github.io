@@ -12,7 +12,7 @@
      tests/seo-products.test.mjs pins all of them. The social photo is a crop of a project photo (site/img/seo/). No amount appears on this
      page, ever (owner ruling R1): the one sentence about money is the owner's own, "Prices depend on size and options.", and it sends the
      visitor to the online estimate. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-eptjHnMe01LsXN0jTp49pQ+swQi7h/mbBahOvqX40+Y=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'sha256-eGvAhFE5hNjt2+he8YrSc6nrS+PbsdmP2J1kcVkhdTA=' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
 <title>Fresh Air System for Commercial Kitchens | Barro Industries</title>
 <meta name="description" content="A fresh air system for commercial kitchens: outside air that replaces what the exhaust removes, designed and installed by Barro Kitchens (Barro Industries).">
 <link rel="canonical" href="https://barroindustries.com/services/fresh-air-systems/">
@@ -326,6 +326,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
   --site-gold:#C9A227;            /* hairlines, rules, numerals on dark */
   --site-gold-ink:#85690F;        /* gold TEXT on light backgrounds: 4.9:1 on the paper tone */
   --site-gold-big:#9A7A14;        /* the large gold numeral on light: >= 3:1 */
+  --site-gold-num:#907213;        /* the proof-bar numeral: 4.56:1 on its white bar, so it passes at ANY size (19.2px on a phone on the content pages, where the large-numeral gold fails 4.5:1) */
   --site-gold-lite:#E2C766;       /* gold text on the navy hero overlay */
   --site-paper:#FAF8F4;--site-bg:#fff;
   --site-ink:#0E1116;--site-muted:#5E6672;
@@ -445,7 +446,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
 #site .proof-bar li{position:relative;display:flex;flex-direction:column;justify-content:flex-start;padding:20px 24px}
 #site .proof-bar li+li::before{content:"";position:absolute;top:0;left:24px;right:24px;height:1px;background:var(--site-line-gold)}
 #site .proof-val{color:var(--site-navy);font:500 1.5rem/1.12 var(--site-serif);font-optical-sizing:auto;letter-spacing:-.012em}
-#site .proof-num{color:var(--site-gold-big)}
+#site .proof-num{color:var(--site-gold-num)}
 #site .proof-sub{margin-top:6px;color:var(--site-muted);font-size:14px;line-height:1.45;text-wrap:balance}
 
 /* section heads */
