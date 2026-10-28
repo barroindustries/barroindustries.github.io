@@ -24,12 +24,25 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const JS_DIR = path.join(REPO_ROOT, 'js');
 const FUNCTIONS_ENTRY = path.join(REPO_ROOT, 'functions', 'index.js');
 const BACKUP_FILE = path.join(REPO_ROOT, 'scripts', 'monthly-backup.js');
+const RULES_FILE = path.join(REPO_ROOT, 'firestore.rules');
 
 // Subcollection names that legitimately show up in `.collection('name')`
 // calls but are never root collections (they're always reached via a
 // parent doc ref, e.g. taskRef.collection('comments')). Subtract these
 // from the root-collection scan.
 const KNOWN_SUBCOLLECTIONS = ['comments', 'messages', 'readers', 'typing', 'records', 'items'];
+
+// Root collections whose client code was RETIRED but whose historic docs are
+// deliberately preserved in Firestore (and therefore still exported by
+// monthly-backup.js via db.listCollections(), with their OVERRIDES CSV). They
+// no longer appear in any `.collection(...)` call, so without this list their
+// OVERRIDES entry reads as a phantom. Each entry is verified below: it must
+// NOT be referenced in js/ any more (else it is live — delete it from here) and
+// firestore.rules must still have a `match /name/` block (else it's a typo or
+// the data is really gone — remove the OVERRIDES entry instead).
+//   attendance_extensions — office attendance retired 2026-08-25 (b1d4165,
+//     OFFICE-KPI-PAY-SPEC R1–R9: "Historic records preserved").
+const RETIRED_COLLECTIONS = ['attendance_extensions'];
 
 // Baseline snapshot of root collections seen in js/ + functions/index.js at
 // authoring time (v14 Wave 7 re-audit, 2026-08-03 — refreshed after the
@@ -136,6 +149,7 @@ function main() {
   }
 
   const scanned = scanRootCollections(JS_DIR);
+  const rulesSrc = fs.existsSync(RULES_FILE) ? fs.readFileSync(RULES_FILE, 'utf-8') : '';
   const backupSrc = fs.readFileSync(BACKUP_FILE, 'utf-8');
   const excludeList = extractExclude(backupSrc);
   const overrideKeys = extractOverrideKeys(backupSrc);
@@ -148,8 +162,22 @@ function main() {
   console.log(`OVERRIDES keys in monthly-backup.js (${overrideKeys.length}): ${overrideKeys.join(', ') || '(none)'}`);
   console.log('');
 
+  // 0. RETIRED_COLLECTIONS must really be retired, and really still exist.
+  const badRetired = [];
+  for (const name of RETIRED_COLLECTIONS) {
+    if (scanned.has(name)) badRetired.push(`${name}: referenced in js/ again — it is live, remove it from RETIRED_COLLECTIONS`);
+    else if (!new RegExp(`match\\s+/${name}/`).test(rulesSrc)) badRetired.push(`${name}: no \`match /${name}/\` in firestore.rules — not a known collection`);
+  }
+  if (badRetired.length > 0) {
+    console.error('FAIL: stale RETIRED_COLLECTIONS entries in scripts/check-backup-coverage.js:');
+    for (const b of badRetired) console.error(`  - ${b}`);
+    process.exit(1);
+  }
+  console.log(`Retired collections (historic data kept, still backed up) (${RETIRED_COLLECTIONS.length}): ${RETIRED_COLLECTIONS.join(', ') || '(none)'}`);
+  const known = new Set([...scanned, ...RETIRED_COLLECTIONS]);
+
   // 1. Phantom EXCLUDE entries — fail
-  const phantoms = excludeList.filter(name => !scanned.has(name));
+  const phantoms = excludeList.filter(name => !known.has(name));
   if (phantoms.length > 0) {
     console.error('FAIL: phantom EXCLUDE entries (not a real root collection referenced in js/):');
     for (const p of phantoms) console.error(`  - ${p}`);
@@ -165,7 +193,7 @@ function main() {
   // site, a typo) would silently stop producing that collection's CSV +
   // month-activity report with zero signal (the JSON snapshot path is
   // independent via db.listCollections(), so it wouldn't even error).
-  const phantomOverrides = overrideKeys.filter(name => !scanned.has(name));
+  const phantomOverrides = overrideKeys.filter(name => !known.has(name));
   if (phantomOverrides.length > 0) {
     console.error('FAIL: phantom OVERRIDES keys (not a real root collection referenced in js/):');
     for (const p of phantomOverrides) console.error(`  - ${p}`);
