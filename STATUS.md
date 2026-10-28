@@ -207,6 +207,13 @@ _Last updated: **2026-10-28**_
 
 ## Pending deploys & one-time actions
 
+- [x] **(done 2026-10-28) v14.0.335 released: five new configurators (dish table, wok range, griddle/griller/fryer, gas deck oven, range hood), five product pages, catalogue + PDF rebuilt, deck-oven page SS304 only (owner), sign-up fix merged.** Deployed: firestore rules, functions qrEstimate, qrSubmit, createStaffAccount (new, us-central1); pushed + verified live.
+- [ ] **Close sign-up (owner, Firebase console):** Authentication › Settings › User actions › untick "Enable create (sign-up)". Then test Team › Invite and a worker account once.
+- [ ] **Price the five new families (owner):** `node scripts/derive-family-pricing.js` → Inventory › Family pricing › Import → fill the blank cells (signed deltas allowed) → Approve ×5. Until then the new products quote as "priced after review".
+- [ ] **Dish table list price (owner):** PW-029 "SS Dish Table w/ Bottom" has no list price; add one in the price list.
+- [ ] **Search Console:** request indexing for the five new /products/ pages and resubmit the sitemap.
+- [ ] **Photos:** dish table, wok range, deck oven, hood configurator previews show line drawings until photos are added (docs/configurator-preview-photo-list.md).
+
 - [ ] **Preview and ship the SEO build** (owner → `release.sh push`; no rules / functions change; the version hook bumps it) — look at the desktop + phone screenshots of the new pages, the homepage's fabrication section and the footers first, then request indexing for the new URLs (list in the 2026-10-22/23 SEO callout at the top). Phone-check once: the footer's PDF links open, "Guides" opens `/guides/`, a product page's "Configure" button lands on the right catalogue category.
 - [x] **2026-09-12 domain cutover: app moved to `barroindustries.com`** (GoDaddy A records -> GitHub Pages, CNAME flipped). Old domain `barroindustries-operatingsystem.ravenmails.com` serves a redirect + SW kill-switch from the `barroindustries/ops-legacy-redirect` repo. Firebase Auth authorized domains updated. Everyone re-opens the app at the new URL (PWA reinstall + re-login).
 - [x] **Deploy public quote requests — DONE 2026-10-21 (agent, owner-approved)** — in order: `bash scripts/release.sh rules`; `cd functions && npm install --no-audit --no-fund && cd ..`; `firebase deploy --only functions:qrStartSession,functions:qrEstimate,functions:qrSubmit,functions:qrAdminDelete,functions:cirSubmit` then `bash scripts/release.sh record functions`; `bash scripts/release.sh push`; smoke-test `/catalogue/?quote=1` (estimate shows a range, no CSP errors).
