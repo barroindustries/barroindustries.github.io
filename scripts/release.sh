@@ -51,7 +51,7 @@ resolve_state_file() {
 }
 STATE_FILE="$(resolve_state_file)"
 STATUS_MD="STATUS.md"
-LIVE_URL="https://barroindustries-operatingsystem.ravenmails.com"
+LIVE_URL="https://barroindustries.com"
 FIREBASE="$(command -v firebase || true)"
 [ -z "$FIREBASE" ] && [ -x "$HOME/.npm-global/bin/firebase" ] && FIREBASE="$HOME/.npm-global/bin/firebase"
 
