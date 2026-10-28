@@ -74,21 +74,8 @@
 
 window.renderPosts = async function() {
   const c = document.getElementById('page-content');
-  const partner = typeof isPartner === 'function' && isPartner();
   const canPost  = isRealPresident();
   const canApprove = isRealPresident() || currentRole === 'manager';
-
-  if (partner) {
-    c.innerHTML = `
-      <div class="page-header"><h2>${emojiIcon('📣',20)} Announcements</h2></div>
-      ${window.chipTabs([{key:'Partners', label:'Partners'}], 'Partners', {cls:'posts-tabs'})}
-      <div id="posts-content"></div>
-    `;
-    if (window.lucide) lucide.createIcons({ nodes: [c] });
-    window.bindChipTabs(c.querySelector('.posts-tabs'), key => loadPosts(key));
-    loadPosts('Partners');
-    return;
-  }
 
   // Department tabs. The dropdown in openNewPostModal offers EVERY department
   // (Object.keys(DEPARTMENTS)), but this list used to be currentDepts alone — so
@@ -155,8 +142,7 @@ window.renderPosts = async function() {
 //                 detail view (openPostById, which passes canApprove:false)
 //                 stays button-less exactly as before.
 //   isOwn       — viewer authored this post (Edit/Delete)
-//   share       — render the "Share" button (feed only; never in the detail view,
-//                 and never for an external partner — see loadPosts)
+//   share       — render the "Share" button (feed only; never in the detail view)
 window.postCardHtml = function(p, opts) {
   opts = opts || {};
   const canApprove  = !!opts.canApprove;
@@ -172,7 +158,6 @@ window.postCardHtml = function(p, opts) {
     : '';
   // Memo mirror cards: internal announcements surfaced into the General feed.
   // They open the memo (with conforme) instead of behaving like a normal post.
-  // Partners never load the General tab, so these stay internal-only.
   if (p.kind === 'memo' && p.memoId) {
     return `
     <div class="post-card post-memo-card" data-id="${p.id}" data-memo-id="${escHtml(p.memoId)}" style="cursor:pointer;border-left:3px solid var(--primary,#0A84FF)">
@@ -308,7 +293,7 @@ window.wirePostCardCommon = function(container) {
 // one card into an openPage panel.
 //
 // Every failure mode dead-ends in a toast, never a thrown/unhandled rejection:
-//   • a partner tapping a chip for an internal post  → rules-DENIED (throws)
+//   • a chip for a post the viewer's rules deny      → rules-DENIED (throws)
 //   • a post deleted after the chip was sent         → !snap.exists
 //   • offline / transient                            → throws
 window.openPostById = async function(postId) {
@@ -388,13 +373,6 @@ async function loadPosts(dept, pageSize) {
     // so president/manager/Corporate Secretary; it deliberately excludes
     // finance, which the rules exclude too.
     const canModerate = (typeof window.isAdminPriv === 'function') ? window.isAdminPriv() : canApprove;
-    // Sharing a post into chat copies up to 140 chars of its title/body VERBATIM
-    // into the chat message doc (ref.label), and from there into the target
-    // conversation's inbox preview and every recipient's push body. An external
-    // partner must never be handed that, so the button is not offered to a
-    // partner viewer at all (js/chat.js's shareToChat re-asserts this, and
-    // additionally blocks every conversation a partner is IN).
-    const viewerIsPartner = typeof isPartner === 'function' && isPartner();
     // Store post data by id so edit button can retrieve it without fragile data-* encoding
     const postMap = new Map(posts.map(p => [p.id, p]));
     container.innerHTML = posts.map(p => window.postCardHtml(p, {
@@ -403,7 +381,7 @@ async function loadPosts(dept, pageSize) {
       isOwn: p.authorId === currentUser.uid,
       // Only a PUBLISHED post is shareable — a pending/rejected draft must not
       // be broadcast into chat before it clears approval.
-      share: !viewerIsPartner && p.status === 'published'
+      share: p.status === 'published'
     })).join('') + (hasMore ? `<div style="text-align:center;padding:14px"><button class="btn-secondary btn-sm" id="posts-load-more-btn">${emojiIcon('⬇',16)} Load older announcements</button></div>` : '');
     if (window.lucide) lucide.createIcons({nodes:[container]});
     document.getElementById('posts-load-more-btn')?.addEventListener('click', () => loadPosts(dept, pageSize + 30));
@@ -412,9 +390,9 @@ async function loadPosts(dept, pageSize) {
     // (window.wirePostCardCommon, above); none of them reload the feed.
     window.wirePostCardCommon(container);
 
-    // Share this post into a chat conversation. The picker + the partner block
-    // both live in js/chat.js (Chat.shareToChat) — this only supplies the
-    // {kind,id,label} payload.
+    // Share this post into a chat conversation. The picker lives in
+    // js/chat.js (Chat.shareToChat) — this only supplies the {kind,id,label}
+    // payload.
     container.querySelectorAll('.post-share-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
       const p = postMap.get(btn.dataset.id);
@@ -576,29 +554,24 @@ window.renderTeamTab = async function() {
   // president-only flag, window.isAccountAdmin()) get the invite door too, on
   // top of the existing president/manager/finance seniority gate.
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance' || window.isAccountAdmin();
-  const viewingAsPartner = typeof isPartner === 'function' && isPartner();
-  // Employee of the Month is a Barro Industries-only recognition: hidden from the
-  // external partner (Brilliant Steel) view, and only the President can set it.
-  const canManageEom = currentRole === 'president' && !viewingAsPartner;
-  // TEAM-PAGE-ORG-SPEC 2026-08-25 — the type-color legend, fabricators-without-
-  // logins block and vacant/aspirational section are ALL internal org info,
-  // hidden from partner viewers exactly like everything else guarded by
-  // viewingAsPartner in this file. The legend is built once here (static —
-  // TEAM_TYPES doesn't change per render) so it is NOT rebuilt on every
-  // search keystroke the way #team-grid is.
+  // Employee of the Month: only the President can set it.
+  const canManageEom = currentRole === 'president';
+  // TEAM-PAGE-ORG-SPEC 2026-08-25 — the type-color legend is built once here
+  // (static — TEAM_TYPES doesn't change per render) so it is NOT rebuilt on
+  // every search keystroke the way #team-grid is.
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('👥',20)} Team</h2>
-      ${pres && !viewingAsPartner ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
+      ${pres ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
     </div>
-    ${!viewingAsPartner ? '<div id="eom-banner"></div>' : ''}
+    <div id="eom-banner"></div>
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <input id="team-search" placeholder="Search name, role or department…" class="ms-input" style="max-width:320px"/>
       <button class="btn-secondary btn-sm" id="set-note-btn" style="white-space:nowrap">${emojiIcon('✏️',16)} Set My Note</button>
     </div>
-    ${!viewingAsPartner ? `<div id="team-legend" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:11px;color:var(--text-muted)">${Object.values(window.TEAM_TYPES||{}).map(t=>`<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0"></span>${escHtml(t.label)}</span>`).join('')}</div>` : ''}
+    <div id="team-legend" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:11px;color:var(--text-muted)">${Object.values(window.TEAM_TYPES||{}).map(t=>`<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:${t.color};display:inline-block;flex-shrink:0"></span>${escHtml(t.label)}</span>`).join('')}</div>
     <div id="team-grid"></div>
-    ${!viewingAsPartner ? '<div id="team-fab-section"></div><div id="team-vacant-section"></div>' : ''}
+    <div id="team-fab-section"></div><div id="team-vacant-section"></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   const teamGrid = document.getElementById('team-grid');
@@ -619,45 +592,31 @@ window.renderTeamTab = async function() {
     return;
   }
   // TEAM-PAGE-ORG-SPEC 2026-08-25 §2b — "the users id set" fabricators are
-  // checked against is the FULL raw collection (before the partner-visibility/
-  // Brilliant-Steel-only filter below), so a login-holding staffer never
-  // double-appears as a "no login" fabricator card just because their users
-  // doc was filtered off the main grid for an unrelated reason.
+  // checked against, so a login-holding staffer never double-appears as a
+  // "no login" fabricator card.
   const allUserIds = new Set(snap.docs.map(d => d.id));
 
+  // Everyone on the users collection is on the Team page — Brilliant Steel
+  // staff are Barro employees like anyone else.
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
-    .filter(u => {
-      if (viewingAsPartner) {
-        // Partners only see other partners
-        return u.role === 'partner';
-      }
-      // Admin/employees see the full team (including partners)
-      // Hide Brilliant Steel-only staff (internal operational filter)
-      if (Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel') return false;
-      return true;
-    })
     .sort((a,b) => {
-      const order = {president:0,manager:1,finance:2,employee:3,agent:4,partner:5};
+      const order = {president:0,manager:1,finance:2,employee:3,agent:4};
       return (order[a.role]??6) - (order[b.role]??6);
     });
 
   renderTeamCards(users, currentUser);
 
-  if (!viewingAsPartner) renderEomBanner(users, canManageEom);
+  renderEomBanner(users, canManageEom);
 
   // TEAM-PAGE-ORG-SPEC 2026-08-25 §2b/2c — fabricators without logins +
-  // vacant/aspirational positions. Both are internal org info: never fetched
-  // or rendered for a partner viewer.
-  let fabricators = [];
-  if (!viewingAsPartner) {
-    const wdSnap = await dbCachedGet('worker_directory',
-      () => db.collection('worker_directory').get(), 60000).catch(() => ({docs:[]}));
-    fabricators = wdSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(f => f.status === 'active' && !allUserIds.has(f.id) && !f.linkedUid);
-    renderFabricatorCards(fabricators, '');
-    renderAspirationalSection();
-  }
+  // vacant/aspirational positions.
+  const wdSnap = await dbCachedGet('worker_directory',
+    () => db.collection('worker_directory').get(), 60000).catch(() => ({docs:[]}));
+  const fabricators = wdSnap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(f => f.status === 'active' && !allUserIds.has(f.id) && !f.linkedUid);
+  renderFabricatorCards(fabricators, '');
+  renderAspirationalSection();
 
   // Debounced to match the pattern already used elsewhere (Inventory/Movements
   // search, js/modules.js) — a full masonry-grid rebuild + card re-wiring on
@@ -674,7 +633,7 @@ window.renderTeamTab = async function() {
         (Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).join(' ').toLowerCase().includes(q)
       ) : users;
       renderTeamCards(filtered, currentUser);
-      if (!viewingAsPartner) renderFabricatorCards(fabricators, v);
+      renderFabricatorCards(fabricators, v);
     }, 180);
   });
 
@@ -738,16 +697,12 @@ window.renderTeamTab = async function() {
             <option value="__freelancer">Freelancer (external)</option>
           </select>
         </div>
-        <div class="form-group" id="inv-company-group" style="display:none"><label>Company <span style="font-weight:400;color:var(--text-muted)">(partner's own company)</span></label>
-          <input id="inv-company" placeholder="e.g. Brilliant Steel Corporation"/>
-        </div>
         <div class="form-group"><label>Department(s)</label>
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:4px">
             ${inviteDeptKeys.map(d=>`<label class="check-row"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
           </div>
         </div>
       `, `<button class="btn-primary" id="save-inv-btn">Send Invite</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      // Company field is only relevant for the Partner role — reveal it when picked.
       // ⚠ SCOPED TO THIS PANEL, NOT document.
       // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
       // inside that window and two panels carry the same ids at once —
@@ -755,12 +710,6 @@ window.renderTeamTab = async function() {
       // the DYING one, so the handler binds to a button nobody can see and the
       // visible button does nothing (and a save can read the PREVIOUS record's
       // field values). Reported by the Corporate Secretary 2026-08-10.
-      const invRole = _panel.querySelector('#inv-role');
-      const syncCompany = () => {
-        const g = _panel.querySelector('#inv-company-group');
-        if (g) g.style.display = (invRole.value === 'partner') ? 'block' : 'none';
-      };
-      invRole?.addEventListener('change', syncCompany); syncCompany();
       _panel.querySelector('#save-inv-btn').addEventListener('click', async () => {
         const email = _panel.querySelector('#inv-email').value.trim();
         if (!email) { Notifs.showToast('Enter an email.','error'); return; }
@@ -793,14 +742,13 @@ window.renderTeamTab = async function() {
             displayName: _panel.querySelector('#inv-name').value.trim() || email.split('@')[0],
             phone: _panel.querySelector('#inv-phone').value.trim(),
             role:        invRoleVal,
-            company:     _panel.querySelector('#inv-company')?.value.trim() || '',
             departments: depts, department: depts[0]||'',
             employeeId:  empId,
             photoUrl:'', startDate: window.bizDate(),
             // TEAM-PAGE-ORG-SPEC 2026-08-25 §2e — stamp the Team-page employment
             // type at creation time (window.teamTypeOf reads this first, ahead of
             // every legacy fallback).
-            team: isFreelancer ? 'freelancer' : invRoleVal === 'partner' ? 'partner' : invRoleVal === 'agent' ? 'agent' : 'office',
+            team: isFreelancer ? 'freelancer' : invRoleVal === 'agent' ? 'agent' : 'office',
             ...(isFreelancer ? { employmentType: 'Project-based' } : {}),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -1010,8 +958,7 @@ function renderEomCard(host, data, users, canManage, standings, month) {
 }
 
 // Score every eligible team member for the given month and return them ranked
-// (highest first). Excludes the President (who runs the award), external
-// partners, and Brilliant Steel-only members.
+// (highest first). Excludes the President (who runs the award).
 //
 // Two eras (OFFICE-KPI-PAY-SPEC-2026-08-25 §2 R7 — see EOM_KPI_ONLY_FROM):
 //
@@ -1052,13 +999,12 @@ async function computeEomStandings(users, monthStr) {
     const workDaysElapsed = (typeof countWorkDays === 'function') ? countWorkDays(y, m, lastDom) : Math.max(1, lastDom);
 
     const candidates = users.filter(u =>
-      u.role !== 'partner' && u.role !== 'president'
+      u.role !== 'president'
       // Operations Team is attendance-paid and has no KPI (owner ruling
       // 2026-09-13) — never a candidate in the KPI-scored EOM race.
       // teamTypeOf works off the users doc alone (team stamp /
       // hrManagedAccount fallback), so no payroll read is needed here.
-      && window.teamTypeOf(u) !== 'operations'
-      && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'));
+      && window.teamTypeOf(u) !== 'operations');
     if (!candidates.length) return [];
 
     // Load all tasks once (shared across candidates). kpi_evals (President
@@ -1266,7 +1212,7 @@ function renderTeamCards(users, currentUser) {
     const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
     const initial = (u.displayName||u.email||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
     const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
-    const badgeColor = {president:'#9BA8FF',manager:'#30D158',finance:'#FFD60A',employee:'#0A84FF',agent:'#FF9F0A',partner:'#FF6B6B'}[u.role] || '#8E8E93';
+    const badgeColor = {president:'#9BA8FF',manager:'#30D158',finance:'#FFD60A',employee:'#0A84FF',agent:'#FF9F0A'}[u.role] || '#8E8E93';
     const isMe = u.id === currentUser?.uid;
     // TEAM-PAGE-ORG-SPEC 2026-08-25 §2a — employment-type color coding, kept
     // separate from the role-line color above (role ≠ employment type).
@@ -1322,7 +1268,7 @@ function renderTeamCards(users, currentUser) {
           : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
         <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card" aria-label="View calling card">${emojiIcon('📇',16)}</button>
-        ${!isMe && (!(typeof isPartner==='function'&&isPartner()) || (u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim()) || ['president','manager'].includes(u.role))
+        ${!isMe
           ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}" aria-label="Message ${escHtml(u.displayName||u.email)}">${emojiIcon('💬',16)}</button>` : ''}
         ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}" aria-label="Nudge ${escHtml(u.displayName||u.email)}">${emojiIcon('👋',16)}</button>` : ''}
         ${canManageAccounts && !isMe && u.role!=='president'
@@ -1674,8 +1620,7 @@ window.renderAttendancePage = async function() {
       const usersSnap = typeof dbCachedGet === 'function'
         ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
         : await db.collection('users').get();
-      empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
-        .filter(u => u.role !== 'partner');
+      empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
       sel.innerHTML = empList.map(u=>`<option value="${u.id}">${escHtml(u.displayName||u.email)}</option>`).join('');
       sel.value = currentUser.uid;
       sel.addEventListener('change', () => {
@@ -2235,7 +2180,7 @@ async function openPresidentCashAdvanceModal(users) {
       : await db.collection('users').get().catch(() => ({ docs: [] }));
     users = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   }
-  const employees = users.filter(u => u.role !== 'partner' && u.id !== currentUser.uid && u.uid !== currentUser.uid);
+  const employees = users.filter(u => u.id !== currentUser.uid && u.uid !== currentUser.uid);
   const empOptions = employees.map(u =>
     `<option value="${u.id}">${escHtml(u.displayName||u.email)} (${u.role||'employee'})</option>`
   ).join('');
@@ -2542,7 +2487,6 @@ async function openPresidentCashAdvanceModal(users) {
       ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
       : await db.collection('users').get();
     const users = snap.docs.map(d=>({id:d.id,...d.data()}))
-      .filter(u => u.role !== 'partner')
       .sort((a,b) => (a.displayName||a.email||'').localeCompare(b.displayName||b.email||''));
     const _panel = openPage('＋ Adjust Balance', `
       <div class="form-group"><label>Employee</label>
@@ -2725,9 +2669,8 @@ async function openPresidentCashAdvanceModal(users) {
 // ═══════════════════════════════════════════════════
 //  GLOBAL SEARCH — across tasks, clients, CRM leads (AEC + ROC), ventures,
 //  inventory, products, quotes and files
-//  Internal staff only. Partners / Brilliant-Steel-only are gated out (some of
-//  these collections are partner-readable at the rules level, so the UI must
-//  explicitly exclude them — never rely on rules alone here).
+//  Internal staff only. Brilliant-Steel-only staff keep their isolated chrome
+//  and are gated out here (never rely on rules alone for this).
 // ═══════════════════════════════════════════════════
 (function(){
   const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
@@ -2741,7 +2684,7 @@ async function openPresidentCashAdvanceModal(users) {
   window.renderGlobalSearch = async function(initialQuery){
     const c = document.getElementById('page-content');
     if(!c) return;
-    const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+    const blocked = (typeof isBrilliantOnly==='function' && isBrilliantOnly());
     if(blocked){ c.innerHTML = window.renderEmptyState({icon:'🔒', title:'Search is not available for this account'}); return; }
     if (window.lucide) lucide.createIcons({ nodes: [c] });
 
@@ -2763,7 +2706,7 @@ async function openPresidentCashAdvanceModal(users) {
       // no way to FIND a duplicate contact by name across the two lead
       // directories — "organize the CRM" meant eyeballing a ~330-row table — and
       // a venture brief could only be reached by scrolling the Portfolio grid.
-      // Both reads are already permitted (aec_contacts/roc_leads: any non-partner;
+      // Both reads are already permitted (aec_contacts/roc_leads: any signed-in user;
       // ventures: canDept('Ventures')), so this needs no rules change; a viewer
       // the rules refuse just gets [] from the .catch and no group renders.
       // Who searches the CRM: the departments that own it, plus the admin tier.
@@ -2782,7 +2725,7 @@ async function openPresidentCashAdvanceModal(users) {
         // via FilesHub's rules-provable 3-query fan-out, capped at 1000 like Products.
         (typeof FilesHub!=='undefined' ? FilesHub.loadFiles(null).then(a=>a.slice(0,1000)) : Promise.resolve([])).catch(()=>[]),
         // CRM leads carry customer contact details — company, contact person,
-        // phone, email. The rules admit every non-partner to read them, so
+        // phone, email. The rules admit every signed-in user to read them, so
         // putting them in GLOBAL search would surface that book to every
         // employee who types a name, which is a wider change than the defect
         // asked for (the defect was that the Corporate Secretary could not find
@@ -2867,7 +2810,7 @@ async function openPresidentCashAdvanceModal(users) {
 window.renderFilesHub = function(){
   const c = document.getElementById('page-content');
   if(!c) return;
-  const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+  const blocked = (typeof isBrilliantOnly==='function' && isBrilliantOnly());
   if(blocked){ c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Files Hub is not available for this account</h4></div>`; return; }
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   // Who gets the aggregate "everything" chip. Unchanged audience — but see
@@ -3034,13 +2977,11 @@ window.renderFilesHub = function(){
 };
 
 /* ═══════════════════════════════════════════════════
-   v12 WS41 — MY PROFILE (5 sub-tabs; partners get 3)
+   v12 WS41 — MY PROFILE (5 sub-tabs)
 ═══════════════════════════════════════════════════ */
 window.renderMyProfile = async function() {
   const c = document.getElementById('page-content'); if (!c) return;
   const u = window.userProfile || {};
-  const partner = (typeof isPartner === 'function' && isPartner()) ||
-                  (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
   // Operations Team (Type-B, weekly, attendance-paid — owner rulings
   // 2026-09-13) gets NO KPI or task surfaces: the My Analytics tab is entirely
   // office-KPI machinery (Task Completion / KPI Composite / Performance
@@ -3050,16 +2991,13 @@ window.renderMyProfile = async function() {
   // finance tab stays (renderPersonalFinance is team-aware) but is labeled
   // plain "Finance" — there is no "Performance" half for this team.
   const opsB = (typeof isTypeBWorker === 'function') && isTypeBWorker();
-  const tabs = partner
-    ? [ {key:'account',   label:'Account',              icon:emojiIcon('👤',16)},
-        {key:'tasks',     label:'Tasks',                icon:emojiIcon('✅',16)},
-        {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ]
-    : [ {key:'id',        label:'ID',                   icon:emojiIcon('🪪',16)},
-        {key:'finance',   label: opsB ? 'Finance' : 'Finance & Performance', icon:emojiIcon('💳',16)},
-        ...(opsB ? [] : [{key:'analytics', label:'My Analytics', icon:emojiIcon('📊',16)},
-                         {key:'tasks',     label:'Tasks',        icon:emojiIcon('✅',16)}]),
-        {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ];
-  const initial = window.initialSubtab(partner ? 'account' : 'id');
+  const tabs = [
+    {key:'id',        label:'ID',                   icon:emojiIcon('🪪',16)},
+    {key:'finance',   label: opsB ? 'Finance' : 'Finance & Performance', icon:emojiIcon('💳',16)},
+    ...(opsB ? [] : [{key:'analytics', label:'My Analytics', icon:emojiIcon('📊',16)},
+                     {key:'tasks',     label:'Tasks',        icon:emojiIcon('✅',16)}]),
+    {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ];
+  const initial = window.initialSubtab('id');
   const depts = (Array.isArray(u.departments) && u.departments.length ? u.departments
                  : u.department ? [u.department] : []).join(', ');
   c.innerHTML = `
@@ -3101,14 +3039,6 @@ async function loadMyProfileTab(key) {
   } else if (key === 'analytics')  { await window.renderPersonalAnalytics(host, uid); }
   else if (key === 'tasks')        { await window.renderMyProfileTasksList(host, uid); }
   else if (key === 'activity')     { await window.renderRecentActivity(host, uid); }
-  else if (key === 'account') {    // partners only — read-only info card
-    const u = window.userProfile || {};
-    host.innerHTML = `<div class="card"><div class="card-body">
-      <div class="profile-info-row"><span class="pir-label">Email</span><span class="pir-value">${escHtml(u.email||'—')}</span></div>
-      <div class="profile-info-row"><span class="pir-label">Company</span><span class="pir-value">${escHtml((typeof partnerCompanyName==='function'&&partnerCompanyName())||'—')}</span></div>
-      <div class="profile-info-row no-border"><span class="pir-label">Role</span><span class="pir-value">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></div>
-    </div></div>`;
-  }
 }
 
 // ── Personal Analytics (Decision 7) — "analytics about me", composed from
@@ -3298,17 +3228,15 @@ window.renderRecentActivity = async function(host, uid) {
   // (js/ui-states.js) owns the loading placeholder, the empty state, and the
   // error+Retry block so this screen can no longer get stuck or fail silently.
   await window.withLoadingAndError(host, async () => {
-    const partner = (typeof isPartner === 'function' && isPartner());
-    const none = Promise.resolve({ docs: [] });
     const [notif, tasks, leave, ca, att, posts, audit] = await Promise.all([
       db.collection('notifications').doc(uid).collection('items')
         .orderBy('createdAt', 'desc').limit(30).get().catch(() => ({ docs: [] })),
       db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
-      partner ? none : db.collection('leave_requests').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
-      partner ? none : db.collection('cash_advances').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
-      partner ? none : db.collection('attendance').doc(uid).collection('records')
+      db.collection('leave_requests').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
+      db.collection('cash_advances').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
+      db.collection('attendance').doc(uid).collection('records')
         .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get().catch(() => ({ docs: [] })),
-      partner ? none : db.collection('posts').where('authorId', '==', uid).get().catch(() => ({ docs: [] })),
+      db.collection('posts').where('authorId', '==', uid).get().catch(() => ({ docs: [] })),
       db.collection('audit_log').where('actorUid', '==', uid)
         .orderBy('ts', 'desc').limit(50).get().catch(() => ({ docs: [] }))   // needs Spec 7 rules+index; degrades silently until deployed
     ]);

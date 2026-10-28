@@ -558,7 +558,6 @@
       var candidates = Object.keys(dir).filter(function (uid) {
         if (uid === currentUser.uid) return false;
         if (uids.indexOf(uid) !== -1) return false;
-        if (dir[uid].role === 'partner') return false;
         if (f && dir[uid].name.toLowerCase().indexOf(f) === -1) return false;
         return true;
       }).sort(function (a, b) { return dir[a].name.localeCompare(dir[b].name); });

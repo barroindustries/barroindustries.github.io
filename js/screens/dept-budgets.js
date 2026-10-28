@@ -43,10 +43,10 @@
 'use strict';
 
 // Departments that get Budgeting (§8 rollout). Ventures (documentation-only by
-// design), Brilliant Steel and Partners (external) are excluded — owner-
-// confirmed (spec §13.4). Admin gets a signpost row, not chip tabs, but IS
-// eligible to receive a release (Finance's own operating budget is 'Finance'
-// itself, picked inside this same surface).
+// design) and Brilliant Steel are excluded — owner-confirmed (spec §13.4).
+// Admin gets a signpost row, not chip tabs, but IS eligible to receive a
+// release (Finance's own operating budget is 'Finance' itself, picked inside
+// this same surface).
 var DEPT_BUDGET_ELIGIBLE = ['Admin','Finance','HR','Sales','CRM','Marketing',
   'Government Biddings','IT','Design','Production','Purchasing'];
 

@@ -15,7 +15,7 @@
    aecStageOf/aecStageMeta/aecContacted/aecProspected/nextAECNumber/
    renderAECDirectory incl. its local openAECDetail/openAECPrintSheet), the
    BK/BS quotation-list builders (latestQuoteRevisions/
-   renderBKQuotationsSummary/renderSalesPartnerQuotes/
+   renderBKQuotationsSummary/renderSalesBSQuotes/
    renderBSQuotationsSummary/bindQuoteActions), and the Wave 7 Pass 2 net-new
    feature — the revision-chain UI (buildQuoteChains/quoteRevDeltaHtml/
    quoteChainToggleHtml/quoteChainHistoryRows, wired into all three
@@ -107,10 +107,10 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   // drawer it should also be in sales department page") embeds the same
   // sales-scoped view renderSalesAnalytics() serves on the Analytics page —
   // quota to meet, OH to cover, floor, pace and the discount signal.
-  const salesTabs = ['Clients','Briefs','Quote requests','Quotes','Analytics','Partner','Files','SOP','Budgeting','Tasks'];
+  const salesTabs = ['Clients','Briefs','Quote requests','Quotes','Analytics','Brilliant Steel','Files','SOP','Budgeting','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
-                  'Partner Quotes':'Partner', 'Partner Files':'Partner',
+                  'Partner':'Brilliant Steel', 'Partner Quotes':'Brilliant Steel', 'Partner Files':'Brilliant Steel',
                   'Work Plans':'Files', 'Proposals':'Files',
                   'Client Briefs':'Briefs', 'Client Information Requests':'Briefs', 'Info Requests':'Briefs',
                   'Quote Requests':'Quote requests', 'QuoteRequests':'Quote requests' };
@@ -127,7 +127,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
       'Briefs holds every Client Information Request sent from barroindustries.com/sales/clientinformationrequest/ — review the answers and photos, add notes, then Convert to client.',
       'Quote requests holds every "Get a quote" request sent from barroindustries.com/catalogue/ — review the items and the estimate the client saw, then Open in Quote Builder to price it properly.',
       'Quotes has ＋New Quotation (full builder) and Quick Estimate (fast price check); everything filed lands in Records, where revisions chain together.',
-      'Partner is a read-only window into Brilliant Steel\'s quotes and files for coordination.',
+      'Brilliant Steel is a read-only window into the department\'s quotes and files for coordination.',
       'Files holds Work Plans and Proposals; Tasks is the department board.'
     ])}
     ${window.chipTabs(salesTabs.map(s=>({key:s,label:s})), subtab)}
@@ -199,12 +199,12 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       break;
     }
 
-    case 'Partner':
+    case 'Brilliant Steel':
       salesSubNav(content, ['Quotes','Files'], 'Quotes',
-        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🤝',16)} Brilliant Steel partner — quotes &amp; files shared with Sales for coordination.</div>`,
+        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🤝',16)} Brilliant Steel — quotes &amp; files shared with Sales for coordination.</div>`,
         (key, view) => {
           if (key === 'Files') renderBSFiles(view, currentUser, currentRole);
-          else renderSalesPartnerQuotes(view, currentUser, currentRole);
+          else renderSalesBSQuotes(view, currentUser, currentRole);
         });
       break;
 
@@ -1395,10 +1395,10 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   }
 }
 
-// ── Partner Quotes (read-only window into Brilliant Steel quotes) ──
-// One-way visibility: internal Sales can see partner quotes; partners never see
-// Barro Kitchens quotes. Backed by the bs_quotes read rule (non-partner staff).
-async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
+// ── Brilliant Steel Quotes (read-only window into Brilliant Steel quotes) ──
+// One-way visibility: internal Sales can see Brilliant Steel quotes. Backed by
+// the bs_quotes read rule (any internal staff).
+async function renderSalesBSQuotes(container, currentUser, currentRole) {
   container.innerHTML = window.skeletonHtml('table');
   // 8-point #3 — surface a read failure instead of the old silent
   // .catch(()=>({docs:[]})) fallback (which rendered indistinguishably
@@ -1406,8 +1406,8 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
   let snap;
   try { snap = await db.collection('bs_quotes').orderBy('createdAt','desc').get(); }
   catch (err) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load partner quotes</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm spq-retry-btn" style="margin-top:14px">Retry</button></div>`;
-    container.querySelector('.spq-retry-btn')?.addEventListener('click', () => renderSalesPartnerQuotes(container, currentUser, currentRole));
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load Brilliant Steel quotes</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm spq-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    container.querySelector('.spq-retry-btn')?.addEventListener('click', () => renderSalesBSQuotes(container, currentUser, currentRole));
     if (window.lucide) lucide.createIcons({ nodes: [container] });
     return;
   }
@@ -1418,12 +1418,12 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
   // Read-only card — unchanged from the pre-Wave-7 markup, just pulled into
   // a named function so the Wave 7 Pass 2 chain wrapper below can call it
   // for both a chain's primary (newest) revision and, compactly, its history.
-  const partnerQuoteCard = (q) => `
+  const bsQuoteCard = (q) => `
     <div class="item-card" style="display:flex;align-items:center;gap:12px">
       <div style="flex:1;min-width:0">
         <div class="item-title" style="font-size:13px">${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}</div>
         <div class="item-meta" style="margin-top:4px">
-          <span>${emojiIcon('👤',16)} ${escHtml(q.createdByName||q.agentName||'Partner')}</span>
+          <span>${emojiIcon('👤',16)} ${escHtml(q.createdByName||q.agentName||'Brilliant Steel')}</span>
           ${q.date?`<span>${escHtml(q.date)}</span>`:''}
         </div>
       </div>
@@ -1436,8 +1436,8 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
   // Wave 7 Pass 2 — same chain wrapper as renderBKQuotationsSummary's
   // quoteChainCard, adapted for this read-only card (no action buttons to
   // preserve here — there were none before this pass either).
-  const partnerQuoteChainCard = (chain) => {
-    const primaryHtml = partnerQuoteCard(chain.primary);
+  const bsQuoteChainCard = (chain) => {
+    const primaryHtml = bsQuoteCard(chain.primary);
     if (chain.history.length < 2) return primaryHtml;
     const rows = chain.history.map((q, i) => {
       const prev = i > 0 ? chain.history[i - 1] : null;
@@ -1445,7 +1445,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
       const prevTot = prev ? (Number(prev.total) || Number(prev.grandTotal) || Number(prev.amount) || 0) : 0;
       const ts = q.date || (q.createdAt?.toDate ? q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '');
       return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 10px${i?';border-top:1px solid var(--border)':''}">
-        <div style="flex:1;min-width:120px;font-size:12px"><strong>R${i+1}</strong> · ${escHtml(ts)} · ${escHtml(q.createdByName||q.agentName||'Partner')}</div>
+        <div style="flex:1;min-width:120px;font-size:12px"><strong>R${i+1}</strong> · ${escHtml(ts)} · ${escHtml(q.createdByName||q.agentName||'Brilliant Steel')}</div>
         <div style="font-size:12px;font-weight:700">₱${fmt(tot)}</div>
         <div>${i>0?quoteRevDeltaHtml(tot,prevTot):'<span style="font-size:11px;color:var(--text-muted)">first filing</span>'}</div>
       </div>`;
@@ -1459,17 +1459,17 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
-      ${emojiIcon('🤝',16)} Read-only view of <strong>Brilliant Steel</strong> partner quotes (50/50 collaborative projects). Sales can see these for coordination; partners cannot see Barro Kitchens quotes.
+      ${emojiIcon('🤝',16)} Read-only view of <strong>Brilliant Steel</strong> quotes. Sales can see these for coordination.
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
-      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Partner Quotes</div></div>
+      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Brilliant Steel Quotes</div></div>
       <div class="stat-card"><div class="stat-num">₱${fmt(total)}</div><div class="stat-label">Total Value</div></div>
       <div class="stat-card"><div class="stat-num">${accepted.length}</div><div class="stat-label">Accepted / Filed</div></div>
     </div>
     <div class="item-list">
       ${!quotes.length
-        ? window.renderEmptyState({ icon:'📋', title:'No partner quotes yet', hint:"Brilliant Steel quotes will appear here as they're created." })
-        : buildQuoteChains(quotes).map(partnerQuoteChainCard).join('')}
+        ? window.renderEmptyState({ icon:'📋', title:'No Brilliant Steel quotes yet', hint:"Brilliant Steel quotes will appear here as they're created." })
+        : buildQuoteChains(quotes).map(bsQuoteChainCard).join('')}
     </div>`;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
 }
@@ -1944,10 +1944,9 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   // try/catch, and no .catch() on the reads at all).
   container.innerHTML = window.skeletonHtml('table');
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
-  // Sales dept employees can see all quotes (including partner-filed); partners only see their own
+  // Sales dept employees can see all quotes; everyone else only sees their own
   const canSeeAll = isPrivileged ||
     (currentRole === 'employee' && (window.currentDepts||[]).includes('Sales'));
-  const isPartnerRole = currentRole === 'partner';
   try {
     // Cached read, scoped separately from getBsQuotesOrdered above — this tab's
     // canSeeAll gate differs (Sales-dept employees only, not all employees) and
@@ -1968,8 +1967,6 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
       : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get(),
       50000);
     const all = snap.docs.map(d=>({id:d.id,...d.data()}))
-      // Partners cannot see records created by Sales (non-partner) users
-      .filter(q => !isPartnerRole || q.createdBy === currentUser.uid)
       .sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const forApproval   = all.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
     const filed         = all.filter(q=>q.status==='filed'||q.approvalStatus==='approved');
@@ -2114,7 +2111,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
     // (message-only before this pass). Titled after the thing that failed, the
     // same way every other list in this file names its own failure, now that
     // the swallowing catches above no longer keep this branch unreachable.
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load partner quotations</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsq-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load Brilliant Steel quotations</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsq-retry-btn" style="margin-top:14px">Retry</button></div>`;
     container.querySelector('.bsq-retry-btn')?.addEventListener('click', () => renderBSQuotationsSummary(container, currentUser, currentRole));
     if (window.lucide) lucide.createIcons({ nodes: [container] });
   }
@@ -2154,7 +2151,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
     });
   });
-  // Request delete (partner / sales staff) — flags the quote + notifies the president
+  // Request delete (sales staff) — flags the quote + notifies the president
   el.querySelectorAll('.bs-delreq-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
@@ -2696,8 +2693,7 @@ window.revokeQuoteShare = async function(coll, docId, token) {
 };
 
 // 🔗 shared / response-state chip — used by every quote list that renders a
-// shareToken/clientResponse (BK cards + BS table here; the partner own-
-// quotes table in js/screens/partners.js calls this as a bare global).
+// shareToken/clientResponse (BK cards + BS table here).
 // clientResponse lives on the INTERNAL quote doc too, not just the mirror —
 // functions/index.js's respondToQuote writes it there (spec §4.2 step 3) so
 // this needs no extra read.
@@ -2722,8 +2718,8 @@ window.quoteShareChipHtml = function(q) {
 // commission / margin internals, so any viewer cleared to see money sees
 // nothing the printed quotation itself wouldn't show. Visibility is layered:
 //   1. Callers gate the affordance (production.js: production-only viewers
-//      have no money view so they never get the link; partners only for
-//      bs_quotes).
+//      have no money view so they never get the link; BS-only staff only
+//      for bs_quotes).
 //   2. Firestore rules remain the real gate on the doc read (bk_quotes:
 //      creator or admin only; bs_quotes: any internal staff, or the partner
 //      who filed it).
@@ -2860,10 +2856,10 @@ window.openQuoteReadOnly = async function(coll, docId, opts) {
   `;
 
   // "Open in builder" — same audience the quotations screens give the Reopen
-  // button (internal Sales edit rights, never partner, never the view-only
-  // secretary role), and only when an editable snapshot exists to open.
+  // button (internal Sales edit rights, never the view-only secretary role),
+  // and only when an editable snapshot exists to open.
   const slot = panel.querySelector('#qv-reopen-slot');
-  if (slot && q.editableState && window.currentRole !== 'partner' && window.currentRole !== 'secretary'
+  if (slot && q.editableState && window.currentRole !== 'secretary'
       && typeof canEditDept === 'function' && canEditDept('Sales')) {
     slot.innerHTML = `<button class="btn-secondary" id="qv-reopen-btn" title="Open this quote in the builder — re-filing saves a new copy">↻ Open in builder</button>`;
     slot.querySelector('#qv-reopen-btn').addEventListener('click', () => {
@@ -2875,8 +2871,8 @@ window.openQuoteReadOnly = async function(coll, docId, opts) {
 
 // ── The share action itself ───────────────────────────────────────────
 // Wired as a 🔗 Share button on every filed/approved/accepted quote card
-// (spec §5.1: BS flat list, BK quotations summary, partner own-quotes
-// table). `onDone` is an optional re-render callback (same convention as
+// (spec §5.1: BS flat list, BK quotations summary). `onDone` is an
+// optional re-render callback (same convention as
 // window.requestQuoteDelete) so the caller's list refreshes and picks up
 // the new 🔗 shared chip / shareToken.
 window.shareQuoteWithClient = async function(coll, docId, onDone) {

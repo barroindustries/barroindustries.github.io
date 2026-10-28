@@ -43,7 +43,7 @@
      renderer + action-button wiring, reusing the cached 'all'-tab
      snapshot for its own list where possible).
    - approveQuoteApproval / returnQuoteToPartner / openQuoteApprovalReview
-     — the partner quote-approval helpers, used exclusively by this
+     — the quote-approval helpers, used exclusively by this
      screen's Quote Approvals tab (and by svc-approvals.js's
      'quote-approval' registry entry, which calls them as bare globals
      — same runtime-only resolution pattern).
@@ -460,12 +460,12 @@ window.renderApprovals = async function(currentUser) {
         ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);const nm=(d.data().assignedToNames||[]).join(', ');return uids.length&&nm?'by '+nm:'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
         ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt})),
         ...finDelSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'finance-del',icon:'🗑',label:'Finance Delete',name:`Delete: ${x.label||'record'}`,detail:`by ${x.requestedByName||'?'}${x.reason?' — '+x.reason:''}`,ts:x.createdAt,recLabel:x.label};}),
-        // Partner quote approvals (partner submitted a quote for the president to review/edit/return).
+        // Quote approvals (a submitted quote for the president to review/edit/return).
         // approval_requests also hosts v12 WS22's ca_deduct requests — split by
         // `type` so those don't get mislabeled as quote approvals.
-        ...qApprSnap2.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
+        ...qApprSnap2.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Staff'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
         ...qApprSnap2.docs.filter(d=>d.data().type==='ca_deduct').map(d=>{const x=d.data();return {id:d.id,...x,type:'ca_deduct',icon:'💳',label:'CA Deduction Request',name:x.userName||'Employee',detail:`₱${fmt(x.amount||0)} this month${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
-        // Quote delete requests (partner bs_quotes + internal bk_quotes + client folder) — president approves or denies
+        // Quote delete requests (bs_quotes + internal bk_quotes + client folder) — president approves or denies
         ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bs_quotes',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
         // bk_quotes holds both Barro Kitchens and Barro Industries (general
         // fabrication) quotes, so the label comes from each doc's own company
@@ -535,7 +535,7 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='quote-approval'?`
                 <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
                 <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
+                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
               `:item.type==='delete-quote'?`
                 <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✓',16)} Approve Delete</button>
                 <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✗',16)} Deny</button>
@@ -749,7 +749,7 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
 
-      // ── Partner quote approvals — open & edit, approve, or return to partner ──
+      // ── Quote approvals — open & edit, approve, or return ──
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () => {
         openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno, clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, ()=>loadApprovalsSub('all'));
       }));
@@ -758,13 +758,13 @@ window.renderApprovals = async function(currentUser) {
         loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.qa-return-btn').forEach(btn => onClickSafe(btn, async () => {
-        const notes = (await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))||'';
+        const notes = (await promptDialog({message:'Notes for the submitter (what to revise)?', multiline:true}))||'';
         await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes, btn.dataset.coll);
         loadApprovalsSub('all');
       }));
 
       // ── Quote delete requests — approve (delete) or deny (clear flag) ──
-      // Collection-aware: bs_quotes (partner) and bk_quotes (internal Sales).
+      // Collection-aware: bs_quotes (Brilliant Steel) and bk_quotes (internal Sales).
       wrap.querySelectorAll('.dq-approve-btn').forEach(btn => onClickSafe(btn, async () => {
         if (!(await confirmDialog({message:`Approve deletion of quote ${btn.dataset.qno}? This permanently removes it.`, danger:true}))) return;
         const coll = btn.dataset.coll || 'bs_quotes';
@@ -972,7 +972,7 @@ window.renderApprovals = async function(currentUser) {
         ...subH.docs.map(d=>mk(d,'submission','📤','Work Submission', d.data().submittedByName||d.data().userName||d.data().authorName||'Unknown', d.data().title||'')),
         ...frH.docs.map(d=>mk(d,'finance-req','💼','Finance Request', `Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`, `by ${d.data().requestedByName||'?'}`)),
         ...fdH.docs.map(d=>mk(d,'finance-del','🗑','Finance Delete', `Delete: ${d.data().label||'record'}`, `by ${d.data().requestedByName||'?'}`)),
-        ...qaH.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>mk(d,'quote-approval','📤','Quote Approval', `${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`, `${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`)),
+        ...qaH.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>mk(d,'quote-approval','📤','Quote Approval', `${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`, `${d.data().agentName||'Staff'} · ₱${fmt(d.data().total||0)}`)),
         ...qaH.docs.filter(d=>d.data().type==='ca_deduct').map(d=>mk(d,'ca_deduct','💳','CA Deduction Request', d.data().userName||'Employee', `₱${fmt(d.data().amount||0)}`)),
         ...lvH.docs.map(d=>mk(d,'leave','🌴','Leave Request', d.data().userName||'Employee', `${d.data().days||0}d ${d.data().type||'leave'}`)),
         ...rzH.docs.map(d=>mk(d,'raise','💸','Raise Request', d.data().subjectName||'Employee', `₱${fmt(d.data().oldAmount||0)} → ₱${fmt(d.data().newAmount||0)}`)),
@@ -1388,7 +1388,7 @@ window.renderApprovals = async function(currentUser) {
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
             <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
             <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
-            <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
+            <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
           </div>` : `
           <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
             <span style="font-size:11px;color:var(--text-muted)">(no linked quote)</span>
@@ -1428,7 +1428,7 @@ window.renderApprovals = async function(currentUser) {
         loadApprovalsSub('roa');
       }));
       wrap.querySelectorAll('.qa-return-btn').forEach(btn => onClickSafe(btn, async () => {
-        const notes = (await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))||'';
+        const notes = (await promptDialog({message:'Notes for the submitter (what to revise)?', multiline:true}))||'';
         await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes, btn.dataset.coll);
         loadApprovalsSub('roa');
       }));
@@ -1494,8 +1494,8 @@ window.syncQuoteStatusToRequest = async function (coll, quoteId, state) {
   }
 };
 
-// ── Partner quote-approval helpers (shared by Approvals page) ──────────
-// Approve a partner-submitted quote: file it + resolve its approval request + notify.
+// ── Quote-approval helpers (shared by Approvals page) ──────────────────
+// Approve a submitted quote: file it + resolve its approval request + notify.
 async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
   coll = coll || 'bs_quotes';
   if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
@@ -1512,7 +1512,7 @@ async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
     Notifs.success('Quote approved and filed!');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
-// Return a partner quote for revision: mark needs_revision + notify the partner.
+// Return a submitted quote for revision: mark needs_revision + notify the submitter.
 async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
   coll = coll || 'bs_quotes';
   if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
@@ -1526,7 +1526,7 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
     if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
-    Notifs.error('Quote returned to partner.');
+    Notifs.error('Quote returned.');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 // Open the full review modal: open in builder, edit key fields, then approve/return.
@@ -1572,7 +1572,7 @@ async function openQuoteApprovalReview(ctx, onDone){
   // match that count, so the panel does not visibly change height on fill.
   const p = openPage(`${emojiIcon('📝',16)} Review Quote — ${escHtml(quoteNumber||'')}`,
     window.skeletonHtml('rows', 5),
-    `<button class="btn-success" id="qar-approve" disabled>${emojiIcon('✅',16)} Save &amp; Approve</button><button class="btn-primary" id="qar-return" disabled>↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    `<button class="btn-success" id="qar-approve" disabled>${emojiIcon('✅',16)} Save &amp; Approve</button><button class="btn-primary" id="qar-return" disabled>↩ Save &amp; Return</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   const body = p.querySelector('.page-panel-body');
   const foot = p.querySelector('.page-panel-foot');
 
@@ -1611,12 +1611,12 @@ async function openQuoteApprovalReview(ctx, onDone){
   const q = snap.data();
   const hasSnapshot = !!q.editableState;
   body.innerHTML = `
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items (saved back to the partner's quote), or adjust the key fields below, then approve or return it to the partner.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items (saved back to the submitter's quote), or adjust the key fields below, then approve or return it.</p>
     <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>${emojiIcon('🔧',16)} Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
     <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Scope / Description</label><textarea id="qar-scope" rows="3" style="${ta}">${escHtml(q.scope||q.description||'')}</textarea></div>
     <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}" inputmode="decimal"/></div>
-    <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
+    <div class="form-group"><label>Notes for submitter</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
   `;
   // openPage's own sweep already ran (on the frame it pushed the panel) and
   // covered the footer; this markup arrived after it, so its icons — the 🔧 on
@@ -1675,7 +1675,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending:approval_requests-pending'); }
       if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
-      closeModal(); Notifs.error('Quote updated and returned to partner.'); onDone&&onDone();
+      closeModal(); Notifs.error('Quote updated and returned.'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
 }

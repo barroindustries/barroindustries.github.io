@@ -26,10 +26,9 @@
      file's own SYSTEM_HEALTH_JOBS... no — reads app.js's SYSTEM_HEALTH_JOBS
      constant, which STAYED behind since checkBackupHealth also needs it).
    - President tools: renderAuditLog, renderProductDatabase.
-   - The 6 role dashboards: renderDashboard (role dispatcher — the
-     isPartner()/renderPartnerDashboard and isBrilliantOnly()/
-     renderBrilliantSteel branches were already routed to partners.js/Wave 7
-     Pass 6 before this pass; verified still correct), liveDateTime (shared
+   - The role dashboards: renderDashboard (role dispatcher — the
+     isBrilliantOnly()/renderBrilliantSteel branch routes to the Brilliant
+     Steel department screens in partners.js), liveDateTime (shared
      live-clock helper), renderPresidentDashboard, renderManagerDashboard,
      renderSecretaryDashboard, renderFinanceDashboard, renderEmployeeDashboard.
      getAllQuotes (bk_quotes+bs_quotes+legacy quotes merge) moved alongside
@@ -62,7 +61,7 @@
    - renderAccessDenied, formatNum — small helpers used exclusively by the
      screens in this file (verified via full-tree grep before moving).
    - Suggestion Box: renderSuggestionBox, loadSuggestions.
-   - Help: renderHelp, renderHelpAdmin, renderHelpEmployee, renderHelpPartner.
+   - Help: renderHelp, renderHelpAdmin, renderHelpEmployee, renderHelpBrilliantSteel.
 
    Wave 7 Pass 9 8-point pass, applied in this file only:
    - chipTabs: converted 3 remaining hand-rolled .subtab-bar instances found
@@ -657,8 +656,8 @@ async function renderProductDatabase() {
     //
     // Cost basis (capitalMaterials/capitalLabor/bom) may NOT go on the products
     // doc: firestore.rules rejects any /products write that (re)introduces a
-    // cost field (productCostFieldsLocked — a partner-readable doc must never
-    // carry cost basis), and post-migrateProductCostsOut that denial would sink
+    // cost field (productCostFieldsLocked — a doc every signed-in user can read
+    // must never carry cost basis), and post-migrateProductCostsOut that denial would sink
     // the WHOLE save, title and price included. Split the write: catalog fields
     // → products, cost fields → product_costs/{code} (finance/admin-only doc,
     // same shape migrateProductCostsOut writes).
@@ -865,7 +864,7 @@ async function renderProductDatabase() {
 // analytics reflect where quotes are actually saved (bk_quotes / bs_quotes).
 async function getAllQuotes() {
   // Self-cache under the shared 'all-quotes' key so every caller (dashboard,
-  // analytics, partner activity) reuses one snapshot instead of re-reading three
+  // analytics) reuses one snapshot instead of re-reading three
   // collections each. Invalidated on quote writes via dbCacheInvalidate('all-quotes').
   return dbCachedGet('all-quotes', async () => {
     const [bk, bs, legacy] = await Promise.all([
@@ -913,8 +912,6 @@ async function renderDashboard() {
     await renderManagerDashboard();
   } else if (currentRole === 'finance') {
     await renderFinanceDashboard();
-  } else if (isPartner()) {
-    await renderPartnerDashboard();
   } else if (isBrilliantOnly()) {
     // Direct render bypasses navigateTo's ensurePage, and the Quotations
     // Summary tab reaches renderBSQuotationsSummary (sales.js) + production
@@ -926,16 +923,6 @@ async function renderDashboard() {
     await renderEmployeeDashboard();
   }
 }
-
-// Partner — Project Details (PARTNER_STAGE, renderPartnerProjects) — moved
-// verbatim to js/screens/partners.js (Wave 7 Pass 6, 2026-08-03). The
-// navigateTo 'partner-projects' case above still calls renderPartnerProjects()
-// as a bare global identifier.
-
-// renderPartnerDashboard — moved verbatim to js/screens/partners.js (Wave 7
-// Pass 6, 2026-08-03). renderDashboard's isPartner() branch above still
-// calls it as a bare global identifier. Uses this file's liveDateTime
-// (below, shared with every other dashboard) the same way.
 
 // Single clock interval — cleared before each new dashboard render
 let _liveDateInterval = null;
@@ -1394,7 +1381,7 @@ async function renderSecretaryDashboard() {
     const pendingPO = poSnap.size||0;
     const pendingRaises = raiseSnap.size||0;
     const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes+pendingPO+pendingRaises;
-    const activeStaff = users.filter(u=>u.role!=='partner').length;
+    const activeStaff = users.length;
     const rows = [
       ['Sign-ups', signupSnap.size||0, `${emojiIcon('👤',16)}`],
       ['Cash Advances', caSnap.size||0, `${emojiIcon('💸',16)}`],
@@ -1859,20 +1846,6 @@ async function renderSOPs() {
       ]
     },
     {
-      title: '🤝 Partner Deal Process (50/50)',
-      icon: '🤝',
-      items: [
-        'Partners (Brilliant Steel / external) bring in clients and co-manage projects.',
-        'When a client prospect is identified, the partner creates a quote via Quote Builder and submits for approval.',
-        'Once the client accepts and the project begins, the <strong>President registers the deal</strong> in the Partners → Deals tab.',
-        'The deal records: client name, total contract value, and Barro Industries\' project cost.',
-        'Gross Profit = Contract Value − Cost. <strong>Partner Share = 50% of Gross Profit.</strong>',
-        'The partner can see their deal pipeline and earnings in their dashboard at any time.',
-        'Payment is released by Finance when the project is marked <em>Completed</em> and approved by the President.',
-        'Always agree on the project scope in writing (quote) before starting fabrication.',
-      ]
-    },
-    {
       title: '📁 Files & Document Management',
       icon: '📁',
       items: [
@@ -1954,7 +1927,7 @@ async function renderSOPs() {
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('📋',20)} Standard Operating Procedures</h2>
-      <p style="font-size:13px;color:var(--text-muted);margin-top:4px">Barro Industries — Official SOPs for all staff and partners</p>
+      <p style="font-size:13px;color:var(--text-muted);margin-top:4px">Barro Industries — Official SOPs for all staff</p>
       ${canEditSOPs?`<button class="btn-primary btn-sm" id="sop-add-btn" style="margin-top:10px">＋ Add SOP</button>`:''}
     </div>
     <div id="sop-list" style="display:flex;flex-direction:column;gap:8px">
@@ -3832,7 +3805,7 @@ async function renderProgressReports() {
             <div class="table-wrap"><table class="data-table table-cards">
               <thead><tr><th></th><th>Member</th><th>Department</th><th>This Month</th><th>All Time</th><th>KPI</th><th></th></tr></thead>
               <tbody>
-                ${users.filter(u=>u.role!=='partner').map(u=>{
+                ${users.map(u=>{
                   const uDone   = tasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
                   const uTotal  = tasks.filter(t=>isAssigned(t,u.id)).length;
                   const uMDone  = monthTasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
@@ -4294,7 +4267,7 @@ async function renderCompanyOverview(ct, canAdd) {
 // The job_projects schema split was offered and DECLINED by the owner
 // ("Nvm, just show comapny health, only percentages") — do not re-raise it.
 // One data load (2 cached collection reads) feeds both hosts; a failed/denied
-// job_projects read (partner deep-link, offline) hides BOTH sections — a
+// job_projects read (denied, offline) hides BOTH sections — a
 // failed users read hides only the Team members tile.
 async function _fillCompanyHealth(ct) {
   const healthHost = ct.querySelector('#co-health-host');
@@ -4319,15 +4292,10 @@ async function _fillCompanyHealth(ct) {
   let teamSize = null;
   try {
     const usersSnap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
-    // Mirrors window.renderTeamTab's own non-partner-viewer exclusion
-    // (js/screens/people.js) exactly, so the Company page and the Team page
-    // never disagree on headcount: BS-department-ONLY staff are excluded;
-    // partner-role users are NOT excluded (renderTeamTab shows them to every
-    // internal viewer too).
-    teamSize = (usersSnap.docs || []).map(d => d.data()).filter(u => {
-      const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
-      return !(depts.length === 1 && depts[0] === 'Brilliant Steel');
-    }).length;
+    // Mirrors window.renderTeamTab (js/screens/people.js): every user doc is
+    // on the Team page, so the Company page and the Team page never disagree
+    // on headcount (Brilliant Steel staff are Barro employees like anyone else).
+    teamSize = (usersSnap.docs || []).length;
   } catch (_) { teamSize = null; }
 
   if (healthHost) healthHost.innerHTML = _companyHealthHtml(projects, teamSize);
@@ -4633,7 +4601,7 @@ async function _fillYearReviewHalf2(host, year) {
   } catch (_) { /* omit tile */ }
 
   // "Projects you're on" — SKIPPED. job_projects carries no reliable
-  // membership/assignee uid field (only createdBy and partnerUid); timeline[]
+  // membership/assignee uid field (only createdBy); timeline[]
   // entries carry a display NAME, not a uid, which is not a safe match. Per
   // spec §1B.5, omit rather than fuzzy-match names.
 
@@ -4705,10 +4673,7 @@ async function _openYearReviewPublish(year, existingDoc, onDone) {
     let teamSize = null;
     try {
       const usnap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
-      teamSize = (usnap.docs || []).map(d => d.data()).filter(u => {
-        const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
-        return !(depts.length === 1 && depts[0] === 'Brilliant Steel');
-      }).length;
+      teamSize = (usnap.docs || []).length;
     } catch (_) { /* leave blank */ }
     let priorRevenue = null, priorProjectsFinished = null;
     try {
@@ -4988,10 +4953,7 @@ async function renderCompanyMemos(ct, canAdd) {
           ? await dbCachedGet('users', () => db.collection('users').get(), 30000)
           : await db.collection('users').get();
         people = snap.docs.map(d=>({id:d.id, ...d.data()}))
-          // Internal staff only — external partners and Brilliant-Steel-only users
-          // have no Memos nav entry, so don't tag them for conforme here.
-          .filter(u => u.id !== me && u.role !== 'partner'
-            && !(Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel'))
+          .filter(u => u.id !== me)
           .map(u => ({ id:u.id, name:u.displayName||u.email||'Unknown', role:(window.ROLES?.[u.role]?.label)||u.role||'' }))
           .sort((a,b)=>a.name.localeCompare(b.name));
         paintList();
@@ -5030,11 +4992,10 @@ async function renderCompanyMemos(ct, canAdd) {
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         // Surface the memo in the General Posts feed as a click-to-open mirror
-        // card so staff don't miss it on the separate Memos tab. Internal-only:
-        // partners only ever load the "Partners" feed sub-tab, never "General",
-        // so they never see this. The card links back to the memo (conforme is
-        // given there); tagged recipients are already notified below, so the
-        // mirror itself is silent — no all-staff broadcast.
+        // card so staff don't miss it on the separate Memos tab. The card links
+        // back to the memo (conforme is given there); tagged recipients are
+        // already notified below, so the mirror itself is silent — no all-staff
+        // broadcast.
         try {
           await db.collection('posts').add({
             dept:        'General',
@@ -5615,7 +5576,7 @@ async function renderAnalytics() {
   if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){
     // Owner ruling 2026-09-01: Sales-department staff get Analytics — the
     // scoped view below (pace/OH-coverage feed only, no money-tier reads).
-    if ((window.currentDepts||[]).includes('Sales') && !(typeof isPartner==='function' && isPartner())) { renderSalesAnalytics(); return; }
+    if ((window.currentDepts||[]).includes('Sales')) { renderSalesAnalytics(); return; }
     document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;
   }
   const c=document.getElementById('page-content');
@@ -5920,8 +5881,9 @@ async function renderAnalytics() {
     // who owes the company how much, how much has been collected, and the top
     // clients by contract value. They survive the Finance carve-out because
     // they are DENORMALIZED — derived from job_projects/projects, whose read
-    // rules are `!isPartner()` because those collections are the operational
-    // project spine that Production and Sales run on. So this is not a hole in
+    // rules are open to every signed-in staff member because those collections
+    // are the operational project spine that Production and Sales run on. So
+    // this is not a hole in
     // the money tier, it is a question about scope: does AR count as Finance?
     // Hiding it here is a one-line change (gate on window.isMoneyPriv() and
     // render the withheld treatment, exactly like the ledger figures above),
@@ -7021,10 +6983,10 @@ function openAddEmployeeModal() {
     const depts=[dept1,dept2].filter(Boolean);
     const empRole=$('#emp-role').value;
     // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3b — same team stamp derivation as the
-    // invite path (people.js): partner/agent read off role, everyone else is
+    // invite path (people.js): agent reads off role, everyone else is
     // 'office' (this record-only path can never produce an Operations hire —
     // see the payClass:'regular' note below).
-    const team = empRole==='partner'?'partner':empRole==='agent'?'agent':'office';
+    const team = empRole==='agent'?'agent':'office';
     const ref = await db.collection('users').add({
       displayName:$('#emp-name').value.trim(),
       email:$('#emp-email').value.trim(),
@@ -7688,16 +7650,18 @@ async function loadSuggestions() {
 // ── Help / Guide ──────────────────────────────────
 function renderHelp() {
   const c = document.getElementById('page-content');
+  // Staff whose ONLY department is Brilliant Steel (isolated chrome) get the
+  // Brilliant Steel guide; admins keep Admin/Employee/Storage; everyone else
+  // gets the Employee guide. Admin wins over BS-only so an admin whose only
+  // department happens to be Brilliant Steel still lands on a chip that exists.
   const bsOnly   = isBrilliantOnly();
-  const extPartner = isPartner(); // external partner role
-  const isAnyPartner = bsOnly || extPartner;
   const pres     = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
-  const section  = isAnyPartner ? 'partner' : pres ? 'admin' : 'employee';
+  const section  = pres ? 'admin' : bsOnly ? 'bs' : 'employee';
 
   const sections = {
     admin:    renderHelpAdmin,
     employee: renderHelpEmployee,
-    partner:  renderHelpPartner
+    bs:       renderHelpBrilliantSteel
   };
 
   c.innerHTML = `
@@ -7706,9 +7670,9 @@ function renderHelp() {
     </div>
     ${window.chipTabs(
       pres
-        ? [{key:'admin',label:'Admin Guide'},{key:'employee',label:'Employee Guide'},{key:'partner',label:'Partner Guide'},{key:'storage',label:'Storage Setup'},{key:'suggestions',icon:emojiIcon('💡',16),label:'Suggestion Box'}]
-        : isAnyPartner
-          ? [{key:'partner',label:'Partner Guide'},{key:'suggestions',icon:emojiIcon('💡',16),label:'Suggestion Box'}]
+        ? [{key:'admin',label:'Admin Guide'},{key:'employee',label:'Employee Guide'},{key:'storage',label:'Storage Setup'},{key:'suggestions',icon:emojiIcon('💡',16),label:'Suggestion Box'}]
+        : bsOnly
+          ? [{key:'bs',label:'Brilliant Steel Guide'},{key:'suggestions',icon:emojiIcon('💡',16),label:'Suggestion Box'}]
           : [{key:'employee',label:'Your Guide'},{key:'suggestions',icon:emojiIcon('💡',16),label:'Suggestion Box'}],
       section, {cls:'help-tabs'}
     )}
@@ -7955,32 +7919,31 @@ function renderHelpEmployee() {
   </div>`;
 }
 
-function renderHelpPartner() {
+function renderHelpBrilliantSteel() {
   return `
   <div class="help-guide">
     <div class="help-hero">
-      <div class="help-hero-icon" style="background:rgba(255,214,10,0.10)"><i data-lucide="handshake" style="stroke:var(--gold);width:28px;height:28px"></i></div>
-      <div><h2>Partner Guide — Brilliant Steel</h2><p>Quote builder, client management, and file sharing</p></div>
+      <div class="help-hero-icon" style="background:rgba(255,214,10,0.10)"><i data-lucide="factory" style="stroke:var(--gold);width:28px;height:28px"></i></div>
+      <div><h2>Brilliant Steel Guide</h2><p>Quote builder, quotations, client data and files</p></div>
     </div>
 
     <div class="help-section">
       <h3><i data-lucide="log-in" class="help-h-icon"></i> How to Log In</h3>
       <ol class="help-steps">
-        <li>Open the app link provided by Barro Industries admin</li>
-        <li>On the login screen, tap <strong>Partner</strong></li>
-        <li>Enter your Brilliant Steel email address</li>
-        <li>Enter your password → tap <strong>Sign In</strong></li>
-        <li>Your account must be set up by Barro Industries admin first — contact them if you can't log in</li>
+        <li>Open the app link your admin gave you</li>
+        <li>On the login screen, tap <strong>Employee</strong></li>
+        <li>Enter your company email and password → tap <strong>Sign In</strong></li>
+        <li>If you forgot your password → tap <strong>Forgot password?</strong> to get a reset email</li>
       </ol>
       <div class="help-tip">${emojiIcon('💡',16)} <strong>Tip:</strong> Save the app link to your phone's home screen for quick access. On iPhone: Safari → Share → "Add to Home Screen".</div>
     </div>
 
     <div class="help-section">
       <h3><i data-lucide="home" class="help-h-icon"></i> Your Dashboard</h3>
-      <p>After logging in, you'll see your Brilliant Steel dashboard with:</p>
+      <p>After logging in you land on the Brilliant Steel screen. The tabs across the top are <strong>Quote Builder</strong>, <strong>Quotations Summary</strong>, <strong>Client Data</strong> and <strong>Files</strong>. Quotations Summary opens first and shows:</p>
       <ul class="help-list">
-        <li><strong>Quote pipeline value</strong> — total value of all quotes you've built</li>
-        <li><strong>Quick access</strong> to Quote Builder, Quotations, and Client Data</li>
+        <li><strong>Quote Analytics</strong> — quotes made, successful, win rate, pipeline value and won value</li>
+        <li><strong>Status tabs</strong> — Filed / Approved, Pending Approval, Needs Revision, Drafts and Rejected</li>
       </ul>
     </div>
 
@@ -7988,43 +7951,41 @@ function renderHelpPartner() {
       <h3><i data-lucide="calculator" class="help-h-icon"></i> Building a Quote</h3>
       <ol class="help-steps">
         <li>Tap <strong>Quotes</strong> in the bottom nav or <strong>Quote Builder</strong> in the sidebar</li>
-        <li>Select or create a <strong>client</strong> from your client list</li>
-        <li>Add <strong>line items</strong> — description, quantity, unit price. The total calculates automatically.</li>
-        <li>Add any <strong>notes or terms</strong> at the bottom</li>
-        <li>Tap <strong>Save Draft</strong> to save without sending</li>
-        <li>When ready, tap <strong>Submit for Approval</strong> — this sends the quote to Barro Industries president for review</li>
-        <li>You'll receive a notification when it's approved or returned for revision</li>
+        <li>At the top of the builder, choose the <strong>Brilliant Steel</strong> pill — the builder opens on Barro Kitchens, and a quote is filed under whichever company pill is selected</li>
+        <li>Enter the client details and add <strong>line items</strong>. The total calculates automatically.</li>
+        <li>Tap <strong>Save draft</strong> any time to park an unfinished quote — it appears under <strong>Drafts</strong> in Quotations Summary</li>
+        <li>When it is ready, open <strong>Verify &amp; File</strong>, tick <strong>Request Approval Before Filing</strong> and tap <strong>Submit for Approval</strong></li>
+        <li>The President reviews it, then approves it or returns it with notes. You'll get a notification either way.</li>
       </ol>
-      <div class="help-tip">${emojiIcon('⚠️',16)} <strong>Note:</strong> Quotes are not final until approved by the Barro Industries president.</div>
+      <div class="help-tip">${emojiIcon('⚠️',16)} <strong>Note:</strong> Quotes are not final until the President approves them. Don't share a quote with a client before then.</div>
     </div>
 
     <div class="help-section">
       <h3><i data-lucide="file-text" class="help-h-icon"></i> Quotations Summary</h3>
       <ul class="help-list">
-        <li>See all your quotes with their current status: Draft, Sent, Accepted, Rejected</li>
-        <li>Use the filter tabs to find quotes by status</li>
-        <li>Tap any quote to view or edit it (drafts only)</li>
-        <li>Approved quotes can be downloaded or shared as PDF</li>
+        <li>Use the status tabs to find a quote: Filed / Approved, Pending Approval, Needs Revision, Drafts or Rejected</li>
+        <li>A <strong>Needs Revision</strong> quote was returned by the President — the notes are in the notification you received</li>
+        <li>On a filed quote, tap <strong>Reopen</strong> to edit a copy, <strong>New Revision</strong> to start the next revision (R2, R3…) with today's date, or <strong>Share</strong> to get a client link — no login needed — to accept or request changes</li>
+        <li>On a draft, tap <strong>Resume</strong> to continue where you left off</li>
       </ul>
     </div>
 
     <div class="help-section">
       <h3><i data-lucide="book-open" class="help-h-icon"></i> Client Data</h3>
       <ol class="help-steps">
-        <li>Tap <strong>Clients</strong> in the sidebar</li>
-        <li>See all your saved clients with contact information</li>
-        <li>Tap <strong>+ Add Client</strong> to add a new client (name, company, email, phone)</li>
-        <li>Tap any client to view their history and quotes</li>
+        <li>Tap <strong>Clients</strong> in the bottom nav or <strong>Client Data</strong> in the sidebar</li>
+        <li>Your clients are built from your quotations — a client appears once a quote is filed for them</li>
+        <li>Use the search box to find a client by name, company or address</li>
+        <li>Tap a client to see their contact details and Quotation History, with the same <strong>Reopen &amp; Edit</strong>, <strong>New Revision</strong> and <strong>Share</strong> buttons</li>
       </ol>
     </div>
 
     <div class="help-section">
       <h3><i data-lucide="folder" class="help-h-icon"></i> Files</h3>
       <ul class="help-list">
-        <li>Tap <strong>Files</strong> to access shared documents with Barro Industries</li>
-        <li>Upload product specs, drawings, or documents — they save to the shared Google Drive folder</li>
-        <li>Files from Barro Industries for you will also appear here</li>
-        <li>All files become shareable links — tap to open in your browser</li>
+        <li>Tap <strong>Files</strong> to see the Brilliant Steel files: <strong>Quotations</strong>, <strong>Images</strong>, <strong>Drawings</strong> and <strong>Documents</strong></li>
+        <li>Upload specs, drawings or documents — they are stored in the app and mirrored to Google Drive nightly</li>
+        <li>Every file becomes a link — tap it to open it in your browser</li>
       </ul>
     </div>
 
@@ -8032,7 +7993,7 @@ function renderHelpPartner() {
       <h3><i data-lucide="bell" class="help-h-icon"></i> Notifications</h3>
       <ul class="help-list">
         <li>Tap the <strong>bell icon</strong> in the top-right to see all notifications</li>
-        <li>You'll be notified when a quote is approved, rejected, or needs revision</li>
+        <li>You'll be notified when a quote is approved or returned for revision</li>
         <li>Tap a notification to go directly to the relevant item</li>
         <li>Tap <strong>Mark all read</strong> to clear the badge count</li>
       </ul>
@@ -8041,8 +8002,8 @@ function renderHelpPartner() {
     <div class="help-section">
       <h3><i data-lucide="help-circle" class="help-h-icon"></i> Need Help?</h3>
       <ul class="help-list">
-        <li>Contact Barro Industries admin for account issues, password resets, or access problems</li>
-        <li>For quote questions, use the in-app notification to message back on a quote</li>
+        <li>Contact your Barro Industries admin for account issues, password resets or access problems</li>
+        <li>Have an idea or found a problem? Send it through the <strong>Suggestion Box</strong> tab above</li>
       </ul>
     </div>
   </div>`;

@@ -237,12 +237,11 @@ window.Notifs = (() => {
     approval_result:{icon:'✅',accent:'#2F9E44'}, delete_approved:{icon:'🗑️',accent:'#2F9E44'},
     delete_denied:{icon:'🗑️',accent:'#D92D20'}, client_delete_request:{icon:'🗑️',accent:'#D92D20'},
     quote_delete_request:{icon:'🗑️',accent:'#D92D20'},
-    // Sales / quotes / partners
+    // Sales / quotes
     quote_filed:{icon:'📄',accent:'#1C7ED6'}, quote_returned:{icon:'↩️',accent:'#E8590C'},
     quote_review_request:{icon:'👀',accent:'#1C7ED6'}, quote_approved:{icon:'✅',accent:'#2F9E44'},
     quote_rejected:{icon:'❌',accent:'#D92D20'}, bs_quote:{icon:'📄',accent:'#1C7ED6'},
     sales_order:{icon:'🛒',accent:'#1C7ED6'}, lead_handoff:{icon:'🤝',accent:'#1C7ED6'},
-    partner_deal:{icon:'🤝',accent:'#1C7ED6'},
     // Purchasing / inventory
     po_approval:{icon:'🧮',accent:'#F76707'}, po_approval_result:{icon:'🧮',accent:'#2F9E44'},
     purchase_submitted:{icon:'🧮',accent:'#F76707'}, low_stock:{icon:'📦',accent:'#E8590C'},

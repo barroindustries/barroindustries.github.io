@@ -431,11 +431,10 @@ const _isFinAdmin = () => ['president','owner','manager','finance'].includes(win
 
 // Sales→Production handoff (owner's rule, 2026-08) — Production staff see WHAT to
 // build (items, target date, priority, notes) and stage/status, never the deal's
-// money (contract/AR/collected/margin/split/invoices). There is no dedicated
+// money (contract/AR/collected/margin/invoices). There is no dedicated
 // 'production' system role (window.ROLES has none — see js/config.js) so this is
-// keyed off department membership, same "role OR sole-department" shape isPartnerU
-// uses elsewhere in this file: true only for genuine Production-dept staff who
-// aren't ALSO Finance/Sales/admin/president (those keep the full money view).
+// keyed off department membership: true only for genuine Production-dept staff
+// who aren't ALSO Finance/Sales/admin/president (those keep the full money view).
 function isProductionOnlyViewer(){
   if (_isFinAdmin()) return false;         // president/owner/manager/finance role, or Finance dept
   if (canEditDept('Sales')) return false;  // Sales dept members (or admin roles) keep the money view
@@ -457,7 +456,7 @@ function isProductionOnlyViewer(){
 //  existed shows the right number of stars.
 //
 //  CANONICAL SOURCE IS job_projects.priority — the spine record for a won
-//  quote. Firestore rules let ANY non-partner staff update a job_project as
+//  quote. Firestore rules let ANY staff update a job_project as
 //  long as the write doesn't touch money keys, so Production and Sales can
 //  both set it with no rules change. The Sales Orders table therefore reads
 //  and writes the LINKED PROJECT rather than sales_orders.priority, whose
@@ -1465,9 +1464,6 @@ async function createJobProject(d){
   const contract=parseFloat(d.total)||0;
   const company=d.co||'BS';
   const who=userProfile?.displayName||currentUser.email;
-  // For shared (BS) projects, remember the partner who originated the quote so
-  // their portal can read the project + compute their 50% expected earnings.
-  const partnerUid = (company==='BS') ? (d.partnerUid||d.createdBy||null) : null;
   const ref=await db.collection('job_projects').add({
     projectNo, company, name:((d.client||'Client')+' — '+(d.qno||'')).trim(),
     clientName:d.client||'', clientId: d.clientId || null, stage:'won',
@@ -1485,8 +1481,6 @@ async function createJobProject(d){
     // transferOrderToProduction / ensureProdHandoffFields).
     targetDate: d.targetDate || null, priority: d.priority || null, notes: d.notes || '',
     acknowledgedAt: null, acknowledgedBy: null,
-    partnerUid,
-    split:{ isShared: company==='BS', barroPct:50, partnerPct:50 },
     documents:[{ type:'Quotation', ref:d.qno||'', at:new Date().toISOString(), by:who }],
     timeline:[{ at:new Date().toISOString(), event:'Project created — quote won', by:who }],
     payments:[], productionOrderIds:[],
@@ -1500,7 +1494,7 @@ async function createJobProject(d){
 window.renderProjectLifecycle = async function(){
   const c = deptContainer(); if(!c) return;
   c.innerHTML=window.skeletonHtml('cards');
-  const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
+  const isBsOnlyU = (typeof isBrilliantOnly==='function') && isBrilliantOnly();
   // Sales→Production handoff (owner's rule) — Production-only viewers get WHAT to
   // build + target date/priority/stage, never contract/AR/collected figures.
   const showMoney = !isProductionOnlyViewer();
@@ -1518,11 +1512,11 @@ window.renderProjectLifecycle = async function(){
     c.querySelector('.proj-retry-btn')?.addEventListener('click', ()=>window.renderProjectLifecycle());
     return;
   }
-  if (isPartnerU) projects = projects.filter(p=>p.createdBy===currentUser.uid || p.partnerUid===currentUser.uid); // partners: own + shared
+  if (isBsOnlyU) projects = projects.filter(p=>p.createdBy===currentUser.uid); // BS-only staff: their own projects only
   // Design-board projects (separate collection) shown read-only below, so this page
-  // is the single place to see ALL projects. Partners never see the internal board.
+  // is the single place to see ALL projects. BS-only staff never see the internal board.
   let designList = [];
-  if (!isPartnerU) {
+  if (!isBsOnlyU) {
     const dsnap = await db.collection('projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
     designList = dsnap.docs.map(d=>window.Projects.normalize(d,'design'));
   }
@@ -1541,7 +1535,7 @@ window.renderProjectLifecycle = async function(){
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${window.isInternalQuoteCompany(p.company)?'badge-orange':'badge-gray'}" style="font-size:9px" title="${escHtml(window.quoteCompanyLabel(p.company))}">${escHtml(p.company||'')}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${window.isInternalQuoteCompany(p.company)?'badge-orange':'badge-gray'}" style="font-size:9px" title="${escHtml(window.quoteCompanyLabel(p.company))}">${escHtml(p.company||'')}</span></div>
         ${showMoney
           ? `<div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</span></div>`
           : (p.targetDate||p.priority) ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">${p.targetDate?`${emojiIcon('📅',16)} Target ${escHtml(p.targetDate)}`:''}${p.targetDate&&p.priority?' · ':''}${p.priority?escHtml(p.priority)+' priority':''}</div>` : ''}
@@ -1708,11 +1702,11 @@ function renderJpdDrawings(host, dwgs){
 function openJobProjectDetail(p, opts){
   if(!p) return;
   const st=jobStage(p.stage);
-  const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
+  const isBsOnlyU = (typeof isBrilliantOnly==='function') && isBrilliantOnly();
   const ownerDept = st.dept;
-  const canAdvance = !isPartnerU && (canEditDept(ownerDept) || canEditDept('Sales'));
+  const canAdvance = !isBsOnlyU && (canEditDept(ownerDept) || canEditDept('Sales'));
   // Sales→Production handoff (owner's rule) — this viewer never sees the deal's
-  // money (contract/AR/collected/margin/split/invoices); they get WHAT to build,
+  // money (contract/AR/collected/margin/invoices); they get WHAT to build,
   // target date, priority, notes, and stage/status only.
   const showMoney = !isProductionOnlyViewer();
   // Production must acknowledge receipt of a job before they can advance its
@@ -1743,14 +1737,14 @@ function openJobProjectDetail(p, opts){
   // (window.openQuoteReadOnly, js/screens/sales.js). The affordance follows
   // the money rules already governing this panel: a quotation is a fully
   // priced document, so production-only viewers keep the plain-text reference;
-  // partners only ever open bs_quotes (their own collection — Firestore still
-  // limits them to quotes they created). If the doc read is denied server-side
+  // BS-only staff only ever open bs_quotes (their own collection — Firestore
+  // still limits what each viewer can read). If the doc read is denied server-side
   // (bk_quotes: creator/admin only), the viewer degrades to the order snapshot
   // this project already displays — no new exposure on any path.
   const quoteColl = p.quoteCollection || (window.quoteCollectionFor ? window.quoteCollectionFor(p.company||'BS') : (p.company==='BS'?'bs_quotes':'bk_quotes'));
-  const canViewQuote = showMoney && !!p.quoteId && (!isPartnerU || quoteColl==='bs_quotes') && typeof window.openQuoteReadOnly==='function';
+  const canViewQuote = showMoney && !!p.quoteId && (!isBsOnlyU || quoteColl==='bs_quotes') && typeof window.openQuoteReadOnly==='function';
   const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${canViewQuote?`<a href="#" id="jpd-quote-link" title="View the quotation this job was won on" style="font-weight:600">Quote ${escHtml(p.quoteNumber||'')} ↗</a>`:`Quote ${escHtml(p.quoteNumber||'')}`} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${canViewQuote?`<a href="#" id="jpd-quote-link" title="View the quotation this job was won on" style="font-weight:600">Quote ${escHtml(p.quoteNumber||'')} ↗</a>`:`Quote ${escHtml(p.quoteNumber||'')}`} · ${p.company||''}</div>
     ${stageUnknown?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} This project's stage ("${escHtml(p.stage||'')}") doesn't match any known lifecycle stage — data may be corrupted. An admin should fix it directly before advancing.</span></div>`:''}
     ${needsAck?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} Acknowledge receipt of this job before you can update its status.</span></div>`:''}
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
@@ -1780,8 +1774,8 @@ function openJobProjectDetail(p, opts){
         return bits.length?`<div style="font-size:11px;color:var(--text-muted);margin-top:5px">${bits.join(' · ')}</div>`:
           `<div style="font-size:11px;color:var(--text-muted);margin-top:5px">Production cannot be handed this job until Sales approves the drawings (or the order is marked as needing none).</div>`; })()}
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-        ${(!isPartnerU && canEditDept('Design') && ['none','changes'].includes(designApprovalOf(p).status))?`<button class="btn-primary btn-sm" id="jpd-send-approval">${emojiIcon('🔏',16)} Send drawings to Sales</button>`:''}
-        ${(!isPartnerU && canEditDept('Sales') && designApprovalOf(p).status==='pending')?`
+        ${(!isBsOnlyU && canEditDept('Design') && ['none','changes'].includes(designApprovalOf(p).status))?`<button class="btn-primary btn-sm" id="jpd-send-approval">${emojiIcon('🔏',16)} Send drawings to Sales</button>`:''}
+        ${(!isBsOnlyU && canEditDept('Sales') && designApprovalOf(p).status==='pending')?`
           <button class="btn-success btn-sm" id="jpd-approve">${emojiIcon('✅',16)} Approve drawings</button>
           <button class="btn-secondary btn-sm" id="jpd-changes">${emojiIcon('↩️',16)} Request changes</button>`:''}
       </div>
@@ -1833,12 +1827,11 @@ function openJobProjectDetail(p, opts){
     </div></div>`:''}
     ${showMoney?`
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px">
-      <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">${emojiIcon('💰',12)} Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">${emojiIcon('💰',12)} Margin</strong>${(!isBsOnlyU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
       <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
         <span style="color:var(--text-muted)">Contract</span><span style="text-align:right">₱${fmt(p.contractAmount||0)}</span>
         <span style="color:var(--text-muted)">Capital (cost)</span><span style="text-align:right">₱${fmt(p.capital||0)}</span>
         <span style="color:var(--text-muted)">Margin</span><span style="text-align:right;font-weight:700">₱${fmt((p.contractAmount||0)-(p.capital||0))}</span>
-        ${p.split?.isShared?`<span style="color:var(--text-muted)">Partner share (${p.split?.partnerPct||50}%)</span><span style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(((p.contractAmount||0)-(p.capital||0))*((p.split?.partnerPct||50)/100))}</span>`:''}
       </div>
     </div></div>`:''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📄',16)} Document Register</div>
@@ -1856,10 +1849,10 @@ function openJobProjectDetail(p, opts){
     <div style="max-height:160px;overflow:auto;font-size:12px">${visTimeline.map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
     <div id="proj-detail-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `
-    ${_isFinAdmin()&&!isPartnerU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
-    ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
+    ${_isFinAdmin()&&!isBsOnlyU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
+    ${_isFinAdmin()&&!isBsOnlyU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
     ${/* 'in_design' is deliberately excluded — a job in Design cannot get a production order; 'won' is kept only for legacy pre-design-flow projects. */''}
-    ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
+    ${!isBsOnlyU && (canEditDept('Production')||canEditDept('Sales')) && window.currentRole !== 'secretary' && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`, opts || {});
   // SCOPED TO THIS PANEL — these six were document.getElementById. The Billing
@@ -1984,42 +1977,29 @@ function openJobProjectDetail(p, opts){
   }));
 }
 
-// Edit the profit factors (capital cost + partner split %) on a project.
-// Gated to president / Sales / Finance per the user's request; partner cannot edit.
+// Edit the profit factor (capital cost) on a project.
+// Gated to president / Sales / Finance per the user's request; BS-only staff cannot edit.
 function openProjectMarginModal(p){
-  const isShared = !!(p.split&&p.split.isShared);
-  const pct = (p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50;
   const _panel = openPage(`${emojiIcon('💰',16)} Edit Profit Factors — `+(escHtml(p.clientName||p.projectNo||'Project')), `
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Expected earnings = (Contract − Capital) × split%.</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Margin = Contract − Capital.</div>
     <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}" inputmode="decimal"/>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Total material + labor + overhead to produce this job.</div></div>
-    ${isShared?`<div class="form-group"><label>Partner split (%)</label><input id="pm-pct" type="number" step="1" min="0" max="100" value="${pct}" inputmode="decimal"/>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Brilliant Steel's share of the margin (50/50 default). Barro keeps the rest.</div></div>`:''}
     <div class="card" style="margin-top:6px"><div class="card-body" style="padding:10px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
       <span style="color:var(--text-muted)">Margin</span><span id="pm-margin" style="text-align:right;font-weight:700">₱${fmt((p.contractAmount||0)-(p.capital||0))}</span>
-      ${isShared?`<span style="color:var(--text-muted)">Partner share</span><span id="pm-share" style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(((p.contractAmount||0)-(p.capital||0))*(pct/100))}</span>
-      <span style="color:var(--text-muted)">Barro share</span><span id="pm-barro" style="text-align:right;font-weight:700">₱${fmt(((p.contractAmount||0)-(p.capital||0))*((100-pct)/100))}</span>`:''}
     </div></div>
     <div id="pm-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="pm-save">Save Factors</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   // ⚠ SCOPED TO THIS PANEL, NOT document — same defect as openJobProjectDetail's
-  // footer above. Two projects' factor forms alive at once share #pm-capital /
-  // #pm-pct, so an unscoped read would take the PREVIOUS project's capital and
-  // split % and write them onto THIS project's job_projects doc — margin,
-  // partner share and Barro share all silently wrong.
+  // footer above. Two projects' factor forms alive at once share #pm-capital, so
+  // an unscoped read would take the PREVIOUS project's capital and write it onto
+  // THIS project's job_projects doc — the margin silently wrong.
   const $pm = (id) => _panel.querySelector('#' + id);
   const recompute=()=>{
     const cap=parseFloat($pm('pm-capital').value)||0;
     const margin=(p.contractAmount||0)-cap;
     $pm('pm-margin').textContent='₱'+fmt(margin);
-    if(isShared){
-      const pp=Math.max(0,Math.min(100,parseFloat($pm('pm-pct').value)||0));
-      $pm('pm-share').textContent='₱'+fmt(margin*(pp/100));
-      $pm('pm-barro').textContent='₱'+fmt(margin*((100-pp)/100));
-    }
   };
   $pm('pm-capital').addEventListener('input',recompute);
-  $pm('pm-pct')?.addEventListener('input',recompute);
   $pm('pm-save').addEventListener('click', async ()=>{
     const err=$pm('pm-err');
     const cap=parseFloat($pm('pm-capital').value)||0;
@@ -2027,16 +2007,12 @@ function openProjectMarginModal(p){
     const who=userProfile?.displayName||currentUser.email;
     const update={ capital:cap, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
       timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Profit factors updated (capital ₱${window.fmtN2(cap)})`, by:who }) };
-    if(isShared){
-      let pp=Math.max(0,Math.min(100,parseFloat($pm('pm-pct').value)||0));
-      update['split.partnerPct']=pp; update['split.barroPct']=100-pp;
-    }
     const saveBtn=$pm('pm-save'); saveBtn.disabled=true; // guard against double-click double-posting
     try{
       await db.collection('job_projects').doc(p.id).update(update);
-      window.logAudit && window.logAudit('update','project',p.id,{ capital:cap, partnerPct:update['split.partnerPct'] });
+      window.logAudit && window.logAudit('update','project',p.id,{ capital:cap });
       // reflect locally so the reopened detail shows fresh numbers
-      p.capital=cap; if(isShared){ p.split=p.split||{}; p.split.partnerPct=update['split.partnerPct']; p.split.barroPct=update['split.barroPct']; }
+      p.capital=cap;
       closeModal(); Notifs.success('Profit factors saved'); window.renderProjectLifecycle&&window.renderProjectLifecycle();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
@@ -2834,7 +2810,7 @@ async function consumeProductionMaterials(order) {
   // the ledger post succeeds, and that post is refused for a Production-only
   // user (no finance rights) — which is precisely the person who consumes
   // materials. Their job would show ₱0 spent forever. job_projects allows a
-  // non-partner this write because `spentMaterials` is not one of the money
+  // staff user this write because `spentMaterials` is not one of the money
   // keys the rule guards, and consumption is already one-shot (materialsConsumed),
   // so the increment cannot run twice.
   if (order.projectId && cos > 0) {
@@ -2862,7 +2838,7 @@ async function consumeProductionMaterials(order) {
 //  and fetchUsersWithPayroll's catch turns that denial into an EMPTY map, so
 //  costing off individual salaries would silently produce ₱0 for exactly the
 //  people who do the logging. A shop rate in settings/laborRates is readable by
-//  all non-partner staff, president-writable, and exposes nobody's salary.
+//  all staff, president-writable, and exposes nobody's salary.
 //
 //  NEVER INVENTED. With no rate on file, hours are still recorded (they are the
 //  shop-floor fact and are worth having) but the cost is left blank and the
@@ -3595,7 +3571,7 @@ async function openRfqModal(currentUser, onDone, prefill, editId) {
   const riItemOpts = (sel='') => `<option value="">— Free text / new —</option>` +
     invItems.map(i => `<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-unit="${escHtml(i.unit||'')}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')}</option>`).join('');
   const deptList = Object.keys(window.DEPARTMENTS || {})
-    .filter(k => k !== 'Brilliant Steel' && k !== 'Partners');
+    .filter(k => k !== 'Brilliant Steel');
   // Keep a saved department that is no longer in DEPARTMENTS selectable, so editing
   // an old RFQ can't silently reassign it.
   if (prefill.requestingDept && !deptList.includes(prefill.requestingDept)) deptList.unshift(prefill.requestingDept);

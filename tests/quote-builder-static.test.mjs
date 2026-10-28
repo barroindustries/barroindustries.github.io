@@ -2,21 +2,22 @@
 //
 // quote-builder-v2.html is one 9,000-line HTML file with one inline <script> and no module system, so it cannot be require()d. Two layers:
 //
-//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 43, the What's New
-//      entry, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS byte-for-byte,
-//      and the two rules of the price-protection design that are about WHAT THE FILE MAY NAME: it never names the pricing function
-//      (it prices only through QBConfigured) and it reads the option sheets (the product_pricing collection) in exactly one place — inside
-//      loadDatabase()'s internal-session branch (spec §2.3).
+//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 44, the What's New
+//      entries 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
+//      byte-for-byte, and the two rules of the price-protection design that are about WHAT THE FILE MAY NAME: it never names the pricing
+//      function (it prices only through QBConfigured) and it reads the option sheets (the product_pricing collection) in exactly one place —
+//      inside loadDatabase(), in its own try/catch (spec §2.3).
 //   2. BEHAVIOUR — the real inline script is executed inside a node:vm context against a small DOM stub, with the real
 //      js/product-families.js, js/qr-families.js, js/pricing-core.js and js/qb-configured.js, and SYNTHETIC odd-figure catalogue data
 //      (the repository is PUBLIC: the real price master and option sheets are private). The money paths are exercised for real:
 //        R1  the cost-plus auto-pricer leaves 'website' / 'manual' lines alone and reprices 'cost' / unlabelled ones (applyComputedPricing)
 //        R3  re-configuring a line: website recomputes, cost leaves the figure to the auto-pricer, manual keeps the staff price
 //        R4  Use cost-based / Use website / Apply cost-based to all / typed price / ↺ re-apply / pass-through
-//        R5  a line flagged "needs a price" blocks canFile() AND fileQuotation(); the gate is silent for a partner
+//        R5  a line flagged "needs a price" blocks canFile() AND fileQuotation()
 //        §3.2 `_cfg` is stripped from the payload, the draft in localStorage and templates; sourceRef / estimateCheck are filed
 //        §4.5 itemCostBasis() hands a configured line to QBConfigured.costBasisFor (not to its primary SKU's cost)
-//        §2.3/§2.5 loadDatabase(): the sheets are read for an internal session only, a denied read degrades, the kill switch works
+//        §2.3/§2.5 loadDatabase(): the sheets are read, a denied read degrades, the kill switch works; the retired partner portal is gone
+//             (PARTNER-REMOVAL-SPEC WS-E: nothing names it, and a leftover ?portal=partner boots as a plain staff session)
 //        §4.2 the panel is generated from the definitions: every group type, option and size axis of every family — and of a family that
 //             does not exist yet — renders with no code change
 //        §4.9 the guided demo opens the panel read-only, adds nothing, closes it again
@@ -25,8 +26,10 @@
 // `priceManual` test; the R5 gate dropped from canFile() / from fileQuotation() / its `unitPrice > 0` clause dropped; `_cfg` left in the
 // strip list or the localStorage draft; the cost-basis hook removed from itemCostBasis(); R3 overwriting a manual or cost price / failing to
 // reprice a website line; the typed price not recorded as `manual`; ↺ re-apply not returning a line to `cost`; sourceRef kept by a template;
-// the sheet read moved outside the !PARTNER_MODE branch; the kill switch ignored; a hand-off ignoring qnoLoc / qnoMethod; the partner
-// removal list losing #configPanel; the tour adding a line or leaving the panel open; the version not bumped.
+// the sheet read moved outside loadDatabase() / out of its own try; the kill switch ignored; a hand-off ignoring qnoLoc / qnoMethod; the
+// tour adding a line or leaving the panel open; the version not bumped; PARTNER_MODE / GENERIC_PARTNER / applyPartnerMode / CO.PT (or a
+// pcoName / portal read) coming back; a boot that removes anything from its own DOM; a ?portal=partner URL changing the company, the
+// configurator or the option-sheet read.
 //
 // WS-5C (owner ruling 2026-10-28 — the staff-only 1.2 mm top plate, spec §14.6) adds, at the end of the file: the "staff" chip, the 1.2 mm choice and its price from a
 // real cell only, the Construction row that is printed, a line saved before the top plate existed, the hidden ⇄ PT chip on configured lines, and the builder
@@ -34,8 +37,14 @@
 // here: validateLine / validateConfiguration called without { staff:true } (or with staff:false), no chip / a chip on every group / a chip without no-print or title,
 // the section fallback of cfgMakeLine / cfgConvertLine removed or the catalogue not handed to the migration, the hand-off re-homing moving any section / never moving /
 // ignoring a database section of the same name / not run on load / not run when the database arrives, the PT chip shown on configured lines again / hidden on every
-// line / hidden on a configured line that carries the flag, the tutorial bullet / Help sentence / tour sentence missing or TUTORIAL_VERSION bumped, a re-configure that
-// does not rewrite the printed specs, priceLine no longer reading an absent group as its default. Run with: node --test tests/*.test.mjs
+// line / hidden on a configured line that carries the flag, the tutorial bullet / Help sentence / tour sentence missing from entry 43, a re-configure that
+// does not rewrite the printed specs, priceLine no longer reading an absent group as its default.
+//
+// PARTNER-REMOVAL-SPEC WS-G (2026-10-28) adds "the starting company (?co=)": the Brilliant Steel department's Quote Builder page opens the builder with ?co=BS and
+// the boot calls bootCompany() (BK / BI / BS only, else BK). Mutation-tested in a scratch copy — each of these must fail here: the boot back on a literal 'BK';
+// bootCompany without its allowlist (any code passes through) / case-sensitive; a loaded quote (loadEditableState), a resumed draft (resumeDraft) or a #quote= link
+// (loadFromStorage) no longer setting its own company, so the hint wins over it. (tests/quote-link.test.mjs pins the host side: ?co=BS only on bs-quote-builder, ahead of
+// ?reopen=1.) Run with: node --test tests/*.test.mjs
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -183,18 +192,34 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 43 and the newest What\'s New entry is version 43, dated, with the configurator bullets', () => {
+  it('TUTORIAL_VERSION is 44: the newest What\'s New entry is version 44 (the partner portal is retired), dated; entry 43 keeps the configurator bullets', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 43);
+    assert.equal(b.run('TUTORIAL_VERSION'), 44);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 43);
+    assert.equal(wn[0].ver, 44);
+    assert.equal(wn[1].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history, the retirement is a new entry');
     assert.match(wn[0].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
-    const text = wn[0].items.join(' ');
+    const t44 = wn[0].items.join(' ');
+    for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
+      assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
+    }
+    const text = wn[1].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
     assert.equal(new Set(wn.map((e) => e.ver)).size, wn.length, 'no duplicate version');
+  });
+
+  it('the Help text and the demo no longer talk about partners: no "Estimator may be hidden depending on your account", no "Partners never see this button" — and the Brilliant Steel pill is explained', () => {
+    const helpBody = (HTML.match(/<div class="modal-body" id="helpBody">[\s\S]*?<h4>What's new<\/h4>/) || [''])[0];
+    assert.ok(helpBody.length > 3000, 'could not find the Help body');
+    assert.equal(/partner/i.test(helpBody), false, 'the Help body still mentions partners');
+    assert.equal(/may be hidden depending on your account/.test(helpBody), false);
+    const steps = makeEnv().plain('TOUR_STEPS');
+    assert.equal(steps.some((s) => /partner/i.test(s.title + ' ' + s.body)), false, 'a guided-demo step still mentions partners');
+    assert.match(helpBody, /<strong>Pick the company<\/strong>[\s\S]*?Brilliant Steel quote hides the cost calculator and BOM; each line gets a <em>pass-through<\/em> tick/);
+    assert.match(steps.find((s) => s.target === '#coBK').body, /On Brilliant Steel the cost calculator stays out of the way and each line gets a pass-through tick/);
   });
 
   it('the guided demo has a "Configure a product" step on #configPanel, inside the workspace, that needs the configurator, right after "Add items"', () => {
@@ -227,10 +252,9 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.ok(steps.some((s) => /configure/i.test(s.body) && s.target === '#addItemsSection'));
   });
 
-  it('the staff-only top plate is in the tutorial (spec §14.6): the What\'s New 43 entry is APPENDED (43 had not shipped, so no new version), Help "Configure a product" and the demo step say it', () => {
+  it('the staff-only top plate is in the tutorial (spec §14.6): it is the last bullet of What\'s New entry 43 (the entry it was appended to before 43 shipped), Help "Configure a product" and the demo step say it', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 43, '43 had not shipped: the bullet joins entry 43, the version is not bumped');
-    const items = b.plain('WHATS_NEW')[0].items;
+    const items = b.plain('WHATS_NEW').find((e) => e.ver === 43).items;
     assert.equal(items.at(-1), 'Tables, sinks and stoves now quote with a 1.5 mm (16 ga) top as standard and print their construction on the quote; staff can still pick a lighter 1.2 mm top, priced once Finance enters its amount.');
     assert.equal(items.filter((t) => /1\.5 mm \(16 ga\)/.test(t)).length, 1, 'said once');
     const help = (HTML.match(/<li><strong>Configure a product<\/strong>[\s\S]*?<\/li>/) || [''])[0];
@@ -282,7 +306,7 @@ describe('static — what the builder may name (spec §2.3 / the pricing-core gu
     assert.equal(all.length, calls.length, 'a validateLine / validateConfiguration call that the scan above did not see');
   });
 
-  it('the product_pricing collection is read in exactly one place: inside loadDatabase(), in its own try/catch, in the !PARTNER_MODE branch', () => {
+  it('the product_pricing collection is read in exactly one place: inside loadDatabase(), in its own try/catch, ahead of the catalogue assembly', () => {
     const hits = [...HTML.matchAll(/product_pricing/g)].map((m) => m.index);
     const from = HTML.indexOf('async function loadDatabase(');
     const to = HTML.indexOf('function reloadDatabase()');
@@ -290,9 +314,8 @@ describe('static — what the builder may name (spec §2.3 / the pricing-core gu
     assert.ok(hits.length >= 1);
     assert.ok(hits.every((i) => i > from && i < to), 'product_pricing is named outside loadDatabase()');
     const read = HTML.indexOf("db.collection('product_pricing')");
-    const branch = HTML.indexOf('if (!PARTNER_MODE) {', from);
     const branchEnd = HTML.indexOf('    DB = {\n      products:', from);
-    assert.ok(branch > 0 && read > branch && read < branchEnd, 'the sheet read is not inside the !PARTNER_MODE branch');
+    assert.ok(read > from && read < branchEnd, 'the sheet read is not inside loadDatabase() ahead of the catalogue assembly');
     assert.ok(/try \{\s*const sheetSnap = await db\.collection\('product_pricing'\)\.get\(\);/.test(HTML), 'the sheet read has no try/catch of its own');
   });
 
@@ -300,11 +323,131 @@ describe('static — what the builder may name (spec §2.3 / the pricing-core gu
     assert.match(HTML, /meta\.quoteBuilder && meta\.quoteBuilder\.configurator === false/);
   });
 
-  it('applyPartnerMode() takes the panel, its backdrop, the chips and every data-cfg control out of the DOM; the configurator is off for a partner', () => {
-    const src = makeEnv().run('applyPartnerMode.toString()');
-    for (const id of ['configPanel', 'cfgBackdrop', 'cfgChips']) assert.ok(src.includes(`'${id}'`), `${id} is not removed`);
-    assert.match(src, /CONFIGURATOR_ON\s*=\s*false/);
-    assert.match(src, /data-cfg-open/);
+  it('the partner portal is gone: nothing in the script names PARTNER_MODE / GENERIC_PARTNER / applyPartnerMode / CO.PT, it reads no portal / pcoName parameter, and only BK / BI / BS exist', () => {
+    // not even a comment names them (PARTNER-REMOVAL-SPEC WS-E). Only the historical What's New entries (user-facing data) still say "partner".
+    for (const gone of ['PARTNER_MODE', 'GENERIC_PARTNER', 'applyPartnerMode', 'PARTNER_CO_NAME', 'PARTNER_BLOCKED_COS', 'CO.PT', 'portal=partner', 'pcoName', 'pcoContact', 'pcoSig']) {
+      assert.equal(SCRIPT.includes(gone), false, `${gone} is still in the script`);
+    }
+    assert.equal(/get\(\s*['"]portal['"]\s*\)/.test(SCRIPT), false, 'the script still reads a portal URL parameter');
+    const b = makeEnv();
+    assert.deepEqual(Object.keys(b.plain('CO')), ['BK', 'BI', 'BS'], 'a runtime company is back');
+    assert.equal(b.run('typeof PARTNER_MODE + "|" + typeof GENERIC_PARTNER + "|" + typeof applyPartnerMode + "|" + typeof PARTNER_BLOCKED_COS'), 'undefined|undefined|undefined|undefined');
+    // 'PT' survives in exactly one code line: the ⇄ PT pass-through chip label (it is not a company code)
+    const ptLines = SCRIPT.split('\n').filter((l) => !/^\s*\/\//.test(l) && /'PT'|"PT"/.test(l));
+    assert.equal(ptLines.length, 1, `'PT' appears on ${ptLines.length} code lines`);
+    assert.match(ptLines[0], /togglePassThrough/);
+  });
+
+  it('the real boot of a retired-portal URL (?portal=partner, even with the old generic-partner parameters) is a plain staff session: Barro Kitchens, nothing removed from the DOM, document sections collapsed, configurator available', () => {
+    const b = makeEnv({ search: '?portal=partner&pcoName=Acme%20Steel&pcoContact=09170000000&pcoSig=A.%20Client' });
+    const boots = b.listeners.document.DOMContentLoaded || [];
+    assert.ok(boots.length >= 1, 'the builder registered no DOMContentLoaded boot');
+    const warn = console.warn; console.warn = () => {};     // the stub has no Firestore: the boot logs "falling back" and uses the embedded catalogue
+    try { boots.forEach((fn) => fn()); } finally { console.warn = warn; }
+    assert.equal(b.run('currentCo'), 'BK');
+    assert.equal(b.el('qnoCo').value, 'BK');
+    assert.equal(b.el('navLogo').innerHTML, 'BARRO <span>KITCHENS</span>');
+    assert.equal(b.run('CONFIGURATOR_ON'), true);
+    assert.equal(b.run('configuratorAvailable()'), true);
+    assert.deepEqual([...b.removed], [], 'the boot removed controls from its own DOM — a partner-style lock-down is back');
+    assert.equal(b.ctx.document.body.classList.contains('doc-details-collapsed'), true, 'staff start with the document sections collapsed (initUI)');
+    // every control the old partner mode removed is in the markup, and nothing in the script removes it by id
+    for (const id of ['coBK', 'coBI', 'coBS', 'btnClient', 'btnInternal', 'btnTerms', 'btnOpenProductDb', 'btnImportItems', 'docDetailsBar', 'costMarginWrap', 'configPanel', 'cfgChips', 'handoffBar', 'laborTimelineWrap', 'mtbCoBI', 'mtbViewTerms']) {
+      assert.ok(HTML.includes(`id="${id}"`), `#${id} is not in the markup`);
+      assert.equal(new RegExp(`getElementById\\('${id}'\\)\\??\\.remove\\(\\)`).test(SCRIPT), false, `the script removes #${id}`);
+    }
+    // the company pills still switch the letterhead (BK / BI / BS): the retired lock never rebrands a pill
+    for (const co of ['BI', 'BS', 'BK']) {
+      b.run(`setCompany('${co}')`);
+      assert.equal(b.run('currentCo'), co);
+      assert.equal(b.el('phName').textContent, b.plain('CO')[co].name);
+      assert.equal(b.el('coBS').classList.contains('active'), co === 'BS');
+      assert.equal(b.el('coBI').classList.contains('active'), co === 'BI');
+    }
+    b.run(`setCompany('PT')`);                       // a leftover draft / template from the retired portal carries code PT: it degrades to Barro Kitchens, never throws
+    assert.equal(b.run('currentCo'), 'BK');
+  });
+
+  // The Brilliant Steel department's Quote Builder page (js/app.js renderQuoteBuilderIframe) opens the builder with ?co=BS so it starts on the
+  // Brilliant Steel pill. The builder honours BK / BI / BS only and only for a FRESH boot (PARTNER-REMOVAL-SPEC WS-G).
+  describe('the starting company (?co=)', () => {
+    // run the real DOMContentLoaded boot; `seed` pre-fills localStorage before it (a draft the previous session left behind)
+    const boot = (search, seed) => {
+      const b = makeEnv({ search });
+      for (const [k, v] of Object.entries(seed || {})) b.store.set(k, v);
+      const boots = b.listeners.document.DOMContentLoaded || [];
+      assert.ok(boots.length >= 1, 'the builder registered no DOMContentLoaded boot');
+      const warn = console.warn; console.warn = () => {};     // no Firestore in the stub: the boot logs "falling back" and uses the embedded catalogue
+      try { boots.forEach((fn) => fn()); } finally { console.warn = warn; }
+      return b;
+    };
+    const co = (search) => boot(search).run('currentCo');
+
+    it('?co=BS boots on Brilliant Steel, ?co=BI on Barro Industries, ?co=BK and no parameter on Barro Kitchens', () => {
+      assert.equal(co(''), 'BK');
+      assert.equal(co('?co=BK'), 'BK');
+      assert.equal(co('?co=BI'), 'BI');
+      assert.equal(co('?co=BS'), 'BS');
+      assert.equal(co('?co=bs'), 'BS');
+      assert.equal(co('?reopen=1&co=BS'), 'BS', 'the parameter is read wherever it sits in the query');
+    });
+
+    it('anything else is Barro Kitchens: an empty, unknown or retired code, a prototype name, a padded or injected value, the retired portal parameter', () => {
+      for (const bad of ['?co=', '?co=XX', '?co=PT', '?co=B', '?co=BSS', '?co=B%20S', '?co=BS%00', '?co=constructor', '?co=toString', '?co=__proto__', '?co=hasOwnProperty',
+        '?co=%3Cimg%20src=x%3E', '?co[]=BS', '?portal=partner', '?portal=partner&co=PT', '?cox=BS']) {
+        assert.equal(co(bad), 'BK', bad);
+      }
+    });
+
+    it('the whole company follows the hint, not just the pill: quote number, letterhead, signature, the co-bs class (calculator and BOM hidden), the pills', () => {
+      const b = boot('?co=BS');
+      const BS = b.plain('CO').BS;
+      assert.equal(b.el('qnoCo').value, 'BS');
+      assert.equal(b.el('phName').textContent, BS.name);
+      assert.equal(b.el('sigContact').textContent, BS.sig.name);
+      assert.equal(b.el('navLogo').innerHTML, BS.nav);
+      assert.equal(b.ctx.document.body.classList.contains('co-bs'), true);
+      assert.equal(b.el('coBS').classList.contains('active'), true);
+      assert.equal(b.el('coBK').classList.contains('active'), false);
+      assert.match(b.run('document.getElementById("quoteNo").value || ""'), /^(BS|)/);
+      // and the user can still switch the pill: the hint is a starting point, not a lock
+      b.run(`setCompany('BK')`);
+      assert.equal(b.run('currentCo'), 'BK');
+      assert.equal(b.ctx.document.body.classList.contains('co-bs'), false);
+    });
+
+    it('it only chooses where a FRESH boot starts: a loaded quote, a revision, a resumed draft and a #quote= link keep their own company', () => {
+      // LOAD_QUOTE / reopen / new revision / template -> loadEditableState(state): setCompany(state.currentCo) when the state has one
+      const a = boot('?co=BS&reopen=1');
+      a.run(`loadEditableState({ currentCo: 'BK', items: [] })`);
+      assert.equal(a.run('currentCo'), 'BK', 'a Barro Kitchens quote reopened from the Brilliant Steel page stays Barro Kitchens');
+      const a2 = boot('?co=BS&reopen=1');
+      a2.run(`loadEditableState({ currentCo: 'BI', items: [] })`);
+      assert.equal(a2.run('currentCo'), 'BI');
+      const a3 = boot('?co=BS&reopen=1');
+      a3.run(`loadEditableState({ items: [] })`);
+      assert.equal(a3.run('currentCo'), 'BS', 'a state that names no company leaves the starting company alone');
+      // a draft left behind by the last session: the resume banner restores the draft's own company
+      const d = boot('?co=BS', { bkqb_client: JSON.stringify({ clientName: 'Fake Draft Client', currentCo: 'BI' }), bkqb_items: '[]' });
+      assert.equal(d.run('currentCo'), 'BS', 'before "Resume" the fresh boot is on the hinted company (the draft is only offered, never auto-restored)');
+      d.run('resumeDraft()');
+      assert.equal(d.run('currentCo'), 'BI', 'Resume restores the draft\'s own company');
+      // loadFromStorage: a #quote= share link carries its company
+      const hashed = makeEnv({ search: '?co=BS' });
+      hashed.ctx.atob = (x) => Buffer.from(String(x), 'base64').toString('binary');         // the vm context has no atob; the loader is `JSON.parse(decodeURIComponent(atob(hash)))`
+      hashed.ctx.location.hash = '#quote=' + Buffer.from(encodeURIComponent(JSON.stringify({ currentCo: 'BK', items: [], clientName: 'Fake Link Client' }))).toString('base64');
+      const warn = console.warn; console.warn = () => {};
+      try { (hashed.listeners.document.DOMContentLoaded || []).forEach((fn) => fn()); } finally { console.warn = warn; }
+      assert.equal(hashed.run('currentCo'), 'BK', 'a shared #quote= link keeps its own company');
+    });
+
+    it('source: the boot calls bootCompany() (not a literal), and bootCompany is an allowlist of exactly BK / BI / BS', () => {
+      assert.match(SCRIPT, /document\.getElementById\('quoteDate'\)\.value = new Date\(\)\.toISOString\(\)\.split\('T'\)\[0\];\s*setCompany\(bootCompany\(\)\);/);
+      assert.equal(/DOMContentLoaded[\s\S]{0,1200}setCompany\('BK'\);\s*cfgInit/.test(SCRIPT), false, 'the boot starts on a literal Barro Kitchens again');
+      const fn = makeEnv().run('bootCompany.toString()');
+      assert.match(fn, /co==='BK'\|\|co==='BI'\|\|co==='BS'/);
+      assert.equal(/hasOwnProperty|CO\[/.test(fn), false, 'bootCompany consults the CO table (a prototype name would pass)');
+    });
   });
 
   it('the strip list, the auto-pricer and the cost basis name what the spec says they name', () => {
@@ -657,9 +800,9 @@ describe('R5 — a line flagged "needs a price" blocks filing until it has one',
     assert.equal(b.el('fileBtn').disabled, true);
   });
 
-  it('a partner session is never blocked by it (it never rendered the controls to fix it): needsPriceReason() is empty', () => {
-    const b = builder({ search: '?portal=partner' });
-    withLines(b, [flagged]);
+  it('a quote with no flagged line is not blocked: needsPriceReason() is empty', () => {
+    const b = builder();
+    withLines(b, [priced]);
     assert.equal(b.run('needsPriceReason()'), '');
   });
 });
@@ -934,15 +1077,16 @@ describe('§2.3 / §2.5 — loadDatabase reads the option sheets for an internal
     assert.equal(b.run('configuratorAvailable()'), true);
   });
 
-  it('partner session: product_pricing is never requested (no doomed round trip, no sheet in the page), the configurator is off', async () => {
+  it('a leftover ?portal=partner in the URL (the retired partner portal) changes nothing: the sheets are read once, state "live", the configurator on, and the old "skipped" state no longer exists', async () => {
     const f = fakeDb();
-    const b = await boot({ search: '?portal=partner' }, f);
-    assert.equal(f.reads.includes('product_pricing'), false);
-    assert.equal(f.reads.includes('products'), true, 'the catalogue itself still loads');
-    assert.deepEqual(b.plain('FAMILY_PRICING'), {});
-    assert.equal(b.run('FAMILY_PRICING_STATE'), 'skipped');
-    assert.equal(b.run('CONFIGURATOR_ON'), false);
-    assert.equal(b.run('configuratorAvailable()'), false);
+    const b = await boot({ search: '?portal=partner&pcoName=Acme' }, f);
+    assert.equal(f.reads.filter((r) => r === 'product_pricing').length, 1);
+    assert.equal(f.reads.includes('products'), true);
+    assert.deepEqual(Object.keys(b.plain('FAMILY_PRICING')).sort(), [...FAM.order].sort());
+    assert.equal(b.run('FAMILY_PRICING_STATE'), 'live');
+    assert.equal(b.run('CONFIGURATOR_ON'), true);
+    assert.equal(b.run('configuratorAvailable()'), true);
+    assert.equal(SCRIPT.includes("'skipped'"), false, 'the partner-only "skipped" option-sheet state is back');
   });
 
   it('a denied read costs only the option amounts: the catalogue still loads, state "denied", configured lines read "Priced after review" in plain words', async () => {
@@ -1220,12 +1364,10 @@ describe('§10.3 / §4.6 — convert an old line; "configure instead"', () => {
     assert.equal(b.plain(`cfgConvertLine({ id: 'CE-016', name: 'x' })`), null, 'a SKU no family absorbed is not convertible');
   });
 
-  it('the ⚙ row offers "convert to configured" only for an absorbed SKU, never for custom / fee / non-absorbed lines or in a partner session', () => {
+  it('the ⚙ row offers "convert to configured" only for an absorbed SKU, never for custom / fee / non-absorbed lines', () => {
     const b = builder();
     assert.match(b.run(`cfgLineRowHtml(${JSON.stringify(plainSink)}, 3)`), /convertToConfigured\(3\)/);
     for (const it of [{ id: 'CUSTOM', name: 'c' }, { id: 'MISCFEE', name: 'm' }, { id: 'CE-016', name: 'f' }]) assert.equal(b.run(`cfgLineRowHtml(${JSON.stringify(it)}, 0)`), '', it.id);
-    const p = builder({ search: '?portal=partner' });
-    assert.equal(p.run(`cfgLineRowHtml(${JSON.stringify(plainSink)}, 0)`), '');
   });
 
   it('convert opens the panel pre-filled with the converted line; Cancel puts the original plain line back; Update keeps the converted one', () => {
@@ -1309,7 +1451,7 @@ describe('§4.9 — the guided demo shows the panel read-only: it adds nothing a
     assert.equal(u.run('cfgState && cfgState.familyId'), 'stove', 'and it is still theirs afterwards');
   });
 
-  it('the step is skipped (no panel) when the configurator is unavailable — a partner, or the kill switch', () => {
+  it('the step is skipped (no panel) when the configurator is unavailable — the kill switch', () => {
     const b = tourEnv();
     b.run('CONFIGURATOR_ON = false');
     const at = b.plain('TOUR_STEPS').findIndex((s) => s.needsConfigurator);
@@ -1643,7 +1785,7 @@ describe('WS-5C — the ⇄ pass-through chip is hidden on configured lines (pla
     assert.equal(b.run('items[0].priceBasis'), 'website', 'a configured line keeps its price basis through it');
   });
 
-  it('a partner session never had the chip, and a plain flagged line shows it as before', () => {
+  it('a plain flagged line shows its chip as before, and a plain line beside a configured one is untouched', () => {
     const b = builder();
     const html = paint(b, [{ ...fryer, passThrough: true }, sink(b)]);
     assert.ok(html.includes('togglePassThrough(0)') && rowOf(html, 'Fryer').includes('⇄ pass-through'));

@@ -864,7 +864,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .help-section p { font-size: var(--fs-md); color: var(--text-2); line-height: 1.7; }
 .help-section code { font-family: var(--font-mono); font-size: var(--fs-sm); background: var(--s2); padding: 1px 5px; border-radius: 4px; }
 
-/* ── Login Role Picker — segmented 3-portal control (v12 WS42 Phase 25) ── */
+/* ── Login Role Picker — segmented 2-portal control (v12 WS42 Phase 25) ── */
 .login-pick-label {
   font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.8px;
   text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px;
@@ -1409,7 +1409,6 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
    block is already taken and a near-duplicate reads as a mistake. */
 .nav-item[data-page="notes"] .nav-icon             { background: linear-gradient(135deg,#00C7BE,#40CFFF); box-shadow: 0 2px 8px rgba(0,199,190,0.32); }
 .nav-item[data-page="my-profile"] .nav-icon        { background: linear-gradient(135deg,#AF52DE,#8B5CF6); box-shadow: 0 2px 8px rgba(175,82,222,0.32); }
-.nav-item[data-page="partner-projects"] .nav-icon  { background: linear-gradient(135deg,#5856D6,#32ADE6); box-shadow: 0 2px 8px rgba(88,86,214,0.32); }
 .nav-item[data-page="bk-quote-builder"] .nav-icon  { background: linear-gradient(135deg,#0A84FF,#32ADE6); box-shadow: 0 2px 8px rgba(10,132,255,0.35); }
 
 /* Dept pages use data-page="dept:X" — give all a gradient background */

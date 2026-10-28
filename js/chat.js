@@ -359,7 +359,7 @@ window.Chat = (() => {
   }
   function deptChannelKeys() {
     return Object.keys(window.DEPARTMENTS || {})
-      .filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept);
+      .filter(d => !DEPARTMENTS[d].isSeparate);
   }
   // Is THIS dept channel closed to a user holding THIS role? Takes the role as
   // an argument rather than reading window.currentRole, because the two callers
@@ -372,7 +372,6 @@ window.Chat = (() => {
   }
   function myDeptChannels() {
     if (window.isLaidOff && window.isLaidOff()) return [];  // LAYOFF-SPEC — no dept channels while laid off
-    if (typeof isPartner === 'function' && isPartner()) return [];  // partners NEVER
     // ⚠ CARVE-OUT GAP (2026-08-09). _isAdminRole() includes 'secretary', so the
     // Corporate Secretary's inbox listed EVERY department channel — including
     // # Finance and # IT, the two the owner explicitly closed to them
@@ -417,21 +416,14 @@ window.Chat = (() => {
       : deptChannelKeys().filter(d => (currentDepts || []).includes(d)))
       .filter(d => !blocked.includes(d));
   }
-  // Decision 3: partner picker = same-company partners + president/manager.
   function dmCandidates(users) {
-    if (typeof isPartner === 'function' && isPartner()) {
-      const myCo = (window.userProfile?.company || '').trim();
-      return users.filter(u => u.id !== currentUser.uid && (
-        (u.role === 'partner' && (u.company || '').trim() === myCo) ||
-        ['president','manager'].includes(u.role)));
-    }
     // LAYOFF-SPEC — a laid-off employee may only START a conversation with
     // HR-department members, the President, or a Manager. Existing threads in
     // their inbox stay readable/writable (deliberate: an in-flight work
     // conversation should be closable, and the inbox query cannot prove a
     // role filter anyway — see the fence comment above).
     if (window.isLaidOff && window.isLaidOff()) {
-      return users.filter(u => u.id !== currentUser.uid && u.role !== 'partner' && (
+      return users.filter(u => u.id !== currentUser.uid && (
         ['president','manager'].includes(u.role) ||
         u.department === 'HR' || (u.departments || []).includes('HR')));
     }
@@ -2499,10 +2491,9 @@ window.Chat = (() => {
         // a member by this filter, but the rules refuse them the channel
         // (deptChannelOpen, firestore.rules) — so notifying them would deliver
         // the message preview, in-app AND on the lock screen, for a thread that
-        // then will not open. Same reasoning as the partner guard in
-        // _forwardBlockReason below: a push notification never passes through
-        // the conversation rules, so the SENDER's client is the only place this
-        // can be stopped.
+        // then will not open. A push notification never passes through the
+        // conversation rules, so the SENDER's client is the only place this can
+        // be stopped.
         .filter(u => !_deptChannelClosedToRole(u.role, conv.department))
         .map(u => u.id);                    // actual members only — NOT implicit admins
     }
@@ -4779,120 +4770,6 @@ window.Chat = (() => {
     dd.classList.remove('hidden');
   }
 
-  // ══════════════════════════════════════════════════════════════════════
-  //  Partner containment — the ONE hard rule for shared record chips
-  // ══════════════════════════════════════════════════════════════════════
-  // A record chip copies up to 140 characters of the source record VERBATIM
-  // into the message doc's `ref.label` (see sendMessage's persist block). For a
-  // shared POST that is the post's own title/body — internal content an
-  // external partner has no read access to. The post DOC stays protected (a
-  // partner tapping the chip gets PERMISSION_DENIED from firestore.rules'
-  // posts rule, and openPostById toasts), but the LABEL is already denormalised
-  // into three places a partner reads, none of which the rules can fence:
-  //
-  //   1. conversations/{id}/messages/{id}.ref.label
-  //      `allow read: if isAuth() && convMember()` (firestore.rules ~859) —
-  //      no per-field restriction of any kind.
-  //   2. conv.lastMessageText — sendMessage's ref-only preview branch writes
-  //      `📣 <label>` / `🔗 <label>` there: the partner's INBOX ROW.
-  //   3. the FCM push body — _notifyRecipients interpolates that same preview,
-  //      and functions/index.js forwards it verbatim: their phone LOCK SCREEN.
-  //
-  // Partners are legitimate DM targets (dmCandidates returns literally
-  // "everyone" for an internal user, so every partner sits in every employee's
-  // picker), which is exactly why this cannot be left to the rules or to
-  // convention. It is enforced in JS at BOTH points: conversations containing a
-  // partner are excluded FROM THE PICKER, and the target is RE-CHECKED against
-  // fresh data immediately before the send, because the picker list is a
-  // snapshot and group membership/roles can change under it.
-  //
-  // Partner-ness is decided the way the rest of the app decides it —
-  // `u.role === 'partner'` (dmCandidates above, js/screens/people.js's Team
-  // card, firestore.rules' own isPartner()) — but compared CASE-INSENSITIVELY:
-  // production carries role-case drift ("Partner"), and over-counting someone
-  // as a partner is the safe direction for this particular check.
-  // The VIEWER test, deliberately separate from the global isPartner().
-  // js/app.js's isPartner() is `currentRole === 'partner'` — CASE-SENSITIVE — and
-  // production contains role drift ('Partner' with a capital P). A drifted viewer
-  // therefore passes that check and could share. For DM/group that self-heals
-  // (their own uid is in participants and the target test below is
-  // case-insensitive), but a dept channel has no participants to catch them on.
-  // Being MORE cautious about who counts as a partner is the safe direction, so
-  // every share/forward refusal routes through here.
-  function _viewerIsPartner() {
-    try { return _roleIsPartner(window.currentRole); } catch (_) { return true; }
-  }
-  function _roleIsPartner(role) {
-    return String(role == null ? '' : role).trim().toLowerCase() === 'partner';
-  }
-  // `fresh` bypasses every cache — the send-time re-check must, because it IS
-  // the security boundary. The picker's own pass may use a short-TTL cache.
-  //
-  // Deliberately NOT the shared 'users' key: dbCachedGet force-substitutes
-  // window.fetchUsersWithPayroll for that key (js/config.js), which returns
-  // `{...userDoc, ...payrollDoc}` — a payroll doc carrying a `role` field would
-  // silently OVERWRITE the user's real role in the merged object, and role is
-  // the exact field this guard decides on. A distinct key gets the raw users
-  // docs with no merge; a short TTL keeps repeat opens cheap.
-  async function _usersByIdMap(fresh) {
-    const snap = fresh
-      ? await db.collection('users').get()
-      : await dbCachedGet('chat-share-users', () => db.collection('users').get(), 15000);
-    const map = {};
-    snap.docs.forEach(d => { map[d.id] = { id: d.id, ...d.data() }; });
-    return map;
-  }
-  // null   → safe to share into.
-  // string → why it is excluded. Phrased about the CHAT, never about a person.
-  function _partnerBlockReason(cv, usersById) {
-    // ── DEPT CHANNELS: participants is EMPTY BY RULE, so inspecting it alone
-    // waves every dept channel straight through. firestore.rules enforces
-    // `participants == []` on dept create and derives membership from each
-    // user's own department instead.
-    //
-    // An earlier version of this guard reasoned that dept channels are safe
-    // because the rules fence their membership branch behind !isPartner(), so
-    // no partner can read the conversation or the message. That is TRUE, and it
-    // closes the message-doc and inbox-row sinks — but it does NOT close the
-    // third one, and the third one is the loudest: push notifications never
-    // pass through conversation rules at all. The SENDER's client computes the
-    // recipient set with _targetsFor() and writes into each recipient's own
-    // notifications inbox, and that filter has no role test whatsoever. So a
-    // partner whose profile lists an internal department (the invite form
-    // offers every department to every role, unfiltered) receives the post
-    // title in-app AND on their lock screen, from a channel they cannot open.
-    //
-    // Resolve membership the SAME way _targetsFor does, so the guard and the
-    // notification fan-out can never disagree about who is in the room.
-    if (cv && cv.type === 'dept') {
-      const dept = cv.department;
-      const members = Object.keys(usersById).map(k => usersById[k]).filter(u =>
-        u && (u.department === dept ||
-              (Array.isArray(u.departments) && u.departments.indexOf(dept) !== -1)));
-      for (let i = 0; i < members.length; i++) {
-        if (_roleIsPartner(members[i].role)) return 'A partner is in this department';
-      }
-      // Distinguish "the read failed" from "this department is genuinely empty".
-      // If usersById is empty the read failed (or was denied) and we cannot show
-      // that nobody external is listening — fail closed. If it resolved but this
-      // department matched nobody, the channel truly has no members: _targetsFor
-      // would notify nobody, so there is nothing to leak and refusing would be a
-      // false alarm.
-      if (!Object.keys(usersById || {}).length) return 'Cannot confirm who is in this channel';
-      return null;
-    }
-    const parts = (cv && Array.isArray(cv.participants)) ? cv.participants : [];
-    // A non-dept conversation with no participants is unverifiable, not empty.
-    if (!parts.length) return 'Cannot confirm everyone here is internal';
-    for (let i = 0; i < parts.length; i++) {
-      const u = usersById[parts[i]];
-      // An unresolvable participant is not proof of safety — fail closed.
-      if (!u) return 'Cannot confirm everyone here is internal';
-      if (_roleIsPartner(u.role)) return 'Includes an external partner';
-    }
-    return null;
-  }
-
   // ── Conversation picker (extracted from _openForwardPicker) ─────────────
   // _openForwardPicker ALREADY was this picker; its list-build, page and row
   // wiring are lifted out here verbatim so Share (from the Posts feed) reuses
@@ -4988,37 +4865,18 @@ window.Chat = (() => {
     if (!m || m.deleted) return;
     const sourceConvId = _openConvId;
     if (!sourceConvId) return;
-    // Forward carries `ref` along verbatim (see the sendMessage call below). For
-    // a POST ref that is the post's own title/body — the exact string the share
-    // flow refuses to place in front of an external partner — so Forward has to
-    // honour the SAME block, otherwise it is simply a second, unguarded route to
-    // the same leak: share a post into an internal thread, then forward it out.
-    //
-    // Deliberately scoped to kind 'post' ONLY. Forwarding text/photos/files/
-    // links and task/quote/bidding refs behaves exactly as it did before this
-    // batch (those carry the pre-existing, separately-tracked F64 exposure and
-    // narrowing them is not this batch's mandate).
+    // Forward carries `ref` along verbatim (see the sendMessage call below).
+    // A POST ref is re-read against the target chat before the send, the same
+    // way the share flow does it; forwarding text/photos/files/links and
+    // task/quote/bidding refs behaves exactly as it always has.
     const guardPostRef = !!(m.ref && m.ref.kind === 'post');
-    let usersById = null;
-    if (guardPostRef) {
-      if (_viewerIsPartner()) {
-        Notifs.showToast('Forwarding a post is available to internal staff only.', 'error');
-        return;
-      }
-      try { usersById = await _usersByIdMap(false); } catch (_) { usersById = null; }
-      if (!usersById || !Object.keys(usersById).length) {   // fail closed
-        Notifs.showToast('Could not check who is in your chats — try again in a moment.', 'error');
-        return;
-      }
-    }
     await _openConvPicker({
       title: 'Forward to…',
       exclude: sourceConvId,
-      filter: guardPostRef ? (cv => _partnerBlockReason(cv, usersById)) : null,
       onPick: async target => {
         if (guardPostRef) {
-          // Same fresh-data re-check the share flow runs, for the same reason:
-          // the picker list is a snapshot.
+          // Same fresh-data re-check the share flow runs: the picker list is a
+          // snapshot.
           const guard = await _assertShareTargetSafe(target);
           if (!guard.ok) { Notifs.showToast(guard.reason, 'error'); return; }
           target = guard.conv;   // already provisioned + freshly re-read
@@ -5064,10 +4922,9 @@ window.Chat = (() => {
   // meeting existed.
   //
   // Routed through _assertShareTargetSafe, exactly like shareToChat: it re-reads
-  // the conversation FRESH and fails closed. That is not ceremony — a meeting
-  // card posted into a thread containing an external partner would hand them the
-  // meeting, and the picker/caller's view of who is in a thread is a snapshot
-  // that can be stale by the time this runs.
+  // the conversation FRESH and fails closed. That is not ceremony — the caller
+  // only has a conversation id, and sendMessage needs the live conversation
+  // (participants, type) to fan the notification out correctly.
   async function postMeetingToChat(convId, meeting) {
     if (!convId || !meeting || !meeting.id) return false;
     const guard = await _assertShareTargetSafe({ id: convId });
@@ -5081,28 +4938,12 @@ window.Chat = (() => {
 
   async function shareToChat(payload) {
     if (!payload || !payload.kind || !payload.id) return;
-    // Every conversation an external partner is in contains an external partner
-    // — including their own — so a partner has nothing they could share into.
-    // Say so plainly rather than opening a picker where every row is blocked.
-    if (_viewerIsPartner()) {
-      Notifs.showToast('Sharing to chat is available to internal staff only.', 'error');
-      return;
-    }
-    let usersById = null;
-    try { usersById = await _usersByIdMap(false); } catch (_) { usersById = null; }
-    // FAIL CLOSED: with no users list there is no way to tell a partner
-    // conversation from an internal one, so the picker must not open at all.
-    if (!usersById || !Object.keys(usersById).length) {
-      Notifs.showToast('Could not check who is in your chats — try again in a moment.', 'error');
-      return;
-    }
     await _openConvPicker({
       title: 'Share to…',
-      filter: cv => _partnerBlockReason(cv, usersById),
       onPick: async target => {
-        // SECOND enforcement point. The picker list is a snapshot: someone can
-        // be added to a group, or have their role changed to partner, between
-        // it painting and this tap. Re-verified against FRESH reads here.
+        // The picker list is a snapshot: a chat can go away, or a department
+        // channel can still be unprovisioned, between it painting and this tap.
+        // Re-verified against a FRESH read here.
         const guard = await _assertShareTargetSafe(target);
         if (!guard.ok) { Notifs.showToast(guard.reason, 'error'); return; }
         try {
@@ -5114,9 +4955,8 @@ window.Chat = (() => {
       }
     });
   }
-  // The send-time half of the partner block. EVERY branch fails closed: any
-  // thrown read, any missing conversation doc, any unresolvable participant,
-  // and any partner participant all refuse the send.
+  // The send-time target check. EVERY branch fails closed: a missing target, a
+  // thrown read or a missing conversation doc all refuse the send.
   async function _assertShareTargetSafe(target) {
     if (!target || !target.id) return { ok: false, reason: 'Nothing was shared — that chat is unavailable.' };
     // A dept channel nobody has opened yet has no Firestore doc for the re-read
@@ -5128,16 +4968,9 @@ window.Chat = (() => {
     }
     let snap = null;
     try { snap = await db.collection('conversations').doc(target.id).get(); }
-    catch (_) { return { ok: false, reason: 'Could not verify who is in that chat — nothing was shared.' }; }
+    catch (_) { return { ok: false, reason: 'Could not verify that chat — nothing was shared.' }; }
     if (!snap || !snap.exists) return { ok: false, reason: 'That chat no longer exists — nothing was shared.' };
     const conv = { id: snap.id, ...snap.data() };
-    let fresh = null;
-    try { fresh = await _usersByIdMap(true); } catch (_) { fresh = null; }
-    if (!fresh || !Object.keys(fresh).length) {
-      return { ok: false, reason: 'Could not verify who is in that chat — nothing was shared.' };
-    }
-    const why = _partnerBlockReason(conv, fresh);
-    if (why) return { ok: false, reason: 'Not shared — ' + why.charAt(0).toLowerCase() + why.slice(1) + '.' };
     return { ok: true, conv };
   }
 
@@ -5145,11 +4978,10 @@ window.Chat = (() => {
   // Task / Quote / Bidding tabs (chipTabs, same pattern the Shared Media page
   // uses), a search box, and a scrollable shortlist. Every collection read
   // goes through .catch(()=>({docs:[]})) per spec — a denied read (e.g. a
-  // partner against bk_quotes/gov_*, see this batch's report for the exact
-  // per-collection rules) just contributes zero rows for that source rather
-  // than throwing, so the picker degrades to "fewer results" instead of
-  // erroring for any role. `onPick(ref)` is called with `{kind, id, label,
-  // collection?}` once the caller taps a row.
+  // role with no access to bk_quotes/gov_*) just contributes zero rows for
+  // that source rather than throwing, so the picker degrades to "fewer
+  // results" instead of erroring for any role. `onPick(ref)` is called with
+  // `{kind, id, label, collection?}` once the caller taps a row.
   async function _openRefPicker(onPick) {
     const tabs = [{ key: 'task', label: 'Task' }, { key: 'quote', label: 'Quote' }, { key: 'bidding', label: 'Bidding' }];
     const body = `
@@ -5546,8 +5378,7 @@ window.Chat = (() => {
   }
   // Wave5 M4 — internal-users picker for "Add members" (creator/admin only).
   // Reuses dmCandidates for the same eligibility scoping "New Message"/
-  // "New Group" already use (a partner sees only same-company partners +
-  // president/manager), minus whoever's already a participant.
+  // "New Group" already use, minus whoever's already a participant.
   async function _openAddMembersPicker(conv) {
     const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000).catch(() => ({ docs: [] }));
     const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -5932,15 +5763,8 @@ window.Chat = (() => {
            dmIdFor, myDeptChannels, dmCandidates, setFilter, setSearch, _attachInbox,
            _attachGlobalBadgeListener, _detachGlobalBadgeListener,
            // 2026-08 "share posts to chat" — called by the Posts feed's Share
-           // button (js/screens/people.js). The partner block lives INSIDE it,
-           // at both the picker and the pre-send re-check, so no caller can
-           // route around it.
+           // button (js/screens/people.js).
            shareToChat, postMeetingToChat,
-           // Test seams for the partner block (headless harness only — nothing
-           // in the app calls these). Exposed so the guard can be exercised
-           // against a constructed partner conversation without a production
-           // sign-in.
-           _partnerBlockReason, _roleIsPartner, _viewerIsPartner, _assertShareTargetSafe,
            _recentDmIds };   // Wave2 practicality batch — read by renderChatPage's New Message picker
 })();
 
@@ -5996,7 +5820,6 @@ window.renderChatPage = async function() {
       .catch(() => ({ docs: [] }));
     const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     const candidates = window.Chat.dmCandidates(users);
-    const isPtnr = typeof isPartner === 'function' && isPartner();
 
     const rowHtml = u => {
       const initials = (u.displayName || u.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -6014,8 +5837,8 @@ window.renderChatPage = async function() {
     // (single `department` field, first entry of a `departments` array as a
     // fallback) so grouping reads the SAME field the rest of chat.js already
     // treats as canonical. Recents = window.Chat._recentDmIds(), filtered to
-    // candidates still eligible today (a partner whose company changed, or a
-    // deactivated account, silently drops out rather than dead-ending).
+    // candidates still eligible today (a deactivated account silently drops
+    // out rather than dead-ending).
     const byUid = {}; candidates.forEach(u => { byUid[u.id] = u; });
     const deptLabel = u => u.department || (Array.isArray(u.departments) && u.departments[0]) || 'Other';
     const recentIds = (window.Chat._recentDmIds ? window.Chat._recentDmIds() : []).filter(id => byUid[id]);
@@ -6049,7 +5872,6 @@ window.renderChatPage = async function() {
     const body = `
       <input id="chat-pick-search" class="ms-input" placeholder="Search people or department…" style="width:100%;margin-bottom:10px"/>
       <div id="chat-pick-list" class="item-list">${candidates.length ? buildListHtml('') : '<div class="empty-state" style="padding:16px"><p>No one to message yet.</p></div>'}</div>
-      ${!isPtnr ? `
       <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
         <div style="font-weight:700;margin-bottom:8px">${emojiIcon('👥',16)} New Group</div>
         <input id="chat-group-name" class="ms-input" placeholder="Group name" style="width:100%;margin-bottom:8px"/>
@@ -6065,7 +5887,7 @@ window.renderChatPage = async function() {
         </label>
         <button class="btn-primary btn-sm" id="chat-group-create-btn" style="margin-top:10px">Create Group</button>
         <div id="chat-group-err" class="error-msg hidden" style="margin-top:6px"></div>
-      </div>` : ''}
+      </div>
     `;
     // ⚠ SCOPED TO THE RETURNED PANEL, never document.* — openPage keeps a
     // CLOSING page in the DOM for ~300ms, so reopening "New Message" inside

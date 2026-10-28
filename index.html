@@ -128,8 +128,8 @@
          CSS beside new JS and a shipped CSS change looked like it never landed.
          A new version = a new cache key, so even a stale SW must hit the network.
          Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-    <link rel="stylesheet" href="css/tokens.css?v=14.0.330"/>
-    <link rel="stylesheet" href="css/styles.css?v=14.0.330"/>
+    <link rel="stylesheet" href="css/tokens.css?v=14.0.331"/>
+    <link rel="stylesheet" href="css/styles.css?v=14.0.331"/>
 
     <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
          Firebase messaging loaded lazily in notifications.js when FCM is configured.
@@ -1348,7 +1348,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
     <h1 class="login-title">Barro Industries</h1>
     <p class="login-sub">Operating System</p>
 
-    <!-- ── Role Picker — segmented 3-portal control (v12 WS42 Phase 25) ── -->
+    <!-- ── Role Picker — segmented 2-portal control (v12 WS42 Phase 25) ── -->
     <div id="login-role-picker">
       <p class="login-pick-label">Sign in as</p>
       <div class="login-role-cards" role="group" aria-label="Portal">
@@ -1367,10 +1367,6 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
         <button class="login-role-card" data-type="employee" title="Staff · Agent · Accountant">
           <span class="lrc-icon"><i data-lucide="user"></i></span>
           <span class="lrc-label">Employee</span>
-        </button>
-        <button class="login-role-card" data-type="partner" title="Projects · Quotes · Partner Portal">
-          <span class="lrc-icon"><i data-lucide="handshake"></i></span>
-          <span class="lrc-label">Partner</span>
         </button>
       </div>
       <button class="login-signup-link" id="signup-btn">
@@ -1447,7 +1443,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.330 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.331 · Barro Industries</div>
   </div>
 </div>
 

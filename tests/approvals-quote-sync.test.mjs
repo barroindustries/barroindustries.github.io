@@ -282,7 +282,7 @@ describe('the four places the President acts on a quote all sync — and a faili
     assert.ok(S.toasts.some((t) => t.t === 'success' && /approved and filed/.test(t.m)));
   });
 
-  it('Return to partner (list / registry): quote saved as needs_revision, then the request entry -> needs_revision, then the approval request returned and the agent told', async () => {
+  it('Return (list / registry): quote saved as needs_revision, then the request entry -> needs_revision, then the approval request returned and the agent told', async () => {
     const S = makeApp({ docs: docs() });
     await S.ret(Q1, 'bk_quotes');
     assert.deepEqual(seq(S), [`update ${RAW_Q1}`, `get ${RAW_Q1}`, `get ${RAW_QR}`, `update ${RAW_QR}`, `where approval_requests.quoteId == ${Q1}`, 'update approval_requests/ar1', 'notify']);
@@ -290,7 +290,7 @@ describe('the four places the President acts on a quote all sync — and a faili
     assert.equal(entryOf(S, RAW_QR, Q1).status, 'needs_revision');
     assert.equal(S.store.get('approval_requests/ar1').status, 'returned');
     assert.equal(S.notes.length, 1);
-    assert.ok(S.toasts.some((t) => t.t === 'error' && /returned to partner/.test(t.m)));
+    assert.ok(S.toasts.some((t) => t.t === 'error' && /returned\./.test(t.m)));
   });
 
   const openReview = async (S) => {
@@ -349,7 +349,7 @@ describe('the four places the President acts on a quote all sync — and a faili
     }
   });
 
-  it('a partner quote (bs_quotes, no sourceRef) approves exactly as before — one extra read of the quote, no request touched', async () => {
+  it('a Brilliant Steel quote (bs_quotes, no sourceRef) approves exactly as before — one extra read of the quote, no request touched', async () => {
     const S = makeApp({ docs: { 'bs_quotes/pq1': quoteDoc({ sourceRef: null }), 'approval_requests/ar1': { type: 'bs_quote', quoteId: 'pq1', status: 'pending' } } });
     await S.approve('pq1', 'bs_quotes');
     assert.deepEqual(seq(S), ['update bs_quotes/pq1', 'get bs_quotes/pq1', 'where approval_requests.quoteId == pq1', 'update approval_requests/ar1', 'notify']);

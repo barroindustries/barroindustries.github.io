@@ -503,10 +503,10 @@ function _epOpenEditor(ctx, statuses) {
         // `departments: [dept]` unconditionally meant that opening a profile to
         // correct a HIRE DATE and pressing Save silently deleted every secondary
         // membership: nav, page access and canEditDept() all derive from that
-        // array, so the person quietly lost a department at next login — and if
-        // the survivor happened to be 'Brilliant Steel' alone, the payroll roster
-        // reclassifies them as an external partner and DROPS THEM FROM THE
-        // MONTHLY RUN. The toast said "Employment details saved."
+        // array, so the person quietly lost a department at next login (and, back
+        // when the payroll roster excluded Brilliant-Steel-only staff — retired
+        // 2026-10-28 — a 'Brilliant Steel' survivor was DROPPED FROM THE MONTHLY
+        // RUN too). The toast said "Employment details saved."
         // Unchanged -> omit entirely. Changed -> new primary first, every other
         // existing membership preserved behind it.
         const _origPrimary = P.depts[0] || '';
@@ -1185,15 +1185,11 @@ async function _epLoadRoster(panel, body) {
   // row's payClass is then missing BY PERMISSION, not because it is unset.
   const payrollDenied = !!(usersRes.value && usersRes.value.payrollDenied);
 
-  // Owner ruling 2026-08-12: "dont include brilliant steel or partners on the
-  // payroll or hr". This is an HR screen, so the same predicate the payroll
-  // roster and the HR roster use applies here — it was filtering `role !==
-  // 'partner'` ALONE, which let a Brilliant-Steel-only member with an
-  // 'employee' role onto an HR list (observed: one on the owner's screen).
-  const users = (usersRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }))
-    .filter(u => (typeof window.isExternalPartnerUser === 'function')
-      ? !window.isExternalPartnerUser(u)
-      : u.role !== 'partner');
+  // Everyone on `users`, the same roster the payroll run and the HR roster
+  // start from (owner ruling 2026-10-28: Brilliant Steel staff are Barro
+  // employees; the external partner role is retired). No department or role
+  // filter.
+  const users = (usersRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }));
   const wps = (wpRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }));
   const linked = new Set(wps.filter(w => w.linkedUid).map(w => w.linkedUid));
   const wpByUid = {};

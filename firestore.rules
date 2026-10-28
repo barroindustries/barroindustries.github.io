@@ -156,7 +156,7 @@ service cloud.firestore {
           && noAccountAdminOnCreate()
           && request.resource.data.get('role', 'employee') != 'president'
           && request.resource.data.get('role', 'employee') in
-               ['manager', 'secretary', 'employee', 'agent', 'finance', 'partner']
+               ['manager', 'secretary', 'employee', 'agent', 'finance']
         ) || (
           isAdmin()
           && noAccountAdminOnCreate()

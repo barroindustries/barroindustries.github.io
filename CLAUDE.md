@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Barro Industries' internal **Operations System** — a vanilla-JS Progressive Web App (no framework, no bundler, no build step). Files are served as-is. The frontend talks directly to Firebase (Auth, Firestore, Storage, Cloud Messaging); a Cloud Function relays push notifications; GitHub Actions handle nightly Drive sync and monthly backups.
 
-The app is an internal tool for a Philippine steel/appliance manufacturer: employees, managers, the president, and an external partner (Brilliant Steel) sign in to role- and department-scoped tabs covering tasks, finance/payroll, attendance, cash advances, sales quotes, government biddings, and more.
+The app is an internal tool for a Philippine steel/appliance manufacturer: employees, managers, and the president sign in to role- and department-scoped tabs covering tasks, finance/payroll, attendance, cash advances, sales quotes, government biddings, and more.
 
 **Start every session at [STATUS.md](STATUS.md)** — the one always-current page: live version, active program, open owner rulings, pending deploys/one-time actions, and the single ranked backlog. Update it before ending any session that changes state. (ROADMAP.md is frozen history.)
 
@@ -52,7 +52,7 @@ All UI lives in plain `<script>` files under `js/`, each attaching render functi
 
 ### Roles & departments
 
-Roles (`president`, `manager`, `employee`, `agent`, `finance`, `partner`) and departments (Admin, Finance, Sales, Marketing, Government Biddings, IT, Design, Brilliant Steel, Partners) are defined in [js/config.js](js/config.js). Nav, bottom-nav, and page access are derived from `currentRole` + `currentDepts` (a user can belong to multiple departments). The president (`neilbarro870@gmail.com`) has full access; `canEditDept(dept)` in departments.js gates writes (admin roles, or membership in that dept). The login screen enforces a portal/role match (admin/employee/partner) — see `ROLE_TYPE_MAP` in app.js.
+Roles (`president`, `manager`, `secretary`, `employee`, `agent`, `finance`) and departments (Admin, Finance, HR, Sales, CRM, Marketing, Government Biddings, IT, Design, Production, Inventory, Purchasing, Ventures, Brilliant Steel) are defined in [js/config.js](js/config.js). Nav, bottom-nav, and page access are derived from `currentRole` + `currentDepts` (a user can belong to multiple departments). The president (`neilbarro870@gmail.com`) has full access; `canEditDept(dept)` in departments.js gates writes (admin roles, or membership in that dept). The login screen enforces a portal/role match (admin/employee) — see `ROLE_TYPE_MAP` in app.js. **Brilliant Steel is an internal department** whose staff are Barro employees (paid, on HR rosters, with the isolated `bsOnly` nav variant when it is their only department); the external `partner` role, the Partners department and the partner portal were retired (specs/PARTNER-REMOVAL-SPEC.md). Until the data purge removes the last such accounts, `app.js` refuses a `partner`-role sign-in and `window.isRetiredRoleUser` (config.js) keeps them off the payroll rosters.
 
 ### Backend — Firebase
 
@@ -62,7 +62,7 @@ Roles (`president`, `manager`, `employee`, `agent`, `finance`, `partner`) and de
 
 ### Standalone tools
 
-- **[quote-builder-v2.html](quote-builder-v2.html)** — a large self-contained HTML quote calculator for Brilliant Steel / Barro Kitchen products, embedded via `<iframe>` from the Sales/Partners tabs. Product data comes from [products-database.json](products-database.json). (`quote-builder.html` is the older v1, read-only.)
+- **[quote-builder-v2.html](quote-builder-v2.html)** — a large self-contained HTML quote calculator for Brilliant Steel / Barro Kitchen products, embedded via `<iframe>` from the Sales and Brilliant Steel tabs (the Brilliant Steel page opens it on the Brilliant Steel pill via `?co=BS`). Product data comes from [products-database.json](products-database.json). (`quote-builder.html` is the older v1, read-only.)
 - **archive/Barro_Operations_Tracker.html** — superseded June-2026 standalone dashboard (moved to `archive/`, v13 Phase 5); live equivalents are the in-app Gov Biddings screen and the `clients` collection.
 
 ### Automation (GitHub Actions, `.github/workflows/`)

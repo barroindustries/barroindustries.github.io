@@ -11,8 +11,9 @@
 // Fixtures are FAKE (odd-figure pesos, invented names): the repository is public.
 //
 // Mutation-tested in scratch copies (see the commit message), never in the shared tree: a request demoted by filing another revision, no de-dup by
-// quote id, no 50-entry cap (or the newest dropped), a loosened or kind-unpinned reference guard, a partner session not skipped, an unchecked quote
-// collection, an unsanitised sourceRef / estimateCheck, a QUOTE_UPDATE that blanks a link it was not sent, a missing link call on any of the three
+// quote id, no 50-entry cap (or the newest dropped), a loosened or kind-unpinned reference guard, a session type (a Brilliant-Steel-only employee, an
+// agent) that is exempted from linking or has its sourceRef / estimateCheck nulled, an unchecked quote collection, a Brilliant Steel page that does not
+// start the builder on the Brilliant Steel pill (or that sends a company the builder does not offer), an unsanitised sourceRef / estimateCheck, a QUOTE_UPDATE that blanks a link it was not sent, a missing link call on any of the three
 // filing paths, a failing link that fails the filing, QB_OPEN_SOURCE unhandled, a hand-off that does not boot authoritative, the permission-denied
 // toast, a Quotes card that shows totals / Open to a view-only role or trusts a collection / id / text; each must fail here.
 //
@@ -46,6 +47,7 @@ const LINK_CODE = [
   piece(/^const QB_SOURCE_REF_RE = .*;$/m, 'QB_SOURCE_REF_RE'), fnPiece('_qbCleanSourceRef'), fnPiece('_qbCleanEstimateCheck'),
   winPiece('linkQuoteToRequest'), winPiece('openQuoteSource'), winPiece('reopenQuoteFromDoc'),
   fnPiece('_qbIsAuthoritativeLoad'), fnPiece('_qbReopenStripLabel'),
+  piece(/^function isBrilliantOnly\(\) \{.*\}$/m, 'isBrilliantOnly'),
 ].join('\n');
 
 const ORIGIN = 'https://app.test';
@@ -101,8 +103,8 @@ function makeApp(opts) {
     window: win, db, console: { log() {}, error() {}, warn: (...a) => warns.push(a) },
     document: { getElementById: (id) => (id === 'qb-frame' ? { contentWindow: FRAME } : null) },
     firebase: { firestore: { FieldValue: { serverTimestamp: () => stamp } } },
-    currentUser: { uid: 'u-staff', email: 'staff@example.test' }, userProfile: { displayName: 'Staff One' }, currentRole: opts.partner ? 'partner' : 'employee',
-    isPartner: () => !!opts.partner,
+    currentUser: { uid: 'u-staff', email: 'staff@example.test' }, userProfile: { displayName: 'Staff One' }, currentRole: opts.role || 'employee',
+    currentDepts: opts.depts || ['Sales'],
     Notifs: { showToast: (m, t) => toasts.push({ m, t }), success: (m) => toasts.push({ m, t: 'success' }), sendToOwner: async () => { ops.push('notify owner'); } },
     navigateTo: async (page, o) => { navs.push([page, o]); if (!opts.navRefused) win.currentPage = page; },
     graftQuoteCosts: async () => {}, dbCacheInvalidate: (k) => invalidated.push(k),
@@ -296,10 +298,13 @@ describe('linkQuoteToRequest — a filed quote is recorded on its request / brie
     }
   });
 
-  it('a partner session never links', async () => {
-    const S = makeApp({ partner: true, docs: { [RAW_QR]: qrDoc() } });
-    assert.equal(await S.link({ kind: 'qr', ref: QR }, infoOf()), false);
-    assert.deepEqual(S.ops, []);
+  it('no kind of session is exempt (the retired partner session used to be): every role, and a Brilliant-Steel-only employee, links the quote to its request', async () => {
+    for (const session of [{ role: 'employee' }, { role: 'manager' }, { role: 'agent' }, { role: 'finance' }, { role: 'president' }, { role: 'employee', depts: ['Brilliant Steel'] }]) {
+      const S = makeApp(Object.assign({ docs: { [RAW_QR]: qrDoc() } }, session));
+      assert.equal(await S.link({ kind: 'qr', ref: QR }, infoOf({ coll: session.depts ? 'bs_quotes' : 'bk_quotes' })), true, JSON.stringify(session));
+      assert.deepEqual(S.ops, [`get ${RAW_QR}`, `update ${RAW_QR}`], JSON.stringify(session));
+    }
+    assert.equal(makeApp({ depts: ['Brilliant Steel'] }).call('isBrilliantOnly'), true, 'the Brilliant-Steel-only fixture really is a Brilliant-Steel-only session');
   });
 
   it('a request that is gone (erased under RA 10173) is a quiet false: nothing written, no toast', async () => {
@@ -385,11 +390,16 @@ describe('the bridge — the three filing paths carry the link and never fail on
     }
   });
 
-  it('a partner session files with sourceRef + estimateCheck null and never touches a request', async () => {
-    const S = makeApp({ partner: true, docs: { [RAW_QR]: qrDoc() } });
+  it('a Brilliant-Steel-only employee files a Brilliant Steel quote WITH its sourceRef + estimateCheck, and the request is linked like any other (no session type is nulled)', async () => {
+    const S = makeApp({ depts: ['Brilliant Steel'], docs: { [RAW_QR]: qrDoc() } });
     await S.send('QUOTE_FILED', filed({ company: 'BS' }));
-    assert.equal(S.adds[0].data.sourceRef, null); assert.equal(S.adds[0].data.estimateCheck, null);
-    assert.ok(!S.ops.some((o) => /quote_requests/.test(o)));
+    assert.equal(S.adds[0].coll, 'bs_quotes');
+    assert.deepEqual(plain(S.adds[0].data.sourceRef), SR); assert.deepEqual(plain(S.adds[0].data.estimateCheck), EC);
+    assert.equal(S.adds[0].data.createdByRole, 'employee');
+    const p = req(S)[0];
+    assert.ok(p && p.status === 'quoted', 'the request moved to Quoted');
+    assert.equal(plain(p.quotes[0]).coll, 'bs_quotes');
+    assert.ok(S.ops.includes('notify owner'));
   });
 
   it('a link that fails (rules not deployed yet, offline) NEVER fails the filing: the quote is saved, the owner is told, staff see why the link is missing', async () => {
@@ -424,15 +434,16 @@ describe('the bridge — the three filing paths carry the link and never fail on
     assert.ok(!S2.ops.some((o) => /quote_requests/.test(o)));
   });
 
-  it('QUOTE_UPDATE: a forged sourceRef is written as null; a partner writes neither key; a collection that is not a quote collection is ignored', async () => {
+  it('QUOTE_UPDATE: a forged sourceRef is written as null; a Brilliant-Steel-only employee writes both keys like anyone else; a collection that is not a quote collection is ignored', async () => {
     const S = makeApp({ docs: { 'bk_quotes/qdEXISTING0000000001': {}, [RAW_QR]: qrDoc() } });
     await S.send('QUOTE_UPDATE', filed({ sourceRef: { kind: 'qr', ref: CIR } }), { docId: 'qdEXISTING0000000001', collection: 'bk_quotes' });
     assert.equal(S.updates.find((u) => u.key === 'bk_quotes/qdEXISTING0000000001').patch.sourceRef, null);
     assert.ok(!S.ops.includes(`get ${RAW_QR}`));
-    const P = makeApp({ partner: true, docs: { 'bk_quotes/qdEXISTING0000000001': {} } });
-    await P.send('QUOTE_UPDATE', filed(), { docId: 'qdEXISTING0000000001', collection: 'bk_quotes' });
-    const pu = P.updates.find((u) => u.key === 'bk_quotes/qdEXISTING0000000001').patch;
-    assert.ok(!('sourceRef' in pu) && !('estimateCheck' in pu));
+    const B = makeApp({ depts: ['Brilliant Steel'], docs: { 'bs_quotes/qdEXISTING0000000002': {}, [RAW_QR]: qrDoc() } });
+    await B.send('QUOTE_UPDATE', filed({ company: 'BS' }), { docId: 'qdEXISTING0000000002', collection: 'bs_quotes' });
+    const bu = B.updates.find((u) => u.key === 'bs_quotes/qdEXISTING0000000002').patch;
+    assert.deepEqual(plain(bu.sourceRef), SR); assert.deepEqual(plain(bu.estimateCheck), EC);
+    assert.ok(B.ops.includes(`get ${RAW_QR}`) && B.ops.includes(`update ${RAW_QR}`), 'the request entry was refreshed');
     const X = makeApp({ docs: { 'users/u1': {} } });
     await X.send('QUOTE_UPDATE', filed(), { docId: 'u1', collection: 'users' });
     assert.deepEqual(X.updates, []);
@@ -441,12 +452,13 @@ describe('the bridge — the three filing paths carry the link and never fail on
   it('each of the three paths calls linkQuoteToRequest exactly where the spec puts it (source order: after the write, before the cost sidecar / notification)', () => {
     const upd = LISTENER.slice(LISTENER.indexOf("if (type === 'QUOTE_UPDATE')"), LISTENER.indexOf("if (type !== 'QUOTE_FILED'"));
     assert.ok(upd.indexOf('.update(update)') > 0 && upd.indexOf('.update(update)') < upd.indexOf('window.linkQuoteToRequest('), 'QUOTE_UPDATE links after the update');
-    assert.match(upd, /linkQuoteToRequest\(_qbPartner \? null : payload\.sourceRef, \{ docId, coll: collection,/);
+    assert.match(upd, /linkQuoteToRequest\(payload\.sourceRef, \{ docId, coll: collection,/);
     assert.match(upd, /hasOwnProperty\.call\(payload, 'sourceRef'\)[\s\S]*_qbCleanSourceRef\(payload\.sourceRef\)/);
     assert.match(upd, /hasOwnProperty\.call\(payload, 'estimateCheck'\)[\s\S]*_qbCleanEstimateCheck\(payload\.estimateCheck\)/);
     const rest = LISTENER.slice(LISTENER.indexOf("if (type !== 'QUOTE_FILED'"));
-    assert.match(rest, /sourceRef:\s+_qbPartner \? null : _qbCleanSourceRef\(payload\.sourceRef\),/);
-    assert.match(rest, /estimateCheck:\s+_qbPartner \? null : _qbCleanEstimateCheck\(payload\.estimateCheck\),/);
+    assert.match(rest, /sourceRef:\s+_qbCleanSourceRef\(payload\.sourceRef\),/);
+    assert.match(rest, /estimateCheck:\s+_qbCleanEstimateCheck\(payload\.estimateCheck\),/);
+    assert.ok(!/\?\s*null\s*:\s*_qbClean/.test(upd + rest), 'a session-conditional "? null : _qbClean…" is back on the link or the estimate check');
     const calls = [...rest.matchAll(/window\.linkQuoteToRequest\(data\.sourceRef, \{ docId: docRef\.id, coll, quoteNumber: data\.fileName, version: data\.version, total: data\.total, status: data\.status, byName: agentName \}\);/g)];
     assert.equal(calls.length, 2, 'QUOTE_FILED and QUOTE_APPROVAL_REQUESTED each link');
     for (const m of calls) {
@@ -469,7 +481,7 @@ describe('QB_OPEN_SOURCE / openQuoteSource — "Open request" in the builder\'s 
     assert.deepEqual(plain(T.navs), [['dept:Sales', { subtab: 'Briefs' }]]);
     assert.deepEqual(T.opens, [['cir', CIR]]);
   });
-  it('the builder\'s message is routed to it, and a forged reference, a partner session or a refused navigation open nothing', async () => {
+  it('the builder\'s message is routed to it (for a Brilliant-Steel-only employee too), and a forged reference or a refused navigation open nothing', async () => {
     const S = makeApp();
     await S.send('QB_OPEN_SOURCE', { sourceRef: { kind: 'qr', ref: QR } });
     assert.deepEqual(S.opens, [['qr', QR]]);
@@ -477,8 +489,8 @@ describe('QB_OPEN_SOURCE / openQuoteSource — "Open request" in the builder\'s 
       const F = makeApp(); await F.send('QB_OPEN_SOURCE', { sourceRef: sr });
       assert.deepEqual(F.navs, [], JSON.stringify(sr)); assert.deepEqual(F.opens, []);
     }
-    const P = makeApp({ partner: true }); await P.send('QB_OPEN_SOURCE', { sourceRef: { kind: 'qr', ref: QR } });
-    assert.deepEqual(P.navs, []); assert.deepEqual(P.opens, []);
+    const B = makeApp({ depts: ['Brilliant Steel'] }); await B.send('QB_OPEN_SOURCE', { sourceRef: { kind: 'qr', ref: QR } });
+    assert.deepEqual(B.opens, [['qr', QR]]);
     const T = makeApp(); T.ctx.navigateTo = async () => { throw new Error('router exploded'); };
     await T.send('QB_OPEN_SOURCE', { sourceRef: { kind: 'qr', ref: QR } });     // must resolve: the listener swallows (and logs) a failed navigation
     assert.ok(T.warns.length >= 1); assert.deepEqual(T.opens, []);
@@ -522,20 +534,19 @@ describe('a website hand-off boots the builder as an authoritative load (spec §
   const HELPERS = fnPiece('_qbIsAuthoritativeLoad') + '\n' + fnPiece('_qbReopenStripLabel');
   const run = (o) => {
     const page = { innerHTML: '' };
-    const win = { _qbReopenState: o.state, _qbReopenAsRevision: o.asRevision, location: { origin: ORIGIN }, addEventListener() {}, removeEventListener() {} };
+    const win = { _qbReopenState: o.state, _qbReopenAsRevision: o.asRevision, currentPage: o.page, location: { origin: ORIGIN }, addEventListener() {}, removeEventListener() {} };
     const c = vm.createContext({
       window: win, console, setTimeout: () => 0,
       document: { getElementById: (id) => (id === 'page-content' ? page : null), body: { classList: { toggle() {}, add() {}, remove() {} } } },
-      isPartner: () => !!o.partner, isGenericPartner: () => false, _qbIsMobile: () => !!o.mobile, enterQbFullscreen() {}, exitQbFullscreen() {}, emojiIcon: (g) => `[${g}]`,
+      _qbIsMobile: () => !!o.mobile, enterQbFullscreen() {}, exitQbFullscreen() {}, emojiIcon: (g) => `[${g}]`,
     });
     vm.runInContext(escSrc + '\n' + HELPERS + '\n' + RENDER + '\nrenderQuoteBuilderIframe();', c);
     return page.innerHTML;
   };
-  it('renderQuoteBuilderIframe: a hand-off loads ?reopen=1 (after ?portal=partner too); Quick Estimate\'s and a fresh builder do not; the strip says where it came from', () => {
+  it('renderQuoteBuilderIframe: a hand-off loads ?reopen=1; Quick Estimate\'s and a fresh builder do not; the strip says where it came from', () => {
     const h = run({ state: { handoff: true, clientName: 'Ana' } });
     assert.match(h, /<iframe id="qb-frame" src="quote-builder-v2\.html\?reopen=1"/);
     assert.match(h, /Quote Builder — from a website request/);
-    assert.match(run({ state: { handoff: true }, partner: true }), /src="quote-builder-v2\.html\?portal=partner&reopen=1"/);
     assert.match(run({ state: { sourceDocId: 'q1', clientName: 'x' } }), /\?reopen=1"/);
     assert.match(run({ state: { sourceDocId: 'q1' } }), /Quote Builder — editing a copy/);
     assert.match(run({ state: { sourceDocId: 'q1' }, asRevision: true }), /Quote Builder — new revision/);
@@ -545,6 +556,20 @@ describe('a website hand-off boots the builder as an authoritative load (spec §
       assert.match(out, /<iframe id="qb-frame" src="quote-builder-v2\.html"/); assert.ok(!/reopen=1/.test(out));
     }
     assert.ok(!/Quote Builder —/.test(run({ state: { handoff: true }, mobile: true })), 'no strip on a phone (the builder is fullscreen there)');
+  });
+  it('the Brilliant Steel Quote Builder page starts the builder on the Brilliant Steel pill (?co=BS, ahead of ?reopen=1); every other page sends no company; the retired portal parameters are never sent', () => {
+    assert.match(run({ page: 'bs-quote-builder' }), /<iframe id="qb-frame" src="quote-builder-v2\.html\?co=BS" allow="print">/);
+    assert.match(run({ page: 'bs-quote-builder', state: { handoff: true } }), /src="quote-builder-v2\.html\?co=BS&reopen=1"/);
+    assert.match(run({ page: 'bs-quote-builder', state: { sourceDocId: 'q1' } }), /src="quote-builder-v2\.html\?co=BS&reopen=1"/);
+    assert.match(run({ page: 'bs-quote-builder', state: { clientName: 'Ana', items: [] } }), /src="quote-builder-v2\.html\?co=BS"/, 'Quick Estimate\'s hand-off on the Brilliant Steel page still has no ?reopen');
+    for (const page of ['bk-quote-builder', 'bs-quotations', 'dashboard', undefined]) {
+      const out = run({ page });
+      assert.match(out, /<iframe id="qb-frame" src="quote-builder-v2\.html" allow="print">/, String(page));
+      assert.ok(!/co=/.test(out), `${page}: a company was sent`);
+    }
+    for (const page of ['bs-quote-builder', 'bk-quote-builder']) {
+      assert.ok(!/portal=|pco[A-Z]/.test(run({ page, state: { handoff: true } })), `${page}: a retired portal parameter is back`);
+    }
   });
 });
 

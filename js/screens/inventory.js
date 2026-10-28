@@ -51,19 +51,12 @@ const peso = n => '₱' + Number(n || 0).toLocaleString('en-PH', { minimumFracti
 const num  = n => Number(n || 0).toLocaleString('en-PH');
 
 window.renderInventoryDept = async function (currentUser, currentRole, subtab = window.initialSubtab('Stock')) {
-  // Partners must never see costs/suppliers — this department has no NAV
-  // entry for them, but guard the entry point itself in case of a direct
-  // deep link. window.userProfile is the signed-in user's PROFILE doc
-  // (role/departments/title) — isExternalPartnerUser needs that shape, not
-  // the bare Firebase Auth `currentUser` object this function receives.
-  if (currentRole === 'partner' || window.isExternalPartnerUser?.(window.userProfile)) return;
-
   const c = deptContainer();
   const tabs = ['Stock', 'Raw Materials', 'Finished Products', 'Movements', 'Count Form'];
   if (['president', 'manager', 'finance'].includes(currentRole)) tabs.push('Job Costing');
   // Family Pricing: the private option amounts behind the configurable catalogue products. Same tier as firestore.rules `product_pricing`
   // (president / manager / finance, or a non-secretary Finance member) — the screen re-checks it and says so if it is not allowed.
-  if (['president', 'manager', 'finance'].includes(currentRole) || (currentRole !== 'secretary' && currentRole !== 'partner' && (window.currentDepts || []).includes('Finance'))) tabs.push('Family Pricing');
+  if (['president', 'manager', 'finance'].includes(currentRole) || (currentRole !== 'secretary' && (window.currentDepts || []).includes('Finance'))) tabs.push('Family Pricing');
   subtab = tabs.includes(subtab) ? subtab : 'Stock';
   c.innerHTML = `
     <div class="page-header">
@@ -109,7 +102,7 @@ async function loadInvContent(currentUser, currentRole, sub) {
 // stock_movements create/update conjunct exactly:
 //   isSeniorAdmin() || canFinance() || inDept('Inventory') ||
 //   isPurchasingDept() || isProductionDept()
-// (secretary and partner already excluded by isSeniorAdmin/canFinance/
+// (secretary already excluded by isSeniorAdmin/canFinance/
 // inDept()'s own carve-outs, but excluded again here up front so this
 // reads as the plain deny-first check it is, not a canEditDept() detour —
 // canEditDept() returns true for admin roles regardless of department
@@ -118,7 +111,7 @@ async function loadInvContent(currentUser, currentRole, sub) {
 // standing cautionary note on UI predicates broader than their rule.)
 function invCanWrite() {
   const r = window.currentRole;
-  if (r === 'partner' || r === 'secretary') return false;
+  if (r === 'secretary') return false;
   if (r === 'president' || r === 'manager' || r === 'finance') return true;
   return ['Inventory', 'Purchasing', 'Production', 'Finance'].some(d => (window.currentDepts || []).includes(d));
 }

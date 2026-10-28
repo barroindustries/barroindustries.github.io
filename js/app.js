@@ -32,17 +32,16 @@ function _uploadErrMsg(err) {
 let _reqPhotoFails    = 0;
 let _reqPhotoDeferred = false;
 let logoutTimer  = null;
-let selectedLoginType = null; // 'admin' | 'employee' | 'partner' — set on login card click
+let selectedLoginType = null; // 'admin' | 'employee' — set on login card click
 
 // Role → login type mapping
 const ROLE_TYPE_MAP = {
   president: 'admin', owner: 'admin', manager: 'admin', secretary: 'admin',
   // Finance (Accountant) is an employee-tier account everywhere else — employee
   // dashboard, employee sidebar/bottom nav — so it logs in via the Employee portal.
-  employee:  'employee', agent: 'employee', finance: 'employee',
-  partner:   'partner'
+  employee:  'employee', agent: 'employee', finance: 'employee'
 };
-const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee', partner: 'Partner' };
+const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee' };
 
 // ── Session lifecycle registry (Phase 65) ─────────
 // Central place for anything tied to the signed-in session — timers, live
@@ -159,6 +158,17 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // ── PARTNER-REMOVAL-SPEC §3.2 retired-role gate ─────────────────────
+      // The external partner feature is retired. Until the data purge (Phase 2)
+      // deletes the accounts themselves, refuse the role here exactly like the
+      // removed flag above (same screen, same sign-out, ahead of the idempotency
+      // guard). Case-insensitive: production carries 'Partner' drift. WS-H deletes this.
+      if (String(currentRole || '').trim().toLowerCase() === 'partner') {
+        showRemovedUserScreen();
+        auth.signOut().catch(()=>{});
+        return;
+      }
+
       // ── Idempotency guard ─────────────────────────
       // Same signed-in user that is already bootstrapped (e.g. token refresh):
       // refresh auth state but SKIP the disruptive re-bootstrap.
@@ -206,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       if (!(window.isLaidOff && window.isLaidOff())) Notifs.checkDeadlines(user.uid);
-      if (userProfile.role !== 'partner' && !(window.isLaidOff && window.isLaidOff()) && !window.isAttendanceExempt(userProfile)) Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
+      if (!(window.isLaidOff && window.isLaidOff()) && !window.isAttendanceExempt(userProfile)) Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
       Notifs.checkLowStock?.(user.uid, userProfile.role);
       Notifs.checkAECFollowups?.(user.uid, userProfile.role);
       checkPayrollDuties(user);
@@ -575,7 +585,7 @@ async function checkPayrollDuties(user) {
     // this exact users/{uid} doc — re-fetching it here was a pure duplicate
     // read fired on every single sign-in (re-audit 2026-08-03).
     const role = window.currentRole;
-    if (role === 'president' || role === 'owner' || role === 'partner') return;
+    if (role === 'president' || role === 'owner') return;
 
     const todayStr = bizDate();
     const year   = parseInt(todayStr.slice(0,4),10);
@@ -1075,27 +1085,17 @@ async function loadUserProfile(user) {
       const paySnap = await payrollPromise;
       if (paySnap && paySnap.exists) userProfile = { ...userProfile, ...paySnap.data() };
     } catch(e) { /* no own payroll doc yet → pay reads as 0 */ }
-    // Lowercased: window.ROLES is canonically lowercase and EVERY role compare
-    // in the app is `currentRole === 'partner'`-style, but production docs carry
-    // drift ('Partner', 'Manager'). An un-normalised 'Partner' matched nothing —
-    // ROLE_TYPE_MAP[currentRole] fell through to 'employee' so they were bounced
-    // off the Partner login portal, ROLES[currentRole].label lost their badge,
-    // and the mandatory-photo gate's partner exemption missed them, trapping the
-    // one role it is explicitly not for. Normalising here fixes all of it at the
-    // single point where the role enters the app. userProfile.role keeps the raw
-    // stored value; this does not rewrite the doc.
-    // DELIBERATELY NOT lowercased. Production really does contain role drift
-    // ('Partner', 'Manager') and normalising HERE looks like the tidy fix, but it
-    // is only half a fix and the dangerous half: firestore.rules compares
-    // getRole() against exact lowercase literals, so a 'Manager' record is denied
-    // by the SERVER no matter what the client believes. Normalising client-side
-    // would hand that user the manager navigation and admin screens while every
-    // write they attempt is refused — swapping a coherent "you are an employee"
-    // for an incoherent "you are a manager whose every action fails". Today the
-    // two agree; that is worth more than papering over the drift.
+    // DELIBERATELY NOT lowercased: currentRole is the raw stored value
+    // (userProfile.role). Production really does contain role drift ('Manager')
+    // and normalising HERE looks like the tidy fix, but it is only half a fix and
+    // the dangerous half: firestore.rules compares getRole() against exact
+    // lowercase literals, so a 'Manager' record is denied by the SERVER no matter
+    // what the client believes. Normalising client-side would hand that user the
+    // manager navigation and admin screens while every write they attempt is
+    // refused — swapping a coherent "you are an employee" for an incoherent "you
+    // are a manager whose every action fails". Today the two agree; that is worth
+    // more than papering over the drift.
     // The DATA is the defect and is fixed in the data (see BETA-REVIEW notes).
-    // Only the photo gate's partner EXEMPTION compares case-insensitively, and
-    // only because being more exempt from a photo grants no privilege.
     currentRole  = userProfile.role;
     // Support both old string 'department' and new array 'departments'
     if (Array.isArray(userProfile.departments) && userProfile.departments.length) {
@@ -1153,15 +1153,15 @@ function applyUserUI() {
   const sd = document.getElementById('sidebar-user-dept');
   if (sd) sd.textContent = currentDepts.join(' · ') || '';
 
-  // Profile photo is MANDATORY for non-partners — it's required to issue the
-  // Barro Industries company ID. External partners are exempt (no company ID).
-  // Show a blocking gate until a photo is set; it's idempotent + self-guards.
-  if (!userProfile.photoUrl && currentRole && String(currentRole).toLowerCase() !== 'partner') {
+  // Profile photo is MANDATORY — it's required to issue the Barro Industries
+  // company ID. Show a blocking gate until a photo is set; it's idempotent +
+  // self-guards.
+  if (!userProfile.photoUrl && currentRole) {
     _reqPhotoTimer = setTimeout(requireProfilePhoto, 800);
   }
 }
 
-// Blocking gate: a non-partner with no profile photo must upload one before
+// Blocking gate: a user with no profile photo must upload one before
 // using the app, because the digital company ID can't be generated without it.
 function requireProfilePhoto() {
   _reqPhotoTimer = 0;
@@ -1173,12 +1173,7 @@ function requireProfilePhoto() {
   // authenticated user. Checking auth.currentUser is the only honest test.
   try { if (!auth || !auth.currentUser) return; } catch (_) { return; }
   if (!userProfile || userProfile.photoUrl) return;       // already set
-  // Lowercased compare as well as the normalisation in loadUserProfile: a
-  // users doc carrying role 'Partner' (capital P — real drift in production)
-  // used to miss this exemption and trap the one class of user the gate is
-  // explicitly not for.
-  const role = String(currentRole || '').toLowerCase();
-  if (role === 'partner' || !role) return;                // partners exempt
+  if (!currentRole) return;                               // no role yet — nothing to gate
   if (_reqPhotoDeferred) return;                          // user chose to continue without one (see below)
   if (document.getElementById('req-photo-overlay')) return;
   const ov = document.createElement('div');
@@ -1399,7 +1394,7 @@ function initLogin() {
   // element, which blocked the auth listener from attaching → app stuck on splash.)
   localStorage.removeItem('bi-guest-name');
 
-  // Role picker cards (admin / employee / partner)
+  // Role picker cards (admin / employee)
   document.querySelectorAll('.login-role-card[data-type]').forEach(card => {
     card.addEventListener('click', () => {
       const type = card.dataset.type;
@@ -1680,9 +1675,9 @@ function getTheme() {
 // ── Navigation ────────────────────────────────────
 function buildNav() {
   buildSidebarNav(); buildBottomNav(); buildTopNavStrip();
-  // Global search is internal-only — show the topbar magnifier for everyone except partners / Brilliant-Steel-only
+  // Global search is internal-only — show the topbar magnifier for everyone except Brilliant-Steel-only staff (and the laid off)
   const gs = document.getElementById('global-search-btn');
-  if (gs) { gs.style.display = (isPartner() || isBrilliantOnly() || (window.isLaidOff && window.isLaidOff())) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
+  if (gs) { gs.style.display = (isBrilliantOnly() || (window.isLaidOff && window.isLaidOff())) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
   // v12 WS42 nav-consolidation — the standalone topbar-depts-btn (grid icon)
   // and topbar-chat-btn were removed: Chat is already a center top-nav-strip
   // tab, and departments stay reachable via the persistent sidebar (each of
@@ -1698,7 +1693,6 @@ function buildNav() {
 }
 
 function isPresident() { return currentRole === 'president'; }
-function isPartner() { return currentRole === 'partner'; }
 // v14 re-audit fix — the role pickers on Invite Team Member (js/screens/
 // people.js), Add Employee Profile and Create Worker Account (js/screens/
 // dashboards.js) all rendered window.ROLES unfiltered, so a MANAGER could mint
@@ -1722,36 +1716,23 @@ window.assignableRoles = function () {
 // bridge, attendance_worker schema, geofencing).
 function isTypeBWorker() { return !!(window.userProfile && userProfile.payClass === 'production'); }
 function isBrilliantOnly() { return currentDepts.length === 1 && currentDepts[0] === 'Brilliant Steel'; }
-// A Brilliant Steel partner gets the BS-locked portal (their pricing, client book,
-// 50/50 split). A generic partner is any other company doing projects WITH Barro —
-// they get a company-branded portal: their affiliated projects + quote generation.
-function isBrilliantPartner() { return isPartner() && currentDepts.includes('Brilliant Steel'); }
-function isGenericPartner()   { return isPartner() && !currentDepts.includes('Brilliant Steel'); }
-// Display name of the partner's own company (set by the President on the user doc).
-function partnerCompanyName() {
-  return (window.userProfile && userProfile.company) ||
-         (currentDepts.includes('Brilliant Steel') ? 'Brilliant Steel' : 'Partner');
-}
 
 // v14 C1 — which NAV_REGISTRY variant bucket the signed-in user's chrome comes
 // from. SAME branch order as the pre-C1 getSidebarItems/_primaryNavItems
-// (admin → generic-partner → partner → brilliant-only → staff) so every
-// existing role/dept combination resolves to the identical bucket it did before.
+// (admin → brilliant-only → workerB → staff) so every existing role/dept
+// combination resolves to the identical bucket it did before.
 function _navVariant() {
   // LAYOFF-SPEC — layoff lockdown beats every other variant, including admin
   // and Type-B: whoever is laid off gets the minimal chrome, full stop.
   if (window.isLaidOff && window.isLaidOff()) return 'laidOff';
   const pres = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   if (pres) return 'admin';
-  const partner = isPartner();
-  if (partner && isGenericPartner()) return 'genericPartner';
-  if (partner) return 'partnerBS';
   if (isBrilliantOnly()) return 'bsOnly';
   // Type-B (Production, weekly self-service worker) — checked after the
-  // admin/partner branches above (an admin or partner never resolves here in
-  // practice, but this keeps the same "higher tiers win" order the rest of
-  // this function already follows) so their own chrome is never downgraded
-  // to the minimal Home/Chat/Profile bar meant for a production floor worker.
+  // admin branch above (an admin never resolves here in practice, but this
+  // keeps the same "higher tiers win" order the rest of this function already
+  // follows) so their own chrome is never downgraded to the minimal
+  // Home/Chat/Profile bar meant for a production floor worker.
   if (isTypeBWorker()) return 'workerB';
   return 'staff';
 }
@@ -1890,10 +1871,10 @@ function _primaryNavItems() {
 
 // v14 mobile-shell batch (ruled decision N3, never implemented until now) —
 // cap the bar at 5 tabs: the first 4 items in today's order + a 'More' tab
-// whenever a variant has more than 5 (today that's 'admin' and 'bsOnly';
-// 'genericPartner'/'partnerBS'/'staff' already sit at exactly 5 after
-// _primaryNavItems() strips Profile, so they render unchanged — no More tab,
-// nothing collapses, and every item keeps its own roomy column).
+// whenever a variant has more than 5 after _primaryNavItems() strips Profile
+// (today that's 'admin' and 'staff'; 'bsOnly' sits at exactly 5, so it renders
+// unchanged — no More tab, nothing collapses, and every item keeps its own
+// roomy column).
 function _bottomNavSplit(items) {
   if (items.length <= 5) return { visible: items, more: [] };
   return { visible: items.slice(0, 4), more: items.slice(4) };
@@ -2233,29 +2214,17 @@ function renderQuoteBuilderIframe() {
   // navigation stay visible (navigateTo replaces this when leaving the builder).
   const c = document.getElementById('page-content');
   if (!c) return;
-  // Only PARTNER-role accounts (external people) get the locked-down builder.
-  // Owner ruling 2026-09-01: internal staff whose only department is Brilliant
-  // Steel are Barro employees — they get the full builder (calculator, BOM,
-  // Estimator) like any other internal user; the old isBrilliantOnly() lock
-  // wrongly caught them ("when brilliant steel is toggled, they cant see the
-  // calculator … they also cant see bom"). External BS accounts are role
-  // 'partner', so nothing leaks: the portal lock, the BI-pill refusal in the
-  // save bridge below, and firestore.rules all still key on isPartner().
+  // Every signed-in user gets the full builder. Internal staff whose only
+  // department is Brilliant Steel are Barro employees (owner ruling 2026-09-01).
+  // The external partner portal was retired (PARTNER-REMOVAL-SPEC).
   // Catalog capital costs stay rules-gated regardless (product_costs is
   // senior-admin/finance) — a plain employee sees the calculator and their
   // own per-quote BOMs, not the protected catalog cost basis.
-  const partnerMode = (typeof isPartner === 'function' && isPartner());
-  let qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
-  if (typeof isGenericPartner === 'function' && isGenericPartner()) {
-    const p = window.userProfile || {};
-    const qs = new URLSearchParams({
-      portal: 'partner',
-      pcoName: (p.company || 'Partner'),
-      pcoContact: (p.phone || ''),
-      pcoSig: (p.displayName || '')
-    });
-    qbSrc = 'quote-builder-v2.html?' + qs.toString();
-  }
+  let qbSrc = 'quote-builder-v2.html';
+  // The Brilliant Steel department's Quote Builder page starts the builder on the Brilliant Steel pill: ?co=BS is the hint (the builder
+  // honours BK / BI / BS only, and only for a fresh boot — a reopened or revised quote brings its own company, see bootCompany() there).
+  // The Barro Kitchens page sends nothing and the builder starts on Barro Kitchens, as ever.
+  if (window.currentPage === 'bs-quote-builder') qbSrc += '?co=BS';
   // A "Reopen" action from the Quotations list stashes the quote's editable
   // snapshot here — load it into the builder once the iframe is ready.
   const reopenState = window._qbReopenState; window._qbReopenState = null;
@@ -2275,13 +2244,13 @@ function renderQuoteBuilderIframe() {
   // (_qbIsAuthoritativeLoad, below). Quick Estimate's hand-off still sets neither, so its draft prompt is untouched.
   if (_qbIsAuthoritativeLoad(reopenState)) qbSrc += (qbSrc.includes('?') ? '&' : '?') + 'reopen=1';
   const reopenAsRevision = window._qbReopenAsRevision; window._qbReopenAsRevision = false;
-  // President-review mode: editing a partner's quote to hand it back. The edits
-  // are saved to the SAME (partner-owned) quote doc, not a new president copy.
+  // President-review mode: editing a submitted quote to hand it back. The edits
+  // are saved to the SAME (submitter-owned) quote doc, not a new president copy.
   const reviewCtx = window._qbReviewContext; window._qbReviewContext = null;
   const reviewBanner = reviewCtx ? `
     <div id="qb-review-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
-      <div style="flex:1;min-width:180px;font-size:12px"><strong>Reviewing ${escHtml(reviewCtx.quoteNumber||'partner quote')}</strong> for ${escHtml(reviewCtx.clientName||'')} — edit the line items, then save it back to the partner.</div>
-      <button class="btn-primary btn-sm" id="qb-return-edit">${emojiIcon('↩',16)} Save edits &amp; Return to Partner</button>
+      <div style="flex:1;min-width:180px;font-size:12px"><strong>Reviewing ${escHtml(reviewCtx.quoteNumber||'this quote')}</strong> for ${escHtml(reviewCtx.clientName||'')} — edit the line items, then save it back.</div>
+      <button class="btn-primary btn-sm" id="qb-return-edit">${emojiIcon('↩',16)} Save edits &amp; Return</button>
       <button class="btn-success btn-sm" id="qb-approve-edit">${emojiIcon('✅',16)} Save edits &amp; Approve</button>
     </div>` : '';
   // On phones/tablets (≤768px) the builder goes fullscreen via
@@ -2291,7 +2260,7 @@ function renderQuoteBuilderIframe() {
   // builder has its own chrome, so body.qb-desktop zeroes .main-content's
   // padding and the iframe takes the whole content area (sizing in styles.css).
   // A reopened quote keeps a one-line strip so "editing a copy" vs "new
-  // revision" stays visible; a partner review keeps its banner.
+  // revision" stays visible; a review keeps its banner.
   const isMobile = _qbIsMobile();
   // The strip's wording comes from _qbReopenStripLabel (below): "new revision", "resuming a saved draft" (QB-DRAFTS-SPEC-2026-09-11 —
   // a draft resume carries draftDocId but no sourceDocId, so no revision chain), "from a website request" (the §6.6 hand-off) or
@@ -2352,15 +2321,15 @@ function requestBuilderState(frame, timeoutMs = 4000) {
   });
 }
 
-// Save the president's edits back onto the partner's OWN quote doc (not a new copy),
-// then approve it or return it for revision, and notify the partner.
+// Save the president's edits back onto the submitter's OWN quote doc (not a new copy),
+// then approve it or return it for revision, and notify the submitter.
 async function saveReviewedPartnerQuote(ctx, action) {
   const frame = document.getElementById('qb-frame');
   let payload;
   try { payload = await requestBuilderState(frame); }
   catch (e) { Notifs.showToast('Could not read the edited quote — try again', 'error'); return; }
   const notes = action === 'return'
-    ? ((await promptDialog({message:'Notes for the partner (what changed / what to confirm)?', multiline:true})) || '')
+    ? ((await promptDialog({message:'Notes for the submitter (what changed / what to confirm)?', multiline:true})) || '')
     : '';
   const update = {
     clientName:    payload.clientName || ctx.clientName || '',
@@ -2398,7 +2367,7 @@ async function saveReviewedPartnerQuote(ctx, action) {
         : { title:'↩ Quote Revised & Returned', body:`The president edited "${ctx.quoteNumber}" for ${update.clientName} and returned it.${notes?' Notes: '+notes:''} Open it to review the changes.`, icon:'✎', type:'quote_returned', link: quoteLink }).catch(()=>{});
     }
     window.logAudit && window.logAudit('update','quote',ctx.quoteId,{ presidentEdited:true, action });
-    Notifs.success(action === 'approve' ? 'Approved with edits + partner notified' : 'Edited & returned to partner');
+    Notifs.success(action === 'approve' ? 'Approved with edits + submitter notified' : 'Edited & returned');
     navigateTo('approvals');
   } catch (ex) { Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error'); }
 }
@@ -2410,8 +2379,8 @@ async function saveReviewedPartnerQuote(ctx, action) {
 // index AND name both still match (the quote may have been edited by an
 // older client since the sidecar was written — a half-stale graft must
 // never land costs on the wrong line). Silent no-op when the sidecar is
-// absent, or rules deny the read (partner sessions) — the reopen then
-// behaves exactly as before this feature.
+// absent, or rules deny the read — the reopen then behaves exactly as before
+// this feature.
 async function graftQuoteCosts(collection, docId, state){
   try {
     if (!state || !Array.isArray(state.items) || !state.items.length) return;
@@ -2501,8 +2470,7 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
 
     // Gather every quote in the SAME revision chain so the revision continues
     // from the most recent one. Reading with scoped queries can fail for
-    // scoped roles (e.g. partners) — fall back to just the clicked quote in
-    // that case.
+    // scoped roles — fall back to just the clicked quote in that case.
     let pool = [clicked];
     try {
       let mine = [];
@@ -2612,7 +2580,7 @@ async function fetchCatalogFile() {
 // v14 re-audit HIGH fix — capitalMaterials/capitalLabor/bom (Barro's cost
 // basis) no longer live on the products doc (see firestore.rules + the
 // migrateProductCostsOut migration in js/migrations.js); they live in
-// product_costs/{docId}, readable only by finance/admin (never partner).
+// product_costs/{docId}, readable only by finance/admin.
 // This cache is refreshed by seedCatalogIfNeeded() below every time the
 // (isPresident()-gated) Product Database screen loads, and normalizeProduct()
 // merges it in. A non-finance/admin session simply gets a permission-denied
@@ -2826,7 +2794,7 @@ const _SKELETON_KIND = {
   'my-dept': 'cards', departments: 'cards', team: 'cards',
   'team-directory': 'cards', 'my-profile': 'cards',
   'system-health': 'cards', 'files-hub': 'cards',
-  'partner-projects': 'cards', 'projects-lifecycle': 'cards',
+  'projects-lifecycle': 'cards',
   // Tabular screens — these paint a <table> or a column-aligned list.
   'bs-quotations': 'table', 'bk-quotations': 'table', 'bs-clients': 'table',
   'sales-orders': 'table', inventory: 'table', 'cash-advances': 'table', 'personal-todo': 'rows',
@@ -2972,7 +2940,7 @@ async function navigateTo(page, opts) {
   if (page === 'dashboard') {
     if (window.isLaidOff && window.isLaidOff()) _pageScriptsKey = 'dashboard:layoff';
     else if (isTypeBWorker()) _pageScriptsKey = 'dashboard:workerB';
-    else if (isPartner() || isBrilliantOnly()) _pageScriptsKey = 'dashboard:partner';
+    else if (isBrilliantOnly()) _pageScriptsKey = 'dashboard:bsOnly';
   }
   try {
     await window.ensurePage(_pageScriptsKey);
@@ -3035,7 +3003,6 @@ async function navigateTo(page, opts) {
     case 'progress':         renderProgressReports(); break;
     case 'bs-quote-builder': renderQuoteBuilderIframe(); break;
     case 'bk-quote-builder': renderQuoteBuilderIframe(); break;
-    case 'partner-projects': renderPartnerProjects(); break;
     case 'notifications':    renderNotificationsPage(); break;
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
@@ -3113,9 +3080,9 @@ function setActiveNav(page) {
 // getAllQuotes + renderDashboard (role dispatcher) + liveDateTime +
 // renderPresidentDashboard/renderManagerDashboard/renderSecretaryDashboard/
 // renderFinanceDashboard/renderEmployeeDashboard — moved verbatim to
-// js/screens/dashboards.js (Wave 7 Pass 9, 2026-08-03). renderPartnerDashboard
-// (Pass 6, partners.js) and the isBrilliantOnly() branch (renderBrilliantSteel,
-// partners.js) were already out of this file before this pass — confirmed.
+// js/screens/dashboards.js (Wave 7 Pass 9, 2026-08-03). The isBrilliantOnly()
+// branch (renderBrilliantSteel, partners.js) was already out of this file
+// before this pass — confirmed.
 // The 'dashboard' case in navigateTo below still calls renderDashboard() as a
 // bare global; departments.js/people.js reach forward into getAllQuotes the
 // same way (typeof-guarded, already defensive before this move).
@@ -3479,22 +3446,9 @@ function renderDeptModule(dept) {
     case 'Inventory':                  window.renderInventoryDept?.(currentUser, currentRole); break;
     case 'Brilliant Steel':            renderBrilliantSteel(currentUser, currentRole); break;
     case 'Government Biddings':        renderGovBiddings(); break;
-    case 'Partners':                   renderPartnersDept(); break;
     default:                           renderGenericDept(dept); break;
   }
 }
-
-// Partners department (renderPartnersDept, loadPartnersDeptTab) — moved
-// verbatim to js/screens/partners.js (Wave 7 Pass 6, 2026-08-03).
-// renderDeptModule's 'Partners' case above still calls renderPartnersDept()
-// as a bare global identifier — same cross-file, runtime-only resolution
-// every other pass documents. See partners.js's header for the full
-// contents list and the parity-audit findings across the 3 partner portal
-// variants (bsOnly/partnerBS/genericPartner).
-
-// Partner Deal Modal (_showAddDealModal) — moved verbatim to
-// js/screens/partners.js (Wave 7 Pass 6, 2026-08-03), next to
-// loadPartnersDeptTab's 'deals' chip, its only caller.
 
 // renderSOPs + openSOPEditor — moved verbatim to js/screens/dashboards.js
 // (Wave 7 Pass 9, 2026-08-03). The 'sops' case in navigateTo below still
@@ -3730,11 +3684,11 @@ function openProfileDrawer() {
     <div class="profile-section-label">MORE</div>
     <div class="profile-inset-card" style="padding:4px 8px">
       ${(() => {
-        const isPartnerU = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+        const isBsOnlyU = (typeof isBrilliantOnly==='function' && isBrilliantOnly());
         const isHolidaysAdmin = ['president','manager','secretary','finance'].includes(currentRole);
         const links = [
-          { icon:'🌴', label:'Leave', page:'leave', hide: isPartnerU },
-          { icon:'📅', label:'Attendance', page:'attendance', hide: isPartnerU },
+          { icon:'🌴', label:'Leave', page:'leave', hide: isBsOnlyU },
+          { icon:'📅', label:'Attendance', page:'attendance', hide: isBsOnlyU },
           { icon:'🗓️', label:'Holidays Admin', page:'holidays', hide: !isHolidaysAdmin },
           { icon:'📖', label:'SOPs', page:'sops' },
           { icon:'❓', label:'Help & Guide', page:'help' },
@@ -4777,9 +4731,8 @@ window.Keymap = (function () {
 
   function openSearch(e) {
     // THIRD entry point into the search page (topbar button + renderGlobalSearch's
-    // own guard are the other two) — repeat the partner/BS-only block here too.
-    const blocked = (typeof isPartner === 'function' && isPartner()) ||
-                    (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+    // own guard are the other two) — repeat the BS-only block here too.
+    const blocked = (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
     if (blocked) return false;
     if (e) e.preventDefault();
     navigateTo('search');
@@ -5007,8 +4960,7 @@ window.Keymap = (function () {
   function maybeShowFirstRunHint() {
     try {
       if (localStorage.getItem('bi-kbd-hint-seen')) return;
-      const blocked = (typeof isPartner === 'function' && isPartner()) ||
-                      (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+      const blocked = (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
       if (blocked) return;
       if (window.Notifs && Notifs.showToast) Notifs.showToast('Tip: press ? for keyboard shortcuts', 'success');
       localStorage.setItem('bi-kbd-hint-seen', '1');
@@ -5087,7 +5039,7 @@ window.fitKpiValues = function(root){
 
 // The Mini Calendar (_calMonthOffset/renderMiniCal), renderAccessDenied,
 // formatNum, the Suggestion Box (renderSuggestionBox/loadSuggestions), and
-// Help (renderHelp/renderHelpAdmin/renderHelpEmployee/renderHelpPartner) —
+// Help (renderHelp/renderHelpAdmin/renderHelpEmployee/renderHelpBrilliantSteel) —
 // moved verbatim to js/screens/dashboards.js (Wave 7 Pass 9, 2026-08-03).
 // renderPresidentDashboard/renderEmployeeDashboard (also in dashboards.js)
 // call renderMiniCal by bare name; renderProgressReports/renderDepartments/
@@ -5102,7 +5054,7 @@ window.fitKpiValues = function(root){
 // from this file's own source. Everything the builder iframe posts is untrusted until it has been through _qbCleanSourceRef /
 // _qbCleanEstimateCheck: only the exact keys come out, and only finite numbers, booleans and short strings. The ref pattern is
 // pinned to its kind (a 'qr' link can only ever name a QR- reference), so a forged message cannot point a write at another
-// collection's document. Partner sessions never carry a link (the request screens are not theirs; firestore.rules agree).
+// collection's document.
 const QB_SOURCE_REF_RE = { qr: /^QR-\d{6}-[A-Z0-9]{6}$/, cir: /^CIR-\d{6}-[A-Z0-9]{6}$/ };
 function _qbCleanSourceRef(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
@@ -5138,7 +5090,6 @@ window.linkQuoteToRequest = async function (sourceRef, info) {
     const q = (info && typeof info === 'object') ? info : {};
     const docId = (typeof q.docId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(q.docId)) ? q.docId : '';
     if (!sr || !docId || !window.QUOTE_COLLECTIONS.includes(q.coll)) return false;
-    if (typeof isPartner === 'function' && isPartner()) return false;
     const FV = firebase.firestore.FieldValue;
     const reqRef = db.collection(sr.kind === 'qr' ? 'quote_requests' : 'client_info_requests').doc(sr.ref);
     const snap = await reqRef.get();
@@ -5189,7 +5140,6 @@ window.linkQuoteToRequest = async function (sourceRef, info) {
 window.openQuoteSource = async function (sourceRef) {
   const sr = _qbCleanSourceRef(sourceRef);
   if (!sr) return false;
-  if (typeof isPartner === 'function' && isPartner()) return false;
   const isQr = sr.kind === 'qr';
   await navigateTo('dept:Sales', { subtab: isQr ? 'Quote requests' : 'Briefs' });
   const open = isQr ? window.qrOpen : window.cirOpen;
@@ -5212,28 +5162,8 @@ window.addEventListener('message', async (e) => {
   const { type, payload, docId, collection } = e.data || {};
   if (!payload || !currentUser || !db) return;
 
-  // Barro Industries (company:'BI') is the parent company's own general-
-  // fabrication identity — INTERNAL ONLY. quote-builder-v2.html already removes
-  // the pill and locks setCompany() for partner sessions, and firestore.rules
-  // denies partners bk_quotes outright (where BI quotes are filed), so this is
-  // the third and last line of the same defence: refuse the message here rather
-  // than let a forged/stale partner payload reach a write that would just fail
-  // silently at the rules layer.
-  const _payloadCo = (payload && (payload.company || payload.co)) || '';
-  // Must match the condition that LAUNCHES the locked builder (see
-  // renderQuoteBuilderIframe): isPartner() ONLY, since the owner's 2026-09-01
-  // ruling un-locked internal Brilliant-Steel-department staff — they are
-  // Barro employees and may quote as any internal company. External accounts
-  // are role 'partner' and still hit this refusal + the rules backstop.
-  const _qbPartner = (typeof isPartner === 'function' && isPartner());
-  if (_payloadCo === 'BI' && _qbPartner) {
-    console.warn('[QB bridge] partner session attempted to file as Barro Industries — refused');
-    Notifs?.showToast && Notifs.showToast('Partners cannot quote as Barro Industries.', 'error');
-    return;
-  }
-
   // QUOTE-BUILDER-CONFIGURATOR-SPEC §6.5: "Open request" in the builder's hand-off bar. No write, so it needs no costSidecar / collection;
-  // openQuoteSource re-validates the ref (kind-pinned pattern) and refuses partner sessions.
+  // openQuoteSource re-validates the ref (kind-pinned pattern).
   if (type === 'QB_OPEN_SOURCE') {
     try { await window.openQuoteSource(payload.sourceRef); }
     catch (err) { console.warn('[QB bridge] QB_OPEN_SOURCE failed', err); }
@@ -5243,14 +5173,13 @@ window.addEventListener('message', async (e) => {
   // QUOTE-COSTS (owner ruling 2026-09-21): the builder ships the cost basis
   // its payload strip removes (BOM rows, lump materials, crew-days, capital
   // costs) as e.data.costSidecar — persist it PRIVATELY in
-  // quote_costs/<coll>_<docId> (internal-only firestore.rules; partners
-  // denied) so an internal reopen/resume can graft the costing back onto the
-  // quote. Best-effort by design: it never blocks or fails the quote write
-  // it rides with (pre-rules-deploy or partner sessions just skip).
+  // quote_costs/<coll>_<docId> (internal-only firestore.rules) so an internal
+  // reopen/resume can graft the costing back onto the quote. Best-effort by
+  // design: it never blocks or fails the quote write it rides with
+  // (pre-rules-deploy just skips).
   const saveCostSidecar = async (coll, id) => {
     const sc = e.data.costSidecar;
     if (!sc || !Array.isArray(sc.items) || !sc.items.length || !coll || !id) return;
-    if (_qbPartner) return;   // partners never carry cost data; never write the private store
     try {
       await db.collection('quote_costs').doc(coll + '_' + id).set({
         ...sc, quoteColl: coll, quoteDocId: id,
@@ -5362,9 +5291,9 @@ window.addEventListener('message', async (e) => {
       const name = String(payload.name || '').trim().slice(0, 80);
       const state = payload.state;
       // Narrow to a KNOWN company code (the registry in js/config.js) so a
-      // template can't be tagged with an arbitrary string; anything else —
-      // including a generic partner's 'PT' — still falls back to 'BK' exactly
-      // as before. 'BI' (Barro Industries / general fabrication) now survives.
+      // template can't be tagged with an arbitrary string; anything else still
+      // falls back to 'BK' exactly as before. 'BI' (Barro Industries / general
+      // fabrication) now survives.
       const co = window.QUOTE_COMPANIES[payload.co] ? payload.co : 'BK';
       if (!name || !state || typeof state !== 'object') {
         Notifs?.showToast && Notifs.showToast('Could not save template — missing a name or quote data.', 'error');
@@ -5450,9 +5379,9 @@ window.addEventListener('message', async (e) => {
         // QUOTE-BUILDER-CONFIGURATOR-SPEC §3.2 — the link to the website request / brief this quote came from, and the estimate-range check
         // filed with it. Written ONLY when the builder sent the key (a builder page still cached from before this feature sends neither, and
         // must not blank a link the quote already has — respondToQuote reads it to move the request to 'converted'); both pass through the
-        // allowlist sanitisers, and a partner session never carries either.
-        ...((!_qbPartner && Object.prototype.hasOwnProperty.call(payload, 'sourceRef')) ? { sourceRef: _qbCleanSourceRef(payload.sourceRef) } : {}),
-        ...((!_qbPartner && Object.prototype.hasOwnProperty.call(payload, 'estimateCheck')) ? { estimateCheck: _qbCleanEstimateCheck(payload.estimateCheck) } : {}),
+        // allowlist sanitisers.
+        ...(Object.prototype.hasOwnProperty.call(payload, 'sourceRef') ? { sourceRef: _qbCleanSourceRef(payload.sourceRef) } : {}),
+        ...(Object.prototype.hasOwnProperty.call(payload, 'estimateCheck') ? { estimateCheck: _qbCleanEstimateCheck(payload.estimateCheck) } : {}),
         // rootQuoteId/parentQuoteId are deliberately NOT touched here — this is
         // the SAME doc being edited, its place in the revision chain doesn't change.
         editedAt:       firebase.firestore.FieldValue.serverTimestamp(),
@@ -5463,7 +5392,7 @@ window.addEventListener('message', async (e) => {
       await saveCostSidecar(collection, docId);   // QUOTE-COSTS — in-place edit refreshes the private cost basis
       // §8.1 — best-effort, never fails the update: refresh this quote's entry on the request / brief it came from (no status / version /
       // number given: the entry keeps what filing recorded).
-      await window.linkQuoteToRequest(_qbPartner ? null : payload.sourceRef, { docId, coll: collection, quoteNumber: payload.quoteNumber, total: payload.total, byName: agentName });
+      await window.linkQuoteToRequest(payload.sourceRef, { docId, coll: collection, quoteNumber: payload.quoteNumber, total: payload.total, byName: agentName });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
       // QB-DRAFTS-SPEC-2026-09-11 — this session may have also picked up a
       // NAMED draft doc along the way (e.g. saved a draft, then reopened and
@@ -5542,10 +5471,10 @@ window.addEventListener('message', async (e) => {
       // Full editable snapshot — lets the quote be re-opened and edited from the Quotations tab
       editableState:  payload.editableState || null,
       // QUOTE-BUILDER-CONFIGURATOR-SPEC §3.2 — which website request / project brief this quote came from, and the estimate-range check
-      // filed with it (null when there is none). Sanitised to the exact keys; a partner session never carries either. The same `data`
+      // filed with it (null when there is none). Sanitised to the exact keys. The same `data`
       // serves QUOTE_FILED and QUOTE_APPROVAL_REQUESTED below, so both paths carry them.
-      sourceRef:      _qbPartner ? null : _qbCleanSourceRef(payload.sourceRef),
-      estimateCheck:  _qbPartner ? null : _qbCleanEstimateCheck(payload.estimateCheck),
+      sourceRef:      _qbCleanSourceRef(payload.sourceRef),
+      estimateCheck:  _qbCleanEstimateCheck(payload.estimateCheck),
       // Wave 3 Q5 — revision-chain links. parentQuoteId is null for a
       // from-scratch quote. rootQuoteId is patched to the new doc's own id
       // below when this is the first-ever filing in its chain (payload didn't
@@ -5556,7 +5485,7 @@ window.addEventListener('message', async (e) => {
       agentName,
       createdBy:      currentUser.uid,
       createdByName:  agentName,
-      createdByRole:  currentRole || 'partner',
+      createdByRole:  currentRole || 'unknown',
       createdAt:      firebase.firestore.FieldValue.serverTimestamp(),
     };
 
@@ -5577,10 +5506,8 @@ window.addEventListener('message', async (e) => {
     data.fileName = data.quoteNumber + (version > 1 ? ` (${version})` : '');
 
     // Upsert into the UNIFIED client book and return the clientId to stamp on the
-    // quote (decision 3). Partners never write the internal CRM (decision 10) —
-    // their client names surface via the hub's "From quotes" section instead.
+    // quote (decision 3).
     const upsertClient = async () => {
-      if (typeof isPartner === 'function' && isPartner()) return null;
       return await window.Clients.upsertFromQuote(data);
     };
 

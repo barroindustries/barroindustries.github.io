@@ -11,7 +11,7 @@
 //
 // Domain-table discoverability: some domains already have well-formed local
 // tables in departments.js (PROD_STAGES, CRM_STAGES, AEC_STAGES, DRAWING_
-// STATUSES, PURCH_STAT) or app.js (PARTNER_STAGE). We do NOT duplicate that
+// STATUSES, PURCH_STAT). We do NOT duplicate that
 // data here — statusBadge2() reads window.PROD_STAGES / window.PURCH_STAT
 // etc. directly when a caller asks for those domains, so there is exactly
 // one source of truth per table. Those tables aren't currently exposed on
@@ -184,7 +184,6 @@
     drawing:      () => window.DRAWING_STATUSES || [],
     crm_stage:    () => window.CRM_STAGES || [],
     aec_stage:    () => window.AEC_STAGES || [],
-    partner_stage:() => window.PARTNER_STAGE || {},
     pr_stage:     () => window.PURCH_STAT || {},
   };
 
@@ -195,7 +194,7 @@
   }
 
   // Normalizes both array-of-{id/value,label,badge} tables and plain
-  // {key:{label,badge}} object tables (e.g. PURCH_STAT, PARTNER_STAGE) into
+  // {key:{label,badge}} object tables (e.g. PURCH_STAT) into
   // one lookup shape.
   function findMeta(domain, id) {
     const table = resolveTable(domain);

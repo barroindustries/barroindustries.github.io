@@ -672,7 +672,7 @@ window.Meetings = (function () {
       const snap = await dbCachedGet('users', window.fetchUsersWithPayroll, 60000);
       snap.docs.forEach(d => {
         const u = d.data();
-        if (u.removed === true || u.role === 'partner') return;
+        if (u.removed === true) return;
         people.push({ uid: d.id, name: u.displayName || u.email || d.id });
       });
       people.sort((a, b) => a.name.localeCompare(b.name));

@@ -137,10 +137,10 @@ const CRM_FUNNEL_META = {
 // failed read painted a complete, confident page — every KPI 0, every funnel
 // row 0/0/0, and the green "✅ No follow-ups due — every lead is on track" —
 // pixel-identical to a CRM that genuinely has no leads in it, with no Retry.
-// The partner account the catches were written for is already refused at the
-// boundary (firestore.rules: aec_contacts/roc_leads `read: isAuth() &&
-// !isPartner()`), so they bought nothing there and cost the error state for
-// every real reader. Both directory tabs of this same feature —
+// The retired external-partner account the catches were written for was already
+// refused at the boundary (firestore.rules: the aec_contacts/roc_leads read
+// rule), so they bought nothing there and cost the error state for every real
+// reader. Both directory tabs of this same feature —
 // renderROCDirectory below and renderAECDirectory (sales.js) — have always
 // surfaced a failed read with a Retry; the Dashboard and Pipeline now agree
 // with their own siblings instead of contradicting them tab to tab.

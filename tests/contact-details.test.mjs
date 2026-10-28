@@ -243,10 +243,12 @@ describe('js/config.js PAGE_SCRIPTS — the configurator module loads on the pag
     });
   }
 
-  it('no partner page loads it (the configurator is not available in partner sessions — spec §2.5)', () => {
-    for (const page of ['dashboard:partner', 'dept:Brilliant Steel', 'bs-quotations', 'bs-clients', 'bs-files', 'dept:Partners', 'partner-projects']) {
+  it('no Brilliant Steel page loads it (the configurator is not offered on the Brilliant Steel pages)', () => {
+    for (const page of ['dashboard:bsOnly', 'dept:Brilliant Steel', 'bs-quotations', 'bs-clients', 'bs-files']) {
       assert.ok(Array.isArray(pageScripts()[page]), `${page} is not a PAGE_SCRIPTS key any more`);
       assert.ok(!pageScripts()[page].includes('js/qb-configured.js'), `${page} loads the configurator module`);
     }
+    // the retired external-partner pages are gone from the table altogether (PARTNER-REMOVAL-SPEC)
+    for (const page of ['dashboard:partner', 'dept:Partners', 'partner-projects']) assert.ok(!(page in pageScripts()), `${page} is a PAGE_SCRIPTS key again`);
   });
 });

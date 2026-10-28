@@ -129,7 +129,7 @@ async function safeNotify(fn) {
 window.Projects = (function() {
   function sumPayments(d) { return (d.payments || []).reduce((s, x) => s + (Number(x.amount) || 0), 0); }
   // Canonical shape: {id, kind, no, name, clientName, contractAmount, collected,
-  // arBalance, stage, payments, invoices, jobProjectId, partnerUid, createdAt, raw}
+  // arBalance, stage, payments, invoices, jobProjectId, createdAt, raw}
   function normalize(doc, kind) {
     const d = doc.data ? doc.data() : doc;
     const id = doc.id || d.id;
@@ -145,26 +145,19 @@ window.Projects = (function() {
       stage:     kind === 'job' ? (d.stage || '') : (d.status || ''),
       payments:  d.payments || [], invoices: d.invoices || [],
       jobProjectId: d.jobProjectId || null,
-      partnerUid: d.partnerUid || null,
       createdAt: d.createdAt || null,
       raw: d
     };
   }
-  // listAll(scope): scope.partner skips the internal Design board; scope.partnerUid
-  // filters job projects to that partner (mirrors the job_projects rule).
-  async function listAll(scope) {
-    scope = scope || {};
+  // listAll(): both collections in one list, cached (key invalidated on any project write).
+  async function listAll() {
     const fetch = async () => {
       const jobSnap = await db.collection('job_projects').get().catch(() => ({ docs: [] }));
-      const desSnap = scope.partner ? { docs: [] } : await db.collection('projects').get().catch(() => ({ docs: [] }));
-      let jobs = jobSnap.docs.map(d => normalize(d, 'job'));
-      if (scope.partnerUid) jobs = jobs.filter(j => j.partnerUid === scope.partnerUid);
+      const desSnap = await db.collection('projects').get().catch(() => ({ docs: [] }));
+      const jobs = jobSnap.docs.map(d => normalize(d, 'job'));
       const designs = desSnap.docs.map(d => normalize(d, 'design'));
       return [...jobs, ...designs];
     };
-    // Only the internal full list is cached (key invalidated on any project write);
-    // partner-scoped reads bypass the cache to avoid leaking across scopes.
-    if (scope.partner || scope.partnerUid) return fetch();
     return (typeof dbCachedGet === 'function') ? dbCachedGet('projects-unified', fetch, 30000) : fetch();
   }
   return { normalize, listAll, sumPayments };
@@ -1987,11 +1980,15 @@ window.RaiseFlow = (function () {
    exactly that.
 
    WHAT IT IS NOW. `periodExcluded` is that period's own exclusion map, read
-   from pay_runs/{month}.excluded. Of the five reasons a person is skipped, this
-   is the ONLY one that is period-scoped. The four permanent ones — partner,
-   removed from the system, production pay class, linked worker profile — stay
-   AHEAD of it in the same order, because three of them are the double-pay guard
-   and one is the owner's stated exception. Their 13 pinned tests are unchanged.
+   from pay_runs/{month}.excluded. Of the four reasons a person is skipped, this
+   is the ONLY one that is period-scoped. The three permanent ones — removed
+   from the system, production pay class, linked worker profile — stay AHEAD of
+   it in the same order, because they are the offboarding and double-pay guard.
+   Their 13 pinned tests are unchanged. (The external-partner exclusion that
+   used to be a fourth permanent one was retired 2026-10-28: Brilliant Steel
+   staff are Barro employees. Until the Phase-2 purge deletes them, a surviving
+   users doc with the retired role 'partner' is dropped from the roster by
+   window.isRetiredRoleUser in buildPayRunLines, before this function runs.)
 
    ⚠ ORDER IS LOAD-BEARING. `removed` must keep winning over an exclusion, so a
    person who left the company reads as "removed", not as "excluded this month".
@@ -2084,12 +2081,14 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
   overridesEff = overridesEff || {};
 
   const usersSnap = await fetchUsersWithPayroll();
-  // ONE definition, in js/config.js — this was a hand-duplicated copy of the
-  // HR roster's identical predicate, i.e. two copies of a rule that decides
-  // who gets paid. Now also covers the Partners department, which neither copy
-  // did (owner ruling 2026-08-12: no Brilliant Steel or Partners on payroll).
-  const isExternalPartner = (u) => window.isExternalPartnerUser(u);
-  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
+  // Everyone on `users` is a candidate (owner ruling 2026-10-28: Brilliant Steel
+  // staff are Barro employees; the external partner role is retired). Who is
+  // actually paid is decided by monthlyRunSkipReason below, never by department.
+  // The ONE exception, temporary: a surviving users doc with the retired role
+  // 'partner' is not a candidate (window.isRetiredRoleUser, js/config.js) until the
+  // Phase-2 purge deletes it. Role only — never a department or a title.
+  // PARTNER-REMOVAL-SPEC §3.2 retired-role — WS-H deletes this filter.
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!window.isRetiredRoleUser(u));
 
   // A regular-payroll uid can ALSO be paid weekly via a worker_profiles doc
   // (v12 WS20 D3, structural bridge — worker_profiles.linkedUid). Hard-skip
@@ -3912,12 +3911,11 @@ window.renderSalesOrders = async function(container){
         <td class="tc-detail" data-label="Priority">${(()=>{
           const pr = o.projectId ? projById[o.projectId] : null;
           if (!pr) return '<span style="font-size:11px;color:var(--text-muted)">—</span>';
-          // isPartner() can't write a job_project they don't own, and the star
-          // row is the only control here that isn't already gated — render it
-          // read-only for them rather than offering a tap that will be refused.
+          // Every viewer of this list is internal staff and may re-rank the
+          // job_project (the rule allows any signed-in staff a non-money write).
           return window.priorityStarPicker
             ? window.priorityStarPicker({ value: pr.priority, coll:'job_projects', id: pr.id,
-                                          editable: !(typeof isPartner==='function' && isPartner()), showLabel:false })
+                                          editable: true, showLabel:false })
             : escHtml(pr.priority||'—');
         })()}</td>
         <td class="tc-detail" data-label="Contract">₱${fmt(o.contractAmount||0)}</td>
@@ -5623,7 +5621,7 @@ function mplSlugCat(cat) {
 const mplCanEdit = () => {
   const r = window.currentRole;
   if (r === 'president' || r === 'manager' || r === 'finance') return true;
-  if (r === 'secretary' || r === 'partner') return false;
+  if (r === 'secretary') return false;
   return ['Purchasing', 'Finance'].some(d => (window.currentDepts || []).includes(d));
 };
 function mplStamp() { return today() + ' ' + new Date().toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }); }

@@ -625,8 +625,7 @@ window.FilesHub = {
     await db.collection('hub_files').doc(f.id).delete();
   },
   // ── Sharing. target = {type:'user'|'dept'|'role', id, label}; perm 'view'|'edit'.
-  // Dept/role targets are EXPANDED to uids NOW (decision 5); partners are excluded
-  // from dept/role expansion — a partner can only be shared to as an explicit user.
+  // Dept/role targets are EXPANDED to uids NOW (decision 5).
   async share(f, target, perm) {
     const FV = firebase.firestore.FieldValue;
     let uids = [];
@@ -634,7 +633,6 @@ window.FilesHub = {
     else {
       const us = await db.collection('users').get();
       us.docs.forEach(d => { const u = d.data();
-        if (u.role === 'partner') return;                  // WS19 guard, by construction
         if (target.type === 'dept' && (u.departments||[]).includes(target.id)) uids.push(d.id);
         if (target.type === 'role' && u.role === target.id) uids.push(d.id); });
     }

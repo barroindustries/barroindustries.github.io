@@ -992,16 +992,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       ? window.dbCachedGet('worker_profiles', () => db.collection('worker_profiles').get(), 60000)
       : db.collection('worker_profiles').get()).catch(()=>({docs:[]}))
   ]);
-  // Exclude ALL external partners from the monthly run — they are not Barro
-  // payroll. A partner can present as role 'partner', a Brilliant-Steel-only
-  // member (the partner company), OR a user titled "Partner" whose role is still
-  // 'employee'/'agent' (which is why the old role-only filter let them through).
-  // ONE definition, in js/config.js (window.isExternalPartnerUser) — the twin
-  // of this predicate lived in js/departments.js's buildPayRunLines and the two
-  // were kept in step by hand. Now also covers the Partners department (owner
-  // ruling 2026-08-12: no Brilliant Steel or Partners on payroll or HR).
-  const isExternalPartner = (u) => window.isExternalPartnerUser(u);
-  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
+  // Everyone on `users` (Brilliant Steel staff are Barro employees), minus — TEMPORARILY — a
+  // surviving users doc with the retired role 'partner' (window.isRetiredRoleUser, js/config.js).
+  // PARTNER-REMOVAL-SPEC §3.2 retired-role — WS-H deletes this filter.
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!window.isRetiredRoleUser(u));
   // ── THE DOUBLE-PAY GUARD, roster side ───────────────────────────
   // A person can be paid weekly by TWO independent facts, and the engine
   // (computePayRun, js/departments.js) honours both:

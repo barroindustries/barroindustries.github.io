@@ -65,7 +65,7 @@ input:not([type="checkbox"]):not([type="radio"]),select,textarea{
 input:not([type="checkbox"]):not([type="radio"]):focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue);}
 
 /* ── CHECKBOXES & RADIOS — the one place their size lives ──────────────────
-   This document is standalone (loaded in an <iframe> from Sales/Partners), so
+   This document is standalone (loaded in an <iframe> by the app's quote-builder pages), so
    the css/styles.css carve-out does NOT reach it; this is its local twin, and
    it matches that file's 16px baseline so a tick looks the same in the app and
    in the quote builder. 16px, not the UA's 13px: 13px is too small to hit
@@ -703,8 +703,7 @@ body.co-bs #commissionRow{display:none!important;}
     font-size:12.5px;font-weight:700;color:var(--gray-dark);cursor:pointer;min-height:40px;}
   .mtb-seg-btn.active{background:var(--dark-blue);color:white;}
   /* The Company row carries three LONG brand labels (Barro Kitchens / Barro
-     Industries / Brilliant Steel — or a generic partner's own company name,
-     which mtbSync() copies in at runtime). Three across truncates all of them
+     Industries / Brilliant Steel). Three across truncates all of them
      on a phone, so this one group stacks; Mode keeps its 3-up split because
      Client/Internal/Admin are short. */
   #mtbCoGroup .mtb-seg{flex-direction:column;}
@@ -1179,8 +1178,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
     <div class="toggle-pills">
       <button id="coBK" class="active" onclick="setCompany('BK')">🍳 Barro Kitchens</button>
       <!-- Barro Industries = the parent company, for GENERAL FABRICATION
-           quotes (railings, gates, structural, sheet metal). Internal only —
-           applyPartnerMode() removes this pill entirely for partner sessions. -->
+           quotes (railings, gates, structural, sheet metal). -->
       <button id="coBI" onclick="setCompany('BI')">🏗 Barro Industries</button>
       <button id="coBS" onclick="setCompany('BS')">⚙ Brilliant Steel</button>
     </div>
@@ -1208,8 +1206,8 @@ body.body-workforce #costMarginWrap{display:none!important;}
      trigger surface. Visibility of Internal/Admin/company rows is synced
      live off the real #btnInternal/#btnAdmin/#coBK DOM state in mtbSync()
      (called from openMobileSheet(), and from setCompany/setView/
-     toggleQuickMode/applyPartnerMode), so it always matches whatever the
-     desktop header currently allows for this role/portal. -->
+     toggleQuickMode), so it always matches whatever the desktop header
+     currently shows. -->
 <div class="mtb-overlay no-print" id="mtbOverlay" onclick="if(event.target===this) closeMobileSheet();">
   <div class="mtb-sheet" id="mtbSheet" role="menu" aria-label="Quote builder menu">
     <div class="mtb-sheet-hdr">
@@ -1262,9 +1260,8 @@ body.body-workforce #costMarginWrap{display:none!important;}
      Client-tab document preview shown in its place — see the CSS block above
      and renderClientPreview() in the script for how the swap works. ── -->
 <div id="internalWorkspace">
-<!-- Internal-deals-with-the-numbers toggle (owner ruling 2026-08-31). Hidden
-     for partners (applyPartnerMode removes it; partners always see the
-     document sections since client info is their editing surface). -->
+<!-- Internal-deals-with-the-numbers toggle (owner ruling 2026-08-31): the
+     document sections tuck behind #docDetailsBar below. -->
 <!-- Client-tab form bar (owner ruling 2026-08-31): the Client tab is the
      document FORM; this bar carries the 👁 Preview toggle. Visible only in
      client view (CSS above hides it elsewhere via .client-only). -->
@@ -1279,7 +1276,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
 
 <!-- ── HAND-OFF BAR (CONFIGURATOR §6.5) — shown when this quote was opened from a website quote request (QR-…) or a project brief
      (CIR-…): the reference, what the client told us, and the estimate range the client saw online. Deliberately NOT a .section, so the
-     Client-tab / Terms-tab CSS never hides it by accident; no-print, and absent for a partner. Rendered by renderHandoffBar(). ── -->
+     Client-tab / Terms-tab CSS never hides it by accident; no-print. Rendered by renderHandoffBar(). ── -->
 <div class="handoff-bar no-print" id="handoffBar" style="display:none;"></div>
 
 <!-- ── DRAFT RESUME BANNER (Wave 3 Q1) — localStorage had a non-empty unfiled
@@ -1439,7 +1436,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
   <div class="sec-title">Add Items to Quote</div>
 
   <!-- ⚙ Configure chips (CONFIGURATOR §4.1) — one per website family, generated from QR_FAMILIES.order by renderCfgChips(); hidden when
-       the configurator is off (kill switch) or unavailable, and removed from a partner session by applyPartnerMode(). -->
+       the configurator is off (kill switch) or unavailable. -->
   <div class="cfg-chips no-print" id="cfgChips" style="display:none;"></div>
 
   <!-- Category filter tabs -->
@@ -1514,7 +1511,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
   <!-- ── CONFIGURATOR PANEL (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §4) — sibling of #calcPanel, same .open mechanics. Generated
        entirely from js/qr-families.js by openConfigurator()/cfgRenderBody(): nothing in it is written by hand per family, so a family
        added to scripts/public-families.json lights up here with zero code change. A bottom sheet at ≤768px (CSS), Esc closes it,
-       focus returns to whatever opened it. applyPartnerMode() removes it (and the chips + backdrop) from a partner session. ── -->
+       focus returns to whatever opened it. ── -->
   <div class="cfg-panel no-print" id="configPanel" role="dialog" aria-modal="false" aria-labelledby="cfgTitle" tabindex="-1">
     <div class="cfg-head">
       <div class="cfg-title" id="cfgTitle">⚙ Configure</div>
@@ -1758,8 +1755,8 @@ body.body-workforce #costMarginWrap{display:none!important;}
 
 <!-- ── PAYMENT DETAILS (owner request) — per-company bank/e-wallet info for the
      client. Rendered by renderPaymentDetails(): only shows for the Barro-owned
-     identities (CO.BK and CO.BI carry the `pay` config; CO.BS/CO.PT do not, so
-     a partner quote never prints Barro's account). Visible on screen AND in
+     identities (CO.BK and CO.BI carry the `pay` config; CO.BS does not, so
+     a Brilliant Steel quote never prints Barro's account). Visible on screen AND in
      print (not wrapped in .print-only), so the preparer can preview exactly
      what the client will see on the printed/PDF quote. ── -->
 <div class="section" id="paymentDetailsSection">
@@ -1815,8 +1812,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
   <!-- Miscellaneous costs (owner ruling 2026-08-31, replaces the labor &
        timeline estimate): delivery, permits, rentals — anything outside the
        per-item BOMs. Ticked rows land on the quotation as their own line;
-       unticked rows spread their quoted price into chosen item prices.
-       Hidden in the partner portal, same as the section it replaced. -->
+       unticked rows spread their quoted price into chosen item prices. -->
   <div id="laborTimelineWrap" class="no-print" style="margin-top:14px;border-top:2px solid #f0c060;padding-top:10px;">
   <!-- Owner ruling 2026-09-01: unified with the quote items — initUI() moves
        this wrap INTO #itemsSection (before .totals-controls) so items and
@@ -1869,9 +1865,9 @@ body.body-workforce #costMarginWrap{display:none!important;}
   <!-- COSTING-PHASE1-SPEC-2026-08-26 §2 — v2 true-cost buildup/ladder/margin
        panel. Was a static <table> of fixed <tr id="mi*"> rows; now fully
        rendered by computeMarginSummary()/renderTrueCostPanel() every pass,
-       same container id so the GENERIC_PARTNER DOM-removal above and the
-       function's own `if(!document.getElementById('marginTbl'))` guard need
-       no changes. COSTING-QB-UX-SPEC-2026-08-26 §3 adds an editable OH%
+       same container id so the function's own
+       `if(!document.getElementById('marginTbl'))` guard needs no changes.
+       COSTING-QB-UX-SPEC-2026-08-26 §3 adds an editable OH%
        (with a reset-to-suggested affordance) and a toggleable per-item
        computation table inside this same render pass — see
        renderTrueCostPanelHtml()/renderOhPerItemTableHtml() in the script. -->
@@ -1902,8 +1898,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
      @media print stylesheet already flattens for the PDF (see the CSS block
      near the end of <style> above), so this can never structurally drift
      from Print/PDF. Shown in place of #internalWorkspace whenever the Client
-     tab is active (body.body-client-view) or for any partner session (which
-     defaults to, and in practice never leaves, Client view). ── -->
+     tab is active (body.body-client-view). ── -->
 <div id="qbDocSheet" class="qb-doc-sheet"></div>
 
 </div><!-- /main -->
@@ -1947,7 +1942,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
     <div class="modal-body" id="helpBody">
       <h4>How a quote gets made</h4>
       <ol>
-        <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it.</li>
+        <li><strong>Pick the company</strong> — Barro Kitchens / Barro Industries / Brilliant Steel. Letterhead, quote number and payment details follow it. The builder starts on Barro Kitchens, or on Brilliant Steel when you open it from the Brilliant Steel department. A Brilliant Steel quote hides the cost calculator and BOM; each line gets a <em>pass-through</em> tick instead.</li>
         <li><strong>Quote number</strong> <em>(Client Data)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself; tick <em>no costing</em> beside it for a line that genuinely has none. ＋ Section for Option A / Option B quotes. 📥 Import brings in a whole list at once — hand Claude any list and the 📋 button inside copies the exact format brief to give it.</li>
@@ -1962,7 +1957,6 @@ body.body-workforce #costMarginWrap{display:none!important;}
       <h4>The three tabs</h4>
       <p><strong>Client Data</strong> — the document form: everything that prints on the quotation, with a 👁 Preview button that shows the finished document exactly as the customer sees it.</p>
       <p><strong>Estimator</strong> — the numbers: items, additional costs, and the calculator — the build waterfall, the OH% and MK% dials (together always 150% of direct), and a per-line experiment table with editable prices.</p><p><strong>Terms</strong> — the terms &amp; conditions, per quote, including the ±5mm measurement tolerance.</p>
-      <p>The Estimator may be hidden depending on your account.</p>
 
       <h4>Good to know</h4>
       <ul>
@@ -2094,8 +2088,7 @@ body.body-workforce #costMarginWrap{display:none!important;}
 //  COMPANY CONFIG
 //  Local mirror of window.BRAND.companies (js/config.js, v12 WS09). This file
 //  loads via <iframe> with no access to the parent app's config.js — keep
-//  BK/BI/BS in sync by hand. CO.PT is synthesized at runtime below from
-//  ?pcoName/?pcoContact/?pcoSig for generic (non-Brilliant-Steel) partners.
+//  BK/BI/BS in sync by hand.
 // ═══════════════════════════════════════════════════════════════════
 const CO = {
   // logo: per-company mark for the printed/on-screen letterhead (applyLetterheadHeader()
@@ -2110,9 +2103,8 @@ const CO = {
     logo:'icons/barro-kitchens.png',
     // pay: Barro Kitchens' own bank account for client payments (owner request).
     // renderPaymentDetails() gates purely on THIS field's presence — same
-    // technique as the logo:'' suppression below — so BS / CO.PT (neither of
-    // which carries a `pay` key) never print Barro's account info on a
-    // partner's quote.
+    // technique as the logo:'' suppression below — so BS (which carries no
+    // `pay` key) never prints Barro's account info on its quotes.
     pay:{bank:'UnionBank',accountName:'Narciso Neil Barro',accountNo:'0015 3001 4016',
       other:['BDO','Metrobank','GCash','GoTyme'],contact:'Barro Kitchens'}},
   // BI (owner request 2026-08-07) — the PARENT company quoting in its own name
@@ -2127,7 +2119,7 @@ const CO = {
   //     through to the app-wide BRAND.logo.print — the Barro KITCHENS cube —
   //     and stamp the wrong sub-brand on a Barro Industries document.
   //   • pay IS carried: BI is the same legal entity that owns this account
-  //     (Barro Industries OPC), unlike BS/PT which must never show it.
+  //     (Barro Industries OPC), unlike BS which must never show it.
   BI:{name:'BARRO INDUSTRIES OPC',sub:'SEC-registered One Person Corporation',
     addr:'21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',contact:'09276836300  |  hello@barroindustries.com',
     sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>INDUSTRIES</span>',code:'BI',
@@ -2139,11 +2131,10 @@ const CO = {
   // logo:'' — Brilliant Steel has no logo asset here; an EMPTY value must
   // suppress the mark entirely (showLogo:false below) rather than falling
   // through to js/letterhead.js's app-wide BRAND.logo.print (the BK cube),
-  // which would print Barro Kitchens branding on a PARTNER's quote.
-  // No `pay` field either, deliberately: Brilliant Steel (and any CO.PT
-  // generic partner synthesized below) must never show Barro's own UnionBank
-  // account — renderPaymentDetails() only renders a payment block when
-  // co.pay exists.
+  // which would print Barro Kitchens branding on a Brilliant Steel quote.
+  // No `pay` field either, deliberately: Brilliant Steel must never show
+  // Barro's own UnionBank account — renderPaymentDetails() only renders a
+  // payment block when co.pay exists.
   BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
     sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
     thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
@@ -2162,18 +2153,13 @@ const CO = {
 // ‼️ MIRROR of window.QUOTE_COMPANIES in js/config.js. This page is an
 // <iframe> and CANNOT see window.* from the parent app frame, so it needs its
 // own copy — keep the two in sync BY HAND.
-// Unknown codes (incl. the runtime-synthesized generic-partner 'PT') fall
-// through to bs_quotes, exactly as the ternaries this replaced already did.
+// Unknown codes (incl. the code of a legacy partner row) fall through to
+// bs_quotes, exactly as the ternaries this replaced already did.
 const QUOTE_COLL={ BK:'bk_quotes', BI:'bk_quotes', BS:'bs_quotes' };
 // hasOwnProperty, not truthiness — QUOTE_COLL['constructor'] is inherited from
 // Object.prototype and IS truthy, so `||` would return Object here. Same guard
 // as _quoteCo() in the js/config.js mirror.
 function quoteCollFor(co){ return Object.prototype.hasOwnProperty.call(QUOTE_COLL,co)?QUOTE_COLL[co]:'bs_quotes'; }
-// Identities a PARTNER session may never assume (setCompany's guard below).
-// Barro Industries only — deliberately NOT Barro Kitchens: applyPartnerMode()
-// leaves the BK pill live for generic partners on purpose ("so they can quote
-// under either brand"), and widening this list would silently kill that.
-const PARTNER_BLOCKED_COS=['BI'];
 
 // ═══════════════════════════════════════════════════════════════════
 //  STATE
@@ -2203,9 +2189,9 @@ let _dragIdx=null;
 let currentCatFilter='all', focusedSearchIdx=-1;
 let DB={products:[],categories:[],laborRoles:[],constants:{}};
 // CONFIGURATOR (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §2.3 / §2.5 / §6 / §7) — the code is the CONFIGURATOR block below addCustomItem().
-let CONFIGURATOR_ON = true;            // false for every partner session (applyPartnerMode) and when productMeta/config.quoteBuilder.configurator === false
-let FAMILY_PRICING = {};               // { familyId: raw option-sheet doc } — read once by loadDatabase() for internal sessions, {} otherwise
-let FAMILY_PRICING_STATE = 'offline';  // 'live' (read ok) | 'denied' (this account may not read the sheets) | 'offline' (database not reached) | 'skipped' (partner)
+let CONFIGURATOR_ON = true;            // false when productMeta/config.quoteBuilder.configurator === false (the kill switch)
+let FAMILY_PRICING = {};               // { familyId: raw option-sheet doc } — read once by loadDatabase(), {} otherwise
+let FAMILY_PRICING_STATE = 'offline';  // 'live' (read ok) | 'denied' (this account may not read the sheets) | 'offline' (database not reached)
 let sourceRef = null;                  // the website request / project brief this quote was opened from (hand-off), or null
 let estimateReason = '';               // ESTIMATE_RANGE_MODE 'reason': why the total sits outside the estimate the client saw
 // PRICING-TIERS-SPEC.md — per-item quantity-break volume discounts. Global,
@@ -2343,8 +2329,7 @@ let draftSaveTimer=null, draftAckTimer=null;
 // COSTING-PHASE1-SPEC-2026-08-26 §1 — shadow-mode true-cost settings.
 // Read-only from product_costs/_settings (finance/admin-gated by
 // firestore.rules, same collection as the per-product cost docs) inside
-// loadDatabase()'s existing `!PARTNER_MODE` branch below — never fetched for
-// a partner session (BS included — see D14 note at computeTrueCost()).
+// loadDatabase() below.
 // COSTING_SETTINGS stays null until that read completes/fails; every reader
 // falls back to COSTING_DEFAULTS, which is also the doc's own initial shape
 // for the (later-phase) President settings editor. Writing this doc is out
@@ -2387,11 +2372,9 @@ const COSTING_DEFAULTS = Object.freeze({
 // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — live pace feed published
 // by the Analytics costing dashboard (Workstream A) at product_costs/_pace,
 // `{pace, baseOH, suggestedOH, computedAt, byUid}`. Read-only here, same
-// finance/admin-gated collection as COSTING_SETTINGS above and the same
-// `!PARTNER_MODE` branch in loadDatabase() below — never fetched for a
-// partner session (BS included), so it stays null for every PARTNER_MODE
-// session exactly like COSTING_SETTINGS does, with no extra guard needed at
-// the read sites. Stays null until that read completes/fails, or when the
+// finance/admin-gated collection as COSTING_SETTINGS above and read in the
+// same place in loadDatabase() below. Stays null until that read
+// completes/fails, or when the
 // dashboard has never published a pace doc yet; paceFactor() (below,
 // computeTrueCost()'s section) treats null/stale (>7 days old) the same way
 // — pace 1, i.e. Phase 1's baseOH×sizeF behavior, unchanged.
@@ -2399,16 +2382,15 @@ let COSTING_PACE = null;
 
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — flat, in-memory copy of the
 // Purchasing-owned `material_prices` collection (MATERIAL-PRICELIST-SPEC),
-// fetched ONCE by loadDatabase()'s `!PARTNER_MODE` branch below (own
-// try/catch, independent of the COSTING_SETTINGS/COSTING_PACE trio — see
-// that block for why) and never refetched per keystroke. Each entry is
+// fetched ONCE by loadDatabase() below (own try/catch, independent of the
+// COSTING_SETTINGS/COSTING_PACE trio — see that block for why) and never
+// refetched per keystroke. Each entry is
 // `{plId, name, price, catId}`. Stays [] until that read completes/fails —
 // same "degrade to empty, manual entry still works" posture as
-// COSTING_SETTINGS/COSTING_PACE, and for the identical reason: never
-// fetched for ANY PARTNER_MODE session (BS included), and firestore.rules
+// COSTING_SETTINGS/COSTING_PACE, and for the identical reason: firestore.rules
 // restricts read/write to isSeniorAdmin()/canFinance()/isPurchasingDept()
-// even for internal staff — a plain sales session gets permission-denied on
-// this read too, same graceful empty-list fallback.
+// — a plain sales session gets permission-denied on this read, same
+// graceful empty-list fallback.
 let MATERIAL_PRICE_LIST = [];
 
 // COSTING-QB-UX-SPEC-2026-08-26 §3 — manual OH% override. Quote-level (NOT
@@ -2433,8 +2415,7 @@ let ohPerItemOpen = false;
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — flattens every material_prices
 // doc's `items[]` (one doc per category — MATERIAL-PRICELIST-SPEC) into one
 // flat array the BOM type-ahead searches by contains-match on `name`. Pure,
-// no DOM/Firestore — its only caller is loadDatabase()'s `!PARTNER_MODE`
-// branch above.
+// no DOM/Firestore — its only caller is loadDatabase() above.
 //
 // ESCALATION (main-session decision, not this file's to fix — quote-
 // builder-v2.html is the only file this build is scoped to): `name` is
@@ -2473,7 +2454,7 @@ async function loadDatabase(force) {
   VOLUME_TIERS=[];
   // CONFIGURATOR: same reset-every-run posture — a "Reload DB" that lands on a fallback path must not keep the previous run's option sheets
   // or a stale kill switch; only the Firestore success branch below may repopulate them.
-  FAMILY_PRICING={}; FAMILY_PRICING_STATE=PARTNER_MODE?'skipped':'offline'; CONFIGURATOR_ON=!PARTNER_MODE;
+  FAMILY_PRICING={}; FAMILY_PRICING_STATE='offline'; CONFIGURATOR_ON=true;
   setStatus('loading','Loading product database…');
 
   // file:// protocol blocks Firestore/fetch — skip directly to embedded data
@@ -2500,78 +2481,72 @@ async function loadDatabase(force) {
 
     // v14 re-audit HIGH fix — capitalMaterials/capitalLabor (Barro's cost
     // basis) have moved off the `products` doc into product_costs, which
-    // firestore.rules restricts to canFinance()/isAdmin() — never role
-    // 'partner'. Previously this doc carried the cost fields directly, so
-    // ANY authenticated session (including a generic partner's) could read
-    // every product's real cost straight from `products` via the browser
-    // console, regardless of the Cost & Margin panel being removed from the
-    // DOM for them. Only attempt the product_costs read for a non-partner
-    // (internal) session — a partner session is denied by the rules anyway,
-    // so skip the doomed round-trip and just leave costs at 0 for them.
+    // firestore.rules restricts to canFinance()/isAdmin(). Previously this
+    // doc carried the cost fields directly, so ANY authenticated session
+    // could read every product's real cost straight from `products` via the
+    // browser console. A session the rules deny is not retried: each read
+    // below has its own catch and just leaves costs at 0.
     // Legacy fallback (`?? p.capitalMaterials ?? 0` below): until
     // migrateProductCostsOut() has run for a given product, or for a
     // finance/admin session before that migration ships at all, the value
     // may still be sitting directly on the products doc.
     let costMap = {};
-    if (!PARTNER_MODE) {
-      try {
-        // COSTING-PHASE1-SPEC-2026-08-26 §1 — the settings doc rides the same
-        // one Firestore round-trip as the per-product cost docs (Promise.all,
-        // not a second sequential await). '_settings' is skipped out of
-        // costMap below so it can never be mistaken for a product's cost row.
-        // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — the pace doc rides
-        // the same round-trip too; '_pace' is skipped out of costMap for the
-        // same reason '_settings' is.
-        const [costSnap, settingsSnap, paceSnap] = await Promise.all([
-          db.collection('product_costs').limit(1000).get(),
-          db.collection('product_costs').doc('_settings').get(),
-          db.collection('product_costs').doc('_pace').get(),
-        ]);
-        costSnap.docs.forEach(cd => { if (cd.id !== '_settings' && cd.id !== '_pace') costMap[cd.id] = cd.data(); });
-        COSTING_SETTINGS = settingsSnap.exists ? { ...COSTING_DEFAULTS, ...settingsSnap.data() } : { ...COSTING_DEFAULTS };
-        COSTING_PACE = paceSnap.exists ? paceSnap.data() : null;
-      } catch (ce) {
-        console.warn('[quote-builder] product_costs load skipped (finance/admin only)', ce);
-        COSTING_SETTINGS = { ...COSTING_DEFAULTS };
-        COSTING_PACE = null;
-      }
+    try {
+      // COSTING-PHASE1-SPEC-2026-08-26 §1 — the settings doc rides the same
+      // one Firestore round-trip as the per-product cost docs (Promise.all,
+      // not a second sequential await). '_settings' is skipped out of
+      // costMap below so it can never be mistaken for a product's cost row.
+      // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — the pace doc rides
+      // the same round-trip too; '_pace' is skipped out of costMap for the
+      // same reason '_settings' is.
+      const [costSnap, settingsSnap, paceSnap] = await Promise.all([
+        db.collection('product_costs').limit(1000).get(),
+        db.collection('product_costs').doc('_settings').get(),
+        db.collection('product_costs').doc('_pace').get(),
+      ]);
+      costSnap.docs.forEach(cd => { if (cd.id !== '_settings' && cd.id !== '_pace') costMap[cd.id] = cd.data(); });
+      COSTING_SETTINGS = settingsSnap.exists ? { ...COSTING_DEFAULTS, ...settingsSnap.data() } : { ...COSTING_DEFAULTS };
+      COSTING_PACE = paceSnap.exists ? paceSnap.data() : null;
+    } catch (ce) {
+      console.warn('[quote-builder] product_costs load skipped (finance/admin only)', ce);
+      COSTING_SETTINGS = { ...COSTING_DEFAULTS };
+      COSTING_PACE = null;
+    }
 
-      // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — material price list for the
-      // custom-item BOM type-ahead. Deliberately its OWN try/catch, not
-      // folded into the product_costs/_settings/_pace Promise.all above:
-      // firestore.rules grants material_prices to isPurchasingDept() as well
-      // as isSeniorAdmin()/canFinance() — a broader set than product_costs —
-      // so a Purchasing-dept preparer could succeed on this read even where
-      // the trio above is denied (or vice versa for a finance-only session
-      // if material_prices rules ever narrow independently). Bundling them
-      // would let one collection's permission-denied reject the whole
-      // Promise.all and silently discard a result the other read actually
-      // earned. Fetched once here, never refetched per keystroke — the BOM
-      // type-ahead below reads the in-memory MATERIAL_PRICE_LIST only.
-      try {
-        const materialsSnap = await db.collection('material_prices').get();
-        MATERIAL_PRICE_LIST = flattenMaterialPriceList(materialsSnap);
-      } catch (me) {
-        console.warn('[quote-builder] material_prices load skipped (senior-admin/finance/purchasing only)', me);
-        MATERIAL_PRICE_LIST = [];
-      }
+    // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — material price list for the
+    // custom-item BOM type-ahead. Deliberately its OWN try/catch, not
+    // folded into the product_costs/_settings/_pace Promise.all above:
+    // firestore.rules grants material_prices to isPurchasingDept() as well
+    // as isSeniorAdmin()/canFinance() — a broader set than product_costs —
+    // so a Purchasing-dept preparer could succeed on this read even where
+    // the trio above is denied (or vice versa for a finance-only session
+    // if material_prices rules ever narrow independently). Bundling them
+    // would let one collection's permission-denied reject the whole
+    // Promise.all and silently discard a result the other read actually
+    // earned. Fetched once here, never refetched per keystroke — the BOM
+    // type-ahead below reads the in-memory MATERIAL_PRICE_LIST only.
+    try {
+      const materialsSnap = await db.collection('material_prices').get();
+      MATERIAL_PRICE_LIST = flattenMaterialPriceList(materialsSnap);
+    } catch (me) {
+      console.warn('[quote-builder] material_prices load skipped (senior-admin/finance/purchasing only)', me);
+      MATERIAL_PRICE_LIST = [];
+    }
 
-      // CONFIGURATOR §2.3 / §2.4 — the family option sheets (product_pricing/{familyId}), so a configured line is priced live. Its OWN
-      // try/catch for the reason material_prices has one: this read is granted to a different set of accounts than the rest, and a denial
-      // must cost the configurator only its option amounts (every configured line then reads "Priced after review" and asks for a typed
-      // price), never the database load. Raw docs are kept as they are — the shared pricing code sanitises them. Never attempted for a
-      // partner session: it sits inside this !PARTNER_MODE branch.
-      try {
-        const sheetSnap = await db.collection('product_pricing').get();
-        const sheets = {};
-        sheetSnap.docs.forEach(sd => { sheets[sd.id] = sd.data(); });
-        FAMILY_PRICING = sheets;
-        FAMILY_PRICING_STATE = 'live';
-      } catch (pe) {
-        console.warn('[quote-builder] option sheets not readable in this session — configured lines will read "Priced after review"', pe);
-        FAMILY_PRICING = {};
-        FAMILY_PRICING_STATE = 'denied';
-      }
+    // CONFIGURATOR §2.3 / §2.4 — the family option sheets (product_pricing/{familyId}), so a configured line is priced live. Its OWN
+    // try/catch for the reason material_prices has one: this read is granted to a different set of accounts than the rest, and a denial
+    // must cost the configurator only its option amounts (every configured line then reads "Priced after review" and asks for a typed
+    // price), never the database load. Raw docs are kept as they are — the shared pricing code sanitises them.
+    try {
+      const sheetSnap = await db.collection('product_pricing').get();
+      const sheets = {};
+      sheetSnap.docs.forEach(sd => { sheets[sd.id] = sd.data(); });
+      FAMILY_PRICING = sheets;
+      FAMILY_PRICING_STATE = 'live';
+    } catch (pe) {
+      console.warn('[quote-builder] option sheets not readable in this session — configured lines will read "Priced after review"', pe);
+      FAMILY_PRICING = {};
+      FAMILY_PRICING_STATE = 'denied';
     }
 
     DB = {
@@ -2668,90 +2643,6 @@ function showToast(msg,type){
 // ═══════════════════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════════════════
-// Partner portal mode (?portal=partner): no Admin/labor controls.
-const PARTNER_MODE = new URLSearchParams(location.search).get('portal') === 'partner';
-// Generic company partner: builder is branded to THEIR company (pcoName) with a
-// Barro Kitchens header toggle, instead of being locked to Brilliant Steel.
-const _PQ = new URLSearchParams(location.search);
-const PARTNER_CO_NAME = (_PQ.get('pcoName') || '').trim();
-const GENERIC_PARTNER = PARTNER_MODE && !!PARTNER_CO_NAME && PARTNER_CO_NAME !== 'Partner';
-if (GENERIC_PARTNER) {
-  CO.PT = {
-    name: PARTNER_CO_NAME.toUpperCase(),
-    sub: 'In partnership with Barro Industries',
-    addr: '', contact: _PQ.get('pcoContact') || '',
-    sig: { name: (_PQ.get('pcoSig')||'').toUpperCase(), title: 'Authorized Representative, ' + PARTNER_CO_NAME },
-    nav: PARTNER_CO_NAME.toUpperCase(), code: 'PT',
-    thanks: 'Thank you for considering ' + PARTNER_CO_NAME + '. We look forward to working with you.',
-    creds: PARTNER_CO_NAME + '  •  In partnership with Barro Industries OPC'
-  };
-}
-function applyPartnerMode(){
-  if(!PARTNER_MODE) return;
-  // Barro Industries is the PARENT company's own general-fabrication identity —
-  // internal only. Remove the pill (and its mobile-sheet proxy) from the DOM
-  // entirely, not display:none, so no partner session has a reachable control
-  // for it at all. setCompany() carries the matching state-level lock for the
-  // draft/template restore paths that never touch these buttons.
-  document.getElementById('coBI')?.remove();
-  document.getElementById('mtbCoBI')?.remove();
-  if(GENERIC_PARTNER){
-    // Keep BOTH header options: re-label the BS pill as the partner's own company,
-    // leave Barro Kitchens available so they can quote under either brand.
-    const coBS=document.getElementById('coBS');
-    if(coBS){ coBS.textContent='🏢 '+CO.PT.name; coBS.setAttribute('onclick',"setCompany('PT')"); }
-  } else {
-    // Brilliant Steel partner: lock company to BS and hide the company switcher.
-    const coBK=document.getElementById('coBK'); if(coBK) coBK.parentElement.style.display='none';
-  }
-  // Remove the Admin (database) view button entirely
-  document.getElementById('btnAdmin')?.remove();
-  document.getElementById('btnOpenProductDb')?.remove();   // partners never open the product database
-  document.getElementById('btnImportItems')?.remove();     // QB-IMPORT-SPEC-2026-09-11 — imported costing data is internal-only; belt-and-braces alongside the PARTNER_MODE guard on every import function below
-  document.getElementById('docDetailsBar')?.remove();      // partners always see the document sections
-  // CONFIGURATOR §2.5 — no configurator in ANY partner session: the panel, its backdrop, the Configure chips and every
-  // "Sold online as" hint come out of the DOM (same .remove() idiom as #btnAdmin). A configured line that reaches a partner renders as a
-  // plain read-only line at its stored price (cfgLineRowHtml / configuratorAvailable() are both PARTNER_MODE-gated).
-  CONFIGURATOR_ON = false;
-  ['configPanel', 'cfgBackdrop', 'cfgChips', 'handoffBar'].forEach(id => document.getElementById(id)?.remove());
-  document.querySelectorAll('[data-cfg-open],[data-cfg-sku],[data-cfg-edit],.cfg-hint').forEach(el => el.remove());
-  document.body.classList.remove('doc-details-collapsed');
-  // Hide the internal Labor & Timeline estimate (Barro's staffing/day-rates) from
-  // partners — they keep the per-item Cost & Margin view for the 50/50 split.
-  const lt=document.getElementById('laborTimelineWrap'); if(lt) lt.style.display='none';
-  const mlr=document.getElementById('miLaborRow'); if(mlr) mlr.style.display='none';
-  // Generic CO.PT partners (not Brilliant Steel) never see internal cost/margin data —
-  // BS keeps it per the standing 50/50 arrangement, but a generic partner is a normal
-  // client and must not see Barro's cost basis. Remove the DOM nodes entirely (not
-  // display:none) so the data never round-trips into the page for that session.
-  if(GENERIC_PARTNER){
-    document.getElementById('btnInternal')?.remove();
-    document.getElementById('btnTerms')?.remove();
-    document.getElementById('mtbViewTerms')?.remove();
-    document.getElementById('costMarginWrap')?.remove();
-  }
-  // COSTING-QB-UX-SPEC-2026-08-26 §1 ESCALATION (see the implementation report
-  // for the full writeup) — a GENERIC_PARTNER's "Client" pill is their ONLY
-  // view button (btnInternal is removed just above, btnAdmin above that); pre-
-  // this-spec, that one view WAS the full editable workspace (search/add
-  // items, item qty/price/spec edits, client info, delivery/timeline/payment/
-  // terms — none of that is PARTNER_MODE-gated, only the cost-basis/margin
-  // internals are). If body-client-view stayed on for them, #internalWorkspace
-  // would go display:none with no button anywhere to ever bring it back —
-  // stranding a generic partner mid-quote with no way to add or edit a line
-  // again. Until product confirms generic partners are read-only recipients
-  // (in which case this override should come out), keep their one view
-  // exactly as it worked before this spec: the live editable workspace, not
-  // the new read-only doc preview. BS is NOT included here — BS keeps
-  // #btnInternal (existing behaviour, untouched above), so Client/Internal
-  // genuinely toggle doc-preview vs. workspace for them, same as an internal
-  // Barro session.
-  if(GENERIC_PARTNER) document.body.classList.remove('body-client-view');
-  // Agent Copy stays available to partners (restored per request).
-  applyLetterheadHeader();
-  if(typeof mtbSync==='function') mtbSync();   // re-sync the mobile sheet after DOM removals above
-}
-
 document.addEventListener('DOMContentLoaded', ()=>{
   // Wave 3 Q1/Q2 — snapshot any localStorage draft into memory FIRST, before
   // anything else runs. renderItems()→renderTotals() (called moments later by
@@ -2766,9 +2657,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // 450ms race — deleted in app.js renderQuoteBuilderIframe).
   try{ window.parent.postMessage({type:'QB_READY'}, window.location.origin); }catch(e){}
   document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
-  setCompany(GENERIC_PARTNER ? 'PT' : (PARTNER_MODE ? 'BS' : 'BK'));
-  applyPartnerMode();
-  cfgInit();   // CONFIGURATOR: Escape + Enter handling for the panel (null-guarded — absent in a partner session)
+  setCompany(bootCompany());
+  cfgInit();   // CONFIGURATOR: Escape + Enter handling for the panel (null-guarded)
   renderTerms();
   loadFromStorage();
   // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §1 — restore the named draft id/key
@@ -2777,8 +2667,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // reopen is about to follow: loadEditableState() calls setSavedDraft()
   // itself and simply overwrites whatever this restore just set.
   try{ const _id=localStorage.getItem('bkqb_draft_docid'); if(_id){ savedDraftDocId=_id; savedDraftClientKey=localStorage.getItem('bkqb_draft_key')||''; } }catch(e){}
-  // Re-assert the partner's locked/default company after restoring any saved draft.
-  if(PARTNER_MODE) setCompany(GENERIC_PARTNER ? 'PT' : 'BS');
   // Default the project start basis to the quote date if not already set
   const ps=document.getElementById('projStart');
   if(ps && !ps.value) ps.value=document.getElementById('quoteDate').value;
@@ -2833,9 +2721,8 @@ function initUI(){
   // Idempotent (initUI re-runs on Reload DB); listeners/ids move with the node.
   unifyMiscIntoItems();
   unifyPaymentIntoTerms();
-  // Numbers-first Internal: start with the document sections collapsed for
-  // internal staff; partners keep them open (their editing surface).
-  if (typeof PARTNER_MODE!=='undefined' && !PARTNER_MODE && !document.body.classList.contains('doc-details-collapsed')) {
+  // Numbers-first Internal: start with the document sections collapsed.
+  if (!document.body.classList.contains('doc-details-collapsed')) {
     document.body.classList.add('doc-details-collapsed');
   }
   // CONFIGURATOR: the catalogue and the option sheets are in now — give every configured line its runtime figures and draw the chips
@@ -2856,16 +2743,18 @@ function initUI(){
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY & VIEW
 // ═══════════════════════════════════════════════════════════════════
+// The company a FRESH builder boots on. The host (js/app.js renderQuoteBuilderIframe) opens the Brilliant Steel department's Quote
+// Builder page with ?co=BS so it starts on the Brilliant Steel pill; every other page sends nothing and the builder starts on Barro
+// Kitchens as ever. Only a company the pills offer is honoured — an unknown code, a retired one ('PT') or a prototype name is the
+// default. It only decides the starting company: a reopened or revised quote, a resumed draft and a #quote= link each call
+// setCompany(state.currentCo) after the boot and so keep their own.
+function bootCompany(){
+  try{
+    const co=String(new URLSearchParams(location.search).get('co')||'').trim().toUpperCase();
+    return (co==='BK'||co==='BI'||co==='BS')?co:'BK';
+  }catch(e){ return 'BK'; }
+}
 function setCompany(co){
-  // PARTNER LOCK — a partner session must never quote as Barro Industries, not
-  // even by restoring a draft/template that carries it (loadFromStorage/
-  // resumeDraft/loadEditableState all call setCompany with whatever `currentCo`
-  // the saved state holds, and none of them go anywhere near the pill this
-  // applyPartnerMode() already removed). Firestore's bk_quotes rules deny
-  // partners outright, so nothing leaks either way — but silently rebranding a
-  // partner's builder to "BARRO INDUSTRIES OPC" and only failing at the write
-  // is far worse than never offering it. Redirect to their own identity.
-  if(PARTNER_MODE && PARTNER_BLOCKED_COS.includes(co)) co = GENERIC_PARTNER ? 'PT' : 'BS';
   // DEFENSIVE — an unknown code used to throw on `c.nav` below and abort the
   // WHOLE restore mid-way (setCompany runs from loadFromStorage/resumeDraft/
   // loadEditableState). Fall back the same way applyLetterheadHeader() already
@@ -2886,11 +2775,8 @@ function setCompany(co){
   // compute/gate guards below match). Commission never applies to BS either.
   document.body.classList.toggle('co-bs', co==='BS');
   document.getElementById('coBK').classList.toggle('active',co==='BK');
-  // The Barro Industries pill is internal-only — applyPartnerMode() removes it
-  // for partner sessions, so guard the lookup rather than assuming it's there.
   document.getElementById('coBI')?.classList.toggle('active',co==='BI');
-  // In generic-partner mode the BS pill represents the partner's own company (PT).
-  document.getElementById('coBS').classList.toggle('active',co==='BS'||co==='PT');
+  document.getElementById('coBS').classList.toggle('active',co==='BS');
   document.getElementById('navLogo').innerHTML=c.nav;
   document.getElementById('qnoCo').value=c.code;
   document.getElementById('phName').textContent=c.name;
@@ -2945,7 +2831,7 @@ function applyLetterheadHeader(){
     accent: currentCo==='BS' ? '#37474F' : '#1E3A5F',
     // v14: resolve the PER-COMPANY mark; an empty one means this company has
     // no logo, so suppress it (showLogo:false) instead of inheriting the
-    // app-wide default and stamping BK branding on a partner document.
+    // app-wide default and stamping BK branding on a Brilliant Steel document.
     logo: (c.logo !== undefined ? c.logo : (document.getElementById('phLogo')?.src || '')) || undefined,
     showLogo: !!(c.logo !== undefined ? c.logo : (document.getElementById('phLogo')?.src || '')),
   });
@@ -2967,8 +2853,8 @@ function setView(v){
   // Inventory department's Product Pricelist; the 📦 button now opens the
   // read-only pricelist picker modal instead (openPricelist()).
   currentView=v;
-  // Null-guarded: in partner mode the Admin button/panel are removed, so a bare
-  // .classList here used to throw and silently abort switching to Internal.
+  // Null-guarded so a missing pill can never throw and silently abort
+  // switching to Internal.
   ['client','internal','terms'].forEach(x=>{
     document.getElementById('btn'+x.charAt(0).toUpperCase()+x.slice(1))?.classList.toggle('active',v===x);
   });
@@ -2980,12 +2866,7 @@ function setView(v){
   // nothing extra is needed at boot, only on every subsequent switch. A fresh
   // render on the way IN to Client keeps the preview from ever showing a
   // stale snapshot from before the last Internal edit.
-  // GENERIC_PARTNER exception (see the escalation note in applyPartnerMode()):
-  // their "Client" pill is still present/clickable (only Internal/Admin are
-  // removed) but must NEVER re-add body-client-view, or clicking it would
-  // display:none their #internalWorkspace with literally no button left to
-  // undo that — they'd lose the ability to add/edit a line item permanently.
-  if (!GENERIC_PARTNER) document.body.classList.toggle('body-client-view', v==='client');
+  document.body.classList.toggle('body-client-view', v==='client');
   // Owner ruling 2026-09-01 — third tab: Terms is its own view showing only
   // the Terms & Conditions section (form). Class works for every session.
   document.body.classList.toggle('body-terms-view', v==='terms');
@@ -3006,9 +2887,8 @@ function setView(v){
 // in this order into #qbDocSheet by renderClientPreview() below — same
 // source markup print already uses, so the two can't structurally drift.
 // Deliberately excludes #costMarginWrap/#internalPanel — the cost/OH panel
-// is Internal-view (and, for BS, partner-Internal-view) only; it was never
-// part of the printed/client-facing document before this spec and stays
-// that way (GENERIC_PARTNER additionally never has that DOM at all).
+// is Internal-view only; it was never part of the printed/client-facing
+// document before this spec and stays that way.
 const QB_DOC_SOURCE_IDS=['lhPrintHeader','phSubject','billStrip','itemsSection',
   'diSection','timelineSection','paymentSection','paymentDetailsSection',
   'remarksSection','termsSection','photoAnnex','printFooter'];
@@ -3086,9 +2966,9 @@ function toggleQuickMode(){
 //  here, this is purely an alternate trigger + a compact summary pill.
 //  mtbSync() never decides gating on its own; it mirrors the live DOM
 //  state of the desktop buttons (existence/visibility/active class),
-//  which applyPartnerMode()/setCompany()/setView() already control, so the
-//  sheet can never offer something the desktop header wouldn't for this
-//  role/portal, and never hides something the desktop header would show.
+//  which setCompany()/setView() already control, so the sheet can never
+//  offer something the desktop header wouldn't, and never hides something
+//  the desktop header would show.
 // ═══════════════════════════════════════════════════════════════════
 function toggleMobileSheet(){
   const ov=document.getElementById('mtbOverlay');
@@ -3124,29 +3004,28 @@ function mtbSync(){
   if(q && mq) mq.classList.toggle('mtb-row-active', q.classList.contains('active'));
 
   // Company segmented row — mirrors #coBK/#coBI/#coBS existence/visibility/active.
-  // In BS-partner lock mode applyPartnerMode() hides the ENTIRE company
-  // toggle-pills wrapper (coBK.parentElement.style.display='none'); mirror
-  // that by hiding the whole #mtbCoGroup, not just the BK button.
+  // If the desktop company toggle-pills wrapper is hidden
+  // (coBK.parentElement.style.display='none'), mirror that by hiding the
+  // whole #mtbCoGroup, not just the BK button.
   const coBK=document.getElementById('coBK'), coBI=document.getElementById('coBI'), coBS=document.getElementById('coBS');
   const coGroup=document.getElementById('mtbCoGroup'), mCoBK=document.getElementById('mtbCoBK'),
         mCoBI=document.getElementById('mtbCoBI'), mCoBS=document.getElementById('mtbCoBS');
   const coLocked = !!(coBK && coBK.parentElement && coBK.parentElement.style.display==='none');
   if(coGroup) coGroup.style.display = coLocked ? 'none' : '';
   if(coBK && mCoBK) mCoBK.classList.toggle('active', coBK.classList.contains('active'));
-  // Barro Industries: applyPartnerMode() REMOVES #coBI (and #mtbCoBI) for
-  // partner sessions, so a missing desktop pill means the sheet row must go
+  // Barro Industries: a missing desktop pill means the sheet row must go
   // too — same "mirror the live DOM, never re-decide gating" rule as Mode below.
   if(mCoBI){
     if(!coBI) mCoBI.remove();
     else mCoBI.classList.toggle('active', coBI.classList.contains('active'));
   }
   if(coBS && mCoBS){
-    mCoBS.textContent = coBS.textContent;   // partner branding (e.g. "🏢 CompanyName") flows through
+    mCoBS.textContent = coBS.textContent;   // the desktop pill's label flows through
     mCoBS.classList.toggle('active', coBS.classList.contains('active'));
   }
 
   // Mode segmented rows — mirror #btnClient/#btnInternal/#btnAdmin one-for-one;
-  // a removed button (partner mode) hides its sheet row the same way.
+  // a missing button hides its sheet row the same way.
   ['Client','Internal','Terms','Admin'].forEach(x=>{
     const orig=document.getElementById('btn'+x);
     const proxy=document.getElementById('mtbView'+x);
@@ -3212,8 +3091,8 @@ async function qqRenderStep1(body){
   });
 }
 
-// Lazily loads the unified `clients` collection once per session. Partner
-// sessions are denied by firestore.rules — caught, falls back to an empty list
+// Lazily loads the unified `clients` collection once per session. A session
+// the rules deny is caught — falls back to an empty list
 // (typed name still files fine; nameKey upsert still creates the client).
 async function qqLoadClients(){
   if (qqClients) return qqClients;
@@ -3346,7 +3225,7 @@ async function autoClientSeq(){
     // company. Numbering stays per-company, matching reserveAtomicQnoSeq()'s
     // `qno_${co}_…` counter key. Gated on the COLLECTION, not the company field:
     // only bk_quotes is genuinely multi-company (BK + BI). bs_quotes is NOT
-    // single-company — it holds BS, the runtime-synthesized PT, and stranded
+    // single-company — it holds BS, legacy partner (PT) rows, and stranded
     // company:'BK' rows (see migrateStrandedBKQuotes in js/app.js, which exists
     // precisely because of them) — so narrowing by field there would silently
     // DROP real prior quotes from the count. Pure client-side narrowing of docs
@@ -3435,7 +3314,7 @@ async function autoComputeCustRev(){
     // Same per-company narrowing as autoClientSeq() above — bk_quotes holds both
     // Barro Kitchens and Barro Industries quotes now, and their customer#/
     // revision# sequences are independent. Gated on the COLLECTION for the
-    // reason spelled out there: bs_quotes carries BS + PT + stranded 'BK' rows,
+    // reason spelled out there: bs_quotes carries BS + legacy partner (PT) rows + stranded 'BK' rows,
     // and dropping those from `docs` under-counts _autoRev — which, unlike the
     // client sequence, is NOT re-derived at file time (reserveAtomicQnoSeq
     // re-reserves only the seq segment and leaves the R suffix alone), so a
@@ -4017,7 +3896,7 @@ function addCustomItem(){
 //  math as the public catalogue and the qrEstimate / qrSubmit callables — js/pricing-core.js, reached ONLY through js/qb-configured.js
 //  (QBConfigured.priceLine): this file never re-implements a price. A configured line stores familyId + config + size + specs and rides
 //  every save / reopen / revision / template / print path; the runtime-only `_cfg` (base, option deltas, reason) is recomputed on load
-//  and stripped from every payload. Staff only: removed from partner sessions (applyPartnerMode), off via productMeta/config
+//  and stripped from every payload. Staff only; off via productMeta/config
 //  .quoteBuilder.configurator === false (no deploy). Nothing in this block is ever printed (R7).
 //
 //  Price protection (A2): a configured line lands at the WEBSITE price when the option sheet prices it, otherwise at 0 flagged
@@ -4030,7 +3909,7 @@ let cfgTourOwned = false;     // the guided demo (not the user) opened the panel
 // The pure helpers are handed their three dependencies at call time (never at load time: this inline script runs before the deferred ones).
 function qbDeps(){ return { PF:window.ProductFamilies, PC:window.PricingCore, FAM:window.QR_FAMILIES, constants:(DB && DB.constants) || {} }; }
 function configuratorAvailable(){
-  return !!(CONFIGURATOR_ON && !PARTNER_MODE && window.QBConfigured && window.ProductFamilies && window.QR_FAMILIES && window.PricingCore);
+  return !!(CONFIGURATOR_ON && window.QBConfigured && window.ProductFamilies && window.QR_FAMILIES && window.PricingCore);
 }
 function cfgFamily(id){
   const F = window.QR_FAMILIES;
@@ -4257,7 +4136,7 @@ function cfgCostChipHtml(basis){
 
 // The ⚙ row under a quote line (Estimator only, never printed): configure / convert, the price basis, what is missing.
 function cfgLineRowHtml(item, idx){
-  if (PARTNER_MODE || !item) return '';
+  if (!item) return '';
   if (!item.familyId) {
     if (item.id && item.id !== 'CUSTOM' && item.id !== 'MISCFEE' && configuratorAvailable() && absorbedFamilyOf(item.id)) {
       return `<div class="spec-line cfg-row no-print"><span class="spec-tag no-print">Online</span><button type="button" class="cfg-link" onclick="convertToConfigured(${idx})" title="Sold online as a configurable product — turn this line into one: your price stays, the options become editable.">⚙ convert to configured</button></div>`;
@@ -4308,7 +4187,7 @@ function convertToConfigured(idx){
 // R4: per-line choice between the website price and the cost-based price
 function setLinePriceBasis(idx, basis){
   const it = items[idx];
-  if (!it || PARTNER_MODE || it.id === 'MISCFEE') return;
+  if (!it || it.id === 'MISCFEE') return;
   if (basis === 'cost') {
     it.priceBasis = 'cost'; delete it.priceManual;       // the auto-pricer fills unitPrice on this pass
   } else if (basis === 'website') {
@@ -4324,7 +4203,6 @@ function setLinePriceBasis(idx, basis){
   saveToStorage(); renderItems(); flashItemSaved();
 }
 function applyCostBasedToAll(){
-  if (PARTNER_MODE) return;
   const liveById = new Map((DB.products || []).map(p => [p.id, p]));
   const targets = items.filter(i => i.id !== 'MISCFEE' && itemCostBasis(i, liveById).hasBasis && (i.priceManual || (i.priceBasis !== undefined && i.priceBasis !== 'cost')));
   if (!targets.length) { showToast('Every line that has a cost basis is already priced by cost.'); return; }
@@ -4335,7 +4213,7 @@ function applyCostBasedToAll(){
 }
 // the two-figure line under a quote line in the experiment table: website ₱X (m%) · cost-based ₱Y (m%) + the switch
 function lineBasisRowHtml(item, idx, calc){
-  if (PARTNER_MODE || item.priceBasis === undefined || !calc) return '';
+  if (item.priceBasis === undefined || !calc) return '';
   const wp = Number(item.basisUnitPrice) || 0;
   const cp = Math.round(calc.sellPerUnit / 100) * 100;
   const mg = p => (p > 0 ? ' (' + ((p - calc.truePerUnit) / p * 100).toFixed(1) + '%)' : '');
@@ -4735,7 +4613,6 @@ let _importParsed = null;       // {sections:[{label,items:[...]}], warnings:[..
 let _importParseTimer = null;
 
 function openImportModal(){
-  if (PARTNER_MODE) return;
   _importParsed = null;
   const box = document.getElementById('importPasteBox'); if (box) box.value = '';
   const fileInput = document.getElementById('importFileInput'); if (fileInput) fileInput.value = '';
@@ -4753,7 +4630,6 @@ function closeImportModal(){
 // clipboard API first, execCommand('copy') textarea fallback for a context
 // where navigator.clipboard is unavailable (older WebView, non-HTTPS).
 function copyImportSpec(){
-  if (PARTNER_MODE) return;
   const done = () => showToast('📋 Format spec copied — paste it to Claude');
   const fail = () => showToast('Could not copy — select and copy the spec manually.', 'error');
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -4781,7 +4657,6 @@ function _importFallbackCopy(text){
 }
 
 function handleImportFile(input){
-  if (PARTNER_MODE) return;
   const file = input.files && input.files[0];
   if (!file) return;
   const reader = new FileReader();
@@ -4798,7 +4673,6 @@ function handleImportFile(input){
 
 // oninput debounce on the paste box — reparses ~300ms after typing stops.
 function scheduleImportParse(){
-  if (PARTNER_MODE) return;
   if (_importParseTimer) clearTimeout(_importParseTimer);
   _importParseTimer = setTimeout(() => {
     const text = document.getElementById('importPasteBox')?.value || '';
@@ -4813,7 +4687,6 @@ function scheduleImportParse(){
 // warns). More than QB_IMPORT_MAX_ITEMS raw rows total → refuse outright, no
 // partial import.
 function parseImportText(text){
-  if (PARTNER_MODE) return;
   const warnings = [];
   let data;
   try { data = JSON.parse(text); }
@@ -5013,7 +4886,6 @@ function renderImportPreview(){
 // (nextSectionId(), computed once per section, before its items are pushed —
 // nextSectionId() scans items[], which grows as sections are applied).
 function applyImport(){
-  if (PARTNER_MODE) return;
   const p = _importParsed;
   if (!p || p.error || !p.sections || !p.sections.length) return;
   let n = 0;
@@ -5117,19 +4989,13 @@ Full example:
 // COSTING-PHASE1-SPEC-2026-08-26 §3 — per-line costing gate for custom
 // (non-catalog) items: a custom line has no product_costs row, so its
 // materials/labor basis for the true-cost engine (computeTrueCost() above)
-// has to come from the preparer directly. Internal view only, and never for
-// ANY PARTNER_MODE session — including Brilliant Steel. Unlike the Cost &
-// Margin panel itself (which BS keeps per the standing D14 ruling), this is
-// a raw cost-ENTRY control, the same category as the Labor & Timeline
-// staffing table that's already hidden from BS (applyPartnerMode() hides
-// laborTimelineWrap/miLaborRow for every PARTNER_MODE session, not just
-// GENERIC_PARTNER) — partners see the computed results, never the inputs.
-// Absent from the DOM entirely (not display:none) for every other case:
-// client view, catalog items, any partner session. Since this whole
-// function returns '' before rendering ANYTHING for PARTNER_MODE, every
-// addition below (BOM rows, type-ahead, crew-day input) inherits that same
-// "zero new DOM for a partner session" guarantee for free — no per-element
-// guard needed inside.
+// has to come from the preparer directly. Internal view only, and never on
+// the Brilliant Steel company (it carries no Barro cost surface — see
+// customCostParts()). Absent from the DOM entirely (not display:none) for
+// every other case: client view, catalog items. Since customCostParts()
+// returns EMPTY before rendering ANYTHING in those cases, every addition
+// below (BOM rows, type-ahead, crew-day input) inherits that same "zero new
+// DOM" guarantee for free — no per-element guard needed inside.
 //
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 — grows the single "Materials ₱ /
 // Labor hrs" lump gate into: a small BOM list (§1, type-ahead against
@@ -5150,7 +5016,6 @@ function customCostGateHtml(item, idx){
 // compact row (chip + button + direct→sells summary) and the modal body.
 function customCostParts(item, idx){
   const EMPTY = { rowHtml:'', workspaceHtml:'' };
-  if (PARTNER_MODE) return EMPTY;
   if (typeof currentCo!=='undefined' && currentCo==='BS') return EMPTY;   // BS: no BOM surface (owner 2026-09-01)
   if (typeof currentView==='undefined' || currentView!=='internal') return EMPTY;
   if (item.id!=='CUSTOM') return EMPTY;
@@ -5305,12 +5170,8 @@ function customCostParts(item, idx){
 
 // QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3 — the only writer of
 // item.noCosting. Additive flag, persists free with the rest of the item via
-// bkqb_items' wholesale serialization (saveToStorage()). PARTNER_MODE guard
-// is belt-and-braces, matching updateCustomCost() above — the checkbox this
-// is wired to only ever renders inside customCostParts(), which already
-// returns EMPTY for every PARTNER_MODE session.
+// bkqb_items' wholesale serialization (saveToStorage()).
 function toggleNoCosting(idx, on){
-  if (PARTNER_MODE) return;
   const it = items[idx];
   if (!it || it.id !== 'CUSTOM') return;
   if (on) it.noCosting = true; else delete it.noCosting;
@@ -5326,13 +5187,11 @@ function toggleNoCosting(idx, on){
 // figure). Clearing priceManual on either flip lets applyComputedPricing()
 // immediately re-price the line for its new mode (to the supplier cost when
 // flagged, back to the ×2.50 build when cleared).
-// Same-day follow-on ruling: Brilliant Steel may mark pass-throughs too —
-// the guard blocks GENERIC partners only (they have no control rendered
-// either; belt-and-braces). On a BS quote the flag never reprices anything
+// Same-day follow-on ruling: Brilliant Steel may mark pass-throughs too.
+// On a BS quote the flag never reprices anything
 // (computeMarginSummary bails on BS before applyComputedPricing) — it only
 // tells the discount engine to skip the line, which is the point.
 function togglePassThrough(idx, on){
-  if (GENERIC_PARTNER) return;
   const it = items[idx];
   if (!it || it.id === 'MISCFEE') return;
   const next = (on===undefined) ? !it.passThrough : !!on;
@@ -5346,14 +5205,12 @@ function togglePassThrough(idx, on){
 
 // Owner ruling 2026-09-21 (follow-on): the Brilliant Steel company carries
 // no Barro cost surface at all (no gate row, no calculator — BS prices by
-// its own model), so BS sessions get this slim per-line tick instead:
-// internal staff on the BS toggle and Brilliant Steel partner sessions
-// alike, never a generic partner. The flag exposes no cost data — it marks
+// its own model), so BS quotes get this slim per-line tick instead.
+// The flag exposes no cost data — it marks
 // "this line sells at the supplier price" so discounts skip it (and it
 // files with the quote for the record).
 function bsPassThroughRowHtml(item, idx){
   if (typeof currentCo==='undefined' || currentCo!=='BS') return '';
-  if (GENERIC_PARTNER) return '';
   if (item.id==='MISCFEE') return '';
   return `<div class="spec-line pt-tick-row no-print" style="display:flex;align-items:center;gap:6px;">
     <label style="display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--gray-dark);cursor:pointer;" title="The supplier price is the client price — no markup on this line, and discounts never touch it."><input type="checkbox" ${item.passThrough?'checked':''} onchange="togglePassThrough(${idx},this.checked)">pass-through — supplier price, discounts skip this line</label>
@@ -5368,8 +5225,7 @@ function bsPassThroughRowHtml(item, idx){
 let bomModalIdx = null;
 // Owner ruling 2026-08-31 — "internal only deals with the numbers": the
 // document sections collapse behind the 📄 Quote details toggle. Collapsed
-// by default for internal staff (set in initUI, where PARTNER_MODE is
-// known); partners never collapse.
+// by default (set in initUI).
 // Owner ruling 2026-08-31 — the Client tab is the document form; 👁 Preview
 // swaps to the rendered document and back. Entering client view always
 // starts at the form (setView clears the flag).
@@ -5429,11 +5285,7 @@ function customLineHasMaterialsBasis(item){
 // — §3/§2, additive item fields, in-session only) on a custom line. An empty
 // input DELETES the field rather than storing 0, so "never entered"
 // (uncosted) can be told apart from "the preparer typed a real zero."
-// PARTNER_MODE guard is belt-and-braces: the input this handler is wired to
-// only exists in the DOM when customCostGateHtml() above already agreed to
-// render it, which never happens for a partner session.
 function updateCustomCost(idx, field, val){
-  if (PARTNER_MODE) return;
   const item=items[idx]; if(!item || item.id!=='CUSTOM') return;
   const trimmed=String(val).trim();
   if (trimmed==='') delete item[field];
@@ -5444,12 +5296,7 @@ function updateCustomCost(idx, field, val){
 
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1 — appends a blank, manually-entered
 // BOM row (src:'manual' until/unless the preparer picks a pricelist match).
-// PARTNER_MODE guard is belt-and-braces, matching updateCustomCost() above —
-// the "Add material" button this is wired to only ever renders inside
-// customCostGateHtml(), which already returns '' for every PARTNER_MODE
-// session.
 function addBomRow(idx){
-  if (PARTNER_MODE) return;
   const item=items[idx]; if(!item || item.id!=='CUSTOM') return;
   if(!Array.isArray(item.bom)) item.bom=[];
   item.bom.push({ name:'', plId:null, qty:1, unitPrice:0, src:'manual' });
@@ -5468,7 +5315,6 @@ function addBomRow(idx){
 // (syncCustomItemMaterialsSpec() below) to match what's left — deleting the
 // last row removes that line entirely, per spec §3.
 function removeBomRow(idx, bomIdx){
-  if (PARTNER_MODE) return;
   const item=items[idx]; if(!item || item.id!=='CUSTOM' || !Array.isArray(item.bom)) return;
   item.bom.splice(bomIdx,1);
   syncCustomItemMaterialsSpec(item);
@@ -5483,7 +5329,6 @@ function removeBomRow(idx, bomIdx){
 // renderItems() pass, so a keystroke never steals focus/cursor position from
 // the input the preparer is actively typing into.
 function bomNameInput(idx, bomIdx, val){
-  if (PARTNER_MODE) return;
   const dd=document.getElementById(`bomSuggest-${idx}-${bomIdx}`);
   if(!dd) return;
   const q=String(val||'').trim().toLowerCase();
@@ -5516,7 +5361,6 @@ function bomHideSuggest(idx, bomIdx){
 // typed query text as a MANUAL row a half-beat after this handler fills it
 // in properly).
 function pickBomMaterial(idx, bomIdx, plId){
-  if (PARTNER_MODE) return;
   const item=items[idx]; if(!item || item.id!=='CUSTOM' || !Array.isArray(item.bom) || !item.bom[bomIdx]) return;
   const m=MATERIAL_PRICE_LIST.find(x=>String(x.plId)===String(plId));
   if(!m) return;
@@ -5532,7 +5376,6 @@ function pickBomMaterial(idx, bomIdx, plId){
 // at — qty/unitPrice edits leave plId/src alone (still the same material,
 // just a different quantity or a hand-adjusted price).
 function updateBomField(idx, bomIdx, field, val){
-  if (PARTNER_MODE) return;
   const item=items[idx]; if(!item || item.id!=='CUSTOM' || !Array.isArray(item.bom) || !item.bom[bomIdx]) return;
   const row=item.bom[bomIdx];
   if(field==='name'){
@@ -5742,8 +5585,7 @@ function unifyMiscIntoItems(){
   }
   // Owner ruling 2026-09-01 (later same day): the CALCULATOR joins the item
   // list too — items → additional costs → pricing/totals → calculator, one
-  // section. no-print added since it leaves the int-panel's print shield;
-  // applyPartnerMode still removes it by id wherever it lives.
+  // section. no-print added since it leaves the int-panel's print shield.
   const calc=document.getElementById('costMarginWrap');
   if(calc && calc.parentElement!==sec){
     calc.classList.add('no-print');
@@ -5813,9 +5655,8 @@ function renderItems(){
       } else if(vbOff){
         volNoteHtml=`<div class="vol-note vol-note-off no-print" onclick="toggleVolumeBreak(${idx})" title="Tap to re-apply this line's volume discount">Vol discount off — tap to apply (−${formatPeso(vbOff.amt)})</div>`;
       }
-      // COSTING-PHASE1-SPEC-2026-08-26 §3 — custom-line costing gate. Own
-      // partner guard (customCostGateHtml() begins `if(PARTNER_MODE) return`)
-      // since this row lives in the items table, not inside #costMarginWrap.
+      // COSTING-PHASE1-SPEC-2026-08-26 §3 — custom-line costing gate; this row
+      // lives in the items table, not inside #costMarginWrap.
       const costGateHtml=customCostGateHtml(item,idx);
       // BS quotes: the pass-through tick rides the same cell the cost gate
       // uses on Barro quotes (customCostGateHtml is '' for BS) — see
@@ -6542,14 +6383,13 @@ function onDiscountModeChange(){
 let _commAuto=false;
 function isNeilName(n){ n=(n||'').toLowerCase(); return n.includes('neil')&&n.includes('barro'); }
 function autoCommissionSync(){
-  if (typeof PARTNER_MODE!=='undefined' && PARTNER_MODE) return;
   const spEl=document.getElementById('salesperson');
   const pctEl=document.getElementById('commissionPct');
   const modeEl=document.getElementById('commissionMode');
   if(!spEl||!pctEl||!modeEl) return;
   const sp=spEl.value.trim();
   const untouched=_commAuto||((modeEl.value||'pct')==='pct'&&(parseFloat(pctEl.value)||0)===0);
-  const wantAuto=!!sp&&!isNeilName(sp)&&currentCo!=='BS'&&currentCo!=='PT';
+  const wantAuto=!!sp&&!isNeilName(sp)&&currentCo!=='BS';
   if(wantAuto&&untouched){
     if(pctEl.value!=='3'){ modeEl.value='pct'; pctEl.value='3'; onCommissionModeChange(); }
     _commAuto=true;
@@ -6617,7 +6457,7 @@ function updateRemarksPrint(){
 // PAYMENT DETAILS — per-company bank/e-wallet block (owner request). Gated
 // purely on CO[currentCo].pay's presence (mirrors the CO.BS logo:'' leak fix):
 // only the Barro-owned identities (BK, BI) carry a `pay` config, so Brilliant
-// Steel and generic (CO.PT) partner quotes render nothing here, ever — no
+// Steel quotes render nothing here, ever — no
 // code-string branch to keep in sync when a company is added, which is exactly
 // why adding BI needed no change to this function's gate. Also honors the
 // #showPaymentDetails checkbox so a preparer can hide it per-quote. Values are
@@ -6952,7 +6792,6 @@ function renderMiscCosts(){
 // A reopened filed quote has MISCFEE lines but an empty table — those are
 // ADOPTED back into miscCosts instead of being deleted.
 function syncMiscItems(cost){
-  if (PARTNER_MODE) return false;
   let changed = false;
   if (!miscCosts.length) {
     items.forEach(it => {
@@ -7082,8 +6921,7 @@ function computeLaborTotal(){
 // factor. `bands` is [[threshold,factor],...] ascending; the last entry's
 // threshold is null (catch-all above the highest real threshold). Falls
 // back to COSTING_DEFAULTS.sizeBands if malformed/empty. Pure math, no item
-// data — deliberately unguarded (nothing partner-sensitive flows through
-// numeric args); its only caller is computeTrueCost() below.
+// data; its only caller is computeTrueCost() below.
 function sizeBandFactor(direct, bands){
   const list = Array.isArray(bands) && bands.length ? bands : COSTING_DEFAULTS.sizeBands;
   for (const band of list) {
@@ -7095,9 +6933,8 @@ function sizeBandFactor(direct, bands){
 
 // COSTING-DASHBOARD-SPEC-2026-08-26 Workstream B — turns the Analytics
 // costing dashboard's published product_costs/_pace doc (COSTING_PACE
-// global, set by loadDatabase()'s `!PARTNER_MODE` branch — never populated
-// for a partner session, so this naturally returns the "no live pace"
-// result there with no extra guard needed) into the OH loading multiplier.
+// global, set by loadDatabase() — null until that read succeeds, in which
+// case this returns the "no live pace" result) into the OH loading multiplier.
 // Live only when computedAt parses and is within the last 7 days — a
 // dashboard nobody has opened in over a week is stale, not wrong, so it
 // falls back to pace 1 (Phase 1's baseOH×sizeF behavior, byte-identical).
@@ -7134,12 +6971,7 @@ function paceSuggestedDiscount(){
 // legacy quote reflects today's cost basis rather than the day it was filed
 // — the snapshot is only the fallback, for a product no longer in the live
 // catalog. Custom lines (§3) use their own costMat/costHrs from the Internal
-// costing gate — never capitalMaterials/capitalLabor. GENERIC_PARTNER never
-// reaches this in practice (computeMarginSummary's #marginTbl DOM-removal
-// guard, and computeTrueCost()'s own guard, both fire first) — the check
-// here is belt-and-braces, matching this file's existing posture on the
-// capitalMaterials/capitalLabor leak (see the v14 re-audit note above
-// loadDatabase()).
+// costing gate — never capitalMaterials/capitalLabor.
 //
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §1/§2 — custom-line materials now prefer
 // the BOM total (Σ row qty × unitPrice) over the costMat lump when bom has
@@ -7162,7 +6994,6 @@ function paceSuggestedDiscount(){
 // always has for a catalog item missing capitalMaterials), it just won't get
 // a reconciled row in the per-item table until materials are added too.
 function itemCostBasis(item, liveById){
-  if (GENERIC_PARTNER) return { mat:0, hrs:0, capLaborPesos:0, laborAbsent:false, hasBasis:false, isCustom:item.id==='CUSTOM' };
   // CONFIGURATOR §4.5 — a configured line is NOT its primary SKU: costing it as one would treat a 6-burner stove as a 1-burner CE-001. Its
   // basis is the nearest standard model the family absorbed, scaled to the configured list figure, labelled approximate where it is shown.
   if (item.familyId) {
@@ -7208,7 +7039,7 @@ function ptUnitCostOf(item, basis, cs){
 
 // COSTING-PHASE1-SPEC-2026-08-26 §1/§2 — shadow-mode true-cost engine. Pure:
 // no Firestore reads here (COSTING_SETTINGS/DB.products cost data were
-// already loaded once, at boot, by loadDatabase()'s `!PARTNER_MODE` branch).
+// already loaded once, at boot, by loadDatabase()).
 // Never touches computePrice()/computeTotals() — the client-facing price
 // engine is untouched by this whole phase.
 //
@@ -7219,13 +7050,7 @@ function ptUnitCostOf(item, basis, cs){
 // to exactly one of the two sums) or silently drops either source. This
 // mirrors, at item grain, the pre-v2 panel's whole-quote laborEst-vs-
 // capLabor either/or.
-//
-// GENERIC_PARTNER never calls this in practice — computeMarginSummary()
-// bails on #marginTbl being absent (removed with #costMarginWrap by
-// applyPartnerMode()) before it would. Guarded here too, so the grep-level
-// isolation proof holds even for this pure/no-DOM function.
 function computeTrueCost(){
-  if (GENERIC_PARTNER) return null;
   const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
   const liveById = new Map((DB.products||[]).map(p=>[p.id,p]));
   const laborPct = (typeof cs.laborPctOfMaterials==='number') ? cs.laborPctOfMaterials : 0.70;
@@ -7259,10 +7084,7 @@ function computeTrueCost(){
   // COSTING-QB-UX-SPEC-2026-08-26 §3 — suggestedOhPct is exactly the old
   // (pre-override) formula, unchanged; ohPct is what actually prices the
   // panel, honoring a manual override (clamped the same way the suggestion
-  // always was) when one is set. PARTNER_MODE never sets ohOverridePct (the
-  // OH% input itself doesn't render for a partner session — see
-  // renderTrueCostPanelHtml()), so a partner's ohPct is always the live
-  // suggested value, exactly like before this spec.
+  // always was) when one is set.
   // OPTION B — fixed-rate pricing (owner ruling 2026-08-31): the suggested
   // OH% is the flat base rate. pace/sizeF are still computed above but are
   // ADVISORY display signals only — they no longer touch the price, so the
@@ -7316,14 +7138,10 @@ function computeTrueCost(){
 // `laborEst` is accepted here for call-site back-compat but no longer drives
 // the rendered figures (extending the contract, not breaking it).
 function computeMarginSummary(laborEst){
-  // #marginTbl lives inside #costMarginWrap, which applyPartnerMode() fully
-  // .remove()s for GENERIC_PARTNER at boot — this DOM-presence check is the
-  // same guard mechanism the pre-v2 panel used (was `#miMaterials`), so a
-  // generic partner session never runs the true-cost math at all, not even
-  // to throw the result away.
+  // #marginTbl lives inside #costMarginWrap — this DOM-presence check is the
+  // same guard mechanism the pre-v2 panel used (was `#miMaterials`).
   const wrap = document.getElementById('marginTbl'); if (!wrap) return;
   const cost = computeTrueCost();
-  if (!cost) return; // GENERIC_PARTNER — unreachable given the DOM guard above; belt-and-braces
   // OPTION B v2 (owner ruling 2026-08-31): the computed selling price flows
   // INTO the quote. If any costed line's price just changed, repaint the
   // items/totals first — renderItems() re-enters here once and the second
@@ -7357,8 +7175,7 @@ function computeMarginSummary(laborEst){
 
 // COSTING-PHASE1-SPEC-2026-08-26 §2 — builds the buildup/ladder/margin HTML
 // for #marginTbl. Split out of computeMarginSummary() for readability only;
-// it renders nothing itself (returns a string), so it carries no partner
-// guard of its own — its one caller is already gated above.
+// it renders nothing itself (returns a string).
 function renderTrueCostPanelHtml(cost){
   const cs=cost.cs;
   // ── the CALCULATOR (Internal redesign, owner ruling 2026-08-31) ─────────
@@ -7376,14 +7193,10 @@ function renderTrueCostPanelHtml(cost){
 
   const ohMinPct=cs.ohMin*100, ohMaxPct=cs.ohMax*100;
   const ohPctVal=cost.ohPct*100, ohSuggestedVal=cost.suggestedOhPct*100;
-  const ohControl = PARTNER_MODE
-    ? `<strong>${ohPctVal.toFixed(1)}%</strong>`
-    : `<input type="number" id="ohOverrideInput" min="${ohMinPct}" max="${ohMaxPct}" step="0.5" value="${ohPctVal.toFixed(1)}" onchange="onOhOverrideChange(this.value)" title="Override the OH%. Clamped ${ohMinPct.toFixed(0)}–${ohMaxPct.toFixed(0)}%; MK adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
+  const ohControl = `<input type="number" id="ohOverrideInput" min="${ohMinPct}" max="${ohMaxPct}" step="0.5" value="${ohPctVal.toFixed(1)}" onchange="onOhOverrideChange(this.value)" title="Override the OH%. Clamped ${ohMinPct.toFixed(0)}–${ohMaxPct.toFixed(0)}%; MK adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
   const mkMinPct=Math.max(0,(cost.totalLoad-cs.ohMax))*100, mkMaxPct=(cost.totalLoad-cs.ohMin)*100;
   const mkPctVal=cost.mkPct*100;
-  const mkControl = PARTNER_MODE
-    ? `<strong>${mkPctVal.toFixed(1)}%</strong>`
-    : `<input type="number" id="mkOverrideInput" min="${mkMinPct.toFixed(0)}" max="${mkMaxPct.toFixed(0)}" step="0.5" value="${mkPctVal.toFixed(1)}" onchange="onMkOverrideChange(this.value)" title="Override the MK%. OH adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
+  const mkControl = `<input type="number" id="mkOverrideInput" min="${mkMinPct.toFixed(0)}" max="${mkMaxPct.toFixed(0)}" step="0.5" value="${mkPctVal.toFixed(1)}" onchange="onMkOverrideChange(this.value)" title="Override the MK%. OH adjusts so OH+MK stays ${Math.round(cost.totalLoad*100)}%." class="calc-dial">%`;
 
   const hasMisc = cost.miscCost>0;
   const hasPt = cost.ptCost>0;
@@ -7449,16 +7262,14 @@ function renderTrueCostPanelHtml(cost){
     // as both Direct/u and Sell/u and "at cost" instead of a negative MK.
     // A CONFIGURED line is a made-to-order product, never a supplier resale (owner-suggested default, 2026-10-28), so the ⇄ PT opt-in is not offered on it.
     // One that ALREADY carries the flag (converted from a pass-through line, or loaded from an older quote) keeps its chip, so the flag can still be cleared.
-    const ptToggle = (PARTNER_MODE || (item.familyId && !item.passThrough)) ? '' : `<button type="button" class="ms-chip" style="font-size:9px;border:none;cursor:pointer;background:${item.passThrough?'#dcecfb':'#f0f0f0'};color:${item.passThrough?'#1E5A8A':'var(--gray-dark)'};" onclick="togglePassThrough(${idx})" title="${item.passThrough?'Pass-through — supplier price = client price (no OH, no MK). Click to return to normal ×2.50 pricing.':'Click to make this a pass-through line — the supplier price is the client price: no OH, no markup, counted at cost (never as a negative).'}">⇄ ${item.passThrough?'pass-through':'PT'}</button>`;
+    const ptToggle = (item.familyId && !item.passThrough) ? '' : `<button type="button" class="ms-chip" style="font-size:9px;border:none;cursor:pointer;background:${item.passThrough?'#dcecfb':'#f0f0f0'};color:${item.passThrough?'#1E5A8A':'var(--gray-dark)'};" onclick="togglePassThrough(${idx})" title="${item.passThrough?'Pass-through — supplier price = client price (no OH, no MK). Click to return to normal ×2.50 pricing.':'Click to make this a pass-through line — the supplier price is the client price: no OH, no markup, counted at cost (never as a negative).'}">⇄ ${item.passThrough?'pass-through':'PT'}</button>`;
     if(item.passThrough){
       const pu = ptUnitCostOf(item, basis, cs);
       const diff = unitPrice - pu;
       const mkCell = Math.abs(diff)<1
         ? `<span style="color:var(--gray-dark);font-weight:600;" title="Pass-through — sold at supplier cost by design: zero margin, not a negative.">at cost</span>`
         : `<span style="color:${diff<0?'var(--red)':'var(--green)'};" title="This pass-through line is priced ${diff<0?'below':'above'} its supplier cost of ${formatPeso(pu)}.">${diff<0?'−':'+'}${formatPeso(Math.abs(diff))}</span>`;
-      const ptPriceCell = PARTNER_MODE
-        ? `<strong>${formatPeso(unitPrice)}</strong>`
-        : `<input type="number" class="calc-price" min="0" step="1" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Pass-through price — auto-set to the supplier cost; type to override.">`;
+      const ptPriceCell = `<input type="number" class="calc-price" min="0" step="1" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Pass-through price — auto-set to the supplier cost; type to override.">`;
       return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${ptToggle}</td><td style="text-align:center;">${qty}</td>
         <td style="text-align:right;">${formatPeso(pu)}</td>
         <td style="text-align:right;font-weight:600;">${formatPeso(pu)}</td>
@@ -7493,9 +7304,7 @@ function renderTrueCostPanelHtml(cost){
     const bS = !bF && !bT && unitPrice < Math.round(sellPerUnit/100)*100;
     const color = bF?'var(--red)':bT?'var(--orange)':bS?'var(--accent)':'var(--green)';
     const chip = priceBasisChipHtml(item) + (item.familyId ? ' ' + cfgCostChipHtml(basis) : '');
-    const priceCell = PARTNER_MODE
-      ? `<strong>${formatPeso(unitPrice)}</strong>`
-      : `<input type="number" class="calc-price" min="0" step="100" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Type any price to experiment — it sticks as a manual override and the MK column shows what it really gives.">`;
+    const priceCell = `<input type="number" class="calc-price" min="0" step="100" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Type any price to experiment — it sticks as a manual override and the MK column shows what it really gives.">`;
     return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${chip} ${ptToggle}${lineBasisRowHtml(item, idx, {directPerUnit, truePerUnit, sellPerUnit})}</td><td style="text-align:center;">${qty}</td>
       <td style="text-align:right;">${formatPeso(directPerUnit)}</td>
       <td style="text-align:right;font-weight:600;">${formatPeso(sellPerUnit)}</td>
@@ -7504,7 +7313,7 @@ function renderTrueCostPanelHtml(cost){
   }).join('');
   const effMkTotal = cost.direct>0 ? (cost.sell-cost.trueCostTotal)/cost.direct : 0;
   const experiment = `<div class="calc-card">
-    <div class="calc-card-title">Experiment — type any price, MK adjusts${(!PARTNER_MODE && items.some(i=>i.id!=='MISCFEE' && (i.priceBasis!==undefined || i.priceManual))) ? '<button type="button" class="cfg-allbtn" onclick="applyCostBasedToAll()" title="Switch every line that has a cost basis to the calculator\'s cost-based price">Apply cost-based to all</button>' : ''}</div>
+    <div class="calc-card-title">Experiment — type any price, MK adjusts${items.some(i=>i.id!=='MISCFEE' && (i.priceBasis!==undefined || i.priceManual)) ? '<button type="button" class="cfg-allbtn" onclick="applyCostBasedToAll()" title="Switch every line that has a cost basis to the calculator\'s cost-based price">Apply cost-based to all</button>' : ''}</div>
     <div style="overflow-x:auto;"><table class="labor-tbl exp-tbl" style="min-width:560px;">
       <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Direct/u</th><th style="text-align:right;">Sell/u</th><th style="text-align:right;">Price/u</th><th style="text-align:right;">MK eff</th></tr></thead>
       <tbody>${expRows || `<tr><td colspan="6" style="text-align:center;color:var(--gray-dark);padding:10px;">Add items — each line becomes a row you can experiment on.</td></tr>`}</tbody>
@@ -7569,10 +7378,9 @@ function resetPricesToComputed(){
 // price auto-sets to direct/unit × (1 + OH% + MK%), rounded to the nearest
 // ₱100 so prices end in two zeros (15,500 · 7,500 · 4,300); MK absorbs the
 // rounding. A hand-typed price sticks (updatePrice sets priceManual) and
-// simply means a different effective MK. Internal sessions only — partner
-// views never mutate quote state from this panel.
+// simply means a different effective MK.
 function applyComputedPricing(cost){
-  if (PARTNER_MODE || !cost) return false;
+  if (!cost) return false;
   let changed = false;
   const laborPctA = (typeof cost.cs.laborPctOfMaterials==='number') ? cost.cs.laborPctOfMaterials : 0.80;
   const mult = 1 + cost.ohPct + cost.mkPct;
@@ -8332,10 +8140,7 @@ const VERIFY_CHECKS=[
 // (or there are none); otherwise the block reason. Mirrors
 // milestoneBlockReason()'s shape exactly: a HARD, non-waivable gate,
 // deliberately outside VERIFY_CHECKS (a preparer can't "Mark as N/A" their
-// way past missing cost data). PARTNER_MODE always passes — a partner
-// session never rendered the Materials ₱/Labor hrs inputs in the first
-// place (customCostGateHtml() above), so it has no way to fix an "uncosted"
-// line and must never be blocked by one.
+// way past missing cost data).
 //
 // COSTING-CUSTOM-BOM-SPEC-2026-08-26 §2 — "costed" now means
 // customLineHasMaterialsBasis(item) (bom rows OR costMat) instead of
@@ -8343,7 +8148,6 @@ const VERIFY_CHECKS=[
 // keeps this in lockstep with itemCostBasis()'s hasBasis and
 // customCostGateHtml()'s chip; see the comment there for the full rationale.
 function uncostedCustomLinesReason(){
-  if (PARTNER_MODE) return '';
   if (typeof currentCo!=='undefined' && currentCo==='BS') return '';   // BS quotes never require a Barro cost basis
   // A pass-through line never blocks filing either: its quoted price IS its
   // cost (owner 2026-09-21), so there is nothing left to cost.
@@ -8355,9 +8159,8 @@ function uncostedCustomLinesReason(){
 // CONFIGURATOR rule R5 (A2, price protection) — '' when every line flagged "needs a price" has one; otherwise the block reason.
 // A HARD, non-waivable gate beside uncostedCustomLinesReason() (never in VERIFY_CHECKS, so "Mark as N/A" cannot get past it). The cost-plus
 // auto-pricer never fills such a line in (its price basis is 'manual'), so the ways out are a typed price, "Use cost-based" on the
-// calculator, or Finance approving the option sheet. '' in any PARTNER_MODE session, which never rendered the controls to fix it.
+// calculator, or Finance approving the option sheet.
 function needsPriceReason(){
-  if (PARTNER_MODE) return '';
   const bad = items.filter(lineNeedsPrice);
   if (!bad.length) return '';
   const noun = bad.every(i => i.familyId) ? 'configured line(s)' : 'line(s)';
@@ -8439,7 +8242,7 @@ function renderHandoffBar(){
   const bar = document.getElementById('handoffBar');
   if (!bar) return;
   const sr = sourceRef;
-  if (PARTNER_MODE || !sr || !sr.kind || !sr.ref) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  if (!sr || !sr.kind || !sr.ref) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   const isQr = sr.kind === 'qr';
   const t = v => (typeof v === 'string' ? v.trim() : '');
   const bits = [];
@@ -8571,8 +8374,6 @@ function buildVerifyModal(){
   // COSTING-PHASE1-SPEC-2026-08-26 §3 — uncosted custom lines. Same visual
   // pattern as the milestone block above: canFile() already returns false
   // via uncostedCustomLinesReason(); this is the message, not the gate.
-  // Never rendered for a partner session (the reason string is always ''
-  // there — see uncostedCustomLinesReason()).
   const costReason=uncostedCustomLinesReason();
   if(costReason){
     html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
@@ -8630,9 +8431,7 @@ function buildVerifyModal(){
   // right here would otherwise render the checkbox unchecked (nothing else
   // re-renders the margin panel between the checkbox being created and this
   // html string being built). Checking computeTrueCost() directly here closes
-  // that gap. computeTrueCost() returns null for GENERIC_PARTNER (never
-  // reached in practice — partners never see #reqApprovalCheck's true state
-  // change this implies — but the null-check keeps this line safe either way).
+  // that gap.
   const belowFloorAtOpen = (typeof computeTrueCost==='function') && (()=>{ const c=computeTrueCost(); return !!c && c.sell<c.direct; })();
   const reqApproval = document.getElementById('reqApprovalCheck')?.checked || belowFloorAtOpen || false;
   html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
@@ -8725,7 +8524,7 @@ async function fileQuotation(){
   if(msBlock){ showToast(msBlock,'error'); return; }
   // COSTING-PHASE1-SPEC-2026-08-26 §3 — same belt-and-braces treatment for
   // uncosted custom lines: canFile() already covers it, this is the second
-  // gate for a programmatic call. '' (no block) in any PARTNER_MODE session.
+  // gate for a programmatic call.
   const costBlock=uncostedCustomLinesReason();
   if(costBlock){ showToast(costBlock,'error'); return; }
   // CONFIGURATOR R5 — the same second gate for a programmatic call: a line flagged "needs a price" never reaches Firestore unpriced.
@@ -8793,10 +8592,8 @@ async function fileQuotation(){
 // rides the postMessage ENVELOPE (e.data.costSidecar); the bridge lifts it
 // into the private quote_costs collection (internal-only rules), and the
 // reopen/resume paths graft it back so the BOM/costing survives a re-open.
-// Rows match back by index+name. Null for partner sessions and when no line
-// carries any cost field.
+// Rows match back by index+name. Null when no line carries any cost field.
 function buildCostSidecar(){
-  if (PARTNER_MODE) return null;
   const rows=[];
   const _cfgLive = items.some(x=>x&&x.familyId) ? new Map((DB.products||[]).map(p=>[p.id,p])) : null;
   items.forEach((it,i)=>{
@@ -9400,12 +9197,16 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 43;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 44;   // integer; bump on every user-visible quote-builder change
 // CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
 // 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
 // them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
 const ESTIMATE_RANGE_MODE = 'warn';
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:44, date:'2026-10-28', items:[
+    'The external partner portal is retired. Brilliant Steel staff use the same builder as everyone else: pick the Brilliant Steel pill for a BS quote — every BS line still carries the pass-through tick. Nothing changes for Barro Kitchens or Barro Industries quotes.',
+    'Open Quote Builder from the Brilliant Steel department and it starts on the Brilliant Steel pill. A quote you reopen or revise keeps its own company, and you can still switch the pill any time.',
+  ]},
   { ver:43, date:'2026-10-28', items:[
     '⚙ Configure a sink, prep table, stove, cabinet, wall shelf or rack right in the builder — the same options and prices as the website. Tap a Configure chip above the search box. The price follows the option amounts Finance approved, and an option nobody has priced yet shows "Priced after review" and asks you for a price instead of guessing.',
     'Website quote requests open as real configured lines at the website price, with the client\'s details, lead source, location and project type filled in. The calculator shows the cost-based price beside it — choose per line or "Apply cost-based to all". A line with no price yet is marked "needs a price", and Verify & File waits until you type one.',
@@ -9574,13 +9375,13 @@ const WHATS_NEW = [           // newest first; plain user language, no dev jargo
 // mode); `needsWorkspace` steps live inside
 // #internalWorkspace and require switching to Internal view first (see
 // showTourStep() below). Every step must resolve or be skipped gracefully —
-// BS-partner lock mode hides the whole company toggle-pills wrapper and may
-// have no #btnAdmin; GENERIC_PARTNER has no #btnInternal/#btnAdmin at all.
+// a missing or hidden target (mobile-hidden topbar buttons, the configurator
+// switched off) skips the step.
 const TOUR_STEPS = [
  { title:'Welcome to the Quote Builder 👋',
    body:'This is where Barro Kitchens, Barro Industries and Brilliant Steel quotes are built, priced, filed and shared. This demo takes about 2 minutes and changes nothing in your quote.' },
  { target:'#coBK', closest:'.toggle-pills', title:'Pick the company',
-   body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice.' },
+   body:'Each quote belongs to one company. The logo, letterhead, quote number and payment details all follow this choice. On Brilliant Steel the cost calculator stays out of the way and each line gets a pass-through tick.' },
  { target:'#btnClient', closest:'.toggle-pills', title:'Three tabs',
    body:'Client Data is the document form — quote number, client, delivery, photos — with a 👁 Preview button that shows the finished document. Estimator deals with the numbers: items, additional costs and the calculator. Terms holds the terms & conditions.' },
  { target:'#clientFormBar', needsForm:true, title:'The document form',
@@ -9610,7 +9411,7 @@ const TOUR_STEPS = [
  { target:'#btnPrint', title:'Save PDF, Agent & Workforce copies',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: item details, qty and unit only — no prices anywhere.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
-   body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here. Partners never see this button.' },
+   body:'📦 opens the full product pricelist — scroll or search, tap a product and it lands on the quote (configurable items open the calculator first). Products themselves are added or edited in the Inventory department, not here.' },
  { title:'That\'s the whole flow 🎉',
    body:'Your work auto-saves as a draft while you type — an unfiled quote offers to resume next time you open the builder. Tap ❓ Help any time for the written guide and What\'s New.' },
 ];
@@ -9660,8 +9461,8 @@ function dismissTutBanner(){
 // ── Spotlight demo tour ──────────────────────────────────────────────
 // Read-only: never touches items/drafts/quote state, and never calls a
 // filing/printing function. Every DOM lookup below is null-guarded so a
-// missing/hidden target (partner lock mode, GENERIC_PARTNER, mobile-hidden
-// topbar buttons) skips the step instead of breaking the tour.
+// missing/hidden target (mobile-hidden topbar buttons, the configurator
+// switched off) skips the step instead of breaking the tour.
 let tourActive=false, tourIdx=0, tourSavedView='client', tourChangedView=false,
     tourCurrentTarget=null, _tourRAF=null;
 
@@ -9704,13 +9505,9 @@ function showTourStep(i, dir){
   const step=TOUR_STEPS[i];
   if(step.needsForm){
     // Owner ruling 2026-08-31: these sections live on the Client-tab FORM.
-    // Switch to client view (form mode, never the preview) so they show;
-    // GENERIC_PARTNER never uses body-client-view — their workspace already
-    // shows the document sections, so no switch is needed there.
-    if(typeof GENERIC_PARTNER==='undefined' || !GENERIC_PARTNER){
-      if(!document.body.classList.contains('body-client-view') || document.body.classList.contains('client-previewing')){
-        if(typeof setView==='function'){ setView('client'); tourChangedView=true; }
-      }
+    // Switch to client view (form mode, never the preview) so they show.
+    if(!document.body.classList.contains('body-client-view') || document.body.classList.contains('client-previewing')){
+      if(typeof setView==='function'){ setView('client'); tourChangedView=true; }
     }
   }
   if(step.needsTerms){
@@ -9725,7 +9522,7 @@ function showTourStep(i, dir){
     // (workspace not visible) never switched views and skipped EVERY Estimator step after the Terms step.
     if(ws && (ws.offsetParent===null || document.body.classList.contains('body-terms-view'))){
       const btnInt=document.getElementById('btnInternal');
-      // The button only has to EXIST (a partner who has none stays put): on a phone it is hidden behind the ☰ menu (#mtbViewInternal does the
+      // The button only has to EXIST: on a phone it is hidden behind the ☰ menu (#mtbViewInternal does the
       // same job), and requiring it to be visible skipped every Estimator step there. The Client / Terms steps above switch views unconditionally too.
       if(btnInt && typeof setView==='function'){
         setView('internal');
@@ -9738,7 +9535,7 @@ function showTourStep(i, dir){
     }
   }
   // The configurator step opens the panel READ-ONLY on a standard product (the demo never adds anything, and the panel is closed again when
-  // the demo leaves the step); no configurator in this session (partner / switched off) -> the step is skipped like any hidden target.
+  // the demo leaves the step); no configurator in this session (switched off) -> the step is skipped like any hidden target.
   if(step.needsConfigurator){
     if(!configuratorAvailable()){ showTourStep(i+dir, dir); return; }
     tourOpenConfigurator();
@@ -9828,19 +9625,12 @@ function endTour(){
   document.removeEventListener('keydown', tourKeyHandler);
   window.removeEventListener('resize', tourReposition);
   window.removeEventListener('scroll', tourReposition, true);
-  // Restore the view the tour started in — only when a needsWorkspace step
-  // actually switched it (tourChangedView), the pill for that view still
-  // exists, and this isn't a GENERIC_PARTNER restoring 'client' (setView()
-  // documents that trap: it would permanently hide their workspace since
-  // they have no #btnInternal to undo it with). GENERIC_PARTNER never sets
-  // tourChangedView in the first place (their workspace is always visible,
-  // so the needsWorkspace branch above never calls setView) — this is
-  // belt-and-braces on top of that.
+  // Restore the view the tour started in — only when a step actually
+  // switched it (tourChangedView) and the pill for that view still exists.
   if(tourChangedView && typeof setView==='function'){
     const pillId='btn'+tourSavedView.charAt(0).toUpperCase()+tourSavedView.slice(1);
     const pillOk=!!document.getElementById(pillId);
-    const genericPartnerTrap=(typeof GENERIC_PARTNER!=='undefined' && GENERIC_PARTNER && tourSavedView==='client');
-    if(pillOk && !genericPartnerTrap) setView(tourSavedView);
+    if(pillOk) setView(tourSavedView);
   }
   tourCurrentTarget=null;
 }

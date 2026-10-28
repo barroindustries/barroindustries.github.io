@@ -21,10 +21,9 @@
   // and lift layoffs — no approval step. Mirrors firestore.rules' write gate
   // (isSeniorAdmin() || isHrDept()). Deliberately NARROWER than isHrPriv()
   // (js/screens/hr.js) — secretary/finance keep SIGHT via canHrView-backed
-  // reads but never the pen. Partners are excluded outright.
+  // reads but never the pen.
   window.canLayoffAdmin = function () {
     const role = window.currentRole || '';
-    if (role === 'partner') return false;
     return ['president', 'manager'].includes(role)
         || (window.currentDepts || []).includes('HR');
   };
@@ -237,9 +236,8 @@
         ? window.dbCachedGet('users', () => db.collection('users').get(), 30000)
         : db.collection('users').get());
       const hrUids = (usersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }))
-        .filter(u => u.role !== 'partner' && (
-          ['president', 'manager'].includes(u.role) ||
-          u.department === 'HR' || (u.departments || []).includes('HR')))
+        .filter(u => ['president', 'manager'].includes(u.role) ||
+          u.department === 'HR' || (u.departments || []).includes('HR'))
         .map(u => u.id);
 
       const hubRef = await db.collection('hub_files').add({
@@ -575,7 +573,7 @@
           ? window.dbCachedGet('users', () => db.collection('users').get(), 30000)
           : db.collection('users').get());
         const eligible = (usersSnap.docs || []).map(d => ({ id: d.id, ...d.data() }))
-          .filter(u => u.role !== 'partner' && u.role !== 'president' && u.removed !== true && !(u.layoff && u.layoff.active === true));
+          .filter(u => u.role !== 'president' && u.removed !== true && !(u.layoff && u.layoff.active === true));
         const options = eligible.map(u =>
           `<option value="${escHtml(u.id)}">${escHtml((u.displayName || u.email || u.id) + ' — ' + (u.employeeId || u.role || ''))}</option>`
         ).join('');

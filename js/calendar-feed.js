@@ -19,8 +19,8 @@
      - biddings / deliveries: reads already permitted to all internal staff
        by firestore.rules; this file only narrows the AUDIENCE further,
        client-side, before ever issuing the read.
-   Partners get no calendar nav entry; a deep-link's meetings leg is denied by
-   the rule exactly as before, and every other source here soft-fails closed.
+   A deep-link's meetings leg is denied by the rule exactly as before for anyone
+   the rule excludes, and every other source here soft-fails closed.
 
    LOAD ORDER — immediately after js/meetings.js (index.html), so
    window.Meetings._h (the Manila date helpers) is guaranteed defined before
@@ -152,7 +152,7 @@ window.CalendarFeed = (function () {
      Government Biddings is physically THREE collections (window.GOV_BUCKETS,
      js/screens/govit.js): gov_philgeps, gov_active_bids, gov_archive, each
      with the identical rule the spec quoted
-     (`allow read: if isAuth() && !isPartner()`). Reads all three under the
+     (any signed-in staff member may read). Reads all three under the
      ONE cache key the spec specifies, combines them, and excludes terminal
      statuses (won/lost/cancelled/archived) exactly as instructed. */
   async function biddingEntries(mk) {

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.330';
+window.APP_VERSION = '14.0.331';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -208,8 +208,8 @@ window.AUTO_LOGOUT_MS = 10 * 24 * 60 * 60 * 1000;
 // coherent system instead of the old ad-hoc material-design swatches).
 // v14 C2 — subtabs corrected to match what each render function ACTUALLY
 // shows today (verified against departments.js). navOrder collisions (Finance/HR
-// both 2, IT/Design both 6, Production/Brilliant Steel both 7, Purchasing/Partners
-// both 8) fixed by renumbering uniquely in the object's existing key order — the
+// both 2, IT/Design both 6, Production/Brilliant Steel both 7) fixed by
+// renumbering uniquely in the object's existing key order — the
 // only order any current consumer (Object.keys(DEPARTMENTS) in the dept
 // switcher/pickers) actually reads; navOrder itself has no reader yet.
 window.DEPARTMENTS = {
@@ -238,7 +238,7 @@ window.DEPARTMENTS = {
     // 'Quick Estimate' are dead aliases that resolve to 'Quotes' — removed here.
     // 'AEC' moved out to the CRM department (2026-08-04) — the architect/
     // engineer/contractor prospecting directory now lives under CRM > AEC Leads.
-    subtabs: ['Clients', 'Briefs', 'Quote requests', 'Quotes', 'Analytics', 'Partner', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
+    subtabs: ['Clients', 'Briefs', 'Quote requests', 'Quotes', 'Analytics', 'Brilliant Steel', 'Files', 'SOP', 'Budgeting', 'Tasks'], navOrder: 4
   },
   'CRM': {
     key: 'CRM', icon: '🎯', lucideIcon: 'target', color: '#F59F00',
@@ -303,8 +303,8 @@ window.DEPARTMENTS = {
     // deliberately NOT kept in sync with the data: the screen's real chip row
     // is Portfolio + one chip per `ventures` doc, built at runtime, so adding
     // a fifth venture is a Firestore write and never an edit to this list.
-    // POSITION: last of the INTERNAL departments, immediately before the two
-    // external ones (Brilliant Steel isSeparate / Partners isPartnerDept) —
+    // POSITION: last of the INTERNAL departments, immediately before the
+    // separate one (Brilliant Steel isSeparate) —
     // this object's own key order is what every consumer actually reads
     // (Object.keys() in the dept switcher/pickers/grid). navOrder is a
     // fractional 10.5 slot to match, and still has NO reader; CRM's 4.5 is
@@ -319,52 +319,7 @@ window.DEPARTMENTS = {
     // 'Dashboard' tab; the default landing subtab is 'Quotations Summary'.
     subtabs: ['Quote Builder', 'Quotations Summary', 'Client Data', 'Files'],
     navOrder: 11, isSeparate: true
-  },
-  'Partners': {
-    key: 'Partners', icon: '🤝', lucideIcon: 'handshake', color: '#1971C2',
-    // renderPartnersDept's real chip tabs (app.js:4107-4113) — 'Deals' and
-    // 'Quote Builder' were missing from the old list.
-    subtabs: ['Overview', 'Deals', 'Tasks', 'Quotes', 'Quote Builder', 'Activity'],
-    navOrder: 12, isPartnerDept: true
   }
-};
-
-// ── window.isExternalPartnerUser(u) — is this person OUTSIDE Barro? ────────
-// Owner ruling (2026-08-12): "dont include brilliant steel or partners on the
-// payroll or hr". They are another company's people; they draw no Barro wage
-// and do not belong on an HR roster.
-//
-// THE ONE COPY. This predicate previously existed TWICE, hand-duplicated in
-// js/departments.js (buildPayRunLines) and js/screens/hr.js (the HR roster) —
-// two copies of a rule that decides who gets paid, guaranteed to drift. Both
-// now delegate here. Anywhere else that lists staff should call this too.
-//
-// EXTERNAL-NESS IS READ OFF `DEPARTMENTS`, never hardcoded by name: Brilliant
-// Steel carries isSeparate, Partners carries isPartnerDept. A future external
-// department is therefore excluded the moment it is declared, instead of
-// silently landing on the payroll until someone remembers this function.
-//
-// ⚠ `every`, NOT `some`, and this is the money-safe direction. Someone is
-// external only when EVERY department they belong to is external. A genuine
-// Barro employee who is ALSO assigned to Brilliant Steel to coordinate the
-// partnership keeps their wage — the failure of wrongly excluding a real
-// employee is silent non-payment, which is far worse than a partner appearing
-// on a roster where a human can see and hold them. (This also fixes the old
-// `depts.length === 1` test, which let a Brilliant-Steel-plus-Partners person
-// through on a technicality.)
-window.isExternalPartnerUser = function(u) {
-  if (!u) return false;
-  if (u.role === 'partner') return true;
-  // A user titled "Partner" whose role is still 'employee'/'agent' — the exact
-  // case the original role-only filter let through.
-  if (typeof u.title === 'string' && u.title.trim().toLowerCase() === 'partner') return true;
-  const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
-  if (!depts.length) return false;          // no department is not evidence of being external
-  const meta = window.DEPARTMENTS || {};
-  return depts.every(function(d) {
-    const m = meta[d];
-    return !!(m && (m.isSeparate || m.isPartnerDept));
-  });
 };
 
 // ── v12 WS42 Phase 21 — BI icon-tile system ──────────────────────────────
@@ -464,8 +419,25 @@ window.ROLES = {
   secretary: { label: 'Corporate Secretary', badge: 'badge-gold',   canSeeAll: true  },
   employee:  { label: 'Employee',            badge: 'badge-gray',   canSeeAll: false },
   agent:     { label: 'Sales Agent',         badge: 'badge-orange', canSeeAll: false },
-  finance:   { label: 'Accountant',          badge: 'badge-green',  canSeeAll: false },
-  partner:   { label: 'Partner',             badge: 'badge-teal',   canSeeAll: false }
+  finance:   { label: 'Accountant',          badge: 'badge-green',  canSeeAll: false }
+};
+
+// ── Retired external-partner role — TEMPORARY roster guard (money safety) ──
+// The external `partner` role is retired and window.isExternalPartnerUser (which
+// kept those accounts off every payroll / HR / statutory roster) is deleted:
+// Brilliant Steel staff are Barro employees and are paid like anyone else. Until
+// the Phase-2 data purge deletes the surviving users docs with role 'partner'
+// (they cannot sign in — app.js refuses the role — but they are still rows on
+// `users`), the five rosters that used to exclude them must keep skipping them,
+// or one with a payroll doc would be computed, paid and filed like staff.
+// ROLE ONLY, trimmed and case-insensitive (production carries 'Partner' drift):
+// never the title and never a department — a Brilliant-Steel-only employee is NOT
+// retired. ONE definition; callers: buildPayRunLines (js/departments.js), the HR
+// payroll roster (js/screens/hr.js), both Gov Rates rosters (js/screens/
+// statutory-rates.js), the payroll back-fill roster (js/screens/payroll-backfill.js).
+// PARTNER-REMOVAL-SPEC §3.2 retired-role — temporary; WS-H deletes this and every call.
+window.isRetiredRoleUser = function(u) {
+  return !!u && String(u.role || '').trim().toLowerCase() === 'partner';
 };
 
 // ── Employment status (owner request, 2026-08-09) ────────────────────────
@@ -509,13 +481,12 @@ window.TEAM_TYPES = {
   operations: { label: 'Fabricator · Operations', sub: 'Weekly payroll',   color: '#FF9F0A' },
   agent:      { label: 'Sales Agent',            sub: 'Commission-based', color: '#FFD60A' },
   freelancer: { label: 'Freelancer',             sub: 'External · project-based', color: '#BF5AF2' },
-  partner:    { label: 'Partner',                sub: 'External company', color: '#FF6B6B' },
 };
 // Classify a users/{uid} doc into a TEAM_TYPES key. Priority order (first hit
 // wins):
 //   1. explicit u.team stamp (new accounts get this — people.js invite save,
 //      dashboards.js openCreateWorkerModal/openAddEmployeeModal)
-//   2. u.role 'partner'/'agent'
+//   2. u.role 'agent'
 //   3. u.payClass === 'production' (merged payroll — only visible to
 //      money-priv viewers via fetchUsersWithPayroll above)
 //   4. u.hrManagedAccount === true (visible to EVERYONE — worker accounts are
@@ -525,7 +496,6 @@ window.TEAM_TYPES = {
 window.teamTypeOf = function(u) {
   if (!u) return 'office';
   if (typeof u.team === 'string' && window.TEAM_TYPES[u.team]) return u.team;
-  if (u.role === 'partner') return 'partner';
   if (u.role === 'agent') return 'agent';
   if (u.payClass === 'production') return 'operations';
   if (u.hrManagedAccount === true) return 'operations';
@@ -655,7 +625,7 @@ window.LeaveAccrual = {
     let seeded=0, skipped=0, i=0;
     for (const d of usnap.docs){
       const u = d.data();
-      if (u.role === 'partner') { skipped++; continue; }        // partners have no leave
+      if (u.removed === true) { skipped++; continue; }  // offboarded (incl. retired partner accounts) get no leave
       const res = await this.grantForYear(d.id, { startDate:u.startDate }, year);
       res.skipped ? skipped++ : seeded++;
       onProgress && onProgress(++i, usnap.size);
@@ -688,7 +658,7 @@ window.LeaveAccrual = {
 //                      (unlike sidebar there was never a shared prefix to
 //                      factor out — every *_BOTTOM_NAV array today lists Home
 //                      itself, at a genuinely different relative spot each time).
-// variant is one of: 'admin' | 'genericPartner' | 'partnerBS' | 'bsOnly' | 'staff'
+// variant is one of: 'admin' | 'bsOnly' | 'staff'
 // (mirrors the exact if/else-if order both getSidebarItems and the old
 // _primaryNavItems already checked in).
 // ⚠ ADDING AN ENTRY HERE IS TWO EDITS, NOT ONE.
@@ -741,8 +711,8 @@ window.NAV_REGISTRY = {
   sidebarUniversal: [
     { key:'dashboard', icon:'home',            label:'Dashboard', page:'dashboard' },
     // Relabelled 'Chat' → 'Chats' 2026-08-12 (owner's own drawer wording).
-    // sidebarUniversal is prepended to EVERY variant, so admins/partners also
-    // get 'Chats' now — deliberate, one label one place, not a per-variant fork.
+    // sidebarUniversal is prepended to EVERY variant, so admins also get
+    // 'Chats' now — deliberate, one label one place, not a per-variant fork.
     { key:'chat',       icon:'message-circle', label:'Chats',     page:'chat'      }
   ],
 
@@ -796,29 +766,9 @@ window.NAV_REGISTRY = {
       { key:'projects',    icon:'trending-up', label:'Projects',        page:'projects-lifecycle' }
     ],
 
-    genericPartner: [
-      { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
-      { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
-      { key:'posts',    icon:'megaphone',    label:'Announcements', page:'posts' },
-      { key:'qb',       icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' },
-      { key:'quotes',   icon:'file-text',    label:'Quotations',    page:'bs-quotations' },
-      { key:'team',     icon:'users',        label:'Team',          page:'team-directory', section:true, sectionLabel:'Directory' },
-      { key:'files',    icon:'folder',       label:'Files',         page:'files' }
-    ],
-    // ── External Partner role (Brilliant Steel) ──
-    partnerBS: [
-      { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
-      { key:'posts',    icon:'megaphone',    label:'Announcements', page:'posts' },
-      { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
-      { key:'qb',       icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' },
-      { key:'quotes',   icon:'file-text',    label:'Quotations',    page:'bs-quotations' },
-      { key:'clients',  icon:'book-open',    label:'Client Data',   page:'bs-clients' },
-      { key:'team',     icon:'users',        label:'Team',          page:'team-directory', section:true, sectionLabel:'Directory' },
-      { key:'files',    icon:'folder',       label:'Files',         page:'files' }
-    ],
-    // ── Partner — Brilliant Steel (ISOLATED, single-dept non-partner user) ──
+    // ── Brilliant Steel (ISOLATED) — internal staff whose ONLY department is
+    //    Brilliant Steel (owner ruling 2026-09-01: Barro employees; isolated chrome kept) ──
     bsOnly: [
-      { key:'projects', icon:'briefcase',  label:'My Projects',   page:'partner-projects' },
       { key:'qb',       icon:'calculator', label:'Quote Builder', page:'bs-quote-builder' },
       { key:'quotes',   icon:'file-text',  label:'Quotations',    page:'bs-quotations' },
       { key:'clients',  icon:'book-open',  label:'Client Data',   page:'bs-clients' },
@@ -907,28 +857,9 @@ window.NAV_REGISTRY = {
       { icon:'rocket',         label:'Ventures', page:'dept:Ventures'  },
       { icon:'circle-user',    label:'Profile', page:'my-profile'      }
     ],
-    // Bottom Nav — Generic Partner (any company)
-    genericPartner: [
-      { icon:'home',           label:'Home',     page:'dashboard'        },
-      { icon:'briefcase',      label:'Projects', page:'partner-projects' },
-      { icon:'message-circle', label:'Chats',    page:'chat'             },
-      { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
-      { icon:'check-square',   label:'Tasks',    page:'tasks'            },
-      { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
-    ],
-    // Bottom Nav — External Partner (Brilliant Steel)
-    partnerBS: [
-      { icon:'home',           label:'Home',     page:'dashboard'        },
-      { icon:'briefcase',      label:'Projects', page:'partner-projects' },
-      { icon:'message-circle', label:'Chats',    page:'chat'             },
-      { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
-      { icon:'file-text',      label:'Summary',  page:'bs-quotations'    },
-      { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
-    ],
-    // Bottom Nav — Partner (Brilliant Steel, isolated)
+    // Bottom Nav — Brilliant Steel (internal staff, isolated)
     bsOnly: [
       { icon:'home',           label:'Home',     page:'dashboard'        },
-      { icon:'briefcase',      label:'Projects', page:'partner-projects' },
       { icon:'message-circle', label:'Chats',    page:'chat'             },
       { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
       { icon:'file-text',      label:'Summary',  page:'bs-quotations'    },
@@ -980,33 +911,15 @@ window.NAV_REGISTRY = {
 // (their unfiltered payroll query is denied → .catch), so they never see others'
 // pay; a user's OWN pay is merged into userProfile separately at auth.
 //
-// v14 re-audit fix — firestore.rules `match /users/{uid}` now splits `get`
-// from `list`: an external partner may still resolve any single uid to a
-// name/photo, but may NOT enumerate the staff directory. Firestore evaluates a
-// list rule against the QUERY, not per document ("rules are not filters"), so
-// the narrowing has to be expressed in the query itself or the whole read is
-// denied. The provable set is exactly what the partner UI needs: other
-// partners (renderTeamTab, js/screens/people.js) plus president/manager (the
-// chat DM picker's candidate set, js/chat.js dmCandidates). Doing it HERE
-// covers every partner-reachable directory read at once, because dbCachedGet()
-// force-substitutes this fetcher for the 'users' key (see below) and the
-// chat presence path passes it explicitly.
-window.PARTNER_VISIBLE_ROLES = ['partner', 'president', 'manager'];
+// The users half is a plain full-collection read — every signed-in user is
+// internal staff. (It used to fall back to a role-scoped query for external
+// partner viewers; that feature is retired, PARTNER-REMOVAL-SPEC.) Every
+// directory read funnels through here because dbCachedGet() force-substitutes
+// this fetcher for the 'users' key (see below) and the chat presence path
+// passes it explicitly.
 window.fetchUsersWithPayroll = async function() {
-  const scopedQ = () => db.collection('users')
-    .where('role', 'in', window.PARTNER_VISIBLE_ROLES).get();
-  const viewerIsPartner = (typeof isPartner === 'function' && isPartner());
   const [uSnap, pSnap] = await Promise.all([
-    viewerIsPartner
-      ? scopedQ()
-      // Belt-and-braces: if currentRole hasn't resolved yet when something
-      // fires this early, the unfiltered list is denied by the rule rather
-      // than over-sharing — fall back to the scoped query instead of letting
-      // a permission error blank the Team tab / DM picker.
-      : db.collection('users').get().catch(err => {
-          if (err && err.code === 'permission-denied') return scopedQ();
-          throw err;
-        }),
+    db.collection('users').get(),
     // ⚠ THE SILENT-ZERO CHOKE POINT. payroll read is isMoneyAdmin(), so a
     // collection LIST is denied outright for the Corporate Secretary (and for
     // any employee viewing a roster). This catch turns that denial into an
@@ -1574,7 +1487,7 @@ window.PAGE_SCRIPTS = {
   // calls, so without the files here they degrade to silent no-ops for the
   // entire Type-B population (verifier finding, 2026-08-24).
   'dashboard:workerB':  ['js/screens/worker.js', 'js/screens/hr.js', 'js/screens/people.js', ..._PERF1_PAYROLL_ENGINE],
-  'dashboard:partner':  ['js/screens/partners.js'], // renderDashboard() -> renderPartnerDashboard()/renderBrilliantSteel()
+  'dashboard:bsOnly':   ['js/screens/partners.js'], // renderDashboard() -> renderBrilliantSteel()
 
   // ── Finance department — by far the widest fan-out in the app: Balance
   // Sheet/Cash Flow/Bank Rec/BIR call js/bir.js (which itself calls
@@ -1645,16 +1558,14 @@ window.PAGE_SCRIPTS = {
 
   'dept:Ventures': ['js/screens/ventures.js'],
 
-  // ── Brilliant Steel + generic Partners — renderBrilliantSteel/
+  // ── Brilliant Steel — renderBrilliantSteel/
   // loadBSContent call js/screens/sales.js's bindQuoteActions unguarded, and
   // the same openSalesOrderModal -> production.js reach as Sales above
-  // applies here too (a partner's quote can also convert to a sales order). ──
+  // applies here too (a BS quote can also convert to a sales order). ──
   'dept:Brilliant Steel': ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
   'bs-quotations':        ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
   'bs-clients':           ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
   'bs-files':             ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
-  'dept:Partners':        ['js/screens/partners.js', 'js/screens/sales.js', 'js/screens/production.js'],
-  'partner-projects':     ['js/screens/partners.js'],
 
   // ── Approvals — Approvals.dispatch (js/svc-approvals.js, EAGER) calls
   // window.approveLeaveRequest/rejectLeaveRequest (js/screens/people.js) and
@@ -1691,7 +1602,7 @@ window.ensurePage = function(page) {
 
 // ── Audit log (append-only) ───────────────────────
 // Records who-changed-what on sensitive data (payroll, finance, inventory,
-// products, production, partner deals, password resets). FIRE-AND-FORGET:
+// products, production, password resets). FIRE-AND-FORGET:
 // the whole thing is wrapped so it can NEVER throw or reject into the caller —
 // a failed/denied audit write must never break the user's actual mutation.
 // Call (do NOT await): window.logAudit('update','payroll',uid,{salary});
@@ -2885,8 +2796,6 @@ window.BRAND = {
 
   // Per-company sub-brands. Field shape is IDENTICAL to quote-builder-v2.html's
   // local CO object (that iframe keeps its OWN copy for isolation — see comment there).
-  // CO.PT (generic partner) is runtime-synthesized inside the iframe from URL params
-  // and is NOT mirrored here.
   companies: {
     BK: { name:'BARRO KITCHENS',
       sub:'By Barro Industries OPC',
@@ -2937,8 +2846,8 @@ window.QUOTE_COMPANIES = {
 // Every collection a quote may legitimately live in — the allowlist the
 // QUOTE_UPDATE bridge (js/app.js) validates an incoming collection against.
 window.QUOTE_COLLECTIONS = ['bk_quotes', 'bs_quotes'];
-// UNKNOWN CODES (including the runtime-synthesized generic-partner 'PT') fall
-// through to the Brilliant Steel/partner entry — byte-identical to what the
+// UNKNOWN CODES (a retired 'PT' on an old doc included) fall through to the
+// Brilliant Steel entry — byte-identical to what the
 // `=== 'BK' ? bk : bs` ternaries these helpers replaced already did.
 // hasOwnProperty, not truthiness: 'constructor', 'toString', 'valueOf' and the
 // rest of Object.prototype are inherited and ARE truthy, so a plain
@@ -2954,9 +2863,8 @@ function _quoteCo(company){
 window.quoteCollectionFor  = function(company){ return _quoteCo(company).coll; };
 window.quoteBuilderPageFor = function(company){ return _quoteCo(company).page; };
 window.quoteCompanyLabel   = function(company){ return _quoteCo(company).label; };
-// Internal = a Barro-owned identity (BK/BI). Partner identities (BS, and the
-// generic 'PT') are not, and must never be quoted under by internal-only flows
-// — or, conversely, be reachable by a partner session.
+// Internal = a Barro-owned identity (BK/BI). Brilliant Steel (BS) is not, and
+// must never be quoted under by internal-only flows.
 window.isInternalQuoteCompany = function(company){ return !!_quoteCo(company).internal; };
 
 // Convenience: pick the correct legal entity for a document type.
@@ -3419,7 +3327,7 @@ window.CashAdvance = {
   // Filtering by uid happens client-side after the fetch, which returns the
   // identical row set per uid (Firestore's cash_advances/approval_requests
   // read rules are per-document, not query-shaped, and both callers here run
-  // in an isFinanceOrAdmin()/non-partner admin context that can already read
+  // in an isFinanceOrAdmin() admin context that can already read
   // every row this widened query touches — see firestore.rules ~415, ~915).
   async planFor(uid, month) {
     const caAllSnap = await dbCachedGet('ca-approved-all',

@@ -19,7 +19,7 @@
    negative number, or 0). "Try a configuration" validates in staff mode so Finance can price it.
 
    Gating mirrors firestore.rules `product_pricing` exactly: president / manager / finance role, or a non-secretary member of the Finance
-   department. Partners and the secretary never see it. Import is President-only (UI rule; the Firestore rule is the finance tier).
+   department. The secretary never sees it. Import is President-only (UI rule; the Firestore rule is the finance tier).
 
    Everything shown is staff-side. Every interpolation into innerHTML goes through escHtml(); handlers are delegated (data-act), no
    inline onclick. Load order: lazy, via js/config.js PAGE_SCRIPTS 'dept:Inventory' / 'inventory' (after js/qr-families.js,
@@ -32,10 +32,10 @@
   var FP_MAX = 1e8;                                                  // a figure beyond +/-100 million is a typo, never a price
   var FP_CONF = { high: 'badge-green', medium: 'badge-blue', low: 'badge-orange', blank: 'badge-gray', entered: 'badge-purple' };
 
-  // Mirror of firestore.rules: isSeniorAdmin() || canFinance() with !isPartner() (canFinance = money-tier role, or a non-secretary Finance member).
+  // Mirror of firestore.rules: isSeniorAdmin() || canFinance() (canFinance = money-tier role, or a non-secretary Finance member).
   function fpCanEdit() {
     var role = window.currentRole || '';
-    if (role === 'partner' || role === 'secretary') return false;
+    if (role === 'secretary') return false;
     if (FP_ROLES.indexOf(role) >= 0) return true;
     return (window.currentDepts || []).indexOf('Finance') >= 0;
   }

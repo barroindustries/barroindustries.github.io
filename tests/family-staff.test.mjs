@@ -127,19 +127,17 @@ const OK_SHEET = {
   size: { perW100: null, confidence: 'blank', derivation: '' },
 };
 
-describe('Inventory › Family Pricing — the gate mirrors firestore.rules: president / manager / finance, or a non-secretary Finance member; never a partner or the secretary', () => {
+describe('Inventory › Family Pricing — the gate mirrors firestore.rules: president / manager / finance, or a non-secretary Finance member; never the secretary', () => {
   const can = (role, depts) => makeEnv({ role, depts }).ctx.window.FamilyPricing.canEdit();
   it('allows exactly the money tier and Finance-department members', () => {
     for (const r of ['president', 'manager', 'finance']) assert.equal(can(r, []), true, r);
     assert.equal(can('employee', ['Finance']), true);
     assert.equal(can('agent', ['Sales', 'Finance']), true);
   });
-  it('refuses everyone else — including a partner or the secretary who is ALSO listed in Finance', () => {
+  it('refuses everyone else — including the secretary who is ALSO listed in Finance', () => {
     assert.equal(can('employee', []), false);
     assert.equal(can('employee', ['Sales', 'IT']), false);
     assert.equal(can('agent', []), false);
-    assert.equal(can('partner', []), false);
-    assert.equal(can('partner', ['Finance']), false);
     assert.equal(can('secretary', ['Finance']), false);
     assert.equal(can('secretary', []), false);
     assert.equal(can('', []), false);
@@ -147,10 +145,10 @@ describe('Inventory › Family Pricing — the gate mirrors firestore.rules: pre
   });
   it('only the president is offered the import', () => {
     assert.equal(makeEnv({ role: 'president' }).ctx.window.FamilyPricing.isPresident(), true);
-    for (const r of ['manager', 'finance', 'employee', 'partner', 'secretary', '']) assert.equal(makeEnv({ role: r }).ctx.window.FamilyPricing.isPresident(), false, r);
+    for (const r of ['manager', 'finance', 'employee', 'secretary', '']) assert.equal(makeEnv({ role: r }).ctx.window.FamilyPricing.isPresident(), false, r);
   });
   it('an unauthorised user sees a locked message and the screen never reads Firestore', async () => {
-    for (const [role, depts] of [['employee', ['Sales']], ['partner', ['Finance']], ['secretary', ['Finance']]]) {
+    for (const [role, depts] of [['employee', ['Sales']], ['secretary', ['Finance']]]) {
       const env = makeEnv({ role, depts, docs: { sink: OK_SHEET } });
       await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, role);
       assert.match(env.el.innerHTML, /Family pricing is for Finance and the President/);
