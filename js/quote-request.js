@@ -19,7 +19,8 @@
    (names/units come from the island, never from storage). No analytics, no cookies, no third-party script beyond the
    two pinned Firebase compat scripts that carry the callables.
 
-   CONFIGURABLE PRODUCTS (owner ruling 2026-10-21): six products — preparation table, sink, stove, cabinet, wall shelving, rack — are ONE card
+   CONFIGURABLE PRODUCTS (owner ruling 2026-10-21; five more added 2026-10-28): eleven products — preparation table, sink, dish table, stove, wok range,
+   griddle / griller / fryer, gas deck oven, range hood, cabinet, wall shelving, rack — are ONE card
    each with a "Configure & add" button that opens a configurator sheet (segmented buttons and chips, a burner-by-burner list for the stove,
    a live preview image at the top: js/qr-preview.js). The options come from window.QR_FAMILIES (js/qr-families.js) and are checked with
    window.ProductFamilies (js/product-families.js) — the very same files the server validates with. A configured line is sent as
@@ -27,6 +28,11 @@
    draft saved before this change is converted line by line to the closest configuration (a notice says so).
    STANDARD CONSTRUCTION (owner ruling 2026-10-28): the sheet lists PF.publicGroups(fam) only — the staff-only group (the 1.2 mm top plate) is never shown,
    kept in the draft or sent — and a read-only "Construction: …" line (PF.constructionLine) says how the made-to-order piece is built.
+   CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4): a group that applies only for some answers of an earlier one (fry baskets for a fryer, a pre-rinse
+   sink on the soiled side of a dish table) stays in the sheet but is HIDDEN until PF.groupApplies says it applies, and goes back to its standard value the
+   moment it stops applying — so the configuration this page holds, keeps and sends is always one the server accepts. An option can also force a size limit
+   (PF.forcedMins / PF.forcedMaxes: a slim hood is at most 500 mm deep, a deck oven's width follows its trays): a size the visitor has not typed follows
+   the options, one they typed is moved to the limit at once, and the size hint says what the options force.
 
    QA seam: ?mock=1 resolves every call locally (no Firebase init); sim=gate|disabled|ratelimit|error|dup|slow|stale|
    expired|unauth exercises each state. It never reaches a backend and is harmless in production.
@@ -57,9 +63,12 @@
   island.products.forEach(function (p) {
     if (p && typeof p.id === 'string' && typeof p.name === 'string') byId[p.id] = p;
   });
-  // The six configurable families (js/qr-families.js) and their pure helpers (js/product-families.js). Without them only the fixed items work.
+  // The eleven configurable families (js/qr-families.js) and their pure helpers (js/product-families.js). Without them only the fixed items work.
   var PF = window.ProductFamilies, FAMS = window.QR_FAMILIES, PV = window.QR_PREVIEW;
-  var famEnabled = !!(PF && FAMS && FAMS.families && FAMS.order);          // the preview module is optional: without it the sheet simply has no picture
+  // The preview module is optional: without it the sheet simply has no picture. The helper file must be the one that knows conditional options and forced maximums:
+  // a copy cached from before them (the page and its scripts are cached separately) would throw in the sheet, so the families are treated as not loaded — the visitor's
+  // configured lines are held, they are told to reload, and nothing is lost.
+  var famEnabled = !!(PF && FAMS && FAMS.families && FAMS.order && typeof PF.groupApplies === 'function' && typeof PF.forcedMaxes === 'function');
   var previews = (island && island.previews && typeof island.previews === 'object') ? island.previews : {};
   function famById(id) { return famEnabled && typeof id === 'string' && Object.prototype.hasOwnProperty.call(FAMS.families, id) ? FAMS.families[id] : null; }
 
@@ -591,7 +600,7 @@
       card.appendChild(el('button', { type: 'button', class: 'qr-add', 'data-id': id, 'aria-label': 'Add to quote: ' + p.name, text: 'Add to quote' }));
       cards.push({ card: card, id: id });
     });
-    // the six configurable products: one card each, one "Configure & add" button that opens the configurator sheet
+    // the eleven configurable products: one card each, one "Configure & add" button that opens the configurator sheet
     [].slice.call(doc.querySelectorAll('.cat-card[data-family]')).forEach(function (card) {
       var fid = card.getAttribute('data-family');
       var fam = famById(fid);
@@ -1039,7 +1048,7 @@
     focusFirst(f, firstEditable ? dimFields[firstEditable].input : (run ? runInput : f.body.querySelector('select,input')));
   }
 
-  // ═══════════════════════════ CONFIGURATOR SHEET (the six configurable products) ═══════════════════════════
+  // ═══════════════════════════ CONFIGURATOR SHEET (the eleven configurable products) ═══════════════════════════
   // One sheet for every family, driven entirely by window.QR_FAMILIES: a live preview image at the top, then one control per option group —
   // segmented buttons for a choice, a burner-by-burner list for a "slots" group (each position its own type chips + Remove, "+ Add burner"),
   // toggle chips for add-ons — then the size, the quantity and a note. The server re-validates everything; this sheet only makes a valid request easy.
@@ -1052,14 +1061,15 @@
     var others = productUnits(ukey, existing ? existing.uid : null);               // units of this family already on OTHER lines (one family, one cap)
     var room = LIMITS.maxQtyPerProduct - others;
     var unitsMsg = function () { return 'You can request up to ' + LIMITS.maxQtyPerProduct + ' of one product in a quote — your list already has ' + others + (room > 0 ? ', which leaves ' + room + '.' : '.'); };
-    var usualW0 = existing ? PF.standardDims(fam, existing.config).W : null;
+    var usual0 = existing ? PF.standardDims(fam, existing.config) : null;
     var st = {
       config: publicConfig(fam, existing ? clone(existing.config) : PF.defaultConfig(fam)),       // the public options only: the website never holds a staff-only one (the 1.2 mm top plate)
       dims: existing ? clone(existing.dims) : PF.defaultDims(fam),
       qty: existing ? existing.qty : 1,
       note: existing ? existing.note : '',
-      wTouched: !!existing && existing.dims.W !== usualW0      // a line whose length is the usual one for its options keeps following them; a length of the visitor's own is kept
+      touched: {}                  // the sizes the visitor chose themselves: a size at the usual one for its options keeps following them; a size of the visitor's own is kept
     };
+    if (existing) PF.DIM_KEYS.forEach(function (k) { if (fam.dims[k] && existing.dims[k] !== usual0[k]) st.touched[k] = true; });
     var finished = false;                                      // set once a button (Add / Save / Cancel) has dealt with the sheet; × / Esc / the backdrop leave it false
     // an Edit opened from the review goes BACK to the review however the sheet is left (× and Esc used to drop the visitor out of the whole quote)
     openSheet('configure', trigger, retReview ? { onClose: function () { if (!finished) openReview(trigger); } } : null);
@@ -1088,7 +1098,7 @@
         return fs;
       }
       var name = nid('g');
-      var seg = el('div', { class: 'qr-seg qr-seg-' + g.options.length });
+      var seg = el('div', { class: 'qr-seg qr-seg-' + g.options.length + (g.options.length === 4 && g.options.some(function (o) { return String(o.l).length > 8; }) ? ' qr-seg-wrap' : '') });
       var labs = [];
       g.options.forEach(function (o, i) {
         var radio = el('input', { type: 'radio', name: name, value: String(i) });
@@ -1177,10 +1187,11 @@
     }
 
     // Only the PUBLIC groups are choices here (PF.publicGroups): the staff-only 1.2 mm top plate is offered in the Quote Builder, never on the website.
-    var groupEls = [];
+    // A group that applies only for some answers of an earlier one (g.when — fry baskets for a fryer, a pre-rinse sink on the soiled side) is in the sheet
+    // but HIDDEN until PF.groupApplies says it applies; syncAll() shows and hides it as the choices change.
     PF.publicGroups(fam).forEach(function (g) {
       var node = g.type === 'slots' ? renderSlots(g) : g.type === 'multi' ? renderMulti(g) : renderChoice(g);
-      groupEls.push(node);
+      if (g.when) syncers.push(function () { node.hidden = !PF.groupApplies(fam, g, st.config); });
       f.body.appendChild(node);
     });
     // The standard construction (owner ruling 2026-10-28), read-only: how this made-to-order piece is built — the top plate, the body, the posts. A few options
@@ -1198,7 +1209,7 @@
     var noteMsg = el('p', { class: 'qr-hint', hidden: true, text: COPY.customSizeNote });
     var axes = PF.DIM_KEYS.filter(function (k) { return fam.dims[k]; });
     var dimsFs = el('fieldset', { class: 'qr-fs' }, el('legend', null, 'Size (mm)', customTag));
-    var grid = el('div', { class: 'qr-dims' + (axes.length === 2 ? ' qr-dims-2' : '') });
+    var grid = el('div', { class: 'qr-dims' + (axes.length === 2 ? ' qr-dims-2' : axes.length === 1 ? ' qr-dims-1' : '') });
     axes.forEach(function (k) {
       var spec = fam.dims[k];
       var input = el('input', { class: 'qr-input', type: 'number', inputmode: 'numeric', step: spec.step, min: spec.min, max: spec.max, value: st.dims[k] });
@@ -1207,47 +1218,48 @@
         var n = input.value === '' ? NaN : Number(input.value);
         setErr(fld, ''); errBanner.hidden = true;
         st.dims[k] = n;
-        if (k === 'W') st.wTouched = true;
+        st.touched[k] = true;
         refreshSize();
       });
       dimFields[k] = { fld: fld, input: input };
       grid.appendChild(fld);
     });
     dimsFs.appendChild(grid);
-    var stdTxt = axes.map(function (k) { return fam.dims[k].label + ' ' + fam.dims[k].default; }).join(' · ');
+    var stdEl = el('p', { class: 'qr-hint' });                                       // "Standard size: ..." — the usual size for the chosen options (what Reset goes back to)
     var wHint = el('p', { class: 'qr-hint qr-wide-hint', 'aria-live': 'polite' });
     var useBtn = on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet qr-btn-sm', hidden: true }), 'click', function () {
       var mw = PF.minWidth(fam, st.config);
-      if (mw) { setW(mw.mm); st.wTouched = true; refreshSize(); }
+      if (mw) { setDim('W', mw.mm); st.touched.W = true; refreshSize(); }
     });
-    dimsFs.appendChild(el('p', { class: 'qr-hint', text: 'Standard size: ' + stdTxt + ' mm. Each dimension in steps of ' + fam.dims.W.step + '.' }));
+    dimsFs.appendChild(stdEl);
     dimsFs.appendChild(wHint); dimsFs.appendChild(useBtn); dimsFs.appendChild(noteMsg);
     dimsFs.appendChild(on(el('button', { type: 'button', class: 'qr-btn qr-btn-quiet', text: 'Reset to standard size' }), 'click', function () {
-      st.dims = PF.standardDims(fam, st.config); st.wTouched = false;
+      st.dims = PF.standardDims(fam, st.config); st.touched = {};
       applyUsualLength();
       axes.forEach(function (k) { dimFields[k].input.value = st.dims[k]; setErr(dimFields[k].fld, ''); });
       refreshSize();
     }));
     f.body.appendChild(dimsFs);
 
-    function setW(n) { st.dims.W = n; if (dimFields.W) dimFields.W.input.value = n; }
-    // The options set a usual minimum length (sinks x 500 mm, burners + add-ons): a new line follows it until the visitor types a length of their
-    // own; a HARD rule (sinks) always raises a length that has fallen below it, with the hint saying so.
+    function setDim(k, n) { st.dims[k] = n; if (dimFields[k]) dimFields[k].input.value = n; }
+    // The sizes follow the options. A size the visitor has not typed is the USUAL one for the chosen options (PF.standardDims: sinks x 500 mm, burners + add-ons, an oven's
+    // depth and height, a hood's depth for its type); a size they typed is kept — unless an option now forbids it: a HARD length rule (sinks), a forced minimum or a forced
+    // maximum moves it to the limit at once, because it could not be sent otherwise (the hint under the fields says so).
     function applyUsualLength() {
-      var mw = PF.minWidth(fam, st.config);
-      if (mw) {
-        if (!st.wTouched) setW(Math.max(fam.dims.W.default, mw.mm));
-        else if (mw.hard && isFinite(st.dims.W) && st.dims.W < mw.mm) setW(mw.mm);
-      }
-      // an oven needs depth and height: a smaller one is raised at once (it could not be sent otherwise)
-      var fm0 = PF.forcedMins(fam, st.config);
-      Object.keys(fm0).forEach(function (k) {
-        if (k === 'W' || !dimFields[k]) return;
-        if (isFinite(st.dims[k]) && st.dims[k] < fm0[k]) { st.dims[k] = fm0[k]; dimFields[k].input.value = fm0[k]; }
+      var std = PF.standardDims(fam, st.config);
+      var mw = PF.minWidth(fam, st.config), fm = PF.forcedMins(fam, st.config), fx = PF.forcedMaxes(fam, st.config);
+      axes.forEach(function (k) {
+        if (!st.touched[k]) { setDim(k, std[k]); return; }
+        var n = st.dims[k];
+        if (!isFinite(n)) return;                                               // the field is empty: there is nothing to move
+        var lo = Math.max(fm[k] || 0, k === 'W' && mw && mw.hard ? mw.mm : 0);
+        if (n < lo) setDim(k, lo);
+        else if (fx[k] != null && n > fx[k]) setDim(k, fx[k]);
       });
     }
     function refreshSize() {
       var std = PF.standardDims(fam, st.config);
+      stdEl.textContent = 'Standard size: ' + axes.map(function (k) { return fam.dims[k].label + ' ' + std[k]; }).join(' · ') + ' mm. Each dimension in steps of ' + fam.dims.W.step + '.';
       var cust = axes.some(function (k) { return st.dims[k] !== std[k]; });
       customTag.hidden = !cust; noteMsg.hidden = !cust;
       var mw = PF.minWidth(fam, st.config);
@@ -1258,12 +1270,29 @@
         useBtn.hidden = !(isFinite(st.dims.W) && st.dims.W !== mw.mm);
         useBtn.textContent = 'Use ' + mw.mm + ' mm';
       } else useBtn.hidden = true;
-      var fm = PF.forcedMins(fam, st.config);
-      var fmKeys = Object.keys(fm);
-      if (fmKeys.length) msg += (msg ? ' ' : '') + 'With these options the ' + fmKeys.map(function (k) { return fam.dims[k].label.toLowerCase() + ' is at least ' + fm[k] + ' mm'; }).join(' and the ') + '.';
+      // What the options force on a size — a minimum (an oven's depth), a maximum (a slim hood's depth) or both (a deck oven's width follows its trays: one value only) —
+      // said in words, and carried by the field itself: its arrows stop at the limits, and a field with a single possible value is read-only.
+      var fm = PF.forcedMins(fam, st.config), fx = PF.forcedMaxes(fam, st.config), forced = [];
+      axes.forEach(function (k) {
+        var spec = fam.dims[k], inp = dimFields[k].input;
+        var lo = fm[k] != null ? Math.max(fm[k], spec.min) : spec.min, hi = fx[k] != null ? Math.min(fx[k], spec.max) : spec.max;
+        inp.setAttribute('min', lo); inp.setAttribute('max', hi);
+        inp.readOnly = lo === hi;
+        if (fm[k] == null && fx[k] == null) return;
+        var name = spec.label.toLowerCase();
+        forced.push(lo === hi ? name + ' is ' + lo + ' mm' : fx[k] == null ? name + ' is at least ' + lo + ' mm' : fm[k] == null ? name + ' is at most ' + hi + ' mm' : name + ' is between ' + lo + ' and ' + hi + ' mm');
+      });
+      if (forced.length) msg += (msg ? ' ' : '') + 'With these options the ' + forced.join(' and the ') + '.';
       wHint.textContent = msg; wHint.hidden = !msg;
     }
-    function changed() { errBanner.hidden = true; if (dupeBox) dupeBox.hidden = true; applyUsualLength(); syncAll(); pv.update(st.config); refreshSize(); }
+    // A conditional option (PF.groupApplies) that has stopped applying goes back to its standard value, as PF.validateConfiguration does — such an option is only ever at
+    // its default, so the configuration this sheet holds is always one the server accepts. Only the conditional groups are written back, never the whole configuration:
+    // the burner list is edited IN PLACE by the buttons that painted it, and a replaced array would leave them editing a stale copy.
+    function snapGated() {
+      var v = PF.validateConfiguration(fam, st.config);
+      PF.publicGroups(fam).forEach(function (g) { if (g.when) st.config[g.key] = v.config[g.key]; });
+    }
+    function changed() { errBanner.hidden = true; if (dupeBox) dupeBox.hidden = true; snapGated(); applyUsualLength(); syncAll(); pv.update(st.config); refreshSize(); }
 
     // ── quantity + note ──
     var qtyMax = Math.max(1, Math.min(LIMITS.maxQtyPerLine, room));
@@ -1344,6 +1373,7 @@
     f.foot.appendChild(on(el('button', { type: 'button', class: 'qr-btn qr-btn-outline', text: 'Cancel' }), 'click', function () { finished = true; closeSheet(!retReview); if (retReview) openReview(trigger); }));
     f.foot.appendChild(addBtn);
 
+    snapGated();
     applyUsualLength();
     syncAll();
     pv.update(st.config);

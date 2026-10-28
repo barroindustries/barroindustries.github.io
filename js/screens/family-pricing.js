@@ -2,8 +2,8 @@
    BARRO INDUSTRIES — Inventory › Family Pricing
    js/screens/family-pricing.js
 
-   NEW 2026-10-21 (owner ruling: the public catalogue has six CONFIGURABLE products — preparation table, sink, stove, cabinet, wall
-   shelving, rack). The public estimate prices a configured line as the family's primary catalogue SKU (priced by its own size rules)
+   NEW 2026-10-21 (owner ruling: the public catalogue has CONFIGURABLE products — at first six: preparation table, sink, stove, cabinet, wall
+   shelving, rack; since 2026-10-28 eleven, with the dish table, wok range, griddle / griller / fryer, gas deck oven and range hood). The public estimate prices a configured line as the family's primary catalogue SKU (priced by its own size rules)
    PLUS the signed amounts of that family's PRIVATE option sheet, stored in Firestore product_pricing/{family}. This screen is where
    Finance and the President read and edit those amounts, see how each starting value was derived, and APPROVE each family.
 
@@ -17,6 +17,10 @@
    A STAFF-ONLY option (QUOTE-BUILDER-CONFIGURATOR-SPEC §14, owner ruling 2026-10-28: the 1.2 mm top plate of tables, sinks and stoves) is priced here like any
    other option, with a caption saying it is offered in the Quote Builder only; the amount is the SIGNED amount added for the non-standard choice (a
    negative number, or 0). "Try a configuration" validates in staff mode so Finance can price it.
+
+   A CONDITIONAL option (CONFIGURATOR-FAMILIES-2-SPEC §4.1: fry baskets apply only to a fryer, a pre-rinse sink only on the soiled side of a dish table) still has one cell
+   per value, priced once; its group header says "Only when Type is Fryer" in the same muted style. A family switched off for the website (productMeta/config
+   families.disabled, spec §9) carries a "Disabled on the website" chip on its card — informational, set outside this screen.
 
    Gating mirrors firestore.rules `product_pricing` exactly: president / manager / finance role, or a non-secretary member of the Finance
    department. The secretary never sees it. Import is President-only (UI rule; the Firestore rule is the finance tier).
@@ -43,7 +47,7 @@
 
   // vals: what the user has TYPED into a figure box and not saved yet, per family: { fid: { 'group|value|key': 'text' } } — so opening or closing another card (which repaints
   // the screen) never loses it. notes: the same for the free-text note.
-  var st = { el: null, docs: {}, primaries: {}, constants: {}, open: {}, dirty: {}, notes: {}, vals: {}, loaded: false };
+  var st = { el: null, docs: {}, primaries: {}, constants: {}, disabled: [], open: {}, dirty: {}, notes: {}, vals: {}, loaded: false };
   function fpForgetEdits(fid) { if (fid) { st.dirty[fid] = false; delete st.notes[fid]; delete st.vals[fid]; } else { st.dirty = {}; st.notes = {}; st.vals = {}; } }
 
   function fpFams() { return window.QR_FAMILIES; }
@@ -117,7 +121,13 @@
       var pid = F.families[fid].primary;
       return db.collection('products').doc(pid).get().then(function (d) { if (d.exists) st.primaries[fid] = fpNormaliseProduct(pid, d.data()); }).catch(function () { /* the check says so */ });
     }));
-    try { var m = await db.collection('productMeta').doc('config').get(); st.constants = (m.exists && m.data() && m.data().constants) || {}; } catch (_) { st.constants = {}; }
+    try {
+      var m = await db.collection('productMeta').doc('config').get();
+      var md = (m.exists && m.data()) || {};
+      st.constants = md.constants || {};
+      // the kill switch (spec §9): family ids switched off for the website, read here only to show a chip
+      st.disabled = (md.families && Array.isArray(md.families.disabled)) ? md.families.disabled.filter(function (x) { return typeof x === 'string'; }) : [];
+    } catch (_) { st.constants = {}; st.disabled = []; }
     st.loaded = true;
   }
 
@@ -161,7 +171,7 @@
     var isPres = fpIsPresident();
     var html = '' +
       '<div class="page-header"><div><h3 style="margin:0">' + emojiIcon('⚙️', 18) + ' Family pricing</h3>' +
-      '<p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">The private option amounts behind the six configurable catalogue products</p></div>' +
+      '<p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">The private option amounts behind the configurable catalogue products</p></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       (isPres ? '<button type="button" class="btn-secondary btn-sm" data-act="import">' + emojiIcon('📥', 16) + ' Import derived starting values</button>' : '') +
       '<button type="button" class="btn-secondary btn-sm" data-act="reload">' + emojiIcon('↻', 16) + ' Refresh</button></div></div>' +
@@ -192,9 +202,10 @@
     meta.push(counts.filled + ' of ' + counts.total + ' amounts entered');
     if (doc && doc.approved === true && doc.approvedByName) meta.push('approved by ' + escHtml(doc.approvedByName));
     var unsaved = st.dirty[fid] ? ' <span class="badge badge-amber">unsaved changes</span>' : '';
+    var off = st.disabled.indexOf(fid) >= 0 ? ' <span class="badge badge-orange fp-off" title="Switched off in productMeta/config (families.disabled): the website refuses this product until it is taken off that list">Disabled on the website</span>' : '';
     return '<div class="card fp-card" data-fid="' + escHtml(fid) + '" style="margin-bottom:12px">' +
       '<div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">' +
-      '<div style="flex:1;min-width:200px"><div style="font-weight:700;font-size:15px">' + escHtml(fam.label) + ' <span class="badge ' + status.cls + '">' + escHtml(status.label) + '</span>' + unsaved + '</div>' +
+      '<div style="flex:1;min-width:200px"><div style="font-weight:700;font-size:15px">' + escHtml(fam.label) + ' <span class="badge ' + status.cls + '">' + escHtml(status.label) + '</span>' + off + unsaved + '</div>' +
       '<div style="font-size:12px;color:var(--text-muted);margin-top:2px">' + meta.join(' · ') + '</div></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="btn-secondary btn-sm" data-act="toggle" data-fid="' + escHtml(fid) + '">' + (open ? 'Close' : 'Open') + '</button>' +
@@ -224,7 +235,9 @@
           : g.type === 'multi' ? 'Amount each add-on adds' : 'Amount added when this is chosen instead of the standard option';
         // a staff-only option (the 1.2 mm top plate, owner ruling 2026-10-28) is priced here like any other, but a visitor to the website can never choose it
         var staffNote = g.staffOnly === true ? ' <span class="fp-staffonly" style="font-size:11px;color:var(--text-muted)">· Staff-only option — offered in the Quote Builder, never on the website</span>' : '';
-        rows += '<tr class="fp-grp"><td colspan="5" style="background:var(--surface-2,#f4f5f7)"><strong>' + escHtml(c.groupLabel) + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + what + '</span>' + staffNote + '</td></tr>';
+        // a conditional option (spec §4.1) says when it applies; its cells are still priced once, here
+        var whenNote = c.when ? ' <span class="fp-when" style="font-size:11px;color:var(--text-muted)">· Only when ' + escHtml(c.when) + '</span>' : '';
+        rows += '<tr class="fp-grp"><td colspan="5" style="background:var(--surface-2,#f4f5f7)"><strong>' + escHtml(c.groupLabel) + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + what + '</span>' + staffNote + whenNote + '</td></tr>';
       }
       if (c.baseline) {
         rows += '<tr><td>' + escHtml(c.label) + (c.hint ? ' <span style="font-size:11px;color:var(--text-muted)">(' + escHtml(c.hint) + ')</span>' : '') + '</td><td colspan="4" style="color:var(--text-muted);font-size:12px">Standard option — adds nothing</td></tr>';
@@ -551,7 +564,7 @@
     var planned = fpPlanImport(seed, st.docs);
     if (planned.error) { Notifs.showToast(planned.error, 'error'); return; }
     var plan = planned.plan, skipped = planned.skipped;
-    if (!plan.length) { Notifs.showToast('The file has none of the six families', 'error'); return; }
+    if (!plan.length) { Notifs.showToast('The file has none of the product families', 'error'); return; }
     var lines = plan.map(function (p) { return p.fam.label + ': ' + p.filled + ' of ' + p.total + ' amounts' + (p.replaces ? ' (replaces the current sheet)' : ''); });
     var ok = await window.confirmDialog({
       title: 'Import derived starting values?',

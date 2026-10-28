@@ -25,11 +25,16 @@ does not give volumes (that needs Google Ads Keyword Planner — owner's account
 | Page | Primary | Secondary / synonyms | Status |
 |---|---|---|---|
 | `/` | stainless steel kitchen equipment Philippines | commercial kitchen equipment supplier Philippines, stainless steel fabrication Quezon City, Barro Kitchens | **built** 2026-10-22, not yet deployed: hero lead names the custom fabrication, a new "Stainless-steel fabrication" section after Services, "Products" in the nav, description names it. Live before: title "Barro Kitchens by Barro Industries" kept |
-| `/catalogue/` | commercial kitchen equipment Philippines | kitchen equipment supplier Manila / Quezon City, restaurant equipment, catering equipment, industrial kitchen equipment, kitchen equipment price list | **built**, not yet deployed: H1 "Commercial kitchen equipment catalogue", an opening sentence for restaurants / hotels / bakeries / catering / commissaries, description, a "Learn more" link on each of the six family cards |
+| `/catalogue/` | commercial kitchen equipment Philippines | kitchen equipment supplier Manila / Quezon City, restaurant equipment, catering equipment, industrial kitchen equipment, kitchen equipment price list | **built**, not yet deployed: H1 "Commercial kitchen equipment catalogue", an opening sentence for restaurants / hotels / bakeries / catering / commissaries, description, a "Learn more" link on each of the eleven family cards (2026-10-28: eleven, and a sixth category, Ventilation, for the range hoods) |
 | `/products/` (new hub) | stainless steel kitchen equipment | stainless steel equipment supplier, stainless steel equipment manufacturers | **built**, not yet deployed (title "Stainless Steel Kitchen Equipment — Built to Order") |
 | `/products/stainless-steel-sinks/` | stainless steel sink Philippines | stainless sink price, stainless kitchen sink, commercial sink, sink with cabinet, stainless sink supplier, 2/3-compartment sink | **built**, not yet deployed |
+| `/products/stainless-steel-dish-tables/` | stainless steel dish table Philippines | dish table, dishwasher table, soiled dish table, clean dish table, dish landing table | **built** 2026-10-28, not yet deployed (title "Stainless Steel Dish Table Philippines — Made to Size") |
 | `/products/stainless-steel-work-tables/` | stainless steel table Philippines | stainless work table / working table price, prep table, kitchen table, table for baking, table supplier/manufacturer | **built**, not yet deployed |
 | `/products/commercial-gas-stoves/` | commercial gas stove Philippines | commercial gas range, commercial stove price, 3/4 burner commercial gas stove, wok burner, high-pressure burner | **built**, not yet deployed |
+| `/products/commercial-wok-ranges/` | commercial wok range Philippines | wok range, wok stove, wok burner, high-pressure wok burner, commercial wok stove | **built** 2026-10-28, not yet deployed (text hero: no wok photograph exists yet) |
+| `/products/commercial-griddles-grillers-and-fryers/` | commercial griddle Philippines | commercial fryer, gas fryer, lava rock griller, charbroiler, gas griddle, flat top griddle | **built** 2026-10-28, not yet deployed |
+| `/products/gas-deck-ovens/` | gas deck oven Philippines | commercial oven, bakery oven, deck oven, 2 deck oven, gas oven with trays | **built** 2026-10-28, not yet deployed (text hero: no deck oven photograph exists yet; the project photographs show range ovens and say so) |
+| `/products/stainless-steel-range-hoods/` | stainless steel range hood Philippines | commercial range hood, kitchen exhaust hood, island hood, wall canopy hood, baffle filter hood | **built** 2026-10-28, not yet deployed; the hood is also the one product of the new Ventilation category (`/catalogue/#cat-ventilation`) |
 | `/products/stainless-steel-cabinets/` | stainless steel cabinet Philippines | stainless kitchen cabinet, wall cabinet, dish rack cabinet | **built**, not yet deployed. Needs the owner's own cabinet photo (none exists yet; the page uses a text hero) |
 | `/products/stainless-steel-shelving/` | stainless steel wall shelf | stainless shelving, kitchen shelving | **built**, not yet deployed |
 | `/products/stainless-steel-racks/` | stainless steel rack Philippines | kitchen rack, rack supplier | **built**, not yet deployed |
@@ -46,6 +51,9 @@ does not give volumes (that needs Google Ads Keyword Planner — owner's account
   (≤ 60 chars where possible); description 140–160 chars with one secondary keyword + Barro Kitchens once.
 - Real content only: options from the configurators (`scripts/public-families.json`), SS304/SS316, brushed /
   mirror / satin, sizes from the catalogue, the 6-month warranty, KitchenShield™ PMS, projects (ISPSC, DMMMSU).
+  A page for a product with no photograph of it (wok range, deck oven, dish table) uses the text hero and says what
+  its project photographs really show; the titles of the five 2026-10-28 pages are cut to fit the 72-character cap
+  that `tests/seo-products.test.mjs` pins (title + " | Barro Industries").
 - No prices, no invented specs/claims, no keyword stuffing, no competitor names, QC contact only.
 - Each page: "Configure & add" / "Get a quote" + the price-intent line, FAQ block (FAQPage JSON-LD),
   internal links (hub ↔ product ↔ catalogue category ↔ related service), in sitemap.xml, requested in Search Console.

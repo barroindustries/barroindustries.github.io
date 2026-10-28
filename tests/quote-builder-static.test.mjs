@@ -2,8 +2,8 @@
 //
 // quote-builder-v2.html is one 9,000-line HTML file with one inline <script> and no module system, so it cannot be require()d. Two layers:
 //
-//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 44, the What's New
-//      entries 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
+//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 45, the What's New
+//      entries 45, 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
 //      byte-for-byte, and the two rules of the price-protection design that are about WHAT THE FILE MAY NAME: it never names the pricing
 //      function (it prices only through QBConfigured) and it reads the option sheets (the product_pricing collection) in exactly one place —
 //      inside loadDatabase(), in its own try/catch (spec §2.3).
@@ -45,6 +45,21 @@
 // bootCompany without its allowlist (any code passes through) / case-sensitive; a loaded quote (loadEditableState), a resumed draft (resumeDraft) or a #quote= link
 // (loadFromStorage) no longer setting its own company, so the hint wins over it. (tests/quote-link.test.mjs pins the host side: ?co=BS only on bs-quote-builder, ahead of
 // ?reopen=1.) Run with: node --test tests/*.test.mjs
+//
+// CONFIGURATOR-FAMILIES-2-SPEC WS-4 (2026-10-28) — five more families (dish table, wok range, griddle / griller / fryer, gas deck oven, range hood) in the builder. The synthetic
+// catalogue below gained their five primaries (PW-029 and CE-012 FIXED, the three others per_length with no height rate) and CE-030 stands in as "the fixed SKU no family absorbed"
+// (CE-016 is the deck oven's 12-tray model now). At the end of the file: conditional groups in the panel (only the groups that apply are drawn, ids stay the definition's indexes,
+// a choice that stops applying snaps to its default BEFORE validation and never shows as an error, a chain of them in a twelfth family), a size an option caps (input max, the
+// "maximum" / "fixed at" hint, Use N mm, routed under the box), the five families through chips / price / Add / ⚙ configure / "Priced after review" / convert / configure instead /
+// sold online as, the per-product kill switch (productMeta/config.families.disabled), TUTORIAL_VERSION 45 with Help and the demo. Mutation-tested in scratch copies (43 mutants, each
+// killed): every group drawn / only the non-applying ones / group ids renumbered among the showing groups; the snap never written back / left out of cfgEvaluate / left out after
+// an option change / validating in public mode; the size input without its max / ignoring the forced max / the hint without "maximum" or "fixed at" / no Use N mm under a capped
+// size / that button carrying the minimum / cfgSplitErrors losing "must be at most" or "must be at least" / forcedMaxes never read; families.disabled never read / not reset by a
+// reload / not filtered to strings / taken from a non-list / a bare string taken as a list / the enabled test inverted; a listed product keeping its chip / an empty Configure row
+// staying on screen / its "sold online as" / its "configure instead" / its "convert to configured" row and the conversion / its ⚙ configure button and the "configurator off" chip /
+// the ⚙ configure action / the panel itself; the demo trying the sink when it is listed / showing its step with every product listed; the version not bumped / the entry carrying
+// 44 / its second bullet removed; Help listing the old six / the old three-product top-plate sentence / no sentence on conditional options; the demo's Add-items step naming six /
+// its configurator step naming three top plates / saying nothing on conditional options.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -130,6 +145,13 @@ const PRIMARIES = [
   prod('PW-015', 'prep_washing', 'per_length', 5119, { W: 600, D: 500, H: 1800 }, { baseLengthMm: 600, pricePerExtraMm: 2.9, rateD100: 23 }),
   prod('PW-023', 'prep_washing', 'fixed', 1893, { W: 1200, D: 450 }, {}),
   prod('PW-010', 'prep_washing', 'per_length', 3307, { W: 600, D: 500, H: 1600 }, { baseLengthMm: 600, pricePerExtraMm: 2.3, rateD100: 19, rateH100: 11 }),
+  // the five families of 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC): synthetic odd figures again. None of them has a height rate — a height is not a size of these families —
+  // and the two LINEAR ones (dish table, deck oven) have a FIXED primary: their length is priced from the option sheet, not by the base item.
+  prod('PW-029', 'prep_washing', 'fixed', 2719, { W: 1200, D: 660, H: 851 }, {}),
+  prod('CE-006', 'cooking_line', 'per_length', 5233, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 4.7, rateD100: 37, rateH100: 0 }),
+  prod('CE-010', 'cooking_line', 'per_length', 4349, { W: 700, D: 700, H: 850 }, { baseLengthMm: 700, pricePerExtraMm: 3.9, rateD100: 33, rateH100: 0 }),
+  prod('CE-012', 'cooking_line', 'fixed', 9871, { W: 700, D: 700, H: 1400 }, {}),
+  prod('EX-001', 'exhaust_system', 'per_length', 3571, { W: 1000, D: 900, H: 500 }, { baseLengthMm: 1000, pricePerExtraMm: 2.1, rateD100: 27, rateH100: 0 }),
 ];
 // every SKU a family absorbed is in the synthetic catalogue too (a configured line is costed from the NEAREST of them), each with a synthetic
 // odd-figure cost — except the rack family's, which has none anywhere (the "no cost basis" case). The primaries carry costs as well.
@@ -146,7 +168,7 @@ const CATALOGUE = (() => {
       else Object.assign(out.get(sku), costs);
     }
   }
-  out.set('CE-016', prod('CE-016', 'cooking_line', 'fixed', 21911, {}, {}));
+  out.set('CE-030', prod('CE-030', 'cooking_line', 'fixed', 21911, {}, {}));      // the salamander oven: a fixed item no family absorbed (CE-016 is the deck oven's 12-tray model now)
   return [...out.values()];
 })();
 function sheetFor(familyId, { approved = true } = {}) {
@@ -156,16 +178,17 @@ function sheetFor(familyId, { approved = true } = {}) {
   for (const c of PF.cells(f)) {
     i++;
     if (c.baseline) continue;
-    (options[c.group] = options[c.group] || {})[c.value] = { flat: (i % 7 === 3 ? -1 : 1) * (311 + 97 * i), perW100: i % 4 === 1 ? 13 + i : null };
+    (options[c.group] = options[c.group] || {})[c.value] = { flat: (i % 7 === 3 ? -1 : 1) * (311 + 97 * i), perW100: (i % 4 === 1 && familyId !== 'deck_oven') ? 13 + i : null };
   }
-  return { familyId, schemaVersion: FAM.version, approved, approvedBy: 'u_syn', options, size: { perW100: familyId === 'wall_shelf' ? 77 : null } };
+  // the length rate of a LINEAR family: wall shelving and the dish table have a rate; the deck oven's width follows its trays, so its rate is 0 ("Enter 0")
+  return { familyId, schemaVersion: FAM.version, approved, approvedBy: 'u_syn', options, size: { perW100: familyId === 'wall_shelf' ? 77 : (familyId === 'dish_table' ? 61 : (familyId === 'deck_oven' ? 0 : null)) } };
 }
 const SHEETS = Object.fromEntries(FAM.order.map((id) => [id, sheetFor(id)]));
 
 // a builder with the synthetic catalogue loaded and no DOM boot (the test sets the state it needs)
 function builder(opts = {}) {
   const b = makeEnv(opts);
-  b.run(`DB = { products: ${JSON.stringify(CATALOGUE)}, categories: [{id:'prep_washing',label:'Preparation & Washing'},{id:'cooking_line',label:'Cooking Line'}], laborRoles: [], constants: {} };`);
+  b.run(`DB = { products: ${JSON.stringify(CATALOGUE)}, categories: [{id:'prep_washing',label:'Preparation & Washing'},{id:'cooking_line',label:'Cooking Line'},{id:'exhaust_system',label:'Exhaust'}], laborRoles: [], constants: {} };`);
   b.run(`FAMILY_PRICING = ${JSON.stringify(SHEETS)}; FAMILY_PRICING_STATE = 'live';`);
   return b;
 }
@@ -182,6 +205,28 @@ function makeLine(b, st) {
   return { ev: b.run('__ev'), line: b.run('__line') };
 }
 
+// a fake Firestore for loadDatabase(): the synthetic catalogue, the synthetic option sheets (or a denied read), and whatever productMeta/config holds
+const fakeDb = ({ sheets = 'ok', meta = {} } = {}) => {
+  const reads = [];
+  const snap = (docs) => ({ empty: docs.length === 0, docs: docs.map((d) => ({ id: d.id, data: () => d.data })) });
+  const coll = (name) => ({
+    get: async () => {
+      reads.push(name);
+      if (name === 'product_pricing') { if (sheets === 'denied') throw new Error('Missing or insufficient permissions.'); return snap(Object.entries(SHEETS).map(([id, data]) => ({ id, data }))); }
+      if (name === 'products') return snap(CATALOGUE.map((p) => ({ id: p.id, data: { category: p.category, title: p.name, formulaType: p.formulaType, basePrice: p.basePrice, measurement: p.defaultDimensions, formula: p.formula, unit: 'pc' } })));
+      return snap([]);
+    },
+    limit() { return this; },
+    doc: (id) => ({ get: async () => { reads.push(name + '/' + id); return { exists: name === 'productMeta', data: () => meta }; } }),
+  });
+  return { reads, db: { collection: coll } };
+};
+const bootDb = async (opts, fake) => {
+  const b = makeEnv({ ...opts, db: fake.db });
+  await b.run('loadDatabase()');
+  return b;
+};
+
 // ═══════════════════════════════════════ 1. STATIC — markup, constants, what the file may name ═══════════════════════════════════════
 describe('static — the script tags, the tutorial, the letterhead', () => {
   it('the three configurator scripts load, deferred, in order, right after pricing-core.js (qb-configured is handed the others at run time)', () => {
@@ -192,19 +237,27 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 44: the newest What\'s New entry is version 44 (the partner portal is retired), dated; entry 43 keeps the configurator bullets', () => {
+  it('TUTORIAL_VERSION is 45: the newest What\'s New entry is version 45 (five more configurable products), dated; entry 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 44);
+    assert.equal(b.run('TUTORIAL_VERSION'), 45);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 44);
-    assert.equal(wn[1].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history, the retirement is a new entry');
+    assert.equal(wn[0].ver, 45);
+    assert.equal(wn[1].ver, 44, '44 stays as history: the five families are a new entry');
+    assert.equal(wn[2].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
     assert.match(wn[0].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
-    const t44 = wn[0].items.join(' ');
+    const t45 = wn[0].items.join(' ');
+    for (const must of ['Five more products can be configured right in the builder', 'dish tables, wok ranges, griddles / grillers / fryers, gas deck ovens and range hoods', 'an option Finance has not priced yet asks you for a price instead of guessing',
+      '"⚙ convert to configured"', 'Some choices only show when they apply', 'fry baskets for a fryer', 'pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged as you type', '"Use N mm"',
+      'a slim hood is at most 500 mm deep', 'a deck oven\'s width follows its trays per deck']) {
+      assert.ok(t45.includes(must), `What's New 45 does not say: ${must}`);
+    }
+    assert.equal(wn[0].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
+    const t44 = wn[1].items.join(' ');
     for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
       assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
     }
-    const text = wn[1].items.join(' ');
+    const text = wn[2].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
@@ -708,7 +761,7 @@ describe('R4 — website price vs cost-based price, per line and for all', () =>
 
   it('a plain catalogue line has no price basis: typing a price leaves it byte-identical to before (priceManual only)', () => {
     const b = builder();
-    b.run(`items.length = 0; items.push({id:'CE-016',category:'cooking_line',name:'Fryer',qty:1,unit:'pc',unitPrice:21911,amount:21911});`);
+    b.run(`items.length = 0; items.push({id:'CE-030',category:'cooking_line',name:'Salamander',qty:1,unit:'pc',unitPrice:21911,amount:21911});`);
     b.run(`updatePrice(0, { value: '25000' })`);
     const it = b.plain('items[0]');
     assert.equal(it.priceManual, true);
@@ -754,7 +807,7 @@ describe('R5 — a line flagged "needs a price" blocks filing until it has one',
 
   it('needsPriceReason: counts only lines that are flagged AND still at 0, in the words of the spec', () => {
     const b = builder();
-    withLines(b, [flagged, { ...flagged, unitPrice: 5000, amount: 5000 }, priced, { id: 'CE-016', category: 'x', name: 'f', qty: 1, unit: 'pc', unitPrice: 0, amount: 0 }]);
+    withLines(b, [flagged, { ...flagged, unitPrice: 5000, amount: 5000 }, priced, { id: 'CE-030', category: 'x', name: 'f', qty: 1, unit: 'pc', unitPrice: 0, amount: 0 }]);
     assert.equal(b.run('needsPriceReason()'), '1 configured line(s) have no price yet — type a price or ask Finance to approve the option sheet.');
     withLines(b, [flagged, { ...flagged, familyId: undefined }]);
     assert.match(b.run('needsPriceReason()'), /^2 line\(s\) have no price yet/, 'a plain unpriced request line counts too');
@@ -919,7 +972,7 @@ describe('§6 / §7 — a website hand-off loads; the total is compared with the
     const items = [
       QB.fromRequestItem({ n: 1, id: 'PW-004', cat: 'prep_washing', name: 'Sink', qty: 2, unit: 'pc', familyId: 'sink', config: { basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'prerinse' }, size: { W: 1800, D: 700, H: 900 }, specs: [{ label: 'Sinks', value: '2' }] }, { n: 1, priced: true, unitPrice: 41300 }, REF),
       QB.fromRequestItem({ n: 2, id: 'PW-015', cat: 'prep_washing', name: 'Cabinet', qty: 1, unit: 'pc', familyId: 'cabinet', config: { type: 'wall', doors: 'sliding', shelves: 2 }, size: { W: 900, D: 400, H: 700 }, specs: [] }, { n: 2, priced: false, unitPrice: 0 }, REF),
-      QB.fromRequestItem({ n: 3, id: 'CE-016', cat: 'cooking_line', name: 'Fryer', qty: 1, unit: 'pc', specs: [] }, { n: 3, priced: true, unitPrice: 30000 }, REF),
+      QB.fromRequestItem({ n: 3, id: 'CE-030', cat: 'cooking_line', name: 'Salamander', qty: 1, unit: 'pc', specs: [] }, { n: 3, priced: true, unitPrice: 30000 }, REF),
     ];
     const state = { clientName: 'Juan', currentCo: 'BK', qnoMethod: 'WB', qnoLoc: 'BG', purpose: 'Cafe / Coffee Shop', handoff: true, items,
       sourceRef: { kind: 'qr', ref: REF, estimate: { low: 60000, high: 75000, step: 5000 }, targetDate: '2026-11-30', targetFlexible: true, useForLabel: 'Restaurant / café', entityType: 'private', notes: 'call <img src=x onerror=alert(1)>', ...over }, ...over.state };
@@ -1046,26 +1099,7 @@ describe('§6 / §7 — a website hand-off loads; the total is compared with the
 
 // ── §2.3 / §2.5: loadDatabase ──────────────────────────────────────────────────────────────────────────
 describe('§2.3 / §2.5 — loadDatabase reads the option sheets for an internal session only; a denied read degrades; the kill switch works', () => {
-  const fakeDb = ({ sheets = 'ok', meta = {} } = {}) => {
-    const reads = [];
-    const snap = (docs) => ({ empty: docs.length === 0, docs: docs.map((d) => ({ id: d.id, data: () => d.data })) });
-    const coll = (name) => ({
-      get: async () => {
-        reads.push(name);
-        if (name === 'product_pricing') { if (sheets === 'denied') throw new Error('Missing or insufficient permissions.'); return snap(Object.entries(SHEETS).map(([id, data]) => ({ id, data }))); }
-        if (name === 'products') return snap(CATALOGUE.map((p) => ({ id: p.id, data: { category: p.category, title: p.name, formulaType: p.formulaType, basePrice: p.basePrice, measurement: p.defaultDimensions, formula: p.formula, unit: 'pc' } })));
-        return snap([]);
-      },
-      limit() { return this; },
-      doc: (id) => ({ get: async () => { reads.push(name + '/' + id); return { exists: name === 'productMeta', data: () => meta }; } }),
-    });
-    return { reads, db: { collection: coll } };
-  };
-  const boot = async (opts, fake) => {
-    const b = makeEnv({ ...opts, db: fake.db });
-    await b.run('loadDatabase()');
-    return b;
-  };
+  const boot = bootDb;
 
   it('internal session: the sheets are read once, kept raw by family id, state "live", configurator on', async () => {
     const f = fakeDb();
@@ -1140,29 +1174,44 @@ describe('§4.1 / §4.2 — the Configure chips and the panel are generated from
 
   const openAndRender = (b, id) => { b.run(`openConfigurator(${JSON.stringify(id)})`); return b.el('cfgBody').innerHTML; };
 
-  it('every group (choice pills, a select above four options, slots, multi), every option and every size axis of all six families renders', () => {
+  // The choices that make a conditional group apply: every key of its `when`, at the first value it allows (the rest at their defaults).
+  const allowing = (f, g) => ({ ...PF.defaultConfig(f), ...Object.fromEntries(Object.entries(g.when || {}).map(([k, vals]) => [k, vals[0]])) });
+
+  it('every group (choice pills, a select above four options, slots, multi), every option and every size axis of all eleven families renders — a conditional group as soon as the choices it depends on allow it', () => {
     const b = builder();
+    let conditional = 0;
     for (const id of FAM.order) {
       const f = FAM.families[id];
-      const html = openAndRender(b, id);
-      assert.equal(b.run('cfgState && cfgState.familyId'), id);
-      f.groups.forEach((g) => {
-        assert.ok(html.includes(g.label.replace(/&/g, '&amp;')), `${id}: group "${g.label}" missing`);
-        g.options.forEach((o) => assert.ok(html.includes(String(o.l)) || html.includes(String(o.f)), `${id}/${g.key}: option ${o.v} missing`));
-        if (g.type === 'slots') assert.ok(html.includes('cfg-slots') && html.includes('cfgSlotAdd'), `${id}: slots row`);
-        if (g.type === 'multi') assert.ok(html.includes('type="checkbox"'), `${id}: add-on chips`);
-        if (g.type === 'choice') assert.ok(g.options.length <= 4 ? html.includes('cfg-pills') : html.includes('<select data-cfg-key'), `${id}/${g.key}: pills vs select`);
-        if (g.type === 'choice' && g.options.length <= 4) g.options.forEach((o) => assert.ok(html.includes(`data-cfg-group="${g.key}" data-cfg-v="${String(o.v)}"`), `${id}/${g.key}=${o.v}: the spec's button[data-cfg-group][data-cfg-v]`));
-      });
-      Object.entries(f.dims).forEach(([k, d]) => {
-        assert.ok(html.includes(`id="cfgDim_${k}"`), `${id}: size input ${k}`);
-        assert.ok(html.includes(`min="${d.min}" max="${d.max}" step="${d.step}"`), `${id}: ${k} limits from the definition`);
-      });
-      assert.ok(b.el('cfgPreview').textContent.startsWith(f.label), `${id}: the one-line summary`);
+      // one pass per group, each with a configuration under which THAT group applies (for an unconditional group: the default one)
+      for (const target of f.groups) {
+        const cfg = allowing(f, target);
+        if (target.when) conditional++;
+        b.run(`openConfigurator(${JSON.stringify(id)}, ${JSON.stringify({ config: cfg })})`);
+        const html = b.el('cfgBody').innerHTML;
+        assert.equal(b.run('cfgState && cfgState.familyId'), id);
+        assert.equal(b.el('cfgNotice').textContent, '', `${id}/${target.key}: a valid configuration opens with no "reset" notice`);
+        f.groups.forEach((g, gi) => {
+          assert.equal(html.includes(`<div class="cfg-lbl" id="cfgL${gi}">`), PF.groupApplies(f, g, cfg), `${id}/${g.key}: shown exactly when it applies (target ${target.key})`);
+        });
+        f.groups.filter((g) => PF.groupApplies(f, g, cfg)).forEach((g) => {
+          assert.ok(html.includes(g.label.replace(/&/g, '&amp;')), `${id}: group "${g.label}" missing`);
+          g.options.forEach((o) => assert.ok(html.includes(String(o.l)) || html.includes(String(o.f)), `${id}/${g.key}: option ${o.v} missing`));
+          if (g.type === 'slots') assert.ok(html.includes('cfg-slots') && html.includes('cfgSlotAdd'), `${id}: slots row`);
+          if (g.type === 'multi') assert.ok(html.includes('type="checkbox"'), `${id}: add-on chips`);
+          if (g.type === 'choice') assert.ok(g.options.length <= 4 ? html.includes('cfg-pills') : html.includes('<select data-cfg-key'), `${id}/${g.key}: pills vs select`);
+          if (g.type === 'choice' && g.options.length <= 4) g.options.forEach((o) => assert.ok(html.includes(`data-cfg-group="${g.key}" data-cfg-v="${String(o.v)}"`), `${id}/${g.key}=${o.v}: the spec's button[data-cfg-group][data-cfg-v]`));
+        });
+        Object.entries(f.dims).forEach(([k, d]) => {
+          assert.ok(html.includes(`id="cfgDim_${k}"`), `${id}: size input ${k}`);
+          assert.ok(html.includes(`min="${d.min}" max="${d.max}" step="${d.step}"`), `${id}: ${k} limits from the definition`);
+        });
+        assert.ok(b.el('cfgPreview').textContent.startsWith(f.label), `${id}: the one-line summary`);
+      }
     }
+    assert.equal(conditional, 3, 'the premise: three conditional groups in the definitions (fry baskets, burners, a pre-rinse sink)');
   });
 
-  it('a seventh family added to the definitions renders with ZERO code change (a choice of 5 → select, slots, multi, two size axes)', () => {
+  it('a twelfth family added to the definitions renders with ZERO code change (a choice of 5 → select, slots, multi, two size axes, and a chain of conditional choices)', () => {
     const b = builder();
     const orderBefore = FAM.order.slice();
     const extra = JSON.parse(JSON.stringify(FAM.families.stove));
@@ -1171,6 +1220,10 @@ describe('§4.1 / §4.2 — the Configure chips and the panel are generated from
       { key: 'size5', label: 'Five sizes', type: 'choice', default: 1, options: [1, 2, 3, 4, 5].map((v) => ({ v, l: `S${v}`, s: `s${v}` })) },
       ...extra.groups,
       { key: 'finish', label: 'Finish', type: 'multi', default: [], options: [{ v: 'a', l: 'Alpha', s: 'a' }, { v: 'b', l: 'Beta', s: 'b' }] },
+      // a chain: B applies only for A = y, and C only for B = 2 (so C can only be showing while B is — and both go when A goes back to x)
+      { key: 'gate_a', label: 'Gate A', type: 'choice', default: 'x', options: [{ v: 'x', l: 'Ax', s: 'ax' }, { v: 'y', l: 'Ay', s: 'ay' }] },
+      { key: 'gate_b', label: 'Gate B', type: 'choice', default: 1, when: { gate_a: ['y'] }, options: [{ v: 1, l: 'B1', s: 'b1' }, { v: 2, l: 'B2', s: 'b2' }] },
+      { key: 'gate_c', label: 'Gate C', type: 'multi', default: [], when: { gate_b: [2] }, options: [{ v: 'p', l: 'Pee', s: 'p' }] },
     ];
     extra.dims = { W: extra.dims.W, H: extra.dims.H };
     // the builder's window.QR_FAMILIES IS this file's FAM (shared by every test below): put the definitions back however this test ends
@@ -1183,6 +1236,20 @@ describe('§4.1 / §4.2 — the Configure chips and the panel are generated from
       assert.ok(html.includes('Burner positions') && html.includes('cfg-slots'));
       assert.ok(html.includes('Finish') && html.includes('Alpha') && html.includes('Beta'));
       assert.ok(html.includes('id="cfgDim_W"') && html.includes('id="cfgDim_H"') && !html.includes('id="cfgDim_D"'), 'only the family\'s own axes');
+      // the chain: only Gate A to begin with; A = y brings Gate B; B = 2 brings Gate C; A back to x takes BOTH away in the same draw and puts their choices back to the defaults
+      const gi = (key) => extra.groups.findIndex((g) => g.key === key);
+      const shown = () => ['gate_a', 'gate_b', 'gate_c'].filter((k) => b.el('cfgBody').innerHTML.includes(`<div class="cfg-lbl" id="cfgL${gi(k)}">`));
+      assert.deepEqual(shown(), ['gate_a']);
+      b.run(`cfgPickOpt(${gi('gate_a')}, 1)`);
+      assert.deepEqual(shown(), ['gate_a', 'gate_b']);
+      b.run(`cfgPickOpt(${gi('gate_b')}, 1)`);
+      b.run(`cfgToggleMulti(${gi('gate_c')}, 0, true)`);
+      assert.deepEqual(shown(), ['gate_a', 'gate_b', 'gate_c']);
+      assert.deepEqual(b.plain('[cfgState.config.gate_b, cfgState.config.gate_c]'), [2, ['p']]);
+      b.run(`cfgPickOpt(${gi('gate_a')}, 0)`);
+      assert.deepEqual(shown(), ['gate_a'], 'both conditional groups are gone in the same draw');
+      assert.deepEqual(b.plain('[cfgState.config.gate_b, cfgState.config.gate_c]'), [1, []], 'and back at their defaults');
+      assert.equal(b.run('cfgEvaluate(cfgState).v.ok'), true, 'the panel never reports the snapped choices as an error');
     } finally {
       b.run(`delete QR_FAMILIES.families.zz_test; QR_FAMILIES.order = QR_FAMILIES.order.filter(id => id !== 'zz_test');`);
     }
@@ -1361,13 +1428,13 @@ describe('§10.3 / §4.6 — convert an old line; "configure instead"', () => {
     assert.equal(conv._uid, 'u9');
     assert.equal(conv.notes, 'n');
     assert.deepEqual(conv.config.basins, 2);
-    assert.equal(b.plain(`cfgConvertLine({ id: 'CE-016', name: 'x' })`), null, 'a SKU no family absorbed is not convertible');
+    assert.equal(b.plain(`cfgConvertLine({ id: 'CE-030', name: 'x' })`), null, 'a SKU no family absorbed is not convertible');
   });
 
   it('the ⚙ row offers "convert to configured" only for an absorbed SKU, never for custom / fee / non-absorbed lines', () => {
     const b = builder();
     assert.match(b.run(`cfgLineRowHtml(${JSON.stringify(plainSink)}, 3)`), /convertToConfigured\(3\)/);
-    for (const it of [{ id: 'CUSTOM', name: 'c' }, { id: 'MISCFEE', name: 'm' }, { id: 'CE-016', name: 'f' }]) assert.equal(b.run(`cfgLineRowHtml(${JSON.stringify(it)}, 0)`), '', it.id);
+    for (const it of [{ id: 'CUSTOM', name: 'c' }, { id: 'MISCFEE', name: 'm' }, { id: 'CE-030', name: 'f' }]) assert.equal(b.run(`cfgLineRowHtml(${JSON.stringify(it)}, 0)`), '', it.id);
   });
 
   it('convert opens the panel pre-filled with the converted line; Cancel puts the original plain line back; Update keeps the converted one', () => {
@@ -1396,7 +1463,7 @@ describe('§10.3 / §4.6 — convert an old line; "configure instead"', () => {
     assert.equal(b.run('cfgState.sizeRaw.W'), '1450');
     assert.equal(b.run('selectedProduct'), null, 'the calculator panel was dismissed');
     assert.match(b.run(`cfgSoldOnlineHtml('PW-006')`), /Sold online as: Sink \(configurable\)[\s\S]*configure instead/);
-    assert.equal(b.run(`cfgSoldOnlineHtml('CE-016')`), '', 'a SKU no family absorbed gets no hint');
+    assert.equal(b.run(`cfgSoldOnlineHtml('CE-030')`), '', 'a SKU no family absorbed gets no hint');
   });
 });
 
@@ -1531,12 +1598,12 @@ describe('WS-5C — the staff-only 1.2 mm top plate: offered in the panel with a
   const groupAt = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
   const optAt = (id, key, v) => FAM.families[id].groups[groupAt(id, key)].options.findIndex((o) => o.v === v);
   const pickTop = (b, id, v) => b.run(`cfgPickOpt(${groupAt(id, 'top')}, ${optAt(id, 'top', v)})`);
-  const STAFF = ['prep_table', 'sink', 'stove'];
+  const STAFF = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];       // the hood, the cooking line and the deck oven have no top plate (CONFIGURATOR-FAMILIES-2-SPEC §3)
   const CHIP = '<span class="cfg-staff-chip no-print" title="Not offered on the website">staff</span>';
   const SINK_CONSTRUCTION = (top) => `SS304 stainless steel · ${top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet`;
   const specText = (html) => { const m = /<span class="spec-edit cell-edit"[^>]*>([^<]*)<\/span>/.exec(html); return m ? m[1] : null; };   // what the quote prints for the line's specs
 
-  it('premise: the definitions mark the Top plate staff-only on exactly the table, the sink and the stove — and a PUBLIC validation refuses its 1.2 mm value', () => {
+  it('premise: the definitions mark the Top plate staff-only on exactly the table, the sink, the dish table, the stove and the wok range — and a PUBLIC validation refuses its 1.2 mm value', () => {
     assert.deepEqual(FAM.order.filter((id) => FAM.families[id].groups.some((g) => g.staffOnly)), STAFF);
     for (const id of STAFF) {
       const f = FAM.families[id];
@@ -1560,7 +1627,9 @@ describe('WS-5C — the staff-only 1.2 mm top plate: offered in the panel with a
       assert.equal((html.match(/cfg-staff-chip/g) || []).length, chips, `${id}: no other chip markup`);
       f.groups.forEach((g, gi) => {
         const label = g.label.replace(/&/g, '&amp;');
-        assert.ok(html.includes(`<div class="cfg-lbl" id="cfgL${gi}">${label}${g.staffOnly ? ' ' + CHIP : ''}</div>`), `${id}/${g.key}: label${g.staffOnly ? ' + chip' : ' alone'}`);
+        const mark = `<div class="cfg-lbl" id="cfgL${gi}">${label}${g.staffOnly ? ' ' + CHIP : ''}</div>`;
+        // a conditional group (fry baskets for a fryer…) is not drawn until its choice allows it, so it has no label here
+        assert.equal(html.includes(mark), PF.groupApplies(f, g, PF.defaultConfig(f)), `${id}/${g.key}: label${g.staffOnly ? ' + chip' : ' alone'}, drawn only when it applies`);
       });
     }
     open(b, 'sink');
@@ -1762,15 +1831,15 @@ describe('WS-5C — the ⇄ pass-through chip is hidden on configured lines (pla
     return b.el('marginTbl').innerHTML;
   };
   const rowOf = (html, name) => (html.split('<tr>').find((r) => r.includes('>' + name)) || html.split('<tr>').find((r) => r.includes(name)) || '');
-  const fryer = { id: 'CE-016', category: 'cooking_line', name: 'Fryer', qty: 1, unit: 'pc', unitPrice: 21911, amount: 21911, _uid: 'f' };
+  const fryer = { id: 'CE-030', category: 'cooking_line', name: 'Salamander', qty: 1, unit: 'pc', unitPrice: 21911, amount: 21911, _uid: 'f' };
   const sink = (b, over = {}) => ({ ...makeLine(b, sinkState({ qty: 1 })).line, _uid: 's', ...over });
 
   it('a configured line has no PT chip; a plain line beside it keeps its chip and its handler', () => {
     const b = builder();
     const html = paint(b, [sink(b), fryer]);
-    assert.ok(html.includes('togglePassThrough(1)'), 'the plain Fryer row keeps its ⇄ PT chip');
+    assert.ok(html.includes('togglePassThrough(1)'), 'the plain Salamander row keeps its ⇄ PT chip');
     assert.equal(html.includes('togglePassThrough(0)'), false, 'the configured Sink row has none');
-    assert.ok(rowOf(html, 'Fryer').includes('⇄ PT'));
+    assert.ok(rowOf(html, 'Salamander').includes('⇄ PT'));
     assert.equal(rowOf(html, 'Sink').includes('⇄'), false);
     assert.ok(rowOf(html, 'Sink').includes('cost from') || rowOf(html, 'Sink').includes('cost ≈'), 'the row is still the configured line\'s (its cost chip)');
   });
@@ -1788,7 +1857,7 @@ describe('WS-5C — the ⇄ pass-through chip is hidden on configured lines (pla
   it('a plain flagged line shows its chip as before, and a plain line beside a configured one is untouched', () => {
     const b = builder();
     const html = paint(b, [{ ...fryer, passThrough: true }, sink(b)]);
-    assert.ok(html.includes('togglePassThrough(0)') && rowOf(html, 'Fryer').includes('⇄ pass-through'));
+    assert.ok(html.includes('togglePassThrough(0)') && rowOf(html, 'Salamander').includes('⇄ pass-through'));
     assert.equal(html.includes('togglePassThrough(1)'), false);
   });
 });
@@ -1830,7 +1899,7 @@ describe('WS-5C — the builder section of a configured line: the base product\'
   it('a website hand-off line arrives with the request\'s PUBLIC category ("washing") and is moved into its base product\'s section; the fixed line beside it is untouched', () => {
     const b = builder();
     const cats = handoff(b, [sinkRow(), sinkRow({ n: 2, id: 'PW-010', cat: 'storage', name: 'Rack', familyId: 'rack', config: { tiers: 3, wheels: true }, size: { W: 1200, D: 500, H: 1600 } }),
-      { n: 3, id: 'CE-016', cat: 'cooking_line', name: 'Fryer', qty: 1, unit: 'pc', specs: [] }]);
+      { n: 3, id: 'CE-030', cat: 'cooking_line', name: 'Salamander', qty: 1, unit: 'pc', specs: [] }]);
     assert.deepEqual(cats, ['prep_washing', 'prep_washing', 'cooking_line']);
     assert.equal(QB.fromRequestItem(sinkRow(), { n: 1, priced: true, unitPrice: 41300 }, REF).category, 'washing', 'premise: fromRequestItem still emits the public category');
   });
@@ -1851,5 +1920,689 @@ describe('WS-5C — the builder section of a configured line: the base product\'
     b.run(`DB.products = __db; cfgRefreshAll();`);
     assert.deepEqual(b.plain('items.map(i => i.category)'), ['prep_washing']);
     assert.ok(b.plain('items[0]._cfg.pricedSize'), 'and its runtime figures came with it');
+  });
+});
+
+// ═══════════════════════════════════════ CONFIGURATOR-FAMILIES-2-SPEC WS-4 — five more families in the builder ═══════════════════════════════════════
+// Dish table, wok range, griddle / griller / fryer, gas deck oven, range hood (families 3, 5, 6, 7, 8 of the eleven). Nothing in the builder is written per family: the panel walks the
+// definitions, so what this block pins is the two generic additions (a choice that applies only for some values of an earlier one — `when`; an option that caps a size — `maxDimWhen`),
+// the per-product kill switch (productMeta/config.families.disabled) and that every new family goes through the SAME pipeline: chips, panel, price, Add, ⚙ configure, convert, hints.
+describe('FAMILIES-2 — conditional options in the panel: only the groups that apply are drawn, and a choice that stops applying goes back to its default', () => {
+  const gIdx = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
+  const oIdx = (id, key, v) => FAM.families[id].groups[gIdx(id, key)].options.findIndex((o) => o.v === v);
+  const open = (b, id, opts = {}) => { b.run(`openConfigurator(${JSON.stringify(id)}, ${JSON.stringify(opts)})`); };
+  const pickV = (b, id, key, v) => b.run(`cfgPickOpt(${gIdx(id, key)}, ${oIdx(id, key, v)})`);
+  const groupsShown = (b) => [...b.el('cfgBody').innerHTML.matchAll(/<div class="cfg-lbl" id="cfgL\d+">([^<]*)/g)].map((m) => m[1].trim());
+  const basisOf = (b) => b.plain('cfgEvaluate(cfgState).basis');
+
+  it('a cooking line draws Burners for a griddle or a griller, Fry baskets for a fryer, and neither for a griller + griddle — Type and Base always', () => {
+    const b = builder();
+    open(b, 'cooking_line');
+    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base'], 'the default is a griddle: no fry baskets');
+    assert.equal(b.el('cfgBody').innerHTML.includes('data-cfg-group="baskets"'), false);
+    pickV(b, 'cooking_line', 'type', 'fryer');
+    assert.deepEqual(groupsShown(b), ['Type', 'Fry baskets', 'Base']);
+    assert.equal(b.el('cfgBody').innerHTML.includes('data-cfg-group="burners"'), false, 'no burner choice on a fryer');
+    assert.ok(b.el('cfgBody').innerHTML.includes('data-cfg-group="baskets" data-cfg-v="3"'));
+    pickV(b, 'cooking_line', 'type', 'griller');
+    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base']);
+    pickV(b, 'cooking_line', 'type', 'combi');
+    assert.deepEqual(groupsShown(b), ['Type', 'Base'], 'a griller + griddle has one burner under each side: nothing to choose');
+  });
+
+  it('a dish table draws the pre-rinse sink only on the soiled side; the Top plate keeps its staff chip and stays last', () => {
+    const b = builder();
+    open(b, 'dish_table');
+    assert.deepEqual(groupsShown(b), ['Side', 'Dishwasher on the', 'Undershelf', 'Top plate'], 'the clean side: no sink to choose');
+    pickV(b, 'dish_table', 'side', 'soiled');
+    assert.deepEqual(groupsShown(b), ['Side', 'Dishwasher on the', 'Pre-rinse sink', 'Undershelf', 'Top plate']);
+    assert.ok(b.el('cfgBody').innerHTML.includes('<span class="cfg-staff-chip no-print" title="Not offered on the website">staff</span>'));
+  });
+
+  it('a group keeps its index in the definition as its id and in its handlers, whichever groups are showing (pick by index still picks the right group)', () => {
+    const b = builder();
+    open(b, 'cooking_line');
+    const bi = gIdx('cooking_line', 'baskets'), ti = gIdx('cooking_line', 'type');
+    pickV(b, 'cooking_line', 'type', 'fryer');
+    const html = b.el('cfgBody').innerHTML;
+    assert.ok(html.includes(`<div class="cfg-lbl" id="cfgL${bi}">Fry baskets</div>`), 'the label id is the index in fam.groups (2), not its position among the groups showing (1)');
+    assert.ok(html.includes(`onclick="cfgPickOpt(${bi},2)"`) && html.includes(`onclick="cfgPickOpt(${ti},0)"`));
+    b.run(`cfgPickOpt(${bi}, 2)`);
+    assert.equal(b.run('cfgState.config.baskets'), 3);
+    assert.equal(b.run('cfgState.config.type'), 'fryer');
+  });
+
+  it('a choice that stops applying is back at its default in the panel\'s own state — and the panel never calls that an error', () => {
+    const b = builder();
+    open(b, 'cooking_line');
+    pickV(b, 'cooking_line', 'type', 'fryer');
+    pickV(b, 'cooking_line', 'baskets', 3);
+    assert.equal(b.run('cfgState.config.baskets'), 3);
+    assert.equal(b.run('cfgState.sizeRaw.W'), '1000', 'three baskets lift an untouched length to the minimum');
+    pickV(b, 'cooking_line', 'type', 'griddle');
+    assert.deepEqual(b.plain('cfgState.config'), { type: 'griddle', burners: 1, baskets: 2, base: 'stand' }, 'baskets are back at the default 2');
+    assert.equal(b.el('cfgErrAll').style.display, 'none', 'no "applies only when" box');
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    assert.equal(b.run('cfgState.sizeRaw.W'), '700', 'and the untouched length followed the options back');
+    // the validator itself calls a non-default value of an option that does not apply an error (that is what the website and the server do with it) — the panel snaps first
+    assert.equal(PF.validateLine(FAM.families.cooking_line, { type: 'griddle', burners: 1, baskets: 3, base: 'stand' }, { W: 700, D: 700 }, { staff: true }).ok, false, 'premise');
+    b.run(`cfgState.config.baskets = 3`);
+    const ev = b.plain('cfgEvaluate(cfgState)');
+    assert.equal(ev.v.ok, true);
+    assert.equal(ev.v.config.baskets, 2);
+    assert.equal(b.run('cfgState.config.baskets'), 2, 'cfgEvaluate wrote the canonical configuration back');
+  });
+
+  it('dish table: the pre-rinse sink forces a length of at least 1200 only while it applies; going back to the clean side drops the sink, its minimum and its price', () => {
+    const b = builder();
+    open(b, 'dish_table');
+    const plainPrice = basisOf(b).unitPrice;
+    pickV(b, 'dish_table', 'side', 'soiled');
+    pickV(b, 'dish_table', 'sink', 'prerinse');
+    assert.equal(b.run('cfgState.config.sink'), 'prerinse');
+    assert.ok(basisOf(b).deltas.some((d) => d.key === 'sink:prerinse') && basisOf(b).deltas.some((d) => d.key === 'side:soiled'));
+    assert.match(b.el('cfgDH_W').innerHTML, /minimum 1200 mm with these options/);
+    b.run(`cfgDimInput('W', { value: '1000' })`);                                       // typed by hand (so no longer following the options)
+    assert.equal(b.el('cfgAddBtn').disabled, true);
+    assert.match(b.el('cfgErr_W').innerHTML, /With these options the length must be at least 1200 mm\./);
+    pickV(b, 'dish_table', 'side', 'clean');
+    assert.equal(b.run('cfgState.config.sink'), 'none');
+    assert.doesNotMatch(b.el('cfgDH_W').innerHTML, /minimum 1200/);
+    assert.equal(b.el('cfgErr_W').innerHTML, '', 'the forced minimum went with the sink');
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    pickV(b, 'dish_table', 'side', 'soiled');
+    assert.equal(b.run('cfgState.config.sink'), 'none', 'it does not come back by itself');
+    b.run(`cfgState.sizeRaw.W = '1200'; cfgState.touched.W = false; cfgAfterConfigChange()`);
+    pickV(b, 'dish_table', 'side', 'clean');
+    assert.equal(basisOf(b).unitPrice, plainPrice, 'a clean-side table at the usual length is priced like the plain one again');
+    assert.deepEqual(basisOf(b).deltas, [], 'no cell left over from the soiled side');
+  });
+
+  it('what is added to the quote is canonical: an option that does not apply is at its default, has no spec row and no price cell (a griddle that was a fryer with 3 baskets for a moment)', () => {
+    const b = builder();
+    open(b, 'cooking_line');
+    pickV(b, 'cooking_line', 'type', 'fryer');
+    pickV(b, 'cooking_line', 'baskets', 3);
+    pickV(b, 'cooking_line', 'type', 'griddle');
+    pickV(b, 'cooking_line', 'burners', 2);
+    const priced = basisOf(b);
+    assert.deepEqual(priced.deltas.map((d) => d.key).sort(), ['burners:2'], 'one cell: the burners — no fryer, no baskets');
+    b.run('cfgCommit()');
+    const it = b.plain('items[0]');
+    assert.deepEqual(it.config, { type: 'griddle', burners: 2, baskets: 2, base: 'stand' });
+    assert.deepEqual(it.specs.map((r) => r.label).filter((l) => l !== 'Construction'), ['Type', 'Burners', 'Base'], 'no "Fry baskets" row on the printed quote');
+    assert.equal(it.specStr.includes('basket'), false);
+    // the same line made without the detour prices the same, to the peso
+    const fresh = builder();
+    open(fresh, 'cooking_line');
+    pickV(fresh, 'cooking_line', 'burners', 2);
+    assert.equal(basisOf(fresh).unitPrice, priced.unitPrice);
+    assert.equal(it.unitPrice, priced.unitPrice);
+    // ⚙ configure on it opens with only the groups that apply
+    b.run('configureLine(0)');
+    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base']);
+  });
+
+  it('a saved line that states a value for an option that does not apply opens with the visible "reset" notice and that option at its default', () => {
+    const b = builder();
+    open(b, 'cooking_line', { config: { type: 'griddle', burners: 1, baskets: 3, base: 'stand' }, dims: { W: 700, D: 700 } });
+    assert.match(b.el('cfgNotice').textContent, /no longer available/);
+    assert.equal(b.run('cfgState.config.baskets'), 2);
+    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base']);
+    // a canonical line opens with no notice
+    open(b, 'cooking_line', { config: { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, dims: { W: 1000, D: 700 } });
+    assert.equal(b.el('cfgNotice').textContent, '');
+    assert.deepEqual(groupsShown(b), ['Type', 'Fry baskets', 'Base']);
+  });
+});
+
+describe('FAMILIES-2 — a size an option caps: the hood\'s depth and the deck oven\'s width (input max, hint, "Use N mm", routed under the box)', () => {
+  const gIdx = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
+  const oIdx = (id, key, v) => FAM.families[id].groups[gIdx(id, key)].options.findIndex((o) => o.v === v);
+  const open = (b, id, opts = {}) => { b.run(`openConfigurator(${JSON.stringify(id)}, ${JSON.stringify(opts)})`); };
+  const pickV = (b, id, key, v) => b.run(`cfgPickOpt(${gIdx(id, key)}, ${oIdx(id, key, v)})`);
+  const dim = (b, k, v) => { b.el('cfgDim_' + k).value = String(v); b.run(`cfgDimInput('${k}', document.getElementById('cfgDim_${k}'))`); };
+
+  it('cfgSplitErrors routes "must be at most" (and "must be at least") to the axis it is about — never into the general box; anything else is general', () => {
+    const b = builder();
+    const split = (fid, errors) => b.plain(`cfgSplitErrors(cfgFamily(${JSON.stringify(fid)}), ${JSON.stringify(errors)})`);
+    const max = 'With these options the depth must be at most 500 mm.';
+    const min = 'With these options the length must be at least 1200 mm.';
+    assert.deepEqual(split('hood', [max]), { byDim: { D: [max] }, general: [] });
+    assert.deepEqual(split('hood', [min, max]), { byDim: { W: [min], D: [max] }, general: [] });
+    assert.deepEqual(split('deck_oven', ['With these options the width must be at most 1200 mm.']).byDim, { W: ['With these options the width must be at most 1200 mm.'] });
+    const other = '"Fry baskets" applies only when Type is Fryer.';
+    assert.deepEqual(split('hood', [other, max]), { byDim: { D: [max] }, general: [other] });
+    assert.deepEqual(split('hood', ['With these options the height must be at most 500 mm.']).general, ['With these options the height must be at most 500 mm.'], 'an axis the family does not have is not an axis');
+  });
+
+  it('a slim hood is at most 500 mm deep: an untouched depth follows (900 → 500), the input is capped, the hint says so; typing 600 is refused under the box with a Use 500 mm button', () => {
+    const b = builder();
+    open(b, 'hood');
+    assert.equal(b.run('cfgState.sizeRaw.D'), '900');
+    assert.equal(b.el('cfgDim_D').max, '1500');
+    assert.doesNotMatch(b.el('cfgDH_D').innerHTML, /maximum/);
+    pickV(b, 'hood', 'type', 'slim');
+    assert.equal(b.run('cfgState.sizeRaw.D'), '500', 'the untouched depth follows the type');
+    assert.equal(b.el('cfgDim_D').max, '500');
+    assert.match(b.el('cfgDH_D').innerHTML, /300–1500 mm, steps of 10 · maximum 500 mm with these options/);
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    dim(b, 'D', 600);
+    assert.equal(b.el('cfgAddBtn').disabled, true);
+    assert.match(b.el('cfgErr_D').innerHTML, /With these options the depth must be at most 500 mm\./);
+    assert.match(b.el('cfgErr_D').innerHTML, /cfgUseMax\('D',500\)[^>]*>Use 500 mm/);
+    assert.equal(b.el('cfgErrAll').style.display, 'none', 'it is under the depth box, not in the general one');
+    assert.equal(b.el('cfgDim_D').classList.contains('cfg-bad'), true);
+    assert.match(b.el('cfgPriceArea').innerHTML, /Fix the highlighted fields/);
+    b.run(`cfgUseMax('D', 500)`);
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    assert.equal(b.el('cfgErr_D').innerHTML, '');
+    assert.match(b.el('cfgPriceArea').innerHTML, /website basis/);
+    // the cap goes with the type
+    pickV(b, 'hood', 'type', 'wall');
+    assert.equal(b.el('cfgDim_D').max, '1500');
+    assert.equal(b.el('cfgDim_D').min, '500', 'a wall canopy is at least 500 mm deep');
+    assert.match(b.el('cfgDH_D').innerHTML, /minimum 500 mm with these options/);
+    assert.doesNotMatch(b.el('cfgDH_D').innerHTML, /maximum/);
+    // an island canopy: at least 1200 long and 700 deep
+    pickV(b, 'hood', 'type', 'island');
+    assert.equal(b.el('cfgDim_W').min, '1200');
+    assert.equal(b.el('cfgDim_D').min, '700');
+  });
+
+  it('a deck oven\'s width follows its trays: 700 for three, 1200 for six — the input is pinned, the hint says "fixed", a wrong width is refused with a Use button, a typed width that fits is kept', () => {
+    const b = builder();
+    open(b, 'deck_oven');
+    assert.equal(b.run('cfgState.sizeRaw.W'), '700');
+    assert.equal(b.el('cfgDim_W').min, '700');
+    assert.equal(b.el('cfgDim_W').max, '700');
+    assert.match(b.el('cfgDH_W').innerHTML, /fixed at 700 mm by these options/);
+    pickV(b, 'deck_oven', 'trays', 6);
+    assert.equal(b.run('cfgState.sizeRaw.W'), '1200', 'an untouched width follows the trays');
+    assert.equal(b.el('cfgDim_W').min, '1200');
+    assert.equal(b.el('cfgDim_W').max, '1200');
+    assert.match(b.el('cfgDH_W').innerHTML, /fixed at 1200 mm by these options/);
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    dim(b, 'W', 1300);
+    assert.equal(b.el('cfgAddBtn').disabled, true);
+    assert.match(b.el('cfgErr_W').innerHTML, /With these options the width must be at most 1200 mm\./);
+    assert.match(b.el('cfgErr_W').innerHTML, /cfgUseMax\('W',1200\)[^>]*>Use 1200 mm/);
+    dim(b, 'W', 1100);
+    assert.match(b.el('cfgErr_W').innerHTML, /With these options the width must be at least 1200 mm\./);
+    assert.match(b.el('cfgErr_W').innerHTML, /cfgUseMin\('W',1200\)[^>]*>Use 1200 mm/);
+    b.run(`cfgUseMin('W', 1200)`);
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    // back to three trays with the width typed by hand: the typed 1200 is now above the cap
+    pickV(b, 'deck_oven', 'trays', 3);
+    assert.equal(b.run('cfgState.sizeRaw.W'), '1200', 'a length typed by hand stays where it was put…');
+    assert.equal(b.el('cfgAddBtn').disabled, true, '…and is refused when the new options cap it');
+    assert.match(b.el('cfgErr_W').innerHTML, /must be at most 700 mm/);
+    b.run(`cfgUseMax('W', 700)`);
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+  });
+
+  it('a hood\'s other size limits are the axis limits: a depth under the type\'s minimum is refused the same way, and the input min follows the options', () => {
+    const b = builder();
+    open(b, 'hood');
+    dim(b, 'D', 400);                                           // a wall canopy is at least 500 mm deep
+    assert.equal(b.el('cfgAddBtn').disabled, true);
+    assert.match(b.el('cfgErr_D').innerHTML, /With these options the depth must be at least 500 mm\./);
+    assert.match(b.el('cfgErr_D').innerHTML, /Use 500 mm/);
+    pickV(b, 'hood', 'type', 'slim');                           // …a slim one may be shallower
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    assert.equal(b.el('cfgDim_D').min, '300');
+  });
+});
+
+describe('FAMILIES-2 — the five new families go through the same pipeline: chips, price, Add to Quote, ⚙ configure, "Priced after review"', () => {
+  const NEW = ['dish_table', 'wok_range', 'cooking_line', 'deck_oven', 'hood'];
+  const gIdx = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
+  const oIdx = (id, key, v) => FAM.families[id].groups[gIdx(id, key)].options.findIndex((o) => o.v === v);
+  const open = (b, id, opts = {}) => { b.run(`openConfigurator(${JSON.stringify(id)}, ${JSON.stringify(opts)})`); };
+  const pickV = (b, id, key, v) => b.run(`cfgPickOpt(${gIdx(id, key)}, ${oIdx(id, key, v)})`);
+  const SECTION = { dish_table: 'prep_washing', wok_range: 'cooking_line', cooking_line: 'cooking_line', deck_oven: 'cooking_line', hood: 'exhaust_system' };
+
+  it('the definitions are the eleven, in the website\'s order — and the builder\'s one chip per family carries each label and its one-line description', () => {
+    assert.deepEqual(FAM.order, ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']);
+    const b = builder();
+    b.run('renderCfgChips()');
+    const html = b.el('cfgChips').innerHTML;
+    assert.deepEqual([...html.matchAll(/data-cfg-open="([a-z_]+)"/g)].map((m) => m[1]), FAM.order, 'one chip per family, in order');
+    assert.equal((html.match(/cfg-chip-btn/g) || []).length, FAM.order.length);
+    for (const [id, label] of [['dish_table', 'Dish table'], ['wok_range', 'Wok range'], ['cooking_line', 'Griddle, griller or fryer'], ['deck_oven', 'Gas deck oven'], ['hood', 'Range hood']]) {
+      assert.ok(html.includes(`⚙ ${label}</button>`), `⚙ ${label}`);
+      assert.ok(html.includes(`title="${FAM.families[id].description}"`), `${id}: the chip's title is its description`);
+    }
+  });
+
+  it('on a phone the chip row is a two-column grid of 44 px targets (the longest label wraps), and nothing about it is printed', () => {
+    const css = HTML.slice(HTML.indexOf('/* ── CONFIGURATOR'), HTML.indexOf('@media print{#configPanel'));
+    assert.match(css, /@media\(max-width:768px\)\{[\s\S]*\.cfg-chips\{display:grid;grid-template-columns:1fr 1fr;gap:8px;\}/);
+    assert.match(css, /\.cfg-chip-btn\{min-height:44px;/);
+    assert.match(HTML, /class="cfg-chips no-print" id="cfgChips"/);
+  });
+
+  it('every new family, at its defaults, prices on the website basis, adds a configured line in its base product\'s section, and ⚙ configure re-opens it as an update (never a second line)', () => {
+    for (const id of NEW) {
+      const b = builder();
+      const f = FAM.families[id];
+      open(b, id);
+      assert.match(b.el('cfgPriceArea').innerHTML, /website basis/, `${id}: priced`);
+      assert.equal(b.el('cfgAddBtn').disabled, false, id);
+      assert.match(b.el('cfgTitle').innerHTML, new RegExp(`Configure: <strong>${f.label.replace(/[,]/g, '[,]')}</strong>`), id);
+      b.run('cfgCommit()');
+      const it = b.plain('items[0]');
+      assert.equal(b.run('items.length'), 1, id);
+      assert.equal(it.familyId, id);
+      assert.equal(it.id, f.primary, `${id}: the line carries the primary SKU`);
+      assert.equal(it.category, SECTION[id], `${id}: the builder section is the base product's own, never the website's public category`);
+      assert.equal(it.priceBasis, 'website');
+      assert.ok(it.unitPrice > 0 && it.basisUnitPrice === it.unitPrice, id);
+      assert.deepEqual(it.specs.map((r) => r.label), PF.describe(f, it.config).map((r) => r.label), `${id}: the printed rows are the options that apply, then the construction`);
+      assert.equal(it.specs.at(-1).label, 'Construction');
+      assert.equal(it.dims, PF.sizeTextLabelled(f, it.size), id);
+      assert.deepEqual(it.config, PF.validateConfiguration(f, it.config, { staff: true }).config, `${id}: canonical`);
+      assert.equal(b.run('cfgState'), null, 'the panel closed');
+      b.run('configureLine(0)');
+      assert.match(b.el('cfgTitle').innerHTML, /Edit:/);
+      assert.equal(b.el('cfgAddBtn').textContent, '✔ Update line');
+      b.run('cfgCommit()');
+      assert.equal(b.run('items.length'), 1, `${id}: an update replaces, never appends`);
+    }
+  });
+
+  it('the figure the panel shows is QBConfigured.priceLine\'s for every family, option and size it can reach (the builder never prices on its own) — conditional groups included', () => {
+    const b = builder();
+    const cases = [
+      ['dish_table', { side: 'soiled', hand: 'right', sink: 'prerinse', undershelf: false, top: 1.2 }, { W: 1800, D: 660 }],
+      ['wok_range', { holes: 3, rear: true, faucet: 'swan', top: 1.5 }, { W: 1900, D: 900 }],
+      ['cooking_line', { type: 'fryer', burners: 1, baskets: 3, base: 'shelf' }, { W: 1100, D: 800 }],
+      ['cooking_line', { type: 'griller', burners: 3, baskets: 2, base: 'stand' }, { W: 1300, D: 700 }],
+      ['deck_oven', { decks: 3, trays: 6, stand: 'heavy' }, { W: 1200 }],
+      ['hood', { type: 'slim', filters: 'none', lighting: false }, { W: 2400, D: 450 }],
+    ];
+    for (const [id, config, size] of cases) {
+      const f = FAM.families[id];
+      b.run(`globalThis.__st = ${JSON.stringify(stateFor(id, { config, sizeRaw: Object.fromEntries(Object.entries(size).map(([k, v]) => [k, String(v)]) ) }))}; globalThis.__ev = cfgEvaluate(__st);`);
+      const ev = b.plain('__ev');
+      assert.equal(ev.v.ok, true, `${id}: ${ev.v.errors.join('; ')}`);
+      const primary = CATALOGUE.find((p) => p.id === f.primary);
+      const direct = QB.priceLine({ PF, PC, FAM }, { family: f, primary, config: ev.v.config, size: ev.v.dims, sheet: SHEETS[id], constants: {} });
+      assert.equal(ev.basis.priced, true, `${id}: priced`);
+      assert.equal(ev.basis.unitPrice, direct.unitPrice, id);
+      assert.deepEqual(ev.basis.deltas, direct.deltas, `${id}: the same cells`);
+    }
+  });
+
+  it('a conditional group never reaches the price: a fryer prices its type and baskets and NO burner cell; a griddle its burners and NO basket cell; a griller + griddle neither', () => {
+    const b = builder();
+    const keys = (cfg, size) => { b.run(`globalThis.__st = ${JSON.stringify(stateFor('cooking_line', { config: cfg, sizeRaw: size }))}; globalThis.__ev = cfgEvaluate(__st);`); const ev = b.plain('__ev'); assert.equal(ev.v.ok, true, ev.v.errors.join('; ')); return ev.basis.deltas.map((d) => d.key).sort(); };
+    assert.deepEqual(keys({ type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, { W: '1000', D: '700' }), ['baskets:3', 'type:fryer']);
+    assert.deepEqual(keys({ type: 'griddle', burners: 3, baskets: 2, base: 'stand' }, { W: '1200', D: '700' }), ['burners:3']);
+    assert.deepEqual(keys({ type: 'combi', burners: 1, baskets: 2, base: 'shelf' }, { W: '900', D: '700' }), ['base:shelf', 'type:combi']);
+  });
+
+  it('deck oven: six trays at 1200 mm prices the six-tray cell and a length rate of 0 — priced; with the width rate blank it reads "Priced after review" for Size; three trays at 700 needs no width rate at all', () => {
+    const b = builder();
+    open(b, 'deck_oven');
+    assert.match(b.el('cfgPriceArea').innerHTML, /website basis/, 'three trays, 700 mm: no length term at all');
+    pickV(b, 'deck_oven', 'trays', 6);
+    let ev = b.plain('cfgEvaluate(cfgState)');
+    assert.equal(ev.v.dims.W, 1200);
+    assert.equal(ev.basis.priced, true);
+    assert.deepEqual(ev.basis.deltas.map((d) => d.key).sort(), ['size:W', 'trays:6']);
+    assert.equal(ev.basis.deltas.find((d) => d.key === 'size:W').amount, 0, 'the width rate is 0: the width is a consequence of the trays');
+    b.run(`FAMILY_PRICING.deck_oven.size.perW100 = null; cfgRefresh();`);
+    ev = b.plain('cfgEvaluate(cfgState)');
+    assert.equal(ev.basis.priced, false);
+    assert.deepEqual(ev.basis.missing, ['Size']);
+    assert.match(b.el('cfgPriceArea').innerHTML, /Priced after review/);
+    assert.match(b.el('cfgPriceArea').innerHTML, /No amount entered yet for: Size\./);
+    assert.notEqual(b.el('cfgManualWrap').style.display, 'none', 'a typed price is asked for');
+  });
+
+  it('no list price on the base product (the dish table\'s PW-029 today) reads "Priced after review — no list price", asks for a price, and a line left without one cannot be filed', () => {
+    const b = builder();
+    b.run(`DB.products.find(p => p.id === 'PW-029').basePrice = 0;`);
+    open(b, 'dish_table');
+    assert.match(b.el('cfgPriceArea').innerHTML, /Priced after review/);
+    assert.match(b.el('cfgPriceArea').innerHTML, /The catalogue base item has no list price\./);
+    assert.notEqual(b.el('cfgManualWrap').style.display, 'none');
+    assert.equal(b.el('cfgAddBtn').disabled, false, 'Add stays enabled');
+    b.run('cfgCommit()');
+    let it = b.plain('items[0]');
+    assert.deepEqual([it.priceBasis, it.unitPrice, it.needsPrice], ['manual', 0, true]);
+    assert.match(b.run('needsPriceReason()'), /^1 configured line\(s\) have no price yet/);
+    b.run('configureLine(0)');
+    b.run(`cfgManualInput({ value: '28500' }); cfgCommit()`);
+    it = b.plain('items[0]');
+    assert.deepEqual([it.priceBasis, it.unitPrice, it.priceManual, it.needsPrice], ['manual', 28500, true, undefined]);
+    assert.equal(b.run('needsPriceReason()'), '');
+  });
+
+  it('a blank cell of a new family is "Priced after review" for exactly that option, in the option\'s own words (a fryer, a hood without lighting)', () => {
+    const b = builder();
+    b.run(`FAMILY_PRICING.cooking_line.options.type.fryer.flat = null; FAMILY_PRICING.hood.options.lighting.false.flat = null;`);
+    open(b, 'cooking_line');
+    pickV(b, 'cooking_line', 'type', 'fryer');
+    assert.match(b.el('cfgPriceArea').innerHTML, /No amount entered yet for: Type: Fryer\./);
+    pickV(b, 'cooking_line', 'type', 'griller');
+    assert.match(b.el('cfgPriceArea').innerHTML, /website basis/, 'the blank cell is not in use for a griller');
+    open(b, 'hood');
+    pickV(b, 'hood', 'lighting', false);
+    assert.match(b.el('cfgPriceArea').innerHTML, /No amount entered yet for: Lighting: Without\./);
+    pickV(b, 'hood', 'lighting', true);
+    assert.match(b.el('cfgPriceArea').innerHTML, /website basis/);
+  });
+
+  it('the cost basis (§4.5) of a configured line of each new family is the nearest standard model it absorbed — a fryer with 3 baskets is CE-022, with 2 CE-009; a two-hole wok range with a rear burner CE-025 — never the primary\'s own cost', () => {
+    const b = builder();
+    b.run(`globalThis.__live = new Map(DB.products.map(p => [p.id, p]));`);
+    const basisFor = (id, config, size) => { const { line } = makeLine(b, stateFor(id, { config, sizeRaw: Object.fromEntries(Object.entries(size).map(([k, v]) => [k, String(v)])) })); return b.plain(`itemCostBasis(${JSON.stringify(line)}, __live)`); };
+    const cases = [
+      ['cooking_line', { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, { W: 1000, D: 700 }, 'CE-022'],
+      ['cooking_line', { type: 'fryer', burners: 1, baskets: 2, base: 'stand' }, { W: 700, D: 700 }, 'CE-009'],
+      ['wok_range', { holes: 2, rear: true, faucet: 'none', top: 1.5 }, { W: 1200, D: 800 }, 'CE-025'],
+      ['deck_oven', { decks: 2, trays: 6, stand: 'none' }, { W: 1200 }, 'CE-016'],
+      ['hood', { type: 'island', filters: 'baffle', lighting: true }, { W: 1200, D: 900 }, 'EX-018'],
+      ['dish_table', { side: 'clean', hand: 'left', sink: 'none', undershelf: true, top: 1.5 }, { W: 1200, D: 660 }, 'PW-029'],
+    ];
+    for (const [id, config, size, sku] of cases) {
+      const basis = basisFor(id, config, size);
+      assert.equal(basis.basisSku, sku, `${id} ${JSON.stringify(config)}`);
+      assert.equal(basis.basisSku, QB.nearestAbsorbed(FAM.families[id], config).sku);
+      assert.equal(basis.hasBasis, true, id);
+      assert.ok(basis.mat > 0 && basis.scale > 0, id);
+    }
+  });
+
+  it('every line the builder can hold for the five families survives save → reopen: familyId, config, size ride the payload; the runtime _cfg figures do not', () => {
+    const b = builder();
+    for (const id of NEW) { open(b, id); b.run('cfgCommit()'); }
+    assert.equal(b.run('items.length'), 5);
+    const pl = b.plain('buildQuotePayload()');
+    assert.deepEqual(pl.items.map((i) => i.familyId), NEW);
+    for (const row of pl.items) { assert.equal('_cfg' in row, false); assert.ok(row.config && row.size && row.specs.length); }
+    // reopen: the lines load back as the same configured lines, with their runtime figures recomputed
+    const again = builder();
+    again.run(`loadEditableState(${JSON.stringify(pl.editableState)})`);
+    assert.deepEqual(again.plain('items.map(i => i.familyId)'), NEW);
+    assert.deepEqual(again.plain('items.map(i => i.config)'), pl.items.map((i) => i.config));
+    assert.ok(again.plain('items.every(i => i._cfg && i._cfg.priced)'), 'the runtime figures came back');
+  });
+});
+
+describe('FAMILIES-2 — a website hand-off of the five families (the request carries the family\'s PUBLIC category: washing, cooking, ventilation) loads as configured lines, re-homed into the base product\'s builder section', () => {
+  const REF = 'QR-261021-K7M2PX';
+  const rows = [
+    { n: 1, id: 'PW-029', cat: 'washing', name: 'Dish table', qty: 1, unit: 'pc', familyId: 'dish_table', config: { side: 'soiled', hand: 'right', sink: 'prerinse', undershelf: true, top: 1.5 }, size: { W: 1800, D: 660 }, specs: [] },
+    { n: 2, id: 'CE-006', cat: 'cooking', name: 'Wok range', qty: 2, unit: 'pc', familyId: 'wok_range', config: { holes: 2, rear: false, faucet: 'none', top: 1.5 }, size: { W: 1200, D: 700 }, specs: [] },
+    { n: 3, id: 'CE-010', cat: 'cooking', name: 'Griddle, griller or fryer', qty: 1, unit: 'pc', familyId: 'cooking_line', config: { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, size: { W: 1000, D: 700 }, specs: [] },
+    { n: 4, id: 'CE-012', cat: 'cooking', name: 'Gas deck oven', qty: 1, unit: 'pc', familyId: 'deck_oven', config: { decks: 2, trays: 6, stand: 'none' }, size: { W: 1200 }, specs: [] },
+    { n: 5, id: 'EX-001', cat: 'ventilation', name: 'Range hood', qty: 1, unit: 'pc', familyId: 'hood', config: { type: 'slim', filters: 'baffle', lighting: true }, size: { W: 2400, D: 500 }, specs: [] },
+  ];
+
+  it('each arrives as a configured line of its family at the website price (priced rows) or manual + needs a price (the unpriced dish table), in its base product\'s section — and ⚙ configure opens it with only the groups that apply', () => {
+    const b = builder();
+    const items = rows.map((r, i) => QB.fromRequestItem(r, { n: i + 1, priced: r.familyId !== 'dish_table', unitPrice: r.familyId !== 'dish_table' ? 41300 + i : 0 }, REF));
+    assert.deepEqual(items.map((x) => x.category), ['washing', 'cooking', 'cooking', 'cooking', 'ventilation'], 'premise: fromRequestItem emits the PUBLIC category');
+    b.run(`loadEditableState(${JSON.stringify({ currentCo: 'BK', handoff: true, items })})`);
+    assert.deepEqual(b.plain('items.map(i => i.familyId)'), ['dish_table', 'wok_range', 'cooking_line', 'deck_oven', 'hood']);
+    assert.deepEqual(b.plain('items.map(i => i.category)'), ['prep_washing', 'cooking_line', 'cooking_line', 'cooking_line', 'exhaust_system']);
+    assert.deepEqual(b.plain('items.map(i => i.priceBasis)'), ['manual', 'website', 'website', 'website', 'website']);
+    assert.equal(b.run('items[0].needsPrice'), true, 'the dish table has no price (PW-029 is unpriced): typed, never guessed');
+    assert.ok(b.plain('items.every(i => i._cfg && i._cfg.pricedSize)'));
+    b.run('configureLine(2)');
+    assert.equal(b.run('cfgState.familyId'), 'cooking_line');
+    assert.equal(b.el('cfgNotice').textContent, '', 'a canonical request line opens with no "reset" notice');
+    assert.deepEqual([...b.el('cfgBody').innerHTML.matchAll(/<div class="cfg-lbl" id="cfgL\d+">([^<]*)/g)].map((m) => m[1].trim()), ['Type', 'Fry baskets', 'Base']);
+    b.run('configureLine(4)');
+    assert.equal(b.run('cfgState.sizeRaw.D'), '500');
+    assert.equal(b.el('cfgDim_D').max, '500');
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+  });
+});
+
+describe('FAMILIES-2 — convert an old line, "configure instead", "sold online as": the SKUs the five families absorbed (and the stove no longer does CE-006 / CE-025)', () => {
+  const plain = (id, extra = {}) => ({ id, category: 'cooking_line', name: id, dims: '', specs: [], qty: 1, unit: 'pc', unitPrice: 12300, amount: 12300, priceManual: true, ...extra });
+  const conv = (b, line) => b.plain(`cfgConvertLine(${JSON.stringify(line)})`);
+
+  it('an old plain line of each absorbed SKU converts to its family\'s configuration of that SKU: the price is kept (manual), the section is kept', () => {
+    const b = builder();
+    const want = {
+      'PW-029': ['dish_table', { side: 'clean', hand: 'left', sink: 'none', undershelf: true, top: 1.5 }],
+      'CE-006': ['wok_range', { holes: 1, rear: false, faucet: 'none', top: 1.5 }],
+      'CE-025': ['wok_range', { holes: 2, rear: true, faucet: 'none', top: 1.5 }],
+      'CE-007': ['cooking_line', { type: 'combi', burners: 1, baskets: 2, base: 'stand' }],
+      'CE-009': ['cooking_line', { type: 'fryer', burners: 1, baskets: 2, base: 'stand' }],
+      'CE-020': ['cooking_line', { type: 'fryer', burners: 1, baskets: 1, base: 'stand' }],
+      'CE-022': ['cooking_line', { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }],
+      'CE-023': ['cooking_line', { type: 'griddle', burners: 3, baskets: 2, base: 'stand' }],
+      'CE-026': ['cooking_line', { type: 'griller', burners: 1, baskets: 2, base: 'shelf' }],
+      'CE-012': ['deck_oven', { decks: 2, trays: 3, stand: 'none' }],
+      'CE-016': ['deck_oven', { decks: 2, trays: 6, stand: 'none' }],
+      'EX-018': ['hood', { type: 'island', filters: 'baffle', lighting: true }],
+      'EX-020': ['hood', { type: 'slim', filters: 'baffle', lighting: true }],
+      'EX-021': ['hood', { type: 'wall', filters: 'baffle', lighting: true }],
+    };
+    for (const [sku, [familyId, config]] of Object.entries(want)) {
+      const c = conv(b, plain(sku, { category: 'baking' }));
+      assert.equal(c.familyId, familyId, sku);
+      assert.deepEqual(c.config, config, sku);
+      assert.equal(c.id, FAM.families[familyId].primary, `${sku}: the line carries the family's primary SKU`);
+      assert.equal(c.unitPrice, 12300, `${sku}: the price is kept`);
+      assert.equal(c.priceBasis, 'manual');
+      assert.equal(c.category, 'baking', `${sku}: the section it sits in is kept`);
+    }
+    assert.equal(conv(b, plain('CE-030')), null, 'the salamander stays a plain item');
+    assert.equal(conv(b, plain('CE-008')).familyId, 'stove', 'a griller + griddle + burners range is still a stove');
+  });
+
+  it('the wok ranges left the stove family: "sold online as" says Wok range for CE-006 and CE-025, and a stove asking for a wok burner no longer finds CE-006', () => {
+    const b = builder();
+    assert.match(b.run(`cfgSoldOnlineHtml('CE-006')`), /Sold online as: Wok range \(configurable\)/);
+    assert.match(b.run(`cfgSoldOnlineHtml('CE-025')`), /Sold online as: Wok range \(configurable\)/);
+    assert.match(b.run(`cfgSoldOnlineHtml('EX-018')`), /Sold online as: Range hood \(configurable\)/);
+    assert.match(b.run(`cfgSoldOnlineHtml('CE-016')`), /Sold online as: Gas deck oven \(configurable\)/);
+    assert.match(b.run(`cfgSoldOnlineHtml('PW-029')`), /Sold online as: Dish table \(configurable\)/);
+    assert.match(b.run(`cfgSoldOnlineHtml('CE-022')`), /Sold online as: Griddle, griller or fryer \(configurable\)/);
+    assert.match(b.run(`cfgSoldOnlineHtml('CE-001')`), /Sold online as: Stove \(configurable\)/);
+    assert.equal(b.run(`cfgSoldOnlineHtml('CE-030')`), '', 'a SKU no family absorbed gets no hint');
+    assert.match(b.run(`cfgLineRowHtml(${JSON.stringify(plain('CE-006'))}, 2)`), /convertToConfigured\(2\)/);
+    assert.equal(FAM.families.stove.absorbed['CE-006'], undefined);
+    assert.equal(FAM.families.stove.absorbed['CE-025'], undefined);
+  });
+
+  it('"configure instead" opens each new family on its configuration of that SKU, carrying the size typed in the calculator (a deck oven\'s width is its trays\')', () => {
+    const b = builder();
+    b.run(`selectedProduct = DB.products.find(p => p.id === 'CE-016'); dimsMm = { W: 1200, D: 700, H: 1400 };`);
+    b.run(`configureInstead('CE-016')`);
+    assert.equal(b.run('cfgState.familyId'), 'deck_oven');
+    assert.deepEqual(b.plain('cfgState.config'), { decks: 2, trays: 6, stand: 'none' });
+    assert.equal(b.run('cfgState.sizeRaw.W'), '1200');
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    b.run(`selectedProduct = DB.products.find(p => p.id === 'EX-020'); dimsMm = { W: 1800, D: 305, H: 355 };`);
+    b.run(`configureInstead('EX-020')`);
+    assert.equal(b.run('cfgState.familyId'), 'hood');
+    assert.equal(b.run('cfgState.config.type'), 'slim');
+    assert.equal(b.run('cfgState.sizeRaw.W'), '1800');
+    assert.equal(b.run('cfgState.sizeRaw.D'), '310', 'the typed 305 rounds up to the family\'s 10 mm step, inside the slim cap');
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    b.run(`configureInstead('CE-022')`);
+    assert.equal(b.run('cfgState.familyId'), 'cooking_line');
+    assert.deepEqual(groupsOf(b), ['Type', 'Fry baskets', 'Base']);
+    function groupsOf(env) { return [...env.el('cfgBody').innerHTML.matchAll(/<div class="cfg-lbl" id="cfgL\d+">([^<]*)/g)].map((m) => m[1].trim()); }
+  });
+});
+
+describe('FAMILIES-2 §9 — one product switched off on its own (productMeta/config.families.disabled): no chip, no hint, no convert, no panel; its existing lines are read-only at their stored price', () => {
+  const lineOf = (id, over = {}) => { const f = FAM.families[id]; const l = makeLine(builder(), stateFor(id)).line; return { ...l, _uid: 'u_' + id, ...over }; };
+
+  it('the list is read beside the configurator switch, only a real list of strings counts, and a reload resets it', async () => {
+    assert.match(HTML, /meta\.families && Array\.isArray\(meta\.families\.disabled\)/);
+    const b = await bootDb({}, fakeDb({ meta: { families: { disabled: ['hood', 'cooking_line'] } } }));
+    assert.deepEqual(b.plain('FAMILIES_DISABLED'), ['hood', 'cooking_line']);
+    assert.equal(b.run('CONFIGURATOR_ON'), true, 'the whole configurator stays on');
+    assert.equal(b.run('configuratorAvailable()'), true);
+    assert.deepEqual(['hood', 'cooking_line', 'sink', 'rack'].map((id) => b.run(`familyEnabled(${JSON.stringify(id)})`)), [false, false, true, true]);
+    assert.deepEqual(['hood', 'sink'].map((id) => b.run(`familyConfigurable(${JSON.stringify(id)})`)), [false, true]);
+    // "Reload DB" with the product back on: the list is reset by the run, not kept from the last one
+    const f2 = fakeDb({ meta: {} });
+    b.ctx.db = f2.db;
+    await b.run('loadDatabase()');
+    assert.deepEqual(b.plain('FAMILIES_DISABLED'), []);
+    // anything that is not a list leaves every product on; a list keeps only its strings
+    for (const meta of [undefined, {}, { families: {} }, { families: { disabled: [] } }, { families: { disabled: 'hood' } }, { families: { disabled: { hood: true } } }, { families: 'hood' }, { families: null }, { families: { disabled: null } }, { quoteBuilder: { configurator: false } }]) {
+      const x = await bootDb({}, fakeDb({ meta: meta || {} }));
+      assert.deepEqual(x.plain('FAMILIES_DISABLED'), [], JSON.stringify(meta));
+      assert.equal(x.run(`FAMILY_PRICING_STATE`), 'live');
+    }
+    const junk = await bootDb({}, fakeDb({ meta: { families: { disabled: [5, null, {}, ['hood'], 'hood', 'no_such_family'] } } }));
+    assert.deepEqual(junk.plain('FAMILIES_DISABLED'), ['hood', 'no_such_family'], 'only the strings');
+    assert.equal(junk.run('familyEnabled("sink")'), true);
+    const whole = await bootDb({}, fakeDb({ meta: { quoteBuilder: { configurator: false }, families: { disabled: ['hood'] } } }));
+    assert.equal(whole.run('configuratorAvailable()'), false, 'the old whole-configurator switch is untouched');
+  });
+
+  it('the file:// / offline paths never leave a stale list behind (nothing was read, so nothing is off)', async () => {
+    const b = makeEnv({ protocol: 'file:' });
+    b.run(`FAMILIES_DISABLED = ['hood']`);
+    await b.run('loadDatabase()');
+    assert.deepEqual(b.plain('FAMILIES_DISABLED'), []);
+  });
+
+  it('chips: a listed product has none; the rest keep theirs in order; with every product listed the whole Configure row goes', async () => {
+    const b = await bootDb({}, fakeDb({ meta: { families: { disabled: ['hood', 'cooking_line'] } } }));
+    b.run('renderCfgChips()');
+    const html = b.el('cfgChips').innerHTML;
+    assert.deepEqual([...html.matchAll(/data-cfg-open="([a-z_]+)"/g)].map((m) => m[1]), FAM.order.filter((id) => id !== 'hood' && id !== 'cooking_line'));
+    assert.equal(html.includes('Range hood'), false);
+    assert.equal(html.includes('Griddle, griller or fryer'), false);
+    assert.ok(html.includes('⚙ Wok range</button>'));
+    b.run(`FAMILIES_DISABLED = ${JSON.stringify(FAM.order)}; renderCfgChips();`);
+    assert.equal(b.el('cfgChips').style.display, 'none');
+    assert.equal(b.el('cfgChips').innerHTML, '');
+  });
+
+  it('the panel refuses a listed product (an old chip, a stale ⚙, a hand-typed call) and opens every other one', async () => {
+    const b = await bootDb({}, fakeDb({ meta: { families: { disabled: ['hood'] } } }));
+    assert.equal(b.run(`openConfigurator('hood')`), false);
+    assert.equal(b.run('cfgState'), null);
+    assert.match(b.toast(), /Configurator unavailable/);
+    assert.equal(b.run(`openConfigurator('wok_range')`), true);
+    assert.equal(b.run('cfgState.familyId'), 'wok_range');
+    // a panel left open when the product is switched off by a reload is not kept (the next openConfigurator replaces it anyway)
+    b.run(`openConfigurator('sink')`);
+    assert.equal(b.run('cfgState.familyId'), 'sink');
+  });
+
+  it('"sold online as" and "configure instead" go for the listed product\'s SKUs only; the others keep them', async () => {
+    const b = await bootDb({}, fakeDb({ meta: { families: { disabled: ['hood', 'wok_range'] } } }));
+    assert.equal(b.run(`cfgSoldOnlineHtml('EX-018')`), '');
+    assert.equal(b.run(`cfgSoldOnlineHtml('CE-006')`), '');
+    assert.match(b.run(`cfgSoldOnlineHtml('PW-006')`), /Sold online as: Sink/);
+    assert.match(b.run(`cfgSoldOnlineHtml('CE-010')`), /Sold online as: Griddle, griller or fryer/);
+    b.run(`configureInstead('EX-018')`);
+    assert.equal(b.run('cfgState'), null, 'no panel for a switched-off product');
+    assert.match(b.toast(), /no configurable version/);
+    b.run(`configureInstead('PW-006')`);
+    assert.equal(b.run('cfgState.familyId'), 'sink');
+  });
+
+  it('an old plain line of a listed product gets no "⚙ convert to configured" (and convert is refused); other products keep it', async () => {
+    const b = await bootDb({}, fakeDb({ meta: { families: { disabled: ['hood'] } } }));
+    const eh = { id: 'EX-018', category: 'exhaust_system', name: 'Island hood', qty: 1, unit: 'pc', unitPrice: 12300, amount: 12300, priceManual: true };
+    assert.equal(b.run(`cfgLineRowHtml(${JSON.stringify(eh)}, 0)`), '');
+    b.run(`items.length = 0; items.push(${JSON.stringify(eh)}); convertToConfigured(0)`);
+    assert.equal(b.run('items[0].familyId'), undefined, 'the line was not converted');
+    assert.equal(b.run('cfgState'), null);
+    assert.match(b.toast(), /cannot be converted/);
+    assert.match(b.run(`cfgLineRowHtml(${JSON.stringify({ ...eh, id: 'PW-006', category: 'prep_washing' })}, 1)`), /convertToConfigured\(1\)/);
+  });
+
+  it('an existing line of a listed product loads, totals at its stored price, reads "configurator off for this product" and cannot be re-configured — while the sink line beside it still can', async () => {
+    const b = await bootDb({}, fakeDb({ meta: { families: { disabled: ['hood'] } } }));
+    const hood = lineOf('hood', { unitPrice: 41700, amount: 41700, basisUnitPrice: 41700 });
+    const sink = lineOf('sink');
+    b.run(`loadEditableState(${JSON.stringify({ currentCo: 'BK', items: [hood, sink] })})`);
+    assert.equal(b.run('items.length'), 2);
+    assert.equal(b.run('items[0].unitPrice'), 41700, 'the stored price is untouched');
+    assert.equal(b.run('computeTotals().grand') > 41700, true);
+    const row = b.run('cfgLineRowHtml(items[0], 0)');
+    assert.match(row, /configurator off/);
+    assert.match(row, /switched off for this product/);
+    assert.equal(/configureLine\(0\)/.test(row), false, 'no ⚙ configure button on it');
+    assert.match(b.run('cfgLineRowHtml(items[1], 1)'), /configureLine\(1\)/, 'the sink keeps its button');
+    assert.equal(/configurator off/.test(b.run('cfgLineRowHtml(items[1], 1)')), false);
+    b.run('configureLine(0)');
+    assert.equal(b.run('cfgState'), null);
+    assert.match(b.toast(), /switched off for this product — this line keeps its stored price/);
+    b.run('configureLine(1)');
+    assert.equal(b.run('cfgState.familyId'), 'sink');
+    // and with the WHOLE configurator off the wording stays the old one
+    b.run('closeConfigurator({ silent: true }); CONFIGURATOR_ON = false;');
+    assert.doesNotMatch(b.run('cfgLineRowHtml(items[0], 0)'), /for this product/);
+    b.run('configureLine(0)');
+    assert.match(b.toast(), /The configurator is switched off — this line keeps its stored price\./);
+  });
+
+  it('the guided demo opens the first product that is on: the sink, or — with the sink listed — the next one; with every product listed the step is skipped', async () => {
+    const tour = async (disabled) => {
+      const b = await bootDb({}, fakeDb({ meta: { families: { disabled } } }));
+      b.ctx.document.querySelector = () => ({ offsetParent: {}, getBoundingClientRect: () => ({ width: 100, height: 20, left: 0, top: 0, right: 100, bottom: 20 }), scrollIntoView() {}, closest: () => null });
+      const at = b.plain('TOUR_STEPS').findIndex((s) => s.needsConfigurator);
+      b.run('startTour()');
+      for (let i = 0; i < at; i++) b.run('tourGo(1)');
+      return { b, at };
+    };
+    const one = await tour([]);
+    assert.equal(one.b.run('cfgState.familyId'), 'sink');
+    one.b.run('endTour()');
+    const two = await tour(['sink']);
+    assert.equal(two.b.run('cfgState.familyId'), 'prep_table', 'the first product that is on');
+    assert.equal(two.b.run('cfgState.tour'), true);
+    assert.equal(two.b.el('cfgAddBtn').disabled, true, 'the demo still adds nothing');
+    two.b.run('endTour()');
+    assert.equal(two.b.run('cfgState'), null);
+    const none = await tour(FAM.order);
+    assert.notEqual(none.b.run('tourIdx'), none.at, 'no panel to show: the step was skipped');
+    assert.equal(none.b.run('cfgState'), null);
+    none.b.run('endTour()');
+  });
+});
+
+describe('FAMILIES-2 — the tutorial (TUTORIAL_VERSION 45, Help and the demo tell the same story)', () => {
+  const helpLi = (HTML.match(/<li><strong>Configure a product<\/strong>[\s\S]*?<\/li>/) || [''])[0];
+
+  it('Help "Configure a product" lists every product kind in the chips\' own order and words, and says what is new: options that only show when they apply, a Use N mm for a capped size, the staff top on five products', () => {
+    assert.ok(helpLi.length > 500);
+    // the kinds come from the definitions, so a renamed or added family fails here until Help says it (the one label with commas is written with slashes in a sentence)
+    const kinds = FAM.order.map((id) => (id === 'cooking_line' ? 'Griddle / griller / fryer' : FAM.families[id].label));
+    assert.equal(kinds.length, 11);
+    assert.ok(helpLi.includes('(' + kinds.join(', ') + ')'), 'the eleven kinds, in the chips\' order');
+    for (const must of ['Some choices only show when they apply — fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged under the box with a <em>Use N mm</em> shortcut',
+      'a slim hood is at most 500 mm deep; a deck oven\'s width follows its trays per deck', 'Tables, sinks, dish tables, stoves and wok ranges are built with a 1.5 mm (16 ga) top as standard']) {
+      assert.ok(helpLi.includes(must), `Help does not say: ${must}`);
+    }
+    assert.equal(/Tables, sinks and stoves are built/.test(helpLi), false, 'the old three-product sentence is gone');
+  });
+
+  it('the demo: the Add-items step names all the product kinds; the configurator step says some choices only appear when they apply, and the staff top is on five products — and its selectors all still resolve', () => {
+    const b = makeEnv();
+    const steps = b.plain('TOUR_STEPS');
+    const add = steps.find((s) => s.target === '#addItemsSection');
+    assert.match(add.body, /configure a table, sink, dish table, stove, wok range, griddle \/ griller \/ fryer, deck oven, hood, cabinet, shelf or rack — the next step\./);
+    const cfg = steps.find((s) => s.target === '#configPanel');
+    assert.match(cfg.body, /Some choices only appear when they apply \(fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table\)\./);
+    assert.match(cfg.body, /On a table, sink, dish table, stove or wok range the staff-only Top plate option switches the standard 1\.5 mm top to a lighter 1\.2 mm one\./);
+    assert.equal(steps.filter((x) => x.needsConfigurator).length, 1, 'no new step: the same #configPanel step (spec §6.6)');
+    assert.equal(steps.filter((x) => x.target === '#configPanel').length, 1);
+    for (const s of steps.filter((x) => x.target)) assert.ok(new RegExp(`id="${s.target.replace(/^[#.]/, '')}"`).test(HTML) || s.target.startsWith('.'), s.target);
+  });
+
+  it('no price, amount or option figure in the new tutorial copy (the repo is public)', () => {
+    const wn = makeEnv().plain('WHATS_NEW')[0].items.join(' ');
+    const copy = helpLi + ' ' + wn + ' ' + makeEnv().plain('TOUR_STEPS').filter((s) => s.target === '#configPanel' || s.target === '#addItemsSection').map((s) => s.body).join(' ');
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(copy.replace(/₱20,000/g, '')), false);
   });
 });

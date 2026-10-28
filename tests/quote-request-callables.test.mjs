@@ -14,6 +14,10 @@
 // throwing inside a transaction callback, a notification carrying senderUid, the per-session cap removed, the bot check
 // removed, the well-formed-body guard removed from any of the three public callables, gate-denied calls logged one by one,
 // the qr_abuse purge never running, the client-reported figure no longer compared with the server's — each must fail here.
+// 2026-10-28 (the five new families, cf2-ws1-mut/): validation keeping a non-applicable option, the forced maximum ignored, standardDims ignoring the forced minimum, a width left out
+// taking the family default, the slim hood allowed 600 mm deep in the generated definitions, pricing-core pricing a non-applicable option's cell — each must fail here.
+// 2026-10-28 WS-2 (the per-family kill switch productMeta/config families.disabled, cf2-ws2-mut/, 22 server mutants, all killed — the full list is in tests/quote-request.test.mjs): the products cache not keeping the list, the
+// list read from the wrong part of the document, qrEstimate or qrSubmit not passing it (or passing a string), the stale-cache path dropping it, the gate ignoring it or refusing every family — each must fail here.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -63,7 +67,7 @@ const rejectsWith = async (p, code, msgRe) => {
 
 // ── fake master: REAL published ids, FAKE figures ───────────────────────────
 // FIXED products only: the SKUs a configurable family absorbed (e.g. CE-001, PW-001, BA-001) are no longer quotable as plain lines.
-const P_LEN = 'CE-009', P_FIX = 'RF-003', P_NOD = 'CE-031', P_ZERO = 'CE-024', P_SPEC = 'BA-011';
+const P_LEN = 'CE-011', P_FIX = 'RF-003', P_NOD = 'CE-031', P_ZERO = 'CE-024', P_SPEC = 'BA-011';          // (CE-011, the steamer, stands in as the per-length plain line: the fryers and griddles are configurable families since 2026-10-28)
 function seedMaster(over) {
   const base = (data) => ({ unit: 'pc', formula: {}, specs: [], measurement: {}, ...data });
   fake.seed(`products/${P_LEN}`, base({ title: 'Fake Stove', category: 'cooking_line', basePrice: 7770, formulaType: 'per_length', measurement: { W: 1200, D: 600, H: 800 }, formula: { baseLengthMm: 1200, pricePerExtraMm: 3.3, rateW100: 50, rateD100: 31, rateH100: 0 } }));
@@ -781,12 +785,23 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
     fake.seed('products/PW-015', base({ title: 'SS Storage Cabinet', category: 'prep_washing', basePrice: 40019, formulaType: 'per_length', measurement: { W: 600, D: 500, H: 1800 }, formula: { baseLengthMm: 600, pricePerExtraMm: 15, rateD100: 500, rateH100: 300 } }));
     fake.seed('products/PW-023', base({ title: 'SS Wall Shelf', category: 'prep_washing', basePrice: 14503, formulaType: 'fixed', measurement: { W: 2908, D: 480, H: 38 } }));
     fake.seed('products/PW-010', base({ title: 'SS Dish Rack', category: 'prep_washing', basePrice: 16703, formulaType: 'per_length', measurement: { W: 600, D: 500, H: 1600 }, formula: { baseLengthMm: 600, pricePerExtraMm: 8, rateD100: 400, rateH100: 300 } }));
+    // the five families of 2026-10-28 (FAKE odd figures): their base items. The dish table and the deck oven are FIXED items (their length is priced from the sheet).
+    fake.seed('products/PW-029', base({ title: 'SS Dish Table w/ Bottom', category: 'prep_washing', basePrice: 0, formulaType: 'fixed', measurement: { W: 1219, D: 660, H: 851 } }));          // unpriced, as in the real master today
+    fake.seed('products/CE-006', base({ title: 'SS Wok Stove (1 Burner High Pressure)', category: 'cooking_line', basePrice: 21113, formulaType: 'per_length', measurement: { W: 600, D: 700, H: 850 }, formula: { baseLengthMm: 600, pricePerExtraMm: 9, rateD100: 503, rateH100: 0 } }));
+    fake.seed('products/CE-010', base({ title: 'SS Griddle with Stand', category: 'cooking_line', basePrice: 17771, formulaType: 'per_length', measurement: { W: 700, D: 700, H: 850 }, formula: { baseLengthMm: 700, pricePerExtraMm: 7, rateD100: 457, rateH100: 0 } }));
+    fake.seed('products/CE-012', base({ title: '2-Deck Gas Oven (6-Tray)', category: 'cooking_line', basePrice: 31337, formulaType: 'fixed', measurement: { W: 700, D: 700, H: 1400 } }));
+    fake.seed('products/EX-001', base({ title: 'SS Range Hood with Baffle Filter, Lamp & Switch', category: 'exhaust_system', basePrice: 14141, formulaType: 'per_length', measurement: { W: 1000, D: 900, H: 500 }, formula: { baseLengthMm: 1000, pricePerExtraMm: 6, rateD100: 353, rateH100: 0 } }));
     const c = (flat, perW100) => ({ flat, perW100: perW100 == null ? null : perW100 });
     fake.seed('product_pricing/prep_table', { familyId: 'prep_table', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { layers: { 2: c(8111, 101), 3: c(16231, 207) }, upper: { 1: c(3077, null), 2: c(null, null) } }, size: { perW100: null } });
     fake.seed('product_pricing/sink', { familyId: 'sink', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { basins: { 2: c(6173, null), 3: c(null, null), 4: c(null, null) }, alignment: { left: c(0, null), right: c(0, null) }, undershelf: { true: c(2503, null) }, upper: { true: c(3011, null) }, faucet: { prerinse: c(4519, null) } }, size: { perW100: null } });
     fake.seed('product_pricing/stove', { familyId: 'stove', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { positions: { wok: c(29111, null), hp_small: c(null, null), hp_large: c(37123, null), lp_small: c(16057, null), lp_large: c(null, null), soup: c(null, null) }, addons: { griller: c(null, null), griddle: c(15091, null), oven: c(22093, null), fryer: c(null, null) } }, size: { perW100: null } });
     fake.seed('product_pricing/cabinet', { familyId: 'cabinet', schemaVersion: FAMS.version, approved: false, options: { type: { wall: c(5003, null) }, doors: { sliding: c(2003, null) }, shelves: { 1: c(-3001, null), 2: c(-1501, null) } }, size: { perW100: null } });
     fake.seed('product_pricing/rack', { familyId: 'rack', schemaVersion: 99, approved: true, approvedBy: 'u_pres', options: { tiers: { 3: c(-1009, null), 5: c(1009, null), 6: c(2009, null) }, wheels: { false: c(-907, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/cooking_line', { familyId: 'cooking_line', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { type: { griller: c(null, null), fryer: c(6230, null), combi: c(11230, null) }, burners: { 2: c(null, null), 3: c(5003, null) }, baskets: { 1: c(-2009, null), 3: c(14003, null) }, base: { shelf: c(2503, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/deck_oven', { familyId: 'deck_oven', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { decks: { 1: c(-15669, null), 3: c(15669, null) }, trays: { 6: c(20664, null) }, stand: { heavy: c(null, null) } }, size: { perW100: 0 } });
+    fake.seed('product_pricing/hood', { familyId: 'hood', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { type: { island: c(18860, null), slim: c(-4001, null) }, filters: { none: c(-701, null) }, lighting: { false: c(-203, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/wok_range', { familyId: 'wok_range', schemaVersion: FAMS.version, approved: false, options: { holes: { 2: c(30001, null), 3: c(60001, null) }, rear: { true: c(3001, null) }, faucet: { swan: c(2507, null) } }, size: { perW100: null } });
+    // dish_table: NO sheet at all (and its base item has no list price)
     // wall_shelf: NO sheet at all
   };
   beforeEach(() => {
@@ -807,9 +822,165 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
   const readyToken = async () => { const t = await newSession(); tick(21000); return t; };
   const submit = async (items) => { const token = await readyToken(); const res = await fns.qrSubmit.run(submitPayload(token, { items }), ctx()); return { res, doc: fake.read(`quote_requests/${res.refNo}`) }; };
 
-  it('the six families the server knows ARE the ones the page ships (same generated file), and every primary is seeded as a loadable, non-quotable product', () => {
-    assert.deepEqual(FAMS.order, ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']);
+  it('the eleven families the server knows ARE the ones the page ships (same generated file), and every primary is seeded as a loadable, non-quotable product', () => {
+    assert.deepEqual(FAMS.order, ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']);
     for (const f of FAMS.order) assert.ok(!ALLOW.ids.includes(FAMS.families[f].primary), `${f}'s primary must not be quotable as a plain line`);
+    for (const f of FAMS.order) assert.ok(fake.has(`products/${FAMS.families[f].primary}`), `${f}'s primary is seeded`);
+  });
+
+  describe('the five families of 2026-10-28 through the callables: loaded like the others, conditional options and upper limits enforced, the usual width stored, priced from the primary + the cells that apply', () => {
+    const fryerCfg = (over) => ({ type: 'fryer', burners: 1, baskets: 3, base: 'stand', ...(over || {}) });
+    it('a fryer with three baskets (1000 mm) priced from the griddle + the fryer cell + the 3-basket cell, and NO burner amount: shown as the rounded range', async () => {
+      // CE-010 at 1000 mm: 17,771 + 300 x 7 = 19,871; + fryer 6,230 + 3 baskets 14,003 = 40,104; two of them = 80,208 -> 0.90 x = 72,187 -> 70,000 · 1.15 x = 92,239 -> 95,000
+      const r = await estimate([famLine('cooking_line', fryerCfg(), { W: 1000, D: 700 }, 2)]);
+      assert.equal(r.pricedCount, 1); assert.equal(r.reviewCount, 0);
+      assert.equal(r.shown, true);
+      assert.deepEqual([r.low, r.high], [70000, 95000]);
+      const { doc } = await submit([famLine('cooking_line', fryerCfg(), { W: 1000, D: 700 })]);
+      assert.deepEqual(doc.internal.lines[0].deltas, [{ key: 'type:fryer', amount: 6230 }, { key: 'baskets:3', amount: 14003 }], 'no burners cell: they do not apply to a fryer');
+      assert.equal(doc.internal.exactTotal, 17771 + 300 * 7 + 6230 + 14003);
+    });
+    it('the stored request is canonical and price-free: the options that do not apply sit at their defaults and have no row; the staff line says how the figure was built', async () => {
+      const { doc } = await submit([famLine('cooking_line', fryerCfg(), { W: 1000, D: 700 }, 2, 'for the new branch')]);
+      const it = doc.items[0];
+      assert.deepEqual(it.config, fryerCfg());
+      assert.deepEqual(it.specs.map((x) => x.label), ['Type', 'Fry baskets', 'Base', 'Construction']);
+      assert.equal(it.cat, 'cooking'); assert.equal(it.name, 'Griddle, griller or fryer'); assert.equal(it.id, 'CE-010'); assert.equal(it.qty, 2);
+      assert.deepEqual(it.size, { W: 1000, D: 700 }); assert.equal(it.sizeCustom, false);
+      assert.ok(!/baskets/i.test(JSON.stringify(doc.estimate)) && !JSON.stringify(doc.summary).includes('baskets'), 'no option name leaks into what the client or the notification sees');
+    });
+    it('a griddle with fry baskets (or a fryer with burners, or a clean-side dish table with a sink) is REFUSED with the option\'s message; nothing is stored and the session is not burned', async () => {
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine('cooking_line', { type: 'griddle', burners: 1, baskets: 3, base: 'stand' }, { W: 1000, D: 700 })] }), ctx()), (e) => { assert.equal(e.code, 'invalid-argument'); assert.match(e.message, /"Fry baskets" applies only when Type is Fryer\./); return true; });
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine('cooking_line', fryerCfg({ burners: 3 }), { W: 1200, D: 700 })] }), ctx()), (e) => { assert.match(e.message, /"Burners" applies only when Type is Griddle or Lava-rock griller\./); return true; });
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine('dish_table', { side: 'clean', hand: 'left', sink: 'prerinse', undershelf: true }, { W: 1200, D: 660 })] }), ctx()), (e) => { assert.match(e.message, /"Pre-rinse sink" applies only when Side is Soiled\./); return true; });
+      assert.deepEqual(fake.paths('quote_requests/'), [], 'nothing was stored');
+    });
+    it('a slim hood deeper than 500 mm and a deck oven wider than its trays allow are REFUSED with the limit; the limits themselves price', async () => {
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine('hood', { type: 'slim', filters: 'baffle', lighting: true }, { W: 1000, D: 600 })] }), ctx()), (e) => { assert.equal(e.code, 'invalid-argument'); assert.match(e.message, /With these options the depth must be at most 500 mm\./); return true; });
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine('deck_oven', { decks: 2, trays: 6, stand: 'none' }, { W: 1300 })] }), ctx()), (e) => { assert.match(e.message, /With these options the width must be at most 1200 mm\./); return true; });
+      const slim = await estimate([famLine('hood', { type: 'slim', filters: 'baffle', lighting: true }, { W: 1000, D: 500 })]);
+      assert.equal(slim.pricedCount, 1);
+    });
+    it('a six-tray deck oven with NO width is stored at 1200 mm and priced as the base item + the 6-tray cell + the (zero) width rate: 31,337 + 20,664', async () => {
+      const { doc } = await submit([famLine('deck_oven', { decks: 2, trays: 6, stand: 'none' }, undefined)]);
+      assert.deepEqual(doc.items[0].size, { W: 1200 }); assert.equal(doc.items[0].sizeCustom, false);
+      assert.equal(doc.internal.lines[0].priced, true, (doc.internal.lines[0].missing || []).join(', '));
+      assert.deepEqual(doc.internal.lines[0].deltas.map((d) => d.key), ['trays:6', 'size:W']);
+      assert.equal(doc.internal.exactTotal, 31337 + 20664);
+      assert.equal(doc.internal.lines[0].base, 31337);
+    });
+    it('a hood (island, no filters, 1500 x 900): the base item at the longer length + the island and filters cells; the cell of an option that was not chosen is not read', async () => {
+      // EX-001 at 1500 mm: 14,141 + 500 x 6 = 17,141; + island 18,860 - no filters 701 = 35,300
+      const { doc } = await submit([famLine('hood', { type: 'island', filters: 'none', lighting: true }, { W: 1500, D: 900 })]);
+      assert.equal(doc.internal.exactTotal, 14141 + 500 * 6 + 18860 - 701);
+      assert.deepEqual(doc.internal.lines[0].deltas.map((d) => d.key), ['type:island', 'filters:none']);
+      assert.equal(doc.items[0].cat, 'ventilation');
+    });
+    it('"priced after review" where it should be: a dish table with no sheet and no list price, an UNAPPROVED wok range, an option whose cell is blank (the heavy-duty stand); the other lines still price', async () => {
+      const { doc } = await submit([famLine('dish_table', { side: 'clean', hand: 'left', sink: 'none', undershelf: true }, { W: 1200, D: 660 }), famLine('wok_range', { holes: 2, rear: false, faucet: 'none' }, { W: 1200, D: 700 }),
+        famLine('deck_oven', { decks: 2, trays: 3, stand: 'heavy' }, {}), famLine('hood', { type: 'wall', filters: 'baffle', lighting: true }, { W: 1000, D: 900 })]);
+      const by = Object.fromEntries(doc.internal.lines.map((l) => [l.familyId, l]));
+      assert.equal(by.dish_table.priced, false); assert.equal(by.dish_table.reason, 'not_approved', 'no sheet at all');
+      assert.equal(by.wok_range.reason, 'not_approved', 'an unapproved sheet');
+      assert.equal(by.deck_oven.reason, 'missing_input'); assert.deepEqual(by.deck_oven.missing, ['Stand: Heavy-duty stand']);
+      assert.equal(by.hood.priced, true); assert.equal(by.hood.unitPrice, 14141, 'the default hood is the base item alone');
+      assert.equal(doc.internal.exactTotal, 14141);
+      assert.equal(doc.estimate.reviewCount, 3); assert.equal(doc.estimate.pricedCount, 1);
+    });
+    it('the old plain lines of the absorbed SKUs are refused like any unknown product (a stale page cannot use them): the fryers, griddles and deck ovens, the wok stove, the hoods and the dish table', async () => {
+      const token = await newSession();
+      for (const id of ['CE-009', 'CE-010', 'CE-012', 'CE-016', 'CE-006', 'CE-025', 'EX-001', 'EX-018', 'PW-029', 'EX-004', 'EX-026']) {
+        await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [{ id, qty: 1, size: null, runs: null, specs: [], note: '' }] }), ctx()), (e) => { assert.equal(e.message, Q.GONE_MSG, id); assert.deepEqual(e.details, { itemIds: [id] }, id); return true; });
+      }
+    });
+  });
+
+  // CONFIGURATOR-FAMILIES-2-SPEC §9: the per-family kill switch, end to end. productMeta/config.families.disabled is read by qrLoadProducts with the rest of the document (cached with it for 10 minutes), and
+  // BOTH callables refuse a listed family exactly like an unknown one — no deploy. (Mutation-tested in a scratch copy, cf2-ws2-mut/: the cache not keeping the list; qrEstimate or qrSubmit not passing it;
+  // disabledFamiliesOf returning nothing; the stale-cache path dropping it — each must fail here. The pure logic is in tests/quote-request.test.mjs.)
+  describe('the per-family kill switch (productMeta/config families.disabled): a family on the list is refused by qrEstimate AND qrSubmit like an unknown one, with no deploy', () => {
+    const hoodLine = () => famLine('hood', { type: 'wall', filters: 'baffle', lighting: true }, { W: 1000, D: 900 });
+    const griddleLine = () => famLine('cooking_line', { type: 'griddle', burners: 1, baskets: 2, base: 'stand' }, { W: 700, D: 700 });
+    const META = (list) => ({ constants: { materialPriceIndexMultiplier: 1 }, families: { disabled: list } });
+    const gone = (itemIds) => (e) => { assert.equal(e.code, 'invalid-argument'); assert.equal(e.message, Q.GONE_MSG); assert.deepEqual(e.details, { itemIds }); return true; };
+
+    it('qrEstimate: a listed family is refused with invalid-argument, the "no longer in the catalogue" message and its id in details.itemIds; every id of the basket that is listed is named; the rest of the basket prices without it', async () => {
+      fake.seed('productMeta/config', META(['hood', 'deck_oven']));
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), hoodLine()] }), ctx()), gone(['hood']));
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine(), famLine('deck_oven', {}, {}), famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 })] }), ctx()), gone(['hood', 'deck_oven']));
+      const r = await fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), griddleLine(), famLine('sink', sinkCfg(), { W: 1000, D: 500, H: 850 })] }), ctx());
+      assert.equal(r.pricedCount, 3, 'the families that are not on the list price as usual');
+    });
+    it('qrSubmit: refused the same way — nothing is stored, the session is not burned, and the request goes through once the line is removed', async () => {
+      fake.seed('productMeta/config', META(['hood']));
+      const token = await readyToken();
+      await assert.rejects(fns.qrSubmit.run(submitPayload(token, { items: [fixedLine(), hoodLine()] }), ctx()), gone(['hood']));
+      assert.deepEqual(fake.paths('quote_requests/'), [], 'nothing was stored');
+      assert.equal(fake.read(`qr_sessions/${portal.tokenHash(token)}`).submittedAt, null, 'the session is still open');
+      const ok = await fns.qrSubmit.run(submitPayload(token, { items: [fixedLine(), griddleLine()] }), ctx());
+      assert.equal(ok.ok, true);
+      assert.equal(fake.read(`quote_requests/${ok.refNo}`).items.length, 2);
+    });
+    it('every one of the eleven families can be switched off on its own, through the real callable: it is refused, and the next family in the order is not', async () => {
+      const token = await newSession();
+      let n = 0;
+      for (const [i, off] of FAMS.order.entries()) {
+        const other = FAMS.order[(i + 1) % FAMS.order.length];
+        fake.seed('productMeta/config', META([off]));
+        tick(10 * 60 * 1000 + 1);                                               // the cache refreshes: the list is picked up
+        n++;
+        await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [famLine(off, {}, {})] }), ctx(`10.31.0.${n}`)), gone([off]), `${off} must be refused`);
+        n++;
+        const r = await fns.qrEstimate.run(estimatePayload(token, { items: [famLine(other, {}, {})] }), ctx(`10.31.0.${n}`));
+        assert.equal(r.ok, true, `${other} must stay on while only ${off} is off`);
+      }
+    });
+    it('no deploy: the list is read when the products cache refreshes (10 minutes, like the estimate switch) — a family added to it is refused from then on, a family taken off it comes back', async () => {
+      const token = await newSession();
+      assert.equal((await fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx())).pricedCount, 1, 'on to begin with');
+      fake.seed('productMeta/config', META(['hood']));
+      assert.equal((await fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx())).pricedCount, 1, 'the cached document is still the old one');
+      tick(10 * 60 * 1000 + 1);
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx()), gone(['hood']));
+      fake.seed('productMeta/config', META([]));
+      tick(10 * 60 * 1000 + 1);
+      assert.equal((await fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx())).pricedCount, 1, 'taken off the list: back on');
+    });
+    it('a malformed list switches nothing off (a bare string, an object, null, junk entries, a wrong-case or padded id) — the same fail-open reading as the estimate switch', async () => {
+      const token = await newSession();
+      for (const bad of ['hood', { hood: true }, null, [null, 7, ''], ['Hood', ' hood', 'HOOD ']]) {
+        fake.seed('productMeta/config', META(bad));
+        tick(10 * 60 * 1000 + 1);
+        const r = await fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx());
+        assert.equal(r.pricedCount, 1, JSON.stringify(bad));
+      }
+    });
+    it('a refresh that FAILS keeps honouring the cached list (a family that was switched off stays off while the master cannot be read), and the family comes back only when a refresh reads the new list', async () => {
+      fake.seed('productMeta/config', META(['hood']));
+      const token = await newSession();
+      await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx()), gone(['hood']));       // loads the cache at T0 with the list
+      fake.seed('productMeta/config', META([]));                                                                               // the owner switches it back on…
+      const orig = fake.db.collection;
+      fake.db.collection = (name) => (name === 'products' ? { limit: () => ({ get: async () => { throw new Error('boom'); } }) } : orig(name));
+      try {
+        tick(11 * 60 * 1000);                                                                                                  // …but the refresh fails: the cache (< 24 h) covers it, with the old list
+        await assert.rejects(fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx()), gone(['hood']));
+      } finally { fake.db.collection = orig; }
+      assert.equal((await fns.qrEstimate.run(estimatePayload(token, { items: [hoodLine()] }), ctx())).pricedCount, 1, 'the master is readable again: the refresh picks the new list up');
+    });
+    it('the switch is per family and touches nothing else: with every family switched off the plain products still estimate and submit', async () => {
+      fake.seed('productMeta/config', META(FAMS.order));
+      const items = [fixedLine(), { id: P_LEN, qty: 1, size: null, runs: null, specs: [], note: '' }];
+      const token = await newSession();
+      const r = await fns.qrEstimate.run(estimatePayload(token, { items }), ctx());
+      assert.equal(r.pricedCount, 2);
+      const t2 = await readyToken();
+      const ok = await fns.qrSubmit.run(submitPayload(t2, { items }), ctx());
+      assert.equal(ok.ok, true);
+    });
   });
 
   describe('estimates', () => {
@@ -1056,7 +1227,7 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
       await rejectsWith(fns.qrEstimate.run(estimatePayload(token, { items: [fixedLine(), smuggledCfg] }), ctx()), 'invalid-argument', /not in the expected format/);
     });
     it('a plain SKU line for a SKU a family absorbed is refused like any unknown product (a stale page cannot use it): PW-001, CE-001, PW-004 …', async () => {
-      for (const id of ['PW-001', 'CE-001', 'PW-004', 'BA-001', 'PW-015', 'PW-023', 'PW-010', 'CE-017']) await bad({ id, qty: 1, size: null, runs: null, specs: [], note: '' }, /no longer in the catalogue/);
+      for (const id of ['PW-001', 'CE-001', 'PW-004', 'BA-001', 'PW-015', 'PW-023', 'PW-010', 'CE-017', 'CE-009', 'CE-010', 'CE-012', 'EX-001', 'PW-029']) await bad({ id, qty: 1, size: null, runs: null, specs: [], note: '' }, /no longer in the catalogue/);
     });
     it('a refused request never burns anything it should not: the response to a bad line is an error, the session stays usable', async () => {
       const token = await newSession();

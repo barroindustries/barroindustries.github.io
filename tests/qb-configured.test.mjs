@@ -16,6 +16,11 @@
 //      configured line sits in its base product's builder SECTION — never in the family's public category, and priceLine / fromRequestItem read an ABSENT group as its
 //      default, so a request or draft stored before the top plate existed prices like the standard 1.5 mm configuration (section 9 at the end of the file).
 //
+//   6. THE FIVE FAMILIES OF 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §10.3): the parity sweep now draws from ALL ELEVEN families and passes unchanged (js/pricing-core.js is
+//      untouched: a conditional option that does not apply is at its default, so it is never priced); a fryer prices its type and basket cells and NO burner cell, a griddle the
+//      burner cell only; a six-tray deck oven at 1200 mm prices the 6-tray cell + the (zero) width rate, and without a width rate it is "Size" missing; the nearest-model match
+//      finds CE-022 / CE-009 / CE-025 for a fryer with 3 / 2 baskets and a two-hole wok range with a rear burner, and a stove that asks for a wok burner no longer finds CE-006.
+//
 // Fixtures are SYNTHETIC odd-figure pesos (the repository is PUBLIC; the real price master and option sheets are private).
 //
 // Mutation-tested in scratch copies (never the shared tree) — each of these must fail here: dropping the soft-width substitution,
@@ -26,6 +31,9 @@
 // getting the bare SKU's price; and so on. 2026-10-28: no default fill (the primary is no longer exact), buildLine validating in public mode (a 1.2 mm top builds nothing),
 // the family's public category back in place of the base product's, a converted line moved out of its section, the catalogue passed to the migration ignored; priceLine pricing the
 // raw configuration (or completing only the width rule, or overwriting a stated value, or filling only the top plate), fromRequestItem not completing / replacing the stored one.
+// 2026-10-28 (the five new families, scratch copies under /private/tmp/.../cf2-ws1-mut/, each must fail here): validation that keeps a non-default value of an option that does not
+// apply (a baskets cell then prices on a griddle), validation ignoring the forced maximum, pricing-core pricing the cell of a conditional option that does not apply, the nearest-model
+// score ignoring the conditional groups' values, the nearest model replaced by the primary, an absent group no longer read as its default.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -76,6 +84,12 @@ const PRIMARIES = {
   cabinet: prod('PW-015', 'storage', 'per_length', 5119, { W: 600, D: 500, H: 1800 }, { baseLengthMm: 600, pricePerExtraMm: 2.9, rateD100: 23 }),     // no rateH100: a custom height is "Size (height)" missing
   wall_shelf: prod('PW-023', 'storage', 'fixed', 1893, { W: 1200, D: 450 }, {}),                                                                       // the LINEAR family: its primary has no length rule
   rack: prod('PW-010', 'storage', 'per_length', 3307, { W: 600, D: 500, H: 1600 }, { baseLengthMm: 600, pricePerExtraMm: 2.3, rateD100: 19, rateH100: 11 }),
+  // the five families of 2026-10-28 (synthetic odd figures; no height rate: a height is not a size of these families)
+  dish_table: prod('PW-029', 'washing', 'fixed', 2719, { W: 1200, D: 660, H: 851 }, {}),                                                                 // LINEAR: a fixed base item, its length is priced from the sheet
+  wok_range: prod('CE-006', 'cooking', 'per_length', 5233, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 4.7, rateD100: 37, rateH100: 0 }),
+  cooking_line: prod('CE-010', 'cooking', 'per_length', 4349, { W: 700, D: 700, H: 850 }, { baseLengthMm: 700, pricePerExtraMm: 3.9, rateD100: 33, rateH100: 0 }),
+  deck_oven: prod('CE-012', 'cooking', 'fixed', 9871, { W: 700, D: 700, H: 1400 }, {}),                                                                  // LINEAR as well: its width follows the trays (the sheet's width rate is 0)
+  hood: prod('EX-001', 'ventilation', 'per_length', 3571, { W: 1000, D: 900, H: 500 }, { baseLengthMm: 1000, pricePerExtraMm: 2.1, rateD100: 27, rateH100: 0 }),
 };
 const PRIMARY_MAP = new Map(Object.entries(PRIMARIES));
 
@@ -90,11 +104,12 @@ function sheetFor(familyId, kind) {
     if (c.baseline) continue;
     const flat = (i % 7 === 3 ? -1 : 1) * (311 + 97 * i);
     const blank = kind === 'blank' && i % 4 === 0;
-    (options[c.group] = options[c.group] || {})[c.value] = { flat: blank ? null : flat, perW100: i % 4 === 1 ? 13 + i : null };
+    (options[c.group] = options[c.group] || {})[c.value] = { flat: blank ? null : flat, perW100: (i % 4 === 1 && familyId !== 'deck_oven') ? 13 + i : null };      // (no cell of the deck oven scales with length: its width follows the trays)
   }
   return {
     familyId, schemaVersion: FAM.version, approved: kind !== 'unapproved', approvedBy: 'u_syn', options,
-    size: { perW100: familyId === 'wall_shelf' && kind !== 'blank' ? 77 : null },
+    // the length rate of a LINEAR family: wall shelving and the dish table have a rate; the deck oven's width follows its trays, so its rate is 0 ("Enter 0")
+    size: { perW100: (f.sizeBasis === 'linear' && kind !== 'blank') ? (familyId === 'deck_oven' ? 0 : 77) : null },
   };
 }
 const SHEETS = Object.fromEntries(['approved', 'unapproved', 'blank'].map((k) => [k, Object.fromEntries(FIDS.map((id) => [id, sheetFor(id, k)]))]));
@@ -106,6 +121,8 @@ function randomLine(r, familyId) {
   for (let attempt = 0; attempt < 200; attempt++) {
     const config = {};
     for (const g of f.groups) {
+      // a conditional option (fry baskets, a pre-rinse sink) is drawn only where it applies; elsewhere it stays at its default, as every validated configuration has it
+      if (!PF.groupApplies(f, g, config)) { config[g.key] = JSON.parse(JSON.stringify(g.default)); continue; }
       if (g.type === 'choice') config[g.key] = pick(r, g.options).v;
       else if (g.type === 'slots') { const n = g.minSlots + Math.floor(r() * (g.maxSlots - g.minSlots + 1)); config[g.key] = Array.from({ length: n }, () => pick(r, g.options).v); }
       else config[g.key] = g.options.filter(() => r() < 0.4).map((o) => o.v);
@@ -115,6 +132,7 @@ function randomLine(r, familyId) {
     const mw = PF.minWidth(f, config);
     if (mw && mw.hard && size.W < mw.mm) size.W = mw.mm;
     Object.entries(PF.forcedMins(f, config)).forEach(([k, m]) => { if (size[k] < m) size[k] = m; });
+    Object.entries(PF.forcedMaxes(f, config)).forEach(([k, m]) => { if (size[k] > m) size[k] = m; });          // a slim hood's depth, a deck oven's width
     if (mw && !mw.hard && r() < 0.45) { const room = (mw.mm - f.dims.W.min) / f.dims.W.step; if (room >= 1) size.W = f.dims.W.min + f.dims.W.step * Math.floor(r() * room); }   // the SOFT rule: a body shorter than the burners need
     const v = PF.validateLine(f, config, size);
     if (v.ok) return { config: v.config, size: v.dims, qty: 1 + Math.floor(r() * 5) };
@@ -136,10 +154,10 @@ const pickKeys = (o) => Object.fromEntries(PARITY_KEYS.map((k) => [k, o[k]]));
 
 // ═══════════════════════════════════════ 1. PRICE PARITY ═══════════════════════════════════════
 describe('priceLine — PARITY with functions/qr-core.js computeBasket (the server that priced the figure the client saw)', () => {
-  it('300 seeded random valid lines x 3 sheets (approved / unapproved / blank cells) x random materials multipliers: identical unitPrice, priced, reason, missing, base, deltas and warnings', () => {
+  it('330 seeded random valid lines (30 of each of the ELEVEN families) x 3 sheets (approved / unapproved / blank cells) x random materials multipliers: identical unitPrice, priced, reason, missing, base, deltas and warnings', () => {
     const r = rng(20261028);
     const seen = { lines: 0, priced: 0, byReason: {}, soft: 0, byFamily: {}, withDeltas: 0, multipliers: new Set() };
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0; i < 330; i++) {
       const familyId = FIDS[i % FIDS.length];
       const { config, size, qty } = randomLine(r, familyId);
       const constants = { materialPriceIndexMultiplier: pick(r, [1, 1, 1.05, 0.97, 1.13]) };
@@ -155,9 +173,9 @@ describe('priceLine — PARITY with functions/qr-core.js computeBasket (the serv
       }
     }
     // the sweep is not vacuous: every family, priced and unpriced outcomes, option deltas, the soft-width substitution and several multipliers all occurred
-    assert.equal(seen.lines, 900);
+    assert.equal(seen.lines, 990);
     assert.deepEqual(Object.keys(seen.byFamily).sort(), [...FIDS].sort());
-    for (const id of FIDS) assert.equal(seen.byFamily[id], 150, id);
+    for (const id of FIDS) assert.equal(seen.byFamily[id], 90, id);
     assert.ok(seen.priced >= 150, `priced lines: ${seen.priced}`);
     assert.ok(seen.withDeltas >= 100, `priced lines with option deltas: ${seen.withDeltas}`);
     assert.ok((seen.byReason.not_approved || 0) >= 250, `not_approved: ${seen.byReason.not_approved}`);
@@ -1077,7 +1095,7 @@ describe('migrateLegacyConfiguredLine — an old plain line becomes a configured
     }
   });
   it('a non-absorbed id, a fixed catalogue product, a custom or fee line, an already-configured line and junk are NOT converted (null)', () => {
-    for (const id of ['RF-003', 'CE-009', 'CUSTOM', 'MISCFEE', '', 'nope', 'pw-006']) assert.equal(migrate(plain({ id })), null, id);
+    for (const id of ['RF-003', 'CE-030', 'EX-004', 'CUSTOM', 'MISCFEE', '', 'nope', 'pw-006']) assert.equal(migrate(plain({ id })), null, id);          // CE-030 (salamander) is still a fixed item; EX-004 (ducting) is not published
     assert.equal(migrate(plain({ id: undefined })), null);
     assert.equal(migrate(plain({ id: 5 })), null);
     assert.equal(migrate(plain({ familyId: 'sink' })), null, 'already configured');
@@ -1147,14 +1165,14 @@ describe('js/qb-configured.js — surface, purity, nothing sensitive', () => {
 // never state it, a line saved before it existed has no `top` either, and only a STAFF session may choose 1.2 mm — so this module compares with an absent key read as the
 // default, and validates in staff mode. Also: a configured line sits in its base product's builder section, never in the family's PUBLIC category.
 describe('the staff-only top plate: default fill in the nearest-model match, staff-mode validation, a blank 1.2 mm cell, and the builder section of a line', () => {
-  const WITH_TOP = ['prep_table', 'sink', 'stove'];
+  const WITH_TOP = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];
   const withoutTop = (cfg) => { const { top, ...rest } = cfg; void top; return rest; };
   // a copy of the approved sheet whose 1.2 mm top cell is `cell` ({ flat, perW100 }); the standard 1.5 mm top never has a cell of its own to fill
   const sheetWithTop = (id, cell) => ({ ...SHEETS.approved[id], options: { ...SHEETS.approved[id].options, top: { 1.2: cell } } });
   const priceAt = (id, cfg, sheet) => QB.priceLine(DEPS, { family: fam(id), primary: PRIMARIES[id], config: cfg, size: PF.defaultDims(fam(id)), sheet });
 
   describe('nearestAbsorbed — an ABSENT group reads as its default, so the primary is still EXACT once a family has a staff-only top plate', () => {
-    it('the primary at the full default configuration (top plate included) is exact with the full score — for all six families, and also when the configuration does not state the top at all', () => {
+    it('the primary at the full default configuration (top plate included) is exact with the full score — for all eleven families, and also when the configuration does not state the top at all', () => {
       for (const id of FIDS) {
         const f = fam(id);
         const cfg = PF.defaultConfig(f);
@@ -1188,7 +1206,7 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
           n++;
         }
       }
-      assert.equal(n, 44 + 34, '44 absorbed SKUs, plus the 1.2 mm variant of the 34 table / sink / stove ones');
+      assert.equal(n, 64 + 35, '64 absorbed SKUs, plus the 1.2 mm variant of the 35 table / sink / dish table / stove / wok range ones');
     });
   });
 
@@ -1225,11 +1243,13 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
       });
     }
     it('a sheet approved against the OLD definitions (schema 1) prices nothing: the base item\'s list price must be approved again as the 1.5 mm price', () => {
-      assert.equal(FAM.version, 2);
+      assert.equal(FAM.version, 3, 'schema 3: five more families and conditional options (no sheet is approved against it yet, so the bump costs nothing live)');
       for (const id of FIDS) {
-        const old = priceAt(id, PF.defaultConfig(fam(id)), { ...SHEETS.approved[id], schemaVersion: 1 });
-        assert.equal(old.priced, false, id); assert.equal(old.reason, 'not_approved', id);
-        assert.equal(priceAt(id, PF.defaultConfig(fam(id)), { ...SHEETS.approved[id], schemaVersion: 2 }).priced, true, `${id}: the control — schema 2, approved, prices`);
+        for (const older of [1, 2]) {
+          const old = priceAt(id, PF.defaultConfig(fam(id)), { ...SHEETS.approved[id], schemaVersion: older });
+          assert.equal(old.priced, false, `${id} at schema ${older}`); assert.equal(old.reason, 'not_approved', `${id} at schema ${older}`);
+        }
+        assert.equal(priceAt(id, PF.defaultConfig(fam(id)), { ...SHEETS.approved[id], schemaVersion: FAM.version }).priced, true, `${id}: the control — the current schema, approved, prices`);
       }
     });
   });
@@ -1273,15 +1293,15 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
         assert.equal(out.specs.at(-1).value, PF.constructionLine(fam(id), out.config), sku);
         n++;
       }
-      assert.equal(n, 44);
+      assert.equal(n, 64);
     });
   });
 
   describe('an ABSENT group reads as its default — a request or draft stored before the top plate existed prices like the standard 1.5 mm configuration (owner follow-up 2026-10-28)', () => {
-    it('priceLine: a configuration with no `top` prices EXACTLY like the same configuration at the standard 1.5 mm top — and exactly as the server prices it (300 seeded random lines x 3 sheets)', () => {
+    it('priceLine: a configuration with no `top` prices EXACTLY like the same configuration at the standard 1.5 mm top — and exactly as the server prices it (330 seeded random lines x 3 sheets)', () => {
       const r = rng(77077);
       let withTop = 0;
-      for (let i = 0; i < 300; i++) {
+      for (let i = 0; i < 330; i++) {
         const fid = FIDS[i % FIDS.length];
         const { config, size, qty } = randomLine(r, fid);
         for (const kind of ['approved', 'unapproved', 'blank']) {
@@ -1293,7 +1313,7 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
         }
         if (WITH_TOP.includes(fid)) withTop++;
       }
-      assert.ok(withTop >= 140, `the sweep must cover the three families that have a top plate (${withTop})`);
+      assert.ok(withTop >= 140, `the sweep must cover the five families that have a top plate (${withTop})`);
     });
 
     it('only ABSENT keys are filled — a stated value is never touched: 1.2 mm stays 1.2 mm (and reads its own cell), undefined counts as absent, a wrong value is not silently "fixed"', () => {
@@ -1446,7 +1466,7 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
   });
 
   describe('the builder SECTION of a configured line — its base product\'s own category, never the family\'s PUBLIC one', () => {
-    const SECTION = { prep_table: 'prep_washing', sink: 'prep_washing', stove: 'cooking_line', cabinet: 'prep_washing', wall_shelf: 'prep_washing', rack: 'prep_washing' };
+    const SECTION = { prep_table: 'prep_washing', sink: 'prep_washing', dish_table: 'prep_washing', stove: 'cooking_line', wok_range: 'cooking_line', cooking_line: 'cooking_line', deck_oven: 'cooking_line', hood: 'exhaust_system', cabinet: 'prep_washing', wall_shelf: 'prep_washing', rack: 'prep_washing' };
     const primaryIn = (id) => ({ ...PRIMARIES[id], category: SECTION[id] });
     it('buildLine takes the category of the primary product passed in, for every family — and it is never the family\'s public category', () => {
       const r = rng(2810);
@@ -1456,7 +1476,7 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
         assert.equal(it.category, SECTION[id], id);
         assert.notEqual(it.category, fam(id).category, `${id}: the family's PUBLIC category ("${fam(id).category}") leaked into the builder`);
       }
-      assert.deepEqual(FIDS.map((id) => fam(id).category), ['preparation', 'washing', 'cooking', 'storage', 'storage', 'storage'], 'the premise: the public categories are not builder section ids');
+      assert.deepEqual(FIDS.map((id) => fam(id).category), ['preparation', 'washing', 'washing', 'cooking', 'cooking', 'cooking', 'cooking', 'ventilation', 'storage', 'storage', 'storage'], 'the premise: the public categories are not builder section ids');
     });
     it('only when no usable product is given does it fall back to the family\'s public category: no primary, a product with no category, a blank or non-text category', () => {
       const f = fam('sink');
@@ -1499,3 +1519,166 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
     });
   });
 });
+
+// ═══════════════════════════════ 10. the five families of 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §10.3) ═══════════════════════════════
+// Money-adjacent: the price of a conditional option that does not apply is NOTHING (js/pricing-core.js is untouched — validation keeps the configuration canonical), the deck
+// oven's width follows its trays (a width rate of 0 prices; a blank one leaves it "Size" missing), and the nearest-model match finds the right standard SKU. The parity sweep
+// at the top of the file already draws from all eleven families; these are the fixed cases.
+describe('the five families of 2026-10-28 — conditional options are never priced when they do not apply, a deck oven\'s width follows its trays, and the nearest-model match finds the right SKU', () => {
+  const NEW5 = ['dish_table', 'wok_range', 'cooking_line', 'deck_oven', 'hood'];
+  const keysOf = (r) => r.deltas.map((d) => d.key);
+  const price = (id, cfg, size, sheet) => QB.priceLine(DEPS, { family: fam(id), primary: PRIMARIES[id], config: full(fam(id), cfg), size, sheet: sheet === undefined ? SHEETS.approved[id] : sheet, constants: {} });
+  const serverSays = (id, cfg, size, kind) => { const { row, line } = serverLine(id, full(fam(id), cfg), size, 1, kind || 'approved'); return { row, line }; };
+
+  it('a fryer prices its TYPE and its BASKET count and no burner cell; a griddle prices the burner cell only (no type cell, no basket cell); the server prices both identically', () => {
+    const fryer = price('cooking_line', { type: 'fryer', baskets: 3 }, { W: 1000, D: 700 });
+    assert.equal(fryer.priced, true, fryer.missing.join(', '));
+    assert.deepEqual(keysOf(fryer), ['type:fryer', 'baskets:3'], 'no "burners" cell: burners do not apply to a fryer');
+    const griddle = price('cooking_line', { type: 'griddle', burners: 3 }, { W: 1200, D: 700 });
+    assert.equal(griddle.priced, true, griddle.missing.join(', '));
+    assert.deepEqual(keysOf(griddle), ['burners:3'], 'the griddle is the base item: no type cell, and no basket cell (baskets do not apply to it)');
+    assert.deepEqual(keysOf(price('cooking_line', { type: 'combi' }, { W: 900, D: 700 })), ['type:combi'], 'a combination has neither burners nor baskets to choose');
+    assert.deepEqual(keysOf(price('cooking_line', { type: 'griller', burners: 2, base: 'shelf' }, { W: 900, D: 700 })), ['type:griller', 'burners:2', 'base:shelf']);
+    assert.deepEqual(keysOf(price('cooking_line', { type: 'fryer', baskets: 1 }, { W: 700, D: 700 })), ['type:fryer', 'baskets:1']);
+    assert.deepEqual(keysOf(price('cooking_line', {}, { W: 700, D: 700 })), [], 'the default is the base item alone');
+    for (const [cfg, size] of [[{ type: 'fryer', baskets: 3 }, { W: 1000, D: 700 }], [{ type: 'griddle', burners: 3 }, { W: 1200, D: 700 }], [{ type: 'combi' }, { W: 900, D: 700 }], [{ type: 'fryer', baskets: 1, base: 'shelf' }, { W: 800, D: 650 }]]) {
+      for (const kind of ['approved', 'blank']) {
+        const { row, line } = serverSays('cooking_line', cfg, size, kind);
+        assert.deepEqual(pickKeys(ours('cooking_line', row.config, row.size, kind)), pickKeys(line), `${JSON.stringify(cfg)} ${kind}`);
+      }
+    }
+  });
+
+  it('the dish table: the pre-rinse cell is priced on the soiled side only; a clean-side table never reads it', () => {
+    const soiled = price('dish_table', { side: 'soiled', sink: 'prerinse' }, { W: 1200, D: 660 });
+    assert.deepEqual(keysOf(soiled), ['side:soiled', 'sink:prerinse']);
+    assert.deepEqual(keysOf(price('dish_table', { side: 'soiled' }, { W: 1200, D: 660 })), ['side:soiled']);
+    assert.deepEqual(keysOf(price('dish_table', { side: 'clean', hand: 'right', undershelf: false }, { W: 1200, D: 660 })), ['hand:right', 'undershelf:false']);
+    // the table is a LINEAR family: a width other than the standard 660 is left for review (the sheet prices the length only)
+    const wide = price('dish_table', {}, { W: 1200, D: 800 });
+    assert.equal(wide.priced, false); assert.deepEqual(wide.missing, ['Size (width)']);
+  });
+
+  it('a six-tray deck oven at 1200 mm prices the 6-tray cell + the width rate (0 = a delta of 0, priced); with NO width rate it is "Size" missing; at its standard 700 mm no width rate is needed', () => {
+    const six = price('deck_oven', { trays: 6 }, { W: 1200 });
+    assert.equal(six.priced, true, six.missing.join(', '));
+    assert.deepEqual(keysOf(six), ['trays:6', 'size:W']);
+    assert.equal(six.deltas.find((d) => d.key === 'size:W').amount, 0, 'size.perW100 = 0: the extra width adds nothing');
+    const noRate = price('deck_oven', { trays: 6 }, { W: 1200 }, { ...SHEETS.approved.deck_oven, size: { perW100: null } });
+    assert.equal(noRate.priced, false); assert.equal(noRate.reason, 'missing_input'); assert.deepEqual(noRate.missing, ['Size']);
+    const standard = price('deck_oven', {}, { W: 700 }, { ...SHEETS.approved.deck_oven, size: { perW100: null } });
+    assert.equal(standard.priced, true, 'W = the base item\'s own length: no width rate needed'); assert.deepEqual(keysOf(standard), []);
+    assert.deepEqual(keysOf(price('deck_oven', { decks: 3, stand: 'heavy' }, { W: 700 })), ['decks:3', 'stand:heavy']);
+    // the server agrees, for both sheets
+    for (const kind of ['approved', 'blank']) {
+      const { row, line } = serverSays('deck_oven', { trays: 6 }, { W: 1200 }, kind);
+      assert.equal(row.size.W, 1200);
+      assert.deepEqual(pickKeys(ours('deck_oven', row.config, row.size, kind)), pickKeys(line), kind);
+    }
+    // a hand-made 1300 mm six-tray line never gets here (the validators refuse it) — the server proves it
+    assert.throws(() => serverLine('deck_oven', full(fam('deck_oven'), { trays: 6 }), { W: 1300 }, 1, 'approved'), /at most 1200 mm/);
+  });
+
+  it('the hood prices its type, filters and lighting cells; the wok range its holes, rear burner and faucet cells; no height is ever a size of these families (a custom height is not offered)', () => {
+    assert.deepEqual(keysOf(price('hood', { type: 'island', filters: 'none', lighting: false }, { W: 1500, D: 900 })), ['type:island', 'filters:none', 'lighting:false']);
+    assert.deepEqual(keysOf(price('hood', { type: 'slim' }, { W: 1000, D: 500 })), ['type:slim']);
+    assert.deepEqual(keysOf(price('wok_range', { holes: 3, rear: true, faucet: 'swan' }, { W: 1800, D: 800 })), ['holes:3', 'rear:true', 'faucet:swan']);
+    for (const id of NEW5) assert.ok(!('H' in fam(id).dims), `${id}: no height axis`);
+    const hood = price('hood', { type: 'slim' }, { W: 1000, D: 500 });
+    assert.deepEqual(hood.pricedSize, { W: 1000, D: 500 });
+  });
+
+  it('a configuration that an inapplicable option changes is NOT a priced line of its own: the validators refuse it, so a baskets amount can never be added to a griddle (both server and builder go through them)', () => {
+    const bad = { ...PF.defaultConfig(fam('cooking_line')), type: 'griddle', baskets: 3 };
+    assert.equal(PF.validateLine(fam('cooking_line'), bad, { W: 1000, D: 700 }, { staff: true }).ok, false, 'staff mode too');
+    assert.equal(QB.buildLine(DEPS, { family: fam('cooking_line'), primary: PRIMARIES.cooking_line, config: bad, size: { W: 1000, D: 700 } }), null, 'the builder builds nothing from it');
+    const norm = Q.normaliseItems([{ familyId: 'cooking_line', config: bad, dims: { W: 1000, D: 700 }, qty: 1, note: '' }], new Map(), { families: FAM, primaries: PRIMARY_MAP });
+    assert.equal(norm.ok, false); assert.match(norm.errors.join(' '), /"Fry baskets" applies only when Type is Fryer\./);
+    // and the pricing function itself, handed such a non-canonical configuration by mistake, would read the cell — which is why nothing upstream may pass one
+    const wrongly = QB.priceLine(DEPS, { family: fam('cooking_line'), primary: PRIMARIES.cooking_line, config: bad, size: { W: 1000, D: 700 }, sheet: SHEETS.approved.cooking_line });
+    assert.equal(wrongly.priced, true);
+    assert.ok(keysOf(wrongly).includes('baskets:3'), 'the premise of the checks above: the pricing function trusts a canonical configuration, so validation is what keeps a basket cell off a griddle');
+  });
+
+  describe('nearestAbsorbed finds the standard model: the SKU a configuration IS, or the closest one', () => {
+    const near3 = (id, cfg) => { const got = QB.nearestAbsorbed(fam(id), cfg); return [got.sku, got.exact]; };
+    it('cooking line: a three-basket fryer is CE-022 (exact), a two-basket one CE-009, a one-basket one CE-020, a combination CE-007, a three-burner griddle CE-023, shelf bases CE-026 / CE-028', () => {
+      assert.deepEqual(near3('cooking_line', { type: 'fryer', baskets: 3, base: 'stand' }), ['CE-022', true]);
+      assert.deepEqual(near3('cooking_line', { type: 'fryer', baskets: 2 }), ['CE-009', true]);
+      assert.deepEqual(near3('cooking_line', { type: 'fryer', baskets: 1 }), ['CE-020', true]);
+      assert.deepEqual(near3('cooking_line', { type: 'combi' }), ['CE-007', true]);
+      assert.deepEqual(near3('cooking_line', { type: 'griddle', burners: 3 }), ['CE-023', true]);
+      assert.deepEqual(near3('cooking_line', { type: 'griddle', base: 'shelf' }), ['CE-028', true]);
+      assert.deepEqual(near3('cooking_line', { type: 'griller', base: 'shelf' }), ['CE-026', true]);
+      assert.deepEqual(near3('cooking_line', {}), ['CE-010', true], 'the default is the primary');
+      // not a standard model: a two-burner griddle is the closest to the one-burner griddle (the first of the ties in map order), but not exact
+      assert.deepEqual(near3('cooking_line', { type: 'griddle', burners: 2 }), ['CE-010', false]);
+    });
+    it('wok range: two holes with a rear burner is CE-025 (exact); one hole CE-006; hood: island EX-018, slim EX-020, wall EX-001 (the first of four identical wall models); deck oven: 12 trays CE-016; dish table PW-029', () => {
+      assert.deepEqual(near3('wok_range', { holes: 2, rear: true }), ['CE-025', true]);
+      assert.deepEqual(near3('wok_range', { holes: 1 }), ['CE-006', true]);
+      assert.deepEqual(near3('wok_range', { holes: 3, rear: true, faucet: 'swan' }), ['CE-025', false]);
+      assert.deepEqual(near3('hood', { type: 'island' }), ['EX-018', true]);
+      assert.deepEqual(near3('hood', { type: 'slim' }), ['EX-020', true]);
+      assert.deepEqual(near3('hood', { type: 'wall' }), ['EX-001', true]);
+      assert.deepEqual(near3('hood', { type: 'wall', filters: 'none' }), ['EX-001', false]);
+      assert.deepEqual(near3('deck_oven', { trays: 6 }), ['CE-016', true]);
+      assert.deepEqual(near3('deck_oven', {}), ['CE-012', true]);
+      assert.deepEqual(near3('deck_oven', { decks: 3, stand: 'heavy' }), ['CE-012', false]);
+      assert.deepEqual(near3('dish_table', { side: 'soiled', sink: 'prerinse' }), ['PW-029', false]);
+      assert.deepEqual(near3('dish_table', {}), ['PW-029', true]);
+    });
+    it('a stove that asks for a wok burner no longer finds CE-006 (the wok ranges left the stove family): its nearest model is the first of the ties, CE-001, and it is not exact', () => {
+      assert.deepEqual(near3('stove', { positions: ['wok'] }), ['CE-001', false]);
+      assert.ok(!Object.keys(fam('stove').absorbed).includes('CE-006') && !Object.keys(fam('stove').absorbed).includes('CE-025'));
+      for (const sku of ['CE-006', 'CE-025']) assert.ok(Object.keys(fam('wok_range').absorbed).includes(sku), sku);
+      assert.deepEqual(near3('stove', { positions: ['wok', 'wok'] }).slice(1), [false]);
+    });
+    it('the primary of every one of the five is exact at its default, with the full score (conditional options at their defaults count as matching on both sides)', () => {
+      for (const id of NEW5) {
+        const f = fam(id);
+        const got = QB.nearestAbsorbed(f, PF.defaultConfig(f));
+        assert.equal(got.sku, f.primary, id); assert.equal(got.exact, true, id);
+        assert.ok(near(got.score, f.groups.length), `${id} score ${got.score}`);
+      }
+    });
+  });
+
+  describe('buildLine / migrateLegacyConfiguredLine for the five families', () => {
+    it('buildLine: the primary\'s id, the family name, ONLY the family\'s own axes in the printed size (no height), and specs = describe() — only the rows that apply, ending with the Construction row', () => {
+      for (const id of NEW5) {
+        const f = fam(id);
+        const cfg = PF.defaultConfig(f);
+        const size = PF.standardDims(f, cfg);
+        const it = QB.buildLine(DEPS, { family: f, primary: PRIMARIES[id], config: cfg, size, qty: 2, basis: ours(id, cfg, size, 'approved') });
+        assert.ok(it, id);
+        assert.equal(it.id, f.primary); assert.equal(it.name, f.label); assert.equal(it.familyId, id);
+        assert.equal(it.dims, PF.sizeTextLabelled(f, size));
+        assert.ok(!/H\d/.test(it.dims), `${id}: no height in "${it.dims}"`);
+        assert.deepEqual(it.specs, PF.describe(f, it.config));
+        assert.equal(it.specs.at(-1).label, 'Construction');
+      }
+      const ck = fam('cooking_line');
+      const fryer = QB.buildLine(DEPS, { family: ck, primary: PRIMARIES.cooking_line, config: { type: 'fryer', baskets: 3 }, size: { W: 1000, D: 700 }, qty: 1 });
+      assert.deepEqual(fryer.specs.map((x) => x.label), ['Type', 'Fry baskets', 'Base', 'Construction'], 'no "Burners" row on a fryer');
+      assert.deepEqual(fryer.config, { type: 'fryer', burners: 1, baskets: 3, base: 'stand' });
+      const griddle = QB.buildLine(DEPS, { family: ck, primary: PRIMARIES.cooking_line, config: { type: 'griddle', burners: 2 }, size: { W: 900, D: 700 }, qty: 1 });
+      assert.deepEqual(griddle.specs.map((x) => x.label), ['Type', 'Burners', 'Base', 'Construction'], 'no "Fry baskets" row on a griddle');
+    });
+    it('a saved plain line converts to the new family: CE-006 -> a wok range, CE-025 -> two holes with a rear burner, CE-010 / CE-009 / CE-022 -> the cooking line, CE-016 -> a six-tray oven, EX-020 -> a slim hood, PW-029 -> a dish table — keeping its price, at a VALID size', () => {
+      const cases = [['CE-006', 'wok_range', (c) => c.holes === 1 && c.rear === false], ['CE-025', 'wok_range', (c) => c.holes === 2 && c.rear === true], ['CE-010', 'cooking_line', (c) => c.type === 'griddle'],
+        ['CE-009', 'cooking_line', (c) => c.type === 'fryer' && c.baskets === 2], ['CE-022', 'cooking_line', (c) => c.type === 'fryer' && c.baskets === 3], ['CE-016', 'deck_oven', (c) => c.trays === 6],
+        ['CE-012', 'deck_oven', (c) => c.trays === 3], ['EX-020', 'hood', (c) => c.type === 'slim'], ['EX-018', 'hood', (c) => c.type === 'island'], ['PW-029', 'dish_table', (c) => c.side === 'clean']];
+      for (const [sku, fid, ok] of cases) {
+        const out = QB.migrateLegacyConfiguredLine(DEPS, { id: sku, category: 'cooking_line', name: sku, dims: '', specs: [], qty: 3, unit: 'pc', unitPrice: 12345, amount: 37035 });
+        assert.ok(out, sku);
+        assert.equal(out.familyId, fid, sku); assert.equal(out.id, fam(fid).primary, sku);
+        assert.ok(ok(out.config), `${sku}: ${JSON.stringify(out.config)}`);
+        assert.equal(PF.validateLine(fam(fid), out.config, out.size, { staff: true }).ok, true, `${sku}: a valid size`);
+        assert.equal(out.unitPrice, 12345, `${sku}: keeps its price`); assert.equal(out.qty, 3);
+        assert.equal(out.priceBasis, 'manual', `${sku}: a converted line keeps its typed price`);
+      }
+    });
+  });
+});
+

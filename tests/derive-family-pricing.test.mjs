@@ -1,4 +1,4 @@
-// tests/derive-family-pricing.test.mjs — scripts/derive-family-pricing.js: the STARTING VALUES for the private option sheets (product_pricing/{family}).
+// tests/derive-family-pricing.test.mjs — scripts/derive-family-pricing.js: the STARTING VALUES for the private option sheets (product_pricing/{family}) of the eleven families.
 //
 // What must hold (owner ruling 2026-10-21):
 //   * Nothing in the script, its console output or the repository is a price. The output is a PRIVATE, GITIGNORED file (private/family-pricing.seed.json);
@@ -9,14 +9,21 @@
 //   * The model the figures feed (priceConfiguredItem) can consume the output as it stands: an imported seed prices what it covers and leaves the rest
 //     "priced after review".
 //
-//   * THE STAFF-ONLY TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14.4): tables, sinks and stoves get ONE extra cell, "Top plate: 1.2 mm" — the SIGNED
-//     amount (a negative number, or 0) for the lighter top — and it is ALWAYS BLANK in the seed: the master's BA-001 "Top Gauge" adder is quoted in the note as a
-//     cross-reference only, never used as the amount. The seed is written for the current family schema (2), so an older seed is refused by the importer.
+//   * THE STAFF-ONLY TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14.4): tables, sinks, dish tables, stoves and wok ranges get ONE extra cell, "Top plate: 1.2 mm" — the
+//     SIGNED amount (a negative number, or 0) for the lighter top — and it is ALWAYS BLANK in the seed: the master's BA-001 "Top Gauge" adder is quoted in the note as a
+//     cross-reference only, never used as the amount. The seed is written for the current family schema (3), so an older seed is refused by the importer.
+//   * THE FIVE FAMILIES OF 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §7): dish table (PW-029 has no list price: every cell blank, with the reason), wok range (no usable
+//     comparison: all blank, related figures only QUOTED), griddle / griller / fryer (the fryer, the combination and the three-basket fryer from SKU pairs, the rest blank),
+//     gas deck oven (the six-tray oven from the CE-016 / CE-012 pair; NO length rate: the width follows the trays), range hood (the island and slim types from SKU pairs; the
+//     filters and the lamps blank with the accessories' list prices quoted). A related price in a note is never the amount.
 //
 // Mutation-tested in scratch copies (see the commit message): turning a blank into 0, dropping the "prefer" order of the owner-prescribed pair,
 // ignoring the adder cross-check, deriving the wall-shelf length rate without the standard length, writing the output next to the source, and so on.
 // 2026-10-28: filling the 1.2 mm top cell from the master's adder, dropping the cell for one family, the absorbed-SKU check pricing a configuration without the
-// top plate — each must fail here too.
+// top plate — each must fail here too. The five new families (scratch copies under /private/tmp/.../cf2-ws1-mut/): the deck oven's length rate derived as the proportional
+// default (NO_LENGTH_RATE removed), its cells scaled with length, a BA-005 / EX-026 / CE-018 reference turned into the amount, a blank turned into 0, the island hood or the fryer
+// or the six-tray oven compared with the wrong SKU (or the wrong way round), the 3-burner comparison ignoring the family's limits, the dish table's unpriced-primary note dropped,
+// an unpriced absorbed SKU skipped silently — 13 mutants, each must fail here.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -51,11 +58,17 @@ const perLen = (id, basePrice, dims) => prod(id, { basePrice, defaultDimensions:
 const PRIMARIES = () => [
   perLen('PW-001', 12345, dd(900, 600, 850)),
   perLen('PW-004', 15555, dd(500, 500, 850)),
+  prod('PW-029', { basePrice: 13579, defaultDimensions: dd(1200, 660, 851) }),              // the dish table: a FIXED item, so its length is priced from the sheet ("linear"); priced here so the sweep below can price its default — the real master has no list price for it yet (tested apart)
   perLen('CE-001', 20001, dd(600, 700, 850)),
+  perLen('CE-006', 21113, dd(600, 700, 850)),                                                // the wok range's base item
+  perLen('CE-010', 17771, dd(700, 700, 850)),                                                // the cooking line's base item (a griddle)
+  prod('CE-012', { basePrice: 31337, defaultDimensions: dd(700, 700, 1400) }),               // the gas deck oven: a FIXED item ("linear")
+  perLen('EX-001', 14141, dd(1000, 900, 500)),                                               // the range hood's base item
   perLen('PW-015', 8888, dd(600, 500, 1800)),
   prod('PW-023', { basePrice: 4444, defaultDimensions: dd(1200, 450) }),
   perLen('PW-010', 9999, dd(600, 500, 1600)),
 ];
+const WITHOUT = (...ids) => PRIMARIES().filter((p) => !ids.includes(p.id));        // the primaries minus some (to model "not in the master" / "unpriced")
 const derive = (extra, constants) => {
   const byId = new Map();
   for (const p of [...PRIMARIES(), ...(extra || [])]) byId.set(p.id, p);          // an extra with a primary's id REPLACES it
@@ -73,12 +86,13 @@ function assertFinite(value, where) {
 describe('derive-family-pricing — the output covers every option of every family, in the shape the app imports', () => {
   const seed = derive();
 
-  it('is a versioned, labelled private seed for the current family schema, with all six families', () => {
+  it('is a versioned, labelled private seed for the current family schema, with all eleven families', () => {
     assert.equal(seed.kind, 'barro-family-pricing-seed');
     assert.equal(seed.version, 1, 'the seed FILE format is unchanged');
     assert.equal(seed.schemaVersion, FAMS.version);
-    assert.equal(seed.schemaVersion, 2, 'the families are on schema 2 (the 1.5 mm top plate is the standard): an older seed is refused by the importer');
+    assert.equal(seed.schemaVersion, 3, 'the families are on schema 3 (five more families, conditional options): an older seed is refused by the importer');
     assert.deepEqual(Object.keys(seed.families), FAMS.order);
+    assert.deepEqual(Object.keys(seed.families), ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']);
     assert.match(seed._readme, /PRIVATE/);
     assert.match(seed._readme, /never be committed/);
     assert.match(seed._readme, /UNAPPROVED/);
@@ -127,13 +141,18 @@ describe('derive-family-pricing — the output covers every option of every fami
     assertFinite(seed, 'seed');
   });
 
-  it('with no evidence beyond the primaries, the only derived figure is the length rate of the linear family — a blank is NEVER zero', () => {
+  it('with no evidence beyond the primaries, the only derived figures are the length rates of the linear families that HAVE a free length (wall shelving, the dish table) — a blank is NEVER zero, and the deck oven has none', () => {
     const flats = [];
     for (const fid of FAMS.order) for (const g of Object.keys(seed.families[fid].options)) for (const v of Object.keys(seed.families[fid].options[g])) flats.push(seed.families[fid].options[g][v].flat);
     assert.ok(flats.every((f) => f === null), 'an option with no evidence in the master must stay blank');
     assert.ok(!flats.includes(0));
     assert.equal(seed.families.wall_shelf.size.confidence, 'low');
     assert.ok(Number.isInteger(seed.families.wall_shelf.size.perW100) && seed.families.wall_shelf.size.perW100 > 0);
+    assert.equal(seed.families.dish_table.size.perW100, Math.round(13579 * 100 / 1200), 'the dish table (priced in this fixture) is proportional to its standard length, like wall shelving');
+    assert.equal(seed.families.dish_table.size.confidence, 'low');
+    assert.deepEqual(FAMS.order.filter((f) => FAMS.families[f].sizeBasis === 'linear'), ['dish_table', 'deck_oven', 'wall_shelf']);
+    assert.equal(seed.families.deck_oven.size.perW100, null, 'the deck oven\'s width follows its trays: NO length rate is derived, whatever CE-012 costs');
+    assert.equal(seed.families.deck_oven.size.confidence, 'blank');
   });
 
   it('an all-blank seed prices NOTHING as configured: changing ANY single option makes the line "priced after review" (missing input) — never a half price, never zero', () => {
@@ -152,15 +171,13 @@ describe('derive-family-pricing — the output covers every option of every fami
         const g = PF.groupOf(fam, c.group);
         const o = g.options.find((x) => String(x.v) === String(c.value));
         const cfg = PF.defaultConfig(fam);
+        // a conditional option (fry baskets, a pre-rinse sink) can only be chosen where it applies: set what it depends on first
+        Object.keys(g.when || {}).forEach((k) => { cfg[k] = g.when[k][0]; });
         if (g.type === 'choice') cfg[g.key] = o.v;
         else if (g.type === 'multi') cfg[g.key] = [o.v];
         else cfg[g.key] = cfg[g.key].concat([o.v]);                      // one more burner of this type than the standard layout
-        // a size that satisfies the family's own width rule and forced minimums, so the probe isolates the missing amount
-        const dims = PF.defaultDims(fam);
-        const mw = PF.minWidth(fam, cfg);
-        if (mw && dims.W < mw.mm) dims.W = mw.mm;
-        const fm = PF.forcedMins(fam, cfg);
-        Object.keys(fm).forEach((k) => { if (dims[k] < fm[k]) dims[k] = fm[k]; });
+        // the size these options are normally built at (the family's width rule and forced limits applied), so the probe isolates the missing amount
+        const dims = PF.standardDims(fam, cfg);
         const v = PF.validateLine(fam, cfg, dims, { staff: true });                    // STAFF mode: the 1.2 mm top plate is a staff-only choice
         assert.ok(v.ok, `${fid} ${c.group}.${c.value}: the probe configuration must itself be valid (${(v.errors || []).join(' ')})`);
         const r = price(v.config, v.dims);
@@ -170,7 +187,7 @@ describe('derive-family-pricing — the output covers every option of every fami
         checked++;
       }
     }
-    assert.ok(checked >= 30, `only ${checked} option cells were probed`);
+    assert.ok(checked >= 55, `only ${checked} option cells were probed`);
   });
 });
 
@@ -362,11 +379,191 @@ describe('derive-family-pricing — figures come only from evidence the master r
   });
 });
 
-describe('derive-family-pricing — the staff-only 1.2 mm top plate (owner ruling 2026-10-28): one SIGNED cell per table, sink and stove, always BLANK', () => {
-  const WITH_TOP = ['prep_table', 'sink', 'stove'];
+describe('derive-family-pricing — the five families of 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §7): figures only where the master really says it, related prices only QUOTED', () => {
+  const NOTE_UNPRICED = /PW-029 \(the dish table\) has no list price in the master yet — enter one on the Product Database first, then the length rate can be derived/;
+  const unpricedDish = () => prod('PW-029', { basePrice: 0, defaultDimensions: dd(1219, 660, 851) });          // the real master today
+
+  it('dish table: PW-029 has no list price, so EVERY cell and the length rate are BLANK with the reason; the 1.2 mm top has its own standard note; the absorbed check says "cannot be checked"', () => {
+    const s = derive([unpricedDish()]);
+    for (const [g, v] of [['side', 'soiled'], ['hand', 'right'], ['sink', 'prerinse'], ['undershelf', 'false']]) {
+      const c = cellOf(s, 'dish_table', g, v);
+      assert.equal(c.flat, null, `${g}.${v}`); assert.equal(c.perW100, null); assert.equal(c.confidence, 'blank');
+      assert.match(c.derivation, NOTE_UNPRICED, `${g}.${v}`);
+    }
+    const top = cellOf(s, 'dish_table', 'top', '1.2');
+    assert.equal(top.flat, null); assert.match(top.derivation, /The standard top is now 1\.5 mm \(16 ga\)/); assert.ok(!NOTE_UNPRICED.test(top.derivation));
+    const size = s.families.dish_table.size;
+    assert.deepEqual([size.perW100, size.confidence], [null, 'blank']);
+    assert.match(size.derivation, NOTE_UNPRICED, 'the length rate carries the same instruction');
+    assert.equal(s.families.dish_table.sizeBasis, 'linear');
+    assert.ok(s.families.dish_table.table.some((r) => r.group === 'size' && r.status === 'blank'));
+    assert.equal(s.families.dish_table.absorbedCheck.length, 1);
+    assert.equal(s.families.dish_table.absorbedCheck[0].sku, 'PW-029');
+    assert.equal(s.families.dish_table.absorbedCheck[0].familyEstimateVsList, null);
+    assert.match(s.families.dish_table.absorbedCheck[0].flag, /^cannot be checked/);
+  });
+  it('dish table, once PW-029 IS priced: the length rate is derived (proportional to its standard length, LOW) but every option cell stays blank — no SKU separates a side, a hand, a sink or an undershelf', () => {
+    const s = derive();
+    assert.equal(s.families.dish_table.size.perW100, Math.round(13579 * 100 / 1200));
+    assert.equal(s.families.dish_table.size.confidence, 'low');
+    for (const [g, v] of [['side', 'soiled'], ['hand', 'right'], ['sink', 'prerinse'], ['undershelf', 'false'], ['top', '1.2']]) assert.equal(cellOf(s, 'dish_table', g, v).flat, null, `${g}.${v}`);
+    assert.match(cellOf(s, 'dish_table', 'side', 'soiled').derivation, /No SKU in the master separates this option from the dish table itself/);
+    assert.ok(!NOTE_UNPRICED.test(cellOf(s, 'dish_table', 'side', 'soiled').derivation), 'no stale "has no list price" once it has one');
+    assert.equal(s.families.dish_table.absorbedCheck[0].flag, 'ok', 'the default dish table is estimated at exactly its own list price');
+  });
+
+  it('wok range: holes 2 and 3, the rear stock burner and the swan-neck faucet are BLANK whatever the master holds (the multi-hole range is a different construction; the stove\'s wok cell is for a mixed range); related prices are quoted in the notes only', () => {
+    const lone = derive();
+    for (const [g, v] of [['holes', '2'], ['holes', '3'], ['rear', 'true'], ['faucet', 'swan'], ['top', '1.2']]) { const c = cellOf(lone, 'wok_range', g, v); assert.equal(c.flat, null, `${g}.${v}`); assert.equal(c.confidence, 'blank'); }
+    assert.match(cellOf(lone, 'wok_range', 'holes', '2').derivation, /CE-025, the only multi-hole wok range, is unpriced; the stove's wok-position cell is for a burner on a mixed range, not a wok hole with its ring — not used\./);
+    assert.equal(cellOf(lone, 'wok_range', 'holes', '3').derivation, cellOf(lone, 'wok_range', 'holes', '2').derivation);
+    assert.match(cellOf(lone, 'wok_range', 'rear', 'true').derivation, /\(CE-018, the stock-pot range, is unpriced\.\)/);
+    assert.ok(!/adder on PW-004/.test(cellOf(lone, 'wok_range', 'faucet', 'swan').derivation), 'no sink adder in the master: nothing to quote');
+    // with every related SKU PRICED in the master the cells are STILL blank — the figures appear in the notes only
+    const rich = derive([
+      prod('CE-025', { basePrice: 61111, defaultDimensions: dd(1500, 800, 800) }),
+      prod('CE-018', { basePrice: 11223, defaultDimensions: dd(600, 700, 850) }),
+      prod('PW-004', { basePrice: 15555, defaultDimensions: dd(500, 500, 850), specs: [spec('Faucet Type', ['Gooseneck', 'Pre-rinse spray'], 'Gooseneck', [0, 640])] }),
+    ]);
+    for (const [g, v] of [['holes', '2'], ['holes', '3'], ['rear', 'true'], ['faucet', 'swan']]) assert.equal(cellOf(rich, 'wok_range', g, v).flat, null, `${g}.${v}: a quoted price is never the amount`);
+    assert.match(cellOf(rich, 'wok_range', 'holes', '2').derivation, /CE-025, the only multi-hole wok range, also has a rear burner and a water-cooled edge, so it cannot isolate a wok hole/);
+    assert.match(cellOf(rich, 'wok_range', 'rear', 'true').derivation, /For reference, CE-018 \(a stock-pot range\) is listed at 11,223; the stove sheet's "soup" burner cell is the nearest idea\. Not used as the amount\./);
+    assert.match(cellOf(rich, 'wok_range', 'faucet', 'swan').derivation, /the sink's pre-rinse faucet adder on PW-004 is 640: a different fitting, not used\./);
+    assert.equal(rich.families.wok_range.absorbedCheck.find((r) => r.sku === 'CE-025').flag.startsWith('cannot be checked'), true, 'CE-025 is a multi-hole range with blank cells');
+    assert.equal(rich.families.wok_range.absorbedCheck.find((r) => r.sku === 'CE-006').flag, 'ok', 'the wok range itself is estimated at exactly its own list price');
+  });
+
+  it('griddle / griller / fryer: the fryer and the combination come from SKU pairs against the griddle at one size, the three-basket fryer from a fixed pair; the griller, 2 burners, 1 basket and the shelf base are BLANK; 3 burners only when CE-023 fits the family\'s limits', () => {
+    const extra = [
+      perLen('CE-009', 24001, dd(700, 700, 850)),                       // the two-basket fryer (the family default fryer)
+      perLen('CE-007', 29001, dd(900, 700, 850)),                       // the griller + griddle combination (its standard length is longer than the griddle's)
+      prod('CE-022', { basePrice: 38001, defaultDimensions: {} }),      // the three-basket fryer: no standard size of its own
+    ];
+    const s = derive(extra);
+    const fryer = cellOf(s, 'cooking_line', 'type', 'fryer');
+    assert.equal(fryer.flat, 24001 - 17771, 'CE-009 against CE-010 at the same size = the whole type difference');
+    assert.equal(fryer.confidence, 'medium', 'two length-priced SKUs of the same default size: a clean pair');
+    assert.match(fryer.derivation, /CE-009 versus CE-010 at the same size, the two-basket fryer \(the family default\) against the griddle, so the figure is the whole type difference/);
+    const combi = cellOf(s, 'cooking_line', 'type', 'combi');
+    assert.equal(combi.flat, 29001 - 17771);
+    assert.equal(combi.confidence, 'low', 'the combination is evaluated at ITS longer standard length: approximate');
+    assert.match(combi.derivation, /CE-007 versus CE-010 at the same size \(taken at 900 mm/);
+    const three = cellOf(s, 'cooking_line', 'baskets', '3');
+    assert.equal(three.flat, 38001 - 24001, 'CE-022 against CE-009: a fixed pair at the fryer\'s size');
+    assert.equal(three.confidence, 'low');
+    for (const [g, v] of [['type', 'griller'], ['burners', '2'], ['burners', '3'], ['baskets', '1'], ['base', 'shelf'], ['top', '1.2']]) {
+      if (g === 'top') continue;                                         // the cooking line has no top plate cell
+      assert.equal(cellOf(s, 'cooking_line', g, v).flat, null, `${g}.${v} must be blank`);
+    }
+    assert.ok(!('top' in s.families.cooking_line.options));
+    // without the evidence the same three cells are BLANK, not zero
+    const bare = derive();
+    for (const [g, v] of [['type', 'fryer'], ['type', 'combi'], ['baskets', '3']]) { assert.equal(cellOf(bare, 'cooking_line', g, v).flat, null, `${g}.${v}`); assert.equal(cellOf(bare, 'cooking_line', g, v).confidence, 'blank'); }
+    assert.match(cellOf(bare, 'cooking_line', 'type', 'griller').derivation, /CE-019 and CE-026 are unpriced/);
+    assert.match(cellOf(bare, 'cooking_line', 'baskets', '1').derivation, /\(CE-020\) is unpriced/);
+    // 3 burners: the 3-burner griddle is deeper than the family allows (depth over 900) -> blank, and the note names it; inside the limits -> a fixed pair, LOW
+    const deep = derive([prod('CE-023', { basePrice: 33001, defaultDimensions: dd(610, 1219, 762) })]);
+    const noBurners = cellOf(deep, 'cooking_line', 'burners', '3');
+    assert.equal(noBurners.flat, null);
+    assert.match(noBurners.derivation, /CE-023 \(the only 3-burner griddle\) has a default size outside this family's limits \(width 610 x depth 1219 mm\)/);
+    const fits = cellOf(derive([prod('CE-023', { basePrice: 33001, defaultDimensions: dd(900, 800, 800) })]), 'cooking_line', 'burners', '3');
+    assert.equal(fits.flat, 33001 - 17771);
+    assert.equal(fits.confidence, 'low');
+    // the configured price follows the derived figures: a three-basket fryer = the griddle + the fryer type + the 3-basket amount
+    const sheet = { approved: true, schemaVersion: FAMS.version, options: Object.fromEntries(Object.entries(s.families.cooking_line.options).map(([g, vs]) => [g, Object.fromEntries(Object.entries(vs).map(([v, c]) => [v, { flat: c.flat, perW100: c.perW100 }]))])), size: { perW100: null } };
+    const prim = PRIMARIES().find((x) => x.id === 'CE-010');
+    const fam = FAMS.families.cooking_line;
+    const cfg = PF.validateLine(fam, { type: 'fryer', baskets: 3 }, { W: 1000, D: 700 }).config;
+    const priced = PC.priceConfiguredItem(prim, fam, cfg, { W: 1000, D: 700 }, sheet, {}, { schemaVersion: FAMS.version });
+    assert.equal(priced.priced, true, priced.missing.join(', '));
+    assert.deepEqual(priced.deltas.map((d) => d.key), ['type:fryer', 'baskets:3'], 'no burners cell: they do not apply to a fryer');
+    assert.equal(priced.unitPrice, 17771 + (24001 - 17771) + (38001 - 24001));
+  });
+
+  it('gas deck oven: 6 trays per deck = the CE-016 / CE-012 pair (a fixed pair, LOW); decks and the heavy-duty stand are BLANK with the proportional figure and BA-005\'s list price only QUOTED; there is NO length rate and no cell scales with length', () => {
+    const s = derive([prod('CE-016', { basePrice: 52001, defaultDimensions: {} }), perLen('BA-005', 40001, dd(1300, 1000, 700))]);
+    const trays = cellOf(s, 'deck_oven', 'trays', '6');
+    assert.equal(trays.flat, 52001 - 31337);
+    assert.equal(trays.confidence, 'low');
+    assert.match(trays.derivation, /CE-016 versus CE-012 at the same size, 12 trays versus 6 trays, two decks each/);
+    assert.equal(trays.perW100, null, 'the width FOLLOWS the trays: the amount does not also scale with length');
+    for (const [g, v] of [['decks', '1'], ['decks', '3'], ['stand', 'heavy']]) { const c = cellOf(s, 'deck_oven', g, v); assert.equal(c.flat, null, `${g}.${v}`); assert.equal(c.perW100, null); assert.equal(c.confidence, 'blank'); }
+    assert.match(cellOf(s, 'deck_oven', 'decks', '1').derivation, /No 1- or 3-deck oven in the master; a per-deck figure would be an extrapolation\. If you agree the price is proportional to the number of decks, the figure would be -15,669 \(half of the 2-deck oven's list price\)\./);
+    assert.match(cellOf(s, 'deck_oven', 'decks', '3').derivation, /would be \+15,669 \(half of the 2-deck oven's list price\)/);
+    assert.match(cellOf(s, 'deck_oven', 'stand', 'heavy').derivation, /different product line \(BA-005, listed at 40,001 at its standard length\): enter the figure you want, it is not used as the amount\./);
+    // the length rate: NEVER the proportional default, whatever CE-012 costs
+    const size = s.families.deck_oven.size;
+    assert.equal(s.families.deck_oven.sizeBasis, 'linear');
+    assert.deepEqual([size.perW100, size.confidence], [null, 'blank']);
+    assert.match(size.derivation, /^Enter 0: the width is fixed by the trays per deck and its cost sits in the "Trays per deck: 6" cell\.$/);
+    assert.ok(s.families.deck_oven.table.some((r) => r.group === 'size' && r.status === 'blank'), 'the console table still lists the length row');
+    // without the evidence the same cells say why; an UNPRICED CE-012 gives no proportional suggestion at all
+    const bare = derive([prod('CE-012', { basePrice: 0, defaultDimensions: dd(700, 700, 1400) })]);
+    assert.ok(!/If you agree the price is proportional/.test(cellOf(bare, 'deck_oven', 'decks', '1').derivation), 'no CE-012 price, no proportional suggestion');
+    assert.match(cellOf(bare, 'deck_oven', 'decks', '1').derivation, /a per-deck figure would be an extrapolation\.$/);
+    assert.match(cellOf(bare, 'deck_oven', 'stand', 'heavy').derivation, /\(BA-005, unpriced\)/);
+    assert.equal(cellOf(bare, 'deck_oven', 'trays', '6').flat, null);
+    // the sheet, as imported, prices a 12-tray oven at W 1200 as the base + the 6-tray amount only — not a cent for the extra width
+    const sheet = { approved: true, schemaVersion: FAMS.version, options: Object.fromEntries(Object.entries(s.families.deck_oven.options).map(([g, vs]) => [g, Object.fromEntries(Object.entries(vs).map(([v, c]) => [v, { flat: c.flat, perW100: c.perW100 }]))])), size: { perW100: 0 } };
+    const prim = PRIMARIES().find((x) => x.id === 'CE-012');
+    const six = PC.priceConfiguredItem(prim, FAMS.families.deck_oven, PF.validateLine(FAMS.families.deck_oven, { trays: 6 }, { W: 1200 }).config, { W: 1200 }, sheet, {}, { schemaVersion: FAMS.version });
+    assert.equal(six.unitPrice, 31337 + (52001 - 31337));
+    assert.deepEqual(six.deltas.map((d) => d.key), ['trays:6', 'size:W']);
+    assert.equal(six.deltas[1].amount, 0, 'size.perW100 entered as 0: the width adds nothing');
+  });
+
+  it('range hood: the island and slim hoods come from fixed SKU pairs against the wall hood (LOW, approximate); no filters / no lighting are BLANK and the accessories\' list prices only QUOTED', () => {
+    const s = derive([
+      prod('EX-018', { basePrice: 33001, defaultDimensions: dd(1219, 1092, 508) }),
+      prod('EX-020', { basePrice: 22001, defaultDimensions: dd(1800, 305, 355) }),
+      prod('EX-026', { basePrice: 2501, defaultDimensions: {} }),
+      prod('EX-027', { basePrice: 1803, defaultDimensions: dd(864, 610, 533) }),
+    ]);
+    const island = cellOf(s, 'hood', 'type', 'island');
+    assert.equal(island.flat, 33001 - 14141);
+    assert.equal(island.confidence, 'low');
+    assert.match(island.derivation, /EX-018 versus EX-001 at the same size \(taken at 1219 mm, the larger SKU's standard length, so below that length it is approximate\), the island hood against the wall hood/);
+    const slim = cellOf(s, 'hood', 'type', 'slim');
+    assert.equal(slim.flat, 22001 - 14141);
+    assert.equal(slim.confidence, 'low');
+    assert.match(slim.derivation, /EX-020 versus EX-001 at the same size/);
+    for (const [g, v, sku, what] of [['filters', 'none', 'EX-026', 'a baffle filter block'], ['lighting', 'false', 'EX-027', 'the 3-bulb lighting case']]) {
+      const c = cellOf(s, 'hood', g, v);
+      assert.equal(c.flat, null, `${g}.${v}: the accessory\'s price is never the amount`); assert.equal(c.confidence, 'blank');
+      assert.ok(c.derivation.includes(`${sku} (${what}) is listed at`), c.derivation);
+      assert.match(c.derivation, /the hood without it is unlikely to drop by exactly that — enter a negative amount, or 0\./);
+    }
+    assert.match(cellOf(s, 'hood', 'filters', 'none').derivation, /listed at 2,501 when sold alone/);
+    assert.match(cellOf(s, 'hood', 'lighting', 'false').derivation, /listed at 1,803 when sold alone/);
+    assert.ok(!('top' in s.families.hood.options), 'no top plate on a hood');
+    assert.equal(s.families.hood.sizeBasis, 'primary');
+    assert.equal(s.families.hood.size.perW100, null);
+    // with the accessories unpriced the notes say so; the types stay blank without their SKUs
+    const bare = derive();
+    assert.match(cellOf(bare, 'hood', 'filters', 'none').derivation, /\(EX-026, a baffle filter block, is unpriced\.\)/);
+    assert.match(cellOf(bare, 'hood', 'lighting', 'false').derivation, /\(EX-027, the 3-bulb lighting case, is unpriced\.\)/);
+    for (const v of ['island', 'slim']) assert.equal(cellOf(bare, 'hood', 'type', v).flat, null, v);
+    // EX-002 / EX-003 are the same wall hood at other sizes: used by the absorbed check only
+    const sizes = derive([perLen('EX-002', 14507, dd(5000, 900, 500)), perLen('EX-003', 15900, dd(5000, 1200, 600))]);
+    assert.equal(sizes.families.hood.absorbedCheck.find((r) => r.sku === 'EX-002').flag, 'ok');
+    assert.ok(sizes.families.hood.absorbedCheck.some((r) => r.sku === 'EX-003'));
+  });
+
+  it('an absorbed SKU the master prices at nothing is REPORTED by the absorbed check ("cannot be checked: ... has no list price"), never skipped silently; one the master does not have at all is not in the report', () => {
+    const s = derive([prod('PW-002', { basePrice: 0, defaultDimensions: dd(900, 600, 850) })]);
+    const row = s.families.prep_table.absorbedCheck.find((r) => r.sku === 'PW-002');
+    assert.ok(row, 'PW-002 is absorbed by the preparation table and is in the master, unpriced');
+    assert.equal(row.familyEstimateVsList, null);
+    assert.equal(row.flag, 'cannot be checked: PW-002 has no list price in the master');
+    assert.equal(derive().families.prep_table.absorbedCheck.find((r) => r.sku === 'PW-003'), undefined, 'not in the master: no row');
+  });
+});
+
+describe('derive-family-pricing — the staff-only 1.2 mm top plate (owner ruling 2026-10-28): one SIGNED cell per table, sink, dish table, stove and wok range, always BLANK', () => {
+  const WITH_TOP = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];
   const topAdder = (light, heavy, adders) => prod('BA-001', { basePrice: 7000, specs: [spec('Top Gauge', [light, heavy], light, adders)] });
 
-  it('prep table, sink and stove each have a "Top plate: 1.2 mm" cell, BLANK (no amount, confidence blank), and the other three families have none; the standard 1.5 mm top has no cell at all', () => {
+  it('prep table, sink, dish table, stove and wok range each have a "Top plate: 1.2 mm" cell, BLANK (no amount, confidence blank), and the other six families have none; the standard 1.5 mm top has no cell at all', () => {
     const seed = derive();
     for (const fid of FAMS.order) {
       const opts = seed.families[fid].options;
@@ -387,8 +584,7 @@ describe('derive-family-pricing — the staff-only 1.2 mm top plate (owner rulin
     assert.match(note, /the base item's list price is read as the 1\.5 mm price/);
     assert.match(note, /Enter what a 1\.2 mm top takes OFF \(a negative amount\), or 0 if it should cost the same\./);
     assert.ok(!/BA-001/.test(note), 'with no evidence in the master the note carries no cross-reference');
-    assert.equal(cellOf(derive(), 'prep_table', 'top', '1.2').derivation, note, 'the same instruction on all three families');
-    assert.equal(cellOf(derive(), 'stove', 'top', '1.2').derivation, note);
+    for (const fid of ['prep_table', 'stove', 'dish_table', 'wok_range']) assert.equal(cellOf(derive(), fid, 'top', '1.2').derivation, note, `the same instruction on all five families (${fid})`);
   });
 
   it('the master\'s BA-001 "Top Gauge" adder is quoted as a CROSS-REFERENCE in the note only — the cell stays BLANK, whatever the master says (before and after the options were renamed)', () => {

@@ -1,4 +1,4 @@
-// tests/catalogue-layout.test.mjs — the 2026-10-21 owner rulings on how /catalogue/ LOOKS and what every card SAYS:
+// tests/catalogue-layout.test.mjs — the 2026-10-21 owner rulings on how /catalogue/ LOOKS and what every card SAYS (eleven configurable cards since 2026-10-28):
 //
 //   1. FEATURED CARDS. A configurable product is the wide featured card (photo left, tag / serif name / description / labelled Specifications /
 //      "Configure & add" right); on a phone it is the normal stacked full-width card; where a category holds several (Storage) they sit side by
@@ -14,11 +14,14 @@
 //      small fake DOM.
 //   6. STANDARD CONSTRUCTION (owner ruling 2026-10-28): a configurable card lists its PUBLIC options, then Size, then a Construction row (how the
 //      made-to-order piece is built, at the family defaults), then Material last — and never the staff-only top plate or the word "staff".
+//   7. CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4.1, 2026-10-28): a row for an option that applies only for some values of an earlier choice ends
+//      with its condition — "Fry baskets: 1 / 2 / 3 (Type is Fryer)" — and a gated group is still ONE row.
 //
 // Mutation-tested (scratch copies, never the shared tree): a line-clamp on the notes, the notes at 13px, a paler notes colour, a card with a
 // fixed height, the "Notes" label dropped from the generator, the Material row changed, .cat-lead removed from the search haystack, the multi
 // grid class dropped, the old 3-column grid restored, a letter tile restored — each must fail here. 2026-10-28: the card listing the staff-only
-// group, the Construction row dropped or moved below Material — each must fail here too.
+// group, the Construction row dropped or moved below Material — each must fail here too. 2026-10-28 (cf2-ws1-mut/): the card row losing its condition suffix, Ventilation
+// after Storage, the hood card without its "Learn more" link — each must fail here too.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -116,7 +119,7 @@ describe('every card says what it is, and shows its notes WHOLE under a label', 
 
   it('on the committed page every note and every spec list is labelled, every label has something under it, and no card carries an empty body', () => {
     const cards = block.split('<li class="cat-card').slice(1);
-    assert.equal(cards.length, 32);
+    assert.equal(cards.length, 25);
     for (const c of cards) {
       const id = (c.match(/data-(?:id|family)="([^"]+)"/) || [])[1];
       assert.ok(c.includes('<div class="cat-head">'), `${id}: no head`);
@@ -130,12 +133,12 @@ describe('every card says what it is, and shows its notes WHOLE under a label', 
   it('every fixed card on the page that has a note shows it in full: the text under .cat-notes is the product note, character for character', () => {
     // the page is generated from the master through publicProduct(); the committed notes are the allowlisted notes (TEXT_FIXES applied), so compare against the generator's own output for the same text
     const notes = [...block.matchAll(/<li class="cat-card[^"]*" data-id="([^"]+)">[\s\S]*?<\/li>/g)].map((m) => [m[1], (m[0].match(/<p class="cat-notes">([^<]*)<\/p>/) || [])[1]]);
-    assert.equal(notes.length, 26);
+    assert.equal(notes.length, 14, 'the 14 fixed items left (the fryers, griddles, grillers and deck ovens are configurable families now)');
     const withNotes = notes.filter(([, n]) => n);
-    assert.ok(withNotes.length >= 20, 'most fixed items have a note');
+    assert.ok(withNotes.length >= 10, 'most fixed items have a note (12 of the 14)');
     for (const [id, n] of withNotes) assert.ok(!/\.\.\.|…|&hellip;/.test(decode(n)), `${id}: the note ends in an ellipsis`);
-    // the longest notes on the page are all there (these three are the longest in the master today)
-    for (const [id, start] of [['CE-016', 'Larger variant of CE-012 6-tray oven. SS202 1.0mm inner'], ['BA-011', 'Insulated SS304 proofer-retarder. Digital controls'], ['RF-003', 'Fan cooling, Embraco/R404A compressor']]) {
+    // the longest notes on the page are all there (these three are the longest of the fixed items today)
+    for (const [id, start] of [['BA-006', 'Insulated SS304 proofer. Double-wall body'], ['BA-011', 'Insulated SS304 proofer-retarder. Digital controls'], ['RF-003', 'Fan cooling, Embraco/R404A compressor']]) {
       const n = decode(notes.find(([i]) => i === id)[1]);
       assert.ok(n.startsWith(start) && n.length > 110, `${id}: the long note is not whole`);
     }
@@ -165,7 +168,7 @@ describe('the placeholder is a small category line-icon — never a big letter',
   it('the committed page has no letter tile anywhere, and every tile carries an icon', () => {
     assert.ok(!/<div class="cat-tile" aria-hidden="true"><span>/.test(block));
     const tiles = block.match(/<div class="cat-tile"[\s\S]*?<\/div>/g) || [];
-    assert.equal(tiles.length, 20, '19 fixed items and the cabinet have no photo yet');
+    assert.equal(tiles.length, 15, '11 fixed items and the dish table, wok range, deck oven and cabinet have no photo yet');
     for (const t of tiles) assert.ok(t.includes('<svg class="cat-ic"') && !/<span/.test(t));
     assert.ok(!/\.cat-tile span\b/.test(css), 'the old big-letter rule is still in the stylesheet');
   });
@@ -174,7 +177,7 @@ describe('the placeholder is a small category line-icon — never a big letter',
 describe('the configurable cards: featured, with a labelled Specifications list and the owner\'s material line', () => {
   const fams = [...block.matchAll(/<li class="cat-card cat-card-family cat-card-feature[^"]*" data-family="([a-z_]+)"[\s\S]*?<\/li>/g)];
 
-  it('all six are featured cards, in order, each with tag, serif-name heading, lead paragraph and a Specifications list ending in Size and Material', () => {
+  it('all eleven are featured cards, in order, each with tag, serif-name heading, lead paragraph and a Specifications list ending in Size and Material', () => {
     assert.deepEqual(fams.map((m) => m[1]), FAMS.order);
     for (const m of fams) {
       assert.match(m[0], /<div class="cat-head"><p class="cat-code cat-tag">Configurable<\/p><h3>[^<]+<\/h3><p class="cat-lead">[^<]{40,}<\/p><\/div>/, m[1]);
@@ -194,8 +197,13 @@ describe('the configurable cards: featured, with a labelled Specifications list 
       cabinet: 'SS304 stainless steel · 1.2 mm body, doors and shelves · square-tube posts with adjustable bullet feet',
       wall_shelf: 'SS304 stainless steel · 1.2 mm shelves · fixed to the wall',
       rack: 'SS304 stainless steel · 1.2 mm shelves · square-tube frame · on wheels',
+      dish_table: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf and splash · raised back and side splash, clean-dish landing · square-tube posts with adjustable bullet feet',
+      wok_range: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm body and panels · recessed wok rings with high-pressure burners · square-tube posts with adjustable bullet feet',
+      cooking_line: 'SS304 stainless steel · 1.2 mm body and panels · semi-non-stick griddle plate, gas-fired · square-tube stand with adjustable bullet feet',
+      deck_oven: 'Insulated double-wall decks with a gas burner, gas valve and thermometer per deck · stainless steel outer body · set on your own base',
+      hood: 'SS304 stainless steel · welded canopy with grease trough and oil cup · wall-mounted canopy · stainless baffle grease filters',
     };
-    assert.equal(fams.length, 6);
+    assert.equal(fams.length, 11);
     for (const m of fams) {
       const fam = FAMS.families[m[1]];
       const rows = [...m[0].matchAll(/<div><dt>([^<]*)<\/dt><dd>([^<]*)<\/dd><\/div>/g)].map((x) => [decode(x[1]), decode(x[2])]);
@@ -206,6 +214,13 @@ describe('the configurable cards: featured, with a labelled Specifications list 
       assert.ok(!m[0].includes('Top plate'), `${m[1]}: the staff-only group has a row on the card`);
       assert.ok(!/staff|lighter|cheaper|1\.2 mm top/i.test(m[0]), `${m[1]}: a card mentions the staff-only choice`);
     }
+    // a conditional option (spec §4.1) is still ONE row, and says when it applies (the row count above is already one per public group)
+    const rowOf = (fid, label) => decode([...fams.find((m) => m[1] === fid)[0].matchAll(/<div><dt>([^<]*)<\/dt><dd>([^<]*)<\/dd><\/div>/g)].find((x) => decode(x[1]) === label)[2]);
+    assert.equal(rowOf('cooking_line', 'Fry baskets'), '1 / 2 / 3 (Type is Fryer)');
+    assert.equal(rowOf('cooking_line', 'Burners'), '1 / 2 / 3 (Type is Griddle or Lava-rock griller)');
+    assert.equal(rowOf('dish_table', 'Pre-rinse sink'), 'None / With pre-rinse sink and spray faucet (Side is Soiled)');
+    assert.equal(rowOf('cooking_line', 'Type'), 'Griddle / Lava-rock griller / Fryer / Griller + griddle', 'an unconditional option has no suffix');
+    for (const m of fams) for (const g of PF.publicGroups(FAMS.families[m[1]])) assert.equal(rowOf(m[1], g.label).endsWith(` (${PF.whenText(FAMS.families[m[1]], g)})`), !!g.when, `${m[1]}.${g.key}: the condition shows exactly on the conditional rows`);
     // the GENERATOR does the same for any family: a staff-only group never gets a row, and a family with no sentence gets no Construction row
     const sinkCard = B.renderFamilyCard(FAMS.families.sink, { id: 'washing' }, null, '');
     assert.ok(!sinkCard.includes('<dt>Top plate</dt>') && sinkCard.includes('<dt>Construction</dt>'));
@@ -241,9 +256,9 @@ describe('the configurable cards: featured, with a labelled Specifications list 
     for (const html of [one, two]) assert.equal((html.match(/cat-card-feature/g) || []).length, html === one ? 1 : 2);
   });
 
-  it('only a category that holds SEVERAL configurable products gets the side-by-side row (Storage); a lone one is the wide featured card', () => {
+  it('only a category that holds SEVERAL configurable products gets the side-by-side row (Washing, Cooking, Storage); a lone one (Preparation, Ventilation) is the wide featured card', () => {
     const grids = [...block.matchAll(/<section class="cat-group" id="cat-([a-z]+)"[\s\S]*?<ul class="(cat-grid[^"]*)">/g)].map((m) => [m[1], m[2]]);
-    assert.deepEqual(grids, [['preparation', 'cat-grid'], ['washing', 'cat-grid'], ['cooking', 'cat-grid'], ['storage', 'cat-grid cat-grid-multi'], ['refrigeration', 'cat-grid']]);
+    assert.deepEqual(grids, [['preparation', 'cat-grid'], ['washing', 'cat-grid cat-grid-multi'], ['cooking', 'cat-grid cat-grid-multi'], ['ventilation', 'cat-grid'], ['storage', 'cat-grid cat-grid-multi'], ['refrigeration', 'cat-grid']]);
     const one = render([prod({ id: 'T-120' })], { families: null });
     assert.ok(!one.includes('cat-grid-multi'));
   });
@@ -453,7 +468,7 @@ describe('search finds every card — the featured ones included — by running 
   const ALL = env.cards.map(env.idOf);
 
   it('starts with every card shown, and a blank query restores them all', () => {
-    assert.equal(ALL.length, 32);
+    assert.equal(ALL.length, 25);
     assert.deepEqual(env.search(''), ALL);
   });
 
@@ -470,21 +485,23 @@ describe('search finds every card — the featured ones included — by running 
   });
 
   it('still finds fixed cards by code, name, size line and note — and not by the "Notes" / "Specifications" labels or the photo caption', () => {
-    assert.deepEqual(env.search('ce-016'), ['CE-016']);
-    assert.ok(env.search('griddle').includes('CE-010'));
-    assert.ok(env.search('900 × 700').includes('CE-007'));
-    assert.ok(env.search('kitz valve').includes('CE-016'), 'the end of the longest note is searched');
+    assert.deepEqual(env.search('ce-016'), ['deck_oven'], 'the code of an absorbed SKU finds the family that replaced it');
+    assert.deepEqual(env.search('ba-011'), ['BA-011']);
+    assert.ok(env.search('griddle').includes('cooking_line'));
+    assert.ok(env.search('700 × 800').includes('BA-006'), 'the size line is searched');
+    assert.ok(env.search('baking').includes('BA-006') === false && env.search('humidity tray').includes('BA-006'), 'the note is searched');
+    assert.ok(env.search('retard then proof').includes('BA-011') && env.search('supplied by partner').includes('BA-011'), 'the end of the longest note is searched');
     assert.deepEqual(env.search('representative'), [], 'the photo caption is not searchable');
-    assert.ok(!env.search('notes').includes('CE-007'), 'the label "Notes" is not searchable text');
+    assert.ok(!env.search('notes').includes('BA-006'), 'the label "Notes" is not searchable text');
     assert.ok(!env.search('specifications').includes('stove'), 'the label "Specifications" is not searchable text');
   });
 
   it('hides the cards that do not match, empties a category with no match, updates the counts and shows the empty state — and a configurable card reappears when the search is cleared', () => {
     const one = env.search('rack');
-    assert.ok(one.includes('rack') && !one.includes('stove') && !one.includes('CE-007'));
+    assert.ok(one.includes('rack') && !one.includes('stove') && !one.includes('BA-006'));
     const storage = env.byId['cat-storage'];
     env.search('zzzz-no-such-product');
-    for (const g of ['cat-preparation', 'cat-washing', 'cat-cooking', 'cat-storage', 'cat-refrigeration']) assert.ok(env.byId[g].classList.contains('is-empty'), g);
+    for (const g of ['cat-preparation', 'cat-washing', 'cat-cooking', 'cat-ventilation', 'cat-storage', 'cat-refrigeration']) assert.ok(env.byId[g].classList.contains('is-empty'), g);
     assert.equal(env.byId['cat-empty'].hidden, false);
     assert.equal(env.byId['cat-empty-q'].textContent, 'zzzz-no-such-product');
     assert.match(env.byId['cat-status'].textContent, /^No results for/);
@@ -497,8 +514,8 @@ describe('search finds every card — the featured ones included — by running 
 
   it('js/catalogue.js reads the lead paragraph (the haystack selector names .cat-lead) and the page keeps the data-cat / data-id / data-family hooks it and js/quote-request.js use', () => {
     assert.match(catJs, /querySelectorAll\('\.cat-code, h3, \.cat-meta, \.cat-notes, \.cat-lead, \.cat-specs'\)/);
-    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family)="/g) || []).length, 32);
-    assert.equal((block.match(/data-kw="/g) || []).length, 6);
+    assert.equal((block.match(/<li class="cat-card[^"]*" data-(?:id|family)="/g) || []).length, 25);
+    assert.equal((block.match(/data-kw="/g) || []).length, 11);
     assert.ok(/cards\[i\]\.parentNode\.parentNode\.getAttribute\('data-cat'\)/.test(catJs), 'the card -> grid -> section hop catalogue.js counts by');
     assert.ok(!/<li class="cat-card[^>]*><div/.test(block.replace(/<li class="cat-card[^>]*>(?:<figure|<div class="cat-tile")/g, '')), 'a card starts with something other than its image well');
   });

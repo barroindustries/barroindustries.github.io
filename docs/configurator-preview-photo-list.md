@@ -16,8 +16,8 @@ start with **Priority 1** and add more over time.
 - Send them as JPG or PNG. Name each file with the **File name** below. I convert them to web
   format and add them.
 
-Total: **Priority 1 = 17 photos** (the most-used variants of each product);
-**Priority 2 = 43 more** for full coverage.
+Total: **Priority 1 = 27 photos** (the most-used variants of each product);
+**Priority 2 = 48 more** for full coverage.
 
 ---
 
@@ -124,14 +124,71 @@ Shelves inside don't show with the doors closed, so they don't need separate pho
 | 2 | 6 | Without | `rack-tiers-6-wheels-no` |
 | 2 | 6 | With | `rack-tiers-6-wheels-yes` |
 
+## 7. Dish table
+
+Options that change the look: the side (the splash and the sloped top differ). Which hand the
+dishwasher is on, the pre-rinse sink and the undershelf are small details: shoot the default
+(dishwasher on the left, no sink, with undershelf) for each side.
+
+| Priority | Side | File name |
+|---|---|---|
+| 1 | Clean (landing) | `dish_table-clean` |
+| 1 | Soiled (loading) | `dish_table-soiled` |
+
+## 8. Wok range
+
+Options that change the look: the number of wok holes. The rear stock burner and the swan-neck
+faucet are small details: shoot the plain range for each count.
+
+| Priority | Wok holes | File name |
+|---|---|---|
+| 1 | 1 | `wok_range-holes-1` |
+| 1 | 2 | `wok_range-holes-2` |
+| 2 | 3 | `wok_range-holes-3` |
+
+## 9. Griddle, griller or fryer
+
+Options that change the look: the type. Burners, fry baskets and the base are small details:
+shoot the default (one burner, two baskets, open stand) for each type.
+
+| Priority | Type | File name |
+|---|---|---|
+| 1 | Griddle | `cooking_line-griddle` |
+| 1 | Lava-rock griller | `cooking_line-griller` |
+| 1 | Fryer | `cooking_line-fryer` |
+| 2 | Griller + griddle | `cooking_line-combi` |
+
+## 10. Gas deck oven
+
+Options that change the look: the number of decks. Trays per deck (a wider body) and the stand
+are small details: shoot the standard body (3 trays per deck, no stand).
+
+| Priority | Decks | File name |
+|---|---|---|
+| 1 | 2 | `deck_oven-decks-2` |
+| 2 | 1 | `deck_oven-decks-1` |
+| 2 | 3 | `deck_oven-decks-3` |
+
+## 11. Range hood
+
+Options that change the look: the type. The baffle filters and the lighting are small details:
+shoot the default (baffle filters, with lighting) for each type.
+
+| Priority | Type | File name |
+|---|---|---|
+| 1 | Wall canopy | `hood-wall` |
+| 1 | Island canopy | `hood-island` |
+| 2 | Slim, low profile | `hood-slim` |
+
 ---
 
 ## Checklist
 
-**Priority 1 (17):** prep table ×3 · sink ×4 · stove ×4 (2-burner, 4-burner, wok close-up,
-oven underneath) · cabinet ×2 · wall shelving ×2 · rack ×2.
+**Priority 1 (27):** prep table ×3 · sink ×4 · stove ×4 (2-burner, 4-burner, wok close-up,
+oven underneath) · cabinet ×2 · wall shelving ×2 · rack ×2 · dish table ×2 · wok range ×2 ·
+griddle / griller / fryer ×3 · deck oven ×1 · range hood ×2.
 
-**Priority 2 (43):** prep table ×6 · sink ×14 · stove ×10 · cabinet ×3 · wall shelving ×4 ·
-rack ×6.
+**Priority 2 (48):** prep table ×6 · sink ×14 · stove ×10 · cabinet ×3 · wall shelving ×4 ·
+rack ×6 · wok range ×1 · griddle / griller / fryer ×1 · deck oven ×2 · range hood ×1.
 
 Any subset works: whatever is missing falls back to the closest photo, then to the placeholder.

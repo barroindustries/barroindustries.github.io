@@ -7,16 +7,28 @@
 //     visitor is told), quantity and note re-cleaned, at most 40 lines, one product one multiplier.
 //   * A draft saved by the PREVIOUS page (key barro-qr-draft-v1, plain SKU lines) is converted ONCE: a fixed item stays, a SKU a family absorbed becomes that
 //     family at its closest configuration (a notice says so), anything else is dropped with the usual notice; the old key is removed, the new key written.
-//     Every one of the 44 absorbed SKUs converts to a line the server accepts, whatever size the old line carried.
+//     Every one of the 64 absorbed SKUs (eleven families) converts to a line the server accepts, whatever size the old line carried.
 //   * A family counts as ONE product for the per-product unit cap (key family:<id>), exactly as the server counts it; whatever capUnits leaves, the server accepts.
 //   * The payloads: a configured line is sent as { familyId, config, dims, qty, note } — nothing else; an ESTIMATE never carries the note; the basket key (the
 //     estimate cache and the "did the basket change" test) ignores key order and note.
 //   * STANDARD CONSTRUCTION (owner ruling 2026-10-28): the configurator sheet offers the PUBLIC groups only (PF.publicGroups) — there is no control for the staff-only 1.2 mm top
 //     plate — and shows a read-only "Construction: …" line instead; the staff-only key is never held in a line or the stored draft and never sent (the server fills in the
 //     standard 1.5 mm top); a stored line that asks for the lighter top is dropped. The sheet is run for real (the REAL openConfigurator in a tiny fake DOM).
+//   * CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4, five families added 2026-10-28): a group with `when` (fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish
+//     table) is in the sheet but HIDDEN until it applies and snaps back to its standard value the moment it stops applying, so whatever the sheet builds is a line the server
+//     accepts; an option can force a size limit (a slim hood is at most 500 mm deep, a deck oven's width follows its trays): a size the visitor has not typed follows the options,
+//     one they typed is moved to the limit at once, and the hint says so. The burner list is still edited in place (a write-back that replaced it would lose edits).
 //
 // Mutation-tested in scratch copies (see the commit message): trusting the stored name, dropping the strict re-validation, keying the cap on the SKU instead of the
 // family, sending the note with an estimate, an order-sensitive basket key, converting an absorbed SKU without the size rules, and so on; each must fail here.
+//
+// WS-3 (CONFIGURATOR-FAMILIES-2, 2026-10-28) — mutation-tested in scratch copies of the whole tree; each of these was KILLED by at least one test here:
+//   a conditional group never hidden / hidden by the inverted rule / hidden once and never shown again; a group that stopped applying keeping its non-standard value (no snap), the snap skipped on
+//   a change or at the opening, the snap replacing the WHOLE configuration (the burner list then edited as a stale copy); a forced maximum not applied to a typed size; a size nobody typed not
+//   following the options (every size, or only the length); a forced minimum on the length ignored; the hard length rule not raising a typed length; the size hint ignoring the maximum / saying
+//   "at least" for it / losing the one-value wording; the size field not following the limits (min / max) or not read-only when only one value is possible; typing not marking a size as the
+//   visitor's own; a saved line's own size not recognised; Reset not handing the sizes back to the options; a size not shown in its field after the options moved it; a size error not routed to its
+//   field; the Add button skipping the family validation or validating in staff mode; the layout classes and the stylesheet hooks gone; a stale helper file not treated as "family files did not load".
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -89,7 +101,7 @@ describe('the draft key and the helpers are the real ones', () => {
     assert.equal(pg.keys.v2, 'barro-qr-draft-v2');
     assert.equal(pg.keys.v1, 'barro-qr-draft-v1');
     assert.equal(pg.ctx.LIMITS.maxQtyPerProduct, 20);
-    assert.ok(island.products.length === 26, 'the island carries the 26 fixed items (the families are not cards of absorbed SKUs; the specialised items of Preparation, Washing and Storage are excluded)');
+    assert.ok(island.products.length === 14, 'the island carries the 14 fixed items (the eleven families are not cards of absorbed SKUs; the specialised items, the exhaust ducting and the blowers are excluded)');
     assert.ok(island.products.every((p) => !FAMS.order.some((f) => Object.keys(FAMS.families[f].absorbed).includes(p.id))), 'no absorbed SKU is in the island');
   });
 });
@@ -227,8 +239,8 @@ describe('a draft saved by the PREVIOUS page (barro-qr-draft-v1) is converted on
   const absorbed = [];
   for (const f of FAMS.order) for (const sku of Object.keys(FAMS.families[f].absorbed)) absorbed.push([f, sku]);
 
-  it('there are 44 absorbed SKUs and EVERY ONE converts to its own family at its configuration, valid, whatever size the old line carried', () => {
-    assert.equal(absorbed.length, 44);
+  it('there are 64 absorbed SKUs (eleven families) and EVERY ONE converts to its own family at its configuration, valid, whatever size the old line carried', () => {
+    assert.equal(absorbed.length, 64);
     const sizes = [null, { W: 1200, D: 600, H: 850 }, { W: 5, D: 5, H: 5 }, { W: 123, D: 7, H: 99999 }, { W: 3500, D: 900, H: 1000 }, 'x'];
     let n = 0;
     for (const [fid, sku] of absorbed) for (const size of sizes) {
@@ -251,7 +263,7 @@ describe('a draft saved by the PREVIOUS page (barro-qr-draft-v1) is converted on
       assert.equal(pg.ctx.convertedLines, 1);
       n++;
     }
-    assert.equal(n, 44 * sizes.length);
+    assert.equal(n, 64 * sizes.length);
   });
   it('the notice says the item is now configurable and to check it; the old key is REMOVED and the new key holds the converted v2 draft', () => {
     const pg = loadV1([{ uid: 'o', id: 'PW-008', qty: 1, size: null, specs: [], note: '' }]);
@@ -309,7 +321,7 @@ describe('a draft saved by the PREVIOUS page (barro-qr-draft-v1) is converted on
   });
   it('OWNER RULING (b): a line for ANY excluded SKU (a specialised table, sink, cabinet, rack, the baking sheet pan, a service line ...) is DROPPED with the notice — in an old draft and in a current one — and never reaches the quote', () => {
     const excluded = Object.keys(JSON.parse(read('scripts/public-categories.json')).excludedProducts);
-    assert.equal(excluded.length, 49);
+    assert.equal(excluded.length, 68, 'the 20 exhaust-system SKUs that are not hoods (ducting, blowers, switches, the service line, the filter block and the lamp case) join the excluded list; the dish table (PW-029) leaves it');
     for (const id of excluded) {
       const old = loadV1([{ uid: 'o', id, qty: 2, size: null, specs: [], note: 'x' }]);
       assert.deepEqual(items(old), [], `${id}: an old-draft line must not survive`);
@@ -488,11 +500,11 @@ describe('what is SENT: a configured line carries exactly { familyId, config, di
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // STANDARD CONSTRUCTION (owner ruling 2026-10-28): the staff-only 1.2 mm top plate is never kept, offered or sent by the website.
 describe('the staff-only 1.2 mm top plate is never kept, offered or sent by the website (owner ruling 2026-10-28)', () => {
-  const STAFF = ['prep_table', 'sink', 'stove'];                    // the families that carry the staff-only group
+  const STAFF = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];                    // the families that carry the staff-only group
   const primaries = new Map(FAMS.order.map((f) => [f, { id: FAMS.families[f].primary }]));
   const lineOf = (fid, extra) => Object.assign({ uid: 'u-1', familyId: fid, config: json(PFmod.defaultConfig(FAMS.families[fid])), dims: json(PFmod.defaultDims(FAMS.families[fid])), qty: 2, note: '' }, extra || {});
 
-  it('the premise: exactly the preparation table, the sink and the stove carry a staff-only group, it is "top", and PF.publicGroups is every other group', () => {
+  it('the premise: exactly the preparation table, the sink, the dish table, the stove and the wok range carry a staff-only group, it is "top", and PF.publicGroups is every other group', () => {
     for (const fid of FAMS.order) {
       const fam = FAMS.families[fid];
       assert.deepEqual(fam.groups.filter((g) => g.staffOnly === true).map((g) => g.key), STAFF.includes(fid) ? ['top'] : [], fid);
@@ -610,7 +622,7 @@ const press = (pg, label) => { const b = where(pg.ctx.sheetFrame.foot, (n) => n.
 const constructionHint = (pg) => where(sheetBody(pg), (n) => n.tag === 'p' && hasCls(n, 'qr-construction'));
 
 describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no control for the staff-only top plate, a read-only Construction line, nothing staff-only in the line it builds', () => {
-  const STAFF = ['prep_table', 'sink', 'stove'];
+  const STAFF = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];
 
   it('lists exactly the PUBLIC option groups of every family — no group, legend, button or word for the staff-only top plate — and then the size', () => {
     for (const fid of FAMS.order) {
@@ -627,7 +639,7 @@ describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no
     }
   });
 
-  it('says how the piece is built — a read-only "Construction: …" line (PF.constructionLine) between the last option group and the size; the table, the sink and the stove say 1.5 mm (16 ga) top plate', () => {
+  it('says how the piece is built — a read-only "Construction: …" line (PF.constructionLine) between the last option group and the size; the table, the sink, the dish table, the stove and the wok range say 1.5 mm (16 ga) top plate', () => {
     for (const fid of FAMS.order) {
       const fam = FAMS.families[fid];
       const body = sheetBody(openSheet(fid));
@@ -699,6 +711,373 @@ describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// CONDITIONAL OPTIONS and FORCED SIZE LIMITS (CONFIGURATOR-FAMILIES-2-SPEC §4, §6.1) — the REAL sheet in the fake DOM.
+describe('conditional options and forced size limits — the REAL openConfigurator in a fake DOM', () => {
+  const primaries = new Map(FAMS.order.map((f) => [f, { id: FAMS.families[f].primary }]));
+  const groupFs = (pg) => where(sheetBody(pg), (n) => n.tag === 'fieldset' && hasCls(n, 'qr-group'));
+  const groupNode = (pg, label) => groupFs(pg).find((n) => n.children[0].textContent === label);
+  const visibleGroups = (pg) => groupFs(pg).filter((n) => !n.hidden).map((n) => n.children[0].textContent);
+  const radiosOf = (fs) => where(fs, (n) => n.tag === 'input' && n.attrs.type === 'radio');
+  const labelOf = (inp) => inp.parentNode.children[1].textContent;
+  const choose = (pg, groupLabel, optLabel) => {
+    const fs = groupNode(pg, groupLabel);
+    assert.ok(fs, `no group "${groupLabel}"`);
+    assert.equal(fs.hidden, false, `"${groupLabel}" is hidden: a visitor cannot choose in it`);
+    const radio = radiosOf(fs).find((r) => labelOf(r) === optLabel);
+    assert.ok(radio, `no option "${optLabel}" in "${groupLabel}"`);
+    radio.checked = true; fire(radio, 'change');
+  };
+  const selected = (pg, groupLabel) => { const r = radiosOf(groupNode(pg, groupLabel)).find((x) => x.checked); return r ? labelOf(r) : null; };
+  const sizeField = (pg, label) => {
+    const f = where(sheetBody(pg), (n) => n.tag === 'div' && hasCls(n, 'qr-field') && where(n, (c) => c.tag === 'span' && hasCls(c, 'qr-label') && c.textContent === label).length > 0)[0];
+    assert.ok(f, `no size field "${label}"`);
+    return f;
+  };
+  const sizeInput = (pg, label) => where(sizeField(pg, label), (n) => n.tag === 'input')[0];
+  const sizeNow = (pg, label) => Number(sizeInput(pg, label).value);
+  const typeSize = (pg, label, v) => { const i = sizeInput(pg, label); i.value = String(v); fire(i, 'input'); };
+  const sizeErr = (pg, label) => where(sizeField(pg, label), (n) => n.tag === 'p' && hasCls(n, 'qr-err'))[0];
+  const sizeHint = (pg) => where(sheetBody(pg), (n) => n.tag === 'p' && hasCls(n, 'qr-wide-hint'))[0];
+  const standardLine = (pg) => where(sheetBody(pg), (n) => n.tag === 'p' && hasCls(n, 'qr-hint') && /^Standard size: /.test(n.textContent))[0].textContent;
+  const added = (pg) => { const before = pg.ctx.draft.items.length; press(pg, 'Add to quote'); return pg.ctx.draft.items.length > before ? json(pg.ctx.draft.items[pg.ctx.draft.items.length - 1]) : null; };
+  const serverSays = (pg, it) => Q.normaliseItems(json([pg.ctx.itemPayload(it)]), new Map(), { families: FAMS, primaries });
+
+  it('the sheet carries EVERY public group of a family, and opens with exactly the ones that apply to its standard configuration visible — only the dish table and the griddle / griller / fryer have a conditional group', () => {
+    const gated = [];
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const pg = openSheet(fid);
+      assert.equal(groupFs(pg).length, PFmod.publicGroups(fam).length, `${fid}: every public group is in the sheet, the hidden ones too`);
+      assert.deepEqual(visibleGroups(pg), PFmod.publicActiveGroups(fam, PFmod.defaultConfig(fam)).map((g) => g.label), `${fid}: the visible groups`);
+      if (PFmod.publicGroups(fam).some((g) => g.when)) gated.push(fid);
+    }
+    assert.deepEqual(gated, ['dish_table', 'cooking_line']);
+  });
+
+  it('griddle / griller / fryer: "Burners" for a griddle or a griller, "Fry baskets" for a fryer, neither for the griller + griddle — each appears and disappears as the type changes', () => {
+    const pg = openSheet('cooking_line');
+    assert.deepEqual(visibleGroups(pg), ['Type', 'Burners', 'Base']);
+    choose(pg, 'Type', 'Fryer');
+    assert.deepEqual(visibleGroups(pg), ['Type', 'Fry baskets', 'Base']);
+    choose(pg, 'Type', 'Griller + griddle');
+    assert.deepEqual(visibleGroups(pg), ['Type', 'Base']);
+    choose(pg, 'Type', 'Lava-rock griller');
+    assert.deepEqual(visibleGroups(pg), ['Type', 'Burners', 'Base']);
+    choose(pg, 'Type', 'Fryer');
+    choose(pg, 'Type', 'Griddle');
+    assert.deepEqual(visibleGroups(pg), ['Type', 'Burners', 'Base']);
+  });
+
+  it('dish table: the pre-rinse sink is offered on the soiled side only', () => {
+    const pg = openSheet('dish_table');
+    assert.deepEqual(visibleGroups(pg), ['Side', 'Dishwasher on the', 'Undershelf']);
+    choose(pg, 'Side', 'Soiled');
+    assert.deepEqual(visibleGroups(pg), ['Side', 'Dishwasher on the', 'Pre-rinse sink', 'Undershelf']);
+    choose(pg, 'Side', 'Clean');
+    assert.deepEqual(visibleGroups(pg), ['Side', 'Dishwasher on the', 'Undershelf']);
+  });
+
+  it('a conditional group goes back to its standard value the moment it stops applying — the line the sheet builds never carries a non-standard option that does not apply, and the server accepts it', () => {
+    // three burners on a griddle, then a fryer: the burner count is the standard one again (and the hidden control shows it)
+    let pg = openSheet('cooking_line');
+    choose(pg, 'Burners', '3');
+    assert.equal(selected(pg, 'Burners'), '3');
+    choose(pg, 'Type', 'Fryer');
+    assert.equal(selected(pg, 'Burners'), '1', 'the hidden group shows its standard value');
+    let it = added(pg);
+    assert.deepEqual(it.config, { type: 'fryer', burners: 1, baskets: 2, base: 'stand' });
+    assert.equal(serverSays(pg, it).ok, true);
+    // three baskets on a fryer, then a griddle: the basket count is the standard two again, and it is not remembered when the fryer comes back
+    pg = openSheet('cooking_line');
+    choose(pg, 'Type', 'Fryer'); choose(pg, 'Fry baskets', '3');
+    choose(pg, 'Type', 'Griddle');
+    assert.equal(selected(pg, 'Fry baskets'), '2');
+    it = added(pg);
+    assert.deepEqual(it.config, { type: 'griddle', burners: 1, baskets: 2, base: 'stand' });
+    assert.equal(serverSays(pg, it).ok, true);
+    pg = openSheet('cooking_line');
+    choose(pg, 'Type', 'Fryer'); choose(pg, 'Fry baskets', '3'); choose(pg, 'Type', 'Griddle'); choose(pg, 'Type', 'Fryer');
+    assert.equal(selected(pg, 'Fry baskets'), '2');
+    // the pre-rinse sink of a dish table: soiled + sink, then the clean side
+    pg = openSheet('dish_table');
+    choose(pg, 'Side', 'Soiled'); choose(pg, 'Pre-rinse sink', 'With pre-rinse sink and spray faucet');
+    it = added(pg);
+    assert.deepEqual(it.config, { side: 'soiled', hand: 'left', sink: 'prerinse', undershelf: true });
+    pg = openSheet('dish_table');
+    choose(pg, 'Side', 'Soiled'); choose(pg, 'Pre-rinse sink', 'With pre-rinse sink and spray faucet'); choose(pg, 'Side', 'Clean');
+    assert.equal(selected(pg, 'Pre-rinse sink'), 'None');
+    it = added(pg);
+    assert.deepEqual(it.config, { side: 'clean', hand: 'left', sink: 'none', undershelf: true });
+    assert.equal(serverSays(pg, it).ok, true);
+  });
+
+  it('PROPERTY: any walk through the options of any family leaves a sheet that builds a line the server accepts — canonical, every option that does not apply at its standard value, and every size still the usual one for those options', () => {
+    let seed = 0x2545F491;
+    const rnd = () => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; };
+    let built = 0, steps = 0;
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      for (let round = 0; round < 25; round++) {
+        const pg = openSheet(fid);
+        const walk = 1 + Math.floor(rnd() * 10);
+        for (let s = 0; s < walk; s++) {
+          const fs = groupFs(pg).filter((n) => !n.hidden);
+          const g = fs[Math.floor(rnd() * fs.length)];
+          const inputs = where(g, (n) => n.tag === 'input');
+          const inp = inputs[Math.floor(rnd() * inputs.length)];
+          if (inp.attrs.type === 'checkbox') inp.checked = !inp.checked; else inp.checked = true;
+          fire(inp, 'change');
+          steps++;
+        }
+        const it = added(pg);
+        assert.ok(it, `${fid}: the sheet could not add a line after the visitor only chose options`);
+        const v = PFmod.validateLine(fam, it.config, it.dims);
+        assert.equal(v.ok, true, `${fid}: ${v.errors.join(' ')}`);
+        assert.deepEqual(it.config, publicOnly(fam, v.config), `${fid}: the line is canonical`);
+        assert.equal(v.custom, false, `${fid}: a size nobody typed is the usual one for its options (${JSON.stringify(it.dims)})`);
+        for (const g of PFmod.publicGroups(fam)) if (!PFmod.groupApplies(fam, g, it.config)) assert.deepEqual(it.config[g.key], g.default, `${fid}: "${g.label}" does not apply and must be at its standard value`);
+        const r = serverSays(pg, it);
+        assert.equal(r.ok, true, `${fid}: the server refused what the sheet built: ${(r.errors || []).join(' | ')}`);
+        built++;
+      }
+    }
+    assert.equal(built, FAMS.order.length * 25);
+    assert.ok(steps > 500);
+  });
+
+  it('a size the visitor has NOT typed follows the options; one they typed is kept and moved only when an option forces it (burners of a griddle)', () => {
+    const pg = openSheet('cooking_line');
+    assert.equal(sizeNow(pg, 'Length'), 700);
+    assert.equal(standardLine(pg), 'Standard size: Length 700 · Width 700 mm. Each dimension in steps of 10.');
+    choose(pg, 'Burners', '2'); assert.equal(sizeNow(pg, 'Length'), 900);
+    choose(pg, 'Burners', '3'); assert.equal(sizeNow(pg, 'Length'), 1200);
+    assert.equal(standardLine(pg), 'Standard size: Length 1200 · Width 700 mm. Each dimension in steps of 10.');
+    choose(pg, 'Burners', '1'); assert.equal(sizeNow(pg, 'Length'), 700, 'untouched: it follows the options back');
+    typeSize(pg, 'Length', 1500);
+    choose(pg, 'Burners', '3'); assert.equal(sizeNow(pg, 'Length'), 1500, 'a length of the visitor\'s own is kept');
+    choose(pg, 'Burners', '1'); assert.equal(sizeNow(pg, 'Length'), 1500);
+    typeSize(pg, 'Length', 800);
+    choose(pg, 'Burners', '3'); assert.equal(sizeNow(pg, 'Length'), 1200, 'a typed length below a forced minimum is raised at once');
+    // Reset: the usual size for the current options, and the size follows the options again
+    fire(where(sheetBody(pg), (n) => n.tag === 'button' && n.textContent === 'Reset to standard size')[0], 'click');
+    assert.equal(sizeNow(pg, 'Length'), 1200);
+    choose(pg, 'Burners', '1'); assert.equal(sizeNow(pg, 'Length'), 700);
+    // the forced minimum is in the field and in the words
+    choose(pg, 'Burners', '2');
+    assert.equal(sizeInput(pg, 'Length').attrs.min, '900');
+    assert.equal(sizeHint(pg).textContent, 'With these options the length is at least 900 mm.');
+    choose(pg, 'Burners', '1');
+    assert.equal(sizeInput(pg, 'Length').attrs.min, '500');
+    assert.equal(sizeHint(pg).hidden, true);
+  });
+
+  it('a forced MAXIMUM lowers a size at once (a slim hood is at most 500 mm deep), the field and the hint say so, the standard depth returns with the wall canopy, and a deeper typed size is refused at the field with the server\'s words', () => {
+    const pg = openSheet('hood');
+    assert.equal(sizeNow(pg, 'Depth'), 900);
+    assert.equal(sizeInput(pg, 'Depth').attrs.max, '1500');
+    choose(pg, 'Type', 'Slim, low profile');
+    assert.equal(sizeNow(pg, 'Depth'), 500);
+    assert.equal(sizeInput(pg, 'Depth').attrs.max, '500', 'the field stops at the limit');
+    assert.equal(sizeHint(pg).hidden, false);
+    assert.match(sizeHint(pg).textContent, /With these options the depth is at most 500 mm\./);
+    choose(pg, 'Type', 'Wall canopy');
+    assert.equal(sizeNow(pg, 'Depth'), 900, 'a depth nobody typed follows the type');
+    assert.equal(sizeInput(pg, 'Depth').attrs.max, '1500');
+    // a typed depth is lowered at once when the limit arrives
+    typeSize(pg, 'Depth', 700);
+    choose(pg, 'Type', 'Slim, low profile');
+    assert.equal(sizeNow(pg, 'Depth'), 500);
+    // ... and a depth typed while the limit holds is refused at the field, never sent
+    typeSize(pg, 'Depth', 650);
+    assert.equal(added(pg), null);
+    assert.equal(sizeErr(pg, 'Depth').hidden, false);
+    assert.equal(sizeErr(pg, 'Depth').textContent, 'With these options the depth must be at most 500 mm.');
+    typeSize(pg, 'Depth', 450);
+    const it = added(pg);
+    assert.deepEqual(it.dims, { W: 1000, D: 450 });
+    assert.equal(serverSays(pg, it).ok, true);
+    // the island canopy forces a minimum on BOTH axes, said in one sentence
+    const isl = openSheet('hood');
+    choose(isl, 'Type', 'Island canopy');
+    assert.equal(sizeNow(isl, 'Length'), 1200);
+    assert.equal(sizeHint(isl).textContent, 'With these options the length is at least 1200 mm and the depth is at least 700 mm.');
+  });
+
+  it('gas deck oven: the width follows the trays per deck (700 for three, 1200 for six), is shown read-only, and the hint says it is one value', () => {
+    const pg = openSheet('deck_oven');
+    assert.equal(sizeNow(pg, 'Width'), 700);
+    assert.equal(sizeInput(pg, 'Width').readOnly, true, 'only one width is possible');
+    assert.equal(sizeHint(pg).textContent, 'With these options the width is 700 mm.');
+    assert.equal(standardLine(pg), 'Standard size: Width 700 mm. Each dimension in steps of 10.');
+    choose(pg, 'Trays per deck', '6');
+    assert.equal(standardLine(pg), 'Standard size: Width 1200 mm. Each dimension in steps of 10.', 'the standard size is the usual one for the chosen options — what Reset goes back to');
+    assert.equal(sizeNow(pg, 'Width'), 1200);
+    assert.equal(sizeInput(pg, 'Width').readOnly, true);
+    assert.equal(sizeInput(pg, 'Width').attrs.min, '1200'); assert.equal(sizeInput(pg, 'Width').attrs.max, '1200');
+    assert.equal(sizeHint(pg).textContent, 'With these options the width is 1200 mm.');
+    choose(pg, 'Decks', '3'); assert.equal(sizeNow(pg, 'Width'), 1200, 'the decks do not change the width');
+    let it = added(pg);
+    assert.deepEqual(it.dims, { W: 1200 });
+    assert.deepEqual(it.config, { decks: 3, trays: 6, stand: 'none' });
+    assert.equal(serverSays(pg, it).ok, true);
+    const pg2 = openSheet('deck_oven'); choose(pg2, 'Trays per deck', '6'); choose(pg2, 'Trays per deck', '3');
+    assert.equal(sizeNow(pg2, 'Width'), 700);
+    it = added(pg2);
+    assert.deepEqual(it.dims, { W: 700 });
+    // a family with a free size has no read-only field
+    assert.equal(sizeInput(openSheet('hood'), 'Length').readOnly, false);
+  });
+
+  it('a size forced up by a pre-rinse sink or the wok range\'s rear burner is raised at once; the dish table keeps a length of its own otherwise', () => {
+    const dt = openSheet('dish_table');
+    typeSize(dt, 'Length', 900);
+    choose(dt, 'Side', 'Soiled');
+    assert.equal(sizeNow(dt, 'Length'), 900, 'a soiled side without the sink has no minimum');
+    choose(dt, 'Pre-rinse sink', 'With pre-rinse sink and spray faucet');
+    assert.equal(sizeNow(dt, 'Length'), 1200);
+    assert.match(sizeHint(dt).textContent, /the length is at least 1200 mm/);
+    const wok = openSheet('wok_range');
+    assert.equal(sizeNow(wok, 'Width'), 700);
+    choose(wok, 'Rear stock burner', 'With');
+    assert.equal(sizeNow(wok, 'Width'), 800, 'the rear burner needs a deeper range');
+    choose(wok, 'Rear stock burner', 'None');
+    assert.equal(sizeNow(wok, 'Width'), 700, 'untouched: it follows back');
+    choose(wok, 'Wok holes', '3');
+    assert.equal(sizeNow(wok, 'Length'), 1800, 'a hard length rule: 600 mm for each hole');
+    // a HARD length rule raises a length the visitor typed as well (it could not be sent otherwise): wok holes, sink basins
+    const wok2 = openSheet('wok_range');
+    typeSize(wok2, 'Length', 700);
+    choose(wok2, 'Wok holes', '2');
+    assert.equal(sizeNow(wok2, 'Length'), 1200);
+    const sink = openSheet('sink');
+    typeSize(sink, 'Length', 600);
+    choose(sink, 'Sinks', '3');
+    assert.equal(sizeNow(sink, 'Length'), 1500, 'the sink\'s own hard rule: 500 mm for each basin');
+  });
+
+  it('"Use N mm" (a length rule) still sets the usual length and keeps it as the visitor\'s own; it is offered only while the length differs from the rule', () => {
+    const pg = openSheet('sink');
+    const useBtn = () => where(sheetBody(pg), (n) => n.tag === 'button' && /^Use \d+ mm$/.test(n.textContent))[0];
+    choose(pg, 'Sinks', '2');
+    assert.equal(sizeNow(pg, 'Length'), 1000);
+    assert.equal(useBtn().hidden, true, 'the length already is the rule');
+    typeSize(pg, 'Length', 1400);
+    assert.equal(useBtn().hidden, false);
+    assert.equal(useBtn().textContent, 'Use 1000 mm');
+    fire(useBtn(), 'click');
+    assert.equal(sizeNow(pg, 'Length'), 1000);
+    assert.equal(useBtn().hidden, true);
+    choose(pg, 'Sinks', '3');
+    assert.equal(sizeNow(pg, 'Length'), 1500, 'a hard rule still raises it');
+  });
+
+  it('editing a saved line opens on its own options and sizes: a conditional group is shown when it applies, a size at the usual one keeps following, a size of its own is kept', () => {
+    const saved = (config, dims) => ({ uid: 'c1', familyId: 'cooking_line', config, dims, qty: 2, note: 'n' });
+    let pg = openSheet('cooking_line', 'c1', [saved({ type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, { W: 1000, D: 700 })]);
+    assert.deepEqual(visibleGroups(pg), ['Type', 'Fry baskets', 'Base']);
+    assert.equal(selected(pg, 'Fry baskets'), '3');
+    choose(pg, 'Type', 'Griddle');
+    assert.equal(sizeNow(pg, 'Length'), 700, '1000 mm was the usual length for three baskets: it follows the options');
+    pg = openSheet('cooking_line', 'c1', [saved({ type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, { W: 1500, D: 700 })]);
+    choose(pg, 'Type', 'Griddle');
+    assert.equal(sizeNow(pg, 'Length'), 1500, 'a length of the visitor\'s own is kept');
+    press(pg, 'Save changes');
+    assert.equal(pg.ctx.draft.items.length, 1);
+    assert.deepEqual(json(pg.ctx.draft.items[0].config), { type: 'griddle', burners: 1, baskets: 2, base: 'stand' });
+    assert.equal(pg.ctx.draft.items[0].qty, 2);
+  });
+
+  it('layout hooks: four option names that would break on a phone (griddle / lava-rock griller / fryer / griller + griddle) get the two-by-two class, and no other group does; a family with one size keeps the half-width layout', () => {
+    const segClasses = (fid) => where(sheetBody(openSheet(fid)), (n) => n.tag === 'div' && hasCls(n, 'qr-seg')).map((n) => n.className);
+    assert.deepEqual(segClasses('cooking_line').map((c) => /qr-seg-wrap/.test(c)), [true, false, false, false], 'only the type of the griddle / griller / fryer (its burners, baskets and base have three, three and two options)');
+    for (const fid of FAMS.order) if (fid !== 'cooking_line') assert.ok(!segClasses(fid).some((c) => /qr-seg-wrap/.test(c)), `${fid}: a group with short names must keep its single row`);
+    const dims = (fid) => where(sheetBody(openSheet(fid)), (n) => n.tag === 'div' && hasCls(n, 'qr-dims'))[0].className;
+    assert.match(dims('deck_oven'), /qr-dims-1/);
+    assert.match(dims('hood'), /qr-dims-2/);
+    assert.ok(!/qr-dims-[12]/.test(dims('sink')), 'three sizes: the three-column layout');
+  });
+
+  it('a saved line that wrongly holds an option that does not apply (this page cannot make one, but a stored draft is untrusted) opens snapped to the standard value and can still be saved', () => {
+    const bad = { uid: 'c1', familyId: 'cooking_line', config: { type: 'fryer', burners: 3, baskets: 3, base: 'stand' }, dims: { W: 1000, D: 700 }, qty: 1, note: '' };
+    const pg = openSheet('cooking_line', 'c1', [bad]);
+    assert.equal(selected(pg, 'Burners'), '1');
+    assert.equal(sizeNow(pg, 'Length'), 1000);
+    press(pg, 'Save changes');
+    assert.deepEqual(json(pg.ctx.draft.items[0].config), { type: 'fryer', burners: 1, baskets: 3, base: 'stand' });
+  });
+
+  it('the burner list of the stove is still edited IN PLACE: two edits in a row both reach the line (a write-back that replaced the list would leave the buttons editing a stale copy)', () => {
+    const pg = openSheet('stove');
+    const slots = () => where(sheetBody(pg), (n) => n.tag === 'li' && hasCls(n, 'qr-slot'));
+    const chip = (slot, label) => where(slot, (n) => n.tag === 'input' && n.attrs.type === 'radio').find((r) => labelOf(r) === label);
+    const pick = (slot, label) => { const r = chip(slot, label); assert.ok(r, label); r.checked = true; fire(r, 'change'); };
+    pick(slots()[0], 'Wok');
+    pick(slots()[0], 'Soup');
+    pick(slots()[0], 'Wok');
+    const it = added(pg);
+    assert.deepEqual(it.config.positions, ['wok'], 'the last of three edits wins');
+    // and after an option elsewhere changes (an add-on chip), the burner buttons still edit the line
+    const pg2 = openSheet('stove');
+    const slot0 = () => where(sheetBody(pg2), (n) => n.tag === 'li' && hasCls(n, 'qr-slot'))[0];
+    const pick2 = (label) => { const r = chip(slot0(), label); r.checked = true; fire(r, 'change'); };
+    pick2('Wok');
+    const oven = where(groupNode(pg2, 'Add-ons'), (n) => n.tag === 'input' && n.attrs.type === 'checkbox').find((x) => labelOf(x) === 'Oven');
+    oven.checked = true; fire(oven, 'change');
+    pick2('Soup');
+    const it2 = added(pg2);
+    assert.deepEqual(it2.config.positions, ['soup']);
+    assert.deepEqual(it2.config.addons, ['oven']);
+    assert.ok(it2.dims.D >= 700 && it2.dims.H >= 850, 'the oven still raises the depth and the height');
+  });
+});
+
+describe('a saved line is re-validated against the families as they are now — conditional options, forced limits and a missing size', () => {
+  const lineOf = (familyId, config, dims) => ({ uid: 'u-1', familyId, config, dims, qty: 1, note: '' });
+
+  it('a stored line that sets an option that does not apply is dropped and the visitor is told; one that leaves it out, or states its standard value, is kept', () => {
+    for (const [why, cfg] of Object.entries({
+      'baskets on a griddle': { type: 'griddle', burners: 1, baskets: 3, base: 'stand' },
+      'burners on a fryer': { type: 'fryer', burners: 2, baskets: 2, base: 'stand' },
+      'burners on the combination': { type: 'combi', burners: 3, baskets: 2, base: 'stand' },
+    })) {
+      const pg = loadV2([lineOf('cooking_line', cfg, { W: 1500, D: 700 })]);
+      assert.deepEqual(items(pg), [], why);
+      assert.match(pg.ctx.pendingToast, /no longer in the catalogue/, why);
+    }
+    const dish = loadV2([lineOf('dish_table', { side: 'clean', hand: 'left', sink: 'prerinse', undershelf: true }, { W: 1200, D: 660 })]);
+    assert.deepEqual(items(dish), [], 'a pre-rinse sink on the clean side');
+    for (const cfg of [{ type: 'fryer', baskets: 3 }, { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, { type: 'griddle', burners: 2 }]) {
+      const pg = loadV2([lineOf('cooking_line', cfg, { W: 1500, D: 700 })]);
+      assert.equal(items(pg).length, 1, JSON.stringify(cfg));
+      assert.equal(pg.ctx.pendingToast, '');
+    }
+  });
+
+  it('a stored line that leaves a size out gets the USUAL size for its options — a six-tray deck oven is 1200 mm wide, a three-burner griddle 1200 mm long — not the family default (which the server would refuse)', () => {
+    const six = loadV2([lineOf('deck_oven', { decks: 2, trays: 6, stand: 'none' }, {})]);
+    assert.deepEqual(items(six)[0].dims, { W: 1200 });
+    const three = loadV2([lineOf('cooking_line', { type: 'griddle', burners: 3 }, { D: 800 })]);
+    assert.deepEqual(items(three)[0].dims, { W: 1200, D: 800 });
+    const slim = loadV2([lineOf('hood', { type: 'slim' }, { W: 1500 })]);
+    assert.deepEqual(items(slim)[0].dims, { W: 1500, D: 500 });
+  });
+
+  it('a stored size beyond a forced limit is dropped (a slim hood 600 mm deep, a six-tray deck oven 700 mm wide), the notice says so', () => {
+    for (const [why, line] of Object.entries({
+      'slim hood 600 deep': lineOf('hood', { type: 'slim', filters: 'baffle', lighting: true }, { W: 1000, D: 600 }),
+      'island hood 600 deep': lineOf('hood', { type: 'island', filters: 'baffle', lighting: true }, { W: 1200, D: 600 }),
+      'six trays 700 wide': lineOf('deck_oven', { decks: 2, trays: 6, stand: 'none' }, { W: 700 }),
+      'three trays 1200 wide': lineOf('deck_oven', { decks: 2, trays: 3, stand: 'none' }, { W: 1200 }),
+      'pre-rinse sink 900 long': lineOf('dish_table', { side: 'soiled', hand: 'left', sink: 'prerinse', undershelf: true }, { W: 900, D: 660 }),
+    })) {
+      const pg = loadV2([line]);
+      assert.deepEqual(items(pg), [], why);
+      assert.match(pg.ctx.pendingToast, /no longer in the catalogue/, why);
+    }
+  });
+});
+
 describe('the page source — configurator guard rails that cannot be unit-tested in plain Node', () => {
   it('no markup is ever parsed, no inline style, no price vocabulary, no private collection or pricing engine is named', () => {
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -716,6 +1095,7 @@ describe('the page source — configurator guard rails that cannot be unit-teste
     assert.match(src, /PF\.validateLine\(/);
     assert.match(src, /PF\.minWidth\(/);
     assert.match(src, /PF\.forcedMins\(/);
+    assert.match(src, /PF\.forcedMaxes\(/);
   });
   it('an Edit opened from the review goes BACK to the review however the sheet is left (both sheets), and a button marks the sheet as dealt with first', () => {
     const wired = src.match(/openSheet\('(item|configure)', trigger, retReview \? \{ onClose: function \(\) \{ if \(!finished\) openReview\(trigger\); \} \} : null\);/g) || [];
@@ -724,11 +1104,13 @@ describe('the page source — configurator guard rails that cannot be unit-teste
     assert.equal((src.match(/finished = true;\n\s+closeSheet\(!retReview\);\n\s+if \(retReview\) openReview\(trigger\);\n\s+toast\(existing \? 'Item updated\.' : 'Added to your quote\.'\);/g) || []).length, 2, 'Save/Add: flag, close, reopen the review, THEN toast (opening a sheet clears a toast)');
     assert.equal((src.match(/finished = true; closeSheet\(!retReview\); if \(retReview\) openReview\(trigger\);/g) || []).length, 2, 'Cancel');
   });
-  it('the configurator: a length of the visitor\'s own is kept, the usual one follows the options; Reset and the "Custom size" tag use the usual size; an oven raises depth/height at once', () => {
-    assert.match(src, /wTouched: !!existing && existing\.dims\.W !== usualW0/);
-    assert.match(src, /st\.dims = PF\.standardDims\(fam, st\.config\); st\.wTouched = false;/);
-    assert.match(src, /var std = PF\.standardDims\(fam, st\.config\);\n\s+var cust = axes\.some\(function \(k\) \{ return st\.dims\[k\] !== std\[k\]; \}\);/);
-    assert.match(src, /var fm0 = PF\.forcedMins\(fam, st\.config\);/);
+  it('the configurator: a size of the visitor\'s own is kept, the usual one follows the options; Reset and the "Custom size" tag use the usual size; an option that forces a limit moves a size to it at once', () => {
+    assert.match(src, /touched: \{\}/);
+    assert.match(src, /if \(existing\) PF\.DIM_KEYS\.forEach\(function \(k\) \{ if \(fam\.dims\[k\] && existing\.dims\[k\] !== usual0\[k\]\) st\.touched\[k\] = true; \}\);/, 'a saved line at the usual size keeps following its options');
+    assert.match(src, /st\.dims\[k\] = n;\n\s+st\.touched\[k\] = true;/, 'typing in a size field makes that size the visitor\'s own');
+    assert.match(src, /st\.dims = PF\.standardDims\(fam, st\.config\); st\.touched = \{\};/);
+    assert.match(src, /var std = PF\.standardDims\(fam, st\.config\);\n\s+stdEl\.textContent = [^\n]*\n\s+var cust = axes\.some\(function \(k\) \{ return st\.dims\[k\] !== std\[k\]; \}\);/);
+    assert.match(src, /fm = PF\.forcedMins\(fam, st\.config\), fx = PF\.forcedMaxes\(fam, st\.config\)/);
     assert.match(src, /function famCustom\(/);
     assert.match(grab('famCustom'), /PF\.standardDims\(/);
   });
@@ -750,6 +1132,24 @@ describe('the page source — configurator guard rails that cannot be unit-teste
     assert.match(code, /config: publicConfig\(fam, existing \? clone\(existing\.config\) : PF\.defaultConfig\(fam\)\)/, 'the sheet\'s starting state');
     assert.match(code, /config: publicConfig\(fam, clone\(v\.config\)\)/, 'the line the sheet builds');
     assert.ok(!/staffOnly|\{ ?staff: ?true/.test(code), 'the website never validates in staff mode, and never names a staff-only group');
+  });
+  it('a copy of the helper file cached from before conditional options (no PF.groupApplies / PF.forcedMaxes) counts as "the family files did not load": the configured lines are held and the visitor is told to reload — nothing throws', () => {
+    const famLine = line(/var famEnabled = [^\n]*;/);
+    const enabled = (PFstub) => vm.runInNewContext(famLine + '; famEnabled', { PF: PFstub, FAMS });
+    assert.equal(enabled(PFmod), true);
+    for (const missing of ['groupApplies', 'forcedMaxes']) {
+      const old = Object.assign({}, PFmod); delete old[missing];
+      assert.equal(enabled(old), false, `a helper file without ${missing}`);
+    }
+    assert.equal(enabled(undefined), false);
+    assert.equal(enabled({}), false);
+  });
+  it('the stylesheet carries the layout hooks the sheet adds: the two-by-two group on a phone, the one-size layout, the read-only look of a size the options fix', () => {
+    const css = read('css/quote-request.css');
+    assert.match(css, /@media \(max-width:519px\)\{#qr-root \.qr-seg-wrap\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}\}/);
+    assert.match(css, /#qr-root \.qr-dims-2,#qr-root \.qr-dims-1\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+    assert.match(css, /#qr-root \.qr-input\[readonly\]\{background:var\(--qr-soft\);/);
+    assert.match(css, /#qr-root \[hidden\]\{display:none !important\}/, 'a hidden conditional group must really disappear (no later display rule may win)');
   });
   it('the draft is stored under the v2 key and a v1 draft is read once and removed', () => {
     assert.match(src, /var DRAFT_KEY = 'barro-qr-draft-v2';/);

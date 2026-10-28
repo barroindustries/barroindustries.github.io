@@ -1,5 +1,5 @@
-// js/product-families.js — pure helpers for the six CONFIGURABLE product families of the public catalogue
-// (specs/PRODUCT-CONFIGURATOR-SPEC.md, simplified by the owner's 2026-10-21 ruling).
+// js/product-families.js — pure helpers for the eleven CONFIGURABLE product families of the public catalogue
+// (specs/PRODUCT-CONFIGURATOR-SPEC.md, simplified by the owner's 2026-10-21 ruling; five more families added 2026-10-28, specs/CONFIGURATOR-FAMILIES-2-SPEC.md).
 //
 // The family DEFINITIONS (options, defaults, size limits, absorbed SKUs, preview rules) are DATA: scripts/public-families.json,
 // compiled by scripts/build-catalogue.js into js/qr-families.js (window.QR_FAMILIES). This file holds the LOGIC that walks that
@@ -22,6 +22,11 @@
 // e.g. the 1.5 mm top plate and the 1.2 mm body) — constructionLine() fills its {group} tokens from the chosen options — and a group may be
 // marked `staffOnly` (the 1.2 mm top plate): it is never offered on the website, the server (which validates without opts) refuses any value
 // but its default, and only a staff session (opts.staff === true: the Quote Builder, the Family pricing screen) may choose another.
+//
+// CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4): a group may carry `when: { <earlier choice group>: [values] }` — it applies only while the choices made before it
+// are in those lists (fry baskets only for a fryer, a pre-rinse sink only on the soiled side of a dish table). An option that does not apply is ALWAYS at its default in
+// a validated configuration, so a stored configuration is canonical and the pricing code (which adds nothing for a default) needs no knowledge of it. A family may also
+// carry `maxDimWhen`, the upper-limit twin of `minDimWhen` (a slim hood is at most 500 mm deep; a deck oven's width follows its trays).
 //
 // UMD-ish shim, like js/qr-def.js: browser <script> -> window.ProductFamilies; Node require() -> module.exports. No dependencies;
 // ES5 on purpose (the public pages target old phones too). Pure: no DOM, no clock, no randomness, no I/O.
@@ -63,6 +68,37 @@
     return ((family && family.groups) || []).filter(function (g) { return g.staffOnly !== true; });
   }
 
+  // ── conditional groups (`when`) ───────────────────────────────────────────
+  // groupApplies(family, g, config) -> boolean   true when the group has no `when`, else when EVERY key of `when` names an earlier choice whose value in `config`
+  // (or, when the config does not state it, that choice's default) is one of the listed values. An option that does not apply is never shown, never described, never
+  // priced and — in a validated configuration — always at its default.
+  function groupApplies(family, g, config) {
+    if (!g || !isPlain(g.when)) return true;
+    var cfg = isPlain(config) ? config : {};
+    return Object.keys(g.when).every(function (k) {
+      var gate = groupOf(family, k);
+      var val = has(cfg, k) && cfg[k] !== undefined ? cfg[k] : (gate ? gate.default : undefined);
+      var allowed = g.when[k];
+      return Array.isArray(allowed) && allowed.indexOf(val) >= 0;
+    });
+  }
+  // activeGroups(family, config) -> the groups that apply to this configuration; publicActiveGroups -> the ones a visitor to the website may see.
+  function activeGroups(family, config) {
+    return ((family && family.groups) || []).filter(function (g) { return groupApplies(family, g, config); });
+  }
+  function publicActiveGroups(family, config) {
+    return activeGroups(family, config).filter(function (g) { return g.staffOnly !== true; });
+  }
+  // whenText(family, g) -> "Type is Fryer" / "Type is Griddle or Lava-rock griller" / several keys joined with " and " (labels, never stored values); '' for a group with no `when`.
+  function whenText(family, g) {
+    if (!g || !isPlain(g.when)) return '';
+    return Object.keys(g.when).map(function (k) {
+      var gate = groupOf(family, k);
+      var labels = (Array.isArray(g.when[k]) ? g.when[k] : []).map(function (v) { var o = optionOf(gate, v); return o ? String(o.l) : String(v); });
+      return (gate ? gate.label : k) + ' is ' + labels.join(' or ');
+    }).join(' and ');
+  }
+
   // ── defaults ───────────────────────────────────────────────────────────────
   function defaultConfig(family) {
     var out = {};
@@ -84,6 +120,9 @@
   //   `opts` is OPTIONAL. PUBLIC mode (no opts, or opts.staff !== true — the server, the website, the default): a staff-only group (g.staffOnly) that
   //   is PRESENT with any value but its default is an error and the config takes the default; present-and-default is accepted. STAFF mode
   //   (opts.staff === true): a staff-only group is validated like any other choice. An ABSENT key takes the default in both modes.
+  //   CONDITIONAL groups (`when`), BOTH modes: groups are walked in order, so the choices a group depends on are already in `config`. A group that does NOT apply
+  //   (see groupApplies) and is PRESENT with a value other than its default is an error ('"Fry baskets" applies only when Type is Fryer.') and takes the default;
+  //   absent or equal to the default it is silently the default. So a validated configuration is canonical: an option that does not apply is always at its default.
   function validateConfiguration(family, raw, opts) {
     var staff = !!(opts && opts.staff === true);
     var errors = [];
@@ -126,6 +165,11 @@
       } else {
         errors.push('Unknown option type for "' + g.label + '".');
       }
+      // a conditional option that does not apply can only be at its default (arrays included: compared as text)
+      if (has(config, g.key) && !groupApplies(family, g, config) && JSON.stringify(config[g.key]) !== JSON.stringify(g.default)) {
+        errors.push('"' + g.label + '" applies only when ' + whenText(family, g) + '.');
+        config[g.key] = clone(g.default);
+      }
     });
     return { ok: errors.length === 0, errors: errors, config: config };
   }
@@ -141,6 +185,7 @@
     (r.terms || []).forEach(function (t) {
       var g = groupOf(family, t.group);
       if (!g) return;
+      if (!groupApplies(family, g, config)) return;                  // an option that does not apply adds nothing to the length
       var val = config ? config[t.group] : undefined;
       if (t.perUnit != null) { if (typeof val === 'number') total += val * t.perUnit; return; }
       if (Array.isArray(val)) val.forEach(function (x) { var o = optionOf(g, x); if (o && typeof o.w === 'number') total += o.w; });
@@ -152,20 +197,32 @@
     return { mm: mm, hard: !!r.hard, noun: r.noun || 'options' };
   }
 
-  // The minimums a chosen add-on forces (minDimWhen: [{group, includes, min:{D,H}}]) -> { D?, H?, W? } (largest wins).
-  function forcedMins(family, config) {
+  // The limits a chosen option forces. `listKey` is the family's rule list (minDimWhen / maxDimWhen: [{group, includes, min|max:{W?,D?,H?}}]), `valueKey` the
+  // limit inside a rule ('min' / 'max'); `larger` says which rule wins when several hold on one axis (the largest minimum, the smallest maximum). A rule whose
+  // group does not apply (see groupApplies) is skipped.
+  function forcedLimits(family, config, listKey, valueKey, larger) {
     var out = {};
-    ((family && family.minDimWhen) || []).forEach(function (rule) {
+    ((family && family[listKey]) || []).forEach(function (rule) {
+      var g = groupOf(family, rule.group);
+      if (g && !groupApplies(family, g, config)) return;
       var val = config ? config[rule.group] : undefined;
       var hit = Array.isArray(val) ? val.indexOf(rule.includes) >= 0 : val === rule.includes;
       if (!hit) return;
-      Object.keys(rule.min || {}).forEach(function (k) { if (out[k] == null || rule.min[k] > out[k]) out[k] = rule.min[k]; });
+      Object.keys(rule[valueKey] || {}).forEach(function (k) {
+        var n = rule[valueKey][k];
+        if (out[k] == null || (larger ? n > out[k] : n < out[k])) out[k] = n;
+      });
     });
     return out;
   }
+  // The minimums a chosen add-on forces (minDimWhen: [{group, includes, min:{D,H}}]) -> { D?, H?, W? } (largest wins).
+  function forcedMins(family, config) { return forcedLimits(family, config, 'minDimWhen', 'min', true); }
+  // The upper limits a chosen option forces (maxDimWhen: [{group, includes, max:{D,H}}]) -> { D?, H?, W? } (smallest wins).
+  function forcedMaxes(family, config) { return forcedLimits(family, config, 'maxDimWhen', 'max', false); }
 
   // standardDims(family, config) -> the size a configuration is normally built at: the family's default size with the length raised to the usual length of the
-  // chosen options (sinks, burners, add-ons) and any forced minimum (an oven's width and height) applied. A size equal to this is NOT a custom size.
+  // chosen options (sinks, burners, add-ons) and any forced minimum (an oven's width and height) applied, then any axis above a forced MAXIMUM (a slim hood's depth,
+  // a deck oven's width) lowered to it. A size equal to this is NOT a custom size.
   function standardDims(family, config) {
     var cfg = config || defaultConfig(family);
     var d = defaultDims(family);
@@ -173,12 +230,15 @@
     if (mw && d.W != null && d.W < mw.mm) d.W = mw.mm;
     var fm = forcedMins(family, cfg);
     Object.keys(fm).forEach(function (k) { if (d[k] != null && d[k] < fm[k]) d[k] = fm[k]; });
+    var fx = forcedMaxes(family, cfg);
+    Object.keys(fx).forEach(function (k) { if (d[k] != null && d[k] > fx[k]) d[k] = fx[k]; });
     return d;
   }
 
   // validateDims(family, raw, config) -> { ok, errors, warnings, dims }
-  //   `raw` is a plain object limited to the family's own axes; an absent / null axis takes the family default. Each value is a whole
-  //   number of millimetres inside [min, max], on the step. A HARD width rule and a forced minimum are errors; a soft width rule is a warning.
+  //   `raw` is a plain object limited to the family's own axes; an absent / null axis takes the size these options are normally built at (standardDims — the family
+  //   default for the default options; a deck oven with six trays per deck is 1200 mm wide, not 700). Each value is a whole number of millimetres inside [min, max],
+  //   on the step. A HARD width rule, a forced minimum and a forced maximum are errors; a soft width rule is a warning.
   function validateDims(family, raw, config) {
     var errors = [];
     var warnings = [];
@@ -186,10 +246,11 @@
     var spec = family.dims || {};
     if (raw != null && !isPlain(raw)) return { ok: false, errors: ['The size must be a set of length / width / height values.'], warnings: warnings, dims: defaultDims(family) };
     var given = raw || {};
+    var usual = standardDims(family, config || defaultConfig(family));          // what an axis the caller left out becomes
     Object.keys(given).forEach(function (k) { if (!has(spec, k)) errors.push('This product has no "' + String(k).slice(0, 20) + '" size.'); });
     Object.keys(spec).forEach(function (k) {
       var d = spec[k];
-      var v = has(given, k) && given[k] != null ? given[k] : d.default;
+      var v = has(given, k) && given[k] != null ? given[k] : (usual[k] != null ? usual[k] : d.default);
       if (!isInt(v) || v < d.min || v > d.max || v % d.step !== 0) {
         errors.push(d.label + ' must be a whole number of millimetres from ' + d.min + ' to ' + d.max + ', in steps of ' + d.step + '.');
         dims[k] = d.default;
@@ -206,6 +267,10 @@
       var fm = forcedMins(family, config || defaultConfig(family));
       Object.keys(fm).forEach(function (k) {
         if (has(dims, k) && dims[k] < fm[k]) errors.push('With these options the ' + String(spec[k].label).toLowerCase() + ' must be at least ' + fm[k] + ' mm.');
+      });
+      var fx = forcedMaxes(family, config || defaultConfig(family));
+      Object.keys(fx).forEach(function (k) {
+        if (has(dims, k) && dims[k] > fx[k]) errors.push('With these options the ' + String(spec[k].label).toLowerCase() + ' must be at most ' + fx[k] + ' mm.');
       });
     }
     return { ok: errors.length === 0, errors: errors, warnings: warnings, dims: dims };
@@ -253,11 +318,13 @@
     });
   }
 
-  // describe(family, config) -> [{ label, value }]  one row per PUBLIC option group, in the family's order, then the Construction row (the staff view,
-  // the receipt and the printed quote). A staff-only group has no row of its own: the Construction row already says which top plate it is.
+  // describe(family, config) -> [{ label, value }]  one row per PUBLIC option group that APPLIES to this configuration, in the family's order, then the Construction
+  // row (the staff view, the receipt and the printed quote). A staff-only group has no row of its own: the Construction row already says which top plate it is. An
+  // option that does not apply (fry baskets on a griddle) has no row.
   function describe(family, config) {
     var rows = [];
     publicGroups(family).forEach(function (g) {
+      if (!groupApplies(family, g, config)) return;
       var v = config ? config[g.key] : undefined;
       if (g.type === 'choice') {
         var o = optionOf(g, v);
@@ -274,10 +341,11 @@
     return rows;
   }
   // summaryParts(family, config) -> string[]   the short phrases of the one-line summary. A staff-only choice (the top plate) contributes its phrase only when
-  // it is NOT the standard one ("1.2 mm top"), so every public summary reads exactly as before.
+  // it is NOT the standard one ("1.2 mm top"), so every public summary reads exactly as before. An option that does not apply contributes nothing.
   function summaryParts(family, config) {
     var parts = [];
     (family.groups || []).forEach(function (g) {
+      if (!groupApplies(family, g, config)) return;                 // an option that does not apply says nothing
       var v = config ? config[g.key] : undefined;
       if (g.type === 'choice') {
         if (g.staffOnly === true && (v === undefined || v === g.default)) return;
@@ -457,21 +525,27 @@
       if (mw && mw.hard && dims.W != null && dims.W < mw.mm) dims.W = mw.mm;
       var fm = forcedMins(f, config);
       Object.keys(fm).forEach(function (k) { if (dims[k] != null && dims[k] < fm[k]) dims[k] = fm[k]; });
+      // ...and a forced MAXIMUM lowers an over-long saved size (a slim hood is at most 500 mm deep; a deck oven's width follows its trays)
+      var fx = forcedMaxes(f, config);
+      Object.keys(fx).forEach(function (k) { if (dims[k] != null && dims[k] > fx[k]) dims[k] = fx[k]; });
       return { familyId: f.id, config: config, dims: dims };
     }
     return null;
   }
 
   // ── the cells of a family's private option sheet ───────────────────────────
-  // cells(family) -> [{ group, groupLabel, value (the string key of the cell), label, kind:'option'|'slot'|'addon', baseline:boolean }]
-  // `baseline` is true for the option the family's primary SKU already has: its delta is zero by definition and is not entered.
+  // cells(family) -> [{ group, groupLabel, value (the string key of the cell), label, kind:'option'|'slot'|'addon', baseline:boolean, hint, when }]
+  // `baseline` is true for the option the family's primary SKU already has: its delta is zero by definition and is not entered. `when` is the plain-words
+  // condition of a conditional group ('Type is Fryer'; '' for an unconditional one): every option of such a group still has its cell — it is priced once, and used
+  // only when the group applies.
   function cells(family) {
     var out = [];
     (family.groups || []).forEach(function (g) {
+      var when = whenText(family, g);
       (g.options || []).forEach(function (o) {
         var kind = g.type === 'slots' ? 'slot' : (g.type === 'multi' ? 'addon' : 'option');
         var baseline = g.type === 'choice' ? o.v === g.default : false;
-        out.push({ group: g.key, groupLabel: g.label, value: String(o.v), label: o.f || o.l, kind: kind, baseline: baseline, hint: o.hint || '' });
+        out.push({ group: g.key, groupLabel: g.label, value: String(o.v), label: o.f || o.l, kind: kind, baseline: baseline, hint: o.hint || '', when: when });
       });
     });
     return out;
@@ -483,6 +557,10 @@
     optionOf: optionOf,
     optionIndex: optionIndex,
     publicGroups: publicGroups,
+    groupApplies: groupApplies,
+    activeGroups: activeGroups,
+    publicActiveGroups: publicActiveGroups,
+    whenText: whenText,
     defaultConfig: defaultConfig,
     defaultDims: defaultDims,
     validateConfiguration: validateConfiguration,
@@ -490,6 +568,7 @@
     validateLine: validateLine,
     minWidth: minWidth,
     forcedMins: forcedMins,
+    forcedMaxes: forcedMaxes,
     sizeText: sizeText,
     sizeTextLabelled: sizeTextLabelled,
     standardDims: standardDims,

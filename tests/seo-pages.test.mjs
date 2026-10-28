@@ -1089,8 +1089,8 @@ describe('links: every internal link resolves, the hubs list every child, every 
     assert.ok(hrefs(byPath('/faq/')).includes('/services/') && hrefs(byPath('/faq/')).includes('/areas-we-serve/') && hrefs(byPath('/faq/')).includes('/work/'));
   });
 
-  it('points the category links only at categories the catalogue has (preparation, washing, cooking, storage, refrigeration)', () => {
-    const ok = new Set(['cat-preparation', 'cat-washing', 'cat-cooking', 'cat-storage', 'cat-refrigeration']);
+  it('points the category links only at categories the catalogue has (preparation, washing, cooking, ventilation, storage, refrigeration)', () => {
+    const ok = new Set(['cat-preparation', 'cat-washing', 'cat-cooking', 'cat-ventilation', 'cat-storage', 'cat-refrigeration']);
     each((p) => { for (const u of hrefs(p).filter((x) => x.startsWith('/catalogue/#'))) assert.ok(ok.has(u.split('#')[1]), `${p.path}: ${u}`); });
   });
 });

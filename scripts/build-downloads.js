@@ -3,7 +3,7 @@
 /* scripts/build-downloads.js — regenerates the three downloadable PDFs of the public website:
  *
  *   downloads/barro-industries-company-profile.pdf   who we are, what we do, how we work, projects, areas, registrations, contact
- *   downloads/barro-industries-catalogue.pdf         the complete product catalogue: six configurable products, fixed equipment, kitchen systems, how to order
+ *   downloads/barro-industries-catalogue.pdf         the complete product catalogue: eleven configurable products, fixed equipment, kitchen systems, how to order
  *   downloads/barro-industries-portfolio.pdf         completed projects in depth (ISPSC 2026, DMMMSU 2022-2023) and one more shown without its client's name
  *
  * RUN:        node scripts/build-downloads.js              (all three)

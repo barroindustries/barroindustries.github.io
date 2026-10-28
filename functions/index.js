@@ -4050,7 +4050,7 @@ exports.cirAdminDelete = functions
 //  Admin SDK (rules do not apply) and cached per instance — the same docs the
 //  Quote Builder prices from (quote-builder-v2.html loadDatabase()). Only
 //  PUBLISHED product ids (functions/qr-published.json) are quotable as plain
-//  lines. The six CONFIGURABLE families (functions/qr-families.js) are quoted as
+//  lines. The eleven CONFIGURABLE families (functions/qr-families.js) are quoted as
 //  { familyId, config, dims, qty, note } lines and priced from their primary SKU
 //  plus the signed option deltas of the PRIVATE sheet `product_pricing/{family}`
 //  (same Admin read, same cache; an unapproved sheet or a blank cell = priced
@@ -4141,7 +4141,7 @@ async function qrPurgeStaleAbuse(db, nowMs) {
 // ── product master cache (§5.0) ───────────────────────────────────────────
 // One read of `products` (limit 1000, the Quote Builder's own limit) + productMeta/config per instance per 10 minutes.
 // A failed refresh may be covered by a cache younger than 24 hours; anything older fails CLOSED ('unavailable').
-let _qrProductsCache = null;                                    // { byId: Map, primaries: Map, pricing: Map, constants, estimateEnabled, loadedAt }
+let _qrProductsCache = null;                                    // { byId: Map, primaries: Map, pricing: Map, constants, estimateEnabled, disabledFamilies, loadedAt }
 const _qrEstimateLru = qr.createLru(256, 10 * 60 * 1000);       // basketHash+entity+version+loadedAt -> { basket, range, gate }
 let _qrEstimateCalls = 0;                                       // per-instance counter for the every-20th forensic sample
 
@@ -4165,7 +4165,7 @@ async function qrLoadProducts(db, nowMs) {
     // An empty index means the master (or functions/qr-published.json) is not what we think it is — refuse, never "price nothing".
     if (byId.size === 0) throw new Error('no published products resolved from the product master');
     const pricing = qr.buildPricingIndex(sheetDocs.filter(Boolean));
-    _qrProductsCache = { byId, primaries: idx.primaries, pricing, constants: qr.constantsOf(meta), estimateEnabled: qr.estimateEnabledOf(meta), loadedAt: nowMs };
+    _qrProductsCache = { byId, primaries: idx.primaries, pricing, constants: qr.constantsOf(meta), estimateEnabled: qr.estimateEnabledOf(meta), disabledFamilies: qr.disabledFamiliesOf(meta), loadedAt: nowMs };
     return _qrProductsCache;
   } catch (e) {
     console.error('[qrLoadProducts] refresh failed:', e.message);
@@ -4309,7 +4309,7 @@ exports.qrEstimate = functions
     }
 
     // 5. Items against the PUBLISHED master.
-    const norm = qr.normaliseItems(d.items, products.byId, { families: qr.FAMILIES, primaries: products.primaries });
+    const norm = qr.normaliseItems(d.items, products.byId, { families: qr.FAMILIES, primaries: products.primaries, disabledFamilies: products.disabledFamilies });
     if (!norm.ok) {
       const err = new functions.https.HttpsError('invalid-argument', norm.errors.slice(0, 3).join(' '), norm.badIds.length ? { itemIds: norm.badIds } : undefined);
       throw err;
@@ -4431,7 +4431,7 @@ exports.qrSubmit = functions
 
     // 6. Items against the PUBLISHED master.
     const products = await qrLoadProducts(db, nowMs);
-    const norm = qr.normaliseItems(d.items, products.byId, { families: qr.FAMILIES, primaries: products.primaries });
+    const norm = qr.normaliseItems(d.items, products.byId, { families: qr.FAMILIES, primaries: products.primaries, disabledFamilies: products.disabledFamilies });
     if (!norm.ok) {
       throw new functions.https.HttpsError('invalid-argument', norm.errors.slice(0, 3).join(' '), norm.badIds.length ? { itemIds: norm.badIds } : undefined);
     }

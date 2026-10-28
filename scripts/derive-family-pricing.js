@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * derive-family-pricing.js — STARTING VALUES for the private option sheets of the six configurable product families.
+ * derive-family-pricing.js — STARTING VALUES for the private option sheets of the eleven configurable product families.
  *
  *   node scripts/derive-family-pricing.js [path/to/products-database.json] [--out private/family-pricing.seed.json]
  *
@@ -31,6 +31,13 @@
  * Quote Builder) has one cell per family, SIGNED, entered by Finance: a negative amount, or 0. It is ALWAYS written BLANK here — the master's own "Top Gauge" adder on
  * BA-001 is quoted in the note as a cross-reference and never becomes the amount — so a 1.2 mm line is "priced after review" until Finance types the figure.
  *
+ * THE FIVE FAMILIES ADDED 2026-10-28 (specs/CONFIGURATOR-FAMILIES-2-SPEC.md §7): dish table, wok range, griddle / griller / fryer, gas deck oven, range hood. Same helpers,
+ * same rule: a figure only where the master really says it. Most of their cells are BLANK on purpose (the single-hole wok range and the three-basket fryer are the only
+ * unpriced-or-lonely comparisons the master offers), and where a related price exists (BA-005 for a deck-oven stand, EX-026 / EX-027 for a hood's filters and lamps,
+ * the stove's burner cells) it is QUOTED in the note for the owner and never becomes the amount. A conditional option (fry baskets, a pre-rinse sink) still has one cell:
+ * it is priced once and used only when the option applies. A family whose width is a consequence of an option (the deck oven: the trays per deck) has NO length rate
+ * (NO_LENGTH_RATE): its sheet's length rate is left for the owner to enter as 0 and none of its amounts scales with length.
+ *
  * The MODEL these figures feed is js/pricing-core.js priceConfiguredItem(): configured price = the primary SKU priced at the requested size
  * through its own rules + the sum of the option deltas; an option equal to the family default adds nothing (the zero point).
  *   a choice value:   flat + perW100 x max(0, W - refW) / 100        (refW = the primary's standard length; a blank perW100 means none)
@@ -51,6 +58,15 @@ const PF = require('../js/product-families.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_OUT = path.join(REPO_ROOT, 'private', 'family-pricing.seed.json');
+
+// Families whose width is a CONSEQUENCE of an option (a deck oven is 700 mm wide with 3 trays per deck and 1200 mm with 6), not a size the customer chooses: the length
+// rate of their sheet and the per-length part of every cell are NOT derived (a proportional default would charge the wide body twice — once in the "6 trays" cell and
+// once again for the extra width). The owner enters 0 for the length rate; the cost of the wider body sits in the option's own cell.
+const NO_LENGTH_RATE = ['deck_oven'];
+// What to say when a linear family's primary SKU has no list price yet, so no length rate can be derived (a family that is not listed gets the generic sentence).
+const PRIMARY_UNPRICED_NOTE = {
+  dish_table: 'PW-029 (the dish table) has no list price in the master yet — enter one on the Product Database first, then the length rate can be derived.',
+};
 
 // ── small helpers ───────────────────────────────────────────────────────────
 const isNum = (n) => typeof n === 'number' && isFinite(n);
@@ -194,7 +210,7 @@ function deriveFamily(fid, fam, ctx) {
       confidence: decision.confidence,
       derivation: decision.text,
     } : { flat: null, perW100: null, confidence: 'blank', derivation: (decision && decision.text) || 'No usable evidence in the master.' };
-    if (linear && c.flat !== null && c.perW100 === null && refW > 0) c.perW100 = round(c.flat * 100 / refW);   // scales with length both ways
+    if (linear && !NO_LENGTH_RATE.includes(fid) && c.flat !== null && c.perW100 === null && refW > 0) c.perW100 = round(c.flat * 100 / refW);   // scales with length both ways
     cells[group][valueKey] = c;
     table.push(Object.assign(rowOf(group, valueKey, label), { status: c.flat === null ? 'blank' : 'derived', confidence: c.confidence }));
   }
@@ -347,6 +363,55 @@ function deriveFamily(fid, fam, ctx) {
     setCell('wheels', 'false', lbl('wheels', false), feet ? decide([Object.assign({}, feet, { fixedPair: true })].map((c) => Object.assign(c, { kind: 'pair', mixed: true }))) : blank('No wheels adder in the master.'));
     const why = 'No clean comparison in the master: the other racks differ from PW-010 in size and construction as well as tiers.';
     for (const t of [3, 5, 6]) setCell('tiers', String(t), lbl('tiers', t), blank(why));
+  } else if (fid === 'dish_table') {
+    // PW-029 is the only dish table in the master and has no list price yet; no other SKU states any of these options. Every cell stays BLANK, with the reason.
+    const why = priced('PW-029') ? 'No SKU in the master separates this option from the dish table itself.' : PRIMARY_UNPRICED_NOTE.dish_table;
+    setCell('side', 'soiled', lbl('side', 'soiled'), blank(why));
+    setCell('hand', 'right', lbl('hand', 'right'), blank(why));
+    setCell('sink', 'prerinse', lbl('sink', 'prerinse'), blank(why));
+    setCell('undershelf', 'false', lbl('undershelf', false), blank(why));
+    topPlateCell();
+  } else if (fid === 'wok_range') {
+    // The only multi-hole wok range (CE-025) also has a rear burner and a water-cooled edge, so it cannot isolate a wok hole; the stove's "wok" burner cell is for a burner
+    // on a mixed range, not a wok hole with its ring. A related figure is QUOTED in the note when the master has one and is never the amount.
+    const holesWhy = `${priced('CE-025') ? 'CE-025, the only multi-hole wok range, also has a rear burner and a water-cooled edge, so it cannot isolate a wok hole' : 'CE-025, the only multi-hole wok range, is unpriced'}; the stove's wok-position cell is for a burner on a mixed range, not a wok hole with its ring — not used.`;
+    setCell('holes', '2', lbl('holes', 2), blank(holesWhy));
+    setCell('holes', '3', lbl('holes', 3), blank(holesWhy));
+    setCell('rear', 'true', lbl('rear', true), blank(`No SKU in the master separates a rear stock burner from the wok range.${priced('CE-018') ? ` For reference, CE-018 (a stock-pot range) is listed at ${fmt(round(P('CE-018', {}).unitPrice))}; the stove sheet's "soup" burner cell is the nearest idea. Not used as the amount.` : ' (CE-018, the stock-pot range, is unpriced.)'}`));
+    const swan = specAdder('PW-004', 'Faucet Type', 'Pre-rinse spray', 'Gooseneck');
+    setCell('faucet', 'swan', lbl('faucet', 'swan'), blank(`No SKU in the master has a water faucet on a wok range.${swan != null ? ` For reference, the sink's pre-rinse faucet adder on PW-004 is ${fmt(round(swan))}: a different fitting, not used.` : ''}`));
+    topPlateCell();
+  } else if (fid === 'cooking_line') {
+    // type: the unit is a griddle (CE-010); the fryer and the combination come from priced SKUs of the same kind at the same size. The fryer is the TWO-basket one, the
+    // family default, so its figure is the whole type difference.
+    setCell('type', 'fryer', lbl('type', 'fryer'), decide([pairCand('CE-010', 'CE-009', 1, 'the two-basket fryer (the family default) against the griddle, so the figure is the whole type difference')], 'CE-009 (the two-basket fryer) or CE-010 (the griddle) is not usable.'));
+    setCell('type', 'combi', lbl('type', 'combi'), decide([pairCand('CE-010', 'CE-007', 1, 'the griller-and-griddle combination against the griddle')], 'CE-007 (the combination) or CE-010 (the griddle) is not usable.'));
+    setCell('type', 'griller', lbl('type', 'griller'), blank('No priced SKU is a lava-rock griller on its own: CE-019 and CE-026 are unpriced.'));
+    setCell('burners', '2', lbl('burners', 2), blank('No SKU in the master has two burners under a griddle or griller.'));
+    const tri = priced('CE-023') && !insideLimits('CE-023');
+    setCell('burners', '3', lbl('burners', 3), decide([pairCand('CE-010', 'CE-023', 1, 'the 3-burner griddle against the 1-burner griddle')], tri ? `CE-023 (the only 3-burner griddle) has a default size outside this family's limits (width ${dd('CE-023').W} x depth ${dd('CE-023').D} mm), so it is not a clean comparison.` : 'CE-023 (the only 3-burner griddle) or CE-010 is not usable.'));
+    setCell('baskets', '1', lbl('baskets', 1), blank('The only single-tank fryer (CE-020) is unpriced.'));
+    setCell('baskets', '3', lbl('baskets', 3), decide([pairCand('CE-009', 'CE-022', 1, 'the three-basket fryer against the two-basket fryer (the three-basket one has no standard size of its own)')], 'CE-022 (the three-basket fryer) or CE-009 (the two-basket fryer) is not usable.'));
+    setCell('base', 'shelf', lbl('base', 'shelf'), blank('The units with a bottom shelf (CE-026, CE-028) are unpriced.'));
+  } else if (fid === 'deck_oven') {
+    // trays per deck: the 12-tray oven against the 6-tray oven, two decks each. The number of decks has no SKU behind it (a per-deck figure would be an extrapolation): the
+    // proportional suggestion is QUOTED, never entered. The heavy-duty stand is a different product line (BA-005): its list price is quoted for reference only.
+    setCell('trays', '6', lbl('trays', 6), decide([pairCand('CE-012', 'CE-016', 1, '12 trays versus 6 trays, two decks each')], 'CE-012 (6 trays) or CE-016 (12 trays) is not usable.'));
+    const half = priced('CE-012') ? round(P('CE-012', {}).unitPrice / 2) : null;
+    const deckWhy = (sign) => `No 1- or 3-deck oven in the master; a per-deck figure would be an extrapolation.${half != null ? ` If you agree the price is proportional to the number of decks, the figure would be ${sign}${fmt(half)} (half of the 2-deck oven's list price).` : ''}`;
+    setCell('decks', '1', lbl('decks', 1), blank(deckWhy('-')));
+    setCell('decks', '3', lbl('decks', 3), blank(deckWhy('+')));
+    const stand = priced('BA-005') ? round(P('BA-005', {}).unitPrice) : null;
+    setCell('stand', 'heavy', lbl('stand', 'heavy'), blank(`The heavy-duty deck-oven stand is a different product line (BA-005${stand != null ? `, listed at ${fmt(stand)} at its standard length` : ', unpriced'}): enter the figure you want, it is not used as the amount.`));
+  } else if (fid === 'hood') {
+    // type: the island and slim hoods are fixed-price SKUs compared with the wall hood (EX-001) at the larger of their sizes — approximate, so never above low-to-medium.
+    // The baffle filters and the lamps are separate accessories (EX-026, EX-027): their list prices are QUOTED, because the canopy without them is unlikely to be cheaper by exactly
+    // that — Finance enters a negative amount (or 0).
+    setCell('type', 'island', lbl('type', 'island'), decide([pairCand('EX-001', 'EX-018', 1, 'the island hood against the wall hood')], 'EX-018 (the island hood) or EX-001 (the wall hood) is not usable.'));
+    setCell('type', 'slim', lbl('type', 'slim'), decide([pairCand('EX-001', 'EX-020', 1, 'the slim hood against the wall hood (far apart in depth, so only a rough guide)')], 'EX-020 (the slim hood) or EX-001 (the wall hood) is not usable.'));
+    const accessory = (id, what) => (priced(id) ? ` For reference, ${id} (${what}) is listed at ${fmt(round(P(id, {}).unitPrice))} when sold alone; the hood without it is unlikely to drop by exactly that — enter a negative amount, or 0.` : ` (${id}, ${what}, is unpriced.)`);
+    setCell('filters', 'none', lbl('filters', 'none'), blank(`No hood in the master is sold without its baffle filters.${accessory('EX-026', 'a baffle filter block')}`));
+    setCell('lighting', 'false', lbl('lighting', false), blank(`No hood in the master is sold without its lamp.${accessory('EX-027', 'the 3-bulb lighting case')}`));
   }
 
   // The length rate for a family whose primary SKU has no length rule of its own: the master has none, so it is derived as list price per 100 mm of the
@@ -354,8 +419,9 @@ function deriveFamily(fid, fam, ctx) {
   let size = { perW100: null, confidence: 'blank', derivation: '' };
   if (linear) {
     const base = P(fam.primary, {}).unitPrice;
-    if (base > 0 && refW > 0) size = { perW100: round(base * 100 / refW), confidence: 'low', derivation: `${fam.primary} has no length rule of its own, so the length rate is its list price per 100 mm of its standard length (${refW} mm), i.e. price assumed proportional to length. Edit if a shorter or longer shelf should cost more or less per metre.` };
-    else size.derivation = `${fam.primary} is not priced, so no length rate can be derived.`;
+    if (NO_LENGTH_RATE.includes(fid)) size.derivation = 'Enter 0: the width is fixed by the trays per deck and its cost sits in the "Trays per deck: 6" cell.';       // never the proportional default
+    else if (base > 0 && refW > 0) size = { perW100: round(base * 100 / refW), confidence: 'low', derivation: `${fam.primary} has no length rule of its own, so the length rate is its list price per 100 mm of its standard length (${refW} mm), i.e. price assumed proportional to length. Edit if a shorter or longer shelf should cost more or less per metre.` };
+    else size.derivation = PRIMARY_UNPRICED_NOTE[fid] || `${fam.primary} is not priced, so no length rate can be derived.`;
     table.push({ group: 'size', value: 'W', label: 'Length (per 100 mm from the standard length)', status: size.perW100 === null ? 'blank' : 'derived', confidence: size.confidence });
   }
 
@@ -364,7 +430,8 @@ function deriveFamily(fid, fam, ctx) {
   const variance = [];
   for (const id of absorbed) {
     const p = byId.get(id);
-    if (!p || !(p.basePrice > 0)) continue;
+    if (!p) continue;
+    if (!(p.basePrice > 0)) { variance.push({ sku: id, familyEstimateVsList: null, flag: 'cannot be checked: ' + id + ' has no list price in the master' }); continue; }
     const cfg = PF.validateConfiguration(fam, fam.absorbed[id], { staff: true }).config;      // an absorbed SKU never states the staff-only top plate: it is the standard one
     const dims = {};
     for (const k of Object.keys(fam.dims)) { const v = (p.defaultDimensions || {})[k]; dims[k] = isNum(v) ? Math.min(Math.max(v, fam.dims[k].min), fam.dims[k].max) : fam.dims[k].default; }

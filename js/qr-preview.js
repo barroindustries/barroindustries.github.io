@@ -11,6 +11,9 @@
    The files live under site/img/configurator/<family>/<key>.webp (+ -thumb), load lazily and are never precached. The names are the owner's
    shot list (docs/configurator-preview-photo-list.md). A stove's burner layout is always drawn live as a diagram (it is more exact than any photo).
 
+   Eleven families have a drawing of their own; any other family id gets DRAW_DEFAULT (a plain box with the family name), so a family added to the data before its
+   picture exists never throws.
+
    Safety: it builds every node with createElement(NS) + textContent — nothing here parses markup, and every SVG shape is a presentation
    attribute or a class (the page's CSP forbids inline styles). No price, no network request other than the optional photo file itself.
    NOTHING about money lives here; the look is entirely in css/quote-request.css. */
@@ -179,7 +182,117 @@
       [left - 6, right + 2].forEach(function (x) { g.appendChild(rect(x, floor + 1, 8, 8, 'qr-pv-fill', 1)); });
     }
   }
-  var DRAW = { prep_table: drawPrepTable, sink: drawSink, stove: drawStove, cabinet: drawCabinet, wall_shelf: drawWallShelf, rack: drawRack };
+  // ── the five families added 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §6.1): the same navy line art, only classes the stylesheet already has ──
+  function arrowAcross(g, x1, x2, y) {                                                                // a thin arrow along the picture, from x1 to x2
+    var dir = x2 > x1 ? 1 : -1;
+    g.appendChild(S('path', { d: 'M ' + x1 + ' ' + y + ' L ' + x2 + ' ' + y + ' M ' + (x2 - 7 * dir) + ' ' + (y - 5) + ' L ' + x2 + ' ' + y + ' L ' + (x2 - 7 * dir) + ' ' + (y + 5), 'class': 'qr-pv-line qr-pv-thin' }));
+  }
+  function drawDishTable(g, c) {
+    // a front view: the table with its raised splash along the back, an optional undershelf and pre-rinse sink, the dishwasher as the box at the chosen end, and an arrow for the way the dishes travel
+    var dwLeft = c.hand !== 'right', dwW = 66, top = 142, floor = 212;
+    var x0 = dwLeft ? 112 : 36, x1 = dwLeft ? 364 : 288, dwX = dwLeft ? 36 : 298;
+    g.appendChild(rect(dwX, top - 46, dwW, floor - top + 46, 'qr-pv-body', 4));                          // the dishwasher
+    g.appendChild(rect(dwX + 10, top - 36, dwW - 20, 18, 'qr-pv-panel', 3));
+    g.appendChild(line(dwX + 14, top - 8, dwX + dwW - 14, top - 8, 'qr-pv-handle'));
+    g.appendChild(rect(x0, top - 18, x1 - x0, 18, 'qr-pv-soft', 2));                                      // the raised splash along the back
+    if (c.side !== 'soiled') g.appendChild(rect(dwLeft ? x1 - 7 : x0, top - 18, 7, 26, 'qr-pv-fill', 1));  // the clean side has a side splash at the far end as well
+    g.appendChild(rect(x0, top, x1 - x0, 8, 'qr-pv-fill', 2));                                            // the table top
+    g.appendChild(line(x0 + 10, top + 8, x0 + 10, floor)); g.appendChild(line(x1 - 10, top + 8, x1 - 10, floor));
+    g.appendChild(line(x0 + 2, floor, x0 + 18, floor)); g.appendChild(line(x1 - 18, floor, x1 - 2, floor));
+    if (c.undershelf) g.appendChild(rect(x0 + 10, floor - 32, x1 - x0 - 20, 5, 'qr-pv-soft', 1.5));
+    if (c.side === 'soiled' && c.sink === 'prerinse') {
+      var bx = dwLeft ? x0 + 12 : x1 - 12 - 72, fx = bx + 36;
+      g.appendChild(rect(bx, top - 6, 72, 26, 'qr-pv-basin', 6));                                         // the pre-rinse sink bowl, at the dishwasher end
+      g.appendChild(line(fx, top - 18, fx, top - 56)); g.appendChild(line(fx - 10, top - 56, fx + 10, top - 56));
+      g.appendChild(rect(fx - 4, top - 40, 8, 14, 'qr-pv-fill', 2));                                      // the spray head
+    }
+    var mid = (x0 + x1) / 2, toward = c.side === 'soiled';                                                // dirty dishes go TOWARD the dishwasher, clean ones come away from it
+    arrowAcross(g, toward === dwLeft ? mid + 26 : mid - 26, toward === dwLeft ? mid - 26 : mid + 26, top - 34);
+  }
+  function drawWokRange(g, c) {
+    // a TOP view: the body, one to three recessed wok rings across it, an optional low stock burner at the back and an optional swan-neck faucet at the back edge
+    var n = c.holes || 1, bx = 34, by = 88, bw = 332, bh = 116, rear = !!c.rear;
+    g.appendChild(rect(bx, by, bw, bh, 'qr-pv-body', 6));
+    var pitch = (bw - 20) / n, r = Math.min(30, pitch / 2 - 6), cy = rear ? by + bh - 40 : by + bh / 2 + 2;
+    for (var i = 0; i < n; i++) {
+      var cx = bx + 10 + pitch * (i + 0.5);
+      g.appendChild(S('circle', { cx: cx, cy: cy, r: r, 'class': 'qr-pv-b qr-pv-b-wok' }));
+      g.appendChild(S('circle', { cx: cx, cy: cy, r: r * 0.58, 'class': 'qr-pv-b-ring' }));
+    }
+    if (rear) g.appendChild(S('circle', { cx: bx + bw / 2, cy: by + 22, r: 13, 'class': 'qr-pv-b qr-pv-b-soup' }));
+    if (c.faucet === 'swan') {
+      var fx = bx + bw - 34;
+      g.appendChild(S('path', { d: 'M ' + fx + ' ' + by + ' L ' + fx + ' ' + (by - 14) + ' Q ' + fx + ' ' + (by - 26) + ' ' + (fx - 14) + ' ' + (by - 26) + ' L ' + (fx - 20) + ' ' + (by - 26) + ' L ' + (fx - 20) + ' ' + (by - 18), 'class': 'qr-pv-line' }));
+    }
+    for (var k = 0; k < n; k++) g.appendChild(S('circle', { cx: bx + 10 + pitch * (k + 0.5), cy: by + bh - 7, r: 3.2, 'class': 'qr-pv-dot' }));      // a control knob under each ring
+  }
+  function drawCookingLine(g, c) {
+    // a front view of the unit on its stand: a flat plate, a grill, fry tanks or a grill beside a plate by type; the knobs, the stand and an optional bottom shelf
+    var type = c.type || 'griddle', w = type === 'combi' ? 264 : 200, l = 200 - w / 2, r = 200 + w / 2, top = 118, bodyH = 44, floor = 212, i, x;
+    g.appendChild(rect(l, top, w, bodyH, 'qr-pv-body', 4));                                               // the body
+    var knobs = type === 'fryer' ? (c.baskets || 2) : type === 'combi' ? 2 : (c.burners || 1);
+    for (i = 0; i < knobs; i++) g.appendChild(S('circle', { cx: l + (w * (i + 0.5)) / knobs, cy: top + 24, r: 4, 'class': 'qr-pv-dot' }));
+    function grill(x0, x1) {
+      g.appendChild(rect(x0, top - 14, x1 - x0, 16, 'qr-pv-add', 3));
+      for (var k = 1; k < 7; k++) g.appendChild(line(x0 + ((x1 - x0) * k) / 7, top - 12, x0 + ((x1 - x0) * k) / 7, top - 2, 'qr-pv-grate'));
+    }
+    if (type === 'griller') grill(l + 8, r - 8);
+    else if (type === 'fryer') {
+      var n = c.baskets || 2, tw = (w - 16 - (n - 1) * 8) / n;
+      for (i = 0; i < n; i++) {
+        x = l + 8 + i * (tw + 8);
+        g.appendChild(rect(x, top - 24, tw, 26, 'qr-pv-basin', 4));                                       // a fry tank ...
+        g.appendChild(line(x + tw / 2 - 9, top - 34, x + tw / 2 + 9, top - 34, 'qr-pv-handle')); g.appendChild(line(x + tw / 2, top - 34, x + tw / 2, top - 22, 'qr-pv-handle'));   // ... and its basket handle
+      }
+    } else if (type === 'combi') {
+      grill(l + 8, 200 - 4);
+      g.appendChild(rect(204, top - 10, r - 8 - 204, 12, 'qr-pv-plate', 2));
+    } else g.appendChild(rect(l + 8, top - 10, w - 16, 12, 'qr-pv-plate', 2));                            // a griddle: one flat plate
+    g.appendChild(line(l + 10, top + bodyH, l + 10, floor)); g.appendChild(line(r - 10, top + bodyH, r - 10, floor));
+    g.appendChild(line(l + 2, floor, l + 18, floor)); g.appendChild(line(r - 18, floor, r - 2, floor));
+    if (c.base === 'shelf') g.appendChild(rect(l + 10, floor - 34, w - 20, 5, 'qr-pv-soft', 1.5));
+  }
+  function drawDeckOven(g, c) {
+    // a front view: one to three stacked decks (a wider body for six trays per deck) on its own base or on a heavy-duty stand
+    var decks = c.decks || 1, w = c.trays === 6 ? 252 : 172, x0 = 200 - w / 2, x1 = 200 + w / 2, floor = 212;
+    var stand = c.stand === 'heavy', standH = stand ? 36 : 6;
+    var deckH = decks === 1 ? 62 : (decks === 2 ? 46 : 34), gap = 4;
+    var y0 = floor - standH - (decks * deckH + (decks - 1) * gap);
+    if (stand) {
+      g.appendChild(line(x0 + 8, floor - standH, x0 + 8, floor)); g.appendChild(line(x1 - 8, floor - standH, x1 - 8, floor));
+      g.appendChild(line(x0 + 8, floor - standH, x1 - 8, floor - 6, 'qr-pv-line qr-pv-thin')); g.appendChild(line(x1 - 8, floor - standH, x0 + 8, floor - 6, 'qr-pv-line qr-pv-thin'));
+      g.appendChild(line(x0 + 2, floor, x0 + 20, floor)); g.appendChild(line(x1 - 20, floor, x1 - 2, floor));
+    } else {
+      g.appendChild(line(x0 + 10, floor - 6, x0 + 10, floor)); g.appendChild(line(x1 - 10, floor - 6, x1 - 10, floor));
+    }
+    for (var i = 0; i < decks; i++) {
+      var y = y0 + i * (deckH + gap);
+      g.appendChild(rect(x0, y, w, deckH, 'qr-pv-oven', 4));
+      g.appendChild(rect(x0 + 10, y + 6, w - 20, deckH - 12, 'qr-pv-panel', 3));                          // the door
+      g.appendChild(line(x0 + 22, y + deckH / 2, x1 - 22, y + deckH / 2, 'qr-pv-handle'));
+      g.appendChild(S('circle', { cx: x1 - 5, cy: y + deckH / 2, r: 2.2, 'class': 'qr-pv-dot' }));
+    }
+  }
+  function drawHood(g, c) {
+    // a front view of the canopy with its duct: against a wall, hung free over an island, or a slim low one; a row of baffle filters and the lamps under it when chosen
+    var type = c.type || 'wall', slim = type === 'slim', y0 = slim ? 120 : 96, yb = slim ? 142 : 152, i;
+    if (type === 'wall') g.appendChild(rect(64, 62, 272, 124, 'qr-pv-hatch'));                              // the wall behind it
+    if (type === 'island') { g.appendChild(line(150, y0, 150, 66, 'qr-pv-line qr-pv-thin')); g.appendChild(line(250, y0, 250, 66, 'qr-pv-line qr-pv-thin')); }
+    g.appendChild(rect(180, y0 - (slim ? 28 : 34), 40, slim ? 28 : 34, 'qr-pv-body', 2));                  // the duct
+    g.appendChild(S('path', { d: 'M ' + (slim ? 118 : 128) + ' ' + y0 + ' L ' + (slim ? 282 : 272) + ' ' + y0 + ' L ' + (slim ? 318 : 312) + ' ' + yb + ' L ' + (slim ? 82 : 88) + ' ' + yb + ' Z', 'class': 'qr-pv-body' }));   // the canopy
+    if (c.filters === 'baffle') for (i = 0; i < 7; i++) g.appendChild(line(110 + i * 30, yb - 11, 110 + i * 30, yb - 3, 'qr-pv-grate'));
+    if (c.lighting) for (i = 0; i < 3; i++) {
+      g.appendChild(S('circle', { cx: 140 + i * 60, cy: yb + 8, r: 3.5, 'class': 'qr-pv-dot' }));
+      g.appendChild(line(140 + i * 60, yb + 14, 140 + i * 60, yb + 30, 'qr-pv-dash'));
+    }
+  }
+  var DRAW = { prep_table: drawPrepTable, sink: drawSink, dish_table: drawDishTable, stove: drawStove, wok_range: drawWokRange, cooking_line: drawCookingLine, deck_oven: drawDeckOven, hood: drawHood, cabinet: drawCabinet, wall_shelf: drawWallShelf, rack: drawRack };
+  // A family with no drawing of its own (one added to scripts/public-families.json before its picture is made) gets a plain box with its name, never an error.
+  function drawDefault(g, c, family) {
+    g.appendChild(rect(110, 90, 180, 112, 'qr-pv-body', 8));
+    g.appendChild(T('qr-pv-add-text', 200, 150, family && family.label ? family.label : '', { 'text-anchor': 'middle' }));
+  }
+  var DRAW_DEFAULT = drawDefault;
 
   // The words under the drawing: the chosen options, wrapped to at most three short lines (46 characters each). A part stays whole where it fits;
   // a part longer than a line by itself (a stove with six burners) is broken between its words, and a word longer than a line is cut. Anything beyond
@@ -214,8 +327,8 @@
     svg.appendChild(rect(10, 10, VB_W - 20, VB_H - 20, 'qr-pv-frame', 6));
     svg.appendChild(T('qr-pv-title', VB_W / 2, 44, family.label, { 'text-anchor': 'middle' }));
     var g = S('g', { 'class': 'qr-pv-art' });
-    var draw = DRAW[family.id];
-    if (draw) { try { draw(g, config); } catch (e) { /* a drawing must never break the sheet */ } }
+    var draw = Object.prototype.hasOwnProperty.call(DRAW, family.id) ? DRAW[family.id] : DRAW_DEFAULT;
+    try { draw(g, config, family); } catch (e) { /* a drawing must never break the sheet */ }
     svg.appendChild(g);
     var rows = wrapParts(PF.summaryParts(family, config));
     var y = family.id === 'stove' && (config.addons || []).indexOf('oven') >= 0 ? 238 : 232;

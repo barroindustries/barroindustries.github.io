@@ -12,6 +12,13 @@
 // The screens run from their REAL source in a vm sandbox with the REAL escHtml (js/modules.js) and the REAL family/pricing libraries loaded inside the same
 // context; Firestore is a small in-memory fake that records every write. Fixtures use FAKE odd-figure pesos (the repository is public).
 //
+// MUTATION RECORD 2026-10-28 (scratch copies, cf2-ws1-mut/; each must fail here): the group header not saying when a conditional option applies, the "Disabled on the website" chip
+// never shown / shown on every card, the switch read from the wrong key, reading the switch losing the material multiplier of the same document.
+// 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §6.4, §9): the screen lists ELEVEN families; a conditional option's group header says when it applies ("Only when Type is Fryer"); a family
+// listed in productMeta/config families.disabled carries a read-only "Disabled on the website" chip. The families are on schema 3.
+// 2026-10-28 WS-2 (CONFIGURATOR-FAMILIES-2-SPEC §8.1, scratch copy cf2-ws2-mut/, 7 rules mutants, all killed; each must fail here): the rules create list missing "hood" or "dish_table", back to the old six ids, naming a twelfth id nobody
+// ships, listing an id twice, opened to any id, or reordered (the literal pin) — the list is pinned both as text and against QR_FAMILIES.order.
+//
 // Mutation-tested in scratch copies (see the commit message): Save leaving `approved` true, Approve writing the figures, Approve not blocked when dirty,
 // import accepting an unknown cell / a string amount / a figure over the cap / writing approved sheets, the gate letting the secretary in, a read that no longer needs a profile,
 // an unescaped derivation note, the client copy showing the family breakdown, the builder mapping losing priceManual, and so on; each must fail here.
@@ -42,7 +49,7 @@ function makeEnv(opts) {
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
   for (const [id, d] of Object.entries(opts.docs || {})) store.set('product_pricing/' + id, clone(d));
   for (const [id, d] of Object.entries(opts.products || {})) store.set('products/' + id, clone(d));
-  store.set('productMeta/config', { constants: opts.constants || {} });
+  store.set('productMeta/config', Object.assign({ constants: opts.constants || {} }, opts.meta || {}));
   const writes = [], reads = [], toasts = [], audits = [], confirms = [];
   const stamp = (v) => (v && v.__serverTimestamp ? { _ts: 1 } : v);
   const resolveStamps = (o) => { const out = {}; for (const k of Object.keys(o)) out[k] = (o[k] && o[k].__serverTimestamp) ? { _ts: 1 } : clone(o[k]); return out; };
@@ -166,14 +173,14 @@ describe('Inventory › Family Pricing — the gate mirrors firestore.rules: pre
 });
 
 describe('Inventory › Family Pricing — what the screen shows', () => {
-  it('six family cards in the family order, each with a status: Not set up / Draft / Approved / Out of date; Approve is disabled until a sheet exists', async () => {
+  it('eleven family cards in the family order, each with a status: Not set up / Draft / Approved / Out of date; Approve is disabled until a sheet exists', async () => {
     const approved = Object.assign({}, OK_SHEET, { familyId: 'prep_table', approved: true, approvedBy: 'u-1', approvedByName: 'Someone' });
     const stale = Object.assign({}, OK_SHEET, { familyId: 'stove', approved: true, approvedBy: 'u-1', schemaVersion: FAKE_SCHEMA + 5 });
     const env = makeEnv({ docs: { prep_table: approved, sink: OK_SHEET, stove: stale } });
     await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
     const html = env.el.innerHTML;
     const order = [...html.matchAll(/class="card fp-card" data-fid="([a-z_]+)"/g)].map((m) => m[1]);
-    assert.deepEqual(order, ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']);
+    assert.deepEqual(order, ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']);
     const cardOf = (fid) => { const a = html.indexOf(`data-fid="${fid}" style="margin-bottom:12px"`); const b = html.indexOf('<div class="card fp-card"', a + 10); return html.slice(a, b < 0 ? html.length : b); };
     assert.match(cardOf('prep_table'), /Approved/);
     assert.match(cardOf('prep_table'), /approved by Someone/);
@@ -182,7 +189,7 @@ describe('Inventory › Family Pricing — what the screen shows', () => {
     assert.match(cardOf('sink'), /data-act="approve"[^>]*data-fid="sink"(?![^>]*disabled)/);
     assert.match(cardOf('stove'), /Out of date — approve again/);
     assert.match(cardOf('stove'), /data-act="approve"/, 'an out-of-date sheet needs a fresh approval');
-    for (const fid of ['cabinet', 'wall_shelf', 'rack']) {
+    for (const fid of ['dish_table', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']) {
       assert.match(cardOf(fid), /Not set up/);
       assert.match(cardOf(fid), /data-act="approve"[^>]*disabled/, `${fid}: there is nothing to approve`);
     }
@@ -225,7 +232,7 @@ describe('Inventory › Family Pricing — what the screen shows', () => {
     await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
     assert.match(env.el.innerHTML, /Draft — not approved/, 'the real sink sheet is shown despite 70 stray documents sorting before it');
     assert.ok(!env.reads.includes('product_pricing'), 'no collection scan');
-    for (const fid of ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']) assert.ok(env.reads.includes('product_pricing/' + fid), fid);
+    for (const fid of ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']) assert.ok(env.reads.includes('product_pricing/' + fid), fid);
   });
   it('everything interpolated is HTML-escaped: a hostile derivation note, family note or approver name cannot become markup', async () => {
     const HOSTILE = '<img src=x onerror=window.__xss=1>"\'></textarea><script>window.__xss=2</script><svg onload=window.__xss=3>';
@@ -577,8 +584,8 @@ describe('Inventory › Family Pricing — "Try a configuration" prices with the
 // ── the staff-only TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14): tables, sinks and stoves have a 1.5 mm (16 ga) top as the STANDARD and a 1.2 mm top that only
 // staff can choose. Its sheet cell is the SIGNED amount added for 1.2 mm (a negative number, or 0); a blank is "priced after review", never zero. The definitions moved to schema 2, so
 // every sheet approved against schema 1 reads "Out of date — approve again" until Finance / the President approves it again knowing the base item's list price is the 1.5 mm price.
-describe('Inventory › Family Pricing — the staff-only Top plate: its own cells, a staff-only caption, priced in "Try a configuration", and the schema-2 re-approval', () => {
-  const WITH_TOP = ['prep_table', 'sink', 'stove'];
+describe('Inventory › Family Pricing — the staff-only Top plate: its own cells, a staff-only caption, priced in "Try a configuration", and the schema re-approval', () => {
+  const WITH_TOP = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];
   const CAPTION = 'Staff-only option — offered in the Quote Builder, never on the website';
   const open = async (fid, docs) => {
     const env = makeEnv({ docs: docs || {} });
@@ -590,7 +597,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
     return { env, card: html.slice(a, b < 0 ? html.length : b), inputs: inputsFromHtml(html, fid) };
   };
 
-  it('table, sink and stove list a "Top plate" group: the 1.5 mm top is the standard (adds nothing), the 1.2 mm top has its own amount boxes, and the group header says it is staff only', async () => {
+  it('table, sink, dish table, stove and wok range list a "Top plate" group: the 1.5 mm top is the standard (adds nothing), the 1.2 mm top has its own amount boxes, and the group header says it is staff only', async () => {
     for (const fid of WITH_TOP) {
       const { card, inputs } = await open(fid);
       assert.match(card, /<strong>Top plate<\/strong>/, fid);
@@ -602,8 +609,8 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
       assert.equal(top[0].value, '', `${fid}: no amount yet is an EMPTY box, never 0`);
     }
   });
-  it('cabinet, wall shelving and rack have no Top plate and no staff-only caption', async () => {
-    for (const fid of ['cabinet', 'wall_shelf', 'rack']) {
+  it('the cooking line, deck oven, hood, cabinet, wall shelving and rack have no Top plate and no staff-only caption', async () => {
+    for (const fid of ['cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']) {
       const { card, inputs } = await open(fid);
       assert.ok(!/Top plate/.test(card) && !card.includes(CAPTION), fid);
       assert.ok(!inputs.some((i) => i.attrs['data-g'] === 'top'), fid);
@@ -672,7 +679,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
   });
 
   it('a sheet approved against the OLD definitions (schema 1) reads "Out of date — approve again"; the same sheet at the current schema is Approved', async () => {
-    assert.equal(FAKE_SCHEMA, 2, 'the families are on schema 2 (the 1.5 mm top plate is the standard)');
+    assert.equal(FAKE_SCHEMA, 3, 'the families are on schema 3 (five more families and conditional options on top of the 1.5 mm top plate): every sheet must be approved against it');
     const old = Object.assign({}, OK_SHEET, { approved: true, approvedBy: 'u-1', approvedByName: 'Someone', schemaVersion: 1 });
     const env = makeEnv({ docs: { sink: old, prep_table: Object.assign({}, old, { familyId: 'prep_table', schemaVersion: FAKE_SCHEMA }) } });
     await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
@@ -683,21 +690,121 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
     assert.match(cardOf('prep_table'), /Approved/);
     assert.ok(!/Out of date/.test(cardOf('prep_table')));
   });
-  it('the import refuses a seed made for schema 1 ("generate it again"); a schema-2 seed brings the 1.2 mm cell as typed (negative allowed), a blank stays blank, and a figure for the standard top is ignored', () => {
+  it('the import refuses a seed made for an older schema ("generate it again"); a current-schema seed brings the 1.2 mm cell as typed (negative allowed), a blank stays blank, and a figure for the standard top is ignored', () => {
     const FP = makeEnv({}).ctx.window.FamilyPricing;
     const seed = (schemaVersion, families) => ({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion, generatedAt: '2026-10-28T00:00:00.000Z', families });
-    const old = FP.planImport(seed(1, { sink: { options: {} } }), {});
-    assert.match(old.error, /older family definition \(schema 1, the app is on 2\)/);
-    assert.match(old.error, /Generate it again/);
-    const typed = FP.planImport(seed(2, { sink: { options: { top: { 1.2: { flat: -300.4, perW100: null, confidence: 'medium', derivation: 'typed' }, 1.5: { flat: 99 } } } } }), {});
+    for (const older of [1, 2]) {
+      const old = FP.planImport(seed(older, { sink: { options: {} } }), {});
+      assert.match(old.error, new RegExp(`older family definition \\(schema ${older}, the app is on ${FAKE_SCHEMA}\\)`));
+      assert.match(old.error, /Generate it again/);
+    }
+    const typed = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { top: { 1.2: { flat: -300.4, perW100: null, confidence: 'medium', derivation: 'typed' }, 1.5: { flat: 99 } } } } }), {});
     assert.ok(!typed.error, typed.error);
     const top = typed.plan[0].options.top;
     assert.equal(top['1.2'].flat, -300, 'a negative amount is kept (rounded to whole pesos)');
     assert.ok(!('1.5' in top), 'the standard top is the zero point: it has no cell');
     assert.ok(typed.skipped >= 1, 'the figure for the standard top is counted as ignored');
-    const blank = FP.planImport(seed(2, { sink: { options: {} } }), {});
+    const blank = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: {} } }), {});
     assert.equal(blank.plan[0].options.top['1.2'].flat, null);
     assert.equal(blank.plan[0].options.top['1.2'].confidence, 'blank');
+  });
+});
+
+describe('Inventory › Family Pricing — a conditional option says when it applies, and a family switched off for the website carries a chip (CONFIGURATOR-FAMILIES-2-SPEC §4.1, §6.4, §9)', () => {
+  // a conditional option (fry baskets for a fryer, a pre-rinse sink on the soiled side of a dish table) is priced ONCE here — every value has its boxes — and its group header
+  // says "Only when Type is Fryer" in the same muted style as the staff-only caption. A family listed in productMeta/config families.disabled gets a read-only chip.
+  const open = async (fid, opts) => {
+    const env = makeEnv(opts || {});
+    await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+    await click(env, 'toggle', fid); await flush();
+    const html = env.el.innerHTML;
+    const a = html.indexOf(`data-fid="${fid}" style="margin-bottom:12px"`);
+    const b = html.indexOf('<div class="card fp-card"', a + 10);
+    return { env, card: html.slice(a, b < 0 ? html.length : b), inputs: inputsFromHtml(html, fid) };
+  };
+  const headers = (card) => [...card.matchAll(/<tr class="fp-grp"><td[^>]*><strong>([^<]*)<\/strong>([^]*?)<\/td><\/tr>/g)].map((m) => [unesc(m[1]), [...m[2].matchAll(/<span class="fp-when"[^>]*>· Only when ([^<]*)<\/span>/g)].map((x) => unesc(x[1]))]);
+
+  it('the cooking line: "Burners" and "Fry baskets" headers carry their condition, "Type" and "Base" carry none — and the caption has the same muted style as the staff-only one', async () => {
+    const { card } = await open('cooking_line');
+    assert.deepEqual(headers(card), [['Type', []], ['Burners', ['Type is Griddle or Lava-rock griller']], ['Fry baskets', ['Type is Fryer']], ['Base', []]]);
+    assert.match(card, /<span class="fp-when" style="font-size:11px;color:var\(--text-muted\)">· Only when Type is Fryer<\/span>/);
+    assert.ok(!card.includes('fp-staffonly'), 'no staff-only caption on the cooking line');
+  });
+  it('the dish table: only the pre-rinse sink is conditional; its staff-only top plate keeps its own caption beside the others', async () => {
+    const { card } = await open('dish_table');
+    assert.deepEqual(headers(card), [['Side', []], ['Dishwasher on the', []], ['Pre-rinse sink', ['Side is Soiled']], ['Undershelf', []], ['Top plate', []], ['Length', []]], 'the dish table is a linear family: its length rate is the last group');
+    assert.equal(card.split('fp-staffonly').length - 1, 1);
+  });
+  it('every family that has no conditional option shows no "Only when" caption anywhere', async () => {
+    for (const fid of ['prep_table', 'sink', 'stove', 'wok_range', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']) {
+      const { card } = await open(fid);
+      assert.ok(!card.includes('fp-when') && !/Only when/.test(card), fid);
+    }
+  });
+  it('EVERY value of a conditional option still has its two amount boxes (a three-basket fryer is priced once), and the standard value is "adds nothing"', async () => {
+    const { card, inputs } = await open('cooking_line');
+    const boxes = (g) => inputs.filter((i) => i.attrs['data-g'] === g).map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`);
+    assert.deepEqual(boxes('baskets'), ['1|flat', '1|perW100', '3|flat', '3|perW100'], 'baskets 2 is the standard');
+    assert.deepEqual(boxes('burners'), ['2|flat', '2|perW100', '3|flat', '3|perW100']);
+    assert.deepEqual(boxes('type'), ['griller|flat', 'griller|perW100', 'fryer|flat', 'fryer|perW100', 'combi|flat', 'combi|perW100']);
+    assert.deepEqual(boxes('base'), ['shelf|flat', 'shelf|perW100']);
+    assert.match(card, /Fry baskets[^]*?2 baskets|Fry baskets[^]*?Standard option — adds nothing/, 'the default basket count adds nothing');
+    assert.match(card, /0 of 8 amounts entered/, 'the cooking line has 8 cells to fill (spec §5.2)');
+  });
+  it('the length-rate row is for the linear families only (dish table, deck oven, wall shelving)', async () => {
+    for (const [fid, linear] of [['dish_table', true], ['deck_oven', true], ['wall_shelf', true], ['cooking_line', false], ['hood', false], ['wok_range', false], ['sink', false]]) {
+      const { card } = await open(fid);
+      assert.equal(/Per 100 mm from the standard length \(both directions\)/.test(card), linear, fid);
+    }
+  });
+  it('the saved note of the deck oven\'s length rate ("Enter 0 …") is shown, escaped, beside its box — and the box is EMPTY until Finance enters 0', async () => {
+    const note = 'Enter 0: the width is fixed by the trays per deck and its cost sits in the "Trays per deck: 6" cell.';
+    const sheet = { familyId: 'deck_oven', schemaVersion: FAKE_SCHEMA, approved: false, options: {}, size: { perW100: null, confidence: 'blank', derivation: note } };
+    const { card, inputs } = await open('deck_oven', { docs: { deck_oven: sheet } });
+    assert.ok(card.includes(note.replace(/"/g, '&quot;')), 'the instruction is on the screen');
+    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'size').value, '', 'blank, not 0');
+  });
+
+  it('the kill switch (productMeta/config families.disabled): a listed family carries a "Disabled on the website" chip, the others do not; it is informational (no button, no extra read)', async () => {
+    const env = makeEnv({ meta: { families: { disabled: ['hood', 'cooking_line'] } } });
+    await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+    const html = env.el.innerHTML;
+    const cardOf = (fid) => { const a = html.indexOf(`data-fid="${fid}" style="margin-bottom:12px"`); const b = html.indexOf('<div class="card fp-card"', a + 10); return html.slice(a, b < 0 ? html.length : b); };
+    for (const fid of ['hood', 'cooking_line']) {
+      assert.match(cardOf(fid), /<span class="badge badge-orange fp-off"[^>]*>Disabled on the website<\/span>/, fid);
+      assert.equal(cardOf(fid).split('Disabled on the website').length - 1, 1, `${fid}: one chip`);
+    }
+    for (const fid of ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'deck_oven', 'cabinet', 'wall_shelf', 'rack']) assert.ok(!cardOf(fid).includes('Disabled on the website'), fid);
+    assert.equal(html.split('Disabled on the website').length - 1, 2);
+    assert.equal(env.reads.filter((r) => r === 'productMeta/config').length, 1, 'the same single read that fetches the material multiplier');
+    assert.deepEqual(env.writes, [], 'reading the switch writes nothing');
+    // a chip is not a control: no data-act on it, and the card still offers Open / Approve as before
+    assert.ok(!/fp-off"[^>]*data-act/.test(html));
+    assert.match(cardOf('hood'), /data-act="toggle"/);
+  });
+  it('no list, an empty list, junk in the list, a list that is not a list, or a family that does not exist: no chip anywhere (and nothing throws)', async () => {
+    for (const meta of [undefined, { families: {} }, { families: { disabled: [] } }, { families: { disabled: 'hood' } }, { families: { disabled: { hood: true } } }, { families: 'hood' }, { families: { disabled: [5, null, {}, ['hood'], 'no_such_family'] } }, { quoteBuilder: { configurator: false } }]) {
+      const env = makeEnv({ meta });
+      await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+      assert.ok(!env.el.innerHTML.includes('Disabled on the website'), JSON.stringify(meta));
+      assert.match(env.el.innerHTML, /fp-card/);
+    }
+  });
+  it('reading the switch does not disturb the material multiplier read from the SAME document: "Try a configuration" still applies it', async () => {
+    const PRIM = { title: 'Synthetic Sink', formulaType: 'per_length', basePrice: 15555, measurement: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 0, rateW100: 0, rateD100: 0, rateH100: 0 }, specs: [] };
+    const env = makeEnv({ docs: { sink: OK_SHEET }, products: { 'PW-004': PRIM }, constants: { materialPriceIndexMultiplier: 2 }, meta: { families: { disabled: ['hood'] } } });
+    await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+    await click(env, 'toggle', 'sink'); await flush();
+    env.stubs.inputs.sink = inputsFromHtml(env.el.innerHTML, 'sink');
+    const fam = env.ctx.window.QR_FAMILIES.families.sink;
+    const ins = {};
+    fam.groups.forEach((g) => { ins[g.key] = { value: String(Math.max(0, g.options.findIndex((o) => o.v === g.default))) }; });
+    const out = { innerHTML: '' };
+    const dims = [{ value: '500', getAttribute: () => 'W' }, { value: '500', getAttribute: () => 'D' }, { value: '850', getAttribute: () => 'H' }];
+    env.stubs.tryBox.sink = { querySelector: (sel) => { const m = sel.match(/^\.fp-try-in\[data-g="(\w+)"\]$/); if (m) return ins[m[1]] || null; if (sel === '.fp-try-out') return out; return null; }, querySelectorAll: () => dims };
+    await click(env, 'try', 'sink');
+    assert.match(out.innerHTML, /31,110<\/strong> each/, '15,555 x the multiplier 2');
+    assert.match(env.el.innerHTML, /Disabled on the website/, 'and the chip is there for the listed family');
   });
 });
 
@@ -827,7 +934,7 @@ describe('Inventory › Family Pricing — the one-time import of the private de
     await send(fileOf({ kind: 'something-else' }));
     assert.match(env.toasts.at(-1).m, /not a family pricing seed file/);
     await send(fileOf(seedOf({ families: { toaster: {} } })));
-    assert.match(env.toasts.at(-1).m, /none of the six families/);
+    assert.match(env.toasts.at(-1).m, /none of the product families/);
     assert.deepEqual(env.writes, []);
   });
   it('a finance user who somehow triggers the import writes nothing (president only in the UI)', async () => {
@@ -845,11 +952,12 @@ describe('Inventory › Family Pricing — the one-time import of the private de
     const DERIVE = req('../scripts/derive-family-pricing.js');
     const FAMS = req('../js/qr-families.js');
     const mk = (id, over) => Object.assign({ id, category: 'prep_washing', name: id, formulaType: 'fixed', basePrice: 7000 + id.length, defaultDimensions: { W: 900, D: 600, H: 850 }, formula: {}, specs: [], unit: 'pc' }, over || {});
-    const byId = new Map(['PW-001', 'PW-003', 'PW-004', 'CE-001', 'PW-015', 'PW-023', 'PW-010'].map((id, i) => [id, mk(id, { basePrice: 9000 + i * 1111 })]));
+    const byId = new Map(['PW-001', 'PW-003', 'PW-004', 'PW-029', 'CE-001', 'CE-006', 'CE-010', 'CE-012', 'EX-001', 'PW-015', 'PW-023', 'PW-010'].map((id, i) => [id, mk(id, { basePrice: 9000 + i * 1111 })]));
     const seed = DERIVE.deriveAll({ fams: FAMS, byId, constants: {}, masterName: 'fake.json' });
     const r = FP().planImport(JSON.parse(JSON.stringify(seed)), {});
     assert.ok(!r.error, r.error);
-    assert.equal(r.plan.length, 6);
+    assert.equal(r.plan.length, 11, 'one sheet per family, all eleven');
+    assert.deepEqual([...r.plan.map((p) => p.fid)], [...FAMS.order]);              // (copied out of the vm realm so deepEqual compares prototypes of THIS realm)
     assert.equal(r.skipped, 0, 'a seed written by the script contains no cell the app does not know');
     for (const p of r.plan) {
       const fromSeed = seed.families[p.fid];
@@ -1130,11 +1238,21 @@ describe('firestore.rules › product_pricing — writes finance tier only, read
     assert.ok(!/cirWriter/.test(allow('delete')) && !/cirWriter/.test(allow('create')) && !/cirWriter/.test(allow('update')));
     assert.equal((block.match(/cirWriter/g) || []).length, 2, 'cirWriter may appear in the read rule and its explaining comment only');
   });
-  it('a new sheet starts UNAPPROVED and can only be created under one of the six family ids', () => {
+  it('a new sheet starts UNAPPROVED and can only be created under one of the ELEVEN family ids (CONFIGURATOR-FAMILIES-2-SPEC §8.1)', () => {
     const rule = allow('create');
-    assert.match(rule, /familyId in \['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack'\]/, 'a sheet can only be created under one of the six family ids');
+    assert.match(rule, /familyId in \['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack'\]/, 'a sheet can only be created under one of the eleven family ids');
     assert.ok(!/matches\(/.test(rule), 'no free-form id pattern');
     assert.match(rule, /request\.resource\.data\.get\('approved', false\) == false/);
+  });
+  it('the create rule lists EXACTLY the families the site ships (QR_FAMILIES.order): a family cannot ship without its rules line — Family pricing "Set up" would be refused — and the rules never name an id nobody ships', async () => {
+    const { createRequire } = await import('node:module');
+    const FAMS = createRequire(import.meta.url)('../js/qr-families.js');
+    const m = allow('create').match(/familyId in \[([^\]]*)\]/);
+    assert.ok(m, 'no "familyId in [...]" list in the create rule');
+    const ids = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, ''));
+    assert.equal(new Set(ids).size, ids.length, 'an id is listed twice');
+    assert.deepEqual([...ids].sort(), [...FAMS.order].sort());
+    assert.equal(ids.length, 11);
   });
   it('an update that leaves the sheet approved must name the writer as the approver AND leave the figures exactly as they were', () => {
     const rule = allow('update');

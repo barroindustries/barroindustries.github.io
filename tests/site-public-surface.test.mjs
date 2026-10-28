@@ -376,7 +376,7 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
     }
     assert.ok(/^Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens and custom stainless steel fabrication in Metro Manila: food-grade SS304 and laboratory-grade SS316, exhaust and fresh-air systems, gas lines and fire suppression\.$/.test(hd));
     assert.ok(hd.includes('stainless steel fabrication'), 'the homepage description names the fabrication (SEO build 2026-10-22)');
-    assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, storage and refrigeration, for restaurants, hotels and bakeries\. Request a quote\.$/.test(cd));
+    assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, ventilation, storage and refrigeration, for restaurants, hotels and bakeries\. Request a quote\.$/.test(cd));   // the six public categories (Ventilation added 2026-10-28)
     // the permanent name, once, in each (owner ruling 2026-10-22)
     for (const d of [hd, cd]) assert.equal((d.match(/Barro Kitchens/g) || []).length, 1);
   });
@@ -505,8 +505,8 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
       names: [...g.matchAll(/<li class="cat-card[^"]*"[^>]*>[\s\S]*?<h3>([^<]*)<\/h3>/g)].map((m) => decode(m[1])),
     }));
     const expected = sections.flatMap((s) => s.names.map((name) => ({ name, url: `${catalogue.url}#cat-${s.id}` })));
-    assert.equal(expected.length, 32, 'the page shows 32 products');
-    assert.equal(list.numberOfItems, 32);
+    assert.equal(expected.length, 25, 'the page shows 25 products: the eleven configurable families first in their categories, then the 14 fixed items');
+    assert.equal(list.numberOfItems, 25);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
     list.itemListElement.forEach((item, i) => {
       assert.deepEqual(Object.keys(item), ['@type', 'position', 'name', 'url']);
@@ -515,7 +515,7 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
       assert.ok(catalogue.html.includes(`id="${item.url.split('#')[1]}"`), `${item.url} has no anchor on the page`);
     });
     assert.deepEqual([...allKeys(list)].sort(), ['@context', '@type', 'itemListElement', 'name', 'numberOfItems', 'position', 'url']);
-    assert.deepEqual(sections.map((s) => s.id), ['preparation', 'washing', 'cooking', 'storage', 'refrigeration']);
+    assert.deepEqual(sections.map((s) => s.id), ['preparation', 'washing', 'cooking', 'ventilation', 'storage', 'refrigeration']);
   });
 
   it('(local only) is exactly what a fresh build produces from the private master', { skip: (() => { try { return resolveMaster() ? false : 'the private master (products-database.json) is not present'; } catch (_) { return 'no master'; } })() }, () => {
@@ -656,7 +656,7 @@ describe('5 · scripts/build-catalogue.js generates the ItemList (names + catego
   const list = (products, extra) => JSON.parse(B.renderItemListLd(db(products), { publicCategories: pubOf(products), ...(extra || {}) }));
   const products = [prod({ id: 'T-001', name: 'Stove <b>One</b>' }), prod({ id: 'T-002', category: 'prep_washing', name: 'Sink & Table' }), prod({ id: 'T-003', name: 'Griddle' }), prod({ id: 'T-004', name: "Fryer $& $' $` $$" })];
 
-  it('lists every product in page order (the five public categories as ruled), each with its name and its category anchor only', () => {
+  it('lists every product in page order (the public categories as ruled), each with its name and its category anchor only', () => {
     const l = list(products);
     assert.equal(l['@type'], 'ItemList');
     assert.equal(l.numberOfItems, 4);
@@ -1157,7 +1157,7 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.ok(proofSub.replace('SS304 / SS316', '').trim().length <= 56, `the proof-bar sub-line is ${proofSub.length} characters: it would run to three lines`);
     for (const k of ['description', 'og:description', 'twitter:description']) for (const p of [home, catalogue]) assert.ok(/SS304/.test(p.meta(k)) && /SS316/.test(p.meta(k)) && p.meta(k).indexOf('SS304') < p.meta(k).indexOf('SS316'), `${p.file}: ${k}`);
     assert.ok(catText.includes('Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications.'));
-    assert.equal(materialRows.length, 6, 'one Material row per configurable card');
+    assert.equal(materialRows.length, 11, 'one Material row per configurable card (eleven families)');
     for (const r of materialRows) assert.equal(r, 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish');
     for (const t of [homeText, catText]) { assert.ok(t.includes('SS304') && t.includes('SS316')); assert.ok(t.indexOf('SS304') < t.indexOf('SS316'), 'SS304 must come first'); }
   });
@@ -1195,12 +1195,39 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.ok(!/\{ ?staff: ?true/.test(code) && !/staffOnly/.test(code), 'the website never validates in staff mode');
     const fams = JSON.parse(read('scripts/public-families.json'));
     const flagged = Object.entries(fams.families).flatMap(([id, f]) => f.groups.filter((g) => g.staffOnly).map((g) => `${id}.${g.key}`));
-    assert.deepEqual(flagged, ['prep_table.top', 'sink.top', 'stove.top'], 'exactly the three top plates are staff-only');
+    assert.deepEqual(flagged, ['prep_table.top', 'sink.top', 'dish_table.top', 'stove.top', 'wok_range.top'], 'exactly the five top plates are staff-only (the hood, the griddle / griller / fryer and the deck oven have none)');
     // no public surface offers or names the lighter top plate: the catalogue cards, the product pages, the FAQ and llms.txt say only the standard
     for (const f of ['catalogue/index.html', 'products/index.html', 'faq/index.html', 'llms.txt', ...fs.readdirSync(path.join(ROOT, 'products'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `products/${e.name}/index.html`)]) {
       const t = read(f).replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '');
       assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(t), `${f} offers or names the lighter top plate`);
     }
+  });
+
+  it('conditional options (CONFIGURATOR-FAMILIES-2-SPEC §4): the website configurator hides a conditional group until PF.groupApplies says it applies, puts it back to its standard value when it stops applying, follows a forced size limit — and still offers public groups only, in the public mode', () => {
+    const js = read('js/quote-request.js');
+    const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    assert.ok(/PF\.publicGroups\(fam\)\.forEach\(function \(g\) \{\n\s+var node = /.test(code), 'the sheet walks the PUBLIC groups');
+    assert.ok(/if \(g\.when\) syncers\.push\(function \(\) \{ node\.hidden = !PF\.groupApplies\(fam, g, st\.config\); \}\);/.test(code), 'a conditional group is hidden until it applies');
+    assert.ok(/var v = PF\.validateConfiguration\(fam, st\.config\);\n\s+PF\.publicGroups\(fam\)\.forEach\(function \(g\) \{ if \(g\.when\) st\.config\[g\.key\] = v\.config\[g\.key\]; \}\);/.test(code), 'a group that stopped applying goes back to its standard value, and only the conditional groups are written back');
+    assert.ok(/function changed\(\) \{[^\n]*snapGated\(\); applyUsualLength\(\); syncAll\(\);/.test(code), 'every change snaps, then follows the options, then shows and hides');
+    assert.ok(/PF\.forcedMaxes\(fam, st\.config\)/.test(code), 'a forced maximum is honoured');
+    assert.ok(!/\{ ?staff: ?true/.test(code) && !/staffOnly/.test(code), 'still the public mode, never a staff-only group');
+    // the data the sheet reads: a conditional group names an EARLIER public choice (so there is no cycle and the gate is always shown first), and is never itself staff-only
+    const fams = JSON.parse(read('scripts/public-families.json'));
+    let gated = 0;
+    for (const [id, f] of Object.entries(fams.families)) f.groups.forEach((g, i) => {
+      if (!g.when) return;
+      gated++;
+      assert.ok(!g.staffOnly && g.type !== 'slots', `${id}.${g.key}: a conditional group is a public choice or add-on`);
+      for (const [k, vals] of Object.entries(g.when)) {
+        const j = f.groups.findIndex((x) => x.key === k);
+        assert.ok(j >= 0 && j < i && f.groups[j].type === 'choice' && !f.groups[j].staffOnly, `${id}.${g.key}: "when" must name an earlier public choice (${k})`);
+        assert.ok(Array.isArray(vals) && vals.length > 0 && vals.every((x) => f.groups[j].options.some((o) => o.v === x)), `${id}.${g.key}: "when" lists options of ${k}`);
+      }
+    });
+    assert.equal(gated, 3, 'fry baskets, burners and the pre-rinse sink are the only conditional groups');
+    // the sheet's own words about a forced limit carry no price word
+    assert.ok(!/price|cost|₱|\bPHP\b/i.test((code.match(/With these options the[^\n]*/g) || []).join(' ')), 'the size hint is price-free');
   });
 
   it('leaves the master\'s own product notes alone: every fixed card still carries exactly the note the generator takes from the master (the "(local only)" fresh-build test in catalogue-public.test.mjs), and the generator\'s display overrides name no grade', () => {

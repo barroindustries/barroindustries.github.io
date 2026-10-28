@@ -1,6 +1,6 @@
 'use strict';
-// scripts/downloads/catalogue.js — the product catalogue (about 18 A4 pages), generated from the website's own data so it follows the site:
-//   · the six configurable products: js/qr-families.js (options, size limits), the catalogue page's cards (the specification lines), scripts/product-photos.json
+// scripts/downloads/catalogue.js — the product catalogue (about 23 A4 pages), generated from the website's own data so it follows the site:
+//   · the eleven configurable products: js/qr-families.js (options, size limits), the catalogue page's cards (the specification lines), scripts/product-photos.json
 //     and site/img/products (representative photographs), and the website configurator's own drawing code (js/qr-preview.js, run here with a tiny DOM shim);
 //   · the fixed equipment, by category: every card of catalogue/index.html (code, name, size, notes and specifications in full — the owner's rule);
 //   · the kitchen systems (exhaust and fresh air, LPG gas line, fire suppression): the wording of the three service pages, which carry the "standard example" of
@@ -20,7 +20,7 @@ const META = {
 };
 const PF = require(path.join(L.ROOT, 'js', 'product-families.js'));
 const QF = require(path.join(L.ROOT, 'js', 'qr-families.js'));
-const CAT_LABEL = { preparation: 'Preparation', washing: 'Washing', cooking: 'Cooking', storage: 'Storage', refrigeration: 'Refrigeration' };
+const CAT_LABEL = { preparation: 'Preparation', washing: 'Washing', cooking: 'Cooking', ventilation: 'Ventilation', storage: 'Storage', refrigeration: 'Refrigeration' };
 // The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, three finishes".
 // (Each family's own line — PF.constructionLine — reaches the family pages through the catalogue page's cards.) tests/content-assets.test.mjs pins the two together.
 const CONSTRUCTION_NOTE = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
@@ -87,7 +87,7 @@ function makeDrawer() {
     const svg = QP.placeholder(fam, v.config);
     const art = svg.children.find((c) => c.attrs.class === 'qr-pv-art');
     const inner = String(art).replace(/qr-pv-/g, 'pv-');
-    const vb = famId === 'stove' ? '20 52 360 176' : '52 52 296 176';
+    const vb = ['stove', 'wok_range', 'dish_table'].includes(famId) ? '20 52 360 176' : '52 52 296 176';
     return { svg: `<svg viewBox="${vb}" role="img" aria-label="${esc(PF.summaryParts(fam, v.config).join(', '))}">${inner}</svg>`, caption: PF.summaryParts(fam, v.config).join(' · ') };
   };
 }
@@ -99,13 +99,25 @@ const VARIANTS = {
   cabinet: [{ type: 'floor', doors: 'swing', shelves: 3 }, { type: 'floor', doors: 'sliding', shelves: 2 }, { type: 'wall', doors: 'swing', shelves: 1 }, { type: 'wall', doors: 'sliding', shelves: 2 }],
   wall_shelf: [{ tiers: 1, surface: 'solid' }, { tiers: 2, surface: 'slotted' }, { tiers: 3, surface: 'solid' }],
   rack: [{ tiers: 3, wheels: false }, { tiers: 4, wheels: true }, { tiers: 6, wheels: true }],
+  // the five of 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC): the dish table, wok range and deck oven have no photograph, so each has four layouts (the first is its main picture)
+  dish_table: [{ side: 'clean', hand: 'left', sink: 'none', undershelf: true }, { side: 'soiled', hand: 'left', sink: 'prerinse', undershelf: true }, { side: 'clean', hand: 'right', sink: 'none', undershelf: false }, { side: 'soiled', hand: 'right', sink: 'none', undershelf: true }],
+  wok_range: [{ holes: 1, rear: false, faucet: 'none' }, { holes: 2, rear: true, faucet: 'none' }, { holes: 3, rear: false, faucet: 'swan' }, { holes: 3, rear: true, faucet: 'swan' }],
+  cooking_line: [{ type: 'griddle', burners: 2, baskets: 2, base: 'stand' }, { type: 'griller', burners: 3, baskets: 2, base: 'shelf' }, { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, { type: 'combi', burners: 1, baskets: 2, base: 'shelf' }],
+  deck_oven: [{ decks: 1, trays: 3, stand: 'none' }, { decks: 2, trays: 3, stand: 'heavy' }, { decks: 3, trays: 6, stand: 'heavy' }, { decks: 2, trays: 6, stand: 'none' }],
+  hood: [{ type: 'wall', filters: 'baffle', lighting: true }, { type: 'island', filters: 'baffle', lighting: true }, { type: 'slim', filters: 'baffle', lighting: false }, { type: 'wall', filters: 'none', lighting: false }],
 };
 // a project photograph that shows the product at work (the website's own photographs and captions)
-const IN_PROJECTS = { prep_table: 'ispsc-03', sink: 'ispsc-05', stove: 'ispsc-01', cabinet: 'dmmmsu-02', wall_shelf: 'dmmmsu-04', rack: 'dmmmsu-03' };
-const IN_PROJECTS_POS = { stove: '50% 40%', sink: '50% 60%' };
+// (the hoods overhead and a griller beside a range really are the product; the dish table, wok range and deck oven have no project photograph of their own, so their block
+// says what its photograph does show, as their website pages do: work tables, a gas cooking line, range ovens)
+const IN_PROJECTS = { prep_table: 'ispsc-03', sink: 'ispsc-05', stove: 'ispsc-01', cabinet: 'dmmmsu-02', wall_shelf: 'dmmmsu-04', rack: 'dmmmsu-03', dish_table: 'ispsc-03', wok_range: 'ispsc-05', cooking_line: 'dmmmsu-01', deck_oven: 'dmmmsu-01', hood: 'ispsc-01' };
+const IN_PROJECTS_POS = { stove: '50% 40%', sink: '50% 60%', dish_table: '50% 82%', wok_range: '50% 62%', cooking_line: '50% 62%', deck_oven: '50% 62%', hood: '50% 12%' };
+const IN_PROJECTS_LABEL = { dish_table: 'Tables in our projects', wok_range: 'Gas cooking lines in our projects', deck_oven: 'Range ovens in our projects' };
 
 const dimWords = (fam) => { const w = Object.values(fam.dims).map((d) => d.label.toLowerCase()); return w.length === 1 ? w[0] : `${w.slice(0, -1).join(', ')} and ${w[w.length - 1]}`; };
+// a family whose width is LOCKED by an option says so instead of printing the range its schema allows (the deck oven: 700 mm for three trays per deck, 1200 mm for six)
+const LOCKED_SIZE = { deck_oven: 'Width 700 mm with three trays per deck, 1200 mm with six' };
 const sizeLine = (fam) => {
+  if (LOCKED_SIZE[fam.id]) return LOCKED_SIZE[fam.id] + '.';
   const d = fam.dims, keys = Object.keys(d);
   const range = keys.map((k) => `${d[k].label} ${d[k].min}–${d[k].max}`).join(' · ');
   const def = keys.map((k) => d[k].default).join(' × ');
@@ -134,7 +146,7 @@ function familyPage(fam, card, draw) {
   const variants = noPhoto ? VARIANTS[fam.id].slice(1, 4) : VARIANTS[fam.id].slice(0, 3);
   const dr = variants.map((cfg) => { const d = draw(fam.id, cfg); return `<div><div class="pv">${d.svg}</div><p class="cap">${esc(d.caption)}</p></div>`; }).join('');
   const projBlock = proj
-    ? `<div class="fill"><p class="h4">Seen in our projects</p><figure class="fig mt1"><div class="ph-box"><img src="${img(proj + '.jpg')}" alt="${esc(L.PROJ_ALT[proj])}" style="object-position:${IN_PROJECTS_POS[fam.id] || '50% 50%'}"></div><figcaption>${esc(L.projCap(proj))}</figcaption></figure></div>`
+    ? `<div class="fill"><p class="h4">${esc(IN_PROJECTS_LABEL[fam.id] || 'Seen in our projects')}</p><figure class="fig mt1"><div class="ph-box"><img src="${img(proj + '.jpg')}" alt="${esc(L.PROJ_ALT[proj])}" style="object-position:${IN_PROJECTS_POS[fam.id] || '50% 50%'}"></div><figcaption>${esc(L.projCap(proj))}</figcaption></figure></div>`
     : '<div class="fill"></div>';
   return L.page({ doc: DOC, label: fam.label, body: `
     <p class="eyebrow">Configurable product · ${CAT_LABEL[fam.category] || ''}</p>
@@ -272,7 +284,7 @@ function build() {
   for (const k of Object.keys(data.fixed)) if (!['cooking', 'refrigeration'].includes(k) && data.fixed[k].length) fixedPages.push({ cat: k, title: CAT_LABEL[k] || k, kicker: `Fixed equipment · ${CAT_LABEL[k] || k}`, lead: 'Standard items with their sizes, notes and specifications. Ask us for a quotation on any item.', items: data.fixed[k] });
 
   // the page order, from which the contents list takes its numbers
-  const ids = ['cover', 'contents', 'materials', ...fams.map((f) => 'fam-' + f.id), ...fixedPages.map((p, i) => 'fixed-' + i), 'sys-exhaust', 'sys-gas', 'sys-fire', 'how', 'order', 'contact'];
+  const ids = ['cover', 'contents', 'materials', 'glance', ...fams.map((f) => 'fam-' + f.id), ...fixedPages.map((p, i) => 'fixed-' + i), 'sys-exhaust', 'sys-gas', 'sys-fire', 'how', 'order', 'contact'];
   const no = (id) => ids.indexOf(id) + 1;
   const row = (t, id, sub) => `<li${sub ? ' class="sub"' : ''}>${sub ? '' : '<span class="no">&nbsp;</span>'}<span>${t}</span><i></i><b>${no(id)}</b></li>`;
   const pg = (p) => { const first = ids.indexOf('fixed-' + fixedPages.indexOf(p)) + 1; return first; };
@@ -284,7 +296,7 @@ function build() {
   pages.push(L.cover({
     photo: 'dmmmsu-01.jpg', edition: '2026 edition', kicker: 'Product catalogue',
     title: '<span class="nowrap">Stainless-steel</span> kitchen equipment, made to order.',
-    sub: 'Preparation · Washing · Cooking · Storage · Refrigeration, and the exhaust, gas and fire suppression systems that go with them.',
+    sub: 'Preparation · Washing · Cooking · Ventilation · Storage · Refrigeration, and the exhaust, gas and fire suppression systems that go with them.',
     footLeft: `<b>${CO.brand}™</b> by ${CO.name}`, footRight: `<b>${CO.site}</b>`, photoPos: '50% 55%',
   }));
 
@@ -296,8 +308,8 @@ function build() {
     <div class="cols c32 gap8 mt4 top">
       <div><p class="h4">Contents</p><ol class="toc mt1">
         ${row('Materials and finishes', 'materials').replace('<span class="no">&nbsp;</span>', '<span class="no">01</span>')}
-        <li><span class="no">02</span><span>Configurable products</span><i></i><b>${no('fam-' + fams[0].id)}–${no('fam-' + fams[fams.length - 1].id)}</b></li>
-        ${fams.map((f) => row(esc(f.label), 'fam-' + f.id, true)).join('')}
+        <li><span class="no">02</span><span>Configurable products</span><i></i><b>${no('glance')}–${no('fam-' + fams[fams.length - 1].id)}</b></li>
+        ${fams.map((f) => row(esc(f.label), 'fam-' + f.id, true).replace('<li class="sub">', '<li class="sub" style="padding-top:.9mm;padding-bottom:.9mm">')).join('')}
         <li><span class="no">03</span><span>Fixed equipment</span><i></i><b>${no('fixed-0')}–${no('fixed-' + (fixedPages.length - 1))}</b></li>
         ${[...new Set(fixedPages.map((p) => p.cat))].map((c) => `<li class="sub"><span>${CAT_LABEL[c] || c}</span><i></i><b>${fixedRange(c)}</b></li>`).join('')}
         <li><span class="no">04</span><span>Kitchen systems</span><i></i><b>${no('sys-exhaust')}–${no('sys-fire')}</b></li>
@@ -308,14 +320,14 @@ function build() {
       </ol></div>
       <div>
         <p class="h4">How to read this catalogue</p>
-        <div class="tile-ic">${icb('sliders')}<div><div class="h3">Configurable products</div><p>Six products you set up yourself: choose the options, then your own length, width and height.</p></div></div>
+        <div class="tile-ic">${icb('sliders')}<div><div class="h3">Configurable products</div><p>Eleven products you set up yourself: choose the options, then your own size.</p></div></div>
         <div class="tile-ic">${icb('boxes')}<div><div class="h3">Fixed equipment</div><p>Standard items with their sizes, notes and specifications.</p></div></div>
         <div class="tile-ic">${icb('wind')}<div><div class="h3">Kitchen systems</div><p>Exhaust and fresh air, LPG gas line and fire suppression, planned together with your cooking line.</p></div></div>
         <div class="note mt3">Ask us for a quotation on any item. Choose your equipment online and you will see an estimated range for your selection, then we send you the final quotation.</div>
       </div>
     </div>` }));
 
-  // materials and finishes, and the size limits of the six products
+  // materials and finishes, and the size limits of the eleven products
   pages.push(L.page({ doc: DOC, label: 'Materials and finishes', body: `
     <p class="eyebrow">01 · Materials and finishes</p>
     <h1 class="h1">Two grades, three finishes</h1>
@@ -330,13 +342,21 @@ function build() {
       <div><div class="sw satin"></div><div class="h3 mt1">Satin</div><p class="sm muted">A soft, low-sheen finish between brushed and mirror.</p></div>
     </div>
     <p class="xs muted mt1">The swatches are illustrations. Ask to see a sample before you decide.</p>
-    <p class="h4 mt4">The six configurable products at a glance</p>
+    <p class="xs muted mt3">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. ${esc(CONSTRUCTION_NOTE)}</p>
+    <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img('ispsc-04.jpg')}" alt="${esc(L.PROJ_ALT['ispsc-04'])}"></div><figcaption>${esc(L.projCap('ispsc-04'))}</figcaption></figure></div>` }));
+
+  // the eleven configurable products at a glance: what you choose and the size range online, one row each
+  pages.push(L.page({ doc: DOC, label: 'Configurable products at a glance', body: `
+    <p class="eyebrow">02 · Configurable products</p>
+    <h1 class="h1">Eleven products, set up online</h1>
+    <p class="lead">Choose the options, then your own size. Each product has a page of its own in this catalogue, with its options, its size limits and its layouts at a glance.</p>
+    <p class="h4 mt4">The eleven configurable products at a glance</p>
     <table class="tb mt1">
       <thead><tr><th>Product</th><th>You choose</th><th>Online size range (mm)</th></tr></thead>
-      <tbody>${fams.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(data.families[f.id].specs.filter(([k]) => k !== 'Size' && k !== 'Construction' && k !== 'Material').map(([k, v]) => k.toLowerCase()).join(', '))}</td><td>${esc(Object.keys(f.dims).map((k) => `${f.dims[k].label} ${f.dims[k].min}–${f.dims[k].max}`).join(' · '))}</td></tr>`).join('')}</tbody>
+      <tbody>${fams.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(data.families[f.id].specs.filter(([k]) => k !== 'Size' && k !== 'Construction' && k !== 'Material').map(([k, v]) => k.toLowerCase()).join(', '))}</td><td>${esc(LOCKED_SIZE[f.id] || Object.keys(f.dims).map((k) => `${f.dims[k].label} ${f.dims[k].min}–${f.dims[k].max}`).join(' · '))}</td></tr>`).join('')}</tbody>
     </table>
-    <p class="xs muted mt1">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. ${esc(CONSTRUCTION_NOTE)} Need a different size? Ask us for a quotation built to your specifications.</p>
-    <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img('ispsc-04.jpg')}" alt="${esc(L.PROJ_ALT['ispsc-04'])}"></div><figcaption>${esc(L.projCap('ispsc-04'))}</figcaption></figure></div>` }));
+    <p class="xs muted mt1">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. Need a different size? Ask us for a quotation built to your specifications.</p>
+    <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img('dmmmsu-01.jpg')}" alt="${esc(L.PROJ_ALT['dmmmsu-01'])}" style="object-position:50% 55%"></div><figcaption>${esc(L.projCap('dmmmsu-01'))}</figcaption></figure></div>` }));
 
   for (const f of fams) pages.push(familyPage(f, data.families[f.id], draw));
 

@@ -521,11 +521,12 @@ else
     echo "FAIL: $CAT_PAGE matches the pricing-token list outside or inside the block (line(s): $page_price_lines). Offending text withheld on purpose."
     cat_fail=1
   fi
-  # Owner ruling 2026-10-21 ("just the equipment"): the public catalogue has EXACTLY five categories, in this
-  # order, and nothing from the excluded exhaust / fresh-air / gas-line / fire-suppression categories.
+  # Owner ruling 2026-10-21 ("just the equipment"): the public catalogue has EXACTLY these categories, in this
+  # order, and nothing from the excluded fresh-air / gas-line / fire-suppression categories (and, from the exhaust
+  # category, only the range hoods, as configurable cards in Ventilation: owner ruling 2026-10-28, CONFIGURATOR-FAMILIES-2-SPEC).
   cat_groups=$(grep -oE '<section class="cat-group" id="cat-[a-z_]+"' "$CAT_PAGE" | sed -E 's/.*id="cat-//; s/"$//' | tr '\n' ' ')
-  if [ "$cat_groups" != "preparation washing cooking storage refrigeration " ]; then
-    echo "FAIL: $CAT_PAGE must have exactly the five public categories (preparation washing cooking storage refrigeration), in that order — found: ${cat_groups:-none}"
+  if [ "$cat_groups" != "preparation washing cooking ventilation storage refrigeration " ]; then
+    echo "FAIL: $CAT_PAGE must have exactly the six public categories (preparation washing cooking ventilation storage refrigeration), in that order — found: ${cat_groups:-none}"
     echo "  FIX: scripts/build-catalogue.js (PUBLIC_CATEGORIES) + scripts/public-categories.json, then re-run  node scripts/build-catalogue.js"
     cat_fail=1
   fi
@@ -695,13 +696,13 @@ else
   cat_fail=1
 fi
 
-# The PRODUCT pages and the FRESH-AIR page (SEO build, 2026-10-22): /products/ + its six product pages, and /services/fresh-air-systems/. Static pages in
+# The PRODUCT pages and the FRESH-AIR page (SEO build, 2026-10-22; five more product pages 2026-10-28, CONFIGURATOR-FAMILIES-2-SPEC §6.3): /products/ + its eleven product pages, and /services/fresh-air-systems/. Static pages in
 # the same design as the content pages above, so the same rulings apply: R1 NO PRICES (the whole file; the plain words price / pricing / cost too), ONE
 # phone / ONE email / the Quezon City address, no app script, never precached — with ONE allowance: the owner's own sentence "Prices depend on size and
-# options." (the hub and the six product pages carry it in their estimate block and in their first FAQ answer) is taken out of the body before the plain
+# options." (the hub and the eleven product pages carry it in their estimate block and in their first FAQ answer) is taken out of the body before the plain
 # words are scanned, so the word appears nowhere else on them; the fresh-air page has no allowance at all. The head (JSON-LD included) is scanned with the
 # full token list. FAIL output carries line numbers only. tests/seo-products.test.mjs pins the rest of their content.
-PRODUCT_PAGES='products/index.html products/stainless-steel-sinks/index.html products/stainless-steel-work-tables/index.html products/commercial-gas-stoves/index.html products/stainless-steel-cabinets/index.html products/stainless-steel-shelving/index.html products/stainless-steel-racks/index.html services/fresh-air-systems/index.html'
+PRODUCT_PAGES='products/index.html products/stainless-steel-sinks/index.html products/stainless-steel-dish-tables/index.html products/stainless-steel-work-tables/index.html products/commercial-gas-stoves/index.html products/commercial-wok-ranges/index.html products/commercial-griddles-grillers-and-fryers/index.html products/gas-deck-ovens/index.html products/stainless-steel-range-hoods/index.html products/stainless-steel-cabinets/index.html products/stainless-steel-shelving/index.html products/stainless-steel-racks/index.html services/fresh-air-systems/index.html'
 prod_fail=0
 prod_body() {  # $1 = page, $2 = its first body line
   if [ "${1#products/}" != "$1" ]; then sed -n "$2,\$p" "$1" | sed 's/Prices depend on size and options\.//g'; else sed -n "$2,\$p" "$1"; fi
@@ -744,7 +745,7 @@ if ! node scripts/inline-page-css.js --check; then
   prod_fail=1
 fi
 if [ "$prod_fail" -eq 0 ]; then
-  echo "PASS: the 8 product and fresh-air pages carry no pricing tokens (only the owner's sentence \"Prices depend on size and options.\", and only on the hub and the six product pages), no disallowed contact detail and no app script, and are not precached"
+  echo "PASS: the 13 product and fresh-air pages carry no pricing tokens (only the owner's sentence \"Prices depend on size and options.\", and only on the hub and the eleven product pages), no disallowed contact detail and no app script, and are not precached"
 else
   cat_fail=1
 fi

@@ -124,6 +124,7 @@ html.qr-has-tray #site-footer{padding-bottom:calc(var(--qr-tray-h,84px) + 8px)}
 #qr-root .qr-select{padding-right:34px;background-image:linear-gradient(45deg,transparent 50%,var(--qr-accent) 50%),linear-gradient(135deg,var(--qr-accent) 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 12px) 55%;background-size:6px 6px,6px 6px;background-repeat:no-repeat}
 #qr-root .qr-textarea{min-height:88px;resize:vertical}
 #qr-root .qr-input[aria-invalid="true"],#qr-root .qr-select[aria-invalid="true"],#qr-root .qr-textarea[aria-invalid="true"]{border-color:var(--qr-danger);outline:1px solid var(--qr-danger)}
+#qr-root .qr-input[readonly]{background:var(--qr-soft);color:var(--qr-muted);cursor:not-allowed}      /* a size the chosen options fix (a deck oven's width follows its trays): shown, not typed */
 #qr-root .qr-hint{margin:6px 0 0;font-size:13px;line-height:1.45;color:var(--qr-muted)}
 #qr-root .qr-err{margin:6px 0 0;font-size:13.5px;line-height:1.4;color:var(--qr-danger);font-weight:500}
 #qr-root .qr-banner{margin:0 0 14px;padding:10px 12px;border:1px solid var(--qr-line);border-radius:6px;background:var(--qr-soft);font-size:14px;line-height:1.45}
@@ -188,6 +189,7 @@ html.qr-lock,html.qr-lock body{overflow:hidden}
 #qr-root .qr-seg{display:grid;gap:8px;grid-template-columns:repeat(4,minmax(0,1fr))}
 #qr-root .qr-seg-2{grid-template-columns:repeat(2,minmax(0,1fr))}
 #qr-root .qr-seg-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:519px){#qr-root .qr-seg-wrap{grid-template-columns:repeat(2,minmax(0,1fr))}}      /* four options with long names (griddle / lava-rock griller / fryer / griller + griddle): two by two on a phone, so no name is broken */
 #qr-root .qr-seg-btn{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;min-height:52px;padding:8px 6px;text-align:center;border:1px solid var(--qr-edge);border-radius:8px;background:var(--qr-bg);cursor:pointer;transition:background-color .15s,border-color .15s,box-shadow .15s}
 #qr-root .qr-seg-btn input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
 #qr-root .qr-seg-btn:hover{border-color:var(--qr-accent)}
@@ -211,7 +213,7 @@ html.qr-lock,html.qr-lock body{overflow:hidden}
 #qr-root .qr-slot-head .qr-btn-quiet{margin-right:-10px}
 #qr-root .qr-slot-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
 #qr-root .qr-slot-foot .qr-hint{margin:0}
-#qr-root .qr-dims-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+#qr-root .qr-dims-2,#qr-root .qr-dims-1{grid-template-columns:repeat(2,minmax(0,1fr))}      /* one size only (a deck oven) keeps the width of a field in the two-size layout */
 #qr-root .qr-wide-hint{color:var(--qr-ink)}
 /* the standard construction line (read-only) after the option groups: the same gap below as a group has, so it never sits against the size fields */
 #qr-root .qr-construction{margin:0 0 18px}

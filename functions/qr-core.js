@@ -24,7 +24,7 @@
 // excluded items, legacy placeholder docs, anything new nobody has published), so
 // the same "no longer in the catalogue" refusal applies to all of them.
 //
-// PRODUCT FAMILIES (owner ruling 2026-10-21): six products are CONFIGURABLE. The published SKUs a family absorbs are no longer
+// PRODUCT FAMILIES (owner ruling 2026-10-21; eleven since 2026-10-28): the configurable products. The published SKUs a family absorbs are no longer
 // quotable as plain lines (qr-published.json lists only the FIXED items); a visitor quotes the family instead, with a line
 // { familyId, config, dims, qty, note }. The family definitions are functions/qr-families.js (GENERATED from scripts/public-families.json,
 // mirrored from js/), the logic that validates a line against one is functions/product-families.js (mirrored), and the price is
@@ -325,6 +325,18 @@ function constantsOf(meta) { return isPlainObject(meta) && isPlainObject(meta.co
 function estimateEnabledOf(meta) {
   return !(isPlainObject(meta) && isPlainObject(meta.quoteRequest) && meta.quoteRequest.estimateEnabled === false);
 }
+/**
+ * Per-family kill-switch (CONFIGURATOR-FAMILIES-2-SPEC §9): productMeta/config.families.disabled is a list of family ids the owner has switched OFF
+ * on the website without a deploy. -> an array of the distinct, non-empty STRING entries (exact ids — no trimming, no case folding — because the
+ * website and the Quote Builder must read the one list the same way); anything else — no list, a list that is not an array, a number or an object
+ * among the entries — contributes nothing, so a malformed document can only ever leave a family ON (the same fail-open reading as estimateEnabledOf).
+ */
+function disabledFamiliesOf(meta) {
+  const list = isPlainObject(meta) && isPlainObject(meta.families) ? meta.families.disabled : null;
+  const out = [];
+  if (Array.isArray(list)) list.forEach((id) => { if (typeof id === 'string' && id !== '' && !out.includes(id)) out.push(id); });
+  return out;
+}
 
 /** 'fresh' (< 10 min) | 'stale' (< 24 h: may cover a failed refresh) | 'dead' (older) | 'empty'. */
 function productsCacheState(cache, nowMs) {
@@ -349,8 +361,10 @@ const GONE_MSG = 'An item in your list is no longer in the catalogue — remove 
  * `items[]` is the stored (client-facing, price-free) shape of §8.1; name / cat / unit are re-derived from the master and
  * anything the client sent for them is ignored.
  * A line is EITHER a plain product line { id, qty, size, runs, specs, note } OR a configured-family line
- * { familyId, config, dims, qty, note } — never both. opts = { families, primaries }: the family definitions (js/qr-families.js) and the Map
- * familyId -> primary SKU the pricing starts from; without them a family line is refused. A family line is validated STRICTLY against the
+ * { familyId, config, dims, qty, note } — never both. opts = { families, primaries, disabledFamilies }: the family definitions (js/qr-families.js), the Map
+ * familyId -> primary SKU the pricing starts from, and the ids the owner has switched off (disabledFamiliesOf; an array or a Set); without the
+ * first two a family line is refused, and a family on the third list is refused with the very same message an unknown family gets (its
+ * line is removed by the page, nothing is validated or priced for it). A family line is validated STRICTLY against the
  * family (an unknown option, value or size key is an error, never ignored) and stored with its configuration, its size and the plain-words
  * option list (`specs`: the same {label, value} rows a product line uses, so every consumer prints it without learning a new shape).
  */
@@ -358,6 +372,7 @@ function normaliseItems(rawItems, byId, opts) {
   const o = opts || {};
   const families = o.families || null;
   const primaries = o.primaries || new Map();
+  const disabled = o.disabledFamilies instanceof Set ? o.disabledFamilies : new Set(Array.isArray(o.disabledFamilies) ? o.disabledFamilies : []);
   const errors = [];
   const badIds = [];
   const items = [];
@@ -372,7 +387,7 @@ function normaliseItems(rawItems, byId, opts) {
       const fid = typeof raw.familyId === 'string' ? raw.familyId : '';
       const fam = families && has(families.families, fid) ? families.families[fid] : null;
       const primary = fam ? primaries.get(fid) : undefined;
-      if (!fam || !primary) { if (!errors.includes(GONE_MSG)) errors.push(GONE_MSG); badIds.push(fid.slice(0, 40)); return; }
+      if (!fam || !primary || disabled.has(fid)) { if (!errors.includes(GONE_MSG)) errors.push(GONE_MSG); badIds.push(fid.slice(0, 40)); return; }
       const qtyF = raw.qty;
       if (!Number.isInteger(qtyF) || qtyF < 1 || qtyF > LIMITS.maxQtyPerLine) { errors.push(`"${fam.label}": quantity must be a whole number from 1 to ${LIMITS.maxQtyPerLine}.`); return; }
       let noteF = '';
@@ -717,6 +732,7 @@ module.exports = {
   buildPricingIndex,
   constantsOf,
   estimateEnabledOf,
+  disabledFamiliesOf,
   productsCacheState,
   normaliseItems,
   basketHash,

@@ -7,11 +7,12 @@
  * The homepage (index.html) carries NO products, no counts and no markers: the owner
  * ruled that the catalogue lives on its own page.
  *
- * PUBLIC CATEGORIES (owner ruling 2026-10-21, "just the equipment"): the public page has exactly
- * five categories, in this order: Preparation, Washing, Cooking, Storage, Refrigeration.
- *   - EXCLUDED_CATEGORIES (exhaust_system, fresh_air_system, gas_line, fire_suppression) are
- *     skipped entirely: no card, no count, no search hit. The master is never edited.
- *   - scripts/public-categories.json maps every other published product id to one of the five
+ * PUBLIC CATEGORIES (owner ruling 2026-10-21, "just the equipment"; Ventilation added 2026-10-28 for the range hoods): the public page has exactly
+ * six categories, in this order: Preparation, Washing, Cooking, Ventilation, Storage, Refrigeration.
+ *   - EXCLUDED_CATEGORIES (fresh_air_system, gas_line, fire_suppression) are
+ *     skipped entirely: no card, no count, no search hit. The master is never edited. (exhaust_system is NOT excluded since
+ *     2026-10-28: its seven hoods are the Ventilation category, every other exhaust product is listed under excludedProducts.)
+ *   - scripts/public-categories.json maps every other published product id to one of the six
  *     and lists the non-equipment items (services, materials, accessories) that are not
  *     published. A master product that is in none of those places REFUSES the build, so a new
  *     product always forces an explicit decision.
@@ -71,7 +72,7 @@ const PF = require('../js/product-families.js');          // the pure family hel
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CATALOGUE_HTML = path.join(REPO_ROOT, 'catalogue', 'index.html');
 const PHOTO_MAP_FILE = path.join(__dirname, 'product-photos.json');
-// PRODUCT FAMILIES (owner ruling 2026-10-21): six configurable products + every other published SKU as a fixed item.
+// PRODUCT FAMILIES (owner ruling 2026-10-21; five more 2026-10-28): eleven configurable products + every other published SKU as a fixed item.
 // scripts/public-families.json is the source; js/qr-families.js (+ the byte-identical functions/qr-families.js) is GENERATED from it.
 const FAMILIES_FILE = path.join(__dirname, 'public-families.json');
 const FAMILIES_JS = path.join(REPO_ROOT, 'js', 'qr-families.js');
@@ -123,18 +124,20 @@ const brandInPath = (t) => BRAND_RE.test(String(t).replace(/[\s\-_./]+/g, ' '));
 const ID_RE = /^[A-Za-z0-9_-]+$/;                // product id: also used in markup
 const CAT_ID_RE = /^[a-z0-9_]+$/;
 
-// The five public categories — exactly these, in this order (owner ruling). The id is the deep-link
+// The six public categories — exactly these, in this order (owner ruling; Ventilation, for the range hoods, added 2026-10-28). The id is the deep-link
 // slug (#cat-preparation); the label is what the page shows.
 const PUBLIC_CATEGORIES = Object.freeze([
   Object.freeze({ id: 'preparation', label: 'Preparation' }),
   Object.freeze({ id: 'washing', label: 'Washing' }),
   Object.freeze({ id: 'cooking', label: 'Cooking' }),
+  Object.freeze({ id: 'ventilation', label: 'Ventilation' }),
   Object.freeze({ id: 'storage', label: 'Storage' }),
   Object.freeze({ id: 'refrigeration', label: 'Refrigeration' }),
 ]);
 const PUBLIC_CATEGORY_IDS = PUBLIC_CATEGORIES.map(c => c.id);
-// Master categories that are never published: the mechanical / plumbing systems, not equipment.
-const EXCLUDED_CATEGORIES = Object.freeze(['exhaust_system', 'fresh_air_system', 'gas_line', 'fire_suppression']);
+// Master categories that are never published: the mechanical / plumbing systems, not equipment. (exhaust_system left this list on 2026-10-28: the range hoods are
+// equipment and a family of their own; the ducting, blowers and other exhaust items are excluded one by one under excludedProducts in scripts/public-categories.json.)
+const EXCLUDED_CATEGORIES = Object.freeze(['fresh_air_system', 'gas_line', 'fire_suppression']);
 const PUBLIC_CATEGORIES_FILE = path.join(__dirname, 'public-categories.json');
 
 // material.* keys that may reach the page (string values only). The spec lists
@@ -606,18 +609,18 @@ function publishedProductIds(db, pub, excludedCategories) {
 }
 
 // ── product families (owner ruling 2026-10-21) ─────────────────────────────
-// Six configurable products; every other published SKU stays a fixed item. scripts/public-families.json is the source of truth
+// Eleven configurable products; every other published SKU stays a fixed item. scripts/public-families.json is the source of truth
 // (options, defaults, size limits, the SKUs each family ABSORBS, preview rules) and holds no price of any kind.
 const FAMILY_ID_RE = /^[a-z][a-z0-9_]{1,30}$/;
 const GROUP_KEY_RE = /^[a-z][a-zA-Z0-9_]{0,30}$/;
 const PREVIEW_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,78}$/;
 const FAMILY_TOP_KEYS = ['_readme', 'version', 'order', 'families', 'fixed'];
-const FAMILY_KEYS = ['label', 'category', 'description', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
-const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
+const FAMILY_KEYS = ['label', 'category', 'description', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
+const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'when', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
 const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 'hint', 'short', 'w'];
 const GROUP_TYPES = ['choice', 'slots', 'multi'];
 // the fields of a family that reach the public/server file js/qr-families.js, in a fixed order (deterministic output)
-const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
+const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
 
 const isPlainObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isIntNum = (n) => typeof n === 'number' && Number.isInteger(n);
@@ -683,6 +686,24 @@ function checkFamily(fid, f, add) {
       if (!(isIntNum(g.minSlots) && isIntNum(g.maxSlots) && g.minSlots >= 1 && g.maxSlots >= g.minSlots && g.maxSlots <= 12)) { at(`${gt}: minSlots / maxSlots must be whole numbers, 1 <= min <= max <= 12`); groupsOk = false; }
     } else if (g.minSlots !== undefined || g.maxSlots !== undefined) { at(`${gt}: minSlots / maxSlots belong to a slots group only`); groupsOk = false; }
   });
+  // Conditional groups (CONFIGURATOR-FAMILIES-2-SPEC §4.1): `when` = { <earlier choice group>: [option values] }. The gated group is a choice or multi group (not slots, not
+  // staff-only); every key names a choice group that comes EARLIER in "groups" (no forward or self reference, so there is no cycle) and is not itself staff-only; every
+  // value is a non-empty list of that group's option values.
+  if (groupsOk) groups.forEach((g, i) => {
+    if (g.when === undefined) return;
+    const wt = `groups[${i}]: "when"`;
+    if (g.type === 'slots' || g.staffOnly === true) { at(`${wt} belongs to a choice or multi group that is not staff-only`); groupsOk = false; }
+    if (!isPlainObj(g.when) || !Object.keys(g.when).length) { at(`${wt} must be an object of { earlier group key: [option values] }`); groupsOk = false; return; }
+    for (const k of Object.keys(g.when)) {
+      const gi = groups.findIndex((x) => x.key === k);
+      if (gi < 0) { at(`${wt}: "${String(k).slice(0, 40)}" is not a group of this family`); groupsOk = false; continue; }
+      if (gi >= i) { at(`${wt}: "${k}" must come EARLIER in "groups" (no forward or self reference)`); groupsOk = false; continue; }
+      const gate = groups[gi];
+      if (gate.type !== 'choice' || gate.staffOnly === true) { at(`${wt}: "${k}" must be a choice group that is not staff-only`); groupsOk = false; continue; }
+      const vals = g.when[k];
+      if (!Array.isArray(vals) || !vals.length || !vals.every((v) => PF.optionOf(gate, v))) { at(`${wt}: "${k}" needs a non-empty list of that group's option values`); groupsOk = false; }
+    }
+  });
   if (!groupsOk) return null;
 
   // dims
@@ -716,6 +737,7 @@ function checkFamily(fid, f, add) {
       const g = gOf(t);
       if (!g || g.type !== 'choice') at(`construction: {${t}} does not name a choice group of this family`);
       else if (!g.options.every((o) => nonEmpty(o.c))) at(`construction: every option of "${t}" needs a "c" phrase (its construction wording)`);
+      else if (g.when !== undefined) at(`construction: {${t}} names a conditional option (it has "when"): a construction phrase cannot depend on it`);
     }
   }
 
@@ -737,15 +759,37 @@ function checkFamily(fid, f, add) {
       });
     }
   }
-  // minDimWhen
-  if (f.minDimWhen !== undefined) {
-    if (!Array.isArray(f.minDimWhen)) at('"minDimWhen" must be an array');
-    else f.minDimWhen.forEach((rule, i) => {
+  // minDimWhen / maxDimWhen: [{ group, includes, min|max: { W?, D?, H? } }] — a chosen option forces a lower (an oven's depth) or an upper (a slim hood's depth, a deck oven's
+  // width) limit on an axis the family has: whole mm inside the axis limits and on its step.
+  const checkLimitRules = (listKey, valueKey) => {
+    if (f[listKey] === undefined) return;
+    if (!Array.isArray(f[listKey])) { at(`"${listKey}" must be an array`); return; }
+    f[listKey].forEach((rule, i) => {
       const g = isPlainObj(rule) ? gOf(rule.group) : null;
-      if (!g || !PF.optionOf(g, rule.includes)) { at(`minDimWhen[${i}]: needs a known group and one of its option values in "includes"`); return; }
-      if (!isPlainObj(rule.min) || !Object.keys(rule.min).length || !Object.keys(rule.min).every((k) => dims[k] && isIntNum(rule.min[k]) && rule.min[k] >= dims[k].min && rule.min[k] <= dims[k].max)) at(`minDimWhen[${i}]: "min" must name the family's own axes with values inside their limits`);
+      if (!g || !PF.optionOf(g, rule.includes)) { at(`${listKey}[${i}]: needs a known group and one of its option values in "includes"`); return; }
+      const lim = rule[valueKey];
+      if (!isPlainObj(lim) || !Object.keys(lim).length || !Object.keys(lim).every((k) => dims[k] && isIntNum(lim[k]) && lim[k] >= dims[k].min && lim[k] <= dims[k].max && lim[k] % dims[k].step === 0)) at(`${listKey}[${i}]: "${valueKey}" must name the family's own axes with values inside their limits and on the step`);
     });
+  };
+  checkLimitRules('minDimWhen', 'min');
+  checkLimitRules('maxDimWhen', 'max');
+  // a minimum and a maximum that can hold TOGETHER on one axis must not cross. Two rules on the SAME group can hold together when they name the same value of a choice group
+  // (any two values of a multi group); rules on DIFFERENT groups are independent choices, so such a pair is refused rather than evaluated (none of the families needs one).
+  if (Array.isArray(f.minDimWhen) && Array.isArray(f.maxDimWhen)) {
+    f.minDimWhen.forEach((a, ia) => f.maxDimWhen.forEach((b, ib) => {
+      if (!isPlainObj(a) || !isPlainObj(b) || !isPlainObj(a.min) || !isPlainObj(b.max)) return;       // already reported above
+      const shared = Object.keys(a.min).filter((k) => Object.prototype.hasOwnProperty.call(b.max, k));
+      if (!shared.length) return;
+      const g = gOf(a.group);
+      if (a.group !== b.group) { at(`minDimWhen[${ia}] and maxDimWhen[${ib}] limit the same axis from different groups: not supported (they could hold together and cross)`); return; }
+      const together = g && g.type === 'choice' ? a.includes === b.includes : true;
+      if (together && shared.some((k) => a.min[k] > b.max[k])) at(`minDimWhen[${ia}] and maxDimWhen[${ib}] can hold together but the minimum is above the maximum`);
+    }));
   }
+  // the family's own default size must be a valid size for its default options (a forced limit or a width rule cannot refuse the zero point)
+  try {
+    if (!PF.validateDims(fam, PF.defaultDims(fam), PF.defaultConfig(fam)).ok) at('the default size is not valid for the default options (a width rule or a forced limit refuses it)');
+  } catch (e) { /* a malformed width rule or limit list was reported above */ }
   // specMap (old saved option -> new option)
   if (f.specMap !== undefined) {
     if (!isPlainObj(f.specMap)) at('"specMap" must be an object');
@@ -837,7 +881,7 @@ function loadPublicFamilies(opts) {
   const rel = path.relative(REPO_ROOT, file) || file;
   let j = opts.source;
   if (j === undefined) {
-    if (!fs.existsSync(file)) throw new Error(`${rel} not found — it defines the six configurable product families`);
+    if (!fs.existsSync(file)) throw new Error(`${rel} not found — it defines the eleven configurable product families`);
     try { j = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
     catch (e) { throw new Error(`${rel} is not valid JSON: ${e.message}`); }
   }
@@ -906,7 +950,7 @@ function renderFamiliesJs(fams) {
   return [
     '// js/qr-families.js — GENERATED by scripts/build-catalogue.js from scripts/public-families.json. DO NOT HAND-EDIT.',
     '// Edit scripts/public-families.json, then run: node scripts/build-catalogue.js (it also writes the byte-identical mirror',
-    '// functions/qr-families.js — ci-invariants CHECK 10). The six configurable product families of the public catalogue: their',
+    '// functions/qr-families.js — ci-invariants CHECK 10). The eleven configurable product families of the public catalogue: their',
     '// options, defaults, size limits, the SKUs each one absorbs, and the preview-image rules. It holds NO price of any kind: the option',
     '// amounts are kept in private staff data that no public page loads. Logic that walks these definitions: js/product-families.js.',
     '(function (root, factory) {',
@@ -1006,6 +1050,7 @@ const TILE_ICONS = Object.freeze({
   preparation: '<path d="M2.5 8h19v2.6h-19z"/><path d="M5 10.6V20M19 10.6V20M5 15.4h14"/>',
   washing: '<path d="M9 11.5V6.2A2.2 2.2 0 0 1 11.2 4H14a2.5 2.5 0 0 1 2.5 2.5V8"/><path d="M16.5 8v1.6"/><path d="M3 12h18l-1.3 6.2a2.2 2.2 0 0 1-2.2 1.8h-11a2.2 2.2 0 0 1-2.2-1.8z"/>',
   cooking: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+  ventilation: '<path d="M3 15h18l-3.2-7H6.2z"/><path d="M10 8V3.5h4V8"/><path d="M7 18.5c0 1.2 1 1.6 1 3M12 18.5c0 1.2 1 1.6 1 3M17 18.5c0 1.2 1 1.6 1 3"/>',
   storage: '<path d="M5 3h14v17H5z"/><path d="M12 3v17"/><path d="M7 20v1.8M17 20v1.8"/><circle cx="9.6" cy="12" r=".7"/><circle cx="14.4" cy="12" r=".7"/>',
   refrigeration: '<path d="M12 2.5v19M9.2 4.6 12 6.8l2.8-2.2M9.2 19.4 12 17.2l2.8 2.2"/><path transform="rotate(60 12 12)" d="M12 2.5v19M9.2 4.6 12 6.8l2.8-2.2M9.2 19.4 12 17.2l2.8 2.2"/><path transform="rotate(120 12 12)" d="M12 2.5v19M9.2 4.6 12 6.8l2.8-2.2M9.2 19.4 12 17.2l2.8 2.2"/>',
 });
@@ -1030,15 +1075,21 @@ const SPEC_LIST = (rows) => `<dl class="cat-specs">${rows.map((r) => `<div><dt>$
 const FAMILY_MATERIAL = 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish';
 
 // The product page of each configurable family (SEO build, 2026-10-22: /products/ and one page per product, written by hand and pinned by
-// tests/seo-products.test.mjs, which also checks that these six are the six families of scripts/public-families.json). A family card ends with a
-// "Learn more" link to its page. A family with no page here simply has no link (a new family needs its page first).
+// tests/seo-products.test.mjs, which also checks that these are the families of scripts/public-families.json). A family card ends with a
+// "Learn more" link to its page. A family with no page here simply has no link (a new family needs its page first). The last five pages arrived with the
+// five new families (CONFIGURATOR-FAMILIES-2-SPEC §6.3, 2026-10-28).
 const FAMILY_PAGES = Object.freeze({
-  prep_table: { path: '/products/stainless-steel-work-tables/', about: 'stainless steel work tables' },
-  sink:       { path: '/products/stainless-steel-sinks/',       about: 'stainless steel sinks' },
-  stove:      { path: '/products/commercial-gas-stoves/',       about: 'commercial gas stoves' },
-  cabinet:    { path: '/products/stainless-steel-cabinets/',    about: 'stainless steel cabinets' },
-  wall_shelf: { path: '/products/stainless-steel-shelving/',    about: 'stainless steel shelving' },
-  rack:       { path: '/products/stainless-steel-racks/',       about: 'stainless steel racks' },
+  prep_table:   { path: '/products/stainless-steel-work-tables/',            about: 'stainless steel work tables' },
+  sink:         { path: '/products/stainless-steel-sinks/',                  about: 'stainless steel sinks' },
+  dish_table:   { path: '/products/stainless-steel-dish-tables/',            about: 'stainless steel dish tables' },
+  stove:        { path: '/products/commercial-gas-stoves/',                  about: 'commercial gas stoves' },
+  wok_range:    { path: '/products/commercial-wok-ranges/',                  about: 'commercial wok ranges' },
+  cooking_line: { path: '/products/commercial-griddles-grillers-and-fryers/', about: 'commercial griddles, grillers and fryers' },
+  deck_oven:    { path: '/products/gas-deck-ovens/',                         about: 'gas deck ovens' },
+  hood:         { path: '/products/stainless-steel-range-hoods/',            about: 'stainless steel range hoods' },
+  cabinet:      { path: '/products/stainless-steel-cabinets/',               about: 'stainless steel cabinets' },
+  wall_shelf:   { path: '/products/stainless-steel-shelving/',               about: 'stainless steel shelving' },
+  rack:         { path: '/products/stainless-steel-racks/',                  about: 'stainless steel racks' },
 });
 
 // The card of a CONFIGURABLE family: one card per family, rendered as the wide FEATURED card (css/catalogue.css: the full row, the photo on
@@ -1051,7 +1102,10 @@ function renderFamilyCard(fam, cat, photo, keywords) {
   const rows = [];
   for (const g of PF.publicGroups(fam)) {            // never a staff-only group (the 1.2 mm top plate is offered in the Quote Builder only)
     if (g.type === 'slots') rows.push([g.label, `Up to ${g.maxSlots} ${g.unit ? g.unit.many : 'positions'}, each chosen one by one`]);
-    else rows.push([g.label, g.options.map((o) => o.l).join(' / ')]);
+    else {
+      const when = PF.whenText(fam, g);                // a conditional option says when it applies: "Fry baskets — 1 / 2 / 3 (Type is Fryer)"
+      rows.push([g.label, g.options.map((o) => o.l).join(' / ') + (when ? ` (${when})` : '')]);
+    }
   }
   // the size line names the axes THIS family really has (wall shelving has a length and a depth, no height)
   const axes = ['W', 'D', 'H'].filter((k) => fam.dims && fam.dims[k]).map((k) => String(fam.dims[k].label).toLowerCase());
@@ -1079,7 +1133,7 @@ function renderCard(p, cat, photo) {
   const rows = [];
   if (p.material) for (const k of MATERIAL_KEYS) if (p.material[k]) rows.push([MATERIAL_LABELS[k], p.material[k]]);
   // The master's ad-hoc option lists (p.specs) are NOT shown any more (owner ruling 2026-10-21): a fixed item is quantity + size + note only,
-  // and the configurable options live on the six family cards. publicProduct() still scans every spec string, so a guard hit is still refused.
+  // and the configurable options live on the family cards. publicProduct() still scans every spec string, so a guard hit is still refused.
   // The note is shown whole, under its label; a product with no note (or no material rows) shows no label and no placeholder for it.
   const body = (p.notes ? LABEL(LABEL_NOTES) + `<p class="cat-notes">${esc(p.notes)}</p>` : '') + (rows.length ? LABEL(LABEL_SPECS) + SPEC_LIST(rows) : '');
   return `<li class="cat-card${photo ? ' has-photo' : ''}" data-id="${esc(p.id)}">` + mark +
@@ -1204,7 +1258,7 @@ function renderCatalogue(db, opts) {
   // SEO build, 2026-10-22: the H1 and the opening sentence carry the page's keyword ("commercial kitchen equipment") and who it is for; the sentences after
   // it are the owner's own, unchanged (tests/catalogue-layout.test.mjs, catalogue-public.test.mjs and site-public-surface.test.mjs pin them).
   lines.push('<h1>Commercial kitchen equipment catalogue</h1>');
-  lines.push('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens: preparation, washing, cooking, storage and refrigeration. Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications. Default sizes are in millimetres. Ask us for a quotation on any item.</p>');
+  lines.push('<p class="cat-lede">Commercial kitchen equipment for restaurants, hotels, bakeries, catering and commissary kitchens: preparation, washing, cooking, ventilation, storage and refrigeration. Premium stainless-steel equipment in food-grade SS304 as standard, or laboratory-grade SS316, built to your specifications. Default sizes are in millimetres. Ask us for a quotation on any item.</p>');
   lines.push('<form class="cat-search" id="cat-search-form" role="search">');
   lines.push('<label class="sr-only" for="cat-search">Search products</label>');
   lines.push(SEARCH_ICON);
@@ -1285,11 +1339,11 @@ function renderCatalogue(db, opts) {
  *   { id, name, cat, unit, dims? }
  * and nothing else (no master option lists: a fixed item is quantity + size + note only, owner ruling 2026-10-21) — price-free BY CONSTRUCTION: every product goes through the SAME publicProduct() allowlist, the same
  * TEXT_FIXES / NOTE_OVERRIDES and the same money / partner-brand scans as the cards, and the finished string is scanned
- * again. The six configurable FAMILIES are not in the island: the page reads them from js/qr-families.js (window.QR_FAMILIES).
+ * again. The configurable FAMILIES (eleven) are not in the island: the page reads them from js/qr-families.js (window.QR_FAMILIES).
  * `previews` is the validated configurator-photo manifest, { family: { key: { s: image, t: thumb, w, h, m } } } — empty until the owner adds photos.
  * It walks the SAME product set as renderCatalogue() by calling it (so the guard errors, the exclusions, the
  * public-category map and the page order are identical, and a product can never be quotable without being on the page).
- *   cat   the PUBLIC category id (preparation / washing / cooking / storage / refrigeration) — the page's own grouping
+ *   cat   the PUBLIC category id (preparation / washing / cooking / ventilation / storage / refrigeration) — the page's own grouping
  *   unit  as the master has it, 'pc' when blank (the Quote Builder's own fallback)
  *   dims  the finite positive default W / D / H in mm — the page decides which size inputs to show from these keys alone
  * `<` is written as <, so no string can ever close the <script> element or open an HTML comment inside it.
