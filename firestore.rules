@@ -552,6 +552,21 @@ service cloud.firestore {
 
     // [RN-52] Cash advances ─ -> docs/firestore-rules-notes.md#rn-52
     match /cash_advances/{docId} {
+      // Audit 2026-10-28 C2 — a self-filed request carries exactly what CashAdvance.request() writes
+      // (js/config.js), unfunded and with no schedule: no pre-seeded payments/monthlyPayment/interest.
+      function caOwnCreateShapeOk() {
+        let d = request.resource.data;
+        return d.keys().hasOnly(['userId', 'userName', 'employeeId', 'amount', 'terms', 'interest',
+                 'interestCharged', 'monthlyPayment', 'totalPayable', 'balance', 'status', 'payments',
+                 'date', 'reason', 'createdAt'])
+          && d.get('amount', 0) is number && d.get('amount', 0) > 0 && d.get('amount', 0) <= 50000
+          && d.get('terms', 1) in [1, 2, 3, 6, 12]
+          && d.get('interest', 0) == 0
+          && d.get('interestCharged', false) == false
+          && d.get('monthlyPayment', null) == null
+          && d.get('totalPayable', null) == null
+          && d.get('payments', []).size() == 0;
+      }
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isMoneyAdmin() || isSecretary()
       );
@@ -560,16 +575,16 @@ service cloud.firestore {
         isMoneyAdmin() ||
         (request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending'
-          && request.resource.data.balance == 0)
+          && request.resource.data.balance == 0
+          && caOwnCreateShapeOk())
       );
-      // Only money-tier can approve or change the money. Owners may edit
-      // non-financial details (e.g. reason) but never status/balance/amount.
+      // Only money-tier can approve or change the money. Audit 2026-10-28 C2: owners may
+      // touch ONLY reason/date, ONLY while pending (monthlyPayment/payments/userId drive payroll).
       allow update: if isAuth() && (
         isMoneyAdmin() ||
         (resource.data.userId == request.auth.uid
-          && request.resource.data.status  == resource.data.status
-          && request.resource.data.balance == resource.data.balance
-          && request.resource.data.amount  == resource.data.amount)
+          && resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reason', 'date']))
       );
       allow delete: if isAuth() && isPresident();
     }
@@ -712,17 +727,37 @@ service cloud.firestore {
       // [RN-56] Tasks are readable by every signed-in user with a profile -> docs/firestore-rules-notes.md#rn-56
       allow read: if isAuth() && (hasProfile() || request.auth.uid in resource.data.get('assignedTo', []));
       // [RN-57] Admins create any task. Design-dept members may create Des -> docs/firestore-rules-notes.md#rn-57
+      // Audit 2026-10-28 C3 — task status feeds KPI → pay (computeKpiForMonth). Non-admins work
+      // only in the employee statuses (js/screens/tasks.js EMP_STATUSES + 'review' from Submit);
+      // approve/score/reassign and stamping completedAt stay with the ops tier.
+      function taskEmpStatus(s) { return s in ['backlog', 'brainstorm', 'in-progress', 'submitted', 'review']; }
+      function taskNonAdminCreateOk() {
+        let d = request.resource.data;
+        return taskEmpStatus(d.get('status', 'backlog'))
+          && !d.keys().hasAny(['completedAt', 'approvedAt', 'approvedBy', 'presidentScore']);
+      }
+      function taskAssigneeUpdateOk() {
+        let diff = request.resource.data.diff(resource.data);
+        return diff.affectedKeys().hasOnly(['status', 'title', 'description', 'priority', 'dueDate',
+                 'department', 'currentStanding', 'submittedBy', 'submittedByName', 'submittedAt',
+                 'followUps', 'openFollowUpCount', 'completedAt',
+                 'lastModifiedBy', 'lastModifiedByName', 'lastModifiedAt'])
+          && (!diff.affectedKeys().hasAny(['status']) || taskEmpStatus(request.resource.data.status))
+          && !diff.addedKeys().hasAny(['completedAt']) && !diff.changedKeys().hasAny(['completedAt']);
+      }
       allow create: if isAuth() && (
         isAdmin()
-        || (isDesignDept() && request.resource.data.get('department', '') == 'Design')
+        || (isDesignDept() && request.resource.data.get('department', '') == 'Design' && taskNonAdminCreateOk())
         || ( hasProfile()
              && request.resource.data.get('createdBy', '') == request.auth.uid
              && ( inDept(request.resource.data.get('department', ''))
-                  || request.auth.uid in request.resource.data.get('assignedTo', []) ) )
+                  || request.auth.uid in request.resource.data.get('assignedTo', []) )
+             && taskNonAdminCreateOk() )
       );
       // [RN-58] Assignees update their own tasks; admins AND finance manag -> docs/firestore-rules-notes.md#rn-58
       allow update: if isAuth() && (
-        (request.auth.uid in resource.data.get('assignedTo', [])) || isOpsAdmin()
+        isOpsAdmin()
+        || ((request.auth.uid in resource.data.get('assignedTo', [])) && taskAssigneeUpdateOk())
       );
       // Admins delete any task; a creator may delete the task they made (the UI
       // already offers it to the creator, so this stops a silent permission fail).

@@ -600,7 +600,7 @@ describe('Phase 3: nothing widens — the retired partner term stands in as hasP
     const defs = RULES_STRIP(STORAGE, true).match(/function hasRoleClaim\(\) \{[^}]*\}/g) || [];
     assert.equal(defs.length, 1, 'hasRoleClaim() must be defined exactly once');
     assert.equal(norm(defs[0]), "function hasRoleClaim() { return 'role' in request.auth.token; }", "hasRoleClaim() must test presence with `'role' in request.auth.token` (it never throws; reading request.auth.token.role would)");
-    assert.equal(FIX.storageRoleClaim.length, 11);
+    assert.equal(FIX.storageRoleClaim.length, 15);   // 11 at the partner removal; audit 2026-10-28 H1 split read → get+list and gave HR its own block
     assert.deepEqual(NOW.storageRoleClaim, FIX.storageRoleClaim);
   });
 });

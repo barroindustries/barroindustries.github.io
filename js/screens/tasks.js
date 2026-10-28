@@ -1327,7 +1327,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       </div>
       <div class="form-group"><label>Status</label>
         <select id="t-status">
-          ${selectableTaskStatuses(TASK_STATUSES).map(s=>`<option value="${s.value}"${s.value==='backlog'?' selected':''}>${s.label}</option>`).join('')}
+          ${(window.isAdminPriv && window.isAdminPriv() ? selectableTaskStatuses(TASK_STATUSES) : TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value))).map(s=>`<option value="${s.value}"${s.value==='backlog'?' selected':''}>${s.label}</option>`).join('')}
         </select>
       </div>
     </div>

@@ -155,7 +155,7 @@ service firebase.storage {
       // generic {department} block, which admits ANY internal staffer. It now
       // has its own block below; a reserved segment with no block of its own is a
       // deny-all, so the two edits are a pair and neither is optional.
-      return seg == 'Finance' || seg == 'Ventures' || seg == 'IT'
+      return seg == 'Finance' || seg == 'Ventures' || seg == 'IT' || seg == 'HR'
         || seg == 'tasks' || seg == 'posts'
         || seg == 'general' || seg == 'General'
         || seg == 'profile-photos' || seg == 'task-comments'
@@ -290,9 +290,15 @@ service firebase.storage {
     function financeTreeOpenToCaller(sub) {
       return claimRole() != 'secretary' || financeOperationalSubfolder(sub);
     }
+    // Audit 2026-10-28 H1 — `read` let EVERY role claim get AND list Taxes/Ledger/Records/SSS/
+    // Accounting. Now: Finance tier reads all; others read only the operational subfolders or a
+    // file they uploaded themselves (Drive's getDownloadURL right after put()); only Finance lists.
+    // Viewing a saved file uses its tokened download URL, which rules never see.
     match /Finance/{subfolder}/{fileName} {
-      allow read: if isSignedIn() && subfolder != 'payslips' && hasRoleClaim()
-        && financeTreeOpenToCaller(subfolder);
+      allow get: if isSignedIn() && subfolder != 'payslips' && hasRoleClaim()
+        && financeTreeOpenToCaller(subfolder)
+        && (isFinanceClaim() || financeOperationalSubfolder(subfolder) || isUploader());
+      allow list: if isSignedIn() && subfolder != 'payslips' && isFinanceClaim();
       allow write: if isSignedIn() && subfolder != 'payslips' && hasRoleClaim()
         && financeTreeOpenToCaller(subfolder)
         && (request.resource == null || isValidDocument())   // size cap on writes
@@ -309,9 +315,13 @@ service firebase.storage {
     // is the documented Storage-rules-safe way to test key presence without
     // throwing, so legacy objects fall through to admin-only.
     function isOwnerOrAdmin() {
-      return isAdminClaim()
-        || ('uploadedBy' in resource.metadata.keys()
-              && resource.metadata.uploadedBy == request.auth.uid);
+      return isAdminClaim() || isUploader();
+    }
+    // The caller uploaded this object (js/drive.js stamps customMetadata.uploadedBy on every put()).
+    function isUploader() {
+      return resource.metadata != null
+        && 'uploadedBy' in resource.metadata.keys()
+        && resource.metadata.uploadedBy == request.auth.uid;
     }
 
     match /tasks/{subfolder}/{fileName} {
@@ -402,10 +412,29 @@ service firebase.storage {
         && isOwnerOrAdmin();
     }
 
+    // Audit 2026-10-28 H1 — HR (layoff papers and other private Files Hub uploads) left the
+    // generic block. The person filing (any staffer) may still upload and fetch their own URL;
+    // only HR members and admins get or list the rest. Secretary: own uploads only.
+    match /HR/{subfolder}/{fileName} {
+      allow get: if isSignedIn() && hasRoleClaim()
+        && ((claimRole() != 'secretary' && isMemberOf('HR')) || isUploader());
+      allow list: if isSignedIn() && hasRoleClaim()
+        && claimRole() != 'secretary' && isMemberOf('HR');
+      allow create: if isSignedIn() && hasRoleClaim()
+        && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && hasRoleClaim()
+        && (isOwnerOrAdmin() || (claimRole() != 'secretary' && isMemberOf('HR')));
+    }
+
+    // Audit 2026-10-28 H1 — `read` included `list`, so any staffer could enumerate every
+    // department's folder. get is unchanged; list is now members (and admins) only.
     match /{department}/{subfolder}/{fileName} {
-      allow read: if isSignedIn()
+      allow get: if isSignedIn()
         && !isReservedTop(department)
         && (hasRoleClaim() || isMemberOf(department));
+      allow list: if isSignedIn()
+        && !isReservedTop(department)
+        && isMemberOf(department);
       allow create: if isSignedIn()
         && !isReservedTop(department)
         && (request.resource == null || isValidDocument())

@@ -1,5 +1,5 @@
 {
- "_about": "Pinned by tests/partner-removal.test.mjs (Phase 3 'nothing widens'). firestoreProfile = the allow/return statements of firestore.rules that contain hasProfile() \u2014 exactly the 111 statements that contained the retired !isPartner() term in HEAD before Phase 3. firestoreBare = the read/get/list statements that are a bare isAuth() (identical to HEAD). storageRoleClaim = the storage.rules statements that contain hasRoleClaim() \u2014 exactly the 11 that contained !isPartnerClaim(). Adding or removing an entry is a deliberate ACCESS decision: regenerate with  UPDATE_RULES_SNAPSHOT=1 node --test tests/partner-removal.test.mjs  and read the diff.",
+ "_about": "Pinned by tests/partner-removal.test.mjs (Phase 3 'nothing widens'). firestoreProfile = the allow/return statements of firestore.rules that contain hasProfile() — exactly the 111 statements that contained the retired !isPartner() term in HEAD before Phase 3. firestoreBare = the read/get/list statements that are a bare isAuth() (identical to HEAD). storageRoleClaim = the storage.rules statements that contain hasRoleClaim() — the 11 that contained !isPartnerClaim(), as narrowed by audit 2026-10-28 H1 (Finance/generic `read` split into get + a stricter list; HR moved out of the generic block into its own four statements) = 15. Adding or removing an entry is a deliberate ACCESS decision: regenerate with  UPDATE_RULES_SNAPSHOT=1 node --test tests/partner-removal.test.mjs  and read the diff.",
  "firestoreProfile": [
   "/_counters/{docId} :: allow write #1",
   "/ad_insights/{docId} :: allow read #1",
@@ -121,8 +121,12 @@
   "/users/{uid} :: allow get #1"
  ],
  "storageRoleClaim": [
-  "/Finance/{subfolder}/{fileName} :: allow read #1",
+  "/Finance/{subfolder}/{fileName} :: allow get #1",
   "/Finance/{subfolder}/{fileName} :: allow write #1",
+  "/HR/{subfolder}/{fileName} :: allow create #1",
+  "/HR/{subfolder}/{fileName} :: allow delete,update #1",
+  "/HR/{subfolder}/{fileName} :: allow get #1",
+  "/HR/{subfolder}/{fileName} :: allow list #1",
   "/IT/{subfolder}/{fileName} :: allow create #1",
   "/IT/{subfolder}/{fileName} :: allow delete,update #1",
   "/IT/{subfolder}/{fileName} :: allow read #1",
@@ -131,6 +135,6 @@
   "/client-info-requests/{ref}/{fileName} :: allow read #1",
   "/{department}/{subfolder}/{fileName} :: allow create #1",
   "/{department}/{subfolder}/{fileName} :: allow delete,update #1",
-  "/{department}/{subfolder}/{fileName} :: allow read #1"
+  "/{department}/{subfolder}/{fileName} :: allow get #1"
  ]
 }
