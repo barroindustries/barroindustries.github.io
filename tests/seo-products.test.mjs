@@ -1496,6 +1496,11 @@ describe('guides and downloads: the footer of every public page, sitemap.xml, ro
     assert.ok(faq.includes(`${FAQ_CONSTRUCTION} ${sentence}"`), 'FAQPage JSON-LD does not say what the visible answer says: the guide sentence stays LAST, right after the construction sentence');
     assert.ok(faq.includes(`${FAQ_CONSTRUCTION} Our <a href="${GUIDE_SS}">guide to SS304 and SS316</a>`), 'the visible answer: the guide sentence stays last');
     for (const g of [GUIDE_SS, GUIDE_COM]) assert.ok(exists(g.slice(1) + 'index.html'));
+    // the two guides of 2026-10-28: the fit-out page (right after the commissary sentence) and the FAQ (under the questions, outside the FAQPage answers)
+    const LAYOUT = '/guides/how-to-plan-a-commercial-kitchen-layout/', LIST = '/guides/commercial-kitchen-equipment-checklist/';
+    assert.ok(fit.includes(`covers layout, equipment and ventilation.</p>\n      <p>For any kitchen, see <a href="${LAYOUT}">how to plan a commercial kitchen layout</a> and our <a href="${LIST}">commercial kitchen equipment list</a>.</p>`), 'the fit-out page links the layout guide and the equipment list');
+    assert.ok(faq.includes(`<p>Planning a new kitchen? Read our guides on <a href="${LAYOUT}">how to plan a commercial kitchen layout</a> and the <a href="${LIST}">commercial kitchen equipment list</a>.</p>`), 'the FAQ links the layout guide and the equipment list');
+    for (const g of [LAYOUT, LIST]) { assert.ok(exists(g.slice(1) + 'index.html')); assert.ok(!faq.match(/"@type":\s*"FAQPage"[\s\S]*?<\/script>/)[0].includes(g), 'the guide links stay out of the FAQPage JSON-LD'); }
   });
 });
 

@@ -571,8 +571,9 @@ describe('guides: JSON-LD — Article, BreadcrumbList, FAQPage (the visible Q&A 
       assert.equal(n['@id'], p.url + '#article');
       assert.equal(n.headline, p.headings.find((h) => h.level === 1).text);
       assert.equal(n.description, p.meta('description'));
-      assert.equal(n.datePublished, p.published);
-      assert.equal(n.dateModified, p.published);
+      // a full datetime with the Philippine offset: Google's Rich Results Test flags a bare date as "missing a timezone" (2026-10-28)
+      assert.equal(n.datePublished, p.published + 'T08:00:00+08:00');
+      assert.equal(n.dateModified, p.published + 'T08:00:00+08:00');
       assert.equal(n.inLanguage, 'en-PH');
       assert.deepEqual(n.image, [p.meta('og:image')]);
       for (const who of [n.author, n.publisher]) {
