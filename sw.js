@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.345';
+const CACHE_VER = 'bi-ops-v14.0.347';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -39,8 +39,8 @@ const PRECACHE = [
   // ?v= must match index.html's <link> hrefs exactly — the SW caches by URL,
   // so an unversioned entry here would never serve the versioned request and
   // the app would lose offline CSS. Both sides are rewritten by the hook.
-  '/css/tokens.css?v=14.0.345',
-  '/css/styles.css?v=14.0.345',
+  '/css/tokens.css?v=14.0.347',
+  '/css/styles.css?v=14.0.347',
   '/css/site.css',
   '/manifest.json',
   '/quote-builder-v2.html',
@@ -166,12 +166,21 @@ const PRECACHE_MANIFEST_CACHE_KEY = '/__precache-manifest__';
 // copy-forwarded cache entry.
 const PRECACHE_ALWAYS_FRESH = ['/', '/index.html', '/t/', '/t/index.html', '/v/', '/v/index.html'];
 
+// Precache fetches revalidate with the server (cache: 'no-cache' — a cheap
+// 304 when unchanged) instead of reading the browser's HTTP cache. GitHub
+// Pages sends max-age=600, so a plain fetch during the first 10 minutes after
+// a deploy could seed THIS version's STATIC cache with the previous release's
+// copy of an unversioned file (e.g. /js/screens/family-pricing.js).
+function freshRequest(path) {
+  return new Request(path, { cache: 'no-cache' });
+}
+
 self.addEventListener('install', event => {
   event.waitUntil(
     precacheDeployDiff().catch(err => {
       console.warn('[SW] Deploy-diff precache failed, falling back to wholesale cache.addAll:', err);
       return caches.open(STATIC).then(cache =>
-        cache.addAll(PRECACHE).catch(err2 => console.warn('[SW] Pre-cache partial fail:', err2))
+        cache.addAll(PRECACHE.map(freshRequest)).catch(err2 => console.warn('[SW] Pre-cache partial fail:', err2))
       );
     })
   );
@@ -219,7 +228,7 @@ async function precacheDeployDiff() {
     // install to ship this feature, or the prior cache was already pruned.
     // Nothing to copy forward, so fetch the whole PRECACHE list wholesale —
     // identical to pre-WP2 behavior, including the partial-failure tolerance.
-    await newCache.addAll(PRECACHE).catch(err => console.warn('[SW] Pre-cache partial fail:', err));
+    await newCache.addAll(PRECACHE.map(freshRequest)).catch(err => console.warn('[SW] Pre-cache partial fail:', err));
   } else {
     // Every path handles its own failure and the aggregate NEVER rejects.
     // A bare Promise.all here would fail fast on one bad fetch, triggering
@@ -243,7 +252,7 @@ async function precacheDeployDiff() {
           // Hash matched but the old cache didn't actually have the response
           // (e.g. a partial previous install) — fall through to a fresh fetch.
         }
-        const res = await fetch(path);
+        const res = await fetch(freshRequest(path));
         if (res && res.ok) {
           await newCache.put(path, res.clone());
           return true;
@@ -316,7 +325,7 @@ self.addEventListener('fetch', event => {
     // Only genuinely bad connections fall through to the versioned cache, and
     // they now do so in 400ms of blank instead of 900ms.
     if (['js','css'].includes(ext)) {
-      event.respondWith(networkFirstTimeout(event.request, STATIC, 400));
+      event.respondWith(networkFirstTimeout(event.request, STATIC, 400, true));
       return;
     }
     // Images/fonts → Cache-first (static, versioned — no per-load network)
@@ -377,7 +386,12 @@ async function staleWhileRevalidate(request, cacheName) {
 // FRESH file (updates apply immediately); only when the network is slower than
 // TIMEOUT do we serve the versioned cache instantly (the speed win on bad
 // connections), refreshing the cache in the background for next time.
-async function networkFirstTimeout(request, cacheName, timeoutMs) {
+//
+// ignoreSearch (JS/CSS route only): js/config.js's ensureScript requests lazy
+// page scripts as js/x.js?v=APP_VERSION, while PRECACHE holds them bare, so a
+// versioned request that has never been fetched online still finds its
+// precached copy offline. The exact match is tried first.
+async function networkFirstTimeout(request, cacheName, timeoutMs, ignoreSearch) {
   const cache = await caches.open(cacheName);
   const net = fetch(request).then(r => { if (r && r.ok) cache.put(request, r.clone()); return r; }).catch(() => null);
   // Look in the named cache first, then fall back to a cross-cache lookup.
@@ -390,7 +404,8 @@ async function networkFirstTimeout(request, cacheName, timeoutMs) {
   // caches.match(); matching that here is what makes HTML safe to move onto
   // this strategy. Harmless for the JS/CSS route, which passes STATIC and so
   // already hits on the first lookup.
-  const cached = (await cache.match(request)) || (await caches.match(request));
+  const cached = (await cache.match(request)) || (await caches.match(request))
+    || (ignoreSearch ? await cache.match(request, { ignoreSearch: true }) : undefined);
   if (!cached) {
     // Same offline body/headers networkFirst() has always returned, so the
     // no-cache-no-network case is unchanged for callers migrating onto this.
