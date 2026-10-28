@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.345';
+window.APP_VERSION = '14.0.346';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1390,12 +1390,24 @@ window.ensureChart = function() {
 // DELETED (not left permanently rejected) so the next call — a Retry button,
 // or simply navigating to the same page again — gets a fresh attempt instead
 // of replaying the same failure forever.
+//
+// Every local src gets ?v=APP_VERSION (2026-10-29). GitHub Pages serves
+// max-age=600, so a bare js/screens/family-pricing.js could come straight
+// from the browser's HTTP cache for up to 10 minutes after a deploy — the
+// app shell on the new version, the lazy screen still on the old one. The
+// version query makes each release a new URL. sw.js's JS/CSS route falls
+// back to its unversioned PRECACHE copy (ignoreSearch) when offline.
+// Promises stay keyed by the bare path callers pass in.
+window.versionedSrc = function(src) {
+  if (/^(https?:)?\/\//.test(src) || src.includes('?')) return src;
+  return src + '?v=' + encodeURIComponent(window.APP_VERSION);
+};
 window._scriptLoading = {};
 window.ensureScript = function(src) {
   if (window._scriptLoading[src]) return window._scriptLoading[src];
   window._scriptLoading[src] = new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = src;
+    s.src = window.versionedSrc(src);
     s.onload = () => resolve();
     s.onerror = (err) => { delete window._scriptLoading[src]; reject(err); };
     document.head.appendChild(s);
