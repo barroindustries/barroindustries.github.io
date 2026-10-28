@@ -48,3 +48,19 @@ products-database.json
 # scripts/derive-family-pricing.js writes the derived starting values for the product-family option sheets here
 # (private/family-pricing.seed.json); the owner imports it from the app, it is never read from the repo.
 /private/
+
+# CONFIDENTIAL — untracked 2026-10-28 (audit C1). The repo is PUBLIC and Pages serves
+# every tracked file, so these were downloadable at barroindustries.com. The files stay
+# on disk (local `npx serve` still serves them, e.g. for the one-time price-list / CRM
+# seed buttons); they are just never published again.
+/data/
+/specs/
+/archive/
+/partners/
+/parterns/
+# Spreadsheet / data exports and merge debris never belong in a public repo
+*.xlsx
+*.xls
+*.csv
+*.orig
+*.rej
