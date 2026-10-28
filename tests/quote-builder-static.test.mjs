@@ -2,8 +2,8 @@
 //
 // quote-builder-v2.html is one 9,000-line HTML file with one inline <script> and no module system, so it cannot be require()d. Two layers:
 //
-//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 46, the What's New
-//      entries 46, 45, 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
+//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 47, the What's New
+//      entries 47, 46, 45, 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
 //      byte-for-byte, and the two rules of the price-protection design that are about WHAT THE FILE MAY NAME: it never names the pricing
 //      function (it prices only through QBConfigured) and it reads the option sheets (the product_pricing collection) in exactly one place —
 //      inside loadDatabase(), in its own try/catch (spec §2.3).
@@ -178,14 +178,14 @@ const CATALOGUE = (() => {
   out.set('CE-030', prod('CE-030', 'cooking_line', 'fixed', 21911, {}, {}));      // the salamander oven: a fixed item no family absorbed (CE-016 is the deck oven's 12-tray model now)
   return [...out.values()];
 })();
-const GRADE_FLAT = 2917;       // the synthetic SS316 premium of every approved fixture sheet (an odd figure; the real amounts are private)
+const GRADE_PCT = 37;          // the synthetic SS316 premium of every approved fixture sheet, a PERCENTAGE of the whole line price (specs/GRADE-PERCENT-SPEC.md; a made-up figure: the real one is private)
 function sheetFor(familyId, { approved = true } = {}) {
   const f = FAM.families[familyId];
   const options = {};
   let i = 0;
   for (const c of PF.cells(f)) {
-    // the staff-only steel grade: its SS316 cell has a synthetic figure of its own and does not count in `i`, so every other cell keeps the figure it had before the grade existed
-    if (c.group === 'grade') { if (!c.baseline) (options.grade = options.grade || {})[c.value] = { flat: GRADE_FLAT, perW100: null }; continue; }
+    // the staff-only steel grade: its SS316 cell is a synthetic PERCENTAGE ({ pct }, schema 5) and does not count in `i`, so every other cell keeps the figure it had before the grade existed
+    if (c.group === 'grade') { if (!c.baseline) (options.grade = options.grade || {})[c.value] = { pct: GRADE_PCT }; continue; }
     i++;
     if (c.baseline) continue;
     (options[c.group] = options[c.group] || {})[c.value] = { flat: (i % 7 === 3 ? -1 : 1) * (311 + 97 * i), perW100: (i % 4 === 1 && familyId !== 'deck_oven') ? 13 + i : null };
@@ -247,35 +247,40 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 46: the newest What\'s New entry is version 46 (the line titles and the staff-only Material row), dated; entries 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
+  it('TUTORIAL_VERSION is 47: the newest What\'s New entry is version 47 (the 316 premium is a percentage of the whole line), dated; entries 46 (the line titles and the staff-only Material row), 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 46);
+    assert.equal(b.run('TUTORIAL_VERSION'), 47);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 46);
-    assert.equal(wn[1].ver, 45, '45 stays as history: the titles and the Material row are a new entry');
-    assert.equal(wn[2].ver, 44, '44 stays as history');
-    assert.equal(wn[3].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
+    assert.equal(wn[0].ver, 47);
+    assert.equal(wn[1].ver, 46, '46 stays as history: the percentage is a new entry');
+    assert.equal(wn[2].ver, 45, '45 stays as history');
+    assert.equal(wn[3].ver, 44, '44 stays as history');
+    assert.equal(wn[4].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
     assert.match(wn[0].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
-    const t46 = wn[0].items.join(' ');
+    assert.deepEqual(wn[0].items, ['The 316 Material premium is now a percentage of the whole line — base, size and every option — set by Finance in Inventory › Family pricing.']);
+    const t47 = wn[0].items.join(' ');
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b|\d\s?%|\bper cent\b/i.test(t47), false, 'the What\'s New entry states no figure');
+    const t46 = wn[1].items.join(' ');
     for (const must of ['Configured lines now carry a proper name on the quote', '"SS Range Stove"', '"SS Range Stove Combination (Griller, Fryer)"', '"SS Griddle"', '"SS Lava-Rock Griller"', '"Gas Deck Oven"',
       'the name updates when you re-configure the line', 'Every configured product starts with a Material row', 'Stainless Steel 304 Food Grade as standard', 'Stainless Steel 316 Laboratory Grade',
-      'a staff-only choice (the website never offers it)', 'shows "Priced after review" until Finance enters the 316 amount for that product in Inventory › Family pricing']) {
+      'a staff-only choice (the website never offers it)', 'shows "Priced after review" until Finance enters the 316 percentage for that product in Inventory › Family pricing']) {
       assert.ok(t46.includes(must), `What's New 46 does not say: ${must}`);
     }
-    assert.equal(wn[0].items.length, 2, 'two bullets: the line names, and the Material row');
-    const t45 = wn[1].items.join(' ');
+    assert.equal(/316 amount/.test(wn.map((e) => e.items.join(' ')).join(' ')), false, 'no What\'s New entry still calls the 316 premium an amount');
+    assert.equal(wn[1].items.length, 2, 'two bullets: the line names, and the Material row');
+    const t45 = wn[2].items.join(' ');
     for (const must of ['Five more products can be configured right in the builder', 'dish tables, wok ranges, griddles / grillers / fryers, gas deck ovens and range hoods', 'an option Finance has not priced yet asks you for a price instead of guessing',
       '"⚙ convert to configured"', 'Some choices only show when they apply', 'fry baskets for a fryer', 'pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged as you type', '"Use N mm"',
       'a slim hood is at most 500 mm deep', 'a deck oven\'s width follows its trays per deck']) {
       assert.ok(t45.includes(must), `What's New 45 does not say: ${must}`);
     }
-    assert.equal(wn[1].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
-    const t44 = wn[2].items.join(' ');
+    assert.equal(wn[2].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
+    const t44 = wn[3].items.join(' ');
     for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
       assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
     }
-    const text = wn[3].items.join(' ');
+    const text = wn[4].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
@@ -2659,7 +2664,7 @@ describe('GRADE-TITLES — Material is drawn first, a 316 line is "Priced after 
     }
   });
 
-  it('picking 316: the summary starts "SS316", Add stays enabled and nothing is called an error; the figure is the 304 one plus exactly the sheet\'s grade cell; going back to 304 takes it away', () => {
+  it('picking 316: the summary starts "SS316", Add stays enabled and nothing is called an error; the figure is the 304 one plus exactly the sheet\'s grade PERCENTAGE of the whole line; going back to 304 takes it away', () => {
     const b = builder();
     open(b, 'sink');
     const std = b.plain('cfgEvaluate(cfgState).basis');
@@ -2673,18 +2678,48 @@ describe('GRADE-TITLES — Material is drawn first, a 316 line is "Priced after 
     assert.equal(b.el('cfgBody').innerHTML.includes('chosen by our staff'), false);
     const dearer = b.plain('cfgEvaluate(cfgState).basis');
     assert.equal(dearer.priced, true);
-    assert.deepEqual(dearer.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: GRADE_FLAT }]);
-    assert.equal(dearer.unitPrice - std.unitPrice, GRADE_FLAT);
+    const S = std.deltas.reduce((n, d) => n + d.amount, std.base);                      // the whole 304 line before rounding, summed in the pricer's order
+    assert.deepEqual(dearer.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: S * GRADE_PCT / 100 }]);
+    assert.equal(dearer.unitPrice, Math.round(S + S * GRADE_PCT / 100), 'the whole line x (1 + pct / 100)');
+    assert.ok(dearer.unitPrice > std.unitPrice);
+    // the panel's own breakdown line: the catalogue base at this size + the options, the percentage inside the options part (peso amounts)
+    const dsum = dearer.deltas.reduce((n, d) => n + d.amount, 0);
+    assert.ok(b.el('cfgPriceArea').innerHTML.includes('+ options ' + b.run(`formatPeso(${Math.abs(dsum)})`)), 'the premium shows as a peso amount in the options part of the breakdown');
     pickV(b, 'sink', 'grade', 304);
     assert.equal(b.run('cfgState.config.grade'), 304);
     assert.equal(b.plain('cfgEvaluate(cfgState).basis').unitPrice, std.unitPrice);
     assert.deepEqual(b.plain('cfgEvaluate(cfgState).basis').deltas.filter((d) => /^grade:/.test(d.key)), []);
   });
 
+  it('a 316 line added at the website price: the line prices at the whole line x (1 + pct / 100), and its "Base … + options …" detail adds up — base + the other options + the premium — in peso amounts; at quantity 3 the amount is three times the unit price', () => {
+    const b = builder();
+    open(b, 'sink');
+    pickV(b, 'sink', 'basins', 2); pickV(b, 'sink', 'faucet', 'prerinse'); pickV(b, 'sink', 'undershelf', true);
+    b.run(`cfgState.qty = 3`);
+    const std = b.plain('cfgEvaluate(cfgState).basis');                                // the 304 line of the same configuration
+    assert.equal(std.priced, true, std.missing.join(', '));
+    assert.ok(std.deltas.length >= 3, 'the fixture must carry other priced options, or this test proves nothing');
+    pickV(b, 'sink', 'grade', 316);
+    const basis = b.plain('cfgEvaluate(cfgState).basis');
+    const S = std.deltas.reduce((n, d) => n + d.amount, std.base);
+    const premium = S * GRADE_PCT / 100;
+    assert.deepEqual(basis.deltas, [...std.deltas, { key: 'grade:316', amount: premium }]);
+    b.run('cfgCommit()');
+    const it = b.plain('items[0]');
+    assert.equal(it.config.grade, 316); assert.equal(it.priceBasis, 'website');
+    assert.equal(it.unitPrice, Math.round(S + premium), 'the unit price is the whole line x (1 + pct / 100)');
+    assert.equal(it.qty, 3); assert.equal(it.amount, 3 * it.unitPrice, 'the quantity multiplies the unit price that already carries the percentage');
+    const detail = (b.el('itemsTbody').innerHTML.match(/<div class="cfg-detail">(Base [^<]*)<\/div>/) || [])[1];
+    assert.ok(detail, 'the line carries its Base … + options … detail');
+    const options = std.deltas.reduce((n, d) => n + d.amount, 0) + premium;
+    assert.equal(detail, `Base ${b.run(`formatPeso(${std.base})`)} at this size + options ${b.run(`formatPeso(${Math.abs(options)})`)}`);
+    assert.ok(Math.abs(std.base + options - it.unitPrice) <= 0.5, 'base + the other options + the premium is the unit price, to the one rounding');
+  });
+
   it('316 with the grade cell blank, or no cell at all: "Priced after review — Material: …", a required price box, Add enabled; a blank cell is never read as 0', () => {
     for (const how of ['blank', 'missing']) {
       const b = builder();
-      b.run(how === 'blank' ? `FAMILY_PRICING.sink.options.grade = { '316': { flat: null, perW100: null } }` : `delete FAMILY_PRICING.sink.options.grade`);
+      b.run(how === 'blank' ? `FAMILY_PRICING.sink.options.grade = { '316': { pct: null } }` : `delete FAMILY_PRICING.sink.options.grade`);
       open(b, 'sink');
       assert.equal(b.plain('cfgEvaluate(cfgState).basis').priced, true, `${how}: the standard grade is the zero point and needs no cell`);
       pickV(b, 'sink', 'grade', 316);
@@ -2786,11 +2821,12 @@ describe('GRADE-TITLES — Material is drawn first, a 316 line is "Priced after 
     const li = (helpBody.match(/<li><strong>Configure a product<\/strong>[\s\S]*?<\/li>/) || [''])[0];
     assert.ok(li.length > 500, 'could not find the Configure a product item');
     for (const must of ['Every product opens with a <em>Material</em> option', 'Stainless Steel 304 Food Grade as standard', 'the <em>staff</em> choice Stainless Steel 316 Laboratory Grade (the website never offers it)',
-      'reads <em>Priced after review</em> until Finance has entered the 316 amount for that product in Inventory › Family pricing', 'each configured line is named for what it is on the quote', '<em>SS Sink</em>', '<em>SS Range Stove Combination (Griller, Fryer)</em>']) {
+      'reads <em>Priced after review</em> until Finance has entered the 316 percentage for that product in Inventory › Family pricing', 'each configured line is named for what it is on the quote', '<em>SS Sink</em>', '<em>SS Range Stove Combination (Griller, Fryer)</em>']) {
       assert.ok(li.includes(must), `Help does not say: ${must}`);
     }
     const cfg = makeEnv().plain('TOUR_STEPS').find((s) => s.target === '#configPanel').body;
-    assert.match(cfg, /Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade — and each line is named for what it is on the quote \(SS Sink, SS Griddle…\)\./);
+    assert.match(cfg, /Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade, which adds a percentage of the whole line price — and each line is named for what it is on the quote \(SS Sink, SS Griddle…\)\./);
+    assert.equal(/316 amount/.test(li + ' ' + cfg), false, 'the Help and the demo no longer call the 316 premium an amount');
     assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(li + ' ' + cfg + ' ' + makeEnv().plain('WHATS_NEW')[0].items.join(' ')), false);
   });
 });

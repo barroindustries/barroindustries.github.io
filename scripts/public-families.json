@@ -1,6 +1,6 @@
 {
-  "_readme": "PUBLIC product families (owner ruling 2026-10-21): the catalogue shows eleven CONFIGURABLE products, each ONE card with a configurator sheet, and every other published product stays a FIXED item (quantity + size + note only). This file is the single source of truth and holds NO price of any kind: each family lists its options, defaults and size limits, the published SKUs it ABSORBS (they no longer appear as their own cards; each maps to the closest configuration, which is also what a saved draft line is converted to), and its primary SKU (whose list price, with its own size rules, is the base the server prices from; the option amounts are kept in private staff data). \"fixed\" lists every published SKU that is NOT absorbed (the specialised items of Preparation, Washing and Storage are not published at all: scripts/public-categories.json excludedProducts, owner ruling 2026-10-21 (b)); scripts/build-catalogue.js refuses a published product that is in neither place, or in both. scripts/build-catalogue.js GENERATES js/qr-families.js (+ the byte-identical functions/qr-families.js), the catalogue cards, the data island and functions/qr-published.json from this file. Edit here, then run: node scripts/build-catalogue.js. Option values (v) are what is stored and validated; labels (l), summaries (s) and hints are what is shown. widthRule is the usual minimum length for the chosen options (hard: refused below it; otherwise guidance only). Preview rules (preview) build the file names of the owner's photo shot list, see docs/configurator-preview-photo-list.md. version is the schema the private option sheets are approved against: raising it makes every approved sheet \"Out of date — approve again\" (2 = the 1.5 mm top plate is the standard construction, owner ruling 2026-10-28; 3 = five more families: dish table, wok range, griddle / griller / fryer, gas deck oven, range hood; 4 = the staff-only steel grade (304 / 316, \"grade\", the first group, with its own first specification row via \"specRow\") on every family, and the line titles (\"title\", \"titleAny\", option \"t\") the Quote Builder names a configured line with). A group may carry \"when\": { <earlier choice group>: [values] } — it applies only while the choices made before it are in those lists (fry baskets only for a fryer); an option that does not apply is always at its default in a validated configuration. A family may carry \"maxDimWhen\" (the upper-limit twin of \"minDimWhen\"): a slim hood is at most 500 mm deep, a deck oven's width follows its trays. construction is a family's public statement of how a made-to-order piece is built; a {group} token in it is replaced by the chosen option's c phrase (its construction wording), and every option of a group named by a token must carry c. A group marked staffOnly (the 1.2 mm top plate, the SS316 grade) is never offered on the website: the server refuses any value but its default, only the Quote Builder (staff) can choose another, and an absorbed SKU never states one (it converts to the default).",
-  "version": 4,
+  "_readme": "PUBLIC product families (owner ruling 2026-10-21): the catalogue shows eleven CONFIGURABLE products, each ONE card with a configurator sheet, and every other published product stays a FIXED item (quantity + size + note only). This file is the single source of truth and holds NO price of any kind: each family lists its options, defaults and size limits, the published SKUs it ABSORBS (they no longer appear as their own cards; each maps to the closest configuration, which is also what a saved draft line is converted to), and its primary SKU (whose list price, with its own size rules, is the base the server prices from; the option amounts are kept in private staff data). \"fixed\" lists every published SKU that is NOT absorbed (the specialised items of Preparation, Washing and Storage are not published at all: scripts/public-categories.json excludedProducts, owner ruling 2026-10-21 (b)); scripts/build-catalogue.js refuses a published product that is in neither place, or in both. scripts/build-catalogue.js GENERATES js/qr-families.js (+ the byte-identical functions/qr-families.js), the catalogue cards, the data island and functions/qr-published.json from this file. Edit here, then run: node scripts/build-catalogue.js. Option values (v) are what is stored and validated; labels (l), summaries (s) and hints are what is shown. widthRule is the usual minimum length for the chosen options (hard: refused below it; otherwise guidance only). Preview rules (preview) build the file names of the owner's photo shot list, see docs/configurator-preview-photo-list.md. version is the schema the private option sheets are approved against: raising it makes every approved sheet \"Out of date — approve again\" (2 = the 1.5 mm top plate is the standard construction, owner ruling 2026-10-28; 3 = five more families: dish table, wok range, griddle / griller / fryer, gas deck oven, range hood; 4 = the staff-only steel grade (304 / 316, \"grade\", the first group, with its own first specification row via \"specRow\") on every family, and the line titles (\"title\", \"titleAny\", option \"t\") the Quote Builder names a configured line with; 5 = the SS316 grade is a percentage of the whole line price: a group marked \"pricing\": \"percent\" holds one \"pct\" cell in the private sheet instead of a flat amount). A group may carry \"when\": { <earlier choice group>: [values] } — it applies only while the choices made before it are in those lists (fry baskets only for a fryer); an option that does not apply is always at its default in a validated configuration. A family may carry \"maxDimWhen\" (the upper-limit twin of \"minDimWhen\"): a slim hood is at most 500 mm deep, a deck oven's width follows its trays. construction is a family's public statement of how a made-to-order piece is built; a {group} token in it is replaced by the chosen option's c phrase (its construction wording), and every option of a group named by a token must carry c. A group marked staffOnly (the 1.2 mm top plate, the SS316 grade) is never offered on the website: the server refuses any value but its default, only the Quote Builder (staff) can choose another, and an absorbed SKU never states one (it converts to the default). A choice group may carry \"pricing\": \"percent\" (the SS316 grade): its non-default value adds that percentage of the whole line price instead of a flat amount, and build-catalogue accepts no other value and no other type of group.",
+  "version": 5,
   "order": [
     "prep_table",
     "sink",
@@ -32,6 +32,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -213,6 +214,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -541,6 +543,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -728,6 +731,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -1079,6 +1083,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -1255,6 +1260,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -1524,6 +1530,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -1677,6 +1684,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -1868,6 +1876,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -2031,6 +2040,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,
@@ -2150,6 +2160,7 @@
           "default": 304,
           "staffOnly": true,
           "specRow": true,
+          "pricing": "percent",
           "options": [
             {
               "v": 304,

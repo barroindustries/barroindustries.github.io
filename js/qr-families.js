@@ -10,7 +10,7 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   return {
-    "version": 4,
+    "version": 5,
     "order": [
       "prep_table",
       "sink",
@@ -43,6 +43,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -225,6 +226,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -553,6 +555,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -741,6 +744,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -1093,6 +1097,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -1270,6 +1275,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -1539,6 +1545,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -1693,6 +1700,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -1885,6 +1893,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -2048,6 +2057,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,
@@ -2168,6 +2178,7 @@
             "default": 304,
             "staffOnly": true,
             "specRow": true,
+            "pricing": "percent",
             "options": [
               {
                 "v": 304,

@@ -837,10 +837,10 @@ describe('the staff-only top plate on the server: a visitor can never choose 1.2
       }
     });
 
-    it('a sheet approved against schema 1, 2 or 3 (before the 1.5 mm top was the standard, before the five new families, before the steel grade) prices NOTHING — "priced after review" — until it is approved again; the same sheet at the current schema prices', () => {
-      assert.equal(FAMS.version, 4, 'the family definitions are on schema 4');
+    it('a sheet approved against schema 1, 2, 3 or 4 (before the 1.5 mm top was the standard, before the five new families, before the steel grade, before the grade was a percentage) prices NOTHING — "priced after review" — until it is approved again; the same sheet at the current schema prices', () => {
+      assert.equal(FAMS.version, 5, 'the family definitions are on schema 5 (the SS316 grade is a percentage of the whole line price)');
       for (const fid of WITH_TOP) {
-        for (const older of [1, 2, 3]) {
+        for (const older of [1, 2, 3, 4]) {
           const old = basket(fid, {}, older);
           assert.equal(old.priced, false, `${fid} at schema ${older}`); assert.equal(old.unitPrice, 0, fid);
           assert.equal(old.reason, 'not_approved', fid);

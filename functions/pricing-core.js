@@ -302,15 +302,30 @@
   //  price each position (a sheet value is the cost of ONE position of that type) as the difference between the chosen positions and the
   //  default ones, so only values with a net count need a cell. A family whose primary SKU carries no length rule of its own
   //  (sizeBasis 'linear') prices the length through sheet.size.perW100, both directions from refW.
+  //
+  //  PERCENT groups (owner ruling 2026-10-28, specs/GRADE-PERCENT-SPEC: the staff-only steel grade): a `choice` group declared `"pricing": "percent"` in
+  //  the family definition does NOT hold a flat amount. Its sheet cell is one `pct` (a signed percentage), and a non-default value adds
+  //     pct x SUBTOTAL / 100        SUBTOTAL = the base at the requested size + every other option's delta + the linear family's length delta
+  //     unitPrice = max(0, round(SUBTOTAL + sum over the percent groups of pct x SUBTOTAL / 100))
+  //  i.e. pct per cent of the WHOLE line price before any percentage. It is priced LAST, so it sees everything above; several percent groups each take their
+  //  percentage of that same SUBTOTAL and ADD (they never compound); the default value (SS304) is the zero point and reads no cell. The amount is unrounded like
+  //  every other delta (the ONE rounding is the final Math.round of the total), and the quantity is applied by the caller afterwards, so the percentage always
+  //  lands on the UNIT price. A blank `pct` is "missing" exactly like a blank flat: never zero.
   //  Pure; never throws; never mutates its inputs.
   // ─────────────────────────────────────────────────────────────────────────
   var MAX_CELL = 1e8;     // a sheet figure beyond +/-100 million is corrupt, not a price
   function cellNum(v) { return (typeof v === 'number' && isFinite(v) && Math.abs(v) <= MAX_CELL) ? v : null; }
+  var MAX_PCT = 1000;     // a sheet percentage beyond +/-1000 % is corrupt, not a premium
+  function cellPct(v) { return (typeof v === 'number' && isFinite(v) && Math.abs(v) <= MAX_PCT) ? v : null; }
+  // a choice group whose cells are percentages (build-catalogue refuses "pricing" on any other kind of group, and any value but "percent")
+  function isPercentGroup(g) { return isObj(g) && g.pricing === 'percent' && g.type === 'choice'; }
 
   // normalisePricingDoc(family, raw) -> { approved:bool, schemaVersion:int|null, options:{ group:{ value:{ flat:number|null, perW100:number|null } } },
   //                                       size:{ perW100:number|null } }
   //   Keeps only the groups and values the family defines; a figure that is not a finite number within +/-1e8 becomes null (blank). `approved`
   //   is true only for the boolean true. The Firestore doc is staff-written, so it is sanitised before it is ever used.
+  //   A PERCENT group's values are { pct:number|null } and nothing else (a pct that is not a finite number within +/-1000 is null = blank; a flat / perW100
+  //   left on such a cell is ignored, so an old-shape cell is BLANK, never priced from its flat).
   function normalisePricingDoc(family, raw) {
     var r = isObj(raw) ? raw : {};
     var out = { approved: r.approved === true, schemaVersion: (typeof r.schemaVersion === 'number' && isFinite(r.schemaVersion) && Math.floor(r.schemaVersion) === r.schemaVersion) ? r.schemaVersion : null, options: {}, size: { perW100: null } };
@@ -318,10 +333,11 @@
     ((family && family.groups) || []).forEach(function (g) {
       var src = has(opts, g.key) && isObj(opts[g.key]) ? opts[g.key] : {};
       var dst = {};
+      var percent = isPercentGroup(g);
       (g.options || []).forEach(function (o) {
         var k = String(o.v);
         var c = has(src, k) && isObj(src[k]) ? src[k] : null;
-        dst[k] = { flat: c ? cellNum(c.flat) : null, perW100: c ? cellNum(c.perW100) : null };
+        dst[k] = percent ? { pct: c ? cellPct(c.pct) : null } : { flat: c ? cellNum(c.flat) : null, perW100: c ? cellNum(c.perW100) : null };
       });
       out.options[g.key] = dst;
     });
@@ -402,20 +418,22 @@
       var g = doc.options[group];
       return g && has(g, valueKey) ? g[valueKey] : null;
     }
+    // a blank (or absent) cell: the option is named once in `missing`, and the line is left for review — never read as zero
+    function markMissing(g, valueKey) {
+      var opt = (g.options || []).filter(function (x) { return String(x.v) === valueKey; })[0];
+      var label = g.label + (opt ? ': ' + (opt.f || opt.l) : '');
+      if (out.missing.indexOf(label) < 0) out.missing.push(label);
+    }
     function priceCell(g, valueKey, times) {
       var group = g.key;
       var c = cellFor(group, valueKey);
-      if (!c || c.flat === null) {
-        var opt = (g.options || []).filter(function (x) { return String(x.v) === valueKey; })[0];
-        var label = g.label + (opt ? ': ' + (opt.f || opt.l) : '');
-        if (out.missing.indexOf(label) < 0) out.missing.push(label);
-        return;
-      }
+      if (!c || c.flat === null) { markMissing(g, valueKey); return; }
       var amount = times * (c.flat + (c.perW100 === null ? 0 : c.perW100) * lenExtra / 100);
       total += amount;
       out.deltas.push({ key: group + ':' + valueKey, amount: amount });
     }
     (Array.isArray(fam.groups) ? fam.groups : []).forEach(function (g) {
+      if (isPercentGroup(g)) return;                              // priced AFTER everything else, as a percentage of the subtotal (the percent pass below)
       var v = cfg[g.key];
       if (g.type === 'choice') {
         if (v === g.default) return;                              // the zero point: no cell needed, no delta
@@ -438,6 +456,19 @@
         out.deltas.push({ key: 'size:W', amount: sz });
       }
     }
+    // THE PERCENT PASS (specs/GRADE-PERCENT-SPEC): each percent group whose chosen value is not its default adds pct x SUBTOTAL / 100, where SUBTOTAL is `total` right now —
+    // the base at this size + every other option + the linear length delta, and NOTHING that a percent group added. So two percent groups add (never compound).
+    var subtotal = total;
+    (Array.isArray(fam.groups) ? fam.groups : []).forEach(function (g) {
+      if (!isPercentGroup(g)) return;
+      var v = cfg[g.key];
+      if (v === g.default) return;                                // the zero point (SS304): no cell is read, nothing is added
+      var c = cellFor(g.key, String(v));
+      if (!c || c.pct === null) { markMissing(g, String(v)); return; }
+      var amount = subtotal * c.pct / 100;
+      total += amount;
+      out.deltas.push({ key: g.key + ':' + String(v), amount: amount });
+    });
     if (out.missing.length) { out.reason = 'missing_input'; return out; }
     var unit = Math.max(0, Math.round(total));
     if (!isFinite(unit)) unit = 0;

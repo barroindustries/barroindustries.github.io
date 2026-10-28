@@ -17,9 +17,13 @@
 //   6. PRODUCT FAMILIES (owner ruling 2026-10-21): normalisePricingDoc + priceConfiguredItem — a configured price = the primary SKU
 //      through the UNCHANGED machinery + signed option deltas from a private sheet; an unapproved sheet / a stale schema / a BLANK cell
 //      is "priced after review" (never zero, never a partial figure); an option equal to the family default adds nothing (identity).
-//   6b. THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, CONFIGURATOR-GRADE-TITLES-SPEC §3, the last describe block): js/pricing-core.js is UNCHANGED — the generic `choice` pricing already
-//      prices the `grade` group of the real definitions: SS304 is the zero point (no cell, no delta), SS316 reads one signed { flat, perW100 } cell, a blank cell is "missing input" naming
-//      "Material: Stainless Steel 316 Laboratory Grade" (never zero), an older-schema sheet is "not approved". FAKE odd figures only (the repository is public).
+//   6b. THE STAFF-ONLY STEEL GRADE AS A PERCENTAGE (owner ruling 2026-10-28, specs/GRADE-PERCENT-SPEC.md, schema 5, the last describe blocks): a `choice` group declared "pricing": "percent" — the
+//      `grade` group of all eleven real definitions, and no other — holds ONE signed `pct` cell instead of { flat, perW100 } (normalisePricingDoc emits { pct } and nothing else; a pct
+//      beyond +/-1000 or a schema-4 { flat, perW100 } cell is BLANK). SS304 is the zero point (no cell read, no delta); SS316 adds pct % of the WHOLE line price = the base at the requested size
+//      + every other option's delta + the linear family's length delta, as an UNROUNDED delta `grade:316`, the ONE rounding being the final one; several percent groups ADD, never compound;
+//      a blank pct is "missing input" naming "Material: Stainless Steel 316 Laboratory Grade" (never zero); a schema-4 approved sheet is "not approved". FAKE percentages only (12.5, 37, 0, -10 …:
+//      the repository is public, the owner's figure is private data). The public path (every line a visitor can build is SS304) is proved byte-identical to the schema-4 module by
+//      tests/grade-percent-parity.test.mjs.
 //   7. REGRESSION: the four original exports are pinned by the SHA-256 of their source (taken before the families were added), on top of
 //      the frozen-oracle parity sweep above, so adding the configured price provably changed nothing about SKU pricing or the Quote Builder.
 //
@@ -29,6 +33,13 @@
 //   (families) read a blank cell as 0 · price an unapproved sheet · skip the schema-version check · charge the chosen value instead of
 //   chosen-minus-default · drop the baseline subtraction for slots · let perW100 charge below the standard length (non-linear family) ·
 //   flip the sign of the linear length rate · stop clamping the total at 0 · edit any of the four original functions.
+//   2026-10-28 (the SS316 percentage; 20 mutants of js/pricing-core.js in a scratch copy, its functions/ mirror patched identically, the whole suite run for each — EVERY ONE killed, by this file, by tests/grade-percent-parity,
+//   qb-configured, family-staff, derive-family-pricing and quote-builder-static): M1 the pct taken of the base price only instead of the subtotal · M2 the pct amount doubled (stands in for "applied after the quantity":
+//   the qty-2 builder / computeBasket tests in qb-configured.test.mjs fail too) · M3 the percent pass skipped (316 priced as 304) · M4 a blank pct read as 0 · M5 the percentage applied when the chosen value IS the default ·
+//   M6 applied twice (a: the total multiplied as well as the delta added, b: the delta pushed twice, c: the amount added to the total twice) · M7 the percent pass placed BEFORE the linear length delta · M8 the pct read
+//   from `flat` (a schema-4 cell prices) · M9 two percent groups compounding instead of adding · M10 the amount rounded before the final round · M11 the +/-1000 cap removed · and seven more: X1 the percent branch of
+//   normalisePricingDoc dropped · X2 percent groups not skipped in the ordinary loop (the 316 cell also priced as a flat) · X3 the cap exclusive (exactly 1000 blank) · X4 the sign dropped · X5 the missing label without the
+//   option name · X6 a multi group with a "pricing" flag treated as a percent group · X7 the percentage taken of the FINAL price (S / (1 - pct)) instead of the subtotal.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -1046,68 +1057,310 @@ describe('REGRESSION — adding the configured price changed NOTHING about SKU p
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28) — priced by the UNCHANGED generic `choice` code, on the REAL definitions. FAKE odd figures.
+//  THE STAFF-ONLY STEEL GRADE AS A PERCENTAGE (owner ruling 2026-10-28, specs/GRADE-PERCENT-SPEC.md, schema 5) — on the REAL definitions. FAKE percentages only
+//  (12.5, 37, 0, -10, 1000 …): the repository is public and the owner's figure is private data.
 // ═══════════════════════════════════════════════════════════════════════════
-describe('priceConfiguredItem — the staff-only steel grade (Material): SS304 is the zero point, SS316 reads one signed cell, a blank cell is "priced after review"', () => {
-  const FAMS = require('../js/qr-families.js');
-  const PFX = require('../js/product-families.js');
+const FAMS = require('../js/qr-families.js');
+const PFX = require('../js/product-families.js');
+const FROZEN = require('./fixtures/pricing-core.schema4.js');          // pricing-core exactly as it was at schema 4: the oracle for "every other group is unchanged"
+const G316 = 'Material: Stainless Steel 316 Laboratory Grade';
+
+describe('the SS316 grade is a PERCENT group on every real family, and normalisePricingDoc reads its cell as { pct } and nothing else', () => {
+  const sink = FAMS.families.sink;
+  const norm = (cells) => normalisePricingDoc(sink, { approved: true, schemaVersion: FAMS.version, options: { grade: cells } }).options.grade;
+
+  it('the premise: the families are on schema 5, and `grade` — a choice group, SS304 the default — is the ONE percent group of each of the eleven', () => {
+    assert.equal(FAMS.version, 5, 'the grade being a percentage is schema 5');
+    assert.equal(FAMS.order.length, 11);
+    for (const id of FAMS.order) {
+      const fam = FAMS.families[id];
+      assert.deepEqual(fam.groups.filter((g) => g.pricing !== undefined).map((g) => g.key + '=' + g.pricing), ['grade=percent'], `${id}: exactly the grade is priced as a percentage`);
+      const g = fam.groups.find((x) => x.key === 'grade');
+      assert.equal(g.type, 'choice', id); assert.equal(g.default, 304, id); assert.deepEqual(g.options.map((o) => o.v), [304, 316], id);
+    }
+  });
+
+  it('a percent cell keeps ONLY pct: a flat / perW100 beside it, the confidence and the note are dropped', () => {
+    assert.deepEqual(norm({ 316: { flat: 999, perW100: 9, pct: 12.5, confidence: 'entered', derivation: 'x', extra: 1 } }), { 304: { pct: null }, 316: { pct: 12.5 } });
+    assert.deepEqual(Object.keys(norm({ 316: { pct: 37 } })[316]), ['pct']);
+    // both values of the group have a cell; a figure left under the standard value is carried (and never read: see the pricing tests below)
+    assert.deepEqual(norm({ 304: { pct: 777 }, 316: { pct: 5 } }), { 304: { pct: 777 }, 316: { pct: 5 } });
+  });
+
+  it('a pct that is not a finite number within +/-1000 is BLANK (null) — a string, NaN, Infinity, a boolean, a list, an object, 1001, -1001, 1e6; the bounds, 0 and a negative are figures', () => {
+    for (const bad of ['12', '', NaN, Infinity, -Infinity, true, false, [], [5], {}, null, undefined, 1001, -1001, 1000.0001, 1e6, -1e6, 1e9]) assert.deepEqual(norm({ 316: { pct: bad } })[316], { pct: null }, String(bad));
+    for (const good of [1000, -1000, 0, -10, 12.5, 0.01, 999.99]) assert.deepEqual(norm({ 316: { pct: good } })[316], { pct: good }, String(good));
+    assert.ok(Object.is(norm({ 316: { pct: 0 } })[316].pct, 0), 'an explicit 0 is a figure, not a blank');
+  });
+
+  it('the schema-4 shape { flat, perW100 } is BLANK — it is never read as a percentage', () => {
+    // (flats of 37, 12, 1 and 0 are inside the +/-1000 cap on purpose: a reader that took the flat for a percentage would keep them, where one that only rejects big numbers would not)
+    for (const old of [{ flat: 4217, perW100: 38 }, { flat: 4217, perW100: null }, { flat: 37, perW100: 38 }, { flat: 12, perW100: 12, confidence: 'entered', derivation: 'an amount' }, { flat: 1, perW100: null }, { flat: 0, perW100: 0 }, { flat: 0 }, { flat: -10, perW100: null }, { flat: null, perW100: null }, {}]) {
+      assert.deepEqual(norm({ 316: old })[316], { pct: null }, JSON.stringify(old));
+    }
+  });
+
+  it('an absent cell, an absent group, a junk cell and a junk group are blank too; only the family\'s own values and groups survive', () => {
+    for (const junk of [undefined, null, 5, 'x', [], { 316: null }, { 316: 'x' }, { 316: [] }, { 999: { pct: 5 } }]) {
+      const out = norm(junk);
+      assert.deepEqual(out, { 304: { pct: null }, 316: { pct: null } }, JSON.stringify(junk));
+    }
+    const d = normalisePricingDoc(sink, { approved: true, schemaVersion: FAMS.version, options: {} });
+    assert.deepEqual(d.options.grade, { 304: { pct: null }, 316: { pct: null } });
+    assert.deepEqual(Object.keys(d.options), sink.groups.map((g) => g.key));
+    assert.equal(normalisePricingDoc(sink, { options: { grade: { 316: { pct: 9 } }, nope: { x: { pct: 9 } } } }).options.nope, undefined);
+  });
+
+  it('every OTHER group of every family is normalised exactly as the schema-4 module does (numbers within the cap, blank = null), and so are the approval fields and the size rate', () => {
+    const odd = [217, null, -48.5, 'x', 1e9, 0, NaN, 33, undefined, true, 1500.25];
+    for (const id of FAMS.order) {
+      const fam = FAMS.families[id];
+      let n = 0;
+      const options = {};
+      for (const g of fam.groups) { options[g.key] = {}; for (const o of g.options) options[g.key][String(o.v)] = { flat: odd[n++ % odd.length], perW100: odd[n++ % odd.length], pct: 12.5 }; }
+      options.nope = { x: { flat: 1 } };
+      const doc = { approved: true, schemaVersion: FAMS.version, options, size: { perW100: 77 } };
+      const now = normalisePricingDoc(fam, doc), then = FROZEN.normalisePricingDoc(fam, doc);
+      assert.deepEqual(Object.keys(now.options), Object.keys(then.options), id);
+      for (const g of fam.groups) {
+        if (g.pricing === 'percent') continue;
+        assert.deepEqual(now.options[g.key], then.options[g.key], `${id}.${g.key}`);
+        for (const v of Object.keys(now.options[g.key])) assert.deepEqual(Object.keys(now.options[g.key][v]), ['flat', 'perW100'], `${id}.${g.key}.${v}`);
+      }
+      assert.deepEqual([now.approved, now.schemaVersion, now.size], [then.approved, then.schemaVersion, then.size], id);
+    }
+  });
+
+  it('a "pricing" flag on a group that is not a choice group is ignored (the build refuses it; the pricing never reads a pct from a multi or a slots group)', () => {
+    const odd = { ...syn(), groups: [
+      { key: 'addons', label: 'Add-ons', type: 'multi', default: [], pricing: 'percent', options: [{ v: 'oven', l: 'Oven' }] },
+      { key: 'burners', label: 'Burners', type: 'slots', minSlots: 1, maxSlots: 3, default: ['lp'], pricing: 'percent', options: [{ v: 'lp', l: 'LP' }, { v: 'wok', l: 'Wok' }] },
+      { key: 'k', label: 'K', type: 'choice', default: 'a', pricing: 'flat', options: [{ v: 'a', l: 'A' }, { v: 'b', l: 'B' }] },
+    ] };
+    const d = normalisePricingDoc(odd, { options: { addons: { oven: { flat: 7, perW100: 3, pct: 50 } }, burners: { wok: { flat: 11, pct: 50 } }, k: { b: { flat: 9, pct: 50 } } } });
+    assert.deepEqual(d.options.addons.oven, { flat: 7, perW100: 3 });
+    assert.deepEqual(d.options.burners.wok, { flat: 11, perW100: null });
+    assert.deepEqual(d.options.k.b, { flat: 9, perW100: null });
+  });
+});
+
+describe('priceConfiguredItem — the SS316 grade adds pct % of the WHOLE line price: SS304 is the zero point, SS316 reads one signed pct, a blank pct is "priced after review"', () => {
   const sink = FAMS.families.sink;
   const SINK_PRIMARY = perLength({ id: 'PW-004', basePrice: 1000, defaultDimensions: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 2, rateD100: 30, rateH100: 0 } });
-  const G316 = 'Material: Stainless Steel 316 Laboratory Grade';
-  const sheet = (cell) => ({ approved: true, schemaVersion: FAMS.version, options: cell === undefined ? {} : { grade: { 316: cell } }, size: { perW100: null } });
+  // two priced options besides the grade, odd figures, per-100-mm rates (one fractional, so the subtotal is NOT a whole number)
+  const OTHER = {
+    basins: { 2: { flat: 4217, perW100: 38.5 } },
+    undershelf: { true: { flat: 1111, perW100: null } },
+    faucet: { prerinse: { flat: 613, perW100: 7 } },
+  };
+  const CFG = { ...PFX.defaultConfig(sink), basins: 2, undershelf: true, faucet: 'prerinse' };
+  const DIMS_C = { W: 1400, D: 500, H: 850 };                                       // a custom length: 900 mm above the standard 500
   const opt = { schemaVersion: FAMS.version };
-  const price = (grade, sh, dims) => priceConfiguredItem(SINK_PRIMARY, sink, { ...PFX.defaultConfig(sink), grade }, dims || PFX.defaultDims(sink), sh, {}, opt);
+  const sheet = (cell, over) => ({ approved: true, schemaVersion: FAMS.version, options: { ...OTHER, ...(over || {}), ...(cell === undefined ? {} : { grade: { 316: cell } }) }, size: { perW100: null } });
+  const price = (grade, sh, dims, cfgOver) => priceConfiguredItem(SINK_PRIMARY, sink, { ...CFG, ...(cfgOver || {}), grade }, dims || DIMS_C, sh, {}, opt);
+  // S, the whole line before any percentage, worked out by hand: the primary's own length rule + the three options at 900 mm above the standard length
+  const BASE = 1000 + 2 * (1400 - 500);                                              // 2800
+  const S = BASE + (4217 + 38.5 * 9) + 1111 + (613 + 7 * 9);                          // 2800 + 4563.5 + 1111 + 676 = 9150.5
+  const labelOf = (groupKey, v) => { const g = sink.groups.find((x) => x.key === groupKey); const o = g.options.find((x) => String(x.v) === String(v)); return g.label + ': ' + (o.f || o.l); };
 
-  it('an approved schema-4 sheet whose SS316 flat is blank: the 316 line is "missing input" naming Material, priced at nothing — the 304 line prices from the base item alone with no delta', () => {
-    assert.equal(FAMS.version, 4, 'the premise: the grade is part of schema 4');
-    for (const sh of [sheet({ flat: null, perW100: null }), sheet({ flat: null, perW100: 40 }), sheet(undefined)]) {
+  it('the fixtures are what the hand-worked figures say (so the assertions below prove something)', () => {
+    const std = price(304, sheet({ pct: 37 }));
+    assert.equal(std.base, BASE);
+    assert.deepEqual(std.deltas, [{ key: 'basins:2', amount: 4563.5 }, { key: 'undershelf:true', amount: 1111 }, { key: 'faucet:prerinse', amount: 676 }]);
+    assert.equal(std.deltas.reduce((n, d) => n + d.amount, std.base), S);
+    assert.equal(S, 9150.5);
+  });
+
+  it('a FAKE pct on a sink at a custom length with two other priced options and a per-100 rate: unitPrice = round(S x (1 + pct/100)); the grade delta is the UNROUNDED S x pct / 100 and the other deltas are exactly the 304 run\'s', () => {
+    const std = price(304, sheet({ pct: 37 }));
+    assert.equal(std.priced, true);
+    assert.equal(std.unitPrice, Math.round(S));
+    const lab = price(316, sheet({ pct: 37 }));
+    assert.equal(lab.priced, true); assert.equal(lab.reason, null); assert.deepEqual(lab.missing, []);
+    assert.equal(lab.base, BASE, 'the base is the primary at the requested size');
+    assert.deepEqual(lab.deltas, [...std.deltas, { key: 'grade:316', amount: S * 37 / 100 }], 'the other deltas are the 304 run\'s; the grade delta ends the list');
+    assert.equal(lab.unitPrice, Math.max(0, Math.round(S + S * 37 / 100)));
+    assert.equal(lab.unitPrice, Math.round(S * 1.37), 'round(S x 1.37)');
+    assert.equal(lab.unitPrice, 12536, 'by hand: 9150.5 + 3385.685 = 12536.185');
+    assert.notEqual(lab.deltas.at(-1).amount, BASE * 37 / 100, 'it is a percentage of the whole line, not of the base item');
+    assert.notEqual(lab.unitPrice, std.unitPrice);
+  });
+
+  it('the percentage is taken of the subtotal and rounded ONCE, at the end: pct 12.5 on a subtotal ending in .5 (the delta stays unrounded)', () => {
+    const lab = price(316, sheet({ pct: 12.5 }));
+    assert.equal(lab.deltas.at(-1).amount, S * 12.5 / 100);                        // 1143.8125 — not 1144
+    assert.equal(lab.unitPrice, 10294, 'round(9150.5 + 1143.8125 = 10294.3125); rounding the amount first would give 10295');
+  });
+
+  it('a spread of percentages, signed: unitPrice = max(0, round(S + S x pct / 100)), and the delta is S x pct / 100', () => {
+    for (const pct of [0.5, 1, 7, 12.5, 25, 37, 99.99, 100, 250, 1000, 0, -1, -10, -37, -50, -99]) {
+      const lab = price(316, sheet({ pct }));
+      assert.equal(lab.priced, true, String(pct));
+      assert.equal(lab.unitPrice, Math.max(0, Math.round(S + S * pct / 100)), String(pct));
+      assert.deepEqual(lab.deltas.at(-1), { key: 'grade:316', amount: S * pct / 100 }, String(pct));
+    }
+  });
+
+  it('pct 0 IS a figure: priced, the same as the 304 line; a NEGATIVE pct is a signed discount; a total that falls to zero or below is not a price (no_price)', () => {
+    const std = price(304, sheet({ pct: 37 }));
+    const zero = price(316, sheet({ pct: 0 }));
+    assert.equal(zero.priced, true); assert.equal(zero.unitPrice, std.unitPrice);
+    assert.ok(Object.is(zero.deltas.at(-1).amount, 0)); assert.equal(zero.deltas.at(-1).key, 'grade:316');
+    const less = price(316, sheet({ pct: -10 }));
+    assert.equal(less.unitPrice, Math.round(S * 0.9)); assert.equal(less.unitPrice, 8235);
+    assert.ok(less.deltas.at(-1).amount < 0);
+    const gone = price(316, sheet({ pct: -1000 }));        // S - 10 S < 0
+    assert.deepEqual([gone.priced, gone.unitPrice, gone.reason], [false, 0, 'no_price']);
+    const exactlyAll = price(316, sheet({ pct: -100 }));    // S - S = 0
+    assert.deepEqual([exactlyAll.priced, exactlyAll.unitPrice, exactlyAll.reason], [false, 0, 'no_price']);
+  });
+
+  it('+/-1000 are the bounds: 1000 prices (S x 11), 1001 / 1e6 are BLANK ("priced after review"), never a price', () => {
+    const top = price(316, sheet({ pct: 1000 }));
+    assert.equal(top.priced, true); assert.equal(top.unitPrice, Math.round(S + S * 1000 / 100));
+    for (const over of [1001, -1001, 1e6, -1e6, 1e9, Infinity, NaN]) {
+      const r = price(316, sheet({ pct: over }));
+      assert.deepEqual([r.priced, r.unitPrice, r.reason], [false, 0, 'missing_input'], String(over));
+      assert.deepEqual(r.missing, [G316], String(over));
+    }
+  });
+
+  it('a BLANK pct (absent cell, null, no number, a string, the schema-4 { flat, perW100 } shape) is "missing input" naming the Material option — unitPrice 0, never zero-priced; the 304 line is untouched', () => {
+    const blanks = [sheet(undefined), sheet({ pct: null }), sheet({}), sheet({ pct: '37' }), sheet({ pct: NaN }), sheet({ flat: 4217, perW100: 38 }), sheet({ flat: 4217, perW100: null }), sheet({ flat: 4217 }), sheet({ flat: 37, perW100: 38 }), sheet({ flat: 0, perW100: null }), sheet({ flat: 12.5 }), { ...sheet(undefined), options: { ...OTHER, grade: null } }];
+    for (const sh of blanks) {
       const lab = price(316, sh);
-      assert.equal(lab.priced, false); assert.equal(lab.unitPrice, 0); assert.equal(lab.reason, 'missing_input');
-      assert.deepEqual(lab.missing, [G316]);
+      assert.equal(lab.priced, false, JSON.stringify(sh.options.grade)); assert.equal(lab.unitPrice, 0); assert.equal(lab.reason, 'missing_input');
+      assert.deepEqual(lab.missing, [G316], JSON.stringify(sh.options.grade));
       const std = price(304, sh);
-      assert.equal(std.priced, true); assert.equal(std.reason, null); assert.deepEqual(std.deltas, []); assert.deepEqual(std.missing, []);
-      assert.equal(std.unitPrice, std.base, 'the base item alone');
+      assert.equal(std.priced, true); assert.equal(std.reason, null); assert.deepEqual(std.missing, []);
+      assert.equal(std.unitPrice, Math.round(S), 'the 304 line prices from the base and the other options alone');
     }
   });
 
-  it('a FAKE odd figure in flat adds the delta grade:316 — exactly that amount; an explicit 0 is a figure (priced, the same as 304); a NEGATIVE one is signed', () => {
-    const std = price(304, sheet({ flat: 2917, perW100: null }));
-    for (const [flat, want] of [[2917, 2917], [0, 0], [-413, -413]]) {
-      const lab = price(316, sheet({ flat, perW100: null }));
-      assert.equal(lab.priced, true, String(flat));
-      assert.deepEqual(lab.deltas, [{ key: 'grade:316', amount: want }], String(flat));
-      assert.equal(lab.unitPrice, std.unitPrice + want, String(flat));
+  it('the OLD shape under 316 is never priced from its flat: { flat: 4217, perW100: 38 } and a pct are not interchangeable (a flat that happens to look like a small percentage, or 0, is not one either)', () => {
+    for (const cell of [{ flat: 4217, perW100: 38 }, { flat: 37, perW100: 38 }, { flat: 12.5, perW100: null }, { flat: 0, perW100: null }, { flat: -10, perW100: 5 }]) {
+      const old = price(316, sheet(cell));
+      assert.equal(old.priced, false, JSON.stringify(cell)); assert.equal(old.reason, 'missing_input'); assert.deepEqual(old.missing, [G316]);
+      assert.equal(old.unitPrice, 0);
     }
-    assert.deepEqual(std.deltas, [], 'a 304 line adds no delta, whatever the 316 cell holds');
+    // ... and with a pct beside the old keys, only the pct counts
+    const both = price(316, sheet({ flat: 4217, perW100: 38, pct: 37 }));
+    assert.equal(both.priced, true); assert.equal(both.unitPrice, 12536);
+    assert.deepEqual(both.deltas.at(-1), { key: 'grade:316', amount: S * 37 / 100 });
   });
 
-  it('a perW100 figure scales with the length ABOVE the standard one only (a non-linear family), flat + perW100 x (W - standard) / 100', () => {
-    const sh = sheet({ flat: 1000, perW100: 70 });
-    const atStd = price(316, sh, { W: 500, D: 500, H: 850 });
-    assert.deepEqual(atStd.deltas, [{ key: 'grade:316', amount: 1000 }], 'at the standard length: the flat part alone');
-    const longer = price(316, sh, { W: 1500, D: 500, H: 850 });
-    assert.deepEqual(longer.deltas, [{ key: 'grade:316', amount: 1000 + 70 * (1500 - 500) / 100 }]);
-    const shorter = price(316, sh, { W: 500, D: 500, H: 850 });
-    assert.equal(shorter.deltas[0].amount, 1000, 'shrinking never discounts');
+  it('a pct on a line whose OTHER cells are blank: "missing input" names those options and not the grade; with both blank, each is named once', () => {
+    const blankBasins = sheet({ pct: 37 }, { basins: { 2: { flat: null, perW100: 38.5 } } });
+    const a = price(316, blankBasins);
+    assert.deepEqual([a.priced, a.unitPrice, a.reason], [false, 0, 'missing_input']);
+    assert.deepEqual(a.missing, [labelOf('basins', 2)]);
+    assert.ok(!a.missing.includes(G316));
+    const blankBoth = sheet({ pct: null }, { basins: { 2: { flat: null, perW100: 38.5 } }, faucet: { prerinse: {} } });
+    const b = price(316, blankBoth);
+    assert.equal(b.reason, 'missing_input');
+    assert.deepEqual([...b.missing].sort(), [G316, labelOf('basins', 2), labelOf('faucet', 'prerinse')].sort());
+    assert.equal(new Set(b.missing).size, b.missing.length);
+    // the 304 line of the same sheet is blocked only by the options it uses
+    assert.deepEqual(price(304, blankBoth).missing, [labelOf('basins', 2), labelOf('faucet', 'prerinse')]);
   });
 
-  it('a 304 line adds no delta and reads no cell, however odd the grade group of the sheet is (a huge figure, a string, the standard value\'s own key)', () => {
-    const base = price(304, sheet(undefined));
-    for (const odd of [{ flat: 99999999, perW100: 5 }, { flat: '12', perW100: null }, null]) assert.deepEqual(price(304, sheet(odd)), base);
-    const withStdKey = { ...sheet(undefined), options: { grade: { 304: { flat: 777, perW100: null }, 316: { flat: 5, perW100: null } } } };
-    assert.deepEqual(price(304, withStdKey).deltas, [], 'the standard grade has no cell: a figure keyed 304 is never charged');
-    assert.equal(price(304, withStdKey).unitPrice, base.unitPrice);
-  });
-
-  it('a sheet approved against the previous schema (3, before the grade existed) prices NOTHING — "not approved" — for the standard grade as well; an unapproved one too', () => {
-    for (const older of [1, 2, 3]) {
-      const r = price(304, { ...sheet({ flat: 2917, perW100: null }), schemaVersion: older });
-      assert.equal(r.priced, false, `schema ${older}`); assert.equal(r.reason, 'not_approved', `schema ${older}`);
+  it('a 304 line adds no delta and reads no grade cell, however odd the grade group of the sheet is (a pct under 304, a flat under 316, a huge pct, a string, null, a list)', () => {
+    const plain = price(304, sheet(undefined));
+    assert.equal(plain.priced, true); assert.deepEqual(plain.deltas.map((d) => d.key), ['basins:2', 'undershelf:true', 'faucet:prerinse']);
+    const odd = [{ 304: { pct: 777 }, 316: { flat: 5, perW100: null } }, { 304: { pct: 37 }, 316: { pct: 37 } }, { 304: { pct: null } }, { 304: { flat: 777, perW100: 3 } }, { 304: 'x', 316: 9 }, { 304: [], 316: [] }, null, 'x', []];
+    for (const grade of odd) {
+      const r = price(304, { ...sheet(undefined), options: { ...OTHER, grade } });
+      assert.deepEqual(r, plain, JSON.stringify(grade));
+      assert.deepEqual(r.deltas.filter((d) => d.key.startsWith('grade')), [], JSON.stringify(grade));
     }
-    assert.equal(price(316, { ...sheet({ flat: 2917, perW100: null }), approved: false }).reason, 'not_approved');
   });
 
-  it('every family prices its SS316 line the same way — a cell per family, SS304 free — with a synthetic primary (the generic code needs nothing per family)', () => {
+  it('a sheet approved against an older schema (1 to 4 — before the grade was a percentage) prices NOTHING — "not approved" — for the standard grade as well; an unapproved one too; the same cells under schema 5 price', () => {
+    for (const older of [1, 2, 3, 4]) {
+      for (const grade of [304, 316]) {
+        const r = price(grade, { ...sheet({ pct: 37 }), schemaVersion: older });
+        assert.equal(r.priced, false, `schema ${older} grade ${grade}`); assert.equal(r.unitPrice, 0); assert.equal(r.reason, 'not_approved', `schema ${older} grade ${grade}`);
+      }
+    }
+    assert.equal(price(316, { ...sheet({ pct: 37 }), approved: false }).reason, 'not_approved');
+    assert.equal(price(316, { ...sheet({ pct: 37 }), schemaVersion: FAMS.version + 1 }).reason, 'not_approved', 'and a FUTURE schema is just as unapproved');
+    assert.equal(price(304, sheet({ pct: 37 })).priced, true);
+    assert.equal(price(316, sheet({ pct: 37 })).priced, true);
+  });
+
+  it('the material-price-index multiplier scales the base BEFORE the options, and the percentage is taken of that whole figure', () => {
+    const c = { materialPriceIndexMultiplier: 1.07 };
+    const base = priceCatalogItem(SINK_PRIMARY, { dims: DIMS_C, runs: null, specIdx: [] }, c).unitPrice;
+    const r = priceConfiguredItem(SINK_PRIMARY, sink, { ...CFG, grade: 316 }, DIMS_C, sheet({ pct: 37 }), c, opt);
+    assert.equal(r.base, base);
+    const sub = base + 4563.5 + 1111 + 676;
+    assert.deepEqual(r.deltas.at(-1), { key: 'grade:316', amount: sub * 37 / 100 });
+    assert.equal(r.unitPrice, Math.round(sub + sub * 37 / 100));
+  });
+
+  it('is deterministic and pure: the same inputs give the same answer, field for field, and nothing is mutated', () => {
+    const args = () => [structuredClone(SINK_PRIMARY), structuredClone(sink), { ...CFG, grade: 316 }, { ...DIMS_C }, sheet({ pct: 37 }), {}, { ...opt }];
+    const a = priceConfiguredItem(...args()), b = priceConfiguredItem(...args());
+    assert.deepEqual(a, b);
+    const frozen = args();
+    const snap = JSON.stringify(frozen);
+    priceConfiguredItem(...frozen);
+    assert.equal(JSON.stringify(frozen), snap);
+  });
+
+  describe('a LINEAR family: the percentage is taken AFTER the length delta, so it follows the length too', () => {
+    const WS = FAMS.families.wall_shelf;
+    const WS_PRIMARY = fixedP({ id: 'PW-023', basePrice: 1893, defaultDimensions: { W: 1200, D: 450 } });
+    const wsSheet = (cell, rate) => ({ approved: true, schemaVersion: FAMS.version, options: { tiers: { 2: { flat: 311, perW100: 13 } }, surface: { slotted: { flat: -97, perW100: null } }, ...(cell === undefined ? {} : { grade: { 316: cell } }) }, size: { perW100: rate === undefined ? 77 : rate } });
+    const wsPrice = (grade, sh, W) => priceConfiguredItem(WS_PRIMARY, WS, { ...PFX.defaultConfig(WS), tiers: 2, surface: 'slotted', grade }, { W, D: 450 }, sh, {}, opt);
+    it('at 2000 mm: S = base 1893 + tiers (311 + 13 x 8) + slotted (-97) + length (77 x 8) = 2827; SS316 at 37 % = round(2827 x 1.37)', () => {
+      const std = wsPrice(304, wsSheet({ pct: 37 }), 2000);
+      assert.deepEqual(std.deltas, [{ key: 'tiers:2', amount: 415 }, { key: 'surface:slotted', amount: -97 }, { key: 'size:W', amount: 616 }]);
+      assert.equal(std.unitPrice, 2827);
+      const lab = wsPrice(316, wsSheet({ pct: 37 }), 2000);
+      assert.deepEqual(lab.deltas, [...std.deltas, { key: 'grade:316', amount: 2827 * 37 / 100 }]);
+      assert.equal(lab.unitPrice, 3873, 'by hand: 2827 + 1045.99 = 3872.99');
+    });
+    it('shorter than the standard length (the linear rate runs both ways) and exactly at it: the same rule', () => {
+      const short = wsPrice(316, wsSheet({ pct: 37 }), 600);            // tiers 311 - 78, length 77 x -6; S = 1893 + 233 - 97 - 462 = 1567
+      assert.deepEqual(short.deltas.map((d) => d.key), ['tiers:2', 'surface:slotted', 'size:W', 'grade:316']);
+      assert.deepEqual(short.deltas.at(-1), { key: 'grade:316', amount: 1567 * 37 / 100 });
+      assert.equal(short.unitPrice, Math.round(1567 * 1.37)); assert.equal(short.unitPrice, 2147);
+      const at = wsPrice(316, wsSheet({ pct: 37 }), 1200);              // no length delta at the standard length: S = 1893 + 311 - 97 = 2107
+      assert.deepEqual(at.deltas.map((d) => d.key), ['tiers:2', 'surface:slotted', 'grade:316']);
+      assert.equal(at.unitPrice, Math.round(2107 * 1.37)); assert.equal(at.unitPrice, 2887);
+    });
+    it('a blank length rate blocks the line as before ("Size"), whatever the pct', () => {
+      const r = wsPrice(316, wsSheet({ pct: 37 }, null), 2000);
+      assert.deepEqual([r.priced, r.reason], [false, 'missing_input']);
+      assert.deepEqual(r.missing, ['Size']);
+    });
+  });
+
+  describe('several percent groups (a synthetic family — none of the real ones has two): each takes its percentage of the SAME subtotal and the amounts ADD, never compound', () => {
+    const TWO = { ...syn(), groups: [
+      { key: 'layers', label: 'Layers', type: 'choice', default: 1, options: [{ v: 1, l: '1' }, { v: 2, l: '2' }] },
+      { key: 'ga', label: 'Alpha', type: 'choice', default: 'x', pricing: 'percent', options: [{ v: 'x', l: 'X' }, { v: 'y', l: 'Y' }] },
+      { key: 'gb', label: 'Beta', type: 'choice', default: 'p', pricing: 'percent', options: [{ v: 'p', l: 'P' }, { v: 'q', l: 'Q' }] },
+      { key: 'wheels', label: 'Wheels', type: 'choice', default: false, options: [{ v: true, l: 'With' }, { v: false, l: 'Without' }] },
+    ] };
+    const sh = (over) => ({ approved: true, schemaVersion: 1, options: { layers: { 2: { flat: 100 } }, wheels: { true: { flat: 40 } }, ga: { y: { pct: 10 } }, gb: { q: { pct: 20 } }, ...(over || {}) }, size: { perW100: null } });
+    const run = (cfg, s) => priceConfiguredItem(PRIMARY, TWO, { layers: 1, ga: 'x', gb: 'p', wheels: false, ...cfg }, DIMS, s === undefined ? sh() : s, {}, OPT);
+    it('S = 1000 + 100 + 40 = 1140; Alpha 10 % = 114 and Beta 20 % = 228 are both of 1140: 1482 (compounding would give 1505)', () => {
+      const r = run({ layers: 2, wheels: true, ga: 'y', gb: 'q' });
+      assert.deepEqual(r.deltas, [{ key: 'layers:2', amount: 100 }, { key: 'wheels:true', amount: 40 }, { key: 'ga:y', amount: 114 }, { key: 'gb:q', amount: 228 }], 'every percentage delta comes AFTER every other delta, although Alpha sits before Wheels');
+      assert.equal(r.unitPrice, 1482);
+    });
+    it('one percent group alone, the other at its default: only that one applies; a blank cell of one names it and leaves the other priced', () => {
+      assert.equal(run({ ga: 'y' }).unitPrice, 1100);
+      assert.equal(run({ gb: 'q' }).unitPrice, 1200);
+      const r = run({ ga: 'y', gb: 'q' }, sh({ gb: { q: { pct: null } } }));
+      assert.deepEqual([r.priced, r.reason, r.missing], [false, 'missing_input', ['Beta: Q']]);
+      assert.deepEqual(r.deltas, [{ key: 'ga:y', amount: 100 }]);
+    });
+  });
+
+  it('every family prices its SS316 line the same way — one pct cell per family, SS304 free — with a synthetic primary (the generic code needs nothing per family)', () => {
     for (const id of FAMS.order) {
       const fam = FAMS.families[id];
       const lengthPriced = fam.sizeBasis !== 'linear';
@@ -1115,15 +1368,20 @@ describe('priceConfiguredItem — the staff-only steel grade (Material): SS304 i
         ? perLength({ id: fam.primary, basePrice: 1000, defaultDimensions: PFX.defaultDims(fam), formula: { baseLengthMm: PFX.defaultDims(fam).W, pricePerExtraMm: 2, rateD100: 30, rateH100: 0 } })
         : fixedP({ id: fam.primary, basePrice: 1000, defaultDimensions: PFX.defaultDims(fam) });
       const dims = PFX.standardDims(fam, PFX.defaultConfig(fam));
-      const sh = { approved: true, schemaVersion: FAMS.version, options: { grade: { 316: { flat: 3113, perW100: null } } }, size: { perW100: lengthPriced ? null : 0 } };
+      const sh = { approved: true, schemaVersion: FAMS.version, options: { grade: { 316: { pct: 37 } } }, size: { perW100: lengthPriced ? null : 0 } };
       const std = priceConfiguredItem(prim, fam, PFX.defaultConfig(fam), dims, sh, {}, opt);
       const lab = priceConfiguredItem(prim, fam, { ...PFX.defaultConfig(fam), grade: 316 }, dims, sh, {}, opt);
       assert.equal(std.priced, true, `${id}: ${std.missing.join(', ')}`); assert.deepEqual(std.deltas, [], id);
       assert.equal(lab.priced, true, `${id}: ${lab.missing.join(', ')}`);
-      assert.equal(lab.unitPrice - std.unitPrice, 3113, id);
-      assert.deepEqual(lab.deltas, [{ key: 'grade:316', amount: 3113 }], id);
+      assert.deepEqual(lab.deltas, [{ key: 'grade:316', amount: std.base * 37 / 100 }], id);
+      assert.equal(lab.unitPrice, Math.round(std.base + std.base * 37 / 100), id);
+      assert.equal(lab.unitPrice, 1370, `${id}: 1000 + 37 % of 1000`);
       const blank = priceConfiguredItem(prim, fam, { ...PFX.defaultConfig(fam), grade: 316 }, dims, { ...sh, options: {} }, {}, opt);
       assert.deepEqual(blank.missing, [G316], id); assert.equal(blank.reason, 'missing_input', id);
+      for (const flat of [3113, 37, 0]) {
+        const oldShape = priceConfiguredItem(prim, fam, { ...PFX.defaultConfig(fam), grade: 316 }, dims, { ...sh, options: { grade: { 316: { flat, perW100: null } } } }, {}, opt);
+        assert.deepEqual(oldShape.missing, [G316], `${id}: a schema-4 cell (flat ${flat}) is blank`);
+      }
     }
   });
 });

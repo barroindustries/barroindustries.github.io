@@ -15,9 +15,15 @@
 // MUTATION RECORD 2026-10-28 (scratch copies, cf2-ws1-mut/; each must fail here): the group header not saying when a conditional option applies, the "Disabled on the website" chip
 // never shown / shown on every card, the switch read from the wrong key, reading the switch losing the material multiplier of the same document.
 // 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §6.4, §9): the screen lists ELEVEN families; a conditional option's group header says when it applies ("Only when Type is Fryer"); a family
-// listed in productMeta/config families.disabled carries a read-only "Disabled on the website" chip. The families are on schema 4.
-// 2026-10-28 (CONFIGURATOR-GRADE-TITLES-SPEC, schema 4): every card lists the staff-only MATERIAL group first — SS304 is the standard (adds nothing), SS316 has one signed amount pair (flat, per 100 mm),
+// listed in productMeta/config families.disabled carries a read-only "Disabled on the website" chip. The families are on schema 5.
+// 2026-10-28 (CONFIGURATOR-GRADE-TITLES-SPEC, schema 4): every card lists the staff-only MATERIAL group first — SS304 is the standard (adds nothing), SS316 has one signed cell,
 // blank until Finance enters it, the header carries the staff-only caption — and the import brings that cell as typed.
+// 2026-10-28 (specs/GRADE-PERCENT-SPEC, schema 5): the Material group is a PERCENT group — SS316's cell is ONE box in % (data-k="pct", no flat / per-100-mm boxes), the group header says it adds a percentage of the whole
+// line price, Save writes { pct, confidence, derivation } with no flat / perW100 key, a schema-4 { flat, perW100 } cell reads as an EMPTY box (and its stale note is not carried), a pct counts as filled in "N of M amounts
+// entered", the import reads pct (2 decimals, +/-1000) and ignores a flat on that cell, and "Try a configuration" prices the percentage of the whole line from the figure in the form.
+// Mutation-tested (scratch copy, whole suite, EVERY ONE killed — 14 mutants of js/screens/family-pricing.js): a blank percent cell counted as filled · Save writing flat / perW100 for a percent cell · the import not rounding to 2 decimals / without the cap /
+// reading the cell from its flat · the box showing the old flat · no +/-1000 cap on the typed box · the stale schema-4 note and confidence carried over · the header not saying what the percentage is of · the row keeping the two peso boxes · a blank
+// box saved as "entered" · an unchanged saved pct losing its confidence · the % suffix gone · the import treating every cell as a percent cell.
 // 2026-10-28 WS-2 (CONFIGURATOR-FAMILIES-2-SPEC §8.1, scratch copy cf2-ws2-mut/, 7 rules mutants, all killed; each must fail here): the rules create list missing "hood" or "dish_table", back to the old six ids, naming a twelfth id nobody
 // ships, listing an id twice, opened to any id, or reordered (the literal pin) — the list is pinned both as text and against QR_FAMILIES.order.
 //
@@ -212,7 +218,9 @@ describe('Inventory › Family Pricing — what the screen shows', () => {
     const inputs = inputsFromHtml(env.el.innerHTML, 'sink');
     const PF = env.ctx.window.ProductFamilies, fam = env.ctx.window.QR_FAMILIES.families.sink;
     const cells = PF.cells(fam).filter((c) => !c.baseline);
-    assert.equal(inputs.length, cells.length * 2, 'one amount box and one per-100-mm box for every non-standard option');
+    const pctCells = cells.filter((c) => PF.groupOf(fam, c.group).pricing === 'percent').length;
+    assert.equal(pctCells, 1, 'the sink\'s steel grade is its one percent cell');
+    assert.equal(inputs.length, (cells.length - pctCells) * 2 + pctCells, 'one amount box and one per-100-mm box for every non-standard option — and ONE percentage box for the SS316 grade');
     assert.match(env.el.innerHTML, /Standard option — adds nothing/);
     assert.match(env.el.innerHTML, /from the sink-table adder/);
     assert.match(env.el.innerHTML, /Try a configuration/);
@@ -684,7 +692,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
   });
 
   it('a sheet approved against the OLD definitions (schema 1) reads "Out of date — approve again"; the same sheet at the current schema is Approved', async () => {
-    assert.equal(FAKE_SCHEMA, 4, 'the families are on schema 4 (the staff-only steel grade and the line titles on top of the five more families and the 1.5 mm top plate): every sheet must be approved against it');
+    assert.equal(FAKE_SCHEMA, 5, 'the families are on schema 5 (the SS316 grade is a percentage of the whole line price, on top of the staff-only steel grade and the line titles, the five more families and the 1.5 mm top plate): every sheet must be approved against it');
     const old = Object.assign({}, OK_SHEET, { approved: true, approvedBy: 'u-1', approvedByName: 'Someone', schemaVersion: 1 });
     const env = makeEnv({ docs: { sink: old, prep_table: Object.assign({}, old, { familyId: 'prep_table', schemaVersion: FAKE_SCHEMA }) } });
     await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
@@ -698,7 +706,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
   it('the import refuses a seed made for an older schema ("generate it again"); a current-schema seed brings the 1.2 mm cell as typed (negative allowed), a blank stays blank, and a figure for the standard top is ignored', () => {
     const FP = makeEnv({}).ctx.window.FamilyPricing;
     const seed = (schemaVersion, families) => ({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion, generatedAt: '2026-10-28T00:00:00.000Z', families });
-    for (const older of [1, 2, 3]) {
+    for (const older of [1, 2, 3, 4]) {
       const old = FP.planImport(seed(older, { sink: { options: {} } }), {});
       assert.match(old.error, new RegExp(`older family definition \\(schema ${older}, the app is on ${FAKE_SCHEMA}\\)`));
       assert.match(old.error, /Generate it again/);
@@ -715,7 +723,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
   });
 });
 
-describe('Inventory › Family Pricing — the staff-only steel grade (Material): the first group of every card, one SS316 cell (signed; flat + per 100 mm), schema 4', () => {
+describe('Inventory › Family Pricing — the staff-only steel grade (Material): the first group of every card, one SS316 cell — a signed PERCENTAGE of the whole line price in one box (schema 5)', () => {
   const CAPTION = 'Staff-only option — offered in the Quote Builder, never on the website';
   const ALL = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack'];
   const open = async (fid, docs) => {
@@ -728,7 +736,7 @@ describe('Inventory › Family Pricing — the staff-only steel grade (Material)
     return { env, card: html.slice(a, b < 0 ? html.length : b), inputs: inputsFromHtml(html, fid) };
   };
 
-  it('EVERY card lists Material FIRST, with the staff-only caption on its header: SS304 is the standard (adds nothing, no boxes), SS316 has its two amount boxes — blank is an EMPTY box, never 0', async () => {
+  it('EVERY card lists Material FIRST, with the staff-only caption on its header: SS304 is the standard (adds nothing, no boxes), SS316 has ONE percentage box (no peso or per-100-mm box) — blank is an EMPTY box, never 0', async () => {
     for (const fid of ALL) {
       const { card, inputs } = await open(fid);
       const firstHeader = card.match(/<tr class="fp-grp"><td[^>]*><strong>([^<]*)<\/strong>/);
@@ -737,38 +745,184 @@ describe('Inventory › Family Pricing — the staff-only steel grade (Material)
       assert.match(card, /Stainless Steel 304 Food Grade[^]*?Standard option — adds nothing/, `${fid}: SS304 is the zero point`);
       assert.match(card, /Stainless Steel 316 Laboratory Grade/, fid);
       const grade = inputs.filter((i) => i.attrs['data-g'] === 'grade');
-      assert.deepEqual(grade.map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`), ['316|flat', '316|perW100'], `${fid}: boxes for SS316 only`);
-      assert.equal(grade[0].value, '', `${fid}: no amount yet is an EMPTY box`);
+      assert.deepEqual(grade.map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`), ['316|pct'], `${fid}: ONE box, for SS316 only, and it is a percentage`);
+      assert.equal(grade[0].value, '', `${fid}: no percentage yet is an EMPTY box`);
       assert.equal(inputs[0].attrs['data-g'], 'grade', `${fid}: the first input on the card is the grade's`);
       assert.ok(card.split(CAPTION).length - 1 >= 1, fid);
     }
   });
 
-  it('a saved SS316 amount fills its box (flat and per 100 mm, as typed) and is counted in "N of M amounts entered"', async () => {
-    const sheet = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { flat: 4217, perW100: 38, confidence: 'entered', derivation: 'typed by Finance' } } }) });
-    const { card, inputs } = await open('sink', { sink: sheet });
-    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-k'] === 'flat').value, '4217');
-    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-k'] === 'perW100').value, '38');
-    assert.match(card, /3 of 10 amounts entered/, 'the three entered amounts of the fixture sheet… ');
-    const plain = await open('sink', { sink: OK_SHEET });
-    assert.match(plain.card, /2 of 10 amounts entered/, 'and the blank SS316 cell is one still to enter');
+  it('the Material header says what the percentage is OF — "percentage of the whole line price (the base at this size plus every other option)"; the row has a % suffix and "—" where the per-100-mm box would be; no other header says it', async () => {
+    for (const fid of ALL) {
+      const { card } = await open(fid);
+      const header = card.match(/<tr class="fp-grp"><td[^>]*><strong>Material<\/strong>([^]*?)<\/td><\/tr>/);
+      assert.ok(header, fid);
+      assert.match(unesc(header[1]), /Adds this percentage of the whole line price \(the base at this size plus every other option\)/, fid);
+      assert.equal(card.split('percentage of the whole line price').length - 1, 1, `${fid}: only the Material header says it`);
+      const row = card.match(/<tr><td>Stainless Steel 316 Laboratory Grade[^]*?<\/tr>/);
+      assert.ok(row, `${fid}: the SS316 row`);
+      assert.match(row[0], /data-k="pct"[^>]*>\s*<span class="fp-pct-unit"[^>]*>%<\/span>/, `${fid}: the % suffix follows the box`);
+      assert.ok(!/data-k="flat"|data-k="perW100"/.test(row[0]), `${fid}: neither a peso box nor a per-100-mm box on the SS316 row`);
+      assert.match(row[0], /<td style="color:var\(--text-muted\)">—<\/td>/, `${fid}: "—" where the per-100-mm box would be`);
+    }
+    // an ordinary option keeps its two boxes and no % suffix
+    const { card } = await open('sink');
+    assert.ok(!/Adds this percentage/.test(card.slice(card.indexOf('<strong>Sinks</strong>'))), 'the other groups keep their wording');
+    assert.equal(card.split('fp-pct-unit').length - 1, 1, 'one % suffix on the whole sink card');
   });
 
-  it('the import: a schema-4 seed brings the SS316 cell as typed (a negative or zero figure and the per-100-mm part too), a blank stays blank, a figure for SS304 (the zero point) is ignored, and a schema-3 seed is refused', () => {
+  it('a saved SS316 percentage fills its box (as typed, a decimal included) and is counted in "N of M amounts entered"; a pct under the standard grade is not a box at all', async () => {
+    const sheet = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { pct: 12.5, confidence: 'entered', derivation: 'typed by Finance' } } }) });
+    const { card, inputs } = await open('sink', { sink: sheet });
+    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-k'] === 'pct').value, '12.5');
+    assert.equal(inputs.filter((i) => i.attrs['data-g'] === 'grade').length, 1);
+    assert.match(card, /3 of 10 amounts entered/, 'the three entered figures of the fixture sheet… ');
+    assert.match(card, /typed by Finance/, 'its note is shown');
+    const plain = await open('sink', { sink: OK_SHEET });
+    assert.match(plain.card, /2 of 10 amounts entered/, 'and the blank SS316 cell is one still to enter');
+    // a pct of 0 is a figure (counted, shown as 0); a negative one is shown as typed
+    for (const [pct, shown] of [[0, '0'], [-10, '-10']]) {
+      const s2 = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { pct, confidence: 'entered', derivation: '' } } }) });
+      const r = await open('sink', { sink: s2 });
+      assert.equal(r.inputs.find((i) => i.attrs['data-g'] === 'grade').value, shown);
+      assert.match(r.card, /3 of 10 amounts entered/, `${pct}: an explicit figure counts`);
+    }
+    // a pct beyond +/-1000 is what the pricing reads as blank: the box is empty and it is not counted
+    const huge = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { pct: 5000, confidence: 'entered', derivation: '' } } }) });
+    const h = await open('sink', { sink: huge });
+    assert.equal(h.inputs.find((i) => i.attrs['data-g'] === 'grade').value, ''); assert.match(h.card, /2 of 10 amounts entered/);
+  });
+
+  it('a schema-4 SS316 cell { flat, perW100 } reads as an EMPTY percentage box and does not count as entered; its stale peso note and confidence are not shown (they described an amount)', async () => {
+    const stale = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { flat: 4217, perW100: 38, confidence: 'entered', derivation: 'ENTER-A-PESO-AMOUNT-NOTE' } } }) });
+    const { card, inputs } = await open('sink', { sink: stale });
+    const grade = inputs.filter((i) => i.attrs['data-g'] === 'grade');
+    assert.deepEqual(grade.map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`), ['316|pct']);
+    assert.equal(grade[0].value, '', 'the old amount is NOT shown as a percentage');
+    assert.match(card, /2 of 10 amounts entered/, 'the old cell is still to be entered');
+    assert.ok(!/ENTER-A-PESO-AMOUNT-NOTE/.test(card), 'a note about a peso amount does not stay under a percentage box');
+    const row = card.match(/<tr><td>Stainless Steel 316 Laboratory Grade[^]*?<\/tr>/)[0];
+    assert.ok(!/class="badge/.test(row), 'and no confidence badge either');
+    // a cell that HAS a pct key (even null) keeps its note
+    const fresh = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { pct: null, confidence: 'blank', derivation: 'KEPT-NOTE' } } }) });
+    assert.match((await open('sink', { sink: fresh })).card, /KEPT-NOTE/);
+  });
+
+  describe('Save and Approve with the percentage box', () => {
+    const setup = async (docs) => {
+      const env = makeEnv({ docs });
+      await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+      await click(env, 'toggle', 'sink'); await flush();
+      env.stubs.inputs.sink = inputsFromHtml(env.el.innerHTML, 'sink');
+      env.stubs.notes.sink = { value: '' };
+      return env;
+    };
+    const box = (env) => env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-v'] === '316' && i.attrs['data-k'] === 'pct');
+    it('typing 12.5 and saving writes options.grade[316] = { pct: 12.5, confidence: "entered", derivation: "" } — NO flat, NO perW100 — with the rest of the sheet as before, approved:false', async () => {
+      const env = await setup({ sink: OK_SHEET });
+      box(env).value = '12.5';
+      await click(env, 'save', 'sink'); await flush();
+      assert.equal(env.writes.length, 1);
+      const cell = env.writes[0].body.options.grade['316'];
+      assert.deepEqual(cell, { pct: 12.5, confidence: 'entered', derivation: '' });
+      assert.deepEqual(Object.keys(cell).sort(), ['confidence', 'derivation', 'pct']);
+      assert.deepEqual(Object.keys(env.writes[0].body.options.grade), ['316'], 'SS304 is the zero point: no cell');
+      assert.equal(env.writes[0].body.approved, false);
+      assert.deepEqual(Object.keys(env.writes[0].body.options.basins['2']).sort(), ['confidence', 'derivation', 'flat', 'perW100'], 'every other option keeps its shape');
+      assert.equal(env.writes[0].body.options.basins['2'].flat, 4300);
+    });
+    it('0 is saved as 0 ("entered"), a negative one as typed, an emptied box as null with confidence "blank" — never 0', async () => {
+      for (const [typed, want, conf] of [['0', 0, 'entered'], ['-10', -10, 'entered'], ['37.25', 37.25, 'entered'], ['1000', 1000, 'entered'], ['-1000', -1000, 'entered'], ['', null, 'blank']]) {
+        const env = await setup({ sink: OK_SHEET });
+        box(env).value = typed;
+        await click(env, 'save', 'sink'); await flush();
+        assert.equal(env.writes.length, 1, typed);
+        assert.deepEqual(env.writes[0].body.options.grade['316'], { pct: want, confidence: conf, derivation: '' }, `"${typed}"`);
+      }
+    });
+    it('a percentage beyond +/-1000, or text that is not a number, writes NOTHING and flags the box (the pricing would read it as blank, so it is refused here)', async () => {
+      for (const bad of ['1001', '-1001', '1e6', 'abc', '12e', 'Infinity', '--5', '12,5']) {
+        const env = await setup({ sink: OK_SHEET });
+        box(env).value = bad;
+        await click(env, 'save', 'sink'); await flush();
+        assert.deepEqual(env.writes, [], `"${bad}" must not be saved`);
+        assert.equal(env.toasts.at(-1).t, 'error');
+        assert.match(env.toasts.at(-1).m, /grade/);
+        assert.equal(box(env).attrs['aria-invalid'], 'true');
+      }
+      const env = await setup({ sink: OK_SHEET });                                   // ... while a peso box still takes a large figure
+      env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'basins' && i.attrs['data-v'] === '2' && i.attrs['data-k'] === 'flat').value = '5000';
+      await click(env, 'save', 'sink'); await flush();
+      assert.equal(env.writes[0].body.options.basins['2'].flat, 5000);
+    });
+    it('over a schema-4 { flat, perW100 } cell: a typed pct REPLACES it (the old keys and the stale note are dropped); left empty it is saved blank; an untouched saved pct keeps its confidence and note', async () => {
+      const stale = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { flat: 4217, perW100: 38, confidence: 'entered', derivation: 'a peso note' } } }) });
+      const typed = await setup({ sink: stale });
+      assert.equal(box(typed).value, '');
+      box(typed).value = '12.5';
+      await click(typed, 'save', 'sink'); await flush();
+      assert.deepEqual(typed.writes[0].body.options.grade['316'], { pct: 12.5, confidence: 'entered', derivation: '' });
+      const empty = await setup({ sink: stale });
+      await click(empty, 'save', 'sink'); await flush();
+      assert.deepEqual(empty.writes[0].body.options.grade['316'], { pct: null, confidence: 'blank', derivation: '' });
+      const kept = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { pct: 9.5, confidence: 'medium', derivation: 'from the price list' } } }) });
+      const same = await setup({ sink: kept });
+      await click(same, 'save', 'sink'); await flush();
+      assert.deepEqual(same.writes[0].body.options.grade['316'], { pct: 9.5, confidence: 'medium', derivation: 'from the price list' });
+    });
+    it('a saved percentage then Approve: the approval writes only the approval fields (the figures are untouched), and the stored sheet prices a 316 line', async () => {
+      const env = await setup({ sink: OK_SHEET });
+      box(env).value = '12.5';
+      await click(env, 'save', 'sink'); await flush();
+      await click(env, 'approve', 'sink'); await flush();
+      const w = env.writes.at(-1);
+      assert.equal(w.op, 'update');
+      assert.deepEqual(Object.keys(w.patch).sort(), ['approved', 'approvedAt', 'approvedBy', 'approvedByName', 'schemaVersion', 'updatedAt', 'updatedBy', 'updatedByName']);
+      const stored = env.store.get('product_pricing/sink');
+      assert.equal(stored.approved, true); assert.equal(stored.schemaVersion, FAKE_SCHEMA);
+      const PC = env.ctx.window.PricingCore, F = env.ctx.window.QR_FAMILIES, PFx = env.ctx.window.ProductFamilies;
+      const prim = { id: 'PW-004', formulaType: 'per_length', basePrice: 1000, defaultDimensions: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 0 }, specs: [] };
+      const r = PC.priceConfiguredItem(prim, F.families.sink, { ...PFx.defaultConfig(F.families.sink), grade: 316 }, PFx.defaultDims(F.families.sink), stored, {}, { schemaVersion: F.version });
+      assert.equal(r.priced, true); assert.equal(r.unitPrice, 1125, '1000 + 12.5 % of 1000');
+    });
+  });
+
+  it('the import: a schema-5 seed brings the SS316 pct as typed (rounded to 2 decimals, within +/-1000, a negative or zero one too), never a flat / perW100; a blank stays blank; a figure for SS304 is ignored; a schema-4 seed is refused', () => {
     const FP = makeEnv({}).ctx.window.FamilyPricing;
     const seed = (schemaVersion, families) => ({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion, generatedAt: '2026-10-28T00:00:00.000Z', families });
-    const typed = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { grade: { 316: { flat: 4217.4, perW100: 38, confidence: 'medium', derivation: 'typed' }, 304: { flat: 99 } } } } }), {});
+    const plain = (o) => JSON.parse(JSON.stringify(o));                                  // the screen's objects live in the vm realm: compare their JSON
+    const plan = (cell, extra) => plain(FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { grade: Object.assign({ 316: cell }, extra || {}) } } }), {}));
+    const typed = plan({ pct: 12.346, flat: 4217.4, perW100: 38, confidence: 'medium', derivation: 'typed' }, { 304: { pct: 99 } });
     assert.ok(!typed.error, typed.error);
     const grade = typed.plan[0].options.grade;
-    assert.equal(grade['316'].flat, 4217, 'rounded to whole pesos');
-    assert.equal(grade['316'].perW100, 38);
+    assert.deepEqual(grade['316'], { pct: 12.35, confidence: 'medium', derivation: 'typed' }, 'two decimals, and the flat / perW100 beside it are NOT carried');
+    assert.deepEqual(Object.keys(grade['316']).sort(), ['confidence', 'derivation', 'pct']);
     assert.ok(!('304' in grade), 'the standard grade is the zero point: it has no cell');
     assert.ok(typed.skipped >= 1, 'the figure for the standard grade is counted as ignored');
-    const zero = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { grade: { 316: { flat: 0, perW100: null, confidence: 'entered', derivation: 'x' } } } } }), {});
-    assert.equal(zero.plan[0].options.grade['316'].flat, 0, 'an explicit 0 IS a figure');
-    const blank = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: {} } }), {});
-    assert.equal(blank.plan[0].options.grade['316'].flat, null);
-    assert.equal(blank.plan[0].options.grade['316'].confidence, 'blank');
+    assert.equal(plan({ pct: 61.237, confidence: 'high' }).plan[0].options.grade['316'].pct, 61.24);
+    assert.equal(plan({ pct: 12.5 }).plan[0].options.grade['316'].pct, 12.5);
+    assert.equal(plan({ pct: 12.5 }).plan[0].options.grade['316'].confidence, 'low', 'a figure with no usable confidence label is "low"');
+    assert.equal(plan({ pct: 0, confidence: 'entered', derivation: 'x' }).plan[0].options.grade['316'].pct, 0, 'an explicit 0 IS a figure');
+    assert.equal(plan({ pct: -10, confidence: 'entered' }).plan[0].options.grade['316'].pct, -10, 'signed');
+    assert.equal(plan({ pct: 1000 }).plan[0].options.grade['316'].pct, 1000);
+    assert.equal(plan({ pct: -1000 }).plan[0].options.grade['316'].pct, -1000);
+    for (const bad of [1000.01, -1000.01, 1e6, '12', NaN, Infinity, null, true, [], {}]) {
+      const c = plan({ pct: bad, confidence: 'high', derivation: 'd' }).plan[0].options.grade['316'];
+      assert.deepEqual(c, { pct: null, confidence: 'blank', derivation: 'd' }, String(bad));
+    }
+    // the OLD shape in a seed is ignored: a flat is never read as a percentage
+    const oldShape = plan({ flat: 4217, perW100: 38, confidence: 'high', derivation: 'old' }).plan[0].options.grade['316'];
+    assert.deepEqual(oldShape, { pct: null, confidence: 'blank', derivation: 'old' });
+    const blank = plain(FP.planImport(seed(FAKE_SCHEMA, { sink: { options: {} } }), {}));
+    assert.deepEqual(blank.plan[0].options.grade['316'], { pct: null, confidence: 'blank', derivation: '' });
+    // counted as filled in "filled of total"
+    const filled = (cell) => plan(cell).plan[0].filled;
+    assert.equal(filled({ pct: 12.5 }), filled({ pct: null }) + 1);
+    assert.equal(filled({ pct: 0 }), filled({ pct: null }) + 1, 'an explicit 0 is filled');
+    assert.equal(filled({ flat: 4217 }), filled({ pct: null }), 'a flat on a percent cell is not a figure');
+    // other groups of the same seed are read exactly as before (flat, rounded, with perW100)
+    const mixed = plain(FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { grade: { 316: { pct: 12.5 } }, basins: { 2: { flat: 4300.4, perW100: 15.6, confidence: 'high', derivation: 'x' } } } } }), {}));
+    assert.deepEqual(mixed.plan[0].options.basins['2'], { flat: 4300, perW100: 16, confidence: 'high', derivation: 'x' });
     const old = FP.planImport(seed(FAKE_SCHEMA - 1, { sink: { options: { grade: { 316: { flat: 4217 } } } } }), {});
     assert.match(old.error, new RegExp(`older family definition \\(schema ${FAKE_SCHEMA - 1}, the app is on ${FAKE_SCHEMA}\\)`));
   });
@@ -797,22 +951,39 @@ describe('Inventory › Family Pricing — the staff-only steel grade (Material)
       assert.deepEqual([...select[1].matchAll(/<option value="(\d)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], !!m[2], unesc(m[3])]),
         [['0', true, 'Stainless Steel 304 Food Grade'], ['1', false, 'Stainless Steel 316 Laboratory Grade']]);
     });
-    it('a POSITIVE amount raises the figure by exactly that much and the summary says "SS316"; the standard grade is the base item alone; an unsaved edit in the form is used', async () => {
-      const { env, out, choose } = await setup(sheetWith({ flat: 4217, perW100: null, confidence: 'entered', derivation: 'x' }));
+    it('a PERCENTAGE of the whole line: pct 12.5 raises 15,555 by 12.5 % (17,499, "+ options ₱1,944") and the summary says "SS316"; the standard grade is the base item alone; an unsaved edit in the form is used', async () => {
+      const { env, out, choose } = await setup(sheetWith({ pct: 12.5, confidence: 'entered', derivation: 'x' }));
       choose(316);
       await click(env, 'try', 'sink');
-      assert.match(out.innerHTML, /19,772<\/strong> each/, '15,555 + 4,217');
-      assert.match(out.innerHTML, /\+ options ₱4,217/);
+      assert.match(out.innerHTML, /17,499<\/strong> each/, '15,555 + 12.5 % of 15,555 = 17,499.375, rounded once');
+      assert.match(out.innerHTML, /\+ options ₱1,944/, 'the percentage shows as a peso amount in the options part');
       assert.match(out.innerHTML, /SS316/);
       choose(304);
       await click(env, 'try', 'sink');
       assert.match(out.innerHTML, /15,555<\/strong> each/, 'the standard grade needs no cell');
       assert.ok(!/SS316/.test(out.innerHTML));
       choose(316);
-      env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-v'] === '316' && i.attrs['data-k'] === 'flat').value = '0';
+      const box = env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-v'] === '316' && i.attrs['data-k'] === 'pct');
+      box.value = '0';
       await click(env, 'try', 'sink');
       assert.match(out.innerHTML, /15,555<\/strong> each/, 'an explicit 0 IS a figure');
       assert.ok(!/Priced after review/.test(out.innerHTML));
+      box.value = '-10';
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /14,000<\/strong> each/, '15,555 less 10 % = 13,999.5, rounded half up');
+      assert.match(out.innerHTML, /− options ₱1,555/, 'a negative percentage reads as a deduction');
+    });
+    it('the percentage follows the OTHER options in the form: a 2-sink sink with a typed 4,300 option and pct 25 is (15,555 + 4,300) x 1.25; the typed pct is used before the stored one', async () => {
+      const { env, ins, out, choose } = await setup(sheetWith({ pct: 12.5, confidence: 'entered', derivation: 'x' }));
+      choose(316);
+      const fam = env.ctx.window.QR_FAMILIES.families.sink;
+      ins.basins.value = String(fam.groups.find((g) => g.key === 'basins').options.findIndex((o) => o.v === 2));
+      const dims = [{ value: '1000', getAttribute: () => 'W' }, { value: '500', getAttribute: () => 'D' }, { value: '850', getAttribute: () => 'H' }];
+      env.stubs.tryBox.sink = Object.assign({}, env.stubs.tryBox.sink, { querySelectorAll: () => dims });
+      env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-k'] === 'pct').value = '25';
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /24,819<\/strong> each/, '(15,555 + 4,300) x 1.25 = 24,818.75');
+      assert.match(out.innerHTML, /\+ options ₱9,264/, '4,300 + 4,963.75');
     });
     it('a BLANK SS316 cell is "Priced after review — … Material: Stainless Steel 316 Laboratory Grade", never the base alone', async () => {
       const { out, choose, env } = await setup(sheetWith(null));
@@ -864,7 +1035,7 @@ describe('Inventory › Family Pricing — a conditional option says when it app
     assert.deepEqual(boxes('burners'), ['2|flat', '2|perW100', '3|flat', '3|perW100']);
     assert.deepEqual(boxes('type'), ['griller|flat', 'griller|perW100', 'fryer|flat', 'fryer|perW100', 'combi|flat', 'combi|perW100']);
     assert.deepEqual(boxes('base'), ['shelf|flat', 'shelf|perW100']);
-    assert.deepEqual(boxes('grade'), ['316|flat', '316|perW100'], 'the staff-only steel grade: SS304 is the standard');
+    assert.deepEqual(boxes('grade'), ['316|pct'], 'the staff-only steel grade: SS304 is the standard, SS316 is ONE percentage box');
     assert.match(card, /Fry baskets[^]*?2 baskets|Fry baskets[^]*?Standard option — adds nothing/, 'the default basket count adds nothing');
     assert.match(card, /0 of 9 amounts entered/, 'the cooking line has 8 cells to fill (spec §5.2) and the SS316 cell');
   });

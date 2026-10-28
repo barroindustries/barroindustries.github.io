@@ -18,6 +18,10 @@
    other option, with a caption saying it is offered in the Quote Builder only; the amount is the SIGNED amount added for the non-standard choice (a
    negative number, or 0). "Try a configuration" validates in staff mode so Finance can price it.
 
+   A PERCENT group (GRADE-PERCENT-SPEC, owner ruling 2026-10-28: the steel grade — `"pricing": "percent"` in the family definition) has ONE box per value, in %, instead of the two peso
+   boxes: its cell is { pct, confidence, derivation }. SS316 adds that percentage of the WHOLE line price (the base at the size asked for plus every other option), see
+   js/pricing-core.js. The older { flat, perW100 } cell of schema 4 is ignored — the box starts empty — and the next Save replaces it.
+
    A CONDITIONAL option (CONFIGURATOR-FAMILIES-2-SPEC §4.1: fry baskets apply only to a fryer, a pre-rinse sink only on the soiled side of a dish table) still has one cell
    per value, priced once; its group header says "Only when Type is Fryer" in the same muted style. A family switched off for the website (productMeta/config
    families.disabled, spec §9) carries a "Disabled on the website" chip on its card — informational, set outside this screen.
@@ -34,7 +38,8 @@
 
   var FP_ROLES = ['president', 'manager', 'finance'];
   var FP_MAX = 1e8;                                                  // a figure beyond +/-100 million is a typo, never a price
-  var FP_CONF = { high: 'badge-green', medium: 'badge-blue', low: 'badge-orange', blank: 'badge-gray', entered: 'badge-purple' };
+  var FP_MAX_PCT = 1000;                                             // a percentage beyond +/-1000 is a typo, never a premium (the mirror of PricingCore's MAX_PCT: beyond it the pricing reads the cell as blank)
+  var FP_CONF ={ high: 'badge-green', medium: 'badge-blue', low: 'badge-orange', blank: 'badge-gray', entered: 'badge-purple' };
 
   // Mirror of firestore.rules: isSeniorAdmin() || canFinance() (canFinance = money-tier role, or a non-secretary Finance member).
   function fpCanEdit() {
@@ -52,12 +57,14 @@
 
   function fpFams() { return window.QR_FAMILIES; }
   function fpPeso(n) { var x = Number(n); return isFinite(x) ? '₱' + x.toLocaleString('en-PH') : ''; }
-  function fpNum(v) {                                                // '' -> null (blank); a finite number within the cap -> itself; anything else -> NaN (invalid)
+  function fpNum(v, max) {                                           // '' -> null (blank); a finite number within the cap (FP_MAX, or `max` for a percentage) -> itself; anything else -> NaN (invalid)
     var t = String(v == null ? '' : v).trim();
     if (t === '') return null;
     var n = Number(t);
-    return isFinite(n) && Math.abs(n) <= FP_MAX ? n : NaN;
+    return isFinite(n) && Math.abs(n) <= (typeof max === 'number' ? max : FP_MAX) ? n : NaN;
   }
+  // a choice group whose cells are percentages (the same test PricingCore applies; build-catalogue allows "pricing" on a choice group only)
+  function fpIsPercent(g) { return !!g && g.pricing === 'percent' && g.type === 'choice'; }
   function fpActor() {
     return {
       uid: (window.currentUser && window.currentUser.uid) || null,
@@ -139,28 +146,35 @@
     if (doc.approved === true) return { label: 'Out of date — approve again', cls: 'badge-red', approved: false };
     return { label: 'Draft — not approved', cls: 'badge-orange', approved: false };
   }
-  // Every cell a family's sheet can hold, with its stored value: [{ group, value, label, kind, baseline, flat, perW100, confidence, derivation }].
+  // Every cell a family's sheet can hold, with its stored value: [{ group, value, label, kind, baseline, flat, perW100, confidence, derivation }]. A cell of a PERCENT group
+  // (the steel grade) carries `percent: true` and `pct` INSTEAD of flat / perW100 — a stored { flat, perW100 } there (schema 4) is not read, and a pct beyond the cap is blank
+  // (exactly what the pricing makes of it).
   function fpCells(fam, doc) {
     var PF = window.ProductFamilies;
     var opts = (doc && doc.options && typeof doc.options === 'object') ? doc.options : {};
     return PF.cells(fam).map(function (c) {
       var g = opts[c.group] && typeof opts[c.group] === 'object' ? opts[c.group] : {};
       var v = g[c.value] && typeof g[c.value] === 'object' ? g[c.value] : {};
-      return Object.assign({}, c, {
+      var note = { confidence: typeof v.confidence === 'string' ? v.confidence : '', derivation: typeof v.derivation === 'string' ? v.derivation : '' };
+      if (fpIsPercent(PF.groupOf(fam, c.group))) {
+        // a cell without a `pct` key is the schema-4 { flat, perW100 } shape: its confidence and its note describe a peso amount, so neither is carried over
+        var fresh = Object.prototype.hasOwnProperty.call(v, 'pct');
+        return Object.assign({}, c, fresh ? note : { confidence: '', derivation: '' }, { percent: true, pct: typeof v.pct === 'number' && isFinite(v.pct) && Math.abs(v.pct) <= FP_MAX_PCT ? v.pct : null });
+      }
+      return Object.assign({}, c, note, {
         flat: typeof v.flat === 'number' && isFinite(v.flat) ? v.flat : null,
-        perW100: typeof v.perW100 === 'number' && isFinite(v.perW100) ? v.perW100 : null,
-        confidence: typeof v.confidence === 'string' ? v.confidence : '',
-        derivation: typeof v.derivation === 'string' ? v.derivation : ''
+        perW100: typeof v.perW100 === 'number' && isFinite(v.perW100) ? v.perW100 : null
       });
     });
   }
+  function fpFilled(c) { return c.percent ? c.pct !== null : c.flat !== null; }
   function fpSizeCell(fam, doc) {
     var s = doc && doc.size && typeof doc.size === 'object' ? doc.size : {};
     return { perW100: typeof s.perW100 === 'number' && isFinite(s.perW100) ? s.perW100 : null, confidence: typeof s.confidence === 'string' ? s.confidence : '', derivation: typeof s.derivation === 'string' ? s.derivation : '' };
   }
   function fpCounts(fam, doc) {
     var cells = fpCells(fam, doc).filter(function (c) { return !c.baseline; });
-    var filled = cells.filter(function (c) { return c.flat !== null; }).length;
+    var filled = cells.filter(fpFilled).length;
     var total = cells.length;
     if (fam.sizeBasis === 'linear') { total++; if (fpSizeCell(fam, doc).perW100 !== null) filled++; }
     return { filled: filled, total: total };
@@ -231,7 +245,8 @@
       if (c.group !== lastGroup) {
         lastGroup = c.group;
         var g = window.ProductFamilies.groupOf(fam, c.group);
-        var what = g.type === 'slots' ? 'Cost of ONE ' + ((g.unit && g.unit.one) || 'position') + ' of each type (the standard ' + escHtml((g.default || []).length) + '-position layout is the zero point)'
+        var what = fpIsPercent(g) ? 'Adds this percentage of the whole line price (the base at this size plus every other option)'
+          : g.type === 'slots' ? 'Cost of ONE ' + ((g.unit && g.unit.one) || 'position') + ' of each type (the standard ' + escHtml((g.default || []).length) + '-position layout is the zero point)'
           : g.type === 'multi' ? 'Amount each add-on adds' : 'Amount added when this is chosen instead of the standard option';
         // a staff-only option (the 1.2 mm top plate, owner ruling 2026-10-28) is priced here like any other, but a visitor to the website can never choose it
         var staffNote = g.staffOnly === true ? ' <span class="fp-staffonly" style="font-size:11px;color:var(--text-muted)">· Staff-only option — offered in the Quote Builder, never on the website</span>' : '';
@@ -244,9 +259,14 @@
         return;
       }
       var conf = c.confidence ? '<span class="badge ' + (FP_CONF[c.confidence] || 'badge-gray') + '">' + escHtml(c.confidence) + '</span>' : '';
+      // a percent cell: ONE box, in %, and no per-100-mm part (the percentage already follows the whole line, length included)
+      var figures = c.percent
+        ? '<td style="white-space:nowrap">' + fpInput(fid, c.group, c.value, 'pct', c.pct) + ' <span class="fp-pct-unit" style="font-size:13px;color:var(--text-muted)">%</span></td>' +
+          '<td style="color:var(--text-muted)">—</td>'
+        : '<td>' + fpInput(fid, c.group, c.value, 'flat', c.flat) + '</td>' +
+          '<td>' + fpInput(fid, c.group, c.value, 'perW100', c.perW100) + '</td>';
       rows += '<tr><td>' + escHtml(c.label) + (c.hint ? ' <span style="font-size:11px;color:var(--text-muted)">(' + escHtml(c.hint) + ')</span>' : '') + '</td>' +
-        '<td>' + fpInput(fid, c.group, c.value, 'flat', c.flat) + '</td>' +
-        '<td>' + fpInput(fid, c.group, c.value, 'perW100', c.perW100) + '</td>' +
+        figures +
         '<td>' + conf + '</td>' +
         '<td style="font-size:11.5px;color:var(--text-muted);max-width:420px;white-space:normal">' + escHtml(c.derivation) + '</td></tr>';
     });
@@ -350,11 +370,11 @@
     var cellsIn = {};
     inputs.forEach(function (inp) {
       var g = inp.getAttribute('data-g'), v = inp.getAttribute('data-v'), k = inp.getAttribute('data-k');
-      var n = (inp.validity && inp.validity.badInput) ? NaN : fpNum(inp.value);       // a number box holding unreadable text reports an empty value: that is not "blank"
+      var n = (inp.validity && inp.validity.badInput) ? NaN : fpNum(inp.value, k === 'pct' ? FP_MAX_PCT : undefined);       // a number box holding unreadable text reports an empty value: that is not "blank"
       if (typeof n === 'number' && isNaN(n)) { invalid.push((g === 'size' ? 'Length' : g) + ' / ' + v); inp.setAttribute('aria-invalid', 'true'); return; }
       inp.removeAttribute('aria-invalid');
       var key = g + '|' + v;
-      cellsIn[key] = cellsIn[key] || { g: g, v: v, flat: null, perW100: null };
+      cellsIn[key] = cellsIn[key] || { g: g, v: v, flat: null, perW100: null, pct: null };
       cellsIn[key][k] = n;
     });
     Object.keys(cellsIn).forEach(function (key) {
@@ -366,8 +386,12 @@
         return;
       }
       var b = beforeBy[key] || {};
-      var changed = c.flat !== b.flat || c.perW100 !== b.perW100;
       options[c.g] = options[c.g] || {};
+      if (b.percent) {            // a PERCENT cell is { pct, confidence, derivation } — never a flat / perW100 (an old-shape cell is replaced by the next Save)
+        options[c.g][c.v] = { pct: c.pct, confidence: c.pct === null ? 'blank' : (c.pct !== b.pct ? 'entered' : (b.confidence || 'entered')), derivation: fpTrim(b.derivation || '', 600) };
+        return;
+      }
+      var changed = c.flat !== b.flat || c.perW100 !== b.perW100;
       options[c.g][c.v] = { flat: c.flat, perW100: c.perW100, confidence: c.flat === null ? 'blank' : (changed ? 'entered' : (b.confidence || 'entered')), derivation: fpTrim(b.derivation || '', 600) };
     });
     return { options: options, size: size, invalid: invalid };
@@ -534,6 +558,14 @@
         var parts = key.split('|'), g = parts[0], v = parts[1];
         var og = Object.prototype.hasOwnProperty.call(so, g) && so[g] && typeof so[g] === 'object' ? so[g] : null;
         var c = og && Object.prototype.hasOwnProperty.call(og, v) && og[v] && typeof og[v] === 'object' ? og[v] : null;
+        if (fpIsPercent(PF.groupOf(fam, g))) {          // a PERCENT cell (the steel grade): one pct to 2 decimals within the cap, never a flat / perW100 — whatever the seed carries there is ignored
+          var pct = c && typeof c.pct === 'number' && isFinite(c.pct) && Math.abs(c.pct) <= FP_MAX_PCT ? Math.round(c.pct * 100) / 100 : null;
+          var pconf = c && typeof c.confidence === 'string' && Object.prototype.hasOwnProperty.call(FP_CONF, c.confidence) ? c.confidence : (pct === null ? 'blank' : 'low');
+          options[g] = options[g] || {};
+          options[g][v] = { pct: pct, confidence: pct === null ? 'blank' : pconf, derivation: fpTrim(c && c.derivation, 600) };
+          if (pct !== null) filled++;
+          return;
+        }
         var flat = c && typeof c.flat === 'number' && isFinite(c.flat) && Math.abs(c.flat) <= FP_MAX ? Math.round(c.flat) : null;
         var per = c && typeof c.perW100 === 'number' && isFinite(c.perW100) && Math.abs(c.perW100) <= FP_MAX ? Math.round(c.perW100) : null;
         var conf = c && typeof c.confidence === 'string' && Object.prototype.hasOwnProperty.call(FP_CONF, c.confidence) ? c.confidence : (flat === null ? 'blank' : 'low');

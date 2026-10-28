@@ -31,10 +31,11 @@
  * Quote Builder) has one cell per family, SIGNED, entered by Finance: a negative amount, or 0. It is ALWAYS written BLANK here — the master's own "Top Gauge" adder on
  * BA-001 is quoted in the note as a cross-reference and never becomes the amount — so a 1.2 mm line is "priced after review" until Finance types the figure.
  *
- * THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, specs/CONFIGURATOR-GRADE-TITLES-SPEC.md): EVERY family's first group is the grade (SS304 standard, SS316 staff-only). The
- * base item's list price is read as the SS304 price, so the SS304 choice needs no cell; the SS316 choice has ONE cell per family, SIGNED, entered by Finance (a positive amount,
- * with a per-100-mm rate only if the premium grows with length, or 0). The master has no SS316 figure, so the cell is ALWAYS written BLANK here — with no figure and no
- * cross-reference — and an SS316 line is "priced after review" until Finance types the amount.
+ * THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, specs/CONFIGURATOR-GRADE-TITLES-SPEC.md; priced as a PERCENTAGE since specs/GRADE-PERCENT-SPEC.md, schema 5): EVERY family's
+ * first group is the grade (SS304 standard, SS316 staff-only). The base item's list price is read as the SS304 price, so the SS304 choice needs no cell; the SS316 choice has ONE
+ * cell per family and it is a PERCENTAGE — { pct } instead of { flat, perW100 } — of the WHOLE line price (the base at the size asked for plus every other option), SIGNED, entered by
+ * Finance. The master has no SS316 figure, so the cell is ALWAYS written BLANK here — with no figure and no cross-reference — and an SS316 line is "priced after review" until
+ * Finance types the percentage.
  *
  * THE FIVE FAMILIES ADDED 2026-10-28 (specs/CONFIGURATOR-FAMILIES-2-SPEC.md §7): dish table, wok range, griddle / griller / fryer, gas deck oven, range hood. Same helpers,
  * same rule: a figure only where the master really says it. Most of their cells are BLANK on purpose (the single-hole wok range and the three-basket fryer are the only
@@ -49,6 +50,7 @@
  *   a burner position: the cost of ONE position of that type (the amount the primary's own burner is also counted at: only the DIFFERENCE
  *                      between the chosen positions and the default ones is added)
  *   a linear family (the primary SKU has no length rule of its own): the amounts scale with length in both directions.
+ *   a percent group (the steel grade, "pricing": "percent"): pct x (the base + every other option + the linear length, before any percentage) / 100
  *
  * Plain CommonJS, Node >= 18, no dependencies.
  */
@@ -265,9 +267,13 @@ function deriveFamily(fid, fam, ctx) {
     }
     setCell('top', '1.2', lbl('top', 1.2), blank(note));
   };
-  // The staff-only steel grade: ONE blank cell on EVERY family (called once, after the recipes). No figure and no cross-reference: the master has nothing to quote.
+  // The staff-only steel grade: ONE blank PERCENT cell on EVERY family (called once, after the recipes): { pct: null, confidence: 'blank', derivation }. No figure and no cross-reference: the
+  // master has nothing to quote. The percentage is of the whole line price, so there is no flat / perW100 here at all (a percent group's cell holds `pct` only).
   const gradeCell = () => {
-    setCell('grade', '316', lbl('grade', 316), blank('The standard material is SS304; the base item\'s list price is read as the SS304 price. Enter what SS316 ADDS for this family (a positive amount; add a per-100-mm rate only if the premium grows with length), or 0. The master has no SS316 figure, so this is always left blank here.'));
+    const derivation = 'The standard material is SS304; the base item\'s list price is read as the SS304 price. Enter the percentage of the whole line price that SS316 adds (the base at the size asked for plus every other option), or 0. The master has no SS316 figure, so this is always left blank here.';
+    cells.grade = cells.grade || {};
+    cells.grade['316'] = { pct: null, confidence: 'blank', derivation };
+    table.push(Object.assign(rowOf('grade', '316', lbl('grade', 316)), { status: 'blank', confidence: 'blank' }));
   };
 
   // ── per-family recipes ────────────────────────────────────────────────────
@@ -471,7 +477,7 @@ function toSheetOptions(cells) {
   const out = {};
   for (const g of Object.keys(cells)) {
     out[g] = {};
-    for (const v of Object.keys(cells[g])) out[g][v] = { flat: cells[g][v].flat, perW100: cells[g][v].perW100 };
+    for (const v of Object.keys(cells[g])) out[g][v] = Object.prototype.hasOwnProperty.call(cells[g][v], 'pct') ? { pct: cells[g][v].pct } : { flat: cells[g][v].flat, perW100: cells[g][v].perW100 };
   }
   return out;
 }

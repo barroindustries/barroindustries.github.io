@@ -26,6 +26,10 @@
 //      lineTitle), fromRequestItem retitles when it is given the family definitions AND PF and keeps the server's name otherwise, an ABSENT `grade` reads as the standard 304 (no
 //      "Material" ever missing), the Material row is the first spec row, and a 316 line is priced from the sheet's grade cell exactly as the server's computeBasket prices it.
 //
+//   8. THE SS316 PERCENTAGE (owner ruling 2026-10-28, specs/GRADE-PERCENT-SPEC.md, schema 5, section 11 and the end of the file): the grade cell is one `pct`; a 316 line costs the FULL configured line price x (1 + pct / 100) — the base,
+//      the size, every other option and the linear length delta — as a peso `grade:316` delta that priceLine passes through, buildLine's `_cfg.deltas` sums to unitPrice - base (to the rounding), the percentage lands on the UNIT price
+//      (so the line amount at quantity 2 is twice it, in the builder and in computeBasket), and costBasisFor scales a 316 line's material + labour by the same (1 + pct / 100) as every other delta already does.
+//
 // Fixtures are SYNTHETIC odd-figure pesos (the repository is PUBLIC; the real price master and option sheets are private).
 //
 // Mutation-tested in scratch copies (never the shared tree) — each of these must fail here: dropping the soft-width substitution,
@@ -98,7 +102,7 @@ const PRIMARIES = {
 };
 const PRIMARY_MAP = new Map(Object.entries(PRIMARIES));
 
-const GRADE_FLAT = 2917;       // the synthetic SS316 premium of every approved fixture sheet (an odd figure; the real amounts are private)
+const GRADE_PCT = 37;          // the synthetic SS316 premium of every approved fixture sheet, a PERCENTAGE of the whole line price (specs/GRADE-PERCENT-SPEC.md; a made-up figure: the real one is private)
 // kind: 'approved' (every non-standard cell has an amount, some per-100-mm rates, some negative) | 'unapproved' (the same, approved:false)
 //       | 'blank' (approved, but every 4th cell is blank and the linear family has no length rate)
 function sheetFor(familyId, kind) {
@@ -106,9 +110,9 @@ function sheetFor(familyId, kind) {
   const options = {};
   let i = 0;
   for (const c of PF.cells(f)) {
-    // the staff-only steel grade (owner ruling 2026-10-28): its SS316 cell is a synthetic odd figure of its own, blank in the 'blank' kind — and it does not count in `i`, so every
+    // the staff-only steel grade (owner ruling 2026-10-28): its SS316 cell is a synthetic PERCENTAGE ({ pct }, schema 5), blank in the 'blank' kind — and it does not count in `i`, so every
     // other cell keeps exactly the figure and the blank pattern it had before the grade existed
-    if (c.group === 'grade') { if (!c.baseline) (options.grade = options.grade || {})[c.value] = { flat: kind === 'blank' ? null : GRADE_FLAT, perW100: null }; continue; }
+    if (c.group === 'grade') { if (!c.baseline) (options.grade = options.grade || {})[c.value] = { pct: kind === 'blank' ? null : GRADE_PCT }; continue; }
     i++;
     if (c.baseline) continue;
     const flat = (i % 7 === 3 ? -1 : 1) * (311 + 97 * i);
@@ -1254,9 +1258,9 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
       });
     }
     it('a sheet approved against the OLD definitions (schema 1) prices nothing: the base item\'s list price must be approved again as the 1.5 mm price', () => {
-      assert.equal(FAM.version, 4, 'schema 4: the staff-only steel grade and the line titles (no sheet is approved against it yet, so the bump costs nothing live)');
+      assert.equal(FAM.version, 5, 'schema 5: the SS316 grade is a percentage of the whole line price (4 was the staff-only steel grade and the line titles; no sheet is approved against it yet, so the bump costs nothing live)');
       for (const id of FIDS) {
-        for (const older of [1, 2, 3]) {
+        for (const older of [1, 2, 3, 4]) {
           const old = priceAt(id, PF.defaultConfig(fam(id)), { ...SHEETS.approved[id], schemaVersion: older });
           assert.equal(old.priced, false, `${id} at schema ${older}`); assert.equal(old.reason, 'not_approved', `${id} at schema ${older}`);
         }
@@ -1800,7 +1804,7 @@ describe('the staff-only steel grade (Material) and the line titles', () => {
   });
 
   describe('a 316 line: built in staff mode, priced from the sheet\'s grade cell exactly as the server prices it, "priced after review" while that cell is blank', () => {
-    it('every family: the Material row first, the same title as at 304, the grade in the stored configuration, dearer than the 304 line by exactly the grade cell', () => {
+    it('every family: the Material row first, the same title as at 304, the grade in the stored configuration, dearer than the 304 line by exactly the grade PERCENTAGE of the whole line', () => {
       for (const id of FIDS) {
         const f = fam(id);
         const cfg = full(f, { grade: 316 });
@@ -1809,9 +1813,11 @@ describe('the staff-only steel grade (Material) and the line titles', () => {
         const std = ours(id, { ...cfg, grade: 304 }, size, 'approved');
         assert.equal(std.priced, true, `${id}: the premise — the 304 line prices`);
         assert.equal(basis.priced, true, `${id}: ${basis.missing.join(', ')}`);
-        assert.deepEqual(basis.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: GRADE_FLAT }], id);
+        const S = std.deltas.reduce((n, d) => n + d.amount, std.base);            // the whole 304 line, before any rounding (summed in the pricer's own order: base first, then each delta)
+        assert.deepEqual(basis.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: S * GRADE_PCT / 100 }], id);
         assert.ok(!std.deltas.some((d) => d.key.startsWith('grade:')), `${id}: the standard grade adds no delta`);
-        assert.equal(basis.unitPrice - std.unitPrice, GRADE_FLAT, `${id}: exactly the grade cell`);
+        assert.equal(basis.unitPrice, Math.max(0, Math.round(S + S * GRADE_PCT / 100)), `${id}: the whole line x (1 + pct / 100)`);
+        assert.ok(basis.unitPrice > std.unitPrice, `${id}: a positive percentage makes the 316 line dearer`);
         const it = QB.buildLine(DEPS, { family: f, primary: PRIMARIES[id], config: cfg, size, qty: 1, basis });
         assert.ok(it, `${id}: a staff session builds a 316 line`);
         assert.equal(it.config.grade, 316, id);
@@ -1822,13 +1828,109 @@ describe('the staff-only steel grade (Material) and the line titles', () => {
         assert.ok(!it.needsPrice);
       }
     });
-    it('a per-100-mm figure in the grade cell scales with the length above the standard one — a fake odd figure, never a real amount', () => {
-      const f = fam('sink'), cfg = full(f, { grade: 316 });
+    it('the percentage is taken of the WHOLE line — the base at a custom length, every other option and, on a linear family, the length rate — never of the base item alone', () => {
+      // a sink at 1500 mm with two other priced options: the approved fixture sheet prices them (some with a per-100-mm part); the grade percentage follows all of it
+      const f = fam('sink'), cfg316 = full(f, { grade: 316, basins: 2, undershelf: true, faucet: 'prerinse' });
       const size = { W: 1500, D: 500, H: 850 };
-      const sheet = { ...SHEETS.approved.sink, options: { ...SHEETS.approved.sink.options, grade: { 316: { flat: 1000, perW100: 70 } } } };
-      const r = QB.priceLine(DEPS, { family: f, primary: PRIMARIES.sink, config: cfg, size, sheet });
-      assert.equal(r.priced, true, r.missing.join(', '));
-      assert.deepEqual(r.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: 1000 + 70 * (1500 - 500) / 100 }]);
+      const std = ours('sink', { ...cfg316, grade: 304 }, size, 'approved');
+      const lab = ours('sink', cfg316, size, 'approved');
+      assert.equal(std.priced, true, std.missing.join(', '));
+      assert.ok(std.deltas.length >= 3, 'the fixture must carry other priced options, or this test proves nothing');
+      const S = std.deltas.reduce((n, d) => n + d.amount, std.base);
+      assert.deepEqual(lab.deltas, [...std.deltas, { key: 'grade:316', amount: S * GRADE_PCT / 100 }], 'the other deltas are the 304 line\'s; the grade delta ends the list');
+      assert.equal(lab.unitPrice, Math.round(S + S * GRADE_PCT / 100));
+      assert.notEqual(lab.deltas.at(-1).amount, std.base * GRADE_PCT / 100, 'not a percentage of the base item alone');
+      // a LINEAR family (wall shelving): the length rate is part of the whole line, in both directions from the standard length
+      const w = fam('wall_shelf'), wcfg = full(w, { grade: 316, tiers: 3, surface: 'slotted' });
+      for (const W of [600, 1200, 2600]) {
+        const wsize = { W, D: 450 };
+        const wstd = ours('wall_shelf', { ...wcfg, grade: 304 }, wsize, 'approved');
+        const wlab = ours('wall_shelf', wcfg, wsize, 'approved');
+        assert.equal(wstd.priced, true, `${W}: ${wstd.missing.join(', ')}`);
+        assert.equal(wstd.deltas.some((d) => d.key === 'size:W'), W !== 1200, `${W}: the fixture's length rate applies off the standard length`);
+        const WS = wstd.deltas.reduce((n, d) => n + d.amount, wstd.base);
+        assert.deepEqual(wlab.deltas, [...wstd.deltas, { key: 'grade:316', amount: WS * GRADE_PCT / 100 }], String(W));
+        assert.equal(wlab.unitPrice, Math.round(WS + WS * GRADE_PCT / 100), String(W));
+      }
+    });
+    it('a seeded sweep of 220 random lines (all eleven families, custom sizes, any options) made 316: the 316 line is the 304 line plus the grade delta of the whole line, and the server\'s computeBasket prices the same hand-built line identically', () => {
+      const r = rng(31628);
+      let n = 0, withOthers = 0;
+      for (let i = 0; i < 220; i++) {
+        const id = FIDS[i % FIDS.length];
+        const f = fam(id);
+        const { config, size, qty } = randomLine(r, id);
+        const cfg316 = { ...config, grade: 316 };
+        const std = ours(id, config, size, 'approved');
+        const lab = ours(id, cfg316, size, 'approved');
+        assert.equal(lab.priced, std.priced, `line ${i} ${id}`);
+        assert.deepEqual(lab.warnings, std.warnings);
+        if (std.priced) {
+          const S = std.deltas.reduce((m, d) => m + d.amount, std.base);
+          assert.deepEqual(lab.deltas, [...std.deltas, { key: 'grade:316', amount: S * GRADE_PCT / 100 }], `line ${i} ${id}`);
+          assert.equal(lab.unitPrice, Math.max(0, Math.round(S + S * GRADE_PCT / 100)), `line ${i} ${id}`);
+          n++; if (std.deltas.length) withOthers++;
+        } else assert.deepEqual(lab.missing, std.missing, `line ${i} ${id}: the grade adds no missing option when the sheet has its pct`);
+        // the server prices the same hand-built line the same way (the website refuses such a line long before it gets there)
+        const handBuilt = [{ n: 1, kind: 'family', id: f.primary, familyId: id, name: f.label, cat: f.category, unit: 'pc', qty, runs: null, size, sizeCustom: true, config: cfg316, specs: [], note: '' }];
+        const basket = Q.computeBasket(handBuilt, new Map(), {}, undefined, { families: FAM, primaries: PRIMARY_MAP, pricing: Q.buildPricingIndex(sheetDocs('approved'), FAM) });
+        assert.deepEqual(pickKeys(ours(id, cfg316, size, 'approved')), pickKeys(basket.lines[0]), `line ${i} ${id}`);
+      }
+      assert.ok(n >= 150, `priced 316 lines: ${n}`); assert.ok(withOthers >= 100, `lines with other priced options: ${withOthers}`);
+    });
+    it('buildLine on a 316 line: _cfg.deltas carries the grade as a peso amount and, with _cfg.base, sums to the unit price (to the one rounding); the line amount is the unit price times the quantity — the percentage lands BEFORE the quantity', () => {
+      const f = fam('sink'), cfg = full(f, { grade: 316, basins: 2, undershelf: true, faucet: 'prerinse' });
+      const size = { W: 1500, D: 500, H: 850 };
+      const std = ours('sink', { ...cfg, grade: 304 }, size, 'approved');
+      const basis = ours('sink', cfg, size, 'approved');
+      assert.equal(basis.priced, true);
+      const S = std.deltas.reduce((n, d) => n + d.amount, std.base);
+      for (const qty of [1, 2, 7]) {
+        const it = QB.buildLine(DEPS, { family: f, primary: PRIMARIES.sink, config: cfg, size, qty, basis });
+        assert.deepEqual(it._cfg.deltas, basis.deltas, 'priceLine passes the deltas through, the grade one included');
+        assert.deepEqual(it._cfg.deltas.at(-1), { key: 'grade:316', amount: S * GRADE_PCT / 100 });
+        const total = it._cfg.deltas.reduce((n, d) => n + d.amount, it._cfg.base);
+        assert.ok(Math.abs(total - it.unitPrice) <= 0.5, `qty ${qty}: base + options ${total} against the unit price ${it.unitPrice}`);
+        assert.equal(it.unitPrice, Math.round(S + S * GRADE_PCT / 100), `qty ${qty}: the unit price is the whole line x (1 + pct / 100)`);
+        assert.equal(it.amount, it.unitPrice * qty, `qty ${qty}: the quantity is applied AFTER the percentage`);
+        assert.equal(it.basisUnitPrice, it.unitPrice);
+      }
+    });
+    it('the server prices a quantity of 2 of the same hand-built 316 line as exactly twice its unit price, and that unit price is the builder\'s (the percentage is taken before the quantity)', () => {
+      for (const id of ['sink', 'wall_shelf', 'stove']) {
+        const f = fam(id), cfg = full(f, { grade: 316 });
+        const size = PF.standardDims(f, cfg);
+        const one = ours(id, cfg, size, 'approved');
+        const handBuilt = (qty) => [{ n: 1, kind: 'family', id: f.primary, familyId: id, name: f.label, cat: f.category, unit: 'pc', qty, runs: null, size, sizeCustom: false, config: cfg, specs: [], note: '' }];
+        const run = (qty) => Q.computeBasket(handBuilt(qty), new Map(), {}, undefined, { families: FAM, primaries: PRIMARY_MAP, pricing: Q.buildPricingIndex(sheetDocs('approved'), FAM) });
+        const b1 = run(1), b2 = run(2);
+        assert.equal(b1.lines[0].unitPrice, one.unitPrice, `${id}: the server's unit price is the builder's`);
+        assert.equal(b2.lines[0].unitPrice, one.unitPrice, `${id}: the quantity does not change the unit price`);
+        assert.equal(b2.lines[0].lineTotal, 2 * one.unitPrice, id);
+        assert.equal(b2.exact, 2 * b1.exact, id);
+      }
+    });
+    it('costBasisFor on a 316 line scales the standard model\'s material AND labour by the same (1 + pct / 100) as every other delta already does — a 316 sheet really costs more (spec section 1.5: kept, pinned)', () => {
+      const sku = { id: 'PW-006', category: 'washing', name: 'PW-006', formulaType: 'fixed', basePrice: 12000, defaultDimensions: { W: 1000, D: 500, H: 850 }, formula: {}, specs: [], unit: 'pc', capitalMaterials: 4400, capitalLabor: 1500 };
+      const LIVE316 = new Map([['PW-006', sku]]);
+      const f = fam('sink');
+      const cfg6 = { basins: 2, alignment: 'center', undershelf: false, upper: false, faucet: 'prerinse' };      // PW-006's own configuration
+      const size6 = { W: 1000, D: 500, H: 850 };                                                                 // ... at its own default size
+      const itemAt = (grade) => {
+        const cfg = full(f, { ...cfg6, grade });
+        return QB.buildLine(DEPS, { family: f, primary: PRIMARIES.sink, config: cfg, size: size6, qty: 1, basis: ours('sink', cfg, size6, 'approved') });
+      };
+      const i304 = itemAt(304), i316 = itemAt(316);
+      assert.ok(i304.unitPrice > 0 && i316.unitPrice > i304.unitPrice);
+      const c304 = QB.costBasisFor(DEPS, i304, LIVE316), c316 = QB.costBasisFor(DEPS, i316, LIVE316);
+      assert.equal(c304.hasBasis, true); assert.equal(c316.hasBasis, true);
+      assert.equal(c304.basisSku, 'PW-006'); assert.equal(c316.basisSku, 'PW-006');
+      assert.equal(c304.scale, i304.unitPrice / 12000); assert.equal(c316.scale, i316.unitPrice / 12000);
+      const tol = 1.2 / i304.unitPrice;                                                                           // the two unit prices are each rounded to a whole peso
+      for (const [what, a, b] of [['scale', c316.scale, c304.scale], ['material', c316.mat, c304.mat], ['labour', c316.capLaborPesos, c304.capLaborPesos]]) {
+        assert.ok(Math.abs(a / b - (1 + GRADE_PCT / 100)) <= tol, `${what}: ${a / b} against ${1 + GRADE_PCT / 100}`);
+      }
+      assert.equal(c316.mat, 4400 * c316.scale); assert.equal(c316.capLaborPesos, 1500 * c316.scale);
     });
     it('while the SS316 cell is blank the line is "priced after review", naming exactly that option; buildLine flags it needsPrice at zero on the manual basis', () => {
       for (const id of FIDS) {

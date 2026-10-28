@@ -616,7 +616,7 @@ const GROUP_KEY_RE = /^[a-z][a-zA-Z0-9_]{0,30}$/;
 const PREVIEW_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,78}$/;
 const FAMILY_TOP_KEYS = ['_readme', 'version', 'order', 'families', 'fixed'];
 const FAMILY_KEYS = ['label', 'category', 'description', 'title', 'titleAny', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
-const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'specRow', 'when', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
+const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'specRow', 'pricing', 'when', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
 const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 't', 'hint', 'short', 'w'];
 const GROUP_TYPES = ['choice', 'slots', 'multi'];
 // the fields of a family that reach the public/server file js/qr-families.js, in a fixed order (deterministic output)
@@ -671,6 +671,9 @@ function checkFamily(fid, f, add) {
     if (g.staffOnly !== undefined && (typeof g.staffOnly !== 'boolean' || (g.staffOnly === true && g.type !== 'choice'))) { at(`${gt}: "staffOnly" must be true or false, and belongs to a choice group only`); groupsOk = false; }
     // specRow (owner ruling 2026-10-28): a staff-only group that still has a specification row of its own (the steel grade; the top plate has none, the Construction row says it) — a boolean, and only on a staff-only group
     if (g.specRow !== undefined && (typeof g.specRow !== 'boolean' || g.staffOnly !== true)) { at(`${gt}: "specRow" must be true or false, and belongs to a staff-only group only`); groupsOk = false; }
+    // pricing (owner ruling 2026-10-28, specs/GRADE-PERCENT-SPEC): absent, or "percent" — the group's non-default value is priced as a PERCENTAGE of the whole line price (the steel grade), and its sheet cell
+    // holds one "pct" instead of a flat amount; a choice group only. A word, not a figure: it carries no price into the public family file.
+    if (g.pricing !== undefined && (g.pricing !== 'percent' || g.type !== 'choice')) { at(`${gt}: "pricing" must be "percent", and belongs to a choice group only`); groupsOk = false; }
     const seenV = [];
     g.options.forEach((o, j) => {
       const ot = `${gt}.options[${j}]`;
