@@ -1,46 +1,60 @@
-// tests/partner-removal.test.mjs — the GATE for the retirement of the external partner feature (specs/PARTNER-REMOVAL-SPEC.md §3.3, Phase 1; WS-G).
+// tests/partner-removal.test.mjs — the GATE for the retirement of the external partner feature (specs/PARTNER-REMOVAL-SPEC.md §3.3; Phase 1 by WS-G, extended by WS-H).
 //
 // Static, no Firestore. The partner feature (role `partner`, the Partners department, the partner portal in the quote builder, the three nav variants,
-// partner_deals, the 50/50 split, ~55 guards in quote-builder-v2.html) is gone from the code; this test fails loudly if any of it grows back, and if a
-// piece the owner ruled to KEEP (the internal Brilliant Steel department, its pages, bs_quotes, the BS pill) gets removed with it.
+// partner_deals, the 50/50 split, ~55 guards in quote-builder-v2.html) is gone from the code, and — since Phase 3 — from the server-side surfaces too (firestore.rules,
+// storage.rules, firestore.indexes.json, the backup / sync scripts, functions/index.js). This test fails loudly if any of it grows back, and if a piece the owner ruled
+// to KEEP (the internal Brilliant Steel department, its pages, bs_quotes, the BS pill) gets removed with it.
 //
 // WHAT IT PINS
 //   1. SCAN SANITY   every script under js/ (not js/vendor/), quote-builder-v2.html, index.html and css/styles.css is read with its comments STRIPPED
 //                    (tests/fixtures/strip-comments.mjs for JS and the <script> blocks of the two pages; <!-- --> and /* */ for markup and CSS), and
 //                    the stripped text of every script still PARSES — so the scan below cannot be hiding a token in code the stripper ate.
 //   2. IDENTIFIERS   none of the retired identifiers (spec §3.3.1 + the names the workstream acceptance greps listed) appears in code. `'PT'` — the
-//                    retired generic-partner company code — is allowed on exactly three lines: the quote builder's pass-through chip label
-//                    (the line carrying togglePassThrough) and the two Phase-3 fallbacks in js/screens/sales.js (buildPublicQuoteDoc,
-//                    resolveQuoteBrand — WS-H deletes them). The §3.1 stub marker comment must be gone too (raw text, comments included).
-//   3. ROLE LITERAL  every quoted 'partner' in js/ is on an allowlisted line: the §3.2 retired-role gate in js/app.js, the temporary roster guard
-//                    window.isRetiredRoleUser in js/config.js (both marked `PARTNER-REMOVAL-SPEC §3.2` within six lines above), or one of the
-//                    AEC-contact-stage lines (a CRM pipeline stage — unrelated), allowlisted by EXACT line content. A stale allowlist entry fails.
+//                    retired generic-partner company code — is allowed on exactly ONE line: the quote builder's pass-through chip label (the line carrying
+//                    togglePassThrough). The §3.1 stub marker, every §3.2 / retired-role marker and isRetiredRoleUser are gone from js/ (raw text, comments included).
+//   3. ROLE LITERAL  every quoted 'partner' in js/ is an AEC-contact-stage line (a CRM pipeline stage — unrelated), allowlisted by EXACT line content. A stale
+//                    allowlist entry fails. There is no role test left, and no marker comment hides one (Phase 3 deleted the §3.2 allowance).
 //   4. REGISTRIES    js/config.js evaluated in a vm: no partner role / team type / Partners department / genericPartner / partnerBS nav variant /
-//                    partner-projects page; the bsOnly variant, the Brilliant Steel department (isSeparate), the four BS PAGE_SCRIPTS keys,
-//                    QUOTE_COMPANIES.BS (internal:false) and QUOTE_COLLECTIONS are all still there; Sales' tab is "Brilliant Steel".
-//   5. LOGIN SCREEN exactly two portal cards (admin, employee); app.js's ROLE_TYPE_MAP / LOGIN_TYPE_LABELS carry no partner.
+//                    partner-projects page; no isExternalPartnerUser and no isRetiredRoleUser; the bsOnly variant, the Brilliant Steel department (isSeparate),
+//                    the four BS PAGE_SCRIPTS keys, QUOTE_COMPANIES.BS (internal:false) and QUOTE_COLLECTIONS are all still there; Sales' tab is "Brilliant Steel".
+//   5. LOGIN SCREEN  exactly two portal cards (admin, employee); app.js's ROLE_TYPE_MAP / LOGIN_TYPE_LABELS carry no partner.
 //   6. KEPT          partners.js still defines renderBrilliantSteel / loadBSContent / renderBSFiles / renderBSClientData; app.js still routes the four
 //                    bs-* cases and 'Brilliant Steel'; sw.js still precaches /js/screens/partners.js; the approvals review functions keep their names.
-//   7. THE §3.2 GATE the retired-role gate in js/app.js's onAuthStateChanged is lifted out of the real source and RUN: a role "partner" (any case,
-//                    padded) is shown the removed-account screen and signed out — even on a token refresh for an already bootstrapped uid — while
-//                    employees, managers, agents, accountants and a Brilliant-Steel-only employee pass it. It sits after the `removed` gate and
-//                    before the idempotency guard and the login-type gate.
-//   Money (§5.4) is tests/partner-removal-payroll.test.mjs. Phase 3 (WS-H) extends this file with the rules/storage/indexes/scripts/functions checks
-//   (§3.3.8), and deletes: the §3.2 gate and the isRetiredRoleUser entries of the role-literal allowlist, the 'PT' allowance for sales.js, and test 7.
+//   7. PHASE 3 (WS-H)  the public quote brand (js/screens/sales.js resolveQuoteBrand / buildPublicQuoteDoc, RUN for real): BK / BI / BS keep their letterhead, every
+//                    other code — 'PT' included — falls back to Brilliant Steel's, with no Firestore read and no synthesised brand. firestore.rules: no isPartner,
+//                    partner_deals, partnerUid or quoted 'Partners' (comments included), no quoted 'partner' role, no partner_deals match block, the users-create
+//                    allowlist names no partner. storage.rules: no isPartnerClaim. Both rules files are well-formed (brackets balance; every helper called is defined).
+//                    firestore.indexes.json: valid, no partner_deals index. scripts/check-backup-coverage.js and scripts/sync-to-drive.js: no partner_deals. The Phase-3
+//                    acceptance grep (isPartner | partner_deals | isPartnerClaim) is empty across the rules, the indexes, every scripts/*.js — scripts/partner-data-purge.js
+//                    excepted BY NAME — and functions/index.js. functions/index.js: the only quoted 'partner' is the AEC stage in the daily digest, by EXACT line content;
+//                    the notification recipients (resolveSalesAndPresidentUids, cirNotifyStaff, qrNotifyStaff) special-case no role.
+//   8. NOTHING WIDENS  (coordinator ruling 2026-10-28). The old `!isPartner()` / `!isPartnerClaim()` terms also refused every signed-in identity with no users doc /
+//                    no role claim (reading either THROWS, and a throwing rule denies), so deleting them would have opened ~110 rules to such an identity. They are
+//                    now hasProfile() (a cached get() of users/{uid}, NOT exists(): exists() is not cached for a later get() and returns false where the old term
+//                    errored) and hasRoleClaim() (`'role' in request.auth.token`), in the same position. Pinned: that definition; the 111 statements that carried the
+//                    term (tests/fixtures/rules-profile-statements.json, regenerate with UPDATE_RULES_SNAPSHOT=1 and READ the diff); that the only bare `isAuth()` reads
+//                    are the five that always were; a list of sensitive reads; the 11 storage statements; and that the only arms dropped with the partner are the three
+//                    that named it ('partner' in the users-list role filter, the Partners-department posts arm, the partnerUid job_projects arm) while every other arm
+//                    stays verbatim. The same facts were proved against the real rules engine (emulator differential, old vs new, 762 operations x 11 identities).
+//   Money (§5.4) is tests/partner-removal-payroll.test.mjs.
 //
-// MUTATION-TESTED in ONE scratch copy (/private/tmp/…/scratchpad/wsg-mut/work/ — js/, the pages, sw.js, css, tests; the shared tree is never touched), each
-// mutant applied alone and undone. The unmutated copy ran green first (control), then each of the 28 gate mutants below re-introduced ONE thing and every one
-// turned this file red (none survived). The other 33 mutants of the same run (61 in all) are in the headers of the payroll and quote suites.
-//   G01 isPartner() stub back in app.js                      G02 window.isExternalPartnerUser back in config.js        G03 a 'Partners' DEPARTMENTS entry back
-//   G04 ROLES.partner back                                    G05 a third (partner) login card in index.html            G06 PARTNER_MODE back in the quote builder
-//   G07 a rogue role === 'partner' in people.js               G08 the same hidden under a COPIED §3.2 marker comment    G09 the §3.2 gate deleted from app.js
-//   G10 the gate moved after the idempotency guard            G11 gate case-sensitive                                    G12 gate does not trim
-//   G13 gate also locks out Brilliant-Steel-only employees    G14 partner-projects back in the bsOnly bottom bar        G15 dashboard:bsOnly renamed back to dashboard:partner
-//   G16 renderBrilliantSteel renamed away                     G17 sw.js PRECACHE drops partners.js                       G18 a 'PT' company code set again in production.js
-//   G19 a partner_deals read back in dashboards.js            G21 an AEC allowlist line edited (the allowlist is exact)  G22 CO.PT referenced in the quote builder
-//   G23 QUOTE_COMPANIES.BS made internal                      G24 Sales tab 'Partner' again                              G25 the §3.1 stub marker comment back
-//   G26 code after a /* */ comment on one line (the scan still sees it)   G27 ROLE_TYPE_MAP gets a partner portal       G28 a Brilliant Steel page dropped from bsOnly
-//   G29 partnerUid spreads to a third file
+// MUTATION-TESTED in ONE scratch copy (/private/tmp/…/scratchpad/wsh-mut/work-gate/ — js/, the pages, sw.js, css, the rules, the indexes, scripts/, functions/index.js
+// and this file; the shared tree is never touched), each mutant applied alone and undone. The unmutated copy ran green first (control 45 of 45) and again after the
+// last mutant; every one of the 36 mutants below re-introduced ONE thing and turned this file red (none survived). Phase 1's own run (WS-G, 28 mutants against the
+// Phase-1 suite) is superseded: its mutants for the §3.2 gate and the 'PT' allowance retired with those allowances; the equivalents are G02-G05 here.
+//   G01 isPartner() back in app.js                          G02 the retired-role gate back in app.js              G03 window.isRetiredRoleUser back in config.js
+//   G04 resolveQuoteBrand's 'PT' fallback back              G05 buildPublicQuoteDoc's 'PT' fallback back         G06 the generic-partner brand synthesis back in resolveQuoteBrand
+//   G07 isPartner() back in firestore.rules                 G08 a partner_deals rule back                        G09 a partnerUid read term in firestore.rules
+//   G10 a quoted 'Partners' department key in a rule        G11 isPartnerClaim() back in storage.rules           G12 the partner_deals index back
+//   G13 partner_deals back in check-backup-coverage.js      G14 partner_deals back in sync-to-drive.js           G15 the partner-drop line back in cirNotifyStaff
+//   G16 the partner-drop line back in qrNotifyStaff         G17 a second 'partner' literal beside the AEC line   G18 the AEC stage line edited (the allowlist is exact)
+//   G19 a quoted 'partner' role test in js/ (payroll-backfill)   G20 an extra AEC-looking stage line (not allowlisted)   G21 !isPartner() back in the users list
+//   G22 resolveQuoteBrand falls back to BK                  G23 buildPublicQuoteDoc falls back to BK             G24 resolveQuoteBrand reads the creator's user doc again
+//   the WIDENING mutants (the first attempt at this cleanup had exactly these — a stranger with no users doc gained 132 of 762 operations on the emulator):
+//   G25 client_info_requests / quote_requests read: profile check dropped   G26 quote_costs: profile check dropped       G27 hasProfile() defined with exists()
+//   G28 tasks read: profile check (and its assignedTo arm) dropped          G29 Finance/* storage read: role claim dropped   G30 department-folder storage read: role claim dropped
+//   G31 hasRoleClaim() always true                          G32 'partner' back in the users-list role filter     G33 the Partners arm back in the posts read
+//   G34 departments read: profile check dropped             G35 _counters write: profile check dropped           G36 hub_folders create: profile check dropped
 //
 // Fixtures are synthetic. Run with: node --test tests/*.test.mjs
 
@@ -90,10 +104,6 @@ const show = (text) => text.trim().replace(/\s+/g, ' ').slice(0, 150);
 
 // ═══════════════════════════════════════ the scanners (pure on {rel, raw, code}, so they are tested on synthetic files below) ═══════════════════
 const lit = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-const PT_ALLOWED_SALES = new Set([                                    // Phase 3 (WS-H) deletes these two fallbacks and this set
-  "const co = window.QUOTE_BRANDS[q.company] ? q.company : 'PT';",      // buildPublicQuoteDoc
-  "const co = window.QUOTE_BRANDS[quote.company] ? quote.company : 'PT';",   // resolveQuoteBrand
-]);
 const FORBIDDEN = [
   // the predicates and registries (spec §3.3.1)
   ['isPartner', /\bisPartner\b/], ['isGenericPartner', /\bisGenericPartner\b/], ['isBrilliantPartner', /\bisBrilliantPartner\b/],
@@ -116,8 +126,7 @@ const FORBIDDEN = [
   ['isAnyPartner', lit('isAnyPartner')], ['extPartner', lit('extPartner')], ['inv-company', lit('inv-company')], ['syncCompany', lit('syncCompany')],
   ['partnerPct (the 50/50 split)', lit('partnerPct')], ['pm-pct / pm-share (the split modal)', /\bpm-(pct|share)\b/],
   // 'PT' — the retired generic-partner company code (not the word "PT" in prose: only the quoted code)
-  ["the retired company code 'PT'", /(['"`])PT\1/, (rel, text) =>
-    (rel === 'quote-builder-v2.html' && /togglePassThrough/.test(text)) || (rel === 'js/screens/sales.js' && PT_ALLOWED_SALES.has(norm(text)))],
+  ["the retired company code 'PT'", /(['"`])PT\1/, (rel, text) => rel === 'quote-builder-v2.html' && /togglePassThrough/.test(text)],
 ].map(([name, re, allow]) => ({ name, re, allow }));
 
 function scanForbidden(files) {
@@ -130,10 +139,10 @@ function scanForbidden(files) {
   return out;
 }
 
-// The role literal. Allowed: the §3.2 gate / roster guard (marker within six lines above), or an exact AEC-stage line. Exact, normalised line content —
-// "contains AEC_STAGES" is not enough (the stage array's own line does not contain it). A CRM pipeline stage called 'partner' has nothing to do with the role.
+// The role literal. Allowed: an exact AEC-stage line, nothing else (Phase 3 deleted the §3.2 retired-role gate and the roster guard, and with them the
+// marker allowance). Exact, normalised line content — "contains AEC_STAGES" is not enough (the stage array's own line does not contain it). A CRM pipeline
+// stage called 'partner' has nothing to do with the role.
 const ROLE_LITERAL = /(['"`])partner\1/;
-const GATE_MARKER = /PARTNER-REMOVAL-SPEC §3\.2/;
 const AEC_STAGE_LINES = {
   'js/screens/sales.js': [
     "{ key:'partner', label:'Partner', color:'var(--success,#30D158)', icon:'🤝' },",
@@ -144,19 +153,17 @@ const AEC_STAGE_LINES = {
   'js/notifications.js': ["const terminal = window.AEC_TERMINAL || ['partner','dormant'];"],
   'js/migrations.js': ["const STATUS_TO_AEC_STAGE = { 'New':'new', 'Contacted':'contacted', 'Meeting Set':'prospect', 'Quotation':'prospect', 'Won':'partner', 'Lost':'dormant' };"],
 };
-function scanRoleLiterals(files) {
-  const offenders = [], gate = [], aec = [];
+function scanRoleLiterals(files, only = 'js/', allow = AEC_STAGE_LINES) {
+  const offenders = [], aec = [];
   for (const f of files) {
-    if (!f.rel.startsWith('js/')) continue;
-    const rawLines = f.raw.split('\n');
+    if (!f.rel.startsWith(only)) continue;
     f.code.split('\n').forEach((text, i) => {
       if (!ROLE_LITERAL.test(text)) return;
-      if (GATE_MARKER.test(rawLines.slice(Math.max(0, i - 6), i + 1).join('\n'))) { gate.push(where(f, i)); return; }
-      if ((AEC_STAGE_LINES[f.rel] || []).some((l) => norm(l) === norm(text))) { aec.push(`${f.rel}  ${norm(text)}`); return; }
+      if ((allow[f.rel] || []).some((l) => norm(l) === norm(text))) { aec.push(`${f.rel}  ${norm(text)}`); return; }
       offenders.push(`${where(f, i)}  ${show(text)}`);
     });
   }
-  return { offenders, gate, aec };
+  return { offenders, aec };
 }
 
 // ═════════════════════════════════════════ 1. the scan itself can be trusted ═════════════════════════════════════════════════════════════════════
@@ -180,22 +187,21 @@ describe('the scan: what it reads, and that it reads it faithfully', () => {
     assert.equal(scanForbidden([f('index.html', '<button data-type="partner"></button>\n<script>var x = "genericPartner";</script>\n')]).length, 2);
     assert.equal(scanForbidden([f('css/styles.css', '/* partner-projects */\n.nav-item[data-page="partner-projects"] { color: red; }\n')]).length, 1);
   });
-  it('the scanner knows the three allowed \'PT\' lines and nothing else', () => {
+  it("the scanner knows the ONE allowed 'PT' line (the quote builder's pass-through chip) and nothing else — Phase 3 deleted the two sales.js fallbacks", () => {
     const f = (rel, raw) => ({ rel, raw, code: codeFor(rel, raw) });
-    assert.deepEqual(scanForbidden([f('js/screens/sales.js', "function a() {\n  const co  = window.QUOTE_BRANDS[q.company] ? q.company : 'PT';\n}\nfunction b() {\n  const co = window.QUOTE_BRANDS[quote.company] ? quote.company : 'PT';\n}\n")]), []);
-    assert.equal(scanForbidden([f('js/screens/sales.js', "function a() {\n  const co = window.QUOTE_BRANDS[q.company] ? q.company : 'PT'; run();\n}\n")]).length, 1, 'a changed line is no longer the allowed one');
-    assert.equal(scanForbidden([f('js/screens/production.js', "function a() {\n  const co = window.QUOTE_BRANDS[q.company] ? q.company : 'PT';\n}\n")]).length, 1, 'the allowance is per file');
+    assert.equal(scanForbidden([f('js/screens/sales.js', "function a() {\n  const co  = window.QUOTE_BRANDS[q.company] ? q.company : 'PT';\n}\n")]).length, 1, "the old sales.js fallback is no longer allowed");
+    assert.equal(scanForbidden([f('js/screens/sales.js', "function b() {\n  const co = window.QUOTE_BRANDS[quote.company] ? quote.company : 'PT';\n}\n")]).length, 1, "the old resolveQuoteBrand fallback is no longer allowed");
+    assert.equal(scanForbidden([f('js/screens/production.js', "function a() {\n  const co = 'PT';\n}\n")]).length, 1, 'the allowance is per file');
     assert.deepEqual(scanForbidden([f('quote-builder-v2.html', "<script>\nconst b = `onclick=\"togglePassThrough(1)\">⇄ ${'PT'}`;\n</script>\n")]), []);
     assert.equal(scanForbidden([f('quote-builder-v2.html', "<script>\nsetCompany('PT');\n</script>\n")]).length, 1);
   });
-  it('the role-literal scanner: a bare literal is flagged; a literal under a §3.2 marker (≤6 lines) or on an exact AEC line is not; a changed AEC line is', () => {
+  it('the role-literal scanner: a bare literal is flagged — even under a copied marker comment; a literal on an exact AEC line is not; a changed AEC line is', () => {
     const f = (rel, raw) => ({ rel, raw, code: codeFor(rel, raw) });
     const inFn = (body) => `function t(role, r, stage) {\n${body}\n}\n`;
     assert.equal(scanRoleLiterals([f('js/x.js', inFn("if (role === 'partner') return;"))]).offenders.length, 1);
     assert.equal(scanRoleLiterals([f('js/x.js', inFn('if (role == "partner") return;'))]).offenders.length, 1);
     assert.equal(scanRoleLiterals([f('js/x.js', inFn("// a partner account\nconst s = 'partnership'; const t = 'Partner';"))]).offenders.length, 0, 'prose, longer words and the capitalised label are not the role literal');
-    assert.deepEqual(scanRoleLiterals([f('js/x.js', inFn("// PARTNER-REMOVAL-SPEC §3.2 gate\n\n\nif (r === 'partner') return;"))]).offenders, []);
-    assert.equal(scanRoleLiterals([f('js/x.js', inFn("// PARTNER-REMOVAL-SPEC §3.2 gate\n\n\n\n\n\n\n\nif (r === 'partner') return;"))]).offenders.length, 1, 'a marker seven lines up is too far');
+    assert.equal(scanRoleLiterals([f('js/x.js', inFn("// PARTNER-REMOVAL-SPEC §3.2 gate\n\n\nif (r === 'partner') return;"))]).offenders.length, 1, 'the §3.2 marker allowance is gone: a copied marker hides nothing');
     assert.deepEqual(scanRoleLiterals([f('js/screens/crm.js', inFn("  if (stage === 'partner')   return 'Won';"))]).offenders, []);
     assert.equal(scanRoleLiterals([f('js/screens/crm.js', inFn("  if (stage === 'partner' || role === 'partner') return 'Won';"))]).offenders.length, 1);
     assert.equal(scanRoleLiterals([f('js/screens/people.js', inFn("if (stage === 'partner') return 'Won';"))]).offenders.length, 1, 'the allowance is per file');
@@ -212,6 +218,11 @@ describe('no retired partner identifier is left in code (comments excluded)', ()
     const hits = REAL.flatMap((f) => f.raw.split('\n').map((text, i) => (/PARTNER-REMOVAL-SPEC §3\.1/.test(text) ? `${where(f, i)}  ${show(text)}` : null)).filter(Boolean));
     assert.deepEqual(hits, []);
   });
+  it('no PARTNER-REMOVAL-SPEC §3.2 / retired-role marker and no isRetiredRoleUser is left anywhere under js/ — comments included (Phase 3 deleted the gate and the roster guard)', () => {
+    const hits = REAL.filter((f) => f.rel.startsWith('js/')).flatMap((f) => f.raw.split('\n')
+      .map((text, i) => (/PARTNER-REMOVAL-SPEC §3\.2|retired-role|isRetiredRoleUser/.test(text) ? `${where(f, i)}  ${show(text)}` : null)).filter(Boolean));
+    assert.deepEqual(hits, []);
+  });
   it('the four stubbed predicates are not defined or guarded anywhere, as a function, a window property or a typeof test', () => {
     for (const name of ['isPartner', 'isBrilliantPartner', 'isGenericPartner', 'partnerCompanyName']) {
       const re = new RegExp(`\\b${name}\\b`);
@@ -226,11 +237,8 @@ describe('no retired partner identifier is left in code (comments excluded)', ()
 // ═════════════════════════════════════════ 3. the role literal ════════════════════════════════════════════════════════════════════════════════════
 describe("the role literal 'partner' appears only where it is allowed", () => {
   const R = scanRoleLiterals(REAL);
-  it("every quoted 'partner' in js/ is the §3.2 gate, the retired-role roster guard or an AEC contact-stage line", () => {
+  it("every quoted 'partner' in js/ is an exact AEC contact-stage line — there is no role test left at all (Phase 3 deleted the §3.2 gate and the roster guard)", () => {
     assert.deepEqual(R.offenders, [], "a 'partner' role test is back");
-  });
-  it('the §3.2 allowance is used by exactly two lines — the retired-role gate in js/app.js and window.isRetiredRoleUser in js/config.js — nothing else hides under a marker', () => {
-    assert.deepEqual(R.gate.map((s) => s.split(':')[0]).sort(), ['js/app.js', 'js/config.js']);
   });
   it('every AEC allowlist entry matches a line (a renamed or deleted AEC line makes this fail, so the allowlist cannot go stale)', () => {
     const want = Object.entries(AEC_STAGE_LINES).flatMap(([rel, ls]) => ls.map((l) => `${rel}  ${norm(l)}`)).sort();
@@ -267,11 +275,11 @@ describe('js/config.js registries', () => {
     assert.equal(win.DEPARTMENTS['Brilliant Steel'].isSeparate, true);
     assert.deepEqual([...win.DEPARTMENTS['Brilliant Steel'].subtabs], ['Quote Builder', 'Quotations Summary', 'Client Data', 'Files']);
   });
-  it('a person typed "partner" is no longer classified as a partner team type, and the retired-role guard is the one new global', () => {
+  it('a person typed "partner" is no longer classified as a partner team type, and neither retired predicate exists', () => {
     assert.notEqual(win.teamTypeOf({ role: 'partner' }), 'partner');
     assert.equal(win.teamTypeOf({ role: 'employee', departments: ['Brilliant Steel'] }), 'office', 'a Brilliant-Steel-only employee is an office employee');
     assert.equal(typeof win.isExternalPartnerUser, 'undefined');
-    assert.equal(typeof win.isRetiredRoleUser, 'function');
+    assert.equal(typeof win.isRetiredRoleUser, 'undefined');
   });
   it('NAV_REGISTRY: no genericPartner / partnerBS variant (sidebar or bottom), no partner-projects entry; bsOnly is still there in both', () => {
     const N = win.NAV_REGISTRY;
@@ -349,55 +357,250 @@ describe('the internal Brilliant Steel department is intact', () => {
   });
 });
 
-// ═════════════════════════════════════════ 7. the §3.2 retired-role gate, run for real ════════════════════════════════════════════════════════════
-describe('the retired-role gate in js/app.js onAuthStateChanged (PARTNER-REMOVAL-SPEC §3.2; WS-H deletes it)', () => {
-  const APP = read('js/app.js');
-  const CB = APP.indexOf('auth.onAuthStateChanged(async user => {');
-  const FROM = APP.indexOf('    if (user) {', CB);
-  const GUARD = 'if (_bootstrappedUid === user.uid) {\n        return;\n      }';
-  const TO = APP.indexOf(GUARD, FROM);
-  it('the gate sits after the `removed` gate and before the idempotency guard and the login-type gate', () => {
-    assert.ok(CB > 0 && FROM > CB && TO > FROM, 'could not lift the start of the onAuthStateChanged callback out of js/app.js');
-    const slice = APP.slice(FROM, TO + GUARD.length);
-    const at = (needle) => { const i = slice.indexOf(needle); assert.ok(i >= 0, `"${needle}" is not in the lifted callback`); return i; };
-    const removed = at('userProfile.removed === true'), gate = at('PARTNER-REMOVAL-SPEC §3.2'), role = at(".trim().toLowerCase() === 'partner'"), guard = at('_bootstrappedUid === user.uid');
-    assert.ok(removed < gate && gate < role && role < guard, 'order must be: removed gate, retired-role gate, idempotency guard');
-    assert.ok(APP.indexOf('if (selectedLoginType) {', TO) > TO, 'the login-type gate must come after the idempotency guard');
-    assert.match(slice.slice(role, guard), /showRemovedUserScreen\(\);\s*auth\.signOut\(\)\.catch\(\(\) ?=> ?\{\}\);\s*return;/, 'the gate must show the removed screen, sign out and return');
+// ═════════════════════════════════════════ 7. Phase 3 (WS-H): rules, storage, indexes, scripts, functions ═════════════════════════════════════════════
+// The partner terms in the server-side surfaces are gone: firestore.rules (isPartner(), every `!isPartner()` clause, the partner_deals rule, the Partners posts
+// carve-out, the partnerUid read term), storage.rules (isPartnerClaim()), firestore.indexes.json (the partner_deals index), the backup / sync scripts and
+// the two partner-drop lines in functions/index.js. scripts/partner-data-purge.js and tests/partner-data-purge.test.mjs legitimately name partner_deals and the
+// partner role (they are the purge) and are excluded BY NAME below — nothing else is.
+const rawHits = (rel, re) => read(rel).split('\n').map((text, i) => (re.test(text) ? `${rel}:${i + 1}  ${show(text)}` : null)).filter(Boolean);   // raw text: comments count
+const RULES_STRIP = (raw, keep = false) => {                      // comments out; string literals blanked (so a bracket or a // inside a string cannot fool the checks) unless `keep`
+  let out = '', i = 0;
+  while (i < raw.length) {
+    const c = raw[i], d = raw[i + 1];
+    if (c === "'" || c === '"') { let j = i + 1; while (j < raw.length && raw[j] !== c) { if (raw[j] === '\\') j++; j++; } out += keep ? raw.slice(i, j + 1) : c + ' '.repeat(Math.max(0, j - i - 1)) + c; i = j + 1; continue; }
+    if (c === '/' && d === '/') { while (i < raw.length && raw[i] !== '\n') i++; continue; }
+    if (c === '/' && d === '*') { const j = raw.indexOf('*/', i + 2); const end = j < 0 ? raw.length : j + 2; out += raw.slice(i, end).replace(/[^\n]/g, ' '); i = end; continue; }
+    out += c; i++;
+  }
+  return out;
+};
+const QUOTED_PARTNER = /(['"])partner\1/;
+const RULES_BUILTINS = new Set(['get', 'exists', 'getAfter', 'existsAfter', 'string', 'int', 'float', 'bool', 'path', 'debug', 'duration', 'timestamp', 'latlng', 'hashing', 'math', 'in', 'is']);
+function rulesProblems(raw) {                                      // a deleted helper that is still called, or an unbalanced bracket, would fail the deploy
+  const code = RULES_STRIP(raw), problems = [];
+  const stack = [];
+  const pair = { ')': '(', ']': '[', '}': '{' };
+  code.split('\n').forEach((line, ln) => {
+    for (const ch of line) {
+      if ('([{'.includes(ch)) stack.push([ch, ln + 1]);
+      else if (pair[ch]) { const top = stack.pop(); if (!top || top[0] !== pair[ch]) { problems.push(`line ${ln + 1}: unbalanced "${ch}"`); return; } }
+    }
   });
+  for (const [ch, ln] of stack) problems.push(`line ${ln}: "${ch}" is never closed`);
+  const defined = new Set([...code.matchAll(/\bfunction\s+([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]));
+  const called = new Map();
+  for (const m of code.matchAll(/(?<![.\w$])([A-Za-z_]\w*)\s*\(/g)) {
+    const name = m[1];
+    if (name === 'function' || name === 'match' || name === 'allow' || name === 'if' || name === 'return' || RULES_BUILTINS.has(name) || defined.has(name)) continue;
+    called.set(name, code.slice(0, m.index).split('\n').length);
+  }
+  for (const [name, ln] of called) problems.push(`line ${ln}: ${name}() is called but never defined`);
+  return problems;
+}
+const PHASE3_PURGE_EXEMPT = new Set(['scripts/partner-data-purge.js']);
+const scriptFiles = fs.readdirSync(path.join(ROOT, 'scripts')).filter((n) => n.endsWith('.js')).map((n) => `scripts/${n}`).filter((rel) => !PHASE3_PURGE_EXEMPT.has(rel)).sort();
+const FUNCTIONS_JS = (() => { const raw = read('functions/index.js'); return { rel: 'functions/index.js', raw, code: jsCode(raw, 'functions/index.js') }; })();
+const FUNCTIONS_AEC_LINES = { 'functions/index.js': ["const terminal = ['partner', 'dormant'];"] };    // the AEC contact stage in the daily digest — EXACT line content, like the js/ allowlist
 
-  // run the real lifted code: loadUserProfile is stubbed to set the role, everything else the gate touches is recorded
-  const run = async (profile, { bootstrapped = false } = {}) => {
-    const calls = [];
-    const ctx = vm.createContext({
-      currentUser: null, userProfile: null, currentRole: null, _bootstrappedUid: bootstrapped ? 'u1' : null,
-      loadUserProfile: async () => { ctx.userProfile = profile; ctx.currentRole = profile.role; },
-      showRemovedUserScreen: () => calls.push('removed-screen'),
-      auth: { signOut: () => { calls.push('sign-out'); return Promise.resolve(); } },
-    });
-    const slice = APP.slice(FROM, TO + GUARD.length);
-    vm.runInContext(`async function __gate(user) {\n${slice}\n      return 'proceeded';\n    }\n  }`, ctx);
-    const result = await ctx.__gate({ uid: 'u1' });
-    return { result, calls };
+// Every `allow ...: if <expr>;` and every function `return` / `let` of a rules file, keyed by the chain of enclosing match paths / functions (comments gone, string literals
+// kept). The expression of one statement is returned whole, however many lines it spans.
+function ruleStatements(raw) {
+  const text = RULES_STRIP(raw, true), out = [], stack = [], seen = new Map();
+  const readExpr = (pos) => {                                       // up to the first `;` at bracket depth 0
+    let depth = 0, i = pos;
+    while (i < text.length) {
+      const c = text[i];
+      if (c === "'" || c === '"') { let j = i + 1; while (j < text.length && text[j] !== c) { if (text[j] === '\\') j++; j++; } i = j + 1; continue; }
+      if ('([{'.includes(c)) depth++; else if (')]}'.includes(c)) depth--; else if (c === ';' && depth === 0) return { expr: text.slice(pos, i), end: i + 1 };
+      i++;
+    }
+    throw new Error('unterminated rules expression');
   };
-  it('a role "partner" — any case, padded — is shown the removed-account screen and signed out, and never proceeds', async () => {
-    for (const role of ['partner', 'Partner', 'PARTNER', ' partner ', '\tPartner\n']) {
-      const r = await run({ role, departments: ['Brilliant Steel'] });
-      assert.deepEqual(r, { result: undefined, calls: ['removed-screen', 'sign-out'] }, JSON.stringify(role));
+  let pos = 0, m;
+  const push = (kind, expr) => {
+    const key = (stack.filter((x) => x !== 'service' && !x.includes('{database}') && !x.includes('{bucket}')).join(' > ') + ' :: ' + kind).trim();
+    const n = (seen.get(key) || 0) + 1; seen.set(key, n);
+    out.push({ key: `${key} #${n}`, expr: expr.replace(/\s+/g, ' ').trim() });
+  };
+  for (;;) {
+    while (pos < text.length && /\s/.test(text[pos])) pos++;
+    if (pos >= text.length) break;
+    const rest = text.slice(pos, pos + 400);
+    if ((m = rest.match(/^rules_version\s*=\s*'[^']*'\s*;/))) { pos += m[0].length; continue; }
+    if ((m = rest.match(/^service\s+[\w.]+\s*\{/))) { stack.push('service'); pos += m[0].length; continue; }
+    if ((m = rest.match(/^match\s+(\/\S*)\s*\{/))) { stack.push(m[1]); pos += m[0].length; continue; }
+    if ((m = rest.match(/^function\s+(\w+)\s*\(([^)]*)\)\s*\{/))) { stack.push('fn ' + m[1]); pos += m[0].length; continue; }
+    if ((m = rest.match(/^allow\s+([^:]+):\s*(?:if\s+)?/))) {
+      const methods = m[1].split(',').map((x) => x.trim()).sort().join(',');
+      pos += m[0].length; const r = readExpr(pos); pos = r.end; push('allow ' + methods, r.expr); continue;
+    }
+    if ((m = rest.match(/^return\s+/))) { pos += m[0].length; const r = readExpr(pos); pos = r.end; push('return', r.expr); continue; }
+    if ((m = rest.match(/^let\s+(\w+)\s*=\s*/))) { pos += m[0].length; const r = readExpr(pos); pos = r.end; push('let ' + m[1], r.expr); continue; }
+    if (text[pos] === '}') { stack.pop(); pos++; continue; }
+    throw new Error('cannot parse the rules near ' + JSON.stringify(rest.slice(0, 100)));
+  }
+  return out;
+}
+const SNAP_PATH = 'tests/fixtures/rules-profile-statements.json';
+const snapshotOf = (rules, storage) => ({
+  firestoreProfile: ruleStatements(rules).filter((x) => /\bhasProfile\(\)/.test(x.expr) && !/fn hasProfile/.test(x.key)).map((x) => x.key).sort(),
+  firestoreBare: ruleStatements(rules).filter((x) => /allow [^:]*\b(read|get|list)\b/.test(x.key) && x.expr === 'isAuth()').map((x) => x.key).sort(),
+  storageRoleClaim: ruleStatements(storage).filter((x) => /\bhasRoleClaim\(\)/.test(x.expr) && !/fn hasRoleClaim/.test(x.key)).map((x) => x.key).sort(),
+});
+
+describe('Phase 3 scanners (synthetic input)', () => {
+  it('rulesProblems: balanced and fully-defined rules pass; a deleted helper that is still called, or a stray bracket, is reported', () => {
+    const ok = "service x { match /a/{b} { function f(u) { return get(/databases/$(database)/documents/users/$(u)).data.role == 'x'; } allow read: if isAuth() && f(1); function isAuth() { return request.auth != null; } } }";
+    assert.deepEqual(rulesProblems(ok), []);
+    assert.deepEqual(rulesProblems("match /a/{b} { allow read: if isAuth() && !isPartner(); function isAuth() { return true; } }").map((p) => p.replace(/^line \d+: /, '')), ['isPartner() is called but never defined']);
+    assert.equal(rulesProblems("match /a/{b} { allow read: if (isAuth(; }").length > 0, true);
+    assert.deepEqual(rulesProblems("// isPartner() in a comment\nmatch /a/{b} { /* isPartner() */ allow read: if request.auth != null; }"), [], 'comments are ignored');
+    assert.deepEqual(rulesProblems("match /a/{b} { allow read: if request.auth.token.note == 'oops ( [ {'; }"), [], 'brackets inside a string are ignored');
+  });
+  it("scanRoleLiterals(only='functions/'): the exact AEC stage line is allowed, an edited one and any other quoted 'partner' is not", () => {
+    const f = (raw) => ({ rel: 'functions/index.js', raw, code: jsCode(raw, 'functions/index.js') });
+    const run = (raw) => scanRoleLiterals([f(raw)], 'functions/', FUNCTIONS_AEC_LINES);
+    assert.deepEqual(run("function d() {\n  const terminal = ['partner', 'dormant'];\n}\n").offenders, []);
+    assert.equal(run("function d() {\n  const terminal = ['partner', 'dormant', 'lost'];\n}\n").offenders.length, 1, 'an edited line is no longer the allowed one');
+    assert.equal(run("function d(uid, uidRole) {\n  if (uidRole.get(uid) === 'partner') return;\n}\n").offenders.length, 1, 'the partner-drop line');
+    assert.equal(run("function d(u) {\n  // 'partner' in a comment\n  return u;\n}\n").offenders.length, 0, 'comments are ignored');
+  });
+});
+
+describe('Phase 3: the public quote brand has no generic-partner branch (js/screens/sales.js, run for real)', () => {
+  const SALES = read('js/screens/sales.js');
+  const piece = (re, what) => { const m = SALES.match(re); assert.ok(m, `${what} not found in js/screens/sales.js`); return m[0]; };
+  const BRANDS = piece(/^window\.QUOTE_BRANDS = \{[\s\S]*?\n\};\n/m, 'window.QUOTE_BRANDS');
+  const BUILD = piece(/^window\.buildPublicQuoteDoc = function[\s\S]*?\n\};\n/m, 'window.buildPublicQuoteDoc');
+  const RESOLVE = piece(/^window\.resolveQuoteBrand = async function[\s\S]*?\n\};\n/m, 'window.resolveQuoteBrand');
+  const ctx = vm.createContext({ firebase: { firestore: { FieldValue: { serverTimestamp: () => 'TS' } } }, db: { collection() { throw new Error('resolveQuoteBrand must not read Firestore any more'); } } });
+  ctx.window = ctx;
+  for (const src of [BRANDS, BUILD, RESOLVE]) vm.runInContext(src, ctx);
+  const brandOf = async (company) => { const r = await ctx.window.resolveQuoteBrand({ company, createdBy: 'someone' }); return { co: r.co, name: r.brand.name }; };
+  const docOf = (company) => ctx.window.buildPublicQuoteDoc({ company, items: [] }, { name: 'n' }, 'bk_quotes', 'q1').co;
+  it('resolveQuoteBrand is the QUOTE_BRANDS lookup and nothing else: no Firestore read of a creator, no synthesised brand', () => {
+    const code = stripComments(RESOLVE);
+    assert.ok(!/\bdb\b|coName|artnership|createdBy|\.doc\(/.test(code), 'resolveQuoteBrand reads a user or builds a brand of its own');
+    assert.ok(/QUOTE_BRANDS\[quote\.company\]/.test(code) && /return \{ co, brand: window\.QUOTE_BRANDS\[co\] \};/.test(code));
+  });
+  it('BK, BI and BS keep their own letterhead', async () => {
+    assert.deepEqual(await brandOf('BK'), { co: 'BK', name: 'BARRO KITCHENS' });
+    assert.deepEqual(await brandOf('BI'), { co: 'BI', name: 'BARRO INDUSTRIES OPC' });
+    assert.deepEqual(await brandOf('BS'), { co: 'BS', name: 'BRILLIANT STEEL CORPORATION' });
+    for (const c of ['BK', 'BI', 'BS']) assert.equal(docOf(c), c);
+  });
+  it("any other code — the retired 'PT', a missing company, an unknown one — falls back to Brilliant Steel (and never reads Firestore for a creator's company)", async () => {
+    for (const c of ['PT', undefined, null, '', 'XX', 'bk']) {
+      assert.deepEqual(await brandOf(c), { co: 'BS', name: 'BRILLIANT STEEL CORPORATION' }, String(c));
+      assert.equal(docOf(c), 'BS', `buildPublicQuoteDoc(${String(c)})`);
     }
   });
-  it('...even on a token refresh for a uid that is already bootstrapped (the gate runs ahead of the idempotency guard)', async () => {
-    const r = await run({ role: 'partner' }, { bootstrapped: true });
-    assert.deepEqual(r, { result: undefined, calls: ['removed-screen', 'sign-out'] });
+});
+
+describe('Phase 3: the server-side surfaces carry no partner term', () => {
+  const RULES = read('firestore.rules'), STORAGE = read('storage.rules');
+  it('firestore.rules: no isPartner, no partner_deals, no partnerUid, no quoted "Partners" department, no quoted \'partner\' role — comments included for the identifiers', () => {
+    assert.deepEqual(rawHits('firestore.rules', /isPartner|partner_deals|partnerUid|(['"])Partners\1/), []);
+    assert.deepEqual(RULES_STRIP(RULES).split('\n').map((t, i) => (QUOTED_PARTNER.test(t) ? `firestore.rules:${i + 1}  ${show(t)}` : null)).filter(Boolean), []);
   });
-  it('every real role passes it — a Brilliant-Steel-only employee included — and an already bootstrapped session is simply left alone', async () => {
-    for (const profile of [{ role: 'employee', departments: ['Brilliant Steel'] }, { role: 'employee' }, { role: 'manager' }, { role: 'president' }, { role: 'secretary' },
-      { role: 'agent' }, { role: 'finance' }, { role: undefined }, { role: 'partners' }, { role: 'partnership' }, { role: 'employee', title: 'Partner', departments: ['Partners'] }]) {
-      assert.deepEqual(await run(profile), { result: 'proceeded', calls: [] }, JSON.stringify(profile));
+  it('firestore.rules: there is no rule for the deleted partner_deals collection (no match block = deny-all), and the users-create allowlist names no partner', () => {
+    assert.ok(!/match \/partner_deals\b/.test(RULES));
+    const create = RULES.match(/match \/users\/\{uid\} \{[\s\S]*?allow create:[\s\S]*?\n      \);/);
+    assert.ok(create, 'could not find the users create rule');
+    assert.ok(!/partner/i.test(create[0]), 'the users create rule names a partner role');
+  });
+  it('storage.rules: no isPartnerClaim (comments included), no quoted \'partner\' role in code', () => {
+    assert.deepEqual(rawHits('storage.rules', /isPartnerClaim|isPartner\b/), []);
+    assert.deepEqual(RULES_STRIP(STORAGE).split('\n').map((t, i) => (QUOTED_PARTNER.test(t) ? `storage.rules:${i + 1}  ${show(t)}` : null)).filter(Boolean), []);
+  });
+  it('both rules files are well-formed: brackets balance and every helper that is called is still defined (a deleted helper cannot stay in use)', () => {
+    assert.deepEqual(rulesProblems(RULES), [], 'firestore.rules');
+    assert.deepEqual(rulesProblems(STORAGE), [], 'storage.rules');
+  });
+  it('firestore.indexes.json: valid JSON with no partner_deals index and no partnerUid field', () => {
+    const j = JSON.parse(read('firestore.indexes.json'));
+    assert.ok(Array.isArray(j.indexes) && j.indexes.length > 20, 'the indexes file lost its indexes');
+    assert.deepEqual(j.indexes.filter((x) => x.collectionGroup === 'partner_deals').length, 0);
+    assert.deepEqual(rawHits('firestore.indexes.json', /partner/i), []);
+  });
+  it('scripts/check-backup-coverage.js and scripts/sync-to-drive.js name no partner_deals', () => {
+    for (const rel of ['scripts/check-backup-coverage.js', 'scripts/sync-to-drive.js']) assert.deepEqual(rawHits(rel, /partner_deals/), [], rel);
+  });
+  it('the Phase-3 acceptance grep is empty: no isPartner / partner_deals / isPartnerClaim in firestore.rules, storage.rules, firestore.indexes.json, any scripts/*.js (the purge script excepted BY NAME) or functions/index.js', () => {
+    assert.ok(scriptFiles.length >= 8 && scriptFiles.includes('scripts/sync-to-drive.js') && !scriptFiles.includes('scripts/partner-data-purge.js'), 'the script walk is wrong');
+    const files = ['firestore.rules', 'storage.rules', 'firestore.indexes.json', ...scriptFiles, 'functions/index.js'];
+    assert.deepEqual(files.flatMap((rel) => rawHits(rel, /isPartner|partner_deals|isPartnerClaim/i)), []);
+  });
+  it("functions/index.js: no 'partner' role test — the only quoted 'partner' is the AEC contact stage in the daily digest, allowed by EXACT line content", () => {
+    const R = scanRoleLiterals([FUNCTIONS_JS], 'functions/', FUNCTIONS_AEC_LINES);
+    assert.deepEqual(R.offenders, [], "a 'partner' role test is back in the Cloud Functions");
+    assert.deepEqual(R.aec, ["functions/index.js  const terminal = ['partner', 'dormant'];"], 'the AEC allowlist entry must match exactly one line (a renamed line makes this fail)');
+  });
+  it('the notification recipients are Sales + President with no role special case (cirNotifyStaff / qrNotifyStaff / resolveSalesAndPresidentUids)', () => {
+    const code = FUNCTIONS_JS.code;
+    for (const fn of ['resolveSalesAndPresidentUids', 'cirNotifyStaff', 'qrNotifyStaff']) {
+      const i = code.indexOf(`async function ${fn}(`);
+      assert.ok(i > 0, `${fn} is gone`);
+      const body = code.slice(i, code.indexOf('\n}\n', i));
+      assert.ok(!/partner|uidRole|\.role\b/i.test(body), `${fn} special-cases a role`);
     }
-    assert.deepEqual(await run({ role: 'employee' }, { bootstrapped: true }), { result: undefined, calls: [] }, 'the idempotency guard returns quietly');
   });
-  it('the removed-user gate beside it still works for every role', async () => {
-    for (const role of ['employee', 'manager', 'agent']) assert.deepEqual(await run({ role, removed: true }), { result: undefined, calls: ['removed-screen', 'sign-out'] }, role);
+});
+
+describe('Phase 3: nothing widens — the retired partner term stands in as hasProfile() / hasRoleClaim(), in the same position', () => {
+  // Removing the old `!isPartner()` / `!isPartnerClaim()` term is not free: reading the caller's users doc (or a missing `role` claim) THROWS for an identity
+  // that has none, and a throwing rule denies — so the term also refused every signed-in identity with no users doc. Dropping it would have opened ~110 rules
+  // to such an identity. The coordinator's ruling (2026-10-28): same position, same refusal. These pins keep it that way.
+  const RULES = read('firestore.rules'), STORAGE = read('storage.rules');
+  const FIX = JSON.parse(read(SNAP_PATH));
+  const NOW = snapshotOf(RULES, STORAGE);
+  if (process.env.UPDATE_RULES_SNAPSHOT) fs.writeFileSync(path.join(ROOT, SNAP_PATH), JSON.stringify({ _about: FIX._about, firestoreProfile: NOW.firestoreProfile, firestoreBare: NOW.firestoreBare, storageRoleClaim: NOW.storageRoleClaim }, null, 1) + '\n');
+  it('hasProfile() is the CACHED get() of users/{uid}, defined once — not exists(): exists() before get() is not cached for the get (an extra billed read and access call) and returns false where the old term errored', () => {
+    const defs = RULES_STRIP(RULES, true).match(/function hasProfile\(\) \{[^}]*\}/g) || [];
+    assert.equal(defs.length, 1, 'hasProfile() must be defined exactly once');
+    assert.equal(norm(defs[0]), 'function hasProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data != null; }');
+    assert.ok(!/exists\(\s*\/databases\/\$\(database\)\/documents\/users\/\$\(request\.auth\.uid\)/.test(RULES_STRIP(RULES)), 'an exists() of the caller\'s own users doc is back');
+  });
+  it('the 111 statements that carried the retired term in HEAD still require a profile — the list is pinned (tests/fixtures/rules-profile-statements.json)', () => {
+    assert.equal(FIX.firestoreProfile.length, 111);
+    assert.deepEqual(NOW.firestoreProfile, FIX.firestoreProfile);
+  });
+  it('and no read has become a bare `isAuth()`: the five that always were are the only ones', () => {
+    assert.deepEqual(FIX.firestoreBare, ['/_counters/{docId} :: allow read #1', '/productMeta/{docId} :: allow read #1', '/products/{docId} :: allow read #1', '/settings_holidays/{year} :: allow read #1', '/users/{uid} :: allow get #1']);
+    assert.deepEqual(NOW.firestoreBare, FIX.firestoreBare);
+  });
+  it('the sensitive reads named by the review still sit behind it: client info requests and quote requests (+ their notes), clients, quote costs, approvals, gov biddings, the users list and the counters write', () => {
+    const stmts = ruleStatements(RULES);
+    const need = [['/client_info_requests/{ref} :: allow read #1'], ['/client_info_requests/{ref}/notes/{nid} :: allow read #1'], ['/quote_requests/{ref} :: allow read #1'], ['/quote_requests/{ref}/notes/{nid} :: allow read #1'],
+      ['/clients/{docId} :: allow read #1'], ['/quote_costs/{id} :: allow read,write #1'], ['/approval_requests/{docId} :: allow read #1'], ['/gov_biddings/{docId} :: allow read #1'],
+      ['/users/{uid} :: allow list #1'], ['/_counters/{docId} :: allow write #1'], ['/worker_directory/{docId} :: allow read #1'], ['/tasks/{taskId} :: allow read #1']];
+    for (const [key] of need) {
+      const s = stmts.find((x) => x.key === key);
+      assert.ok(s, `no such statement: ${key}`);
+      assert.ok(/\bhasProfile\(\)/.test(s.expr), `${key} no longer requires a profile: ${s.expr}`);
+    }
+  });
+  it('the retired term was in 112 expressions; hasProfile() is in at least that many places (a removal fails here even if the list above was edited with it)', () => {
+    assert.ok((RULES_STRIP(RULES).match(/\bhasProfile\(\)/g) || []).length >= 112 + 1, 'hasProfile() used in fewer places than the term it replaced');
+  });
+  it('the only arms dropped with the partner are the three that named it — the \'partner\' member of the users-list role filter, the Partners-department posts arm, the partnerUid job_projects arm — and each is unreachable now', () => {
+    const stmts = ruleStatements(RULES);
+    assert.match(stmts.find((x) => x.key === '/users/{uid} :: allow list #1').expr, /^isAuth\(\) && \( hasProfile\(\) \|\| resource\.data\.get\('role', ''\) in \['president', 'manager'\] \)$/);
+    assert.equal(stmts.find((x) => x.key === '/posts/{postId} :: allow read #1').expr, 'isAuth() && hasProfile()');
+    assert.equal(stmts.find((x) => x.key === '/job_projects/{docId} :: allow read #1').expr, 'isAuth() && (resource.data.createdBy == request.auth.uid || hasProfile())');
+  });
+  it('the arms that are NOT partner-named stay verbatim, so every identity gets the same decision as before: tasks (assignedTo), settings (system), order_tracking and public_quotes (own source)', () => {
+    const stmts = ruleStatements(RULES), at = (key) => stmts.find((x) => x.key === key).expr;
+    assert.match(at('/tasks/{taskId} :: allow read #1'), /hasProfile\(\) \|\| request\.auth\.uid in resource\.data\.get\(/);
+    assert.match(at('/settings/{docId} :: allow read #1'), /hasProfile\(\) \|\| docId ==/);
+    assert.match(at('/order_tracking/{token} :: allow create #1'), /hasProfile\(\)\s*\|\|\s*\(\s*request\.resource\.data\.get\([^)]*\) != ''\s*&& exists\(/);
+    assert.match(at('/public_quotes/{token} :: allow update #1'), /hasProfile\(\) \|\| \(srcIsMine\(resource\.data\) && srcIsMine\(request\.resource\.data\)\)/);
+  });
+  it('storage.rules: hasRoleClaim() is `\'role\' in request.auth.token`, defined once, and sits in the eleven statements the retired claim term sat in', () => {
+    const defs = RULES_STRIP(STORAGE, true).match(/function hasRoleClaim\(\) \{[^}]*\}/g) || [];
+    assert.equal(defs.length, 1, 'hasRoleClaim() must be defined exactly once');
+    assert.equal(norm(defs[0]), "function hasRoleClaim() { return 'role' in request.auth.token; }", "hasRoleClaim() must test presence with `'role' in request.auth.token` (it never throws; reading request.auth.token.role would)");
+    assert.equal(FIX.storageRoleClaim.length, 11);
+    assert.deepEqual(NOW.storageRoleClaim, FIX.storageRoleClaim);
   });
 });

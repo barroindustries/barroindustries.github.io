@@ -81,7 +81,6 @@ function seedUsers() {
   fake.seed('users/u_mgr', { role: 'manager', displayName: 'Mgr', departments: ['Admin'] });
   fake.seed('users/u_sales1', { role: 'employee', department: 'Sales', displayName: 'Sales One' });
   fake.seed('users/u_sales2', { role: 'employee', departments: ['Design', 'Sales'], displayName: 'Sales Two' });
-  fake.seed('users/u_partner', { role: 'partner', departments: ['Sales'], displayName: 'Partner' });
   fake.seed('users/u_sec', { role: 'secretary', departments: ['Admin'], displayName: 'Sec' });
   fake.seed('users/u_it', { role: 'employee', department: 'IT', displayName: 'IT' });
 }
@@ -536,7 +535,7 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
       assert.equal(doc.estimate.reason, 'disabled');
       assert.equal(doc.internal.exactTotal, 7770 + 2 * 4217);
     });
-    it('notifies the Sales department (legacy string AND array field) + the President; drops the partner; never the secretary or other departments', async () => {
+    it('notifies the Sales department (legacy string AND array field) + the President; never the secretary or other departments', async () => {
       const token = await readySession();
       const res = await fns.qrSubmit.run(submitPayload(token), ctx());
       const uids = fake.paths('notifications/').map((p) => p.split('/')[1]);
@@ -719,7 +718,7 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
     });
     it('only a president or manager (read from users/{uid}.role): a Sales employee, the secretary and a forged claim are denied', async () => {
       const ref = await seedRequest();
-      for (const uid of ['u_sales1', 'u_sec', 'u_partner', 'u_it', 'nobody']) await rejectsWith(fns.qrAdminDelete.run({ refNo: ref }, { auth: { uid } }), 'permission-denied');
+      for (const uid of ['u_sales1', 'u_sec', 'u_it', 'nobody']) await rejectsWith(fns.qrAdminDelete.run({ refNo: ref }, { auth: { uid } }), 'permission-denied');
       await rejectsWith(fns.qrAdminDelete.run({ refNo: ref }, { auth: { uid: 'u_sales1', token: { role: 'president' } } }), 'permission-denied');
       assert.ok(fake.has(`quote_requests/${ref}`));
     });
@@ -744,7 +743,7 @@ describe('qr callables — against the in-memory Firestore', { skip: SKIP }, () 
   });
 
   describe('Client Information Request notifications still behave (resolveSalesAndPresidentUids was extracted from cirNotifyStaff)', () => {
-    it('cirSubmit notifies Sales (both department fields) + the President, drops the partner, dedupes — byte-identical recipients and shape', async () => {
+    it('cirSubmit notifies Sales (both department fields) + the President, dedupes — byte-identical recipients and shape', async () => {
       const token = 'B'.repeat(43);
       fake.seed(`cir_drafts/${portal.tokenHash(token)}`, { formId: 'commissary_brief', formVersion: 1, createdAt: new FakeTimestamp(T0 - 60000), ipHash: 'x', uaHash: 'y', photoCount: 0, bytesTotal: 0, photos: {}, submittedAt: null, refNo: null });
       const res = await fns.cirSubmit.run({

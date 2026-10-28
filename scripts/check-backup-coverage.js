@@ -53,7 +53,7 @@ const BASELINE = [
   'job_projects', 'kpi_evals', 'kpi_targets', 'leave_accruals',
   'leave_balances', 'leave_requests', 'ledger', 'memos', 'notif_push_quota',
   'notif_quota', 'notifications',
-  'order_tracking', 'partner_deals', 'pay_runs', 'payroll',
+  'order_tracking', 'pay_runs', 'payroll',
   'payroll_ca_overrides', 'payroll_delete_requests', 'payslips',
   'pending_raises', 'personal_todos', 'policies', 'posts', 'productMeta',
   'production_orders', 'products', 'projects', 'promotions',

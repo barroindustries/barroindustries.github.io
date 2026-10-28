@@ -159,20 +159,6 @@
       ]
     },
     {
-      "collectionGroup": "partner_deals",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "partnerUid",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "hub_files",
       "queryScope": "COLLECTION",
       "fields": [

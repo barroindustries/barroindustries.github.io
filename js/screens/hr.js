@@ -992,10 +992,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       ? window.dbCachedGet('worker_profiles', () => db.collection('worker_profiles').get(), 60000)
       : db.collection('worker_profiles').get()).catch(()=>({docs:[]}))
   ]);
-  // Everyone on `users` (Brilliant Steel staff are Barro employees), minus — TEMPORARILY — a
-  // surviving users doc with the retired role 'partner' (window.isRetiredRoleUser, js/config.js).
-  // PARTNER-REMOVAL-SPEC §3.2 retired-role — WS-H deletes this filter.
-  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!window.isRetiredRoleUser(u));
+  // Everyone on `users` (Brilliant Steel staff are Barro employees).
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   // ── THE DOUBLE-PAY GUARD, roster side ───────────────────────────
   // A person can be paid weekly by TWO independent facts, and the engine
   // (computePayRun, js/departments.js) honours both:

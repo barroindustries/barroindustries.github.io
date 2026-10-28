@@ -22,7 +22,9 @@ service cloud.firestore {
     // [RN-5] Lowercase-docId sibling of the two above. /strategy_notes -> docs/firestore-rules-notes.md#rn-5
     function deptKeyOpenToSecretary(k) { return !(k == 'finance' || k == 'it'); }
     function strategyDeptOpen(k) { return !isSecretary() || deptKeyOpenToSecretary(k); }
-    function isPartner()     { return getRole() == 'partner'; }
+    // True when the caller has a users/{uid} doc. It stands where the old external-partner exclusion stood, in every expression that had it: a signed-in
+    // identity with NO users doc errors here, exactly as getRole() does, so it is refused as before. get() (not exists()) on purpose — see docs/firestore-rules-notes.md#rn-1.
+    function hasProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data != null; }
     function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
     function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
 
@@ -70,8 +72,7 @@ service cloud.firestore {
     // [RN-10] Member of the HR DEPARTMENT ─ -> docs/firestore-rules-notes.md#rn-10
     function isHrDept() {
       let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      return u.get('role', null) != 'partner'
-        && (u.get('department', '') == 'HR' || u.get('departments', []).hasAny(['HR']));
+      return u.get('department', '') == 'HR' || u.get('departments', []).hasAny(['HR']);
     }
     // [RN-11] READ-ONLY sight of the HR surface (attendance, leave) for -> docs/firestore-rules-notes.md#rn-11
     function canHrView() { return isOpsAdmin() || isHrDept(); }
@@ -135,8 +136,8 @@ service cloud.firestore {
     match /users/{uid} {
       // [RN-21] v14 re-audit fix — `read` covers BOTH get and list, so the -> docs/firestore-rules-notes.md#rn-21
       allow get:  if isAuth();
-      allow list: if isAuth() && ( !isPartner()
-        || resource.data.get('role', '') in ['partner', 'president', 'manager'] );
+      allow list: if isAuth() && ( hasProfile()
+        || resource.data.get('role', '') in ['president', 'manager'] );
       // [RN-22] Self-signup must not self-assign into a privileged departm -> docs/firestore-rules-notes.md#rn-22
       function noPrivilegedDeptOnCreate() {
         return request.resource.data.get('department', '') != 'Finance'
@@ -210,7 +211,7 @@ service cloud.firestore {
           && resource.data.get('role', 'employee') != 'president'
           && onlyOffboardingFieldsChanged())
         ||
-        // [RN-30] LAYOFF-SPEC — HR-dept members (any role except partner — i -> docs/firestore-rules-notes.md#rn-30
+        // [RN-30] LAYOFF-SPEC — HR-dept members (any role) plus the senior b -> docs/firestore-rules-notes.md#rn-30
         (isHrDept() && !isOwner(uid)
           && resource.data.get('role', 'employee') != 'president'
           && request.resource.data.diff(resource.data).affectedKeys()
@@ -232,7 +233,7 @@ service cloud.firestore {
     match /_counters/{docId} {
       allow read:  if isAuth();
       // [RN-34] v14 re-audit fix — monotonic-only: the new count may never -> docs/firestore-rules-notes.md#rn-34
-      allow write: if isAuth() && !isPartner()
+      allow write: if isAuth() && hasProfile()
         && (request.resource == null || (
           isNonNegNumber(request.resource.data.get('count', 0))
           && (resource == null || request.resource.data.get('count', 0) >= resource.data.get('count', 0))
@@ -240,17 +241,13 @@ service cloud.firestore {
     }
 
     // ── Posts ─
-    // v12 WS19: read locked to !isPartner() — internal company feed, was bare
-    // isAuth() (the audit separately flagged that published-post NOTIFICATIONS
-    // also fan out to partners; that's a different, notification-side fix).
     match /posts/{postId} {
-      // [RN-35] Internal feed stays !isPartner()-only, EXCEPT posts delibe -> docs/firestore-rules-notes.md#rn-35
-      allow read: if isAuth() && ( !isPartner()
-        || (resource.data.get('dept','') == 'Partners' && resource.data.get('status','') == 'published') );
+      // [RN-35] Internal company feed — readable by every signed-in user w -> docs/firestore-rules-notes.md#rn-35
+      allow read: if isAuth() && hasProfile();
       // v13 Phase 22: enforce the publish/approval model server-side — matches
       // modules.js openNewPostModal (authorId is the real field name; only the
       // president gets publishDirectly, everyone else always lands 'pending').
-      allow create: if isAuth() && !isPartner() &&
+      allow create: if isAuth() && hasProfile() &&
         request.resource.data.get('authorId', '') == request.auth.uid &&
         request.resource.data.keys().hasOnly([
           'title','content','dept','status','authorId','authorName','authorPhoto',
@@ -329,7 +326,7 @@ service cloud.firestore {
     // cir_drafts / cir_ratelimit / cir_abuse have NO match block (Admin SDK only). Secretary = view-only.
     function cirWriter() { return isSeniorAdmin() || (!isSecretary() && inDept('Sales')); }
     match /client_info_requests/{ref} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create, delete: if false;
       allow update: if isAuth() && cirWriter()
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -341,7 +338,7 @@ service cloud.firestore {
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
     }
     match /client_info_requests/{ref}/notes/{nid} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create: if isAuth() && cirWriter()
         && request.resource.data.get('authorUid','') == request.auth.uid
         && request.resource.data.get('at', null) == request.time
@@ -352,7 +349,7 @@ service cloud.firestore {
     // Public quote requests (specs/PUBLIC-QUOTE-REQUEST-SPEC.md) — created/deleted by callables only;
     // qr_sessions / qr_ratelimit / qr_abuse have NO match block (Admin SDK only). Secretary = view-only.
     match /quote_requests/{ref} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create, delete: if false;
       allow update: if isAuth() && cirWriter()
         && request.resource.data.diff(resource.data).affectedKeys()
@@ -364,7 +361,7 @@ service cloud.firestore {
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
     }
     match /quote_requests/{ref}/notes/{nid} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create: if isAuth() && cirWriter()
         && request.resource.data.get('authorUid','') == request.auth.uid
         && request.resource.data.get('at', null) == request.time
@@ -375,7 +372,7 @@ service cloud.firestore {
     match /notes/{noteId} {
       allow read: if isAuth() && ( noteIsOwner(resource) || noteIsShared(resource) );
 
-      allow create: if isAuth() && !isPartner()
+      allow create: if isAuth() && hasProfile()
         && request.resource.data.get('ownerUid', '') == request.auth.uid
         && request.resource.data.keys().hasOnly(
              ['ownerUid','ownerName','title','body','sharedUids','sharedLevels',
@@ -537,17 +534,17 @@ service cloud.firestore {
 
     // ── Geofence work sites (v14 Type-B) ─
     match /geo_sites/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create, update: if isAuth() && isOpsAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
     // ── Attendance extension requests ─
     match /attendance_extensions/{docId} {
-      // [RN-50] Internal HR data — external Brilliant Steel partners exclu -> docs/firestore-rules-notes.md#rn-50
-      allow read: if isAuth() && !isPartner();
+      // [RN-50] Internal HR data — readable by every signed-in user with a -> docs/firestore-rules-notes.md#rn-50
+      allow read: if isAuth() && hasProfile();
       // [RN-51] v14 re-audit fix — was a bare isAuth() with NO field const -> docs/firestore-rules-notes.md#rn-51
-      allow create: if isAuth() && !isPartner() && (
+      allow create: if isAuth() && hasProfile() && (
         isOpsAdmin() ||
         (request.resource.data.get('uid', '') == request.auth.uid
           && request.resource.data.get('status', '') == 'pending')
@@ -623,7 +620,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.get('uid', '') == request.auth.uid || canHrView()
       );
-      allow create: if isAuth() && !isPartner()
+      allow create: if isAuth() && hasProfile()
         && request.resource.data.get('uid', '') == request.auth.uid
         && request.resource.data.get('status', '') == 'pending'
         && isNonNegNumber(request.resource.data.get('amount', 0))
@@ -716,13 +713,13 @@ service cloud.firestore {
 
     // ── Tasks ─
     match /tasks/{taskId} {
-      // [RN-56] v12 WS19: was bare isAuth() — a partner could browse EVERY -> docs/firestore-rules-notes.md#rn-56
-      allow read: if isAuth() && (!isPartner() || request.auth.uid in resource.data.get('assignedTo', []));
+      // [RN-56] Tasks are readable by every signed-in user with a profile -> docs/firestore-rules-notes.md#rn-56
+      allow read: if isAuth() && (hasProfile() || request.auth.uid in resource.data.get('assignedTo', []));
       // [RN-57] Admins create any task. Design-dept members may create Des -> docs/firestore-rules-notes.md#rn-57
       allow create: if isAuth() && (
         isAdmin()
         || (isDesignDept() && request.resource.data.get('department', '') == 'Design')
-        || ( !isPartner()
+        || ( hasProfile()
              && request.resource.data.get('createdBy', '') == request.auth.uid
              && ( inDept(request.resource.data.get('department', ''))
                   || request.auth.uid in request.resource.data.get('assignedTo', []) ) )
@@ -740,7 +737,7 @@ service cloud.firestore {
         return request.auth.uid in get(/databases/$(database)/documents/tasks/$(taskId)).data.get('assignedTo', []);
       }
       match /comments/{commentId} {
-        allow read:   if isAuth() && (!isPartner() || taskAssignee());
+        allow read:   if isAuth() && (hasProfile() || taskAssignee());
         allow create: if isAuth() && request.resource.data.authorId == request.auth.uid;
         allow update, delete: if isAuth() && (
           resource.data.authorId == request.auth.uid || isAdmin()
@@ -748,7 +745,7 @@ service cloud.firestore {
       }
       // Read receipts ("Seen by"). Each user writes only their own receipt.
       match /readers/{readerUid} {
-        allow read:  if isAuth() && (!isPartner() || taskAssignee());
+        allow read:  if isAuth() && (hasProfile() || taskAssignee());
         allow write: if isAuth() && isOwner(readerUid);
       }
     }
@@ -758,7 +755,7 @@ service cloud.firestore {
       // [RN-61] ⚠ 2026-08-10 — WHY THE PARTICIPANTS DISJUNCT IS TYPE-FENCE -> docs/firestore-rules-notes.md#rn-61
       function memberOfDoc() {
         return (request.auth.uid in resource.data.get('participants', []))
-          || (resource.data.get('type','') == 'dept' && !isPartner()
+          || (resource.data.get('type','') == 'dept' && hasProfile()
               && deptChannelOpen(resource.data.get('department',''))
               && (isAdmin() || inDept(resource.data.get('department',''))));
       }
@@ -766,7 +763,7 @@ service cloud.firestore {
       function convMember() {
         let c = get(/databases/$(database)/documents/conversations/$(convId)).data;
         return (request.auth.uid in c.get('participants', []))
-          || (c.get('type','') == 'dept' && !isPartner()
+          || (c.get('type','') == 'dept' && hasProfile()
               && deptChannelOpen(c.get('department',''))
               && (isAdmin() || inDept(c.get('department',''))));
       }
@@ -782,7 +779,7 @@ service cloud.firestore {
           && request.resource.data.get('createdBy','') == request.auth.uid
           && request.auth.uid in request.resource.data.get('participants', []) )
         ||
-        ( request.resource.data.get('type','') == 'dept' && !isPartner()
+        ( request.resource.data.get('type','') == 'dept' && hasProfile()
           && deptChannelOpen(request.resource.data.get('department',''))
           && (isAdmin() || inDept(request.resource.data.get('department','')))
           && convId == 'dept_' + request.resource.data.get('department','')
@@ -909,7 +906,7 @@ service cloud.firestore {
 
     // [RN-68] Settings ─ -> docs/firestore-rules-notes.md#rn-68
     match /settings/{docId} {
-      allow read: if isAuth() && (!isPartner() || docId == 'system');
+      allow read: if isAuth() && (hasProfile() || docId == 'system');
       allow write: if isAuth() && isPresident();
     }
 
@@ -940,15 +937,14 @@ service cloud.firestore {
 
     // ── President message ─
     match /president_message/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isPresident();
     }
 
     // ── SOPs — readable by internal staff, editable by admins ─
-    // v12 WS19: read locked to !isPartner() — was bare isAuth(). Write stays
-    // isAdmin() (secretary keeps this oversight/coordination surface).
+    // Write stays isAdmin() (secretary keeps this oversight/coordination surface).
     match /sops/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
 
@@ -1271,21 +1267,19 @@ service cloud.firestore {
 
     // [RN-91] Quotes (internal) ─ -> docs/firestore-rules-notes.md#rn-91
     match /quotes/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
 
-    // ── BS Quotes (Brilliant Steel partner) ─
-    // One-way visibility: partner quotes ARE visible to internal staff (Sales,
-    // etc.) so they can coordinate; a partner only ever sees their OWN quotes.
-    // (The reverse — partner reading internal bk_quotes — is denied below.)
+    // ── BS Quotes (Brilliant Steel department) ─
+    // Brilliant Steel quotes are visible to all staff (Sales etc. coordinate on them).
     match /bs_quotes/{docId} {
       // v14 wave3 Q6: autosaved draft slot — exactly one per user, doc id
       // 'draft_{uid}'. Keyed on the ID (never on data fields — absent-field
       // reads DENY the whole rule) so create/update/delete of one's own
       // draft always works; drafts carry draftBy, not createdBy.
       allow read: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || !isPartner()
+        resource.data.createdBy == request.auth.uid || hasProfile()
         || docId == 'draft_' + request.auth.uid
       );
       allow create: if isAuth() && (
@@ -1303,51 +1297,47 @@ service cloud.firestore {
     }
 
     // ── BK Quotes (Barro Kitchens / internal Sales) ─
-    // Internal sales quotes are NOT visible to external partners — only the
-    // creator or an admin may read. A partner has no bk_quotes of their own,
-    // so this collection is effectively invisible to them.
+    // Only the creator or an admin may read a Barro Kitchens quote.
     match /bk_quotes/{docId} {
-      allow read: if isAuth() && !isPartner() && (
+      allow read: if isAuth() && hasProfile() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
         || docId == 'draft_' + request.auth.uid
       );
       // [RN-92] Admins may also create with a DIFFERENT createdBy: require -> docs/firestore-rules-notes.md#rn-92
-      allow create: if isAuth() && !isPartner() &&
+      allow create: if isAuth() && hasProfile() &&
         (request.resource.data.createdBy == request.auth.uid || isAdmin()
          || docId == 'draft_' + request.auth.uid);
-      allow update: if isAuth() && !isPartner() && (
+      allow update: if isAuth() && hasProfile() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
         || docId == 'draft_' + request.auth.uid
       );
-      // v14 wave3 Q6: own draft slot deletable (deleted on File); partner
-      // exclusion for bk_quotes stays absolute.
+      // v14 wave3 Q6: own draft slot deletable (deleted on File).
       // QB-DRAFTS-SPEC-2026-09-11: creator may delete their own explicit draft.
       allow delete: if isAuth() && (isAdmin()
-        || (!isPartner() && docId == 'draft_' + request.auth.uid)
-        || (!isPartner() && resource.data.get('status','') == 'draft'
+        || (hasProfile() && docId == 'draft_' + request.auth.uid)
+        || (hasProfile() && resource.data.get('status','') == 'draft'
             && resource.data.get('createdBy','') == request.auth.uid));
     }
 
     // ── Quote cost sidecars (QB, owner 2026-09-21) ─ the cost basis (BOM/
     // costMat/labor/capital) stripped from quote docs, keyed <coll>_<docId>.
-    // Internal-only: partners must never read Barro's cost basis.
+    // Internal-only.
     match /quote_costs/{id} {
-      allow read, write: if isAuth() && !isPartner();
+      allow read, write: if isAuth() && hasProfile();
     }
 
     // [RN-93] Quote Templates (QUOTE-TEMPLATES-SPEC.md) ─ -> docs/firestore-rules-notes.md#rn-93
     match /quote_templates/{id} {
-      allow read:   if isAuth() && !isPartner();               // internal Sales library
-      allow create: if isAuth() && !isPartner()
+      allow read:   if isAuth() && hasProfile();   // internal Sales library
+      allow create: if isAuth() && hasProfile()
                     && request.resource.data.get('createdBy','') == request.auth.uid;
-      allow update, delete: if isAuth() && !isPartner()
+      allow update, delete: if isAuth() && hasProfile()
                     && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
     }
 
     // ── Approval requests ─
     match /approval_requests/{docId} {
-      // Internal workflow data — external partners excluded from reading.
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       // [RN-94] v13 Phase 21: the ONLY two client write sites into this co -> docs/firestore-rules-notes.md#rn-94
       allow create: if isAuth() &&
         (request.resource.data.get('userId', '') == request.auth.uid ||
@@ -1381,19 +1371,6 @@ service cloud.firestore {
       allow read, update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Partner deals (50/50 profit split) ─
-    match /partner_deals/{docId} {
-      // Partners can read their own deals; admins can read all.
-      allow read: if isAuth() && (
-        resource.data.partnerUid == request.auth.uid || isAdmin()
-      );
-      // Only money-tier can create/update deals (this is a profit-split payout
-      // record) — partners cannot self-register earnings. v12 WS19: narrowed
-      // from isAdmin() to isMoneyAdmin() so secretary can't post a deal.
-      allow create, update: if isAuth() && isMoneyAdmin();
-      allow delete: if isAuth() && isPresident();
-    }
-
     // [RN-96] Products catalog ─ -> docs/firestore-rules-notes.md#rn-96
     function productCostFieldNotIncreased(field) {
       let nv = request.resource.data.get(field, null);
@@ -1420,29 +1397,29 @@ service cloud.firestore {
     }
     // [RN-97] Product cost basis (materials/labor capital + BOM unit cos -> docs/firestore-rules-notes.md#rn-97
     match /product_costs/_pace {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
     }
     match /product_costs/_settings {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
     }
     match /product_costs/{docId} {
       // [RN-98] ⚠ 2026-08-09 SECRETARY LEAK — isAdmin() -> isSeniorAdmin() -> docs/firestore-rules-notes.md#rn-98
-      allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
+      allow read, write: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance());
     }
 
     // Product-family option sheets (specs/PRODUCT-CONFIGURATOR-SPEC.md, simplified 2026-10-21): the PRIVATE price deltas behind the six
-    // configurable catalogue products. Same tier as product_costs; never partner, never public (the Cloud Function reads it with the Admin SDK).
+    // configurable catalogue products. Same tier as product_costs; never public (the Cloud Function reads it with the Admin SDK).
     // Approval is attributable and cannot ride along with an edit: a write that leaves `approved` true must name its writer in approvedBy and
     // must not change the figures (options / size) in the same write, so a changed figure always needs a fresh approval. A sheet can only be
     // created under one of the six family ids (a stray document can never crowd a real one out). No delete.
     match /product_pricing/{familyId} {
       // 2026-10-28 QUOTE-BUILDER-CONFIGURATOR-SPEC §2.4: the quote builder prices options live for the same Sales tier that already
-      // sees the per-line build-up on Sales › Quote requests (cirWriter). Writes stay finance-tier; partners and the secretary never.
-      allow read: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance() || cirWriter());
-      allow create: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance())
+      // sees the per-line build-up on Sales › Quote requests (cirWriter). Writes stay finance-tier; the secretary never.
+      allow read: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance() || cirWriter());
+      allow create: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance())
         && familyId in ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']
         && request.resource.data.get('approved', false) == false;
-      allow update: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance())
+      allow update: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance())
         && request.resource.data.get('approved', false) is bool
         && (request.resource.data.get('approved', false) != true
             || (request.resource.data.get('approvedBy', '') == request.auth.uid
@@ -1453,26 +1430,25 @@ service cloud.firestore {
 
     // [RN-99] Material Price List (COSTING PHASE 1, 2026-08-26) ─ -> docs/firestore-rules-notes.md#rn-99
     match /material_prices/{docId} {
-      allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance() || isPurchasingDept());
+      allow read, write: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance() || isPurchasingDept());
     }
 
     // ── Reference materials ─
-    // v12 WS19: read locked to internal staff (!isPartner()) on all four — were
-    // bare isAuth(). Write stays isAdmin() (secretary keeps this surface).
+    // Read needs a profile (hasProfile()) on all four. Write stays isAdmin() (secretary keeps this surface).
     match /resources/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
     match /policies/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
     match /handbook/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
     match /memos/{docId} {
-      allow read:   if isAuth() && !isPartner();
+      allow read:   if isAuth() && hasProfile();
       allow create: if isAuth() && isAdmin();
       allow delete: if isAuth() && isAdmin();
       // [RN-100] Admins edit freely. A tagged recipient may update ONLY to -> docs/firestore-rules-notes.md#rn-100
@@ -1493,7 +1469,7 @@ service cloud.firestore {
 
     // [RN-101] Projects ─ -> docs/firestore-rules-notes.md#rn-101
     match /projects/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create: if isAuth();
       // [RN-102] Creator/admin can edit anything; finance (role or Finance- -> docs/firestore-rules-notes.md#rn-102
       allow update: if isAuth() && (
@@ -1520,7 +1496,7 @@ service cloud.firestore {
       function isDemotion() {
         return statusNow() in ['approved', 'released'] && statusNext() != statusNow();
       }
-      allow read:   if isAuth() && !isPartner();
+      allow read:   if isAuth() && hasProfile();
       // v12 WS35: new drawings must start at draft (no API-created pre-approved docs).
       allow create: if isAuth() && canDesign()
                     && request.resource.data.get('createdBy', '') == request.auth.uid
@@ -1554,7 +1530,7 @@ service cloud.firestore {
 
     // [RN-105] IT collections ─ -> docs/firestore-rules-notes.md#rn-105
     match /it_tickets/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create: if isAuth();
       allow update: if isAuth() && (
         resource.data.get('createdBy', '') == request.auth.uid || canIt()
@@ -1564,11 +1540,11 @@ service cloud.firestore {
     }
     // [RN-107] IT assets/software: IT-dept members manage them (UI gates -> docs/firestore-rules-notes.md#rn-107
     match /it_assets/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canIt();
     }
     match /it_software/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canIt();
     }
     match /it_access/{docId} {
@@ -1582,23 +1558,23 @@ service cloud.firestore {
 
     // ── Per-department document collections (renderDocCollection) ─
     // These were unruled → silent permission-denied (blank screens). Internal
-    // staff read; the owning department (or an admin) writes. Partners excluded.
+    // staff read; the owning department (or an admin) writes.
     match /work_plans/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Sales');
     }
     match /marketing_plans/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Marketing');
     }
     match /marketing_proposals/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Marketing');
     }
 
     // [RN-108] Marketing suite (v12 WS34): campaigns, promotions calendar -> docs/firestore-rules-notes.md#rn-108
     match /campaigns/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create: if isAuth() && canDept('Marketing')
         && request.resource.data.get('name', '') != ''
         && request.resource.data.get('status', 'planned') in ['planned','active','done','cancelled']
@@ -1611,7 +1587,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
     match /promotions/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create: if isAuth() && canDept('Marketing')
         && request.resource.data.get('title', '') != ''
         && request.resource.data.get('createdBy', '') == request.auth.uid;
@@ -1620,7 +1596,7 @@ service cloud.firestore {
 
     // [RN-109] Meta Ads integration (specs/META-ADS-SPEC-2026-08-30.md) ─ -> docs/firestore-rules-notes.md#rn-109
     match /ad_insights/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if false;
     }
     // meta_leads: the lead-webhook's claim/audit ledger (Cloud Function only).
@@ -1631,33 +1607,33 @@ service cloud.firestore {
     }
 
     match /marketing_templates/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Marketing');
     }
 
     match /gov_philgeps/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Government Biddings');
     }
     match /gov_active_bids/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Government Biddings');
     }
     match /gov_archive/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && canDept('Government Biddings');
     }
 
     // [RN-110] AEC Partner Directory (Sales/CRM prospecting: architects/e -> docs/firestore-rules-notes.md#rn-110
     match /aec_contacts/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create, update: if isAuth() && (canDept('Sales') || canDept('CRM') || isAdmin());
       allow delete: if isAuth() && isAdmin();
     }
 
     // [RN-111] ROC (restaurant) Lead Directory — CRM department (added 20 -> docs/firestore-rules-notes.md#rn-111
     match /roc_leads/{id} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow create, update: if isAuth() && (canDept('CRM') || canDept('Sales') || isAdmin());
       allow delete: if isAuth() && isAdmin();
     }
@@ -1683,9 +1659,9 @@ service cloud.firestore {
         return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['remindersSent']);
       }
 
-      allow read: if isAuth() && !isPartner() && (isInvitee() || isOrganizer() || isAdmin());
+      allow read: if isAuth() && hasProfile() && (isInvitee() || isOrganizer() || isAdmin());
 
-      allow create: if isAuth() && !isPartner()
+      allow create: if isAuth() && hasProfile()
         && request.resource.data.get('organizerUid', '') == request.auth.uid
         && request.auth.uid in request.resource.data.get('invitees', [])
         && request.resource.data.get('invitees', []).size() <= 200
@@ -1699,7 +1675,7 @@ service cloud.firestore {
         && noServerFieldsOnCreate();
 
       // [RN-114] ⚠ 2026-08-10 — the oversight tier's WRITE on this collecti -> docs/firestore-rules-notes.md#rn-114
-      allow update: if isAuth() && !isPartner() && (
+      allow update: if isAuth() && hasProfile() && (
         ( (isOrganizer() || isSeniorAdmin())
           && request.resource.data.get('organizerUid', '') == resource.data.get('organizerUid', '')
           && request.resource.data.get('title', '') != ''
@@ -1720,13 +1696,13 @@ service cloud.firestore {
     }
 
     match /ventures/{id} {
-      allow read: if isAuth() && !isPartner() && canDept('Ventures');
-      allow create: if isAuth() && !isPartner() && canDept('Ventures')
+      allow read: if isAuth() && hasProfile() && canDept('Ventures');
+      allow create: if isAuth() && hasProfile() && canDept('Ventures')
         && request.resource.data.get('name', '') != ''
         && request.resource.data.get('slug', '') != ''
         && request.resource.data.get('status', 'exploring')
              in ['active', 'exploring', 'paused', 'archived'];
-      allow update: if isAuth() && !isPartner() && canDept('Ventures')
+      allow update: if isAuth() && hasProfile() && canDept('Ventures')
         && request.resource.data.get('name', '') != ''
         && request.resource.data.get('status', 'exploring')
              in ['active', 'exploring', 'paused', 'archived'];
@@ -1931,7 +1907,7 @@ service cloud.firestore {
     // [RN-133] Department budgets (DEPT-BUDGETS-SPEC-2026-08-11) ─ -> docs/firestore-rules-notes.md#rn-133
     match /dept_budget_releases/{docId} {
       allow read: if isAuth() && (canFinance() || isSecretary()
-        || (!isPartner() && inDept(resource.data.get('dept', ''))));
+        || (hasProfile() && inDept(resource.data.get('dept', ''))));
       allow create: if isAuth() && canFinance()
         && request.resource.data.get('dept', '') != ''
         && request.resource.data.get('type', '') in ['float', 'ceiling']
@@ -1949,9 +1925,9 @@ service cloud.firestore {
     }
     match /dept_budget_requests/{docId} {
       allow read: if isAuth() && (canFinance() || isSecretary()
-        || (!isPartner() && inDept(resource.data.get('dept', ''))));
+        || (hasProfile() && inDept(resource.data.get('dept', ''))));
       allow create: if isAuth()
-        && (canFinance() || (!isPartner() && !isSecretary()
+        && (canFinance() || (hasProfile() && !isSecretary()
                              && inDept(request.resource.data.get('dept', ''))))
         && request.resource.data.get('requestedBy', '') == request.auth.uid
         && request.resource.data.get('status', '') == 'pending'
@@ -1962,7 +1938,7 @@ service cloud.firestore {
       // request (status may only stay 'pending' or become 'cancelled').
       allow update: if isAuth() && (
         canFinance()
-        || ( !isPartner() && !isSecretary()
+        || ( hasProfile() && !isSecretary()
           && resource.data.get('requestedBy', '') == request.auth.uid
           && resource.data.get('status', '') == 'pending'
           && request.resource.data.get('status', '') in ['pending', 'cancelled']
@@ -1974,12 +1950,12 @@ service cloud.firestore {
     }
     match /dept_spend_logs/{docId} {
       allow read: if isAuth() && (canFinance() || isSecretary()
-        || (!isPartner() && inDept(resource.data.get('dept', ''))));
+        || (hasProfile() && inDept(resource.data.get('dept', ''))));
       // Proof is REQUIRED at the boundary, not just in the form: at least one
       // attachment, or a typed no-receipt reason (owner: receipts or an
       // explicit, flagged excuse — a silently optional field means none).
       allow create: if isAuth()
-        && (canFinance() || (!isPartner() && !isSecretary()
+        && (canFinance() || (hasProfile() && !isSecretary()
                              && inDept(request.resource.data.get('dept', ''))))
         && request.resource.data.get('loggedBy', '') == request.auth.uid
         && request.resource.data.get('status', '') == 'pending'
@@ -1994,7 +1970,7 @@ service cloud.firestore {
       //     status can only be 'pending' again, identity/dept keys frozen.
       allow update: if isAuth() && (
         canFinance()
-        || ( !isPartner() && !isSecretary()
+        || ( hasProfile() && !isSecretary()
           && resource.data.get('loggedBy', '') == request.auth.uid
           && resource.data.get('status', '') in ['pending', 'rejected']
           && request.resource.data.get('status', '') == 'pending'
@@ -2055,7 +2031,7 @@ service cloud.firestore {
     }
     // [RN-139] Worker directory (public-safe roster projection, v12 WS28) -> docs/firestore-rules-notes.md#rn-139
     match /worker_directory/{docId} {
-      allow read:           if isAuth() && !isPartner();
+      allow read:           if isAuth() && hasProfile();
       // [RN-140] v14 re-audit fix — this mirror is maintained by the SAME H -> docs/firestore-rules-notes.md#rn-140
       allow create: if isAuth() && (isMoneyAdmin() || isAccountAdminFlag());
       allow update: if isAuth() && (isMoneyAdmin()
@@ -2066,31 +2042,28 @@ service cloud.firestore {
 
     // ── Government biddings ─
     match /gov_biddings/{docId} {
-      // Government bidding pipeline is internal-only — external partners excluded
-      // from reading (null-safe getRole(): null is treated as "not partner").
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
 
     // ── Departments config ─
-    // v12 WS19: read locked to !isPartner() — was bare isAuth().
     match /departments/{docId} {
-      allow read: if isAuth() && !isPartner();
+      allow read: if isAuth() && hasProfile();
       allow write: if isAuth() && isAdmin();
     }
 
     // [RN-141] Inventory (raw materials + finished goods) ─ -> docs/firestore-rules-notes.md#rn-141
     match /inventory_items/{docId} {
-      allow read:   if isAuth() && !isPartner();
-      allow create, update: if isAuth() && !isPartner() && !isSecretary()
+      allow read:   if isAuth() && hasProfile();
+      allow create, update: if isAuth() && hasProfile() && !isSecretary()
         && (isSeniorAdmin() || canFinance() || inDept('Inventory') || isPurchasingDept() || isProductionDept());
       allow delete: if isAuth() && isSeniorAdmin();
     }
     // Stock movement log — append-only for the same writer set; history is
     // never rewritten except by senior admins.
     match /stock_movements/{docId} {
-      allow read:   if isAuth() && !isPartner();
-      allow create: if isAuth() && !isPartner() && !isSecretary()
+      allow read:   if isAuth() && hasProfile();
+      allow create: if isAuth() && hasProfile() && !isSecretary()
         && (isSeniorAdmin() || canFinance() || inDept('Inventory') || isPurchasingDept() || isProductionDept());
       allow update, delete: if isAuth() && isSeniorAdmin();
     }
@@ -2101,12 +2074,12 @@ service cloud.firestore {
 
     // [RN-142] Production orders (shop-floor pipeline) ─ -> docs/firestore-rules-notes.md#rn-142
     match /production_orders/{docId} {
-      allow read:   if isAuth() && !isPartner();
-      allow create: if isAuth() && !isPartner() && (canProduction() || inDept('Sales'))
+      allow read:   if isAuth() && hasProfile();
+      allow create: if isAuth() && hasProfile() && (canProduction() || inDept('Sales'))
         && request.resource.data.get('stage','') != 'out_for_delivery'
         && request.resource.data.get('stage','') != 'delivered';
       // [RN-143] canProduction() = isAdmin() || isProductionDept(), and isA -> docs/firestore-rules-notes.md#rn-143
-      allow update: if isAuth() && !isPartner() && canProduction() && !isSecretary()
+      allow update: if isAuth() && hasProfile() && canProduction() && !isSecretary()
         // QC gate — may not ENTER Out for Delivery without a passed inspection
         && ( request.resource.data.get('stage','') != 'out_for_delivery'
              || resource.data.get('stage','') in ['out_for_delivery','ready']
@@ -2190,12 +2163,12 @@ service cloud.firestore {
     }
 
     // ── Sales orders (won project → payment → finance) ──
-    // Anyone internal (incl. partners) can create an order for a project they
-    // closed and read their own; finance/admin read all + update (post to books).
+    // Anyone internal can create an order for a project they closed and read their
+    // own; finance/admin read all + update (post to books).
     match /sales_orders/{docId} {
-      // [RN-149] Internal operational doc: any non-partner staff may read ( -> docs/firestore-rules-notes.md#rn-149
+      // [RN-149] Internal operational doc: any staff with a profile may rea -> docs/firestore-rules-notes.md#rn-149
       allow read:   if isAuth() && (
-        resource.data.createdBy == request.auth.uid || !isPartner()
+        resource.data.createdBy == request.auth.uid || hasProfile()
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       // Finance keeps full update rights. Design may write ONLY the design-flow
@@ -2213,16 +2186,14 @@ service cloud.firestore {
     }
 
     // ── Project lifecycle (the spine: quote→order→production→delivery→paid) ──
-    // Internal staff read + manage all; a partner sees only their own BS projects.
+    // Internal staff read + manage all.
     match /job_projects/{docId} {
-      // Partner sees projects they created OR shared projects originating from their quote.
-      // Partner may NOT edit profit factors — only the project owner / non-partner staff can update.
-      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || resource.data.partnerUid == request.auth.uid || !isPartner());
+      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || hasProfile());
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       // v12 WS36 — money keys need books access; stage/timeline/documents/tracking
       // edits stay open to internal staff exactly as before (affectedKeys diff, so
       // writes not touching money keys are unaffected).
-      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || !isPartner())
+      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || hasProfile())
         && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(
                ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule'])
              || canFinance() );
@@ -2234,14 +2205,14 @@ service cloud.firestore {
       allow get:    if true;
       allow list:   if false;
       allow create: if isAuth() && (
-        !isPartner()
+        hasProfile()
         || (
           request.resource.data.get('orderId', '') != ''
           && exists(/databases/$(database)/documents/sales_orders/$(request.resource.data.get('orderId', '')))
           && get(/databases/$(database)/documents/sales_orders/$(request.resource.data.get('orderId', ''))).data.get('createdBy', '') == request.auth.uid
         )
       );
-      allow update: if isAuth() && !isPartner();
+      allow update: if isAuth() && hasProfile();
       allow delete: if isAuth() && isAdmin();
     }
 
@@ -2259,7 +2230,7 @@ service cloud.firestore {
             && exists(/databases/$(database)/documents/$(rd.get('src', {}).get('coll', ''))/$(rd.get('src', {}).get('id', '')))
             && srcQuote(rd).get('createdBy', '') == request.auth.uid;
       }
-      // A staff/partner write may never fabricate or alter a client response:
+      // A staff write may never fabricate or alter a client response:
       // create must start it 'pending'; update must leave it untouched or
       // reset it to 'pending' (deliberate "re-open for response" after a fix).
       function responseUntouchedOrReset() {
@@ -2269,12 +2240,12 @@ service cloud.firestore {
 
       allow create: if isAuth()
         && request.resource.data.get('clientResponse', {}).get('status', '') == 'pending'
-        && (!isPartner() || srcIsMine(request.resource.data));
+        && (hasProfile() || srcIsMine(request.resource.data));
       allow update: if isAuth()
         && responseUntouchedOrReset()
-        && (!isPartner() || (srcIsMine(resource.data) && srcIsMine(request.resource.data)));
+        && (hasProfile() || (srcIsMine(resource.data) && srcIsMine(request.resource.data)));
       allow delete: if isAuth()
-        && (!isPartner() || srcIsMine(resource.data));
+        && (hasProfile() || srcIsMine(resource.data));
     }
 
     // [RN-152] Public ID verification (QR scan target, WS27) ─ -> docs/firestore-rules-notes.md#rn-152
@@ -2301,7 +2272,7 @@ service cloud.firestore {
             && d.get('photoUrl', '') == u.get('photoUrl', '')
             && realDepts.hasAll(deptTokens);
       }
-      allow create, update: if isAuth() && !isPartner() && (
+      allow create, update: if isAuth() && hasProfile() && (
         isOpsAdmin() ||                                     // HR mints worker + employee cards
         ( request.resource.data.get('kind','') == 'employee'      // employee self-mints OWN card only
           && request.resource.data.get('uid','') == request.auth.uid
@@ -2344,38 +2315,37 @@ service cloud.firestore {
 
     // [RN-154] Client CRM — UNIFIED (v12 WS32) ─ -> docs/firestore-rules-notes.md#rn-154
     match /clients/{docId} {
-      allow read:   if isAuth() && !isPartner();
-      allow create, update: if isAuth() && !isPartner()
+      allow read:   if isAuth() && hasProfile();
+      allow create, update: if isAuth() && hasProfile()
         && request.resource.data.get('name', '') is string
         && request.resource.data.get('name', '') != '';
       allow delete: if isAuth() && isAdmin();
     }
     // Legacy archives (records-forever directive): staff read, admin-only write
-    // (migration stamps `migratedTo`), nothing else. Partner read of bs_clients
-    // is REMOVED — no partner-facing code ever read it (grep-verified WS32 brief).
-    match /sales_clients/{docId}  { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
-    match /design_clients/{docId} { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
-    match /bs_clients/{docId}      { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
+    // (migration stamps `migratedTo`), nothing else.
+    match /sales_clients/{docId}  { allow read: if isAuth() && hasProfile(); allow write: if isAuth() && isAdmin(); }
+    match /design_clients/{docId} { allow read: if isAuth() && hasProfile(); allow write: if isAuth() && isAdmin(); }
+    match /bs_clients/{docId}      { allow read: if isAuth() && hasProfile(); allow write: if isAuth() && isAdmin(); }
 
     // [RN-155] Dynamic / runtime-named collections ─ -> docs/firestore-rules-notes.md#rn-155
     match /{coll}/{docId} {
       // [RN-156] Files: readable by internal staff; you own what you upload -> docs/firestore-rules-notes.md#rn-156
-      allow read:   if isAuth() && coll.matches('files_.*') && !isPartner();
-      allow create: if isAuth() && coll.matches('files_.*') && !isPartner()
+      allow read:   if isAuth() && coll.matches('files_.*') && hasProfile();
+      allow create: if isAuth() && coll.matches('files_.*') && hasProfile()
                     && request.resource.data.uploadedBy == request.auth.uid;
-      allow update, delete: if isAuth() && coll.matches('files_.*') && !isPartner()
+      allow update, delete: if isAuth() && coll.matches('files_.*') && hasProfile()
                     && (resource.data.uploadedBy == request.auth.uid || isAdmin());
     }
     match /{coll}/{docId} {
       // [RN-157] Budget lines: internal planning data. v12 WS19: this was a -> docs/firestore-rules-notes.md#rn-157
-      allow read:  if isAuth() && coll.matches('budgets_.*') && !isPartner();
+      allow read:  if isAuth() && coll.matches('budgets_.*') && hasProfile();
       // [RN-158] v12 WS34: widened so a dept member can manage their OWN de -> docs/firestore-rules-notes.md#rn-158
       allow create: if isAuth() && coll.matches('budgets_.*')
         && ( isMoneyAdmin()
-          || (!isPartner() && inDept(request.resource.data.get('dept',''))) );
+          || (hasProfile() && inDept(request.resource.data.get('dept',''))) );
       allow update, delete: if isAuth() && coll.matches('budgets_.*')
         && ( isMoneyAdmin()
-          || (!isPartner() && inDept(resource.data.get('dept',''))) );
+          || (hasProfile() && inDept(resource.data.get('dept',''))) );
     }
 
     // [RN-159] Files Hub (WS38) — unified file metadata + folder tree ─ -> docs/firestore-rules-notes.md#rn-159
@@ -2384,9 +2354,9 @@ service cloud.firestore {
            isSeniorAdmin()
         || resource.data.get('uploadedBy','') == request.auth.uid
         || request.auth.uid in resource.data.get('sharedUserIds', [])
-        || (!isPartner() && resource.data.get('visibility','company') == 'company')
+        || (hasProfile() && resource.data.get('visibility','company') == 'company')
       );
-      allow create: if isAuth() && !isPartner()
+      allow create: if isAuth() && hasProfile()
         && request.resource.data.get('uploadedBy','') == request.auth.uid
         && request.resource.data.get('visibility','company') in ['company','private']
         && request.resource.data.get('deleted', false) == false;
@@ -2406,16 +2376,16 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
     match /hub_folders/{folderId} {
-      allow read:   if isAuth() && !isPartner();
-      allow create: if isAuth() && !isPartner()
+      allow read:   if isAuth() && hasProfile();
+      allow create: if isAuth() && hasProfile()
         && request.resource.data.get('createdBy','') == request.auth.uid;
-      allow update, delete: if isAuth() && !isPartner()
+      allow update, delete: if isAuth() && hasProfile()
         && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
     }
 
     // [RN-160] Year in Review (owner ruling 2026-08-12: end-of-year figur -> docs/firestore-rules-notes.md#rn-160
     match /company_year_review/{year} {
-      allow read:   if isAuth() && !isPartner();
+      allow read:   if isAuth() && hasProfile();
       allow create, update, delete: if isAuth() && isPresident();
     }
   }

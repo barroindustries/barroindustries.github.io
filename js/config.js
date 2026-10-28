@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.331';
+window.APP_VERSION = '14.0.332';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -420,24 +420,6 @@ window.ROLES = {
   employee:  { label: 'Employee',            badge: 'badge-gray',   canSeeAll: false },
   agent:     { label: 'Sales Agent',         badge: 'badge-orange', canSeeAll: false },
   finance:   { label: 'Accountant',          badge: 'badge-green',  canSeeAll: false }
-};
-
-// ── Retired external-partner role — TEMPORARY roster guard (money safety) ──
-// The external `partner` role is retired and window.isExternalPartnerUser (which
-// kept those accounts off every payroll / HR / statutory roster) is deleted:
-// Brilliant Steel staff are Barro employees and are paid like anyone else. Until
-// the Phase-2 data purge deletes the surviving users docs with role 'partner'
-// (they cannot sign in — app.js refuses the role — but they are still rows on
-// `users`), the five rosters that used to exclude them must keep skipping them,
-// or one with a payroll doc would be computed, paid and filed like staff.
-// ROLE ONLY, trimmed and case-insensitive (production carries 'Partner' drift):
-// never the title and never a department — a Brilliant-Steel-only employee is NOT
-// retired. ONE definition; callers: buildPayRunLines (js/departments.js), the HR
-// payroll roster (js/screens/hr.js), both Gov Rates rosters (js/screens/
-// statutory-rates.js), the payroll back-fill roster (js/screens/payroll-backfill.js).
-// PARTNER-REMOVAL-SPEC §3.2 retired-role — temporary; WS-H deletes this and every call.
-window.isRetiredRoleUser = function(u) {
-  return !!u && String(u.role || '').trim().toLowerCase() === 'partner';
 };
 
 // ── Employment status (owner request, 2026-08-09) ────────────────────────

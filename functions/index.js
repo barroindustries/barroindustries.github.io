@@ -3401,31 +3401,27 @@ async function cirPurgeStaleDrafts(db, nowMs) {
  * §2.5 step 11b — owner ruling R1 (amended): union of Sales-department users
  * (legacy `department` string field + current `departments` array field,
  * same dual-query idiom processMetaLead uses for the same reason) AND an
- * INDEPENDENT role=='president' query, deduped by uid, partners always
- * dropped (by the caller, from the returned uid -> role map). Each of the
+ * INDEPENDENT role=='president' query, deduped by uid. Each of the
  * three queries is caught individually so one failing never drops the other
- * two's recipients (spec: "still send to whoever the others returned"). Role
- * for the partner-drop check comes straight off each query's own doc data — no
- * extra re-read per recipient.
- * Returns { allUids: Set<string>, uidRole: Map<string, string|undefined> }.
+ * two's recipients (spec: "still send to whoever the others returned").
+ * Returns { allUids: Set<string> }.
  */
 async function resolveSalesAndPresidentUids(db, logTag) {
-  const uidRole = new Map();
   const salesUids = new Set();
   const presidentUids = new Set();
 
   const q1 = db.collection('users').where('department', '==', 'Sales').get()
-    .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
+    .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); }))
     .catch((e) => console.error(`${logTag} notify: Sales(department) query failed:`, e.message));
   const q2 = db.collection('users').where('departments', 'array-contains', 'Sales').get()
-    .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
+    .then((s) => s.docs.forEach((d) => { salesUids.add(d.id); }))
     .catch((e) => console.error(`${logTag} notify: Sales(departments[]) query failed:`, e.message));
   const q3 = db.collection('users').where('role', '==', 'president').get()
-    .then((s) => s.docs.forEach((d) => { presidentUids.add(d.id); uidRole.set(d.id, (d.data() || {}).role); }))
+    .then((s) => s.docs.forEach((d) => { presidentUids.add(d.id); }))
     .catch((e) => console.error(`${logTag} notify: president query failed:`, e.message));
   await Promise.all([q1, q2, q3]);
 
-  return { allUids: new Set([...salesUids, ...presidentUids]), uidRole };
+  return { allUids: new Set([...salesUids, ...presidentUids]) };
 }
 
 /**
@@ -3433,7 +3429,7 @@ async function resolveSalesAndPresidentUids(db, logTag) {
  * Recipient resolution lives in resolveSalesAndPresidentUids above.
  */
 async function cirNotifyStaff(db, doc, refNo) {
-  const { allUids, uidRole } = await resolveSalesAndPresidentUids(db, '[cirSubmit]');
+  const { allUids } = await resolveSalesAndPresidentUids(db, '[cirSubmit]');
   if (allUids.size === 0) {
     console.error('[cirSubmit] notify: no recipients resolved (all three lookups empty or failed) for', refNo);
     return;
@@ -3441,7 +3437,6 @@ async function cirNotifyStaff(db, doc, refNo) {
 
   const toNotify = [];
   allUids.forEach((uid) => {
-    if (uidRole.get(uid) === 'partner') return; // R1: partners always dropped, even if somehow Sales/president.
     toNotify.push({
       ref: db.collection('notifications').doc(uid).collection('items').doc(),
       notifData: Object.assign({}, cir.buildNotification(doc), { dedupKey: `cir_${refNo}_${uid}` }),
@@ -4186,14 +4181,13 @@ async function qrLoadProducts(db, nowMs) {
 
 /** §5.4 step 11a — notify the Sales department + the President (R6) of a new quote request. NEVER carries the exact figure. */
 async function qrNotifyStaff(db, doc, refNo) {
-  const { allUids, uidRole } = await resolveSalesAndPresidentUids(db, '[qrSubmit]');
+  const { allUids } = await resolveSalesAndPresidentUids(db, '[qrSubmit]');
   if (allUids.size === 0) {
     console.error('[qrSubmit] notify: no recipients resolved (all three lookups empty or failed) for', refNo);
     return;
   }
   const toNotify = [];
   allUids.forEach((uid) => {
-    if (uidRole.get(uid) === 'partner') return;                  // partners always dropped
     toNotify.push({
       ref: db.collection('notifications').doc(uid).collection('items').doc(),
       notifData: Object.assign({}, qr.buildNotification(doc), { dedupKey: `qr_${refNo}_${uid}` }),

@@ -254,14 +254,11 @@ window.renderStatutoryStatusSection = async function (container, canWrite, curre
 
   // ── roster reads ────────────────────────────────────────────────────────
   // Everyone on `users`, like buildPayRunLines (js/departments.js), so this
-  // report's roster matches the real pay run's — including its one temporary
-  // exception: a surviving users doc with the retired role 'partner' is not on it
-  // (window.isRetiredRoleUser, js/config.js). PARTNER-REMOVAL-SPEC §3.2 retired-role
-  // — WS-H deletes this filter.
+  // report's roster matches the real pay run's.
   let officeDocs = [], payrollDenied = false, officeReadFailed = false;
   try {
     const usersRes = await window.fetchUsersWithPayroll();
-    officeDocs = usersRes.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => !window.isRetiredRoleUser(u));
+    officeDocs = usersRes.docs.map(d => ({ id: d.id, ...d.data() }));
     payrollDenied = !!usersRes.payrollDenied;
   } catch (_) { officeReadFailed = true; }
 
@@ -979,12 +976,9 @@ window.renderOfficeSplitSection = async function (container, currentUser, curren
   const hardFail = previewFailed || rosterFailed || payrollDenied;
 
   // ── Office roster: not removed, not Operations Team ────────────────────
-  // No department test — the same roster buildPayRunLines starts from, so it also
-  // drops a surviving users doc with the retired role 'partner' (window.
-  // isRetiredRoleUser, js/config.js; PARTNER-REMOVAL-SPEC §3.2 retired-role —
-  // WS-H deletes that term).
+  // No department test — the same roster buildPayRunLines starts from.
   const officeRaw = hardFail ? [] : usersRes.docs.map(d => ({ id: d.id, ...d.data() }))
-    .filter(u => !window.isRetiredRoleUser(u) && u.removed !== true && u.payClass !== 'production');
+    .filter(u => u.removed !== true && u.payClass !== 'production');
 
   const flatByUid = {};
   (flatBuilt && flatBuilt.lines ? flatBuilt.lines : []).forEach(l => { flatByUid[l.uid] = l; });

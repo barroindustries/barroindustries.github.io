@@ -7,13 +7,13 @@
 //   * Sales › Quote requests (js/screens/quote-requests.js): a configured line shows the family name, each chosen option and the size; the exact figure and
 //     how it was built are staff-only (never in the client copy); "Open in Quote Builder" maps the line to its primary SKU with the configuration in
 //     the description; a fixed line is mapped exactly as before.
-//   * firestore.rules `product_pricing`: finance tier only, never public, no partner, approve requires the approver's own uid and unchanged figures, no delete.
+//   * firestore.rules `product_pricing`: finance tier only, never public, needs a users profile, approve requires the approver's own uid and unchanged figures, no delete.
 //
 // The screens run from their REAL source in a vm sandbox with the REAL escHtml (js/modules.js) and the REAL family/pricing libraries loaded inside the same
 // context; Firestore is a small in-memory fake that records every write. Fixtures use FAKE odd-figure pesos (the repository is public).
 //
 // Mutation-tested in scratch copies (see the commit message): Save leaving `approved` true, Approve writing the figures, Approve not blocked when dirty,
-// import accepting an unknown cell / a string amount / a figure over the cap / writing approved sheets, the gate letting the secretary or a partner in,
+// import accepting an unknown cell / a string amount / a figure over the cap / writing approved sheets, the gate letting the secretary in, a read that no longer needs a profile,
 // an unescaped derivation note, the client copy showing the family breakdown, the builder mapping losing priceManual, and so on; each must fail here.
 //
 // Run with: node --test tests/*.test.mjs
@@ -1110,13 +1110,13 @@ describe('firestore.rules › product_pricing — writes finance tier only, read
     if (catchAll > 0) assert.ok(start < catchAll, 'the product_pricing rule must sit before the catch-all');
     assert.ok(!/match \/product_pricing\/\{[^}]*=\*\*\}/.test(rules));
   });
-  it('create / update are signed-in, non-partner, senior-admin or finance; READ is the same plus the Sales tier (cirWriter) — and nothing is open to the public or to any signed-in user', () => {
+  it('create / update are signed-in, with a users profile, senior-admin or finance; READ is the same plus the Sales tier (cirWriter) — and nothing is open to the public or to any signed-in user', () => {
     for (const op of ['create', 'update']) {
       const rule = allow(op);
-      assert.match(rule, /isAuth\(\) && !isPartner\(\) && \(isSeniorAdmin\(\) \|\| canFinance\(\)\)/, op);
+      assert.match(rule, /isAuth\(\) && hasProfile\(\) && \(isSeniorAdmin\(\) \|\| canFinance\(\)\)/, op);
       assert.ok(!/cirWriter/.test(rule), `${op} must stay finance tier: the Sales tier may only READ the sheet`);
     }
-    assert.match(allow('read'), /isAuth\(\) && !isPartner\(\) && \(isSeniorAdmin\(\) \|\| canFinance\(\) \|\| cirWriter\(\)\)/);
+    assert.match(allow('read'), /isAuth\(\) && hasProfile\(\) && \(isSeniorAdmin\(\) \|\| canFinance\(\) \|\| cirWriter\(\)\)/);
     for (const op of ['read', 'create', 'update']) {
       assert.ok(!/if true|if isAuth\(\);|if request\.auth != null;/.test(allow(op)), `${op} must not be open`);
     }
@@ -1126,7 +1126,7 @@ describe('firestore.rules › product_pricing — writes finance tier only, read
   it('QUOTE-BUILDER-CONFIGURATOR-SPEC §2.4: the read gate names cirWriter() — president / manager or a NON-secretary Sales member — and nothing else was widened', () => {
     assert.match(allow('read'), /cirWriter\(\)/);
     assert.match(rules, /function cirWriter\(\) \{ return isSeniorAdmin\(\) \|\| \(!isSecretary\(\) && inDept\('Sales'\)\); \}/);
-    assert.match(allow('read'), /!isPartner\(\)/, 'a partner session must never read the option amounts');
+    assert.match(allow('read'), /hasProfile\(\)/, 'a signed-in identity with no users doc must never read the option amounts');
     assert.ok(!/cirWriter/.test(allow('delete')) && !/cirWriter/.test(allow('create')) && !/cirWriter/.test(allow('update')));
     assert.equal((block.match(/cirWriter/g) || []).length, 2, 'cirWriter may appear in the read rule and its explaining comment only');
   });
@@ -1194,9 +1194,9 @@ describe('firestore.rules › quote_requests / client_info_requests — the quot
       assert.equal((b.match(/size\(\) <= 50/g) || []).length, 1, name);
     }
   });
-  it('the rest of both rules is untouched: signed-in non-partner read, no create / delete, Sales-tier writers only, attribution fields name the real writer', () => {
+  it('the rest of both rules is untouched: signed-in read with a users profile, no create / delete, Sales-tier writers only, attribution fields name the real writer', () => {
     for (const b of [qrBlock, cirBlock]) {
-      assert.match(b, /allow read: if isAuth\(\) && !isPartner\(\);/);
+      assert.match(b, /allow read: if isAuth\(\) && hasProfile\(\);/);
       assert.match(b, /allow create, delete: if false;/);
       assert.match(upd(b), /allow update: if isAuth\(\) && cirWriter\(\)/);
       assert.match(upd(b), /statusChangedBy'\]\)\s*\|\|\s*request\.resource\.data\.statusChangedBy == request\.auth\.uid/);

@@ -14,13 +14,14 @@ rules_version = '2';
 //    as request.auth.token.role / request.auth.token.departments:
 //      – Finance/payslips (transfer proofs)  → finance tier ONLY.
 //      – Other Finance/* (receipts, ledger, taxes, collections, …) →
-//        readable/modifiable by internal staff, NOT the external
-//        partner; overwrite/delete restricted to the finance tier so a
+//        readable/modifiable by internal staff holding a role claim;
+//        overwrite/delete restricted to the finance tier so a
 //        non-finance staffer can file a receipt but can't tamper with
 //        or destroy existing financial files.
-//      – Other department folders → internal staff only (the external
-//        Brilliant Steel partner is excluded), with the partner still
-//        allowed into folders that ARE one of their own departments.
+//      – Other department folders → internal staff holding a role claim
+//        (these rules once also kept the external Brilliant Steel
+//        partner role out; it is retired — PARTNER-REMOVAL-SPEC Phase 3,
+//        2026-10-28 — and the term is now hasRoleClaim()).
 //      – profile-photos stay owner-scoped; tasks/posts/General stay
 //        collaborative (company-wide).
 //      – THE CORPORATE SECRETARY BOUNDARY (owner ruling, closed in
@@ -35,20 +36,21 @@ rules_version = '2';
 //        ROLE, so their assigned Ventures review works without anyone
 //        remembering to assign the department.
 //
-//  WHY "internal (non-partner)" RATHER THAN STRICT PER-DEPT MEMBERSHIP
+//  WHY "internal (any role claim)" RATHER THAN STRICT PER-DEPT MEMBERSHIP
 //  ------------------------------------------------------------------
 //  Many first-path segments are NOT real department keys — "General"
 //  (All Company Files), Government-Biddings section titles, tasks,
 //  posts. A strict "members of that department only" gate would deny
 //  legitimate internal uploads/reads to those folders and break the
-//  app. The concrete threat closed here is the EXTERNAL partner role
-//  reading/overwriting/deleting internal (esp. financial) files, plus
-//  locking payslip transfer proofs to finance.
+//  app. The concrete threat closed here is a token without a role
+//  claim (no users doc; formerly also the retired EXTERNAL partner
+//  role) reading/overwriting/deleting internal (esp. financial) files,
+//  plus locking payslip transfer proofs to finance.
 //
 //  NOTE ON DOWNLOAD URLS: getDownloadURL() is a READ. After an upload
 //  the app immediately fetches the file's URL, so the uploader must
 //  retain read on that path. Expense receipts are uploaded by internal
-//  staff (non-partner) into Finance/* — covered by the "internal read"
+//  staff into Finance/* — covered by the "internal read"
 //  rule. Payslip proofs are uploaded only by finance — covered by the
 //  finance-tier rule. So no legitimate upload flow is broken.
 //
@@ -96,9 +98,9 @@ service firebase.storage {
     }
 
     // ── Custom-claim accessors (minted by syncUserClaims) ──
-    // A missing custom claim reads as null on the token (it does NOT throw,
-    // unlike a missing Firestore field), so scalar comparisons are safe. The
-    // `departments` claim is a list — guard against null before `in`.
+    // Reading a MISSING custom claim directly (request.auth.token.role) throws — and a throwing rule denies — just like a missing Firestore field
+    // (measured on the Firestore rules emulator, same language, 2026-10-28; an earlier note here said it reads as null, which was wrong). Test presence with
+    // `'role' in request.auth.token` (hasRoleClaim() below). The `departments` claim is a list — guard against null before `in`.
     function claimRole() {
       return request.auth.token.role;
     }
@@ -123,8 +125,11 @@ service firebase.storage {
         || claimRole() == 'finance'
         || (claimRole() != 'secretary' && hasClaimDept('Finance'));
     }
-    function isPartnerClaim() {
-      return claimRole() == 'partner';
+    // True when the token carries a `role` claim at all (syncUserClaims mints it from users/{uid}.role, so an identity with no users doc has none). It stands
+    // where the old external-partner claim exclusion stood, in every expression that had it, because that term ALSO refused such a token: reading a missing
+    // claim throws, and a throwing rule denies. Presence is tested with `in`, which never throws.
+    function hasRoleClaim() {
+      return 'role' in request.auth.token;
     }
     // A user may reach a department folder if they're an admin, or it's one of
     // their own departments.
@@ -139,7 +144,7 @@ service firebase.storage {
     function isReservedTop(seg) {
       // 'Ventures' is reserved (2026-08-08) so brief attachments do NOT fall to
       // the generic department block, which is readable — and, since read covers
-      // list, ENUMERABLE — by any internal non-partner staffer. Without this the
+      // list, ENUMERABLE — by any internal staffer. Without this the
       // Firestore record would be Ventures-only while the file it points at was
       // company-wide, which defeats the point of the restriction.
       // 'IT' is reserved (2026-08-10) for the same reason, one ruling later. The
@@ -147,7 +152,7 @@ service firebase.storage {
       // (canIt() = !isSecretary() && canDept('IT')) but never came here, and 'IT'
       // is a perfectly ordinary department key — js/app.js's Files tab writes
       // IT/Personal/* and IT/Shared/* — so it fell straight through to the
-      // generic {department} block, which admits ANY internal non-partner. It now
+      // generic {department} block, which admits ANY internal staffer. It now
       // has its own block below; a reserved segment with no block of its own is a
       // deny-all, so the two edits are a pair and neither is optional.
       return seg == 'Finance' || seg == 'Ventures' || seg == 'IT'
@@ -244,8 +249,8 @@ service firebase.storage {
 
     // ── Finance / everything else (receipts, taxes, ledger, …) ──
     // (subfolder != 'payslips' so this never loosens the rule above.)
-    //  • read  → internal staff (non-partner). Lets an employee retrieve the
-    //            URL of the receipt they just filed; blocks the partner.
+    //  • read  → internal staff (a role claim). Lets an employee retrieve the
+    //            URL of the receipt they just filed.
     //  • create (new object) → internal staff. Employees file expense receipts.
     //  • overwrite/delete (existing object) → finance tier only — a non-finance
     //    staffer can add a file but can't tamper with or destroy existing ones.
@@ -254,7 +259,7 @@ service firebase.storage {
     //  `claimRole() != 'secretary'` to isFinanceClaim()'s DEPT leg, which closed
     //  the payslip folder and the overwrite/delete tier — but this block never
     //  calls isFinanceClaim() on the read or create path at all, so the one rule
-    //  that most needed the ruling was left as `!isPartnerClaim()`: every scanned
+    //  that most needed the ruling was left as the bare role-claim check: every scanned
     //  receipt, BIR filing, ledger scan and SSS/government document under
     //  Finance/* stayed readable, and new objects droppable, by that role. Owner
     //  ruling: Finance is closed to the Corporate Secretary, and a department
@@ -286,9 +291,9 @@ service firebase.storage {
       return claimRole() != 'secretary' || financeOperationalSubfolder(sub);
     }
     match /Finance/{subfolder}/{fileName} {
-      allow read: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim()
+      allow read: if isSignedIn() && subfolder != 'payslips' && hasRoleClaim()
         && financeTreeOpenToCaller(subfolder);
-      allow write: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim()
+      allow write: if isSignedIn() && subfolder != 'payslips' && hasRoleClaim()
         && financeTreeOpenToCaller(subfolder)
         && (request.resource == null || isValidDocument())   // size cap on writes
         && (resource == null || isFinanceClaim());           // overwrite/delete → finance
@@ -331,8 +336,8 @@ service firebase.storage {
     }
 
     // ── Quote-builder photo attachments (see specs/quote-builder-photos-spec.md) ──
-    // Attached from quote-builder-v2 (Sales staff AND the external partner both
-    // file quotes), so any signed-in user may upload/read. Images only.
+    // Attached from quote-builder-v2 by the staff who file quotes, so any
+    // signed-in user may upload/read. Images only.
     match /quote-photos/{quoteRef}/{fileName} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (request.resource == null || isValidImage());
@@ -342,16 +347,15 @@ service firebase.storage {
     // ── Other department folders ─────────────────────
     // Sales, Marketing, Design, IT, Admin, Production, Brilliant Steel, plus
     // gov-section-title and Files-tab folders. Internal staff get full
-    // cross-department access; the external partner is excluded UNLESS the
-    // folder is one of their own departments (e.g. their Brilliant Steel space).
+    // cross-department access.
     // Reserved top-level segments are excluded so their stricter rules win.
     // ── Ventures brief attachments (2026-08-08) ─────────────────────────────
     // 'Ventures' is in isReservedTop(), so the generic {department} block below
     // deliberately does NOT cover it — that block is readable (and, since read
-    // covers list, ENUMERABLE) by any internal non-partner staffer, which would
+    // covers list, ENUMERABLE) by any internal staffer, which would
     // have left the Firestore record Ventures-only while the file it points at
     // was company-wide. This block restores access, scoped: department members
-    // and admins only, partners never. isMemberOf() reads the Auth CUSTOM CLAIM
+    // and admins only. isMemberOf() reads the Auth CUSTOM CLAIM
     // (syncUserClaims), not the users doc — Storage rules cannot read Firestore.
     //
     // 2026-08-10 — the two rule files disagreed about who an "admin" is, and
@@ -370,8 +374,8 @@ service firebase.storage {
       return isMemberOf('Ventures') || claimRole() == 'secretary';
     }
     match /Ventures/{subfolder}/{fileName} {
-      allow read: if isSignedIn() && !isPartnerClaim() && isVenturesMember();
-      allow write: if isSignedIn() && !isPartnerClaim() && isVenturesMember()
+      allow read: if isSignedIn() && hasRoleClaim() && isVenturesMember();
+      allow write: if isSignedIn() && hasRoleClaim() && isVenturesMember()
         && (request.resource == null || isValidDocument());   // size cap on writes
     }
 
@@ -388,12 +392,12 @@ service firebase.storage {
     // took away (owner ruling: assignment never beats the role), exactly the
     // back door isFinanceClaim() closed on 2026-08-09.
     match /IT/{subfolder}/{fileName} {
-      allow read: if isSignedIn() && !isPartnerClaim()
+      allow read: if isSignedIn() && hasRoleClaim()
         && claimRole() != 'secretary' && isMemberOf('IT');
-      allow create: if isSignedIn() && !isPartnerClaim()
+      allow create: if isSignedIn() && hasRoleClaim()
         && claimRole() != 'secretary' && isMemberOf('IT')
         && (request.resource == null || isValidDocument());
-      allow update, delete: if isSignedIn() && !isPartnerClaim()
+      allow update, delete: if isSignedIn() && hasRoleClaim()
         && claimRole() != 'secretary' && isMemberOf('IT')
         && isOwnerOrAdmin();
     }
@@ -401,22 +405,22 @@ service firebase.storage {
     match /{department}/{subfolder}/{fileName} {
       allow read: if isSignedIn()
         && !isReservedTop(department)
-        && (!isPartnerClaim() || isMemberOf(department));
+        && (hasRoleClaim() || isMemberOf(department));
       allow create: if isSignedIn()
         && !isReservedTop(department)
         && (request.resource == null || isValidDocument())
-        && (!isPartnerClaim() || isMemberOf(department));
+        && (hasRoleClaim() || isMemberOf(department));
       allow update, delete: if isSignedIn()
         && !isReservedTop(department)
-        && (!isPartnerClaim() || isMemberOf(department))
+        && (hasRoleClaim() || isMemberOf(department))
         && isOwnerOrAdmin();
     }
 
     // Client information request photos (specs/CLIENT-INFO-REQUEST-SPEC.md §3.2) — written ONLY by
-    // the cir* callables (Admin SDK). Staff read; partner never. The 4-segment
+    // the cir* callables (Admin SDK). Staff read. The 4-segment
     // client-info-requests/drafts/{d}/{f} path matches no block at all → deny-all by construction.
     match /client-info-requests/{ref}/{fileName} {
-      allow read: if isSignedIn() && !isPartnerClaim();
+      allow read: if isSignedIn() && hasRoleClaim();
       allow write: if false;
     }
 

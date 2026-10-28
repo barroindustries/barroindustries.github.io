@@ -2448,8 +2448,8 @@ window.QUOTE_BRANDS = {
   },
   // Barro Industries — the parent company quoting general fabrication in its
   // own name. WITHOUT this entry a BI quote shown to a CUSTOMER would fall
-  // through resolveQuoteBrand's else-branch and render as a generic PARTNER
-  // ("In partnership with Barro Industries"), which is exactly backwards.
+  // through to resolveQuoteBrand's fallback and render as Brilliant Steel,
+  // which is exactly backwards.
   BI: {
     name: 'BARRO INDUSTRIES OPC', sub: 'SEC-registered One Person Corporation',
     creds: 'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
@@ -2523,10 +2523,11 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
     date:   /^\d{4}-\d{2}-\d{2}$/.test(String((m && m.date) || '')) ? String(m.date) : '',
     amount: Number(m && m.amount) || 0,
   })) : null;
-  // Narrow to a KNOWN brand code; anything else is a generic partner ('PT').
-  // Driven by QUOTE_BRANDS (which now carries BK/BI/BS) rather than a hardcoded
-  // pair, so this can't drift out of step with resolveQuoteBrand below.
-  const co  = window.QUOTE_BRANDS[q.company] ? q.company : 'PT';
+  // Narrow to a KNOWN brand code; anything else falls back to 'BS' (the retired
+  // generic-partner 'PT' code is gone — PARTNER-REMOVAL-SPEC Phase 3). Driven by
+  // QUOTE_BRANDS (BK/BI/BS) rather than a hardcoded pair, so this can't drift out
+  // of step with resolveQuoteBrand below.
+  const co  = window.QUOTE_BRANDS[q.company] ? q.company : 'BS';
   return {
     v: 1,
     co,
@@ -2584,39 +2585,18 @@ window.buildPublicQuoteDoc = function(q, brand, coll, docId) {
   };
 };
 
-// Resolve the four public brand strings for a quote. BK/BI/BS are static
-// (QUOTE_BRANDS above); a generic (non-Brilliant-Steel) partner quote
-// (company:'PT') is branded with the partner COMPANY'S name — sourced from
-// the quote's CREATOR's own user profile (same `users/{uid}.company` field
-// partnerCompanyName() reads for portal branding), not the current viewer's
-// profile, since the person clicking Share may be internal Sales staff, not
-// the partner who filed the quote. Mirrors quote-builder-v2.html's CO.PT
-// synthesis (~line 1665) field-for-field, minus `sig` (not part of the
-// public brand allowlist).
+// Resolve the four public brand strings for a quote: BK/BI/BS are static
+// (QUOTE_BRANDS above); any other code falls back to Brilliant Steel's. (The
+// generic-partner brand that used to be synthesised here for company:'PT' quotes
+// went with the external partner role — PARTNER-REMOVAL-SPEC Phase 3.) It stays
+// async because every caller awaits it.
 window.resolveQuoteBrand = async function(quote) {
   // Table lookup, not a chain of === comparisons: the old two-arm ternary meant
   // every company code it didn't literally name — including 'BI' — silently
-  // fell through to the generic-PARTNER branch below, so a Barro Industries
-  // fabrication quote would have introduced itself to the customer as an
-  // unnamed partner "in partnership with Barro Industries".
-  const co = window.QUOTE_BRANDS[quote.company] ? quote.company : 'PT';
-  if (window.QUOTE_BRANDS[co]) return { co, brand: window.QUOTE_BRANDS[co] };
-  let coName = 'Partner';
-  try {
-    if (quote.createdBy) {
-      const us = await db.collection('users').doc(quote.createdBy).get();
-      if (us.exists && us.data().company) coName = us.data().company;
-    }
-  } catch (_) { /* best-effort — falls back to 'Partner' */ }
-  return {
-    co,
-    brand: {
-      name: coName,
-      sub: 'In partnership with Barro Industries',
-      creds: coName + '  •  In partnership with Barro Industries OPC',
-      thanks: 'Thank you for considering ' + coName + '. We look forward to working with you.',
-    },
-  };
+  // fell through to the fallback, so a Barro Industries fabrication quote would
+  // have been branded as another company.
+  const co = window.QUOTE_BRANDS[quote.company] ? quote.company : 'BS';
+  return { co, brand: window.QUOTE_BRANDS[co] };
 };
 
 // 12-char crypto-random token, same 54-char unambiguous alphabet (no

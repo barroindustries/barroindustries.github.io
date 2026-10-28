@@ -16,19 +16,17 @@
 //      js/screens/employee-profile.js) — no isExternalPartnerUser / _isExternalPartner / Brilliant Steel / 'partner' / isSeparate in their code, roster lines pinned.
 //   4. the payroll-side files as a whole (payroll.js, payroll-weekly.js, screens/payroll.js, payroll-backfill.js, statutory-rates.js, employee-profile.js, ...)
 //      carry no external-partner or Brilliant Steel test in code.
-//   5. the predicate is gone: js/config.js is evaluated in a vm and `typeof window.isExternalPartnerUser === 'undefined'`; no code anywhere under js/ names it.
-//   6. THE TEMPORARY RETIRED-ROLE GUARD (added by WS-G, coordinator ruling 2026-10-28; WS-H deletes it and every line of this file that mentions RETIRED_* or
-//      isRetiredRoleUser). With isExternalPartnerUser gone, a surviving users doc with role 'partner' would be a pay-run / HR-payroll / Gov-Rates candidate until
-//      the Phase-2 purge deletes it. window.isRetiredRoleUser (js/config.js; ROLE only, trimmed, any case) keeps it off the five rosters that used to exclude it.
-//      Pinned from four sides: the helper itself (every spelling of the role, and not a title / department / team), the five roster lines (exact text AND the
-//      expressions lifted out of the real source and evaluated on fixtures), the real pay-run builder run end to end (a retired doc with a full pay record has no
-//      line and is not even listed as skipped; the Brilliant Steel employees beside it are paid), and a census (exactly five call sites + one definition, the role
-//      literal only in the helper).
+//   5. the predicates are gone: js/config.js is evaluated in a vm and `typeof window.isExternalPartnerUser === 'undefined'` AND `typeof window.isRetiredRoleUser ===
+//      'undefined'`; no code anywhere under js/ names either (or _isExternalPartner).
+//   PHASE 3 (WS-H, 2026-10-28): between Phase 1 and the Phase-2 purge a TEMPORARY retired-role roster guard (window.isRetiredRoleUser, role 'partner' only) kept a surviving
+//   partner users doc off the five rosters. The purge deleted the only partner account (verification: all zeros), so WS-H deleted the guard and its call sites and
+//   restored the original pins below: the roster line is EXACTLY `const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));` in buildPayRunLines and
+//   renderPayrollManagement, `skip: u.payClass === 'production',` in payroll-backfill.js, and officeDocs / officeRaw carry no role or department term.
 // Comments are stripped before every textual assertion (the explanatory comments legitimately say "Brilliant Steel" and "partner"), and the stripper is itself
 // tested, and every stripped extract must still PARSE — a stripper that ate real code would otherwise hide a forbidden token.
 //
 // MUTATION-TESTED in scratch copies (/private/tmp/…/scratchpad/wsd-mut/<id>/ — a copy of js/ plus this file; the shared tree is never touched). The unmutated
-// copy ran green first (control: 30 of 30), then each of the 16 mutants below re-introduced the exclusion (or a department-dependent pay twist) in ONE place and
+// copy ran green first (control: 30 of 30), then each of the 16 mutants M01-M16 re-introduced the exclusion (or a department-dependent pay twist) in ONE place and
 // every one turned the suite red. Legend of the tests that killed them:
 //   [clean] the extract carries no partner / Brilliant Steel / department rung   [line] the roster line is exactly …   [use] allStaff feeds nothing but the skip loop
 //   [paid] a Brilliant-Steel-only employee is PAID (null)   [reasons] removed / production / linked / excluded unchanged   [dept] the reason never depends on department
@@ -49,22 +47,17 @@
 //   M13  departments.js  roster filters on the DEPARTMENTS registry (`isSeparate`) rather than a name                                    KILLED by clean, line, use
 //   M14  departments.js  monthlyRunSkipReason: when an exclusion map is passed, Brilliant Steel staff are skipped                        KILLED by clean, reasons, dept, run-1/2/3
 //   M15  departments.js  a Brilliant Steel employee's finalPay is zeroed after computePayLine (department-dependent pay)                 KILLED by clean, run-2
-//   M16  departments.js  STEALTH: BS staff dropped inside the skip loop with no banned token and no `department` word (matches fixture ids) KILLED by run-1/2/3 alone
-//   ── added with the retired-role guard (WS-G, 2026-10-28), same scratch method, one work copy with the mutant applied and undone; control 228/228 green ──
-//   [guard] the "retired-role guard" describe   [census] its call-site census   [lines] the reshaped roster-line pins   [run] the real builder run incl. the RETIRED-ROLE GUARD test
-//   M17  departments.js  buildPayRunLines: the retired-role filter removed from the roster line                                              KILLED by lines, run, guard
-//   M18  departments.js  buildPayRunLines: the filter inverted (only retired accounts reach the loop)                                        KILLED by lines, run, guard
-//   M19  config.js       helper does not trim the role                                                                                       KILLED by guard (helper), run
-//   M20  config.js       helper is case-sensitive                                                                                            KILLED by guard (helper), run
-//   M21  config.js       helper broadened to the old predicate (a Brilliant-Steel-only employee is "retired")                                KILLED by guard, run, paid-like-Sales
-//   M22  config.js       helper also retires anyone titled "Partner"                                                                         KILLED by guard, run
-//   M23  hr.js           HR payroll roster: the guard removed                                                                                KILLED by rosters, guard (lifted expression), census
-//   M24  statutory-rates.js  Gov Rates preview officeDocs: the guard removed                                                                 KILLED by rosters, guard, census
-//   M25  statutory-rates.js  Gov Rates office split officeRaw: the guard term removed                                                        KILLED by rosters, guard, census
-//   M26  payroll-backfill.js  the back-fill roster's guard removed                                                                           KILLED by census, the back-fill pin
-//   M27  departments.js  a sixth call site (monthlyRunSkipReason also asks the guard, reason 'retired')                                      KILLED by census, reasons list, paid, dept
-//   M28  hr.js           guard applied with the wrong sense (keeps only retired accounts)                                                    KILLED by rosters, guard
-//   and M01, M02, M03, M05, M06, M09, M16 re-run against the EXTENDED suite (the roster-line pins were reshaped to allow the guard): all killed.
+//   M16  departments.js  STEALTH: BS staff dropped inside the skip loop with no banned token and no `department` word (matches fixture ids) KILLED by run-1/2/3 and the loop-gate pin (one `continue`)
+//   ── WS-H (Phase 3, 2026-10-28): the guard deleted, the original pins restored, M01-M16 RE-RUN against the restored suite (control 30 of 30 before and after, all 16
+//      killed again) plus seven mutants that put the guard (or a role-partner term) back. Scratch copy: /private/tmp/…/scratchpad/wsh-mut/work-payroll (js/ + this file;
+//      the shared tree is never touched). [lines] the exact roster-line pins   [gone] the predicates-are-gone describe   [files] the whole-file scan
+//   W01  departments.js  buildPayRunLines: `.filter(u=>!window.isRetiredRoleUser(u))` back on the roster line (helper absent)                    KILLED by lines, use, run-1/2/3
+//   W02  config.js       window.isRetiredRoleUser defined again (nothing calls it)                                                               KILLED by gone (both checks)
+//   W03  hr.js           renderPayrollManagement's roster regains a role-partner filter                                                          KILLED by rosters
+//   W04  statutory-rates.js  renderStatutoryStatusSection's officeDocs regains a role-partner filter                                             KILLED by rosters, files
+//   W05  statutory-rates.js  renderOfficeSplitSection's officeRaw regains a role-partner term                                                    KILLED by rosters, files
+//   W06  payroll-backfill.js  the back-fill skip regains a trimmed, case-insensitive role-partner term                                            KILLED by files (whole-file + its `skip:` line)
+//   W07  departments.js  monthlyRunSkipReason regains a 'retired' reason for role partner                                                        KILLED by clean, reasons
 //
 // Fixtures are FAKE (invented names and odd-figure pesos): the repository is public.
 // Run with: node --test tests/*.test.mjs
@@ -116,15 +109,6 @@ const STAT = read('js/screens/statutory-rates.js');
 const STAT_STATUS = piece(STAT, /^window\.renderStatutoryStatusSection = async function[\s\S]*?\n\};\n/m, 'window.renderStatutoryStatusSection in js/screens/statutory-rates.js');
 const STAT_SPLIT  = piece(STAT, /^window\.renderOfficeSplitSection = async function[\s\S]*?\n\};\n/m, 'window.renderOfficeSplitSection in js/screens/statutory-rates.js');
 const EP_ROSTER = piece(read('js/screens/employee-profile.js'), /^async function _epLoadRoster\([\s\S]*?\n\}\n/m, '_epLoadRoster in js/screens/employee-profile.js');
-const RETIRED   = piece(read('js/config.js'), /^window\.isRetiredRoleUser = function[\s\S]*?\n\};\n/m, 'window.isRetiredRoleUser in js/config.js');
-
-// ── the TEMPORARY retired-role guard (PARTNER-REMOVAL-SPEC §3.2 "retired-role"; WS-H deletes it) ───────────────────────────────────────────────
-// With isExternalPartnerUser gone, a surviving users doc with role 'partner' would be a pay-run / HR-payroll / statutory candidate until the Phase-2 purge
-// deletes it. window.isRetiredRoleUser (js/config.js; ROLE only, trimmed, case-insensitive) keeps it off the five rosters that used to exclude it. Every
-// pin that mentions RETIRED_* below, the "retired-role guard" describe and the fixtures named ret_* are deleted by WS-H together with the guard.
-const RETIRED_CALL = 'window.isRetiredRoleUser(u)';
-const RETIRED_FILTER = `.filter(u=>!${RETIRED_CALL})`;                              // as written in departments.js / hr.js (compact style)
-const squash = (s) => String(s).replace(/\s+/g, '');                                // statutory-rates.js writes the same expressions with spaces
 
 const lines = (code) => code.split('\n');
 const linesMatching = (code, re) => lines(code).filter((l) => re.test(l));
@@ -164,15 +148,15 @@ describe('buildPayRunLines — the roster is everyone on `users`; nothing decide
     assert.ok(!/\bDEPARTMENTS\b/.test(code), 'buildPayRunLines consults the DEPARTMENTS registry');
     assert.ok(!/\bdepartments?\b/.test(code), 'buildPayRunLines reads a department off a person — the roster must not depend on department');
   });
-  it('the roster line is `const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));` plus ONE filter: the temporary retired-role one', () => {
+  it('the roster line is EXACTLY `const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));` — no filter of any kind', () => {
     const roster = linesMatching(code, /^\s*const allStaff\s*=/);
     assert.equal(roster.length, 1, 'exactly one `const allStaff =` line');
-    assert.equal(roster[0].trim(), `const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}))${RETIRED_FILTER};`);
+    assert.equal(roster[0].trim(), 'const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));');
   });
   it('`allStaff` is used for nothing but the skip loop, so no filter can be slipped in after the roster line', () => {
     assert.equal((code.match(/\ballStaff\b/g) || []).length, 2, 'allStaff: the declaration and the loop, nothing else');
     assert.equal(linesMatching(code, /\bfor \(const u of allStaff\) \{/).length, 1, 'the loop is `for (const u of allStaff) {`');
-    assert.ok(!/\busersSnap\b[^;]*\.filter\(/.test(code.replace(RETIRED_FILTER, '')), 'usersSnap is filtered by something other than the retired-role guard');
+    assert.ok(!/\busersSnap\b[^;]*\.filter\(/.test(code), 'usersSnap is filtered');
     assert.equal((code.match(/\busersSnap\b/g) || []).length, 2, 'usersSnap: fetched once, read once');
   });
   it('the only gate on the loop is monthlyRunSkipReason(u, linkedUids, periodExcluded)', () => {
@@ -251,7 +235,7 @@ describe('buildPayRunLines run for real — Brilliant Steel employees land on th
       doc: () => ({ get: async () => (name === 'pay_runs' && excluded ? { exists: true, data: () => ({ excluded }) } : { exists: false, data: () => ({}) }) }),
       get: async () => ({ docs: name === 'worker_profiles' ? docsOf(workerProfiles) : [] }),
     }) };
-    for (const src of [RETIRED, SKIP, PERIOD_EX, BPRL]) vm.runInContext(src, ctx);          // RETIRED: the REAL window.isRetiredRoleUser from js/config.js
+    for (const src of [SKIP, PERIOD_EX, BPRL]) vm.runInContext(src, ctx);
     return ctx;
   }
   const PAY = { salary: 23750, allowance: 1250, deductions: 0, payClass: 'regular' };
@@ -269,10 +253,6 @@ describe('buildPayRunLines run for real — Brilliant Steel employees land on th
     person('bs_prod', { departments: ['Brilliant Steel'], payClass: 'production' }),
     person('bs_lnk',  { departments: ['Brilliant Steel'] }),
     person('depts_p', { departments: ['Partners'], department: 'Partners' }),         // an employee filed under the retired department: still an employee, paid
-    // the retired role (TEMPORARY guard): each has a full pay record, so only the guard keeps them off the run
-    person('ret_a',   { role: 'partner', departments: ['Brilliant Steel'], department: 'Brilliant Steel' }),
-    person('ret_b',   { role: 'Partner', departments: ['Partners'] }),                // production carries 'Partner' drift
-    person('ret_c',   { role: ' PARTNER\n', departments: ['Sales'] }),
   ];
   const WORKERS = [{ id: 'wp1', linkedUid: 'bs_lnk', status: 'active' }];
   const run = async (opts) => {
@@ -297,14 +277,6 @@ describe('buildPayRunLines run for real — Brilliant Steel employees land on th
     assert.ok(Number.isFinite(line('bs_only').finalPay) && line('bs_only').finalPay > 0, 'a real, positive net pay was worked out for them');
     for (const uid of ['bs_two', 'bs_str', 'agent_a', 'titled', 'depts_p']) assert.deepEqual(bare(line(uid)), bare(line('sales_a')), `${uid} is paid differently from sales_a`);
   });
-  it('RETIRED-ROLE GUARD: a role:"partner" users doc (any case, padded) with a full pay record has no line and is not even listed as skipped; the Brilliant Steel employees beside it are all paid', async () => {
-    const out = await run();
-    for (const uid of ['ret_a', 'ret_b', 'ret_c']) {
-      assert.ok(!out.lines.some((l) => l.uid === uid), `${uid} has a pay line`);
-      assert.ok(!plain(out.skipped).some((x) => x.uid === uid), `${uid} is listed as skipped — it should be off the roster entirely, exactly as it was before the feature was retired`);
-    }
-    for (const uid of ['bs_only', 'bs_two', 'bs_str', 'depts_p']) assert.ok(out.lines.some((l) => l.uid === uid && l.finalPay > 0), `${uid} is not paid`);
-  });
   it('a period exclusion treats a Brilliant Steel employee like anyone else — the one reason that is period-scoped', async () => {
     const out = await run({ excluded: { bs_two: 'unpaid leave', sales_a: 'unpaid leave' } });
     assert.ok(!out.lines.some((l) => l.uid === 'bs_two' || l.uid === 'sales_a'));
@@ -317,101 +289,30 @@ describe('buildPayRunLines run for real — Brilliant Steel employees land on th
 
 // ═════════════════════════════ 3. the other rosters that used to filter (textual pins, comments stripped) ════════════════════════════════════
 describe('the other rosters start from everyone on `users` too', () => {
-  it('HR payroll roster (js/screens/hr.js renderPayrollManagement): clean, and its roster line is `usersSnap.docs.map(...)` plus ONLY the temporary retired-role filter', () => {
+  it('HR payroll roster (js/screens/hr.js renderPayrollManagement): clean, and its roster line is EXACTLY `usersSnap.docs.map(...)` — no filter', () => {
     const code = codeOf(HR_PAYROLL, 'renderPayrollManagement');
     assertClean(code, 'renderPayrollManagement');
     const roster = linesMatching(code, /^\s*const allStaff\s*=/);
     assert.equal(roster.length, 1);
-    assert.equal(roster[0].trim(), `const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}))${RETIRED_FILTER};`);
-    assert.ok(!/\busersSnap\b[^;]*\.filter\(/.test(code.replace(RETIRED_FILTER, '')), 'usersSnap is filtered by something other than the retired-role guard');
+    assert.equal(roster[0].trim(), 'const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));');
+    assert.ok(!/\busersSnap\b[^;]*\.filter\(/.test(code), 'usersSnap is filtered');
   });
-  it('Gov Rates statutory preview (renderStatutoryStatusSection): clean, and the office roster is the users list plus ONLY the temporary retired-role filter', () => {
+  it('Gov Rates statutory preview (renderStatutoryStatusSection): clean, and the office roster is the unfiltered users list', () => {
     const code = codeOf(STAT_STATUS, 'renderStatutoryStatusSection');
     assertClean(code, 'renderStatutoryStatusSection');
     assert.equal(linesMatching(code, /officeDocs\s*=\s*usersRes\.docs\.map/).length, 1);
-    assert.ok(squash(code).includes(squash(`officeDocs = usersRes.docs.map(d => ({ id: d.id, ...d.data() }))${RETIRED_FILTER};`)), 'officeDocs is `usersRes.docs.map(...)` + the retired-role filter and nothing else');
+    assert.ok(norm(code).includes('officeDocs = usersRes.docs.map(d => ({ id: d.id, ...d.data() }));'), 'officeDocs is `usersRes.docs.map(...)` and nothing else');
   });
-  it('Gov Rates office split (renderOfficeSplitSection): clean, and the roster filter is only the retired-role guard / removed / production', () => {
+  it('Gov Rates office split (renderOfficeSplitSection): clean, and the roster filter is only removed / production', () => {
     const code = codeOf(STAT_SPLIT, 'renderOfficeSplitSection');
     assertClean(code, 'renderOfficeSplitSection');
-    assert.ok(squash(code).includes(squash("const officeRaw = hardFail ? [] : usersRes.docs.map(d => ({ id: d.id, ...d.data() })) .filter(u => !window.isRetiredRoleUser(u) && u.removed !== true && u.payClass !== 'production');")),
-      'officeRaw is the users list filtered by the retired-role guard / removed / production only');
+    assert.ok(norm(code).includes("const officeRaw = hardFail ? [] : usersRes.docs.map(d => ({ id: d.id, ...d.data() })) .filter(u => u.removed !== true && u.payClass !== 'production');"),
+      'officeRaw is the users list filtered by removed / production only');
   });
   it('HR profiles list (js/screens/employee-profile.js _epLoadRoster): clean, and `users` is the unfiltered list', () => {
     const code = codeOf(EP_ROSTER, '_epLoadRoster');
     assertClean(code, '_epLoadRoster');
     assert.ok(norm(code).includes('const users = (usersRes.value.docs || []).map(d => ({ id: d.id, ...d.data() }));'), '`users` is `.map(...)` with no .filter');
-  });
-});
-
-// ═══════════════ the TEMPORARY retired-role guard (PARTNER-REMOVAL-SPEC §3.2 "retired-role"; WS-H deletes this whole describe) ═══════════════
-describe('retired-role guard — a surviving role:"partner" users doc is off every roster; a Brilliant Steel employee is not', () => {
-  const helperCtx = (() => { const c = vm.createContext({}); c.window = c; vm.runInContext(RETIRED, c); return c; })();
-  const retired = (u) => helperCtx.window.isRetiredRoleUser(u);
-
-  it('window.isRetiredRoleUser: the role "partner", trimmed and in any case — and nothing else', () => {
-    for (const role of ['partner', 'Partner', 'PARTNER', ' partner ', '\tPartner\n', 'pArTnEr']) assert.equal(retired({ role }), true, JSON.stringify(role));
-    for (const role of ['employee', 'manager', 'president', 'secretary', 'finance', 'agent', 'removed', 'partners', 'partnership', 'co-partner', 'partner2', 'part ner', '', undefined, null, 0, false, {}]) {
-      assert.equal(retired({ role }), false, JSON.stringify(role));
-    }
-    for (const v of [null, undefined, {}, 'partner', 5, []]) assert.equal(retired(v), false, String(v));
-  });
-  it('it is by ROLE only: a Brilliant-Steel-only employee, one titled "Partner", one in a "Partners" department, one flagged team "partner" is NOT retired', () => {
-    for (const u of [
-      { role: 'employee', departments: ['Brilliant Steel'] }, { role: 'employee', department: 'Brilliant Steel' }, { role: 'employee', departments: ['Partners'] },
-      { role: 'agent', title: 'Partner', departments: ['Brilliant Steel'] }, { role: 'employee', team: 'partner' }, { role: 'manager', departments: ['Brilliant Steel'], title: ' Partner ' },
-    ]) assert.equal(retired(u), false, JSON.stringify(u));
-  });
-
-  // the roster expressions are LIFTED from the real source and evaluated against fixtures with the real helper, so the pins above are not only text
-  const USERS = [
-    { id: 'bs_only', role: 'employee', departments: ['Brilliant Steel'] },
-    { id: 'sales_a', role: 'employee', departments: ['Sales'] },
-    { id: 'ret_a',   role: 'partner',  departments: ['Brilliant Steel'] },
-    { id: 'ret_b',   role: ' Partner ' },
-    { id: 'gone',    role: 'employee', removed: true },
-    { id: 'prod',    role: 'employee', payClass: 'production' },
-  ];
-  const docsOf = (arr) => arr.map((d) => ({ id: d.id, data: () => { const { id, ...rest } = d; return rest; } }));
-  const evalIds = (expr, vars) => {
-    const c = vm.createContext({ window: {}, ...vars });
-    vm.runInContext(RETIRED, c);
-    return plain(vm.runInContext(expr, c)).map((u) => u.id);
-  };
-  const exprAfter = (line, re) => { const m = line.match(re); assert.ok(m, `could not lift the roster expression from: ${line}`); return m[1]; };
-
-  it('pay run (buildPayRunLines) roster: everyone but the retired role — removed / production are decided later, by monthlyRunSkipReason', () => {
-    const line = linesMatching(codeOf(BPRL, 'buildPayRunLines'), /^\s*const allStaff\s*=/)[0];
-    assert.deepEqual(evalIds(exprAfter(line, /const allStaff\s*=\s*(.*);\s*$/), { usersSnap: { docs: docsOf(USERS) } }), ['bs_only', 'sales_a', 'gone', 'prod']);
-  });
-  it('HR payroll roster (renderPayrollManagement): the same', () => {
-    const line = linesMatching(codeOf(HR_PAYROLL, 'renderPayrollManagement'), /^\s*const allStaff\s*=/)[0];
-    assert.deepEqual(evalIds(exprAfter(line, /const allStaff\s*=\s*(.*);\s*$/), { usersSnap: { docs: docsOf(USERS) } }), ['bs_only', 'sales_a', 'gone', 'prod']);
-  });
-  it('Gov Rates statutory preview (renderStatutoryStatusSection): the same', () => {
-    const code = norm(codeOf(STAT_STATUS, 'renderStatutoryStatusSection'));
-    assert.deepEqual(evalIds(exprAfter(code, /officeDocs = (usersRes\.docs\.map[^;]*);/), { usersRes: { docs: docsOf(USERS) } }), ['bs_only', 'sales_a', 'gone', 'prod']);
-  });
-  it('Gov Rates office split (renderOfficeSplitSection): minus removed and production as before', () => {
-    const code = norm(codeOf(STAT_SPLIT, 'renderOfficeSplitSection'));
-    const expr = exprAfter(code, /const officeRaw = ([^;]*);/);
-    assert.deepEqual(evalIds(expr, { hardFail: false, usersRes: { docs: docsOf(USERS) } }), ['bs_only', 'sales_a']);
-    assert.deepEqual(evalIds(expr, { hardFail: true, usersRes: { docs: docsOf(USERS) } }), [], 'a hard failure still yields an empty roster');
-  });
-
-  it('the guard has exactly the five call sites that used to exclude partners (and one definition); the role literal lives only in the definition', () => {
-    const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
-      e.isDirectory() ? (e.name === 'vendor' ? [] : walk(`${dir}/${e.name}`)) : (e.name.endsWith('.js') ? [`${dir}/${e.name}`] : []));
-    const found = {};
-    for (const rel of walk('js')) {
-      const raw = read(rel);
-      if (!raw.includes('isRetiredRoleUser')) continue;
-      const n = (codeOf(raw, rel).match(/\bisRetiredRoleUser\b/g) || []).length;
-      if (n) found[rel] = n;
-    }
-    assert.deepEqual(found, { 'js/config.js': 1, 'js/departments.js': 1, 'js/screens/hr.js': 1, 'js/screens/payroll-backfill.js': 1, 'js/screens/statutory-rates.js': 2 });
-    assert.equal((codeOf(read('js/config.js'), 'js/config.js').match(/(['"`])partner\1/g) || []).length, 1, "js/config.js names the 'partner' role in more than the one helper");
-    assert.match(codeOf(RETIRED, 'isRetiredRoleUser'), /String\(u\.role \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'partner'/);
   });
 });
 
@@ -422,16 +323,16 @@ describe('the payroll-side files carry no external-partner / Brilliant Steel tes
   for (const rel of FILES) {
     it(rel, () => assertClean(codeOf(read(rel), rel), rel));
   }
-  it("js/screens/payroll-backfill.js's roster skips only production-class staff and (temporarily) the retired role", () => {
+  it("js/screens/payroll-backfill.js's roster skips only production-class staff", () => {
     const code = codeOf(read('js/screens/payroll-backfill.js'), 'js/screens/payroll-backfill.js');
     assert.equal(linesMatching(code, /\bskip:/).length, 1);
-    assert.equal(linesMatching(code, /\bskip:/)[0].trim(), "skip: u.payClass === 'production' || window.isRetiredRoleUser(u),");
+    assert.equal(linesMatching(code, /\bskip:/)[0].trim(), "skip: u.payClass === 'production',");
   });
 });
 
 // ═══════════════════════════════════ 5. the predicate is gone ═════════════════════════════════════════════════════════════════════════════════
-describe('window.isExternalPartnerUser is gone, not softened', () => {
-  it('js/config.js evaluates (in a vm) with no window.isExternalPartnerUser', () => {
+describe('window.isExternalPartnerUser is gone, not softened — and so is the temporary window.isRetiredRoleUser', () => {
+  it('js/config.js evaluates (in a vm) with neither window.isExternalPartnerUser nor window.isRetiredRoleUser', () => {
     const sandbox = {
       console: { log() {}, info() {}, warn() {}, error() {} },
       setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
@@ -447,8 +348,9 @@ describe('window.isExternalPartnerUser is gone, not softened', () => {
     catch (e) { assert.fail(`js/config.js no longer evaluates in the minimal browser stub (${e.message}) — extend the stub in this test, do not delete the check`); }
     assert.equal(typeof sandbox.window.fetchUsersWithPayroll, 'function', 'config.js ran past the place the predicate used to live');
     assert.equal(typeof sandbox.window.isExternalPartnerUser, 'undefined');
+    assert.equal(typeof sandbox.window.isRetiredRoleUser, 'undefined');
   });
-  it('no code under js/ names isExternalPartnerUser or _isExternalPartner (comments aside)', () => {
+  it('no code under js/ names isExternalPartnerUser, _isExternalPartner or isRetiredRoleUser (comments aside)', () => {
     const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
       e.isDirectory() ? (e.name === 'vendor' ? [] : walk(`${dir}/${e.name}`)) : (e.name.endsWith('.js') ? [`${dir}/${e.name}`] : []));
     const files = walk('js');
@@ -456,9 +358,9 @@ describe('window.isExternalPartnerUser is gone, not softened', () => {
     const hits = [];
     for (const rel of files) {
       const raw = read(rel);
-      if (!/isExternalPartner/.test(raw)) continue;                       // cheap pre-filter; only a file that says it at all is stripped
-      if (/isExternalPartnerUser|_isExternalPartner/.test(codeOf(raw, rel))) hits.push(rel);
+      if (!/isExternalPartner|isRetiredRoleUser/.test(raw)) continue;      // cheap pre-filter; only a file that says it at all is stripped
+      if (/isExternalPartnerUser|_isExternalPartner|isRetiredRoleUser/.test(codeOf(raw, rel))) hits.push(rel);
     }
-    assert.deepEqual(hits, [], 'isExternalPartnerUser / _isExternalPartner is back in code');
+    assert.deepEqual(hits, [], 'isExternalPartnerUser / _isExternalPartner / isRetiredRoleUser is back in code');
   });
 });

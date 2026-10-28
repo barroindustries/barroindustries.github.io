@@ -1986,9 +1986,7 @@ window.RaiseFlow = (function () {
    it in the same order, because they are the offboarding and double-pay guard.
    Their 13 pinned tests are unchanged. (The external-partner exclusion that
    used to be a fourth permanent one was retired 2026-10-28: Brilliant Steel
-   staff are Barro employees. Until the Phase-2 purge deletes them, a surviving
-   users doc with the retired role 'partner' is dropped from the roster by
-   window.isRetiredRoleUser in buildPayRunLines, before this function runs.)
+   staff are Barro employees.)
 
    ⚠ ORDER IS LOAD-BEARING. `removed` must keep winning over an exclusion, so a
    person who left the company reads as "removed", not as "excluded this month".
@@ -2084,11 +2082,7 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
   // Everyone on `users` is a candidate (owner ruling 2026-10-28: Brilliant Steel
   // staff are Barro employees; the external partner role is retired). Who is
   // actually paid is decided by monthlyRunSkipReason below, never by department.
-  // The ONE exception, temporary: a surviving users doc with the retired role
-  // 'partner' is not a candidate (window.isRetiredRoleUser, js/config.js) until the
-  // Phase-2 purge deletes it. Role only — never a department or a title.
-  // PARTNER-REMOVAL-SPEC §3.2 retired-role — WS-H deletes this filter.
-  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!window.isRetiredRoleUser(u));
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
 
   // A regular-payroll uid can ALSO be paid weekly via a worker_profiles doc
   // (v12 WS20 D3, structural bridge — worker_profiles.linkedUid). Hard-skip

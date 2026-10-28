@@ -585,7 +585,6 @@ describe('the real callables accept the project brief', { skip: SKIP }, () => {
     fake.admin.storage = () => ({ bucket: () => bucket });
     fake.seed('users/u_pres', { role: 'president', displayName: 'Pres' });
     fake.seed('users/u_sales1', { role: 'employee', department: 'Sales', displayName: 'Sales One' });
-    fake.seed('users/u_partner', { role: 'partner', departments: ['Sales'], displayName: 'Partner' });
     fns = loadFunctions();
   });
   afterEach(() => { mock.timers.reset(); });
@@ -634,7 +633,7 @@ describe('the real callables accept the project brief', { skip: SKIP }, () => {
     assert.deepEqual(d.photos.map((p) => [p.group, p.caption, p.path.startsWith(`client-info-requests/${res.refNo}/`)]), [['site', 'Front of the shop', true], ['kitchen', '', true]]);
     assert.ok(d.photos.every((p) => !JSON.stringify(p).includes('http')));
     assert.deepEqual([...bucket.files.keys()].sort(), d.photos.map((p) => p.path).sort());
-    // notifications: Sales + President, partner dropped, no senderUid, plain-text
+    // notifications: Sales + President, no senderUid, plain-text
     const uids = fake.paths('notifications/').map((p) => p.split('/')[1]);
     assert.deepEqual([...new Set(uids)].sort(), ['u_pres', 'u_sales1']);
     const n = fake.read(fake.paths('notifications/u_pres/')[0]);

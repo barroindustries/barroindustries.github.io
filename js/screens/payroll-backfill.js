@@ -218,9 +218,7 @@
         name: u.displayName || u.email || u.id,
         sub: [u.title || '', u.department || ''].filter(Boolean).join(' · '),
         gone: u.removed === true,
-        // window.isRetiredRoleUser (js/config.js): a surviving users doc with the retired role
-        // 'partner' is not an Office Team row. PARTNER-REMOVAL-SPEC §3.2 retired-role — WS-H deletes it.
-        skip: u.payClass === 'production' || window.isRetiredRoleUser(u),
+        skip: u.payClass === 'production',
         ids: { tinNum: u.tinNum || '', ssNum: u.ssNum || '', phNum: u.phNum || '', pagibigNum: u.pagibigNum || '' },
         extra: { employeeId: u.employeeId || '', title: u.title || '', department: u.department || '' }
       };

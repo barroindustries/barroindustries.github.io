@@ -1171,7 +1171,7 @@ describe('functions/index.js — the qr* glue stays inside the rules', () => {
     assert.ok(!/senderUid\s*:/.test(nb));
     assert.ok(!/exactTotal|internal/.test(nb));
     assert.match(nb, /dedupKey: `qr_\$\{refNo\}_\$\{uid\}`/);
-    assert.match(nb, /uidRole\.get\(uid\) === 'partner'/);
+    assert.ok(!/partner|uidRole/i.test(nb), 'the notification carries no role special case (the retired partner-drop line is gone, PARTNER-REMOVAL-SPEC Phase 3)');
   });
   it('qrAdminDelete reads users/{uid}.role (not a custom claim) and allows only president / manager', () => {
     const del = src.slice(src.indexOf('exports.qrAdminDelete = functions'));

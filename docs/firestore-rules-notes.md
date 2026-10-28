@@ -2,7 +2,11 @@
 Narrative comments moved out of [`firestore.rules`](../firestore.rules) so the file stays under
 Firebase's hard **262,144-byte** limit on a rules source. **No rule logic lives here** — this is
 the reasoning, audit history and owner rulings that used to sit inline. Nothing was reworded:
-every block below is the original text, verbatim.
+every block below is the original text, verbatim — with ONE exception: on 2026-10-28
+(PARTNER-REMOVAL-SPEC Phase 3) the external `partner` role was retired; the term that excluded
+it (`!isPartner()` in firestore.rules, `!isPartnerClaim()` in storage.rules) became
+`hasProfile()` / `hasRoleClaim()` in the same position, and the sentences in the 38 blocks that
+explained it were re-worded to match. Everything else is still verbatim.
 
 Each block is tagged `RN-<n>`; the rules file keeps a one-line pointer at the same spot.
 When you change a rule, update its note here too — a stale rationale is worse than none.
@@ -19,7 +23,19 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // rule) when the user doc or the `role` field is absent — which legitimately
     // happens for freshly-created / worker / older profiles. .get('role', null)
     // degrades to null instead, so callers can treat "no role" as "not privileged"
-    // and "not partner" rather than being hard-denied. Returns null when missing.
+    // rather than being hard-denied. Returns null when missing.
+    // That covers an absent FIELD only. A signed-in identity with NO users doc at all
+    // still errors here (the rules-side get() of a missing doc throws — measured on
+    // the Firestore rules emulator), so every rule that reaches getRole() — isAdmin(),
+    // canDept(), canFinance(), ... — refuses it. hasProfile() (defined beside
+    // isSeniorAdmin()) is that same refusal on its own. It stands where the external-
+    // partner exclusion stood, in every expression that had it (PARTNER-REMOVAL-SPEC
+    // Phase 3, 2026-10-28), so a rule that read `isAuth() && <that term>` still refuses
+    // an identity with no profile: same cached get() of users/{uid}, no extra read.
+    // It is get(), not exists(), on purpose: measured on the emulator, exists() before
+    // get() on the same doc is NOT cached for the get (one more billed read and one
+    // more access call per evaluation), and exists() turns the refusal into a plain
+    // `false`, which differs from the error under `!` or a ternary.
 ```
 
 <a id="rn-2"></a>
@@ -161,10 +177,11 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // membership (canEditDept, js/departments.js:39-53); HR was the one that
     // did not.
     //
-    // Same null-safe shape as isFinanceDept()/isDesignDept() above, and the
-    // same 'partner' exclusion the rest of the file applies to dept-derived
-    // access: an external partner account must never pick up an internal tier
-    // from a department string.
+    // Same null-safe shape as isFinanceDept()/isDesignDept() above. (It once also
+    // excluded the external 'partner' role, so a department string could never hand
+    // such an account an internal tier; that role is retired — PARTNER-REMOVAL-SPEC
+    // Phase 3, 2026-10-28 — and the exclusion is gone. `let u = get(users/{uid})`
+    // still refuses a caller with no users doc.)
 ```
 
 <a id="rn-11"></a>
@@ -274,7 +291,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
     // themselves (role) or change their own pay/department/employee ID.
     // NOTE: use .get(field, null) — directly reading a field that is absent on
-    // the document raises an error (which DENIES the rule). Worker/partner/older
+    // the document raises an error (which DENIES the rule). Worker/older
     // profiles legitimately lack some of these fields, so a direct read broke
     // their routine self-updates (e.g. the lastSeen presence heartbeat). With
     // .get(), an absent field compares null==null and is correctly "unchanged".
@@ -353,42 +370,26 @@ When you change a rule, update its note here too — a stale rationale is worse 
 *Applies at:* `allow get:  if isAuth();`
 ```
       // v14 re-audit fix — `read` covers BOTH get and list, so the old bare
-      // `allow read: if isAuth()` let ANY signed-in principal (an external
-      // partner most sharply, but equally any compromised low-privilege
-      // account) pull the ENTIRE staff directory — displayName, email, phone,
-      // employeeId, role, departments — with one unfiltered
-      // db.collection('users').get(). The "partners only see partners" filter
-      // was pure client-side JS (renderTeamTab, js/screens/people.js; and
-      // dmCandidates, js/chat.js), i.e. applied AFTER the full snapshot had
-      // already been delivered to the partner's machine. This is the only
-      // collection in the file that had no partner scoping at all.
-      //
-      // Split the two operations rather than locking partners out wholesale:
-      //  • get  stays open to every signed-in user. Single-doc uid→name/photo
-      //    resolution is everywhere the partner legitimately works — the chat
-      //    DM header (js/chat.js), task assignees/creators, approval actors,
-      //    post authors — and the caller must already hold the uid, so there
-      //    is no enumeration. Also, no rule anywhere depends on this: getRole()
-      //    uses a rules-side get(), which bypasses rules entirely.
-      //  • list is where enumeration lives, so that is what a partner loses.
-      //    A partner may run ONLY a query whose role filter Firestore can
-      //    prove is confined to what their two directory screens actually
-      //    need: other partners (the Team tab) plus president/manager (the
-      //    "New Message" picker's candidate set — js/chat.js dmCandidates,
-      //    Decision 3). Internal staff keep the unfiltered list unchanged.
-      //
-      // Firestore evaluates a `list` rule against the QUERY, not per document
-      // ("rules are not filters"), so the client MUST send the matching
-      // filter — js/config.js fetchUsersWithPayroll() now emits
-      // .where('role','in',['partner','president','manager']) when the caller
-      // is a partner, and every partner-reachable directory read funnels
-      // through it (dbCachedGet force-substitutes it for the 'users' key).
-      // Verified against the emulator: that query AND a plain
-      // where('role','==','partner') both prove against this rule, while an
-      // unfiltered list and a where('role','==','employee') are denied.
-      // .get('role','') — a legacy user doc with no role field must deny the
-      // partner branch, not ERROR the rule (an erroring rule denies for
-      // everyone, incl. the internal staff who share this block).
+      // `allow read: if isAuth()` let ANY signed-in principal (any compromised
+      // low-privilege account, and once the external partner role most sharply)
+      // pull the ENTIRE staff directory — displayName, email, phone, employeeId,
+      // role, departments — with one unfiltered db.collection('users').get().
+      // The two operations are therefore declared separately:
+      //  • get  is open to every signed-in user. Single-doc uid→name/photo
+      //    resolution is everywhere (chat DM header in js/chat.js, task
+      //    assignees/creators, approval actors, post authors) and the caller must
+      //    already hold the uid, so there is no enumeration. Also, no rule anywhere
+      //    depends on this: getRole() uses a rules-side get(), which bypasses rules.
+      //  • list is where enumeration lives, so it needs a profile (hasProfile()): a
+      //    signed-in identity with no users doc cannot enumerate the directory. The
+      //    one other arm is a query whose role filter Firestore can prove is confined
+      //    to president/manager — what the external partner role's "New Message"
+      //    picker ran (js/config.js fetchUsersWithPayroll emitted
+      //    where('role','in',['partner','president','manager']) for a partner
+      //    caller). That role is retired — PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28 —
+      //    so 'partner' is no longer a member of the filter; no users doc carries it.
+      //    .get('role','') — a legacy user doc with no role field must deny that arm,
+      //    not ERROR the rule (an erroring rule denies for everyone).
 ```
 
 <a id="rn-22"></a>
@@ -615,14 +616,13 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
 
 <a id="rn-30"></a>
-## RN-30 — LAYOFF-SPEC — HR-dept members (any role except partner — i
+## RN-30 — LAYOFF-SPEC — HR-dept members (any role) plus the senior b
 *Applies at:* `(isHrDept() && !isOwner(uid)`
 ```
-        // LAYOFF-SPEC — HR-dept members (any role except partner — isHrDept()
-        // excludes partners itself) plus the senior branch above may toggle
-        // ONLY the layoff pointer map on ANOTHER user's doc; never president,
-        // never self (self-lift laundering). `layoff` is ONE top-level map
-        // key, so hasOnly(['layoff']) covers place (map) and lift (null).
+        // LAYOFF-SPEC — HR-dept members (any role) plus the senior branch above
+        // may toggle ONLY the layoff pointer map on ANOTHER user's doc; never
+        // president, never self (self-lift laundering). `layoff` is ONE top-level
+        // map key, so hasOnly(['layoff']) covers place (map) and lift (null).
 ```
 
 <a id="rn-31"></a>
@@ -664,7 +664,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
 
 <a id="rn-34"></a>
 ## RN-34 — v14 re-audit fix — monotonic-only: the new count may never
-*Applies at:* `allow write: if isAuth() && !isPartner()`
+*Applies at:* `allow write: if isAuth() && hasProfile()`
 ```
       // v14 re-audit fix — monotonic-only: the new count may never go
       // backward. Every real writer (nextCounterId et al., generalized in
@@ -678,17 +678,17 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
 
 <a id="rn-35"></a>
-## RN-35 — Internal feed stays !isPartner()-only, EXCEPT posts delibe
-*Applies at:* `allow read: if isAuth() && ( !isPartner()`
+## RN-35 — Internal company feed — readable by every signed-in user w
+*Applies at:* `allow read: if isAuth() && hasProfile();`
 ```
-      // Internal feed stays !isPartner()-only, EXCEPT posts deliberately targeted
-      // at the Partners dept once published — the partner Posts tab lists exactly
-      // where('dept','==','Partners').where('status','==','published'), whose
-      // equality filters statically match this predicate so the list() is
-      // provable and succeeds (a bare !isPartner() rule made that query throw
-      // 'Missing or insufficient permissions' and blanked the partner feed). Uses
-      // .get(...,'') so a post missing dept/status denies for partners rather than
-      // erroring the rule. General/other-dept posts remain fully internal.
+      // Internal company feed — readable by every signed-in user with a profile
+      // (hasProfile()). Until PARTNER-REMOVAL-SPEC Phase 3 (2026-10-28) the external
+      // 'partner' role was kept out of it, except for posts targeted at the Partners
+      // department once published (the partner Posts tab listed exactly
+      // where('dept','==','Partners').where('status','==','published')). The role and
+      // the department are retired and their posts deleted, so that arm is gone;
+      // the exclusion's place is held by the profile check, so an identity with no
+      // users doc still cannot read the feed.
 ```
 
 <a id="rn-36"></a>
@@ -920,21 +920,22 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
 
 <a id="rn-50"></a>
-## RN-50 — Internal HR data — external Brilliant Steel partners exclu
-*Applies at:* `allow read: if isAuth() && !isPartner();`
+## RN-50 — Internal HR data — readable by every signed-in user with a
+*Applies at:* `allow read: if isAuth() && hasProfile();`
 ```
-      // Internal HR data — external Brilliant Steel partners excluded from reading.
-      // getRole() is null-safe: null (no/missing role) is treated as "not partner"
-      // so internal users with incomplete profiles are never wrongly locked out;
-      // only a positively-identified 'partner' is denied.
+      // Internal HR data — readable by every signed-in user with a profile
+      // (hasProfile()). It once excluded the external Brilliant Steel partner role;
+      // that role is retired — PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28 — and the
+      // term that excluded it is now the profile check, so an identity with no
+      // users doc is still refused.
 ```
 
 <a id="rn-51"></a>
 ## RN-51 — v14 re-audit fix — was a bare isAuth() with NO field const
-*Applies at:* `allow create: if isAuth() && !isPartner() && (`
+*Applies at:* `allow create: if isAuth() && hasProfile() && (`
 ```
       // v14 re-audit fix — was a bare isAuth() with NO field constraints and no
-      // partner exclusion at all (every sibling request collection —
+      // profile check at all (every sibling request collection —
       // leave_requests, cash_advances, approval_requests — pins ownership,
       // status, and shape). The sole real write site (js/screens/dashboards.js,
       // docId `${uid}_${todayStr}`) always self-files as {uid, userName, date,
@@ -1001,15 +1002,17 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
 
 <a id="rn-56"></a>
-## RN-56 — v12 WS19: was bare isAuth() — a partner could browse EVERY
-*Applies at:* `allow read: if isAuth() && (!isPartner() || request.auth.uid in resource.data.get('assignedTo', []));`
+## RN-56 — Tasks are readable by every signed-in user with a profile
+*Applies at:* `allow read: if isAuth() && (hasProfile() || request.auth.uid in resource.data.get('assignedTo', []));`
 ```
-      // v12 WS19: was bare isAuth() — a partner could browse EVERY internal task
-      // across every department. BUT a partner's dashboard has a real, shipped
-      // "My Tasks" feature (assignedTo array-contains) + an "All Tasks" link into
-      // the same tasks page (js/app.js ~2099, openTaskDetail is shared code) —
-      // a blanket !isPartner() lock would blank-screen that. Fix: partner may
-      // read only tasks they're assigned to; full read stays for internal staff.
+      // Tasks are readable by every signed-in user with a profile (hasProfile()), and
+      // by whoever is assigned to the task. v12 WS19 made this rule partner-aware: it
+      // was bare isAuth() — a partner could browse EVERY internal task across every
+      // department — and the external partner role was limited to the tasks assigned
+      // to it (array membership on `assignedTo`, for its "My Tasks" screen). That role
+      // is retired (PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28). The `assignedTo` arm is
+      // kept verbatim so the decision is unchanged for every identity; it now matters
+      // only to a signed-in identity with no users doc whom someone assigned a task.
 ```
 
 <a id="rn-57"></a>
@@ -1029,8 +1032,9 @@ When you change a rule, update its note here too — a stale rationale is worse 
       // Scoped deliberately: `inDept()` means nobody can file work into a
       // department they have nothing to do with, and createdBy is pinned to
       // the caller so a task cannot be created under someone else's name.
-      // Partners stay out entirely — they read only tasks assigned to them
-      // (see the read rule above) and have never been able to create.
+      // A caller with no users doc stays out entirely (hasProfile()) — such a caller
+      // reads only tasks assigned to them (see the read rule above) and has never
+      // been able to create. (Written for the external partner role, retired.)
 ```
 
 <a id="rn-58"></a>
@@ -1063,9 +1067,10 @@ When you change a rule, update its note here too — a stale rationale is worse 
       // subcollections, so this needs explicit coverage — tasks are readable
       // by all signed-in users, so their messages are too. Author owns their
       // own message; admins can moderate.
-      // v12 WS19: same own-task scoping as the parent — a partner assigned to
-      // THIS task can still read/use its comment thread (openTaskDetail is
-      // shared code with the partner dashboard); a partner NOT assigned cannot.
+      // v12 WS19: same own-task scoping as the parent — whoever is assigned to THIS
+      // task can read its comment thread (taskAssignee()), whether or not they have
+      // a profile; everyone else needs one (hasProfile()). Written for the external
+      // partner role, retired — PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28.
 ```
 
 <a id="rn-60"></a>
@@ -1074,12 +1079,11 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
     // ── Team Chat (v12 WS37) — conversations + messages/readers/typing ──
     // One collection, three types: 'dm' | 'group' | 'dept'.
-    //  • dm/group: membership = the participants array. A partner may read/write
-    //    ONLY conversations they're a participant of (conditional wall, same
-    //    semantics as tasks/comments) — and unlike tasks, internal staff are
-    //    participant-scoped too (nobody reads a DM they're not in).
-    //  • dept: membership derived live via isAdmin() || inDept(department);
-    //    partners NEVER pass this branch. participants stays [] on dept docs.
+    //  • dm/group: membership = the participants array — internal staff are
+    //    participant-scoped (nobody reads a DM they're not in).
+    //  • dept: membership derived live via isAdmin() || inDept(department), and only
+    //    for a caller with a profile (hasProfile() — the external partner role this
+    //    once kept out is retired). participants stays [] on dept docs.
     // Rules do NOT cascade — messages/readers/typing each get an explicit match.
 ```
 
@@ -1244,13 +1248,15 @@ When you change a rule, update its note here too — a stale rationale is worse 
 *Applies at:* `match /settings/{docId} {`
 ```
     // ── Settings ─
-    // v12 WS19: read locked to internal staff on the internal docs (sales_sop,
-    // employeeOfMonth) — was bare isAuth(). 'system' stays universally readable:
-    // EVERY session (incl. partner) listens to settings/system via onSnapshot
-    // for the president's force-logout signal (js/app.js:135) — locking it out
-    // would silently break force-logout for partner sessions specifically,
-    // exactly when the President most needs it to work (cutting off a
-    // compromised/terminated partner account).
+    // Read needs a profile (hasProfile()) on every doc EXCEPT 'system', which stays
+    // readable by any signed-in identity: EVERY session listens to settings/system
+    // via onSnapshot for the president's force-logout signal (js/app.js:135) —
+    // locking it out would silently break force-logout exactly when the President
+    // most needs it to work. (v12 WS19 wrote this for the external partner role —
+    // locked out of the internal docs, sales_sop and employeeOfMonth, but still
+    // able to see 'system' so a terminated partner account could be cut off. The
+    // role is retired — PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28; the shape is
+    // unchanged.)
 ```
 
 <a id="rn-69"></a>
@@ -1669,19 +1675,18 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
     // ── Quotes (internal) ─
     // NOTE: was incorrectly named 'quotations' in previous rules — fixed
-    // v12 WS19: read locked to !isPartner() — this is the INTERNAL Sales quotes
-    // collection (distinct from bk_quotes/bs_quotes, which already correctly
-    // exclude/scope the partner) and was bare isAuth().
+    // This is the INTERNAL Sales quotes collection (distinct from bk_quotes/bs_quotes);
+    // read needs a profile (hasProfile()) — v12 WS19 had locked it away from the
+    // external partner role, retired in PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28.
 ```
 
 <a id="rn-92"></a>
 ## RN-92 — Admins may also create with a DIFFERENT createdBy: require
-*Applies at:* `allow create: if isAuth() && !isPartner() &&`
+*Applies at:* `allow create: if isAuth() && hasProfile() &&`
 ```
       // Admins may also create with a DIFFERENT createdBy: required by the v12
       // WS31 stranded-quote migration, which moves misfiled BK docs out of
-      // bs_quotes preserving the ORIGINAL creator for the audit trail. Partner
-      // isolation is unchanged (partners still can never touch bk_quotes at all).
+      // bs_quotes preserving the ORIGINAL creator for the audit trail.
 ```
 
 <a id="rn-93"></a>
@@ -1692,7 +1697,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // Reusable product/pricing/terms configs saved from the quote builder —
     // client/identity fields are stripped client-side before this is ever
     // written, so this collection never carries a specific client's contact
-    // details. Internal Sales library — partners excluded, same as /quotes.
+    // details. Internal Sales library — a profile is required, same as /quotes.
 ```
 
 <a id="rn-94"></a>
@@ -1739,11 +1744,10 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // ── Products catalog ─
     // v14 re-audit HIGH fix — Firestore has no field-level read security, so
     // this doc's cost-basis fields (capitalMaterials, capitalLabor, and the
-    // BOM's per-line unitCost) were readable by ANY authenticated user,
-    // including role 'partner', straight from the browser console — the
-    // quote builder's DOM-only "hide the cost panel" for generic partners
-    // was theatre on top of a fully-readable doc. Fix: cost data now lives
-    // ONLY in product_costs/{docId} below (finance/admin, never partner).
+    // BOM's per-line unitCost) were readable by ANY authenticated user
+    // straight from the browser console — the quote builder's DOM-only "hide
+    // the cost panel" was theatre on top of a fully-readable doc. Fix: cost
+    // data now lives ONLY in product_costs/{docId} below (finance/admin).
     // `products` itself is unchanged for read (still needed for name/price/
     // measurement/specs); writes going forward may never (re)introduce a
     // cost field onto it.
@@ -1762,11 +1766,12 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
     // ── Product cost basis (materials/labor capital + BOM unit costs) ──
     // v14 re-audit HIGH fix. Split out of products/{docId} (see comment
-    // above) precisely so a partner can never reach this data at all, not
-    // just "shouldn't" per UI. Read+write restricted to finance/admin only —
-    // explicitly NOT partner, even though isAdmin()/canFinance() would never
-    // naturally include that role; the `!isPartner()` is defense-in-depth so
-    // this stays true even if a future edit widens either helper.
+    // above) precisely so this data is reachable by finance/admin only, not
+    // just "shouldn't" per UI. Read+write restricted to finance/admin only
+    // (isSeniorAdmin() || canFinance()); the hasProfile() beside that gate (the
+    // external-partner exclusion's place until PARTNER-REMOVAL-SPEC Phase 3,
+    // 2026-10-28) is defense-in-depth so this stays true even if a future edit
+    // widens either helper.
     // Owner ruling 2026-09-01 ("sales dep should have analytics… it should
     // show if oh for the month is covered"): the AGGREGATE pace/coverage feed
     // (_pace) and the pricing constants (_settings) are readable by ALL
@@ -1780,7 +1785,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
 
 <a id="rn-98"></a>
 ## RN-98 — ⚠ 2026-08-09 SECRETARY LEAK — isAdmin() -> isSeniorAdmin()
-*Applies at:* `allow read, write: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());`
+*Applies at:* `allow read, write: if isAuth() && hasProfile() && (isSeniorAdmin() || canFinance());`
 ```
       // ⚠ 2026-08-09 SECRETARY LEAK — isAdmin() -> isSeniorAdmin(). This doc is
       // capital material/labour and BOM unit costs; it was split out of
@@ -1798,7 +1803,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // ── Material Price List (COSTING PHASE 1, 2026-08-26) ─
     // Supplier price list (Kingsway 2025 seed) — the live material-price feed
     // for costing. Same sensitivity class as /product_costs (supplier cost
-    // basis), same secretary/partner exclusions. Deliberately does NOT use
+    // basis), same secretary exclusion (and a profile is required). Deliberately does NOT use
     // canPurchasing(): that helper routes through isAdmin(), which includes
     // the secretary — the exact leak the 2026-08-09 fix above closed.
     // Purchasing-dept staff get read+write via isPurchasingDept() directly.
@@ -1824,10 +1829,8 @@ When you change a rule, update its note here too — a stale rationale is worse 
 *Applies at:* `match /projects/{docId} {`
 ```
     // ── Projects ─
-    // v12 WS19: read locked to !isPartner() — was bare isAuth(). NOTE: this is
-    // DIFFERENT from /job_projects (which already correctly partner-scopes) —
-    // the unified Projects view already skips this collection for partners
-    // client-side, so this closes the gap without any UI regression.
+    // Read needs a profile (hasProfile()); v12 WS19 had locked it away from the
+    // external partner role (retired — PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28).
 ```
 
 <a id="rn-102"></a>
@@ -1849,7 +1852,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // (not a subcollection) so the cross-project Drawings dashboard is a simple
     // query. Rules do NOT cascade, so this needs its own block. All field reads
     // are .get(field, default) — a bare read of an absent field DENIES the rule.
-    // v12 WS19: read locked to !isPartner() — was bare isAuth().
+    // v12 WS19: read needs a profile (hasProfile()) — was bare isAuth().
     // v12 WS35: real approval gate. 'approved' and 'released' are privileged
     // transitions with a pinned topology (for_review→approved→released), approvable
     // only by president/manager or the parent project's designLead — and NEVER by
@@ -1878,14 +1881,14 @@ When you change a rule, update its note here too — a stale rationale is worse 
 *Applies at:* `match /it_tickets/{docId} {`
 ```
     // ── IT collections ─
-    // v12 WS19: read locked to !isPartner() on all three — were bare isAuth().
+    // v12 WS19: read needs a profile (hasProfile()) on all three — were bare isAuth().
     // ⚠ 2026-08-10 — it_tickets was MISSED by the 2026-08-09 canIt() sweep below.
     // That pass converted it_assets/it_software writes and both it_access and
     // it_network verbs, and its block comment reasons collection by collection —
     // but never names this one, sitting immediately above it. So the Corporate
     // Secretary still held moderator rights over the IT department's own work
     // queue: silently reassign or close any ticket, and permanently delete one.
-    // READ is deliberately LEFT at !isPartner(): it is company-wide by design and
+    // READ is deliberately LEFT at hasProfile(): it is company-wide by design and
     // by the same argument the sweep makes for the it_assets/it_software
     // inventory just below — every internal employee can already see the queue
     // they file into, and removing exactly one role from a company-wide read
@@ -1921,7 +1924,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // 2026-08-09 — canDept('IT') -> canIt() on every WRITE, and on the two
     // restricted READS (it_access holds credentials/account grants, it_network
     // holds infrastructure config; both were admin-or-IT-dept). Delta is exactly
-    // {secretary}. it_assets/it_software READ deliberately stays !isPartner():
+    // {secretary}. it_assets/it_software READ deliberately stays hasProfile():
     // it is a company-wide inventory every employee can already see, so removing
     // one role from it would be theatre, and the IT screen is hidden from them in
     // the nav. Note the client ALREADY restricted the Access Control / Network
@@ -1947,7 +1950,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // ── Meta Ads integration (specs/META-ADS-SPEC-2026-08-30.md) ─
     // ad_insights: per-campaign per-day Meta spend/impressions/clicks/leads,
     // written ONLY server-side (nightly GitHub Action via admin SDK, which
-    // bypasses rules). Readable by any signed-in non-partner — it feeds the
+    // bypasses rules). Readable by any signed-in user with a profile — it feeds the
     // Marketing → Insights table, and the external ads freelancer (a plain
     // employee) legitimately needs it. write:false keeps clients out entirely.
 ```
@@ -1959,7 +1962,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // ── AEC Partner Directory (Sales/CRM prospecting: architects/engineers/
     // contractors, v12 WS33; moved from a Sales sub-tab into its own CRM
     // department 2026-08-04 — js/screens/crm.js's "AEC Leads" tab). Internal
-    // pipeline — partner excluded, matching work_plans. Writes follow the
+    // pipeline — a profile is required, matching work_plans. Writes follow the
     // TIGHTENED canDept pattern — deliberately stricter than the legacy
     // bare-isAuth() sales_clients block (~1121); that looseness is pre-existing,
     // not the template. Widened 2026-08-04 to ALSO allow canDept('CRM') —
@@ -1976,7 +1979,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // ── ROC (restaurant) Lead Directory — CRM department (added 2026-08-04
     // alongside the CRM department; js/screens/crm.js's renderROCDirectory).
     // Net-new collection mirroring aec_contacts' exact rule shape: internal
-    // pipeline (partner excluded), writes gated to Sales/CRM dept members or
+    // pipeline (a profile is required), writes gated to Sales/CRM dept members or
     // admin, delete admin-only (no delete-request flow — same low-stakes-list
     // rationale as aec_contacts, not a finance/money collection).
 ```
@@ -1994,9 +1997,9 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // READ is canDept-shaped, matching the owner's decision: anyone ASSIGNED
     // to the Ventures department, plus admins (canDept('Ventures') ==
     // isAdmin() || inDept('Ventures')). Deliberately NOT president-only and
-    // NOT all-internal-staff. `!isPartner()` is defense-in-depth — the
-    // external partner could never satisfy canDept today, but this keeps that
-    // true even if a future edit widens the helper. THIS RULE IS THE
+    // NOT all-internal-staff. `hasProfile()` is defense-in-depth — canDept()
+    // already refuses a caller with no users doc, but this keeps that true even
+    // if a future edit widens the helper. THIS RULE IS THE
     // BOUNDARY; the screen-side canEditDept check is cosmetic.
     //
     // LIST: the client reads the collection UNFILTERED and sorts client-side
@@ -2058,7 +2061,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
 
 <a id="rn-114"></a>
 ## RN-114 — ⚠ 2026-08-10 — the oversight tier's WRITE on this collecti
-*Applies at:* `allow update: if isAuth() && !isPartner() && (`
+*Applies at:* `allow update: if isAuth() && hasProfile() && (`
 ```
       // ⚠ 2026-08-10 — the oversight tier's WRITE on this collection is narrowed
       // from isAdmin() to isSeniorAdmin(); the READ above is deliberately left
@@ -2665,7 +2668,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
 
 <a id="rn-143"></a>
 ## RN-143 — canProduction() = isAdmin() || isProductionDept(), and isA
-*Applies at:* `allow update: if isAuth() && !isPartner() && canProduction() && !isSecretary()`
+*Applies at:* `allow update: if isAuth() && hasProfile() && canProduction() && !isSecretary()`
 ```
       // canProduction() = isAdmin() || isProductionDept(), and isAdmin() still
       // contains 'secretary' — so narrowing the /ledger Production leg to
@@ -2769,14 +2772,15 @@ When you change a rule, update its note here too — a stale rationale is worse 
 ```
 
 <a id="rn-149"></a>
-## RN-149 — Internal operational doc: any non-partner staff may read (
+## RN-149 — Internal operational doc: any staff with a profile may rea
 *Applies at:* `allow read:   if isAuth() && (`
 ```
-      // Internal operational doc: any non-partner staff may read (so a Finance-dept
+      // Internal operational doc: any staff with a profile may read (so a Finance-dept
       // employee — role 'employee', not the special 'finance' role — can see them in
       // the Sales Orders tab). An unfiltered list query was being denied for such
-      // users, which is why created orders "weren't reflecting". Partners only see
-      // their own. Finance/admin still gate create→record (update).
+      // users, which is why created orders "weren't reflecting". A caller with no
+      // profile (the external partner role, retired) sees only their own.
+      // Finance/admin still gate create→record (update).
 ```
 
 <a id="rn-150"></a>
@@ -2789,16 +2793,15 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // PUBLIC (no auth) so a client can open the link without an account; `list` is
     // DENIED so nobody can enumerate all orders. Only client-SAFE fields live here
     // (status, dates, amounts the client already knows) — never internal cost/margin.
-    // Internal non-partner staff create/update it; admins may delete.
-    // v14 sales-pipeline gap fix — a partner converting THEIR OWN won quote into a
-    // Sales Order (js/departments.js openSalesOrderModal / window.ensureOrderTracking)
-    // already succeeds at creating the sales_orders + job_projects docs (both allow
-    // create for any authenticated creator, no partner exclusion), but this doc's
-    // create used to be a blanket !isPartner() — silently denied (best-effort
-    // try/catch swallows it) for every partner-originated order, so those clients
-    // NEVER got a tracking link. Narrow fix: a partner may create a tracking doc
-    // ONLY when it points (via `orderId`) at a sales_orders doc THEY THEMSELVES
-    // created — never for any other order. `.get(field, default)` throughout so a
+    // Internal staff with a profile create/update it; admins may delete.
+    // v14 sales-pipeline gap fix, still in force: create ALSO accepts a caller with
+    // no profile when the tracking doc points (via `orderId`) at a sales_orders doc
+    // THEY THEMSELVES created — never for any other order. It was written for the
+    // external partner role converting THEIR OWN won quote into a Sales Order, whose
+    // create was a blanket partner exclusion and was silently denied (best-effort
+    // try/catch swallows it), so those clients never got a tracking link. The role is
+    // retired — PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28 — and the arm is kept
+    // verbatim so no decision changes. `.get(field, default)` throughout so a
     // malformed/missing orderId denies (fails closed) instead of throwing.
 ```
 
@@ -2815,8 +2818,10 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // enumeration). There is NO public write: the client's accept/request-
     // changes goes through the respondToQuote callable (functions/index.js),
     // which bypasses rules via the Admin SDK — so every write rule here is
-    // authenticated-staff-only. Partner branch mirrors order_tracking: a
-    // partner may mint/maintain a mirror ONLY for a quote THEY created.
+    // authenticated-staff-only. The branch for a caller with no profile mirrors
+    // order_tracking: they may mint/maintain a mirror ONLY for a quote THEY created
+    // (srcIsMine()). Written for the external partner role, retired —
+    // PARTNER-REMOVAL-SPEC Phase 3, 2026-10-28 — and kept verbatim.
 ```
 
 <a id="rn-152"></a>
@@ -2850,10 +2855,11 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // ── Client CRM — UNIFIED (v12 WS32) ─
     // ONE `clients` collection (brands[] tags Sales/Design/BS membership); the
     // three per-brand books below are read-only archives kept for the audit
-    // trail. INTERNAL-ONLY: partners never read/write the client book — their
-    // Client Data view derives from their own bs_quotes (already partner-scoped).
-    // This deliberately closes the old hole where any BS partner could read the
-    // ENTIRE bs_clients book. create/update require a non-empty string name via
+    // trail. INTERNAL-ONLY: a caller with no profile never reads/writes the client
+    // book (the external partner role, retired in PARTNER-REMOVAL-SPEC Phase 3,
+    // 2026-10-28, derived its Client Data view from its own bs_quotes). This closed
+    // the old hole where any BS partner could read the ENTIRE bs_clients book.
+    // create/update require a non-empty string name via
     // .get(field,default) (missing-field-throws memory); note request.resource.data
     // is the full post-write doc, so field-patch updates still pass. DELETE is
     // admin-only — everyone else uses the deleteRequested flag (President queue).
@@ -2887,22 +2893,23 @@ When you change a rule, update its note here too — a stale rationale is worse 
 
 <a id="rn-156"></a>
 ## RN-156 — Files: readable by internal staff; you own what you upload
-*Applies at:* `allow read:   if isAuth() && coll.matches('files_.*') && !isPartner();`
+*Applies at:* `allow read:   if isAuth() && coll.matches('files_.*') && hasProfile();`
 ```
       // Files: readable by internal staff; you own what you upload; owner/admin
-      // edit or remove. v12 WS19: added !isPartner() — a files_* doc's `url`
-      // field is a token-bearing Storage download link (js/drive.js), so letting
-      // the external partner read it was a full file-content exfiltration path,
-      // not just a metadata leak. Internal cross-department read stays open
+      // edit or remove. v12 WS19: added the partner exclusion (now hasProfile()) — a
+      // files_* doc's `url` field is a token-bearing Storage download link
+      // (js/drive.js), so letting an identity with no profile read it is a full
+      // file-content exfiltration path, not just a metadata leak. Internal
+      // cross-department read stays open
       // (per-dept scoping would need a schema migration — deferred).
 ```
 
 <a id="rn-157"></a>
 ## RN-157 — Budget lines: internal planning data. v12 WS19: this was a
-*Applies at:* `allow read:  if isAuth() && coll.matches('budgets_.*') && !isPartner();`
+*Applies at:* `allow read:  if isAuth() && coll.matches('budgets_.*') && hasProfile();`
 ```
       // Budget lines: internal planning data. v12 WS19: this was a genuine
-      // world-write (any signed-in account, including a partner, could
+      // world-write (any signed-in account could
       // create/update/delete ANY department's budget lines) — the UI's dept/
       // finance gating was cosmetic only. Read stays broad for internal staff;
       // write narrowed to money-tier (true per-department member-write would
@@ -2968,7 +2975,7 @@ When you change a rule, update its note here too — a stale rationale is worse 
     // employee may see; money included ON PURPOSE — this doc, once published,
     // is the deliberate disclosure). A doc's existence IS publication: it is
     // created only by the President's publish step, so read may be blanket
-    // internal. Employees must NEVER be able to write it. Partner excluded —
+    // internal. Employees must NEVER be able to write it. A profile is required —
     // internal disclosure. NO per-person pay data may ever be added to this
     // doc shape (see COMPANY-AND-CALENDAR-SPEC-2026-08-12.md §1B.3).
 ```

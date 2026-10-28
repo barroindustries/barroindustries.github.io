@@ -158,17 +158,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // ── PARTNER-REMOVAL-SPEC §3.2 retired-role gate ─────────────────────
-      // The external partner feature is retired. Until the data purge (Phase 2)
-      // deletes the accounts themselves, refuse the role here exactly like the
-      // removed flag above (same screen, same sign-out, ahead of the idempotency
-      // guard). Case-insensitive: production carries 'Partner' drift. WS-H deletes this.
-      if (String(currentRole || '').trim().toLowerCase() === 'partner') {
-        showRemovedUserScreen();
-        auth.signOut().catch(()=>{});
-        return;
-      }
-
       // ── Idempotency guard ─────────────────────────
       // Same signed-in user that is already bootstrapped (e.g. token refresh):
       // refresh auth state but SKIP the disruptive re-bootstrap.
