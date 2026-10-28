@@ -18,6 +18,10 @@ const cir       = require('./cir-core');
 // js/pricing-core.js), ./qr-def (the shared definitions) and ./qr-published.json
 // (the generated allowlist of published product ids).
 const qr        = require('./qr-core');
+// STATUS.md Open ruling #13 — pure authorization/shape helpers for the
+// createStaffAccount callable below. Zero Firebase deps; required directly by
+// tests/staff-account.test.mjs.
+const staff     = require('./staff-core');
 admin.initializeApp();
 
 // v14 re-audit fix — real per-sender enforcement (see the block inside
@@ -208,9 +212,9 @@ exports.sendPushOnNotification = functions
 //
 //  WHAT ACTUALLY DISTINGUISHES A PLACEHOLDER FROM A LIVE ACCOUNT
 //  A live account's users doc is ALWAYS keyed by its Firebase Auth uid — every
-//  writer does users.doc(<authUid>).set(...): self-signup (js/app.js), Invite
-//  Team Member (js/screens/people.js), Create Worker Account
-//  (js/screens/dashboards.js) and both paths of this function. The ONLY writer
+//  writer does users.doc(<authUid>).set(...): createStaffAccount (Invite Team
+//  Member / Create Worker Account — it picks the uid itself and writes the doc
+//  just before the Auth account) and both paths of this function. The ONLY writer
 //  of a placeholder, signupApprove (js/svc-approvals.js), uses
 //  users.doc() — a random Firestore auto-ID with no Auth account behind it —
 //  and hardcodes role:'employee', departments:[], no `uid` field.
@@ -642,6 +646,121 @@ exports.setUserDisabled = functions.https.onCall(async (data, context) => {
   }
 
   return { ok: true, authNote };
+});
+
+/**
+ * createStaffAccount — the ONLY way staff/worker logins are created in-app
+ * (STATUS.md Open ruling #13). Replaces the browser-side
+ * createUserWithEmailAndPassword calls in Invite Team Member
+ * (js/screens/people.js) and Create Worker Account (js/screens/dashboards.js),
+ * which needed Firebase Auth sign-up left OPEN to the public apiKey. Who may
+ * mint which role/department is functions/staff-core.js authorizeStaffCreate()
+ * — the same tiers as the admin branches of the users create rule.
+ *
+ * Order matters. The uid is chosen HERE (Admin SDK only — a browser can never
+ * pick one) and users/{uid} (+ usernames/{u}) is written BEFORE the Auth
+ * account exists, so createUserDocOnAuthCreate finds the doc and no-ops instead
+ * of racing in a default 'employee' profile and burning an employee id. If the
+ * Auth create then fails, the docs are rolled back. syncUserClaims cannot stamp
+ * claims on a doc whose Auth account does not exist yet, so the claims are set
+ * here, in the same { role, departments } shape it mints.
+ *
+ * kind 'invite': email address; a random password nobody sees — the client
+ * then sends the password-reset email (unchanged UX). kind 'worker': username
+ * login on the synthetic <username>@bi.barroindustries address with the
+ * HR-chosen password. Payroll / worker_profiles writes stay client-side, under
+ * their own rules.
+ */
+exports.createStaffAccount = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  const parsed = staff.parseStaffRequest(data);
+  if (parsed.error) throw new functions.https.HttpsError('invalid-argument', parsed.error);
+  const req = parsed.req;
+
+  const db = admin.firestore();
+  const callerSnap = await db.collection('users').doc(context.auth.uid).get();
+  const caller = callerSnap.exists ? (callerSnap.data() || {}) : null;
+  const denied = staff.authorizeStaffCreate(caller, req);
+  if (denied) throw new functions.https.HttpsError('permission-denied', denied);
+
+  // Cheap pre-check so the common "already has an account" case never writes.
+  try {
+    await admin.auth().getUserByEmail(req.email);
+    throw new functions.https.HttpsError('already-exists',
+      req.kind === 'worker' ? 'Username already taken. Choose another.' : `${req.email} already has an account.`);
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    if (!e || e.code !== 'auth/user-not-found') {
+      throw new functions.https.HttpsError('internal', 'Could not check the address: ' + ((e && (e.code || e.message)) || e));
+    }
+  }
+
+  const userRef = db.collection('users').doc();     // random id — becomes the Auth uid
+  const uid = userRef.id;
+  const unameRef = req.kind === 'worker' ? db.collection('usernames').doc(req.username) : null;
+  const counterRef = db.collection('_counters').doc('employees');
+  let userDoc;
+  await db.runTransaction(async (t) => {
+    if (unameRef && (await t.get(unameRef)).exists) {
+      throw new functions.https.HttpsError('already-exists', 'Username already taken. Choose another.');
+    }
+    let employeeId = req.employeeId || '';
+    if (req.kind === 'invite') {
+      // Same counter and format the client transaction used.
+      const c = await t.get(counterRef);
+      const next = (c.exists ? c.data().count : 0) + 1;
+      t.set(counterRef, { count: next }, { merge: true });
+      employeeId = `BI-${manilaDate().slice(0, 4)}-${String(next).padStart(3, '0')}`;
+    }
+    userDoc = staff.buildStaffUserDoc(req, uid, context.auth.uid, employeeId, manilaDate(), admin.firestore.FieldValue);
+    t.create(userRef, userDoc);
+    if (unameRef) t.create(unameRef, { email: req.email, uid });
+  });
+
+  try {
+    await admin.auth().createUser({
+      uid,
+      email: req.email,
+      password: req.kind === 'worker' ? req.password : crypto.randomBytes(24).toString('base64url'),
+      displayName: userDoc.displayName,
+      disabled: false
+    });
+  } catch (e) {
+    await userRef.delete().catch(() => {});
+    if (unameRef) await unameRef.delete().catch(() => {});
+    if (e && (e.code === 'auth/email-already-exists' || e.code === 'auth/uid-already-exists')) {
+      throw new functions.https.HttpsError('already-exists',
+        req.kind === 'worker' ? 'Username already taken. Choose another.' : `${req.email} already has an account.`);
+    }
+    throw new functions.https.HttpsError('internal', 'Could not create the login: ' + ((e && (e.code || e.message)) || e));
+  }
+
+  try {
+    await admin.auth().setCustomUserClaims(uid, staff.claimsFor(userDoc));
+  } catch (e) {
+    // Not fatal: the next role/department edit re-mints them via syncUserClaims,
+    // and backfillUserClaims covers everyone. Firestore rules do not read claims.
+    console.error('[createStaffAccount] setCustomUserClaims failed for', uid, (e && (e.code || e.message)) || e);
+  }
+
+  try {
+    await db.collection('audit_log').add({
+      ts: admin.firestore.FieldValue.serverTimestamp(),
+      action: req.kind === 'worker' ? 'create-worker-account' : 'invite-user',
+      entity: 'user',
+      entityId: uid,
+      details: { role: req.role, departments: req.departments, email: req.email },
+      actorUid: context.auth.uid,
+      actorName: caller.displayName || caller.email || 'unknown',
+      actorRole: caller.role || null,
+    });
+  } catch (e) {
+    console.error('[createStaffAccount] audit log write failed:', e.message);
+  }
+
+  return { ok: true, uid, email: req.email, employeeId: userDoc.employeeId };
 });
 
 // ──────────────────────────────────────────────────────────────────────────

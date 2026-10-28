@@ -715,42 +715,23 @@ window.renderTeamTab = async function() {
         if (!email) { Notifs.showToast('Enter an email.','error'); return; }
         const depts = [..._panel.querySelectorAll('.inv-dept-cb:checked')].map(cb=>cb.value);
         try {
-          // Use a secondary app instance so the admin session is not replaced
-          const secondaryApp = firebase.initializeApp(window.firebaseConfig, `invite-${Date.now()}`);
-          const tempPass = Array.from(crypto.getRandomValues(new Uint8Array(12)))
-            .map(b => b.toString(36)).join('').slice(0, 10);
-          const cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, tempPass);
-          const uid = cred.user.uid;
-          await secondaryApp.delete();
-          // Atomic counter so concurrent invites never collide on the same employee ID
-          const counterRef = db.collection('_counters').doc('employees');
-          const empId = await db.runTransaction(async t => {
-            const snap = await t.get(counterRef);
-            const next = (snap.exists ? snap.data().count : 0) + 1;
-            t.set(counterRef, { count: next }, { merge: true });
-            return `BI-${window.bizYear()}-${String(next).padStart(3,'0')}`;
-          });
           // '__freelancer' is a TEAM classification, not a permission role: the
           // account signs in and is permissioned as a plain employee (so the
           // firestore.rules role whitelist is untouched), but is born
           // team:'freelancer' — Team-page pill + attendance exemption.
           const invRolePick = _panel.querySelector('#inv-role').value;
           const isFreelancer = invRolePick === '__freelancer';
-          const invRoleVal = isFreelancer ? 'employee' : invRolePick;
-          await db.collection('users').doc(uid).set({
-            uid, email,
-            displayName: _panel.querySelector('#inv-name').value.trim() || email.split('@')[0],
+          // The login, the users doc (employee id, TEAM-PAGE-ORG-SPEC §2e team
+          // stamp) and the claims are all created server-side by the
+          // createStaffAccount callable (functions/staff-core.js) — never by
+          // createUserWithEmailAndPassword here, so Auth sign-up can stay OFF.
+          await firebase.functions().httpsCallable('createStaffAccount')({
+            kind: 'invite', email,
+            displayName: _panel.querySelector('#inv-name').value.trim(),
             phone: _panel.querySelector('#inv-phone').value.trim(),
-            role:        invRoleVal,
-            departments: depts, department: depts[0]||'',
-            employeeId:  empId,
-            photoUrl:'', startDate: window.bizDate(),
-            // TEAM-PAGE-ORG-SPEC 2026-08-25 §2e — stamp the Team-page employment
-            // type at creation time (window.teamTypeOf reads this first, ahead of
-            // every legacy fallback).
-            team: isFreelancer ? 'freelancer' : invRoleVal === 'agent' ? 'agent' : 'office',
-            ...(isFreelancer ? { employmentType: 'Project-based' } : {}),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            role: isFreelancer ? 'employee' : invRolePick,
+            freelancer: isFreelancer,
+            departments: depts
           });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
           closeModal();
@@ -768,7 +749,7 @@ window.renderTeamTab = async function() {
           }
           window.renderTeamTab();
         } catch(err) {
-          if (err && err.code === 'auth/email-already-in-use') {
+          if (err && (err.code === 'functions/already-exists' || err.code === 'already-exists')) {
             // The account may be a previously-orphaned invite (auth user + profile
             // created, but the reset email never went out or was never used) —
             // give the admin a recovery path instead of a dead-end error.

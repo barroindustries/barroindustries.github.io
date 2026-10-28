@@ -433,6 +433,9 @@ When you change a rule, update its note here too — a stale rationale is worse 
 <a id="rn-24"></a>
 ## RN-24 — Self-signup creates its own doc as 'employee'; admins crea
 *Applies at:* `function noAccountAdminOnCreate() {`
+
+> **2026-10-28 (Open ruling #13): the self-signup arm described below is REMOVED.** No identity may create its own users doc any more; staff/worker logins come from the `createStaffAccount` callable (`functions/staff-core.js` mirrors the admin arms below), console-added logins from `createUserDocOnAuthCreate`. The text below is history.
+
 ```
       // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
       // v12 WS19: only isSeniorAdmin() (president/manager) may mint a manager/
