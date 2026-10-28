@@ -3147,7 +3147,7 @@ window.Chat = (() => {
       ? `<div class="chat-reactions-row" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${
           Object.entries(grouped).map(([emoji, uids]) => {
             const mine = uids.includes(currentUser.uid);
-            return `<button class="chat-reaction-chip" data-mid="${escHtml(m.id)}" data-emoji="${escHtml(emoji)}" style="font-size:12px;border-radius:12px;padding:1px 7px;border:1px solid ${mine?'var(--primary)':'var(--border)'};background:${mine?'var(--primary-soft)':'var(--surface-2)'};cursor:pointer">${emoji} ${uids.length}</button>`;
+            return `<button class="chat-reaction-chip" data-mid="${escHtml(m.id)}" data-emoji="${escHtml(emoji)}" style="font-size:12px;border-radius:12px;padding:1px 7px;border:1px solid ${mine?'var(--primary)':'var(--border)'};background:${mine?'var(--primary-soft)':'var(--surface-2)'};cursor:pointer">${escHtml(emoji)} ${uids.length}</button>`;
           }).join('')
         }</div>`
       : '';

@@ -1483,7 +1483,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         return `<tr class="pr-row">
           <td class="tc-avatar" style="text-align:center">
             <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--on-primary);font-size:14px;margin:0 auto">
-              ${u&&u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((line.name||'?')[0])}
+              ${u&&u.photoUrl?`<img src="${escHtml(safeHttpUrl(u.photoUrl))}" style="width:100%;height:100%;object-fit:cover"/>`:((line.name||'?')[0])}
             </div>
           </td>
           <td class="tc-name"><strong>${escHtml(line.name||'')}</strong>${editedBadge}${noteBadge}<div style="font-size:11px;color:var(--text-muted)">${escHtml(u?(u.title||ROLES[u.role]?.label||u.role||''):'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
@@ -1726,7 +1726,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       return `<tr class="pr-row">
         <td class="tc-avatar" style="text-align:center">
           <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--on-primary);font-size:14px;margin:0 auto">
-            ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((u.displayName||'?')[0])}
+            ${u.photoUrl?`<img src="${escHtml(safeHttpUrl(u.photoUrl))}" style="width:100%;height:100%;object-fit:cover"/>`:((u.displayName||'?')[0])}
           </div>
         </td>
         <td class="tc-name"><strong>${escHtml(u.displayName||u.email)}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(u.title||ROLES[u.role]?.label||u.role)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>

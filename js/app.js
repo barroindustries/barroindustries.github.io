@@ -1110,7 +1110,7 @@ function applyUserUI() {
   const ta = document.getElementById('topbar-avatar');
   if (ta) {
     ta.innerHTML = userProfile.photoUrl
-      ? `<img src="${userProfile.photoUrl}" style="width:34px;height:34px;border-radius:50%;object-fit:cover"/>`
+      ? `<img src="${escHtml(safeHttpUrl(userProfile.photoUrl))}" style="width:34px;height:34px;border-radius:50%;object-fit:cover"/>`
       : initial;
     // On mobile the avatar IS the profile menu (Facebook-style) — tapping your
     // picture opens the drawer (settings, notification prefs, sign out, and a
@@ -1125,7 +1125,7 @@ function applyUserUI() {
   const mb = document.getElementById('topbar-menu-btn');
   if (mb) mb.onclick = openProfileDrawer;
   const sa = document.getElementById('sidebar-avatar');
-  if (sa) sa.innerHTML = userProfile.photoUrl ? `<img src="${userProfile.photoUrl}"/>` : initial;
+  if (sa) sa.innerHTML = userProfile.photoUrl ? `<img src="${escHtml(safeHttpUrl(userProfile.photoUrl))}"/>` : initial;
   const sn = document.getElementById('sidebar-user-name');
   if (sn) sn.textContent = userProfile.displayName || userProfile.email;
   const sr = document.getElementById('sidebar-user-role');
@@ -2948,6 +2948,13 @@ async function navigateTo(page, opts) {
   // dept: prefix for dual dept tabs
   if (page.startsWith('dept:')) {
     const dept = page.slice(5);
+    // Audit 2026-10-28 C4 — `dept` comes straight from the URL hash (parseHash decodes it), so a
+    // crafted link like #/dept/<img onerror=…> reached innerHTML. Only real department keys route.
+    if (!Object.prototype.hasOwnProperty.call(window.DEPARTMENTS || {}, dept)) {
+      c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔍',44)}</div><h4>Page not found</h4></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [c] });
+      return;
+    }
     renderDeptModule(dept);
     _devCheckIconIntegrity(page);
     if (typeof window.devCheckStacking === 'function') window.devCheckStacking();
@@ -3387,7 +3394,7 @@ function renderDeptModule(dept) {
       // from leaving a blank page behind.
       c.innerHTML = (typeof renderAccessDenied === 'function')
         ? renderAccessDenied(dept)
-        : `<div class="access-denied"><h3>${dept}</h3><p>You don't have access to this department.</p></div>`;
+        : `<div class="access-denied"><h3>${escHtml(dept)}</h3><p>You don't have access to this department.</p></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [c] });
     }
     return;
@@ -3497,8 +3504,8 @@ function renderGenericDept(dept) {
   const cfg = DEPARTMENTS[dept];
   const c = document.getElementById('page-content');
   c.innerHTML = `
-    <div class="page-header" style="display:flex;align-items:center;gap:10px">${window.deptIconTile(cfg||dept, 32)}<h2 style="margin:0">${dept}</h2></div>
-    <div class="card"><div class="card-body"><div class="empty-state">${window.deptIconTile(cfg||dept, 44)}<h4>${dept}</h4><p>Module coming soon.</p></div></div></div>`;
+    <div class="page-header" style="display:flex;align-items:center;gap:10px">${window.deptIconTile(cfg||dept, 32)}<h2 style="margin:0">${escHtml(dept)}</h2></div>
+    <div class="card"><div class="card-body"><div class="empty-state">${window.deptIconTile(cfg||dept, 44)}<h4>${escHtml(dept)}</h4><p>Module coming soon.</p></div></div></div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 }
 

@@ -887,14 +887,14 @@ window.renderComments = async function(collection, docId, containerId, currentUs
             const canDelete = canEdit || isAdmin;
             return `
             <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'}" data-cid="${c.id}">
-              ${!isMine ? `<div class="ms-avatar" title="${escHtml(c.authorName||'User')}">${c.photoUrl?`<img src="${c.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(c.authorName||'U')}</div>` : ''}
+              ${!isMine ? `<div class="ms-avatar" title="${escHtml(c.authorName||'User')}">${c.photoUrl?`<img src="${escHtml(safeHttpUrl(c.photoUrl))}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(c.authorName||'U')}</div>` : ''}
               <div class="ms-bubble-wrap">
                 ${!isMine ? `<div class="ms-name">${escHtml(c.authorName||'User')}</div>` : ''}
                 <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} comment-bubble-tap" data-id="${c.id}">
                   ${c.text?`<div class="ms-text">${escHtml(c.text).replace(/\n/g,'<br/>')}</div>`:''}
                   ${c.fileUrl ? (c.fileSource!=='link' && isImage(c.fileUrl)
-                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${safeHttpUrl(c.fileUrl)}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer" onclick="window.open('${safeHttpUrl(c.fileUrl)}','_blank')"/></div>`
-                    : `<a href="${safeHttpUrl(c.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(c.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(c.fileName||'Attachment')}</span></a>`
+                    ? `<div style="margin-top:${c.text?'6':'0'}px"><a href="${escHtml(safeHttpUrl(c.fileUrl))}" target="_blank" rel="noopener"><img src="${escHtml(safeHttpUrl(c.fileUrl))}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer"/></a></div>`
+                    : `<a href="${escHtml(safeHttpUrl(c.fileUrl))}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(c.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(c.fileName||'Attachment')}</span></a>`
                   ) : ''}
                   <div class="ms-meta">
                     <span class="ms-time">${timeLabel(c.createdAt)}</span>
@@ -907,7 +907,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                 </div>` : ''}
                 ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${escHtml(seenBy.map(r=>r.name.split(' ')[0]).join(', '))}</div>` : ''}
               </div>
-              ${isMine ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${userProfile.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>` : ''}
+              ${isMine ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${escHtml(safeHttpUrl(userProfile.photoUrl))}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>` : ''}
             </div>`;
           }).join('')}
       </div>
