@@ -5984,31 +5984,22 @@ window.openPayslipEditPanel = async function(model, backFn) {
 //  window, no cross-origin script — fully same-document.
 // ═══════════════════════════════════════════════════════════
 
-let _html2canvasLoadPromise = null;
+// Loaded through window.ensureScript (js/config.js), which adds ?v=APP_VERSION
+// (GitHub Pages sends max-age=600 — a bare src could run the previous
+// release's file for 10 minutes after a deploy), shares one load promise
+// across every caller (print-docs.js and screens/hr.js both load these) and
+// drops a failed load so the next export retries.
 function _ensureHtml2Canvas() {
   if (window.html2canvas) return Promise.resolve();
-  if (_html2canvasLoadPromise) return _html2canvasLoadPromise;
-  _html2canvasLoadPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'js/vendor/html2canvas.min.js';
-    s.onload = () => resolve();
-    s.onerror = () => { _html2canvasLoadPromise = null; reject(new Error('Could not load the export library — check your connection and try again.')); };
-    document.head.appendChild(s);
+  return window.ensureScript('js/vendor/html2canvas.min.js').catch(() => {
+    throw new Error('Could not load the export library — check your connection and try again.');
   });
-  return _html2canvasLoadPromise;
 }
-let _pdfLiteLoadPromise = null;
 function _ensurePdfLite() {
   if (window.jpegToPdf) return Promise.resolve();
-  if (_pdfLiteLoadPromise) return _pdfLiteLoadPromise;
-  _pdfLiteLoadPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'js/pdf-lite.js';
-    s.onload = () => resolve();
-    s.onerror = () => { _pdfLiteLoadPromise = null; reject(new Error('Could not load the PDF export helper.')); };
-    document.head.appendChild(s);
+  return window.ensureScript('js/pdf-lite.js').catch(() => {
+    throw new Error('Could not load the PDF export helper.');
   });
-  return _pdfLiteLoadPromise;
 }
 
 function _isIOSStandalone() {

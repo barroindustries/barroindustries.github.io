@@ -20,6 +20,9 @@
 //   6. HTML       sw.js's HTML route revalidates (cache: 'no-cache') instead of taking the browser's max-age=600 copy of index.html; freshRequest()
 //                 rebuilds a navigation from its URL with redirect: 'manual' (a navigation may only be answered with an opaque redirect), and
 //                 the response is still cached under the original request.
+//   7. EXPORTS    js/print-docs.js and js/screens/hr.js load js/vendor/html2canvas.min.js and js/pdf-lite.js through window.ensureScript (so with
+//                 ?v=APP_VERSION and one shared load across both files), keep their user-facing error messages, and retry after a failed load;
+//                 neither file injects a <script> of its own any more.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -30,11 +33,11 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
-function loadConfig() {
+function loadConfig({ fail = () => false } = {}) {
   const injected = [];
   const document = {
     createElement: () => ({}),
-    head: { appendChild(s) { injected.push(s.src); Promise.resolve().then(() => s.onload && s.onload()); } },
+    head: { appendChild(s) { injected.push(s.src); Promise.resolve().then(() => (fail(s.src) ? s.onerror && s.onerror(new Error('load')) : s.onload && s.onload())); } },
     addEventListener() {},
     getElementById: () => null,
     querySelector: () => null,
@@ -175,4 +178,33 @@ describe("sw.js revalidates HTML past the browser's HTTP cache (2026-10-29)", ()
     assert.match(sw, /async function networkFirstTimeout\(request, cacheName, timeoutMs, ignoreSearch, revalidate\)/);
     assert.match(sw, /const net = fetch\(revalidate \? freshRequest\(request\) : request\)\.then\(r => \{ if \(r && r\.ok\) cache\.put\(request, r\.clone\(\)\)/);
   });
+});
+
+describe('the PDF / JPEG export helpers load through ensureScript (2026-10-29)', () => {
+  const fnOf = (src, name) => src.match(new RegExp(`^[ ]*function ${name}\\(\\) \\{[\\s\\S]*?\\n[ ]*\\}\\n`, 'm'))?.[0];
+  for (const file of ['js/print-docs.js', 'js/screens/hr.js']) {
+    const src = read(file);
+    it(`${file}: versioned, shared, its error messages kept, and a failed load retries`, async () => {
+      assert.ok(!/createElement\('script'\)/.test(src), `${file} injects a <script> itself again (it would load without ?v=)`);
+      const h2c = fnOf(src, '_ensureHtml2Canvas'), pdf = fnOf(src, '_ensurePdfLite');
+      assert.ok(h2c && pdf, `${file}: a loader is gone`);
+      let broken = true;
+      const { win, injected } = loadConfig({ fail: (u) => broken && u.startsWith('js/pdf-lite.js') });
+      vm.runInContext(`${h2c}\n${pdf}\nwindow._h2c = _ensureHtml2Canvas; window._pdf = _ensurePdfLite;`, vm.createContext(win));
+      await Promise.all([win._h2c(), win._h2c()]);
+      assert.deepEqual(injected, [`js/vendor/html2canvas.min.js?v=${win.APP_VERSION}`], 'html2canvas loaded unversioned or twice');
+      await assert.rejects(win._pdf(), { message: 'Could not load the PDF export helper.' });
+      broken = false;
+      await win._pdf();
+      assert.deepEqual(injected.slice(1), [`js/pdf-lite.js?v=${win.APP_VERSION}`, `js/pdf-lite.js?v=${win.APP_VERSION}`], 'a failed load did not retry');
+      win.html2canvas = () => {};
+      await win._h2c();
+      assert.equal(injected.length, 3, 'a loaded library is fetched again');
+    });
+    it(`${file}: the html2canvas failure message is unchanged`, async () => {
+      const { win } = loadConfig({ fail: () => true });
+      vm.runInContext(`${fnOf(src, '_ensureHtml2Canvas')}\nwindow._h2c = _ensureHtml2Canvas;`, vm.createContext(win));
+      await assert.rejects(win._h2c(), { message: 'Could not load the export library — check your connection and try again.' });
+    });
+  }
 });
