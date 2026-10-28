@@ -9,7 +9,8 @@
 //     staged write (the exact behaviour behind STATUS 2026-09-26's portalUnlock lesson);
 //   - turns FieldValue.serverTimestamp() into a Timestamp-like with toMillis()/toDate() taken from Date.now() at write time
 //     (tests mock Date, so server time is controllable).
-// Supported surface: collection().doc().{get,set,create,update,delete,collection}, collection().add(),
+// Supported surface: collection().doc().{get,set,create,update,delete,collection,listCollections}, collection().add(),
+// collection().listDocuments() (missing parents included, as in Firestore),
 // where(field,'==' | 'array-contains',v), orderBy(field,dir), limit(n), get(), runTransaction, batch,
 // FieldValue.serverTimestamp, FieldValue.delete (an update() key whose value is delete() removes that field, dotted
 // paths included — cirRemovePhoto uses it), admin.storage().bucket() as inert stubs (a test that needs real objects
@@ -110,6 +111,12 @@ function createFake() {
       id: idOf(path), path,
       get parent() { return collRef(parentOf(path)); },
       collection: (name) => collRef(`${path}/${name}`),
+      // Like Firestore: every subcollection that has at least one document anywhere beneath it.
+      async listCollections() {
+        const ids = new Set();
+        for (const p of store.keys()) if (p.startsWith(path + '/')) ids.add(p.slice(path.length + 1).split('/')[0]);
+        return [...ids].map((id) => collRef(`${path}/${id}`));
+      },
       async get() { stats.docGets[path] = (stats.docGets[path] || 0) + 1; return snapshot(path, store.get(path)); },
       async set(data, opts) { applyWrite(store, { kind: 'set', path, data, merge: !!(opts && opts.merge) }); bump(path); },
       async create(data) { applyWrite(store, { kind: 'create', path, data }); bump(path); },
@@ -124,6 +131,14 @@ function createFake() {
       id: idOf(path), path,
       doc: (id) => docRef(`${path}/${id || ('auto' + (++autoId))}`),
       async add(data) { const r = self.doc(); await r.create(data); return r; },
+      // Like Firestore's listDocuments(): EVERY document ref in the collection, including "missing" parents —
+      // ids that hold no document themselves but have documents beneath them (attendance/{uid} above
+      // attendance/{uid}/records/{date}). get() above, like the real one, returns only documents that exist.
+      async listDocuments() {
+        const ids = new Set();
+        for (const p of store.keys()) if (p.startsWith(path + '/')) ids.add(p.slice(path.length + 1).split('/')[0]);
+        return [...ids].map((id) => docRef(`${path}/${id}`));
+      },
       where: (field, op, value) => collRef(path, { ...query, filters: query.filters.concat([{ field, op, value }]) }),
       orderBy: (field, dir) => collRef(path, { ...query, order: { field, dir: dir || 'asc' } }),
       limit: (n) => collRef(path, { ...query, lim: n }),
@@ -193,7 +208,11 @@ function createFake() {
     return b;
   }
 
-  const db = { collection: (name) => collRef(name), runTransaction, batch };
+  const db = {
+    collection: (name) => collRef(name), runTransaction, batch,
+    // Root collections that hold at least one document anywhere beneath them (Admin SDK listCollections()).
+    async listCollections() { return [...new Set([...store.keys()].map((p) => p.split('/')[0]))].map((id) => collRef(id)); },
+  };
 
   // test helpers
   const fake = {
@@ -211,7 +230,7 @@ function createFake() {
   const FieldValue = { serverTimestamp: () => SERVER_TS, delete: () => DELETE_FIELD };
   const firestore = Object.assign(() => db, { FieldValue });
   const bucket = { file: () => ({ save: async () => {}, move: async () => {}, delete: async () => {} }), deleteFiles: async () => {} };
-  fake.admin = { initializeApp() {}, firestore, storage: () => ({ bucket: () => bucket }), auth: () => ({}), messaging: () => ({}) };
+  fake.admin = { initializeApp() {}, credential: { cert: () => ({}) }, firestore, storage: () => ({ bucket: () => bucket }), auth: () => ({}), messaging: () => ({}) };
   return fake;
 }
 

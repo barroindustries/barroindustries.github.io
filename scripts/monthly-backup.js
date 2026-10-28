@@ -10,8 +10,9 @@
  *   BI-Operations/
  *   └── Monthly Backups/
  *       └── YYYY-MM/                  ← e.g. 2026-05
- *           ├── attendance.json
+ *           ├── attendance.json           ← that month's records, flattened (report)
  *           ├── attendance.csv
+ *           ├── attendance__records.json  ← EVERY attendance record (restore source)
  *           ├── tasks.json
  *           ├── tasks.csv
  *           ├── tasks__comments.json     ← subcollection walker (see below)
@@ -46,6 +47,8 @@ const admin = require('firebase-admin');
 const {
   requireEnv, initDrive, preflight, ensureFolder: ensureFolderRaw, uploadBuffer,
 } = require('./drive-lib');
+// Audit 2026-10-28 H4 — walk "missing" parents too (attendance/{uid} never exists as a doc).
+const { parentRefs, fetchAttendanceRecords } = require('./backup-walk');
 
 // ── Init Firebase ──────────────────────────────────────────────────────────
 const serviceAccount = JSON.parse(requireEnv('FIREBASE_SERVICE_ACCOUNT'));
@@ -199,42 +202,32 @@ const EXCLUDE = new Set(['notifications']);
 // ── Fetch attendance subcollections: attendance/{uid}/records/{date} ────────
 // The root 'attendance' collection holds one doc per user (uid as doc ID).
 // Actual records live in the 'records' subcollection keyed by 'YYYY-MM-DD'.
+// Audit 2026-10-28 H4: was db.collection('attendance').get(), which returns NO users — the app never
+// writes attendance/{uid} itself, only records beneath it — so every month exported []. See
+// scripts/backup-walk.js. This month view stays; the FULL record set (the restore source) is now
+// attendance__records.json from the subcollection walker, via the refs fetchCollection returns.
 async function fetchAttendanceSubcollection({ start, end }) {
   const startStr = start.toISOString().slice(0, 10);
   const endStr   = end.toISOString().slice(0, 10); // exclusive
-  const usersSnap = await db.collection('attendance').get();
-  const results = [];
-
-  // Fetch each user's records subcollection in parallel
-  await Promise.all(usersSnap.docs.map(async userDoc => {
-    const uid = userDoc.id;
-    const recsSnap = await userDoc.ref.collection('records')
-      .where(admin.firestore.FieldPath.documentId(), '>=', startStr)
-      .where(admin.firestore.FieldPath.documentId(), '<',  endStr)
-      .get();
-    for (const rec of recsSnap.docs) {
-      results.push(serialize({ id: rec.id, userId: uid, ...rec.data() }));
-    }
-  }));
-
-  // Sort by userId then date for readable output
-  results.sort((a, b) => a.userId.localeCompare(b.userId) || a.date?.localeCompare(b.date ?? ''));
-  return results;
+  const rows = await fetchAttendanceRecords(db, { startStr, endStr });
+  return rows.map(serialize);
 }
 
 // ── Fetch and filter a collection ──────────────────────────────────────────
 // Returns { docs, refs }: `docs` is the serialized export payload (unchanged
-// shape/behavior); `refs` is the matching array of DocumentReferences for the
-// SAME doc set, used by exportSubcollections() below to walk each doc's
-// subcollections (comments, messages, …) without a second, possibly-stale
-// query. For the attendance special case (already flattened into per-record
-// rows, not per-user docs) refs is empty — see exportSubcollections' doc
-// comment for why that's also how attendance/{uid}/records avoids double
-// export.
+// shape/behavior); `refs` is EVERY document ref in the collection — the docs
+// above plus "missing" parents that only have subcollections (audit H4,
+// scripts/backup-walk.js) — used by exportSubcollections() below to walk
+// comments, messages, attendance records, … For attendance, `docs` is the
+// month's records flattened (attendance.json, a report — restore skips it)
+// and the walker writes the full set as attendance__records.json, which
+// restore-from-backup.js restores through its subcollection path.
 async function fetchCollection(col, { start, end }) {
   // Attendance is a subcollection — handled separately
+  // H4: refs come from listDocuments(), so the walker below also reaches parents that are not
+  // documents themselves — attendance/{uid}, attendance_worker/{id}, and any future collection like them.
   if (col.type === 'subcollection') {
-    return { docs: await fetchAttendanceSubcollection({ start, end }), refs: [] };
+    return { docs: await fetchAttendanceSubcollection({ start, end }), refs: await parentRefs(db.collection(col.name)) };
   }
 
   // v13 Phase 89: FULL snapshot for every collection, always — no dateField
@@ -246,7 +239,7 @@ async function fetchCollection(col, { start, end }) {
 
   return {
     docs: snap.docs.map(d => serialize({ id: d.id, ...d.data() })),
-    refs: snap.docs.map(d => d.ref),
+    refs: await parentRefs(db.collection(col.name)),
   };
 }
 
@@ -520,7 +513,7 @@ async function main() {
       }
 
       // Generic subcollection walker — comments/messages/etc. under this
-      // root's docs (v13 Phase 2+3). No-op when refs is empty (attendance).
+      // root's docs (v13 Phase 2+3), and since H4 attendance records too.
       await exportSubcollections(name, refs, monthFolder, stats, manifest, summaryLines);
     } catch (err) {
       console.error(`  ❌ ${name}: ${err.message}`);
