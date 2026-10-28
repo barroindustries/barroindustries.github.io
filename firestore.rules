@@ -151,6 +151,7 @@ service cloud.firestore {
       function noAccountAdminOnCreate() {
         return request.resource.data.get('accountAdmin', false) == false;
       }
+      // No self-create branch (Open ruling #13): every profile is written by an admin, createStaffAccount or createUserDocOnAuthCreate.
       allow create: if isAuth() && (
         isPresident() || (
           isSeniorAdmin()
@@ -162,11 +163,6 @@ service cloud.firestore {
           isAdmin()
           && noAccountAdminOnCreate()
           && request.resource.data.get('role', 'employee') in ['employee', 'agent']
-          && noPrivilegedDeptOnCreate()
-        ) || (
-          isOwner(uid)
-          && noAccountAdminOnCreate()
-          && request.resource.data.role == 'employee'
           && noPrivilegedDeptOnCreate()
         ) || (
           // [RN-25] TEAM-PAGE-ORG-SPEC-2026-08-25 — a President-flagged accoun -> docs/firestore-rules-notes.md#rn-25

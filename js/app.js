@@ -1047,26 +1047,17 @@ async function loadUserProfile(user) {
     // reads as 0" behavior for the merge step further down.
     const payrollPromise = db.collection('payroll').doc(user.uid).get().catch(() => null);
     let snap = await db.collection('users').doc(user.uid).get();
-    if (!snap.exists) {
-      const counterRef = db.collection('_counters').doc('employees');
-      const empId = await db.runTransaction(async t => {
-        const c = await t.get(counterRef);
-        const next = (c.exists ? c.data().count : 0) + 1;
-        t.set(counterRef, { count: next }, { merge: true });
-        return `BI-${bizYear()}-${String(next).padStart(3,'0')}`;
-      });
-      const profile  = {
-        uid: user.uid, email: user.email,
-        displayName: user.displayName || user.email.split('@')[0],
-        role: 'employee', departments: [], title: '',
-        employeeId: empId,
-        photoUrl: '', startDate: bizDate(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      await db.collection('users').doc(user.uid).set(profile);
-      dbCacheInvalidate && dbCacheInvalidate('users');
+    // No self-created profile (STATUS.md Open ruling #13): firestore.rules no
+    // longer lets an account write its OWN users doc — every profile is written
+    // server-side, by createStaffAccount or, for a login added by hand in the
+    // Firebase console, by createUserDocOnAuthCreate. That trigger can lag the
+    // first sign-in by a few seconds, so wait for it briefly; still nothing →
+    // the catch below (a signed-in identity with no profile is refused by the rules).
+    for (let i = 0; !snap.exists && i < 4; i++) {
+      await new Promise(r => setTimeout(r, 1500));
       snap = await db.collection('users').doc(user.uid).get();
     }
+    if (!snap.exists) throw new Error('No profile for this account yet.');
     userProfile  = { id: snap.id, ...snap.data() };
     // Merge the user's OWN pay (salary/allowance/deductions) from the protected
     // payroll/{uid} doc — pay no longer lives on the world-readable users doc.

@@ -55,7 +55,7 @@
    - Analytics: renderAnalytics.
    - Team (accounts admin — distinct from people.js's renderTeamTab, the
      employee-facing team directory): renderTeam, openAddEmployeeModal,
-     _getWorkerAuth, openCreateWorkerModal, openEditEmployeeModal.
+     openCreateWorkerModal, openEditEmployeeModal.
    - Mini Calendar: _calMonthOffset, renderMiniCal (used by
      renderPresidentDashboard/renderEmployeeDashboard above).
    - renderAccessDenied, formatNum — small helpers used exclusively by the
@@ -7016,11 +7016,6 @@ function openAddEmployeeModal() {
 
 // ── Secondary Firebase app — used only for creating/updating worker accounts
 //    so HR's own session is never interrupted
-function _getWorkerAuth() {
-  try { return firebase.app('worker-admin').auth(); }
-  catch { return firebase.initializeApp(window.firebaseConfig, 'worker-admin').auth(); }
-}
-
 // ── Create Worker Account (username + password, no email required) ────────
 // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3b — optional opts.linkWorker = { id, name,
 // jobTitle, department } (a worker_directory doc with no login yet, surfaced by
@@ -7187,36 +7182,19 @@ function openCreateWorkerModal(opts) {
 
     btn.disabled = true; btn.textContent = 'Creating…';
 
-    // Auth email is synthetic — worker never needs to see or use this
-    const authEmail = `${username}@bi.barroindustries`;
     try {
-      // Create Firebase Auth account via secondary app (doesn't affect HR's session)
-      const workerAuth = _getWorkerAuth();
-      const cred = await workerAuth.createUserWithEmailAndPassword(authEmail, password);
-      const uid  = cred.user.uid;
-      await workerAuth.signOut();
-
-      // Write Firestore profile using the Auth UID as the doc ID
-      await db.collection('users').doc(uid).set({
-        displayName: name,
-        username:    username,
-        authEmail:   authEmail,
-        email:       authEmail,        // fallback for any email display
-        employeeId:  eid,
-        role, department: dept, departments: dept ? [dept] : [],
-        title,
-        startDate:   start,
-        employmentStatus: empStatus,
-        hrManagedAccount: true,
-        // TEAM-PAGE-ORG-SPEC-2026-08-25 Part 3b — both create and link modes
-        // stamp the explicit team classification (teamTypeOf's config.js
-        // priority-1 signal), same rule the invite path (people.js) uses.
-        team: payClass === 'production' ? 'operations' : 'office',
-        createdBy:   currentUser.uid,
-        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+      // The Auth login, the users/{uid} profile (hrManagedAccount, the
+      // TEAM-PAGE-ORG-SPEC Part 3b team stamp) and the usernames/{u} login map
+      // are created server-side by the createStaffAccount callable
+      // (functions/staff-core.js) — never by createUserWithEmailAndPassword
+      // here, so Firebase Auth sign-up can stay OFF.
+      const res = await firebase.functions().httpsCallable('createStaffAccount')({
+        kind: 'worker', username, password,
+        displayName: name, employeeId: eid,
+        role, departments: dept ? [dept] : [],
+        title, startDate: start, employmentStatus: empStatus, payClass
       });
-      // Keep the username -> email login map in sync (v12 WS19).
-      await db.collection('usernames').doc(username).set({ email: authEmail, uid });
+      const uid = res.data.uid;
       // Pay → protected payroll/{uid} (keyed by Auth UID == users doc id).
       // payClass is now DECLARED here rather than inferred later: an absent
       // payClass reads as 'regular' in the run, the roster and the profile, so
@@ -7303,7 +7281,7 @@ function openCreateWorkerModal(opts) {
       // page hijack (verify pass, TEAM-PAGE-ORG-SPEC-2026-08-25).
     } catch(err) {
       btn.disabled = false; btn.textContent = 'Create Account';
-      errEl.textContent = err.code === 'auth/email-already-in-use'
+      errEl.textContent = (err.code === 'functions/already-exists' || err.code === 'already-exists')
         ? 'Username already registered. Choose another.'
         : (err.message || 'Account creation failed.');
       errEl.classList.remove('hidden');
