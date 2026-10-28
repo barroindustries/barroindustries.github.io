@@ -2066,23 +2066,22 @@ body.body-workforce #costMarginWrap{display:none!important;}
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-<script defer src="js/firebase-config.js"></script>
 <!-- v12 WS31 — shared letterhead engine. Self-contained (own esc fallback,
      accepts opts.entity) so it works standalone in this iframe; already in
      sw.js PRECACHE. Falls back to the legacy #printHeader if it fails to load
      (offline/file://). -->
-<script defer src="js/letterhead.js"></script>
 <!-- PUBLIC-QUOTE-REQUEST-SPEC.md §6.2 — the catalogue-item pricing formula (computePrice below delegates to it).
      One copy of the math, shared with the Cloud Functions' public estimate; already in sw.js PRECACHE so the builder
      still prices offline. Relative src, so file:// opens work too. -->
-<script defer src="js/pricing-core.js"></script>
 <!-- QUOTE-BUILDER-CONFIGURATOR-SPEC.md §2.1 — the CONFIGURATOR. The eleven website families' definitions (price-free, generated), the logic that
      walks them (validation, wording, size rules) and the pure helpers that price / build / cost a configured line through js/pricing-core.js
      above. All three are UMD files already in sw.js PRECACHE; relative src, so file:// opens work (no option sheets there -> every configured
      line reads "Priced after review"). Order matters: qb-configured.js is handed the other three at run time, never at load time. -->
-<script defer src="js/qr-families.js"></script>
-<script defer src="js/product-families.js"></script>
-<script defer src="js/qb-configured.js"></script>
+<!-- Local scripts carry the app's ?v= CACHE-BUST (2026-10-29): GitHub Pages sends max-age=600, so a bare src could price with the
+     previous release's js/pricing-core.js for 10 minutes after a deploy. js/app.js opens this iframe as quote-builder-v2.html?v=APP_VERSION;
+     this loader writes the six local scripts (firebase-config, then the three above, in that order) with that version, as the same
+     parser-inserted defer scripts the app-kit in index.html uses. Opened without ?v= (standalone, file://) they load bare, as before. -->
+<script>(function(){var v=new URLSearchParams(location.search).get('v'),q=(v&&/^[0-9][0-9.]*$/.test(v))?'?v='+v:'';['js/firebase-config.js','js/letterhead.js','js/pricing-core.js','js/qr-families.js','js/product-families.js','js/qb-configured.js'].forEach(function(f){document.write('<script defer src="'+f+q+'"><\/script>');});})();</script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
