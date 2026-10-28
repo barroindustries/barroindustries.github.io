@@ -2272,6 +2272,9 @@ window.computePayRun = async function(month, { policy } = {}) {
     // resolved off the settings doc, losing which policy actually ran.
     month, state:'computed', payPolicy: built.payPolicy,
     employeeCount: lines.length, totalNet, lines, skipped,
+    // Audit 2026-10-28 H2 — the rate table these lines were frozen with; disbursePayRun
+    // refuses to pay when it is not the table in force at release (statutoryReleaseBlock).
+    statutoryStamp: window.statutoryStamp(String(month).slice(0,4)),
     computedBy: currentUser?.uid, computedByName: window.userProfile?.displayName || currentUser?.email,
     computedAt: firebase.firestore.FieldValue.serverTimestamp()
   }, { merge:true });
@@ -2308,6 +2311,25 @@ window.disbursePayRun = async function(month, opts = {}) {
   // because a toast is too easy to miss/ignore on a "disburse payroll" click.
   const _payYear = String(month||'').slice(0,4);
   const _statTable = window.STATUTORY && window.STATUTORY[_payYear];
+  // Audit 2026-10-28 H2 — confirmed TODAY is not enough: the lines must also have been
+  // worked out WITH today's confirmed table. Checked only on a fresh release ('verified');
+  // resuming a half-finished 'disbursing' run must stay possible.
+  const _preSnap = await db.collection('pay_runs').doc(month).get().catch(() => null);
+  const _pre = (_preSnap && _preSnap.exists) ? (_preSnap.data() || {}) : {};
+  const _statBlock = window.statutoryReleaseBlock(_pre.statutoryStamp, _payYear);
+  if (_pre.state === 'verified' && _statBlock && _statBlock.code !== 'unverified') {
+    await window.confirmDialog({
+      title: 'Work these figures out again before paying',
+      html: true,
+      message: 'The government deductions on this payroll were worked out '
+        + (_statBlock.code === 'unstamped' ? 'before the app recorded which rates were used' : 'with different ' + _payYear + ' rates from the ones confirmed now')
+        + ', so they may be wrong — for example ₱0, if the rates were not entered yet.<br><br>'
+        + '<strong>To pay:</strong> the President reopens the period, then press <strong>Prepare</strong> and check it again. '
+        + 'The figures are then worked out with the confirmed rates.',
+      confirmLabel: 'Understood', cancelLabel: 'Close', danger: true
+    });
+    return;
+  }
   if (!_statTable || _statTable.verified !== true) {
     await window.confirmDialog({
       title: 'Payroll cannot be released yet',
@@ -2340,6 +2362,10 @@ window.disbursePayRun = async function(month, opts = {}) {
     if (!snap.exists) throw new Error('No pay run found for this month.');
     const d = snap.data();
     if (d.state === 'verified') {
+      // Same H2 check on the doc the lock is taken from (re-prepared in another tab meanwhile).
+      if (window.statutoryReleaseBlock(d.statutoryStamp, _payYear)) {
+        throw new Error('The government rates changed since this payroll was worked out — reopen it and prepare it again before paying.');
+      }
       tx.update(runRef, {
         state: 'disbursing',
         disbursingAt: firebase.firestore.FieldValue.serverTimestamp(),

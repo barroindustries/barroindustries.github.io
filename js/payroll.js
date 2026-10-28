@@ -786,6 +786,17 @@ if (typeof window === 'undefined') {
   /* Should this correction post anything? A repeat that changes nothing must
      post NOTHING — not a zero-value pair of ledger legs, and not a second copy
      of a difference already booked. */
+  /* Audit 2026-10-28 H3 — which ledger legs a correction entry still owes, or null.
+     An entry written before this change carries no ledgerPosted field: it is treated as
+     owed, which is safe because its refs are deterministic and upsertByRef overwrites. */
+  PC.correctionLedgerOwed = function (entry) {
+    if (!entry || entry.ledgerPosted === true) return null;
+    const difference = r2(Number(entry.difference) || 0);
+    if (Math.abs(difference) < 0.01) return null;
+    return { seq: entry.seq, amount: r2(Math.abs(difference)), owedMore: difference > 0, reason: String(entry.reason || ''),
+      was: r2(Number(entry.was) || 0), now: r2(Number(entry.now) || 0), difference: difference };
+  };
+
   PC.correctionPosts = function (nowNet, wasNet, hasPrior) {
     const difference = r2(Number(nowNet) - Number(wasNet));
     if (Math.abs(difference) < 0.01) return { posts: false, difference: 0 };
@@ -1759,7 +1770,11 @@ if (typeof window === 'undefined') {
       // In ONE transaction on the document that is actually writable, so the
       // number and the record of it can never disagree in either direction.
       let seq = 0, duplicate = false, wasNet = frozenNet, difference = 0;
+      // Audit 2026-10-28 H3 — the correction whose two ledger legs still have to land: this
+      // press's new entry, or (on a repeat) the last entry if its legs never did.
+      let owed = null;
       await _db().runTransaction(async (tx) => {
+        owed = null;
         const snap = await tx.get(psRef);
         const cur = snap.exists ? (snap.data() || {}) : {};
         const prior = Array.isArray(cur.corrections) ? cur.corrections : [];
@@ -1776,7 +1791,9 @@ if (typeof window === 'undefined') {
         // Nothing changed — a repeat of a correction already applied. Post
         // nothing rather than a zero-value pair of ledger legs.
         if (Math.abs(difference) < 0.01 && prior.length) {
-          seq = last ? last.seq : prior.length; duplicate = true; return;
+          seq = last ? last.seq : prior.length; duplicate = true;
+          owed = PC.correctionLedgerOwed(last);
+          return;
         }
         // Same reason, same money, moments ago: this is the same press arriving
         // twice, not a second correction. The deterministic refs below would
@@ -1784,13 +1801,19 @@ if (typeof window === 'undefined') {
         // payslip is its own kind of wrong.
         if (last && last.reason === reason && r2(last.difference) === difference
             && last.at && (Date.parse(nowIso) - Date.parse(last.at)) < 60000) {
-          seq = last.seq; duplicate = true; return;
+          seq = last.seq; duplicate = true;
+          owed = PC.correctionLedgerOwed(last);
+          return;
         }
         seq = prior.length + 1;
         const entry = {
           seq: seq, reason: reason, was: wasNet, now: nowNet, difference: difference,
-          at: nowIso, by: myUid(), byName: myName(), periodId: periodId
+          at: nowIso, by: myUid(), byName: myName(), periodId: periodId,
+          // Flipped to true only once BOTH legs are in the ledger (below). A repeat press
+          // finds it false and posts them, instead of seeing "no difference" and posting nothing.
+          ledgerPosted: Math.abs(difference) < 0.01
         };
+        owed = PC.correctionLedgerOwed(entry);
         const write = {
           corrections: prior.concat([entry]),
           corrected: true, correctedAt: stamp(), correctedBy: myUid(),
@@ -1819,32 +1842,59 @@ if (typeof window === 'undefined') {
         tx.set(psRef, write, { merge: true });
       });
 
-      const refExp = 'PAYFIX-' + periodId + '-' + personId + '-' + seq + '-EXP';
-      const refCash = 'PAYFIX-' + periodId + '-' + personId + '-' + seq + '-CASH';
       const ledgerRefs = [];
 
-      if (Math.abs(difference) >= 0.01) {
-        const amount = r2(Math.abs(difference));
-        const owedMore = difference > 0;
+      // ⚠ AUDIT 2026-10-28 H3 — THE PAYSLIP IS ALREADY CORRECTED HERE; THE BOOKS ARE NOT. The
+      // transaction above committed the new pay, and the two legs below are separate writes.
+      // If they fail (a closed accounting period for Finance, a dropped connection), the old
+      // code was stranded for good: a second press measured against the already-corrected
+      // payslip, found a zero difference, took the duplicate branch and posted nothing. Now
+      // the entry carries ledgerPosted:false until both legs land, a repeat press posts
+      // whatever is still owed under the SAME seq-based refs (upsertByRef overwrites, so a
+      // half-posted pair converges and never doubles), and a failure says so plainly.
+      if (owed) {
+        const amount = owed.amount;
+        const owedMore = owed.owedMore;
         const what = owedMore ? 'underpaid' : 'overpaid';
-        const note = 'Pay correction (' + what + ') - ' + name + ' (' + PC.label(periodId) + '): ' + reason;
-        // The expense side. An overpayment CREDITS Payroll Expense, which backs
-        // the original debit down by exactly the difference; it never erases it.
-        await postLeg(refExp, {
-          date: postDate, kind: owedMore ? 'debit' : 'credit', accountType: 'expense',
-          account: 'Payroll Expense', category: 'Payroll Expense', description: note, amount: amount
-        });
-        ledgerRefs.push(refExp);
-        // The cash side, equal and opposite, so the books stay balanced whether
-        // money went out or came back.
-        await postLeg(refCash, {
-          date: postDate, kind: owedMore ? 'credit' : 'debit', accountType: 'asset',
-          account: 'Cash', category: 'Payroll Expense', description: note, amount: amount,
-          extra: (window.BankAccounts && typeof window.BankAccounts.tag === 'function')
-            ? window.BankAccounts.tag(p.bankAccount || null, owedMore ? 'out' : 'in') : {}
-        });
-        ledgerRefs.push(refCash);
-        if (typeof window.dbCacheInvalidate === 'function') window.dbCacheInvalidate('ledger');
+        const note = 'Pay correction (' + what + ') - ' + name + ' (' + PC.label(periodId) + '): ' + owed.reason;
+        const refExp = 'PAYFIX-' + periodId + '-' + personId + '-' + owed.seq + '-EXP';
+        const refCash = 'PAYFIX-' + periodId + '-' + personId + '-' + owed.seq + '-CASH';
+        try {
+          // The expense side. An overpayment CREDITS Payroll Expense, which backs
+          // the original debit down by exactly the difference; it never erases it.
+          await postLeg(refExp, {
+            date: postDate, kind: owedMore ? 'debit' : 'credit', accountType: 'expense',
+            account: 'Payroll Expense', category: 'Payroll Expense', description: note, amount: amount
+          });
+          ledgerRefs.push(refExp);
+          // The cash side, equal and opposite, so the books stay balanced whether
+          // money went out or came back.
+          await postLeg(refCash, {
+            date: postDate, kind: owedMore ? 'credit' : 'debit', accountType: 'asset',
+            account: 'Cash', category: 'Payroll Expense', description: note, amount: amount,
+            extra: (window.BankAccounts && typeof window.BankAccounts.tag === 'function')
+              ? window.BankAccounts.tag(p.bankAccount || null, owedMore ? 'out' : 'in') : {}
+          });
+          ledgerRefs.push(refCash);
+        } catch (err) {
+          throw new Error(name + "'s payslip for " + PC.label(periodId) + ' now shows the corrected pay ('
+            + PC.peso(nowNet) + '), but the matching entries did not reach the accounts: '
+            + ((err && err.message) || 'the ledger refused them') + ' Nothing is lost. Once that is put right'
+            + ' (for a closed month, the President or a reopened period), press Correct again with the same'
+            + ' figures and it will record them.');
+        } finally {
+          if (typeof window.dbCacheInvalidate === 'function') window.dbCacheInvalidate('ledger');
+        }
+        // Both legs are in: mark it, so a later repeat posts nothing. Best-effort — if this
+        // write is lost, a repeat re-posts the same two refs, which overwrites, never doubles.
+        await _db().runTransaction(async (tx) => {
+          const snap = await tx.get(psRef);
+          const list = (snap.exists && Array.isArray((snap.data() || {}).corrections)) ? snap.data().corrections : [];
+          tx.set(psRef, {
+            corrections: list.map((e) => (e && e.seq === owed.seq)
+              ? Object.assign({}, e, { ledgerPosted: true, ledgerRefs: [refExp, refCash] }) : e)
+          }, { merge: true });
+        }).catch((err) => console.error('Payroll.correctAfterPay: could not mark the ledger legs posted (a repeat is safe)', err));
       }
 
       // Mark it on the period as well, so a correction is visible from the run
@@ -1860,12 +1910,17 @@ if (typeof window === 'undefined') {
       // expected; that was wrong, and the catch turned a real denial into
       // invisible data loss. Still best-effort: the correction is already
       // permanent on the payslip and in the audit log.
+      // A repeat that only finished an earlier correction's ledger legs (H3) records THAT
+      // correction's figures — its own difference is 0 and would read as a no-op fix.
+      const rec = (duplicate && owed)
+        ? { reason: owed.reason, was: owed.was, now: owed.now, difference: owed.difference }
+        : { reason: reason, was: wasNet, now: nowNet, difference: difference };
       await DOC(periodId, kind).set({
         correctedAt: stamp(),
         correctedBy: myUid(),
         corrections: _fb().firestore.FieldValue.arrayUnion({
-          personId: String(personId), name: name, seq: seq, reason: reason,
-          was: wasNet, now: nowNet, difference: difference, at: nowIso, by: myUid()
+          personId: String(personId), name: name, seq: seq, reason: rec.reason,
+          was: rec.was, now: rec.now, difference: rec.difference, at: nowIso, by: myUid()
         })
       }, { merge: true }).catch(() => { /* frozen period — recorded on the payslip instead */ });
 
@@ -1875,10 +1930,12 @@ if (typeof window === 'undefined') {
       // Tell the person and tell Finance. Best-effort, after the money.
       const theirUid = kind === 'week' ? (line.linkedUid || null) : String(personId);
       try {
-        if (window.Notifs && theirUid && typeof window.Notifs.send === 'function' && Math.abs(difference) >= 0.01) {
+        // (owed: a first press that failed at the ledger threw before reaching here, so the
+        // repeat that completes it is the one that tells them — deduped on the same seq.)
+        if (window.Notifs && theirUid && typeof window.Notifs.send === 'function' && (Math.abs(difference) >= 0.01 || owed)) {
           await window.Notifs.send(theirUid, {
             title: '💰 Your pay was corrected',
-            body: 'Your pay for ' + PC.label(periodId) + ' was corrected to ' + PC.peso(nowNet) + ' (' + reason + ').',
+            body: 'Your pay for ' + PC.label(periodId) + ' was corrected to ' + PC.peso(rec.now) + ' (' + rec.reason + ').',
             icon: '💰', type: 'payroll', link: 'personal-finance',
             dedupKey: 'payroll-correction-' + periodId + '-' + personId + '-' + seq
           });
@@ -1886,8 +1943,8 @@ if (typeof window === 'undefined') {
         if (window.Notifs && typeof window.Notifs.sendToDept === 'function') {
           await window.Notifs.sendToDept('Finance', {
             title: 'Pay correction recorded',
-            body: name + ' - ' + PC.label(periodId) + ': ' + PC.peso(wasNet) + ' corrected to ' + PC.peso(nowNet)
-              + '. Reason: ' + reason,
+            body: name + ' - ' + PC.label(periodId) + ': ' + PC.peso(rec.was) + ' corrected to ' + PC.peso(rec.now)
+              + '. Reason: ' + rec.reason,
             icon: '📝', type: 'payroll', link: 'payroll',
             dedupKey: 'payroll-correction-fin-' + periodId + '-' + personId + '-' + seq
           }, { fallbackToOwner: true });

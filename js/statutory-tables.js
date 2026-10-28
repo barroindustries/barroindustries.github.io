@@ -113,6 +113,55 @@ window.computeStatutory = function({ grossPay, year }) {
   return { ee:{sss:sssEE, philhealth:phEE, pagibig:piEE, tax}, er:{sss:sssER, philhealth:phER, pagibig:piER}, unverified: !T.verified };
 };
 
+/* ── WHICH RATES A RUN WAS WORKED OUT WITH (audit 2026-10-28 H2) ────────────
+   A run's SSS/PhilHealth/Pag-IBIG/tax are FROZEN onto its lines at prepare, from
+   whatever table is in memory then — but the release gate used to look only at
+   TODAY's table. So: open January before the year's rates exist (every line
+   freezes ₱0 government deductions), confirm the rates, press Pay — the gate
+   passes and the zeros are paid. Same for a month frozen on placeholders and
+   paid after they were confirmed.
+   statutoryStamp(year) fingerprints the rate sections (sss, philhealth, pagibig,
+   withholdingMonthly) plus the verified flag; prepare stores it on the run, and
+   statutoryReleaseBlock() refuses to pay when the stored stamp is missing or is
+   not the table in force now. Attestation metadata on the stored doc is left
+   out, so re-attesting identical rates does not force a re-prepare. */
+function _statCanon(v) {
+  if (Array.isArray(v)) return v.map(_statCanon);
+  if (v && typeof v === 'object') {
+    const o = {};
+    Object.keys(v).sort().forEach((k) => { o[k] = _statCanon(v[k]); });
+    return o;
+  }
+  return v === undefined ? null : v;
+}
+function _statHash(s) {           // FNV-1a, 32-bit — a change detector, not security
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+// statutoryStamp(year) -> { year, verified, fingerprint }   fingerprint 'none' = no table at all
+window.statutoryStamp = function (year) {
+  const y = String(year);
+  const T = window.STATUTORY && window.STATUTORY[y];
+  if (!T) return { year: y, verified: false, fingerprint: 'none' };
+  const verified = T.verified === true;
+  const body = JSON.stringify(_statCanon({
+    sss: T.sss || null, philhealth: T.philhealth || null,
+    pagibig: T.pagibig || null, withholdingMonthly: T.withholdingMonthly || null
+  }));
+  return { year: y, verified, fingerprint: (verified ? 'V-' : 'U-') + _statHash(body) };
+};
+// statutoryReleaseBlock(frozenStamp, year) -> null when the run may be paid, else
+// { code: 'unverified' | 'unstamped' | 'changed', now }.
+window.statutoryReleaseBlock = function (frozenStamp, year) {
+  const now = window.statutoryStamp(year);
+  if (!now.verified) return { code: 'unverified', now };
+  if (!frozenStamp || !frozenStamp.fingerprint) return { code: 'unstamped', now };
+  if (String(frozenStamp.year) !== now.year || frozenStamp.fingerprint !== now.fingerprint) return { code: 'changed', now };
+  return null;
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { STATUTORY: window.STATUTORY, computeStatutory: window.computeStatutory, round2 };
+  module.exports = { STATUTORY: window.STATUTORY, computeStatutory: window.computeStatutory, round2,
+    statutoryStamp: window.statutoryStamp, statutoryReleaseBlock: window.statutoryReleaseBlock };
 }

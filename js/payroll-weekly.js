@@ -317,6 +317,9 @@ if (typeof window === 'undefined') {
     if (!cfg || typeof cfg !== 'object') return out;
     if (!WRC.STAT_KEYS.some((k) => MODES.includes(cfg[k]))) return out;
     out.configured = true;
+    // Audit 2026-10-28 H2 — an 'auto' key takes its amount from the rate table, so with no
+    // (or an unconfirmed) table it silently comes out ₱0. Release needs to know that.
+    out.usesTable = WRC.STAT_KEYS.some((k) => cfg[k] === 'auto');
     if (!c.isLastPayWeek) return out;         // monthly obligation, monthly bracket
     out.applied = true;
 
@@ -763,6 +766,8 @@ if (typeof window === 'undefined') {
         weekId, state: 'computed', month: window.payWeekMonth(weekId), label: WRC.weekLabel(weekId),
         days: window.payWeekDays(weekId), isLastPayWeekOfMonth: WRC.isLastPayWeekOfMonth(weekId),
         lines, skipped, totals, warnings,
+        // Audit 2026-10-28 H2 — the rate table these lines were frozen with (see disburse).
+        statutoryStamp: window.statutoryStamp(String(weekId).slice(0, 4)),
         computedAt: stamp(), computedBy: me() && me().uid, computedByName: myName()
       }, { merge: true });
 
@@ -965,12 +970,23 @@ if (typeof window === 'undefined') {
       // block would stop every ordinary week over rates nobody is using. It
       // bites exactly when the run actually carries a statutory amount computed
       // off a placeholder table, which is when a wrong figure would be remitted.
+      //
+      // Audit 2026-10-28 H2 — "carries a statutory amount" is not the right test on its own: an
+      // 'auto' worker on a week with NO table for the year comes out at ₱0, so the old
+      // statTotal > 0 condition skipped the gate exactly when the figures were most wrong. The
+      // run also relies on the table when any applied line has an auto key (usesTable). And,
+      // as on the monthly run, the lines must have been worked out WITH the table in force now.
       const statTotal = preLines.reduce((s, l) => s + ((l.statutory && l.statutory.total) || 0), 0);
-      if (statTotal > 0) {
+      const reliesOnTable = statTotal > 0
+        || preLines.some((l) => l.statutory && l.statutory.applied && l.statutory.usesTable);
+      if (reliesOnTable) {
         const year = String(weekId).slice(0, 4);
         const table = window.STATUTORY && window.STATUTORY[year];
         if (!table || table.verified !== true) {
-          throw new Error(`This week deducts ₱${statTotal.toFixed(2)} of SSS/PhilHealth/Pag-IBIG, but the ${year} statutory tables are unverified placeholder rates. Load the accountant-verified tables before disbursing.`);
+          throw new Error(`This week's SSS/PhilHealth/Pag-IBIG/tax (₱${statTotal.toFixed(2)}) depends on the ${year} statutory tables, which are not confirmed yet — they are placeholders, or not entered at all. Confirm them in Finance → Taxes & BIR → Gov Rates, then compute the week again before disbursing.`);
+        }
+        if (pre.state === 'verified' && window.statutoryReleaseBlock(pre.statutoryStamp, year)) {
+          throw new Error(`This week's government deductions were worked out before the confirmed ${year} rates were in force, so they may be wrong (₱0 if the rates were not entered yet). Ask the President to reopen the week, compute it again, check it, then release.`);
         }
       }
 
