@@ -534,7 +534,7 @@ describe('a website hand-off boots the builder as an authoritative load (spec §
   const HELPERS = fnPiece('_qbIsAuthoritativeLoad') + '\n' + fnPiece('_qbReopenStripLabel');
   const run = (o) => {
     const page = { innerHTML: '' };
-    const win = { _qbReopenState: o.state, _qbReopenAsRevision: o.asRevision, currentPage: o.page, location: { origin: ORIGIN }, addEventListener() {}, removeEventListener() {} };
+    const win = { APP_VERSION: '9.9.9', _qbReopenState: o.state, _qbReopenAsRevision: o.asRevision, currentPage: o.page, location: { origin: ORIGIN }, addEventListener() {}, removeEventListener() {} };
     const c = vm.createContext({
       window: win, console, setTimeout: () => 0,
       document: { getElementById: (id) => (id === 'page-content' ? page : null), body: { classList: { toggle() {}, add() {}, remove() {} } } },
@@ -545,26 +545,26 @@ describe('a website hand-off boots the builder as an authoritative load (spec §
   };
   it('renderQuoteBuilderIframe: a hand-off loads ?reopen=1; Quick Estimate\'s and a fresh builder do not; the strip says where it came from', () => {
     const h = run({ state: { handoff: true, clientName: 'Ana' } });
-    assert.match(h, /<iframe id="qb-frame" src="quote-builder-v2\.html\?reopen=1"/);
+    assert.match(h, /<iframe id="qb-frame" src="quote-builder-v2\.html\?v=9\.9\.9&reopen=1"/);
     assert.match(h, /Quote Builder — from a website request/);
-    assert.match(run({ state: { sourceDocId: 'q1', clientName: 'x' } }), /\?reopen=1"/);
+    assert.match(run({ state: { sourceDocId: 'q1', clientName: 'x' } }), /\?v=9\.9\.9&reopen=1"/);
     assert.match(run({ state: { sourceDocId: 'q1' } }), /Quote Builder — editing a copy/);
     assert.match(run({ state: { sourceDocId: 'q1' }, asRevision: true }), /Quote Builder — new revision/);
     assert.match(run({ state: { draftDocId: 'd1' } }), /Quote Builder — resuming a saved draft/);
     for (const state of [{ clientName: 'Ana', items: [] }, null, undefined]) {
       const out = run({ state });
-      assert.match(out, /<iframe id="qb-frame" src="quote-builder-v2\.html"/); assert.ok(!/reopen=1/.test(out));
+      assert.match(out, /<iframe id="qb-frame" src="quote-builder-v2\.html\?v=9\.9\.9"/); assert.ok(!/reopen=1/.test(out));
     }
     assert.ok(!/Quote Builder —/.test(run({ state: { handoff: true }, mobile: true })), 'no strip on a phone (the builder is fullscreen there)');
   });
-  it('the Brilliant Steel Quote Builder page starts the builder on the Brilliant Steel pill (?co=BS, ahead of ?reopen=1); every other page sends no company; the retired portal parameters are never sent', () => {
-    assert.match(run({ page: 'bs-quote-builder' }), /<iframe id="qb-frame" src="quote-builder-v2\.html\?co=BS" allow="print">/);
-    assert.match(run({ page: 'bs-quote-builder', state: { handoff: true } }), /src="quote-builder-v2\.html\?co=BS&reopen=1"/);
-    assert.match(run({ page: 'bs-quote-builder', state: { sourceDocId: 'q1' } }), /src="quote-builder-v2\.html\?co=BS&reopen=1"/);
-    assert.match(run({ page: 'bs-quote-builder', state: { clientName: 'Ana', items: [] } }), /src="quote-builder-v2\.html\?co=BS"/, 'Quick Estimate\'s hand-off on the Brilliant Steel page still has no ?reopen');
+  it('the Brilliant Steel Quote Builder page starts the builder on the Brilliant Steel pill (co=BS after the ?v= cache-bust, ahead of reopen=1); every other page sends no company; the retired portal parameters are never sent', () => {
+    assert.match(run({ page: 'bs-quote-builder' }), /<iframe id="qb-frame" src="quote-builder-v2\.html\?v=9\.9\.9&co=BS" allow="print">/);
+    assert.match(run({ page: 'bs-quote-builder', state: { handoff: true } }), /src="quote-builder-v2\.html\?v=9\.9\.9&co=BS&reopen=1"/);
+    assert.match(run({ page: 'bs-quote-builder', state: { sourceDocId: 'q1' } }), /src="quote-builder-v2\.html\?v=9\.9\.9&co=BS&reopen=1"/);
+    assert.match(run({ page: 'bs-quote-builder', state: { clientName: 'Ana', items: [] } }), /src="quote-builder-v2\.html\?v=9\.9\.9&co=BS"/, 'Quick Estimate\'s hand-off on the Brilliant Steel page still has no ?reopen');
     for (const page of ['bk-quote-builder', 'bs-quotations', 'dashboard', undefined]) {
       const out = run({ page });
-      assert.match(out, /<iframe id="qb-frame" src="quote-builder-v2\.html" allow="print">/, String(page));
+      assert.match(out, /<iframe id="qb-frame" src="quote-builder-v2\.html\?v=9\.9\.9" allow="print">/, String(page));
       assert.ok(!/co=/.test(out), `${page}: a company was sent`);
     }
     for (const page of ['bs-quote-builder', 'bk-quote-builder']) {

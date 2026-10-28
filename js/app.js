@@ -2200,11 +2200,13 @@ function renderQuoteBuilderIframe() {
   // Catalog capital costs stay rules-gated regardless (product_costs is
   // senior-admin/finance) — a plain employee sees the calculator and their
   // own per-quote BOMs, not the protected catalog cost basis.
-  let qbSrc = 'quote-builder-v2.html';
+  // ?v= (2026-10-29): GitHub Pages sends max-age=600, so a bare URL could load the previous release's builder (and, through its
+  // own ?v= script srcs, the previous release's pricing) for 10 minutes after a deploy. sw.js matches it to the bare precached copy offline.
+  let qbSrc = 'quote-builder-v2.html?v=' + encodeURIComponent(window.APP_VERSION);
   // The Brilliant Steel department's Quote Builder page starts the builder on the Brilliant Steel pill: ?co=BS is the hint (the builder
   // honours BK / BI / BS only, and only for a fresh boot — a reopened or revised quote brings its own company, see bootCompany() there).
   // The Barro Kitchens page sends nothing and the builder starts on Barro Kitchens, as ever.
-  if (window.currentPage === 'bs-quote-builder') qbSrc += '?co=BS';
+  if (window.currentPage === 'bs-quote-builder') qbSrc += '&co=BS';
   // A "Reopen" action from the Quotations list stashes the quote's editable
   // snapshot here — load it into the builder once the iframe is ready.
   const reopenState = window._qbReopenState; window._qbReopenState = null;

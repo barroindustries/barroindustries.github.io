@@ -14,6 +14,9 @@
 //   4. APP KIT    every local <script> in index.html's app-kit carries ?v=<APP_VERSION> and is precached under that exact URL; the pre-commit hook
 //                 rewrites js/*.js?v= in index.html and sw.js; sw.js's deploy-diff compares entries by bare path (so a per-release ?v= does not
 //                 re-download every unchanged kit file) and reads the old response back under its exact old key.
+//   5. BUILDER    js/app.js opens the quote builder as quote-builder-v2.html?v=APP_VERSION (&co=BS…); the builder's one-line loader writes its six
+//                 local scripts, in the old order, with that ?v= (bare when opened without one, and never with a non-version value); sw.js's
+//                 HTML route has the same ignoreSearch fallback across caches, so the versioned iframe URL still opens offline.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -81,7 +84,7 @@ describe('sw.js agrees with versioned lazy scripts', () => {
   it('the JS/CSS route falls back to the bare precached copy (ignoreSearch) and precache fetches revalidate', () => {
     assert.match(sw, /\['js','css'\]\.includes\(ext\)\)\s*\{\s*event\.respondWith\(networkFirstTimeout\(event\.request, STATIC, \d+, true\)\)/);
     assert.match(sw, /async function networkFirstTimeout\(request, cacheName, timeoutMs, ignoreSearch\)/);
-    assert.match(sw, /ignoreSearch \? await cache\.match\(request, \{ ignoreSearch: true \}\)/);
+    assert.match(sw, /ignoreSearch \? await caches\.match\(request, \{ ignoreSearch: true \}\)/);
     assert.match(sw, /new Request\(path, \{ cache: 'no-cache' \}\)/);
     assert.ok(!/\.addAll\(PRECACHE\)\.catch/.test(sw), 'a precache addAll reads the HTTP cache again');
     assert.ok(/await fetch\(freshRequest\(path\)\)/.test(sw) && !/await fetch\(path\)/.test(sw), 'the deploy-diff precache fetch reads the HTTP cache again');
@@ -116,5 +119,34 @@ describe('index.html app-kit scripts carry ?v=APP_VERSION (2026-10-29)', () => {
     assert.match(sw, /const oldKey = prevKeyByBare\[bare\(path\)\];/);
     assert.match(sw, /const oldHash = oldKey && prevManifest\.files\[oldKey\];/);
     assert.match(sw, /await prevCache\.match\(oldKey\)/);
+  });
+});
+
+describe('the quote builder loads its scripts with the app version (2026-10-29)', () => {
+  const qb = read('quote-builder-v2.html');
+  const loader = (qb.match(/<script>(\(function\(\)\{var v=new URLSearchParams[^\n]*?)<\/script>\n/) || [])[1];
+  const run = (search) => {
+    const written = [];
+    vm.runInNewContext(loader, { location: { search }, URLSearchParams, document: { write: (h) => written.push(h) } });
+    return written;
+  };
+  const FILES = ['js/firebase-config.js', 'js/letterhead.js', 'js/pricing-core.js', 'js/qr-families.js', 'js/product-families.js', 'js/qb-configured.js'];
+  it('the loader writes the six local scripts in order with ?v=, bare without one, and refuses a non-version value', () => {
+    assert.ok(loader, 'the builder\'s script loader is gone');
+    assert.deepEqual(run('?v=14.0.999&co=BS'), FILES.map((f) => `<script defer src="${f}?v=14.0.999"></script>`));
+    assert.deepEqual(run(''), FILES.map((f) => `<script defer src="${f}"></script>`));
+    assert.deepEqual(run('?v=%22%3E%3Cimg'), FILES.map((f) => `<script defer src="${f}"></script>`));
+    assert.ok(!/<script defer src="js\//.test(qb), 'a local script tag is back outside the loader (it would load unversioned)');
+    assert.ok(qb.indexOf(loader) < qb.indexOf('<script>\n'), 'the loader must come before the builder\'s main inline script');
+  });
+  it('js/app.js opens the builder with ?v=APP_VERSION and appends its other params with &', () => {
+    const app = read('js/app.js');
+    assert.ok(app.includes("let qbSrc = 'quote-builder-v2.html?v=' + encodeURIComponent(window.APP_VERSION);"));
+    assert.ok(app.includes("if (window.currentPage === 'bs-quote-builder') qbSrc += '&co=BS';"));
+  });
+  it("sw.js's HTML route has the ignoreSearch fallback, looking across caches (the shell is precached in STATIC)", () => {
+    const sw = read('sw.js');
+    assert.match(sw, /networkFirstTimeout\(event\.request, RUNTIME, 3000, true\)/);
+    assert.match(sw, /ignoreSearch \? await caches\.match\(request, \{ ignoreSearch: true \}\)/);
   });
 });

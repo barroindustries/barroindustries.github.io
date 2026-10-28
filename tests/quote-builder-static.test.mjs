@@ -240,7 +240,9 @@ const bootDb = async (opts, fake) => {
 // ═══════════════════════════════════════ 1. STATIC — markup, constants, what the file may name ═══════════════════════════════════════
 describe('static — the script tags, the tutorial, the letterhead', () => {
   it('the three configurator scripts load, deferred, in order, right after pricing-core.js (qb-configured is handed the others at run time)', () => {
-    const tags = [...HTML.matchAll(/<script defer src="(js\/[a-z-]+\.js)"><\/script>/g)].map((m) => m[1]);
+    // the local scripts are written, in this order, by the one-line ?v= loader (2026-10-29; pinned in tests/lazy-script-versioning.test.mjs)
+    const loader = (HTML.match(/<script>\(function\(\)\{var v=new URLSearchParams[^\n]*?<\/script>\n/) || [''])[0];
+    const tags = [...loader.matchAll(/'(js\/[a-z-]+\.js)'/g)].map((m) => m[1]);
     const at = tags.indexOf('js/pricing-core.js');
     assert.ok(at >= 0);
     assert.deepEqual(tags.slice(at, at + 4), ['js/pricing-core.js', 'js/qr-families.js', 'js/product-families.js', 'js/qb-configured.js']);

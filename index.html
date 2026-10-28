@@ -128,8 +128,8 @@
          CSS beside new JS and a shipped CSS change looked like it never landed.
          A new version = a new cache key, so even a stale SW must hit the network.
          Keep these in lockstep with sw.js's PRECACHE entries (ci-invariants #2). -->
-    <link rel="stylesheet" href="css/tokens.css?v=14.0.347"/>
-    <link rel="stylesheet" href="css/styles.css?v=14.0.347"/>
+    <link rel="stylesheet" href="css/tokens.css?v=14.0.348"/>
+    <link rel="stylesheet" href="css/styles.css?v=14.0.348"/>
 
     <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
          Every local js/ src carries the same ?v= CACHE-BUST as the stylesheets above
@@ -175,42 +175,42 @@
   <!-- v12 WS16 — Chart.js loads on demand via window.ensureChart() (config.js), not eagerly here.
        The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
   <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
-  <script defer src="js/firebase-config.js?v=14.0.347"></script>
+  <script defer src="js/firebase-config.js?v=14.0.348"></script>
   <!-- v13 Phase 8 — client error logging. Loads right after firebase-config.js
        so window.onerror/onunhandledrejection catch boot errors too. -->
-  <script defer src="js/errlog.js?v=14.0.347"></script>
-  <script defer src="js/config.js?v=14.0.347"></script>
+  <script defer src="js/errlog.js?v=14.0.348"></script>
+  <script defer src="js/config.js?v=14.0.348"></script>
   <!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/
        window.escHtml only at CALL time; placed right after config.js for clarity. -->
-  <script defer src="js/ui-states.js?v=14.0.347"></script>
+  <script defer src="js/ui-states.js?v=14.0.348"></script>
   <!-- v13 Part E Phase 40/115/116 — statusBadge2()/STATUS_META. Needs window.escHtml
        (config.js) only; must load before departments.js, the first consumer. -->
-  <script defer src="js/ui-status-meta.js?v=14.0.347"></script>
-  <script defer src="js/statutory-tables.js?v=14.0.347"></script>
-  <script defer src="js/print-docs.js?v=14.0.347"></script>
-  <script defer src="js/finance-ledger.js?v=14.0.347"></script>
-  <script defer src="js/drive.js?v=14.0.347"></script>
-  <script defer src="js/notifications.js?v=14.0.347"></script>
+  <script defer src="js/ui-status-meta.js?v=14.0.348"></script>
+  <script defer src="js/statutory-tables.js?v=14.0.348"></script>
+  <script defer src="js/print-docs.js?v=14.0.348"></script>
+  <script defer src="js/finance-ledger.js?v=14.0.348"></script>
+  <script defer src="js/drive.js?v=14.0.348"></script>
+  <script defer src="js/notifications.js?v=14.0.348"></script>
   <!-- Meetings + in-system calendar (owner request). MUST load after
        notifications.js: window.Meetings sends invites through Notifs.send at
        RUN time. Everything it touches is a runtime reference, never parse-time,
        so this position is about intent, not a hard parse dependency. -->
-  <script defer src="js/meetings.js?v=14.0.347"></script>
+  <script defer src="js/meetings.js?v=14.0.348"></script>
   <!-- COMPANY-AND-CALENDAR-SPEC-2026-08-12 §2 — window.CalendarFeed, the ONE
        calendar data source for both the dashboard mini calendar and the drawer
        Calendar page. Must load right after meetings.js: it consumes
        window.Meetings._h (the Manila date helpers) at call time. -->
-  <script defer src="js/calendar-feed.js?v=14.0.347"></script>
+  <script defer src="js/calendar-feed.js?v=14.0.348"></script>
   <!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
        before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
-  <script defer src="js/svc-approvals.js?v=14.0.347"></script>
+  <script defer src="js/svc-approvals.js?v=14.0.348"></script>
   <!-- v13 Phase 45 — generic finance CRUD table component; departments.js's
        Taxes/Records tabs call window.renderFinanceCrudTable. -->
-  <script defer src="js/ui-crud-table.js?v=14.0.347"></script>
+  <script defer src="js/ui-crud-table.js?v=14.0.348"></script>
   <!-- v14 Wave 2 Batch A — pure money-math (vatSplit, computePayLine), split out
        of departments.js so it's independently unit-tested (tests/money.test.mjs).
        Must load before departments.js, which calls these via window.*. -->
-  <script defer src="js/money-core.js?v=14.0.347"></script>
+  <script defer src="js/money-core.js?v=14.0.348"></script>
   <!-- PERF-WAVE1 WP1 — js/pay-policy.js and js/statutory-status.js (formerly
        here, load-bearing before js/payroll.js/js/departments.js/js/screens/*)
        are now lazy-loaded as part of the payroll compute-engine bundle
@@ -221,8 +221,8 @@
   <!-- Type-B (Production, weekly) self-service attendance — pure geofencing
        math (haversineMeters/siteMatch), independently unit-tested
        (tests/geo.test.mjs). No dependencies; loads early like money-core.js. -->
-  <script defer src="js/geo-core.js?v=14.0.347"></script>
-  <script defer src="js/departments.js?v=14.0.347"></script>
+  <script defer src="js/geo-core.js?v=14.0.348"></script>
+  <script defer src="js/departments.js?v=14.0.348"></script>
   <!-- PERF-WAVE1 WP1 (2026-08-24) — js/screens/design.js, tasks.js, sales.js,
        crm.js, ventures.js, hr.js, employee-profile.js, js/payroll-weekly.js,
        js/payroll.js, js/screens/payroll.js, js/screens/payroll-backfill.js,
@@ -252,9 +252,9 @@
        departments' "Budgeting" subtab — bundling this file into all nine
        PAGE_SCRIPTS entries individually was strictly worse than its ~62KB
        eager cost. See js/config.js's PAGE_SCRIPTS comment. -->
-  <script defer src="js/screens/dept-budgets.js?v=14.0.347"></script>
-  <script defer src="js/app.js?v=14.0.347"></script>
-  <script defer src="js/modules.js?v=14.0.347"></script>
+  <script defer src="js/screens/dept-budgets.js?v=14.0.348"></script>
+  <script defer src="js/app.js?v=14.0.348"></script>
+  <script defer src="js/modules.js?v=14.0.348"></script>
   <!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
        System Health, Audit Log, Product Database, SOPs, Personal Finance +
        the KPI/attendance-score cluster, Progress Reports, Company, Departments,
@@ -273,8 +273,8 @@
        file (dashboards.js) and js/chat.js below stay eager: dashboards.js's
        own performance fixes are PERF-WAVE1 WP3's package, not this one's, and
        chat.js's one lazy-file reach (openTaskDetail, tasks.js) is WP4's. -->
-  <script defer src="js/screens/dashboards.js?v=14.0.347"></script>
-  <script defer src="js/chat.js?v=14.0.347"></script>
+  <script defer src="js/screens/dashboards.js?v=14.0.348"></script>
+  <script defer src="js/chat.js?v=14.0.348"></script>
   </template>
   <script>(function(){
     var root = document.documentElement;
@@ -1448,7 +1448,7 @@ html[data-view="site"]::-webkit-scrollbar-thumb:hover,html[data-view="site"] ::-
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.347 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.348 · Barro Industries</div>
   </div>
 </div>
 

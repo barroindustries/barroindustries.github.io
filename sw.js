@@ -20,7 +20,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.347';
+const CACHE_VER = 'bi-ops-v14.0.348';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -40,36 +40,36 @@ const PRECACHE = [
   // — the SW caches by URL (the ignoreSearch fallback on the JS/CSS route is
   // only a safety net). Both sides are rewritten by the hook. Lazy PAGE_SCRIPTS
   // files stay bare here; js/config.js's ensureScript versions them at runtime.
-  '/css/tokens.css?v=14.0.347',
-  '/css/styles.css?v=14.0.347',
+  '/css/tokens.css?v=14.0.348',
+  '/css/styles.css?v=14.0.348',
   '/css/site.css',
   '/manifest.json',
   '/quote-builder-v2.html',
-  '/js/firebase-config.js?v=14.0.347',
+  '/js/firebase-config.js?v=14.0.348',
   '/js/site.js',
-  '/js/errlog.js?v=14.0.347',
-  '/js/config.js?v=14.0.347',
-  '/js/ui-states.js?v=14.0.347',
-  '/js/ui-status-meta.js?v=14.0.347',
+  '/js/errlog.js?v=14.0.348',
+  '/js/config.js?v=14.0.348',
+  '/js/ui-states.js?v=14.0.348',
+  '/js/ui-status-meta.js?v=14.0.348',
   '/js/gestures.js',
   '/js/qrcode.js',
-  '/js/statutory-tables.js?v=14.0.347',
+  '/js/statutory-tables.js?v=14.0.348',
   '/js/letterhead.js',
-  '/js/print-docs.js?v=14.0.347',
+  '/js/print-docs.js?v=14.0.348',
   '/js/bir.js',
-  '/js/finance-ledger.js?v=14.0.347',
-  '/js/drive.js?v=14.0.347',
-  '/js/notifications.js?v=14.0.347',
-  '/js/meetings.js?v=14.0.347',
-  '/js/calendar-feed.js?v=14.0.347',
-  '/js/svc-approvals.js?v=14.0.347',
-  '/js/ui-crud-table.js?v=14.0.347',
-  '/js/money-core.js?v=14.0.347',
+  '/js/finance-ledger.js?v=14.0.348',
+  '/js/drive.js?v=14.0.348',
+  '/js/notifications.js?v=14.0.348',
+  '/js/meetings.js?v=14.0.348',
+  '/js/calendar-feed.js?v=14.0.348',
+  '/js/svc-approvals.js?v=14.0.348',
+  '/js/ui-crud-table.js?v=14.0.348',
+  '/js/money-core.js?v=14.0.348',
   '/js/pricing-core.js',
   '/js/pay-policy.js',
   '/js/statutory-status.js',
-  '/js/geo-core.js?v=14.0.347',
-  '/js/departments.js?v=14.0.347',
+  '/js/geo-core.js?v=14.0.348',
+  '/js/departments.js?v=14.0.348',
   '/js/screens/design.js',
   '/js/screens/tasks.js',
   '/js/screens/sales.js',
@@ -97,14 +97,14 @@ const PRECACHE = [
   '/js/screens/production.js',
   '/js/screens/inventory.js',
   '/js/screens/finance.js',
-  '/js/screens/dept-budgets.js?v=14.0.347',
+  '/js/screens/dept-budgets.js?v=14.0.348',
   '/js/screens/statutory-rates.js',
   '/js/screens/approvals.js',
   '/js/screens/govit.js',
   '/js/screens/partners.js',
   '/js/migrations.js',
-  '/js/app.js?v=14.0.347',
-  '/js/modules.js?v=14.0.347',
+  '/js/app.js?v=14.0.348',
+  '/js/modules.js?v=14.0.348',
   '/js/screens/people.js',
   '/js/screens/notes.js',
   '/js/screens/todo.js',
@@ -117,9 +117,9 @@ const PRECACHE = [
   '/js/screens/client-info-requests.js',
   '/js/screens/quote-requests.js',
   '/js/screens/family-pricing.js',
-  '/js/screens/dashboards.js?v=14.0.347',
+  '/js/screens/dashboards.js?v=14.0.348',
   '/js/screens/layoff.js',
-  '/js/chat.js?v=14.0.347',
+  '/js/chat.js?v=14.0.348',
   '/js/screens/worker.js',
   '/icons/bi-logo.svg',
   '/icons/icon-192.png',
@@ -354,7 +354,7 @@ self.addEventListener('fetch', event => {
     // costly (it is what pins the app version for the whole session), so we
     // give the network a long time to win before falling back.
     if (ext === 'html' || url.endsWith('/') || !url.includes('.')) {
-      event.respondWith(networkFirstTimeout(event.request, RUNTIME, 3000));
+      event.respondWith(networkFirstTimeout(event.request, RUNTIME, 3000, true));
       return;
     }
   }
@@ -398,10 +398,14 @@ async function staleWhileRevalidate(request, cacheName) {
 // TIMEOUT do we serve the versioned cache instantly (the speed win on bad
 // connections), refreshing the cache in the background for next time.
 //
-// ignoreSearch (JS/CSS route only): js/config.js's ensureScript requests lazy
-// page scripts as js/x.js?v=APP_VERSION, while PRECACHE holds them bare, so a
-// versioned request that has never been fetched online still finds its
-// precached copy offline. The exact match is tried first.
+// ignoreSearch (JS/CSS and HTML routes): js/config.js's ensureScript requests
+// lazy page scripts as js/x.js?v=APP_VERSION, the quote builder asks for its
+// scripts the same way, and js/app.js opens the builder iframe as
+// quote-builder-v2.html?v=APP_VERSION(&co=BS…), while PRECACHE holds those
+// bare, so a versioned request that has never been fetched online still finds
+// its precached copy offline. Exact matches are tried first; the fallback
+// looks across caches because the HTML route's own cache is RUNTIME and the
+// precached shell lives in STATIC.
 async function networkFirstTimeout(request, cacheName, timeoutMs, ignoreSearch) {
   const cache = await caches.open(cacheName);
   const net = fetch(request).then(r => { if (r && r.ok) cache.put(request, r.clone()); return r; }).catch(() => null);
@@ -416,7 +420,7 @@ async function networkFirstTimeout(request, cacheName, timeoutMs, ignoreSearch) 
   // this strategy. Harmless for the JS/CSS route, which passes STATIC and so
   // already hits on the first lookup.
   const cached = (await cache.match(request)) || (await caches.match(request))
-    || (ignoreSearch ? await cache.match(request, { ignoreSearch: true }) : undefined);
+    || (ignoreSearch ? await caches.match(request, { ignoreSearch: true }) : undefined);
   if (!cached) {
     // Same offline body/headers networkFirst() has always returned, so the
     // no-cache-no-network case is unchanged for callers migrating onto this.
