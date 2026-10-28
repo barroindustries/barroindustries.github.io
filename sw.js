@@ -11,7 +11,8 @@
 //      login-screen visit, independent of this runtime strategy.
 //    • Images/fonts → Cache-first, update in background
 //    • CDN scripts → Cache-first (versioned URLs never change)
-//    • HTML → Network-first with a 3000ms timeout, cache as offline fallback
+//    • HTML → Network-first with a 3000ms timeout, revalidated past the browser's
+//      HTTP cache (cache: 'no-cache'), cache as offline fallback
 //    • Everything else → Network-first (unbounded), cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
@@ -20,7 +21,7 @@
 // clone — see CLAUDE.md). scripts/ci-invariants.sh's CACHE_VER check now
 // fails CI loudly if the two ever drift apart, so this is enforced, not just
 // documented convention.
-const CACHE_VER = 'bi-ops-v14.0.350';
+const CACHE_VER = 'bi-ops-v14.0.351';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -40,36 +41,36 @@ const PRECACHE = [
   // — the SW caches by URL (the ignoreSearch fallback on the JS/CSS route is
   // only a safety net). Both sides are rewritten by the hook. Lazy PAGE_SCRIPTS
   // files stay bare here; js/config.js's ensureScript versions them at runtime.
-  '/css/tokens.css?v=14.0.350',
-  '/css/styles.css?v=14.0.350',
+  '/css/tokens.css?v=14.0.351',
+  '/css/styles.css?v=14.0.351',
   '/css/site.css',
   '/manifest.json',
   '/quote-builder-v2.html',
-  '/js/firebase-config.js?v=14.0.350',
+  '/js/firebase-config.js?v=14.0.351',
   '/js/site.js',
-  '/js/errlog.js?v=14.0.350',
-  '/js/config.js?v=14.0.350',
-  '/js/ui-states.js?v=14.0.350',
-  '/js/ui-status-meta.js?v=14.0.350',
+  '/js/errlog.js?v=14.0.351',
+  '/js/config.js?v=14.0.351',
+  '/js/ui-states.js?v=14.0.351',
+  '/js/ui-status-meta.js?v=14.0.351',
   '/js/gestures.js',
   '/js/qrcode.js',
-  '/js/statutory-tables.js?v=14.0.350',
+  '/js/statutory-tables.js?v=14.0.351',
   '/js/letterhead.js',
-  '/js/print-docs.js?v=14.0.350',
+  '/js/print-docs.js?v=14.0.351',
   '/js/bir.js',
-  '/js/finance-ledger.js?v=14.0.350',
-  '/js/drive.js?v=14.0.350',
-  '/js/notifications.js?v=14.0.350',
-  '/js/meetings.js?v=14.0.350',
-  '/js/calendar-feed.js?v=14.0.350',
-  '/js/svc-approvals.js?v=14.0.350',
-  '/js/ui-crud-table.js?v=14.0.350',
-  '/js/money-core.js?v=14.0.350',
+  '/js/finance-ledger.js?v=14.0.351',
+  '/js/drive.js?v=14.0.351',
+  '/js/notifications.js?v=14.0.351',
+  '/js/meetings.js?v=14.0.351',
+  '/js/calendar-feed.js?v=14.0.351',
+  '/js/svc-approvals.js?v=14.0.351',
+  '/js/ui-crud-table.js?v=14.0.351',
+  '/js/money-core.js?v=14.0.351',
   '/js/pricing-core.js',
   '/js/pay-policy.js',
   '/js/statutory-status.js',
-  '/js/geo-core.js?v=14.0.350',
-  '/js/departments.js?v=14.0.350',
+  '/js/geo-core.js?v=14.0.351',
+  '/js/departments.js?v=14.0.351',
   '/js/screens/design.js',
   '/js/screens/tasks.js',
   '/js/screens/sales.js',
@@ -97,14 +98,14 @@ const PRECACHE = [
   '/js/screens/production.js',
   '/js/screens/inventory.js',
   '/js/screens/finance.js',
-  '/js/screens/dept-budgets.js?v=14.0.350',
+  '/js/screens/dept-budgets.js?v=14.0.351',
   '/js/screens/statutory-rates.js',
   '/js/screens/approvals.js',
   '/js/screens/govit.js',
   '/js/screens/partners.js',
   '/js/migrations.js',
-  '/js/app.js?v=14.0.350',
-  '/js/modules.js?v=14.0.350',
+  '/js/app.js?v=14.0.351',
+  '/js/modules.js?v=14.0.351',
   '/js/screens/people.js',
   '/js/screens/notes.js',
   '/js/screens/todo.js',
@@ -117,9 +118,9 @@ const PRECACHE = [
   '/js/screens/client-info-requests.js',
   '/js/screens/quote-requests.js',
   '/js/screens/family-pricing.js',
-  '/js/screens/dashboards.js?v=14.0.350',
+  '/js/screens/dashboards.js?v=14.0.351',
   '/js/screens/layoff.js',
-  '/js/chat.js?v=14.0.350',
+  '/js/chat.js?v=14.0.351',
   '/js/screens/worker.js',
   '/icons/bi-logo.svg',
   '/icons/icon-192.png',
@@ -172,8 +173,19 @@ const PRECACHE_ALWAYS_FRESH = ['/', '/index.html', '/t/', '/t/index.html', '/v/'
 // Pages sends max-age=600, so a plain fetch during the first 10 minutes after
 // a deploy could seed THIS version's STATIC cache with the previous release's
 // copy of an unversioned file (e.g. /js/screens/family-pricing.js).
-function freshRequest(path) {
-  return new Request(path, { cache: 'no-cache' });
+//
+// The HTML route uses this too (2026-10-29), for the same reason: index.html
+// pins the whole session's version (its ?v= script URLs), so a 10-minute-old
+// copy from the HTTP cache would boot the previous release. A navigation
+// Request cannot be re-made with a new cache mode, so it is rebuilt from its
+// URL — with redirect: 'manual', because a navigation may only be answered
+// with an opaque redirect, never a followed one (GitHub Pages redirects
+// /t → /t/), and the browser then follows it itself.
+function freshRequest(input) {
+  if (typeof input !== 'string' && input.mode === 'navigate') {
+    return new Request(input.url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'manual' });
+  }
+  return new Request(input, { cache: 'no-cache' });
 }
 
 self.addEventListener('install', event => {
@@ -354,7 +366,7 @@ self.addEventListener('fetch', event => {
     // costly (it is what pins the app version for the whole session), so we
     // give the network a long time to win before falling back.
     if (ext === 'html' || url.endsWith('/') || !url.includes('.')) {
-      event.respondWith(networkFirstTimeout(event.request, RUNTIME, 3000, true));
+      event.respondWith(networkFirstTimeout(event.request, RUNTIME, 3000, true, true));
       return;
     }
   }
@@ -406,9 +418,14 @@ async function staleWhileRevalidate(request, cacheName) {
 // its precached copy offline. Exact matches are tried first; the fallback
 // looks across caches because the HTML route's own cache is RUNTIME and the
 // precached shell lives in STATIC.
-async function networkFirstTimeout(request, cacheName, timeoutMs, ignoreSearch) {
+//
+// revalidate (HTML route only): the network leg asks the server (cache:
+// 'no-cache', a cheap 304 when unchanged) instead of taking the browser's
+// max-age=600 HTTP-cache copy — see freshRequest(). The response is still
+// cached under the original request.
+async function networkFirstTimeout(request, cacheName, timeoutMs, ignoreSearch, revalidate) {
   const cache = await caches.open(cacheName);
-  const net = fetch(request).then(r => { if (r && r.ok) cache.put(request, r.clone()); return r; }).catch(() => null);
+  const net = fetch(revalidate ? freshRequest(request) : request).then(r => { if (r && r.ok) cache.put(request, r.clone()); return r; }).catch(() => null);
   // Look in the named cache first, then fall back to a cross-cache lookup.
   // THIS SECOND LOOKUP IS LOAD-BEARING for the HTML route: navigations are
   // written to RUNTIME, but the app shell ('/', '/index.html', '/track.html',

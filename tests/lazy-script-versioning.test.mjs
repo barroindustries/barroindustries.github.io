@@ -17,6 +17,9 @@
 //   5. BUILDER    js/app.js opens the quote builder as quote-builder-v2.html?v=APP_VERSION (&co=BS…); the builder's one-line loader writes its six
 //                 local scripts, in the old order, with that ?v= (bare when opened without one, and never with a non-version value); sw.js's
 //                 HTML route has the same ignoreSearch fallback across caches, so the versioned iframe URL still opens offline.
+//   6. HTML       sw.js's HTML route revalidates (cache: 'no-cache') instead of taking the browser's max-age=600 copy of index.html; freshRequest()
+//                 rebuilds a navigation from its URL with redirect: 'manual' (a navigation may only be answered with an opaque redirect), and
+//                 the response is still cached under the original request.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -83,9 +86,9 @@ describe('sw.js agrees with versioned lazy scripts', () => {
   const sw = read('sw.js');
   it('the JS/CSS route falls back to the bare precached copy (ignoreSearch) and precache fetches revalidate', () => {
     assert.match(sw, /\['js','css'\]\.includes\(ext\)\)\s*\{\s*event\.respondWith\(networkFirstTimeout\(event\.request, STATIC, \d+, true\)\)/);
-    assert.match(sw, /async function networkFirstTimeout\(request, cacheName, timeoutMs, ignoreSearch\)/);
+    assert.match(sw, /async function networkFirstTimeout\(request, cacheName, timeoutMs, ignoreSearch, revalidate\)/);
     assert.match(sw, /ignoreSearch \? await caches\.match\(request, \{ ignoreSearch: true \}\)/);
-    assert.match(sw, /new Request\(path, \{ cache: 'no-cache' \}\)/);
+    assert.match(sw, /return new Request\(input, \{ cache: 'no-cache' \}\);/);
     assert.ok(!/\.addAll\(PRECACHE\)\.catch/.test(sw), 'a precache addAll reads the HTTP cache again');
     assert.ok(/await fetch\(freshRequest\(path\)\)/.test(sw) && !/await fetch\(path\)/.test(sw), 'the deploy-diff precache fetch reads the HTTP cache again');
   });
@@ -146,7 +149,30 @@ describe('the quote builder loads its scripts with the app version (2026-10-29)'
   });
   it("sw.js's HTML route has the ignoreSearch fallback, looking across caches (the shell is precached in STATIC)", () => {
     const sw = read('sw.js');
-    assert.match(sw, /networkFirstTimeout\(event\.request, RUNTIME, 3000, true\)/);
+    assert.match(sw, /networkFirstTimeout\(event\.request, RUNTIME, 3000, true, true\)/);
     assert.match(sw, /ignoreSearch \? await caches\.match\(request, \{ ignoreSearch: true \}\)/);
+  });
+});
+
+describe("sw.js revalidates HTML past the browser's HTTP cache (2026-10-29)", () => {
+  const sw = read('sw.js');
+  const fn = sw.match(/^function freshRequest\(input\) \{[\s\S]*?\n\}/m)?.[0];
+  class FakeRequest { constructor(input, init) { this.input = input; this.init = init; } }
+  const freshRequest = fn && vm.runInNewContext(`${fn}; freshRequest`, { Request: FakeRequest });
+  it('freshRequest: a navigation is rebuilt from its URL (no-cache, manual redirect); anything else keeps its request with no-cache', () => {
+    assert.ok(freshRequest, 'freshRequest is gone');
+    const nav = freshRequest({ mode: 'navigate', url: 'https://barroindustries.com/' });
+    assert.equal(nav.input, 'https://barroindustries.com/');
+    assert.deepEqual({ ...nav.init }, { cache: 'no-cache', credentials: 'same-origin', redirect: 'manual' });
+    const iframe = { mode: 'cors', url: 'x' };
+    assert.equal(freshRequest(iframe).input, iframe);
+    assert.deepEqual({ ...freshRequest(iframe).init }, { cache: 'no-cache' });
+    assert.deepEqual({ ...freshRequest('/js/app.js?v=1').init }, { cache: 'no-cache' });
+  });
+  it('the HTML route revalidates; the JS/CSS route does not need to (its URLs are versioned); responses are cached under the original request', () => {
+    assert.match(sw, /networkFirstTimeout\(event\.request, RUNTIME, 3000, true, true\)/);
+    assert.match(sw, /networkFirstTimeout\(event\.request, STATIC, \d+, true\)\)/);
+    assert.match(sw, /async function networkFirstTimeout\(request, cacheName, timeoutMs, ignoreSearch, revalidate\)/);
+    assert.match(sw, /const net = fetch\(revalidate \? freshRequest\(request\) : request\)\.then\(r => \{ if \(r && r\.ok\) cache\.put\(request, r\.clone\(\)\)/);
   });
 });
