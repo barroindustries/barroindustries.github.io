@@ -94,7 +94,7 @@ const PRIMARIES = {
   wall_shelf: prod('PW-023', 'storage', 'fixed', 1893, { W: 1200, D: 450 }, {}),                                                                       // the LINEAR family: its primary has no length rule
   rack: prod('PW-010', 'storage', 'per_length', 3307, { W: 600, D: 500, H: 1600 }, { baseLengthMm: 600, pricePerExtraMm: 2.3, rateD100: 19, rateH100: 11 }),
   // the five families of 2026-10-28 (synthetic odd figures; no height rate: a height is not a size of these families)
-  dish_table: prod('PW-029', 'washing', 'fixed', 2719, { W: 1200, D: 660, H: 851 }, {}),                                                                 // LINEAR: a fixed base item, its length is priced from the sheet
+  dish_table: prod('PW-029', 'washing', 'fixed', 2719, { W: 1220, D: 660, H: 851 }, {}),                                                                 // LINEAR: a fixed base item, its length is priced from the sheet
   wok_range: prod('CE-006', 'cooking', 'per_length', 5233, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 4.7, rateD100: 37, rateH100: 0 }),
   cooking_line: prod('CE-010', 'cooking', 'per_length', 4349, { W: 700, D: 700, H: 850 }, { baseLengthMm: 700, pricePerExtraMm: 3.9, rateD100: 33, rateH100: 0 }),
   deck_oven: prod('CE-012', 'cooking', 'fixed', 9871, { W: 700, D: 700, H: 1400 }, {}),                                                                  // LINEAR as well: its width follows the trays (the sheet's width rate is 0)
@@ -1571,10 +1571,10 @@ describe('the five families of 2026-10-28 — conditional options are never pric
   });
 
   it('the dish table: the pre-rinse cell is priced on the soiled side only; a clean-side table never reads it', () => {
-    const soiled = price('dish_table', { side: 'soiled', sink: 'prerinse' }, { W: 1200, D: 660 });
+    const soiled = price('dish_table', { side: 'soiled', sink: 'prerinse' }, { W: 1220, D: 660 });
     assert.deepEqual(keysOf(soiled), ['side:soiled', 'sink:prerinse']);
-    assert.deepEqual(keysOf(price('dish_table', { side: 'soiled' }, { W: 1200, D: 660 })), ['side:soiled']);
-    assert.deepEqual(keysOf(price('dish_table', { side: 'clean', hand: 'right', undershelf: false }, { W: 1200, D: 660 })), ['hand:right', 'undershelf:false']);
+    assert.deepEqual(keysOf(price('dish_table', { side: 'soiled' }, { W: 1220, D: 660 })), ['side:soiled']);
+    assert.deepEqual(keysOf(price('dish_table', { side: 'clean', hand: 'right', undershelf: false }, { W: 1220, D: 660 })), ['hand:right', 'undershelf:false']);
     // the table is a LINEAR family: a width other than the standard 660 is left for review (the sheet prices the length only)
     const wide = price('dish_table', {}, { W: 1200, D: 800 });
     assert.equal(wide.priced, false); assert.deepEqual(wide.missing, ['Size (width)']);

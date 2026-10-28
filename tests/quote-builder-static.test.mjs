@@ -154,7 +154,7 @@ const PRIMARIES = [
   prod('PW-010', 'prep_washing', 'per_length', 3307, { W: 600, D: 500, H: 1600 }, { baseLengthMm: 600, pricePerExtraMm: 2.3, rateD100: 19, rateH100: 11 }),
   // the five families of 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC): synthetic odd figures again. None of them has a height rate — a height is not a size of these families —
   // and the two LINEAR ones (dish table, deck oven) have a FIXED primary: their length is priced from the option sheet, not by the base item.
-  prod('PW-029', 'prep_washing', 'fixed', 2719, { W: 1200, D: 660, H: 851 }, {}),
+  prod('PW-029', 'prep_washing', 'fixed', 2719, { W: 1220, D: 660, H: 851 }, {}),
   prod('CE-006', 'cooking_line', 'per_length', 5233, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 4.7, rateD100: 37, rateH100: 0 }),
   prod('CE-010', 'cooking_line', 'per_length', 4349, { W: 700, D: 700, H: 850 }, { baseLengthMm: 700, pricePerExtraMm: 3.9, rateD100: 33, rateH100: 0 }),
   prod('CE-012', 'cooking_line', 'fixed', 9871, { W: 700, D: 700, H: 1400 }, {}),

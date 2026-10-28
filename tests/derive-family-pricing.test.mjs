@@ -62,7 +62,7 @@ const perLen = (id, basePrice, dims) => prod(id, { basePrice, defaultDimensions:
 const PRIMARIES = () => [
   perLen('PW-001', 12345, dd(900, 600, 850)),
   perLen('PW-004', 15555, dd(500, 500, 850)),
-  prod('PW-029', { basePrice: 13579, defaultDimensions: dd(1200, 660, 851) }),              // the dish table: a FIXED item, so its length is priced from the sheet ("linear"); priced here so the sweep below can price its default — the real master has no list price for it yet (tested apart)
+  prod('PW-029', { basePrice: 13579, defaultDimensions: dd(1220, 660, 851) }),              // the dish table: a FIXED item, so its length is priced from the sheet ("linear"); priced here so the sweep below can price its default — the real master has no list price for it yet (tested apart)
   perLen('CE-001', 20001, dd(600, 700, 850)),
   perLen('CE-006', 21113, dd(600, 700, 850)),                                                // the wok range's base item
   perLen('CE-010', 17771, dd(700, 700, 850)),                                                // the cooking line's base item (a griddle)
@@ -158,7 +158,7 @@ describe('derive-family-pricing — the output covers every option of every fami
     assert.ok(!flats.includes(0));
     assert.equal(seed.families.wall_shelf.size.confidence, 'low');
     assert.ok(Number.isInteger(seed.families.wall_shelf.size.perW100) && seed.families.wall_shelf.size.perW100 > 0);
-    assert.equal(seed.families.dish_table.size.perW100, Math.round(13579 * 100 / 1200), 'the dish table (priced in this fixture) is proportional to its standard length, like wall shelving');
+    assert.equal(seed.families.dish_table.size.perW100, Math.round(13579 * 100 / 1220), 'the dish table (priced in this fixture) is proportional to its standard length, like wall shelving');
     assert.equal(seed.families.dish_table.size.confidence, 'low');
     assert.deepEqual(FAMS.order.filter((f) => FAMS.families[f].sizeBasis === 'linear'), ['dish_table', 'deck_oven', 'wall_shelf']);
     assert.equal(seed.families.deck_oven.size.perW100, null, 'the deck oven\'s width follows its trays: NO length rate is derived, whatever CE-012 costs');
@@ -414,7 +414,7 @@ describe('derive-family-pricing — the five families of 2026-10-28 (CONFIGURATO
   });
   it('dish table, once PW-029 IS priced: the length rate is derived (proportional to its standard length, LOW) but every option cell stays blank — no SKU separates a side, a hand, a sink or an undershelf', () => {
     const s = derive();
-    assert.equal(s.families.dish_table.size.perW100, Math.round(13579 * 100 / 1200));
+    assert.equal(s.families.dish_table.size.perW100, Math.round(13579 * 100 / 1220));
     assert.equal(s.families.dish_table.size.confidence, 'low');
     for (const [g, v] of [['side', 'soiled'], ['hand', 'right'], ['sink', 'prerinse'], ['undershelf', 'false'], ['top', '1.2']]) assert.equal(cellOf(s, 'dish_table', g, v).flat, null, `${g}.${v}`);
     assert.match(cellOf(s, 'dish_table', 'side', 'soiled').derivation, /No SKU in the master separates this option from the dish table itself/);

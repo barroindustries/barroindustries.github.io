@@ -684,7 +684,7 @@
             "min": 600,
             "max": 3000,
             "step": 10,
-            "default": 1200
+            "default": 1220
           },
           "D": {
             "label": "Width",

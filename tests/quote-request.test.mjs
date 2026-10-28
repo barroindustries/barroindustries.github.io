@@ -804,7 +804,7 @@ describe('the staff-only top plate on the server: a visitor can never choose 1.2
     const PRIM = {
       prep_table: prod('PW-001', 'per_length', 4217, { W: 900, D: 600, H: 850 }, { baseLengthMm: 900, pricePerExtraMm: 3.3, rateD100: 31, rateH100: 17 }),
       sink: prod('PW-004', 'per_length', 6173, { W: 500, D: 500, H: 850 }, { baseLengthMm: 500, pricePerExtraMm: 4.1, rateD100: 29, rateH100: 13 }),
-      dish_table: prod('PW-029', 'fixed', 2719, { W: 1200, D: 660, H: 851 }, {}),                                                                                      // a FIXED base item: its length is priced from the sheet
+      dish_table: prod('PW-029', 'fixed', 2719, { W: 1220, D: 660, H: 851 }, {}),                                                                                      // a FIXED base item: its length is priced from the sheet
       stove: prod('CE-001', 'per_length', 7770, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 5.7, rateD100: 41, rateH100: 0 }),
       wok_range: prod('CE-006', 'per_length', 5233, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 4.7, rateD100: 37, rateH100: 0 }),
     };

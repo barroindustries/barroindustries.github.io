@@ -51,7 +51,7 @@ const PRIMARIES = {
   cabinet: prod('PW-015', 'storage', 'per_length', 5119, { W: 600, D: 500, H: 1800 }, { baseLengthMm: 600, pricePerExtraMm: 2.9, rateD100: 23 }),
   wall_shelf: prod('PW-023', 'storage', 'fixed', 1893, { W: 1200, D: 450 }, {}),
   rack: prod('PW-010', 'storage', 'per_length', 3307, { W: 600, D: 500, H: 1600 }, { baseLengthMm: 600, pricePerExtraMm: 2.3, rateD100: 19, rateH100: 11 }),
-  dish_table: prod('PW-029', 'washing', 'fixed', 2719, { W: 1200, D: 660, H: 851 }, {}),
+  dish_table: prod('PW-029', 'washing', 'fixed', 2719, { W: 1220, D: 660, H: 851 }, {}),
   wok_range: prod('CE-006', 'cooking', 'per_length', 5233, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 4.7, rateD100: 37, rateH100: 0 }),
   cooking_line: prod('CE-010', 'cooking', 'per_length', 4349, { W: 700, D: 700, H: 850 }, { baseLengthMm: 700, pricePerExtraMm: 3.9, rateD100: 33, rateH100: 0 }),
   deck_oven: prod('CE-012', 'cooking', 'fixed', 9871, { W: 700, D: 700, H: 1400 }, {}),

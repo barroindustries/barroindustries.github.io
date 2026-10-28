@@ -264,7 +264,7 @@ describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
     assert.deepEqual(PF.groupOf(f, 'side').options.map((o) => [o.l, o.hint]), [['Clean', 'Where washed dishes land'], ['Soiled', 'Where dirty dishes are loaded']]);
     assert.deepEqual(PF.groupOf(f, 'hand').options.map((o) => o.hint), ['Facing the table', 'Facing the table']);
     assert.deepEqual(PF.groupOf(f, 'sink').when, { side: ['soiled'] }, 'the pre-rinse sink exists on the soiled side only');
-    assert.deepEqual(f.dims, { W: { label: 'Length', min: 600, max: 3000, step: 10, default: 1200 }, D: { label: 'Width', min: 600, max: 900, step: 10, default: 660 } });
+    assert.deepEqual(f.dims, { W: { label: 'Length', min: 600, max: 3000, step: 10, default: 1220 }, D: { label: 'Width', min: 600, max: 900, step: 10, default: 660 } });
     assert.deepEqual(f.minDimWhen, [{ group: 'sink', includes: 'prerinse', min: { W: 1200 } }]);
     assert.equal(f.maxDimWhen, undefined);
     assert.deepEqual(f.preview, { tokens: { side: { from: 'side' } }, chain: ['dish_table-{side}'] });
