@@ -11,6 +11,9 @@
 //   * A family counts as ONE product for the per-product unit cap (key family:<id>), exactly as the server counts it; whatever capUnits leaves, the server accepts.
 //   * The payloads: a configured line is sent as { familyId, config, dims, qty, note } — nothing else; an ESTIMATE never carries the note; the basket key (the
 //     estimate cache and the "did the basket change" test) ignores key order and note.
+//   * STANDARD CONSTRUCTION (owner ruling 2026-10-28): the configurator sheet offers the PUBLIC groups only (PF.publicGroups) — there is no control for the staff-only 1.2 mm top
+//     plate — and shows a read-only "Construction: …" line instead; the staff-only key is never held in a line or the stored draft and never sent (the server fills in the
+//     standard 1.5 mm top); a stored line that asks for the lighter top is dropped. The sheet is run for real (the REAL openConfigurator in a tiny fake DOM).
 //
 // Mutation-tested in scratch copies (see the commit message): trusting the stored name, dropping the strict re-validation, keying the cap on the SKU instead of the
 // family, sending the note with an estimate, an order-sensitive basket key, converting an absorbed SKU without the size rules, and so on; each must fail here.
@@ -37,6 +40,9 @@ const src = read('js/quote-request.js');
 const island = JSON.parse(read('catalogue/index.html').match(/<script type="application\/json" id="qr-catalogue">([\s\S]*?)<\/script>/)[1]);
 const { LIMITS } = QRN;
 const json = (v) => JSON.parse(JSON.stringify(v));          // out of the vm realm and back: plain objects for assert / the server
+const PFmod = require('../js/product-families.js');
+// A configuration as the WEBSITE holds it: the public groups only (computed from PF.publicGroups, independently of the page's own publicConfig)
+const publicOnly = (fam, cfg) => Object.fromEntries(PFmod.publicGroups(fam).map((g) => [g.key, cfg[g.key]]));
 
 // Pull a named function (brace-matched) out of the IIFE, so the REAL code is what is tested.
 function grab(name) {
@@ -49,7 +55,7 @@ function grab(name) {
 const line = (re) => { const m = src.match(re); assert.ok(m, `${re} not found in js/quote-request.js`); return m[0]; };
 
 const NAMES = ['uid', 'clone', 'isObj', 'dimKeys', 'isRunProduct', 'maxDim', 'specDefault', 'defaultSize', 'defaultSpecs',
-  'isFam', 'famById', 'famCustom', 'lineKey', 'unitsOf', 'unitKey', 'productUnits', 'capUnits',
+  'isFam', 'famById', 'publicConfig', 'famCustom', 'lineKey', 'unitsOf', 'unitKey', 'productUnits', 'capUnits',
   'freshDraft', 'ls', 'sanitizeItem', 'sanitizeFamilyItem', 'migrateV1Item', 'sanitizeText', 'loadDraft', 'saveDraftNow', 'clearDraft',
   'entityNow', 'basketKey', 'itemPayload', 'estimateItemPayload'];
 
@@ -236,7 +242,7 @@ describe('a draft saved by the PREVIOUS page (barro-qr-draft-v1) is converted on
       const PF = pg.ctx.PF;
       const v = PF.validateLine(pg.ctx.FAMS.families[fid], it.config, it.dims);
       assert.equal(v.ok, true, `${sku}: ${v.errors.join(' ')}`);
-      assert.deepEqual(it.config, json(PF.validateConfiguration(pg.ctx.FAMS.families[fid], FAMS.families[fid].absorbed[sku]).config), `${sku}: the configuration is the absorbed one`);
+      assert.deepEqual(it.config, json(publicOnly(pg.ctx.FAMS.families[fid], PF.validateConfiguration(pg.ctx.FAMS.families[fid], FAMS.families[fid].absorbed[sku]).config)), `${sku}: the configuration is the absorbed one (public options only)`);
       // and the SERVER accepts exactly this line
       const primaries = new Map(FAMS.order.map((f) => [f, { id: FAMS.families[f].primary }]));
       const wire = json([pg.ctx.itemPayload(it)]);
@@ -415,7 +421,7 @@ describe('what is SENT: a configured line carries exactly { familyId, config, di
   const pg = makePage();
   const PFn = require('../js/product-families.js');
   const fam = FAMS.families.stove;
-  const stove = () => ({ uid: 'k', familyId: 'stove', name: 'Stove', cat: 'Cooking', unit: 'pc', config: json(PFn.validateConfiguration(fam, { positions: ['wok', 'hp_large', 'soup'], addons: ['oven', 'fryer'] }).config), dims: { W: 1500, D: 700, H: 850 }, qty: 2, note: 'hello' });
+  const stove = () => ({ uid: 'k', familyId: 'stove', name: 'Stove', cat: 'Cooking', unit: 'pc', config: json(publicOnly(fam, PFn.validateConfiguration(fam, { positions: ['wok', 'hp_large', 'soup'], addons: ['oven', 'fryer'] }).config)), dims: { W: 1500, D: 700, H: 850 }, qty: 2, note: 'hello' });
   const fixed = () => ({ uid: 'f', id: 'RF-003', name: 'Chiller', cat: 'Refrigeration', unit: 'pc', qty: 1, size: { W: 1200 }, runs: null, specs: [{ label: 'Doors', value: 'Two' }], note: 'n' });
 
   it('submit payload: a configured line has exactly the five keys and nothing of the draft (no uid, name, category, unit)', () => {
@@ -479,6 +485,220 @@ describe('what is SENT: a configured line carries exactly { familyId, config, di
   });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// STANDARD CONSTRUCTION (owner ruling 2026-10-28): the staff-only 1.2 mm top plate is never kept, offered or sent by the website.
+describe('the staff-only 1.2 mm top plate is never kept, offered or sent by the website (owner ruling 2026-10-28)', () => {
+  const STAFF = ['prep_table', 'sink', 'stove'];                    // the families that carry the staff-only group
+  const primaries = new Map(FAMS.order.map((f) => [f, { id: FAMS.families[f].primary }]));
+  const lineOf = (fid, extra) => Object.assign({ uid: 'u-1', familyId: fid, config: json(PFmod.defaultConfig(FAMS.families[fid])), dims: json(PFmod.defaultDims(FAMS.families[fid])), qty: 2, note: '' }, extra || {});
+
+  it('the premise: exactly the preparation table, the sink and the stove carry a staff-only group, it is "top", and PF.publicGroups is every other group', () => {
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      assert.deepEqual(fam.groups.filter((g) => g.staffOnly === true).map((g) => g.key), STAFF.includes(fid) ? ['top'] : [], fid);
+      assert.deepEqual(PFmod.publicGroups(fam).map((g) => g.key), fam.groups.map((g) => g.key).filter((k) => k !== 'top'), fid);
+    }
+  });
+
+  it('publicConfig keeps the public groups only, whatever the configuration holds: the staff-only key and an unknown key are dropped, a value is never changed, a non-object is left for the strict validation', () => {
+    const pg = makePage();
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const full = json(PFmod.defaultConfig(fam));
+      const out = json(pg.ctx.publicConfig(fam, Object.assign({ colour: 'red', constructor: 1 }, full)));
+      assert.deepEqual(out, publicOnly(fam, full), fid);
+      assert.ok(!('top' in out) && !('colour' in out), fid);
+    }
+    assert.equal(pg.ctx.publicConfig(FAMS.families.sink, 'basins=2'), 'basins=2');
+  });
+
+  it('a stored line with the STANDARD top plate (1.5) is kept — it holds its public options only — and the draft written back to the device carries no staff-only key', () => {
+    for (const fid of STAFF) {
+      const stored = lineOf(fid);                                    // the full default configuration, top: 1.5 included
+      assert.equal(stored.config.top, 1.5);
+      const pg = loadV2([stored]);
+      const [it] = items(pg);
+      assert.ok(it, `${fid}: a line with the standard top plate must survive`);
+      assert.deepEqual(it.config, publicOnly(FAMS.families[fid], stored.config), fid);
+      assert.ok(!('top' in it.config), fid);
+      assert.equal(pg.ctx.pendingToast, '', fid);
+      pg.ctx.saveDraftNow();
+      assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)), `${fid}: the draft on the visitor's device carries a staff-only key`);
+    }
+  });
+
+  it('a stored line that asks for the LIGHTER top plate is dropped and the visitor is told — 1.2, and every other value but the standard one, however it is spelt', () => {
+    for (const fid of STAFF) for (const top of [1.2, '1.2', '1.5', 1.25, 0, 2, true, null, [1.5], { v: 1.5 }]) {
+      const pg = loadV2([lineOf(fid, { config: Object.assign(lineOf(fid).config, { top }) })]);
+      assert.deepEqual(items(pg), [], `${fid}: top ${JSON.stringify(top)} must not survive`);
+      assert.match(pg.ctx.pendingToast, /no longer in the catalogue/, `${fid}: top ${JSON.stringify(top)}: the visitor must be told`);
+    }
+  });
+
+  it('the payloads never carry a staff-only key — submit and estimate, even from a line that holds one — and the server accepts what is sent; the same payload WITH the lighter top is refused (why the page never sends it)', () => {
+    const pg = makePage();
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const holding = lineOf(fid);                                   // holds top: 1.5 when the family has one
+      for (const make of [pg.ctx.itemPayload, pg.ctx.estimateItemPayload]) {
+        const p = json(make(holding));
+        assert.ok(!('top' in p.config), `${fid}: the payload carries a staff-only key`);
+        assert.deepEqual(p.config, publicOnly(fam, holding.config), fid);
+        const r = Q.normaliseItems([p], new Map(), { families: FAMS, primaries });
+        assert.equal(r.ok, true, `${fid}: ${r.errors.join(' | ')}`);
+        if (STAFF.includes(fid)) assert.equal(r.items[0].config.top, 1.5, `${fid}: the server stores the standard top plate`);
+      }
+      if (STAFF.includes(fid)) {
+        const lighter = json(pg.ctx.itemPayload(holding));
+        lighter.config.top = 1.2;
+        const r = Q.normaliseItems([lighter], new Map(), { families: FAMS, primaries });
+        assert.equal(r.ok, false, `${fid}: the server must refuse a lighter top plate from the website`);
+        assert.match(r.errors.join(' '), /is chosen by our staff when the quotation is prepared/);
+      }
+    }
+  });
+});
+
+// ── the sheet itself: the REAL openConfigurator, run in a tiny fake DOM ──
+class FText { constructor(t) { this.nodeType = 3; this.textContent = String(t); } }
+class FNode {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.attrs = {}; this.listeners = {}; this.parentNode = null;
+    this.hidden = false; this.disabled = false; this.value = ''; this.checked = false; this.className = '';
+    const self = this;
+    this.classList = {
+      toggle(c, force) { const s = new Set(self.className.split(/\s+/).filter(Boolean)); if (force === undefined ? !s.has(c) : force) s.add(c); else s.delete(c); self.className = [...s].join(' '); },
+      add(c) { this.toggle(c, true); }, remove(c) { this.toggle(c, false); }, contains(c) { return self.className.split(/\s+/).includes(c); },
+    };
+  }
+  get firstChild() { return this.children[0] || null; }
+  get textContent() { return this.children.map((c) => c.textContent).join(''); }
+  set textContent(t) { this.children = [new FText(t)]; }
+  appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
+  removeChild(c) { this.children = this.children.filter((x) => x !== c); return c; }
+  insertBefore(n, ref) { n.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); return n; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  removeAttribute(k) { delete this.attrs[k]; }
+  addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); }
+  querySelector() { return null; }
+  querySelectorAll() { return []; }
+  focus() {}
+  scrollIntoView() {}
+}
+const fire = (node, ev) => (node.listeners[ev] || []).slice().forEach((fn) => fn({ target: node, preventDefault() {}, stopPropagation() {} }));
+const where = (root, pred) => { const out = []; (function walk(n) { if (pred(n)) out.push(n); (n.children || []).forEach(walk); })(root); return out; };
+const hasCls = (n, c) => (n.className || '').split(/\s+/).includes(c);
+
+// the page of makePage() plus a fake document, the sheet helpers stubbed (they only open and close the dialog) and the REAL element builders and configurator
+function makeSheetPage(preload) {
+  const pg = makePage();
+  pg.ctx.FNode = FNode; pg.ctx.FText = FText;
+  const prelude = [
+    'var COPY = D.COPY, PHONE = "0927 683 6300", PV = null, previews = {}, idSeq = 0, sheetFrame = null;',
+    'var doc = { createElement: function (t) { return new FNode(t); }, createTextNode: function (t) { return new FText(t); } };',
+    'function openSheet() {} function closeSheet() {} function focusFirst() {} function toast() {} function refreshAll() {} function scheduleEstimate() {} function openReview() {}',
+    'function frame(title, sub, step) { sheetFrame = { title: title, step: step, head: new FNode("div"), h2: new FNode("h2"), body: new FNode("div"), foot: new FNode("div") }; return sheetFrame; }',
+  ].join('\n');
+  vm.runInContext(prelude + '\n' + ['nid', 'add', 'el', 'on', 'clear', 'cap1', 'field', 'setErr', 'openConfigurator'].map(grab).join('\n'), pg.ctx, { filename: 'quote-request.js (configurator extract)' });
+  if (preload) pg.ctx.draft.items = json(preload);
+  return pg;
+}
+const openSheet = (fid, editUid, preload) => { const pg = makeSheetPage(preload); pg.ctx.openConfigurator(fid, null, editUid || null, false); return pg; };
+const sheetBody = (pg) => pg.ctx.sheetFrame.body;
+const press = (pg, label) => { const b = where(pg.ctx.sheetFrame.foot, (n) => n.tag === 'button' && n.textContent === label)[0]; assert.ok(b, `no "${label}" button on the sheet`); fire(b, 'click'); };
+const constructionHint = (pg) => where(sheetBody(pg), (n) => n.tag === 'p' && hasCls(n, 'qr-construction'));
+
+describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no control for the staff-only top plate, a read-only Construction line, nothing staff-only in the line it builds', () => {
+  const STAFF = ['prep_table', 'sink', 'stove'];
+
+  it('lists exactly the PUBLIC option groups of every family — no group, legend, button or word for the staff-only top plate — and then the size', () => {
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const body = sheetBody(openSheet(fid));
+      const groups = where(body, (n) => n.tag === 'fieldset' && hasCls(n, 'qr-group'));
+      assert.deepEqual(groups.map((g) => g.children[0].textContent), PFmod.publicGroups(fam).map((g) => g.label), `${fid}: the option groups on the sheet`);
+      assert.equal(groups.length, fam.groups.length - (STAFF.includes(fid) ? 1 : 0), fid);
+      assert.ok(!/Top plate/.test(body.textContent), `${fid}: the sheet names the top plate as an option`);
+      assert.ok(!/lighter|\(16 ga\)\s*Standard|staff/i.test(where(body, (n) => n.tag === 'label' || n.tag === 'legend').map((n) => n.textContent).join(' ')), `${fid}: a staff-only choice is on the sheet`);
+      const size = where(body, (n) => n.tag === 'fieldset' && !hasCls(n, 'qr-group'));
+      assert.equal(size.length, 1, `${fid}: the size fieldset`);
+      assert.match(size[0].children[0].textContent, /^Size \(mm\)/);
+    }
+  });
+
+  it('says how the piece is built — a read-only "Construction: …" line (PF.constructionLine) between the last option group and the size; the table, the sink and the stove say 1.5 mm (16 ga) top plate', () => {
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const body = sheetBody(openSheet(fid));
+      const hints = constructionHint(openSheet(fid));
+      assert.equal(hints.length, 1, `${fid}: one Construction line`);
+      assert.ok(hasCls(hints[0], 'qr-hint'), `${fid}: it is a hint, not a control`);
+      assert.equal(hints[0].textContent, 'Construction: ' + PFmod.constructionLine(fam, PFmod.defaultConfig(fam)), fid);
+      assert.equal(where(hints[0], (n) => ['input', 'select', 'button', 'textarea'].includes(n.tag)).length, 0, `${fid}: the line must be read-only`);
+      const kinds = body.children.map((n) => (hasCls(n, 'qr-construction') ? 'hint' : n.tag === 'fieldset' ? (hasCls(n, 'qr-group') ? 'group' : 'size') : n.tag));
+      assert.ok(kinds.lastIndexOf('group') < kinds.indexOf('hint') && kinds.indexOf('hint') < kinds.indexOf('size'), `${fid}: the line comes after the groups and before the size: ${kinds.join(' ')}`);
+      if (STAFF.includes(fid)) assert.match(hints[0].textContent, /^Construction: SS304 stainless steel · 1\.5 mm \(16 ga\) top plate · 1\.2 mm /, fid);
+    }
+  });
+
+  it('the line follows the choices that change the build — a wall-hung cabinet is "wall-hung", a rack without wheels stands on adjustable bullet feet — and a sheet re-opened on a saved line shows ITS construction', () => {
+    const choose = (pg, groupKey, value) => {
+      const fam = FAMS.families[pg.ctx.sheetFrame.title === 'Cabinet' ? 'cabinet' : 'rack'];
+      const g = fam.groups.find((x) => x.key === groupKey);
+      const o = g.options.find((x) => x.v === value);
+      const fs = where(sheetBody(pg), (n) => n.tag === 'fieldset' && hasCls(n, 'qr-group') && n.children[0].textContent === g.label)[0];
+      const radio = where(fs, (n) => n.tag === 'input').find((r) => r.parentNode.children[1].textContent === o.l);
+      assert.ok(radio, `no option "${o.l}" in "${g.label}"`);
+      radio.checked = true; fire(radio, 'change');
+    };
+    const cab = openSheet('cabinet');
+    assert.equal(constructionHint(cab)[0].textContent, 'Construction: ' + PFmod.constructionLine(FAMS.families.cabinet, { type: 'floor' }));
+    choose(cab, 'type', 'wall');
+    assert.equal(constructionHint(cab)[0].textContent, 'Construction: ' + PFmod.constructionLine(FAMS.families.cabinet, { type: 'wall' }));
+    assert.match(constructionHint(cab)[0].textContent, /wall-hung$/);
+    choose(cab, 'type', 'floor');
+    assert.match(constructionHint(cab)[0].textContent, /adjustable bullet feet$/);
+    const rack = openSheet('rack');
+    assert.match(constructionHint(rack)[0].textContent, /on wheels$/);
+    choose(rack, 'wheels', false);
+    assert.equal(constructionHint(rack)[0].textContent, 'Construction: ' + PFmod.constructionLine(FAMS.families.rack, { wheels: false }));
+    assert.match(constructionHint(rack)[0].textContent, /adjustable bullet feet$/);
+    // a saved wall-hung cabinet re-opens saying so
+    const saved = { uid: 'c1', familyId: 'cabinet', config: { type: 'wall', doors: 'swing', shelves: 3 }, dims: json(PFmod.defaultDims(FAMS.families.cabinet)), qty: 1, note: '' };
+    assert.match(constructionHint(openSheet('cabinet', 'c1', [saved]))[0].textContent, /wall-hung$/);
+  });
+
+  it('"Add to quote" builds a line that holds the public options only — never a staff-only key — and neither the draft on the device, the submit payload nor the estimate payload carries one', () => {
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const pg = openSheet(fid);
+      press(pg, 'Add to quote');
+      const [it] = json(pg.ctx.draft.items);
+      assert.ok(it, `${fid}: nothing was added to the draft`);
+      assert.deepEqual(it.config, publicOnly(fam, PFmod.defaultConfig(fam)), fid);
+      assert.ok(!('top' in it.config), fid);
+      assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)), `${fid}: the draft on the visitor's device carries a staff-only key`);
+      for (const p of [json(pg.ctx.itemPayload(it)), json(pg.ctx.estimateItemPayload(it))]) assert.ok(!('top' in p.config), `${fid}: a payload carries a staff-only key`);
+    }
+  });
+
+  it('editing a line: the sheet opens on its options (no top plate, its own construction) and Save writes the public options only — even for a line that, wrongly, still holds the staff-only key', () => {
+    const holding = { uid: 'u-1', familyId: 'sink', config: Object.assign(publicOnly(FAMS.families.sink, PFmod.defaultConfig(FAMS.families.sink)), { basins: 2, top: 1.5 }), dims: { W: 1800, D: 700, H: 900 }, qty: 2, note: 'near the door' };
+    const pg = openSheet('sink', 'u-1', [holding]);
+    assert.equal(pg.ctx.sheetFrame.step, 'Edit your selection');
+    assert.ok(!/Top plate/.test(sheetBody(pg).textContent));
+    assert.match(constructionHint(pg)[0].textContent, /^Construction: SS304 stainless steel · 1\.5 mm \(16 ga\) top plate · /);
+    press(pg, 'Save changes');
+    const [it] = json(pg.ctx.draft.items);
+    assert.equal(pg.ctx.draft.items.length, 1);
+    assert.equal(it.config.basins, 2);
+    assert.ok(!('top' in it.config), 'a saved line must not hold the staff-only key');
+    assert.equal(it.qty, 2); assert.equal(it.note, 'near the door');
+    assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)));
+  });
+});
+
 describe('the page source — configurator guard rails that cannot be unit-tested in plain Node', () => {
   it('no markup is ever parsed, no inline style, no price vocabulary, no private collection or pricing engine is named', () => {
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
@@ -516,6 +736,20 @@ describe('the page source — configurator guard rails that cannot be unit-teste
     assert.match(src, /function changed\(\) \{ errBanner\.hidden = true; if \(dupeBox\) dupeBox\.hidden = true;/);
     assert.match(src, /var pv = PV \? PV\.create\(/);
     assert.match(src, /var firstRadio = f\.body\.querySelector\('\.qr-group input:checked'\) \|\| f\.body\.querySelector\('\.qr-group input'\);/);
+  });
+  it('standard construction: the sheet walks PF.publicGroups(fam) (never fam.groups), says how the piece is built in a read-only line, and EVERY line the page builds, rebuilds or sends passes through publicConfig', () => {
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    assert.match(code, /PF\.publicGroups\(fam\)\.forEach\(function \(g\) \{\n\s+var node = g\.type === 'slots'/);
+    assert.ok(!/\bfam\.groups\b/.test(code), 'the sheet must never walk fam.groups: a staff-only group would get a control');
+    assert.match(code, /el\('p', \{ class: 'qr-hint qr-construction', 'aria-live': 'polite', text: constructionText\(\) \}\)/);
+    assert.match(code, /return 'Construction: ' \+ PF\.constructionLine\(fam, st\.config\);/);
+    assert.match(code, /syncers\.push\(function \(\) \{ var t = constructionText\(\);/, 'the line follows the choices');
+    assert.match(grab('sanitizeFamilyItem'), /config: publicConfig\(fam, v\.config\)/, 'a rebuilt stored line');
+    assert.match(grab('itemPayload'), /config: publicConfig\(famById\(it\.familyId\), it\.config\)/, 'the submit payload');
+    assert.match(grab('estimateItemPayload'), /config: publicConfig\(famById\(it\.familyId\), it\.config\)/, 'the estimate payload');
+    assert.match(code, /config: publicConfig\(fam, existing \? clone\(existing\.config\) : PF\.defaultConfig\(fam\)\)/, 'the sheet\'s starting state');
+    assert.match(code, /config: publicConfig\(fam, clone\(v\.config\)\)/, 'the line the sheet builds');
+    assert.ok(!/staffOnly|\{ ?staff: ?true/.test(code), 'the website never validates in staff mode, and never names a staff-only group');
   });
   it('the draft is stored under the v2 key and a v1 draft is read once and removed', () => {
     assert.match(src, /var DRAFT_KEY = 'barro-qr-draft-v2';/);

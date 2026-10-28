@@ -12,10 +12,13 @@
 //   4. TIGHTER SPACING between sections and inside cards (upper bounds, so it cannot quietly creep back).
 //   5. SEARCH still finds every card — the featured ones included — by running the REAL js/catalogue.js against the REAL generated page in a
 //      small fake DOM.
+//   6. STANDARD CONSTRUCTION (owner ruling 2026-10-28): a configurable card lists its PUBLIC options, then Size, then a Construction row (how the
+//      made-to-order piece is built, at the family defaults), then Material last — and never the staff-only top plate or the word "staff".
 //
 // Mutation-tested (scratch copies, never the shared tree): a line-clamp on the notes, the notes at 13px, a paler notes colour, a card with a
 // fixed height, the "Notes" label dropped from the generator, the Material row changed, .cat-lead removed from the search haystack, the multi
-// grid class dropped, the old 3-column grid restored, a letter tile restored — each must fail here.
+// grid class dropped, the old 3-column grid restored, a letter tile restored — each must fail here. 2026-10-28: the card listing the staff-only
+// group, the Construction row dropped or moved below Material — each must fail here too.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -30,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const B = require('../scripts/build-catalogue.js');
 const FAMS = require('../js/qr-families.js');
+const PF = require('../js/product-families.js');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
@@ -180,6 +184,35 @@ describe('the configurable cards: featured, with a labelled Specifications list 
       assert.ok(page, `${m[1]}: no product page in FAMILY_PAGES`);
       assert.ok(m[0].includes(`<div><dt>Size</dt><dd>Made to your `) && m[0].endsWith(`<div><dt>Material</dt><dd>${B.FAMILY_MATERIAL}</dd></div></dl><p class="cat-learn"><a class="link-arrow" href="${page.path}">Learn more about ${page.about}</a></p></div></li>`), `${m[1]}: Size / Material rows, then the "Learn more" link`);
     }
+  });
+
+  it('STANDARD CONSTRUCTION: each card lists the PUBLIC options, then Size, then Construction (the owner\'s sentence at the family defaults), then Material LAST — and never the staff-only top plate', () => {
+    const CONSTRUCTION = {
+      prep_table: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet',
+      sink: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet',
+      stove: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm body and panels · square-tube posts with adjustable bullet feet',
+      cabinet: 'SS304 stainless steel · 1.2 mm body, doors and shelves · square-tube posts with adjustable bullet feet',
+      wall_shelf: 'SS304 stainless steel · 1.2 mm shelves · fixed to the wall',
+      rack: 'SS304 stainless steel · 1.2 mm shelves · square-tube frame · on wheels',
+    };
+    assert.equal(fams.length, 6);
+    for (const m of fams) {
+      const fam = FAMS.families[m[1]];
+      const rows = [...m[0].matchAll(/<div><dt>([^<]*)<\/dt><dd>([^<]*)<\/dd><\/div>/g)].map((x) => [decode(x[1]), decode(x[2])]);
+      assert.deepEqual(rows.map((r) => r[0]), [...PF.publicGroups(fam).map((g) => g.label), 'Size', 'Construction', 'Material'], m[1]);
+      assert.equal(rows.find((r) => r[0] === 'Construction')[1], CONSTRUCTION[m[1]], `${m[1]}: the Construction row`);
+      assert.equal(rows.find((r) => r[0] === 'Construction')[1], PF.constructionLine(fam, PF.defaultConfig(fam)), `${m[1]}: it is the helper\'s sentence at the defaults`);
+      // the staff-only option is not offered here, and nothing on a card says "staff" or names the lighter choice
+      assert.ok(!m[0].includes('Top plate'), `${m[1]}: the staff-only group has a row on the card`);
+      assert.ok(!/staff|lighter|cheaper|1\.2 mm top/i.test(m[0]), `${m[1]}: a card mentions the staff-only choice`);
+    }
+    // the GENERATOR does the same for any family: a staff-only group never gets a row, and a family with no sentence gets no Construction row
+    const sinkCard = B.renderFamilyCard(FAMS.families.sink, { id: 'washing' }, null, '');
+    assert.ok(!sinkCard.includes('<dt>Top plate</dt>') && sinkCard.includes('<dt>Construction</dt>'));
+    const bare = B.renderFamilyCard({ ...FAMS.families.sink, construction: undefined }, { id: 'washing' }, null, '');
+    assert.ok(!bare.includes('<dt>Construction</dt>') && !bare.includes('<dt>Top plate</dt>'));
+    // pinned order in the markup itself: Size, then Construction, then Material, then the "Learn more" link
+    assert.ok(sinkCard.indexOf('<dt>Size</dt>') < sinkCard.indexOf('<dt>Construction</dt>') && sinkCard.indexOf('<dt>Construction</dt>') < sinkCard.indexOf('<dt>Material</dt>') && sinkCard.indexOf('<dt>Material</dt>') < sinkCard.indexOf('cat-learn'));
   });
 
   it('the Material line is the owner\'s OWN statement of what is offered (SS304 food-grade as standard, SS316 laboratory-grade; brushed, mirror or satin finish) — never a claim the homepage does not make', () => {

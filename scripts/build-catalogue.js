@@ -612,12 +612,12 @@ const FAMILY_ID_RE = /^[a-z][a-z0-9_]{1,30}$/;
 const GROUP_KEY_RE = /^[a-z][a-zA-Z0-9_]{0,30}$/;
 const PREVIEW_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,78}$/;
 const FAMILY_TOP_KEYS = ['_readme', 'version', 'order', 'families', 'fixed'];
-const FAMILY_KEYS = ['label', 'category', 'description', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
-const GROUP_KEYS = ['key', 'label', 'type', 'default', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
-const OPTION_KEYS = ['v', 'l', 'f', 's', 'hint', 'short', 'w'];
+const FAMILY_KEYS = ['label', 'category', 'description', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
+const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
+const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 'hint', 'short', 'w'];
 const GROUP_TYPES = ['choice', 'slots', 'multi'];
 // the fields of a family that reach the public/server file js/qr-families.js, in a fixed order (deterministic output)
-const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
+const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'];
 
 const isPlainObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isIntNum = (n) => typeof n === 'number' && Number.isInteger(n);
@@ -664,6 +664,8 @@ function checkFamily(fid, f, add) {
     if (!nonEmpty(g.label)) { at(`${gt}: "label" must be a non-empty string`); groupsOk = false; }
     if (!GROUP_TYPES.includes(g.type)) { at(`${gt}: "type" must be one of ${GROUP_TYPES.join(', ')}`); groupsOk = false; return; }
     if (!Array.isArray(g.options) || !g.options.length || g.options.length > 12) { at(`${gt}: "options" must be 1 to 12 entries`); groupsOk = false; return; }
+    // staffOnly (owner ruling 2026-10-28): a group only the Quote Builder (staff) may choose a non-default value of; a choice group, and only true / false
+    if (g.staffOnly !== undefined && (typeof g.staffOnly !== 'boolean' || (g.staffOnly === true && g.type !== 'choice'))) { at(`${gt}: "staffOnly" must be true or false, and belongs to a choice group only`); groupsOk = false; }
     const seenV = [];
     g.options.forEach((o, j) => {
       const ot = `${gt}.options[${j}]`;
@@ -674,7 +676,7 @@ function checkFamily(fid, f, add) {
       else seenV.push(o.v);
       if (g.type !== 'choice' && typeof o.v !== 'string') { at(`${ot}: a ${g.type} option value must be a string`); groupsOk = false; }
       if (!nonEmpty(o.l)) { at(`${ot}: "l" must be a non-empty string`); groupsOk = false; }
-      for (const k of ['f', 's', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
+      for (const k of ['f', 's', 'c', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
       if (o.w !== undefined && !(isIntNum(o.w) && o.w >= 0 && o.w <= 5000)) { at(`${ot}: "w" must be a whole number of mm from 0 to 5000`); groupsOk = false; }
     });
     if (g.type === 'slots') {
@@ -703,6 +705,19 @@ function checkFamily(fid, f, add) {
   // defaults must be a valid configuration
   const dc = PF.validateConfiguration(fam, PF.defaultConfig(fam));
   if (!dc.ok) at(`the defaults are not a valid configuration (${dc.errors.length} problem(s))`);
+
+  // construction (owner ruling 2026-10-28): the public statement of how the made-to-order piece is built. A {token} in it names a CHOICE group of this
+  // family and every option of that group carries "c" (its construction phrase), so PF.constructionLine() can fill it for any configuration.
+  if (!nonEmpty(f.construction)) at('"construction" must be a non-empty string');
+  else {
+    if (/[{}]/.test(f.construction.replace(/\{[A-Za-z0-9_]+\}/g, ''))) at('construction: a brace that is not a {groupKey} token');
+    const tokens = [...new Set([...f.construction.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[1]))];
+    for (const t of tokens) {
+      const g = gOf(t);
+      if (!g || g.type !== 'choice') at(`construction: {${t}} does not name a choice group of this family`);
+      else if (!g.options.every((o) => nonEmpty(o.c))) at(`construction: every option of "${t}" needs a "c" phrase (its construction wording)`);
+    }
+  }
 
   // widthRule
   if (f.widthRule !== undefined) {
@@ -780,14 +795,18 @@ function checkFamily(fid, f, add) {
   const ab = isPlainObj(f.absorbed) ? f.absorbed : null;
   if (!ab || !Object.keys(ab).length) at('"absorbed" must be a non-empty object of { sku: configuration }');
   else {
+    // An absorbed SKU states every PUBLIC option and NEVER a staff-only one (it converts to that option's default: the standard 1.5 mm top plate).
+    const publicKeys = PF.publicGroups(fam).map((g) => g.key).sort().join();
+    const staffKeys = fam.groups.filter((g) => g.staffOnly === true).map((g) => g.key);
     for (const sku of Object.keys(ab)) {
       if (!ID_RE.test(sku)) { at(`absorbed: "${sku}" is not a product id`); continue; }
       const v = PF.validateConfiguration(fam, ab[sku]);
       if (!v.ok) at(`absorbed["${sku}"]: not a valid configuration (${v.errors.length} problem(s))`);
-      else if (Object.keys(ab[sku]).sort().join() !== fam.groups.map((g) => g.key).sort().join()) at(`absorbed["${sku}"]: must state every option, and only the family's own`);
+      else if (staffKeys.some((k) => Object.prototype.hasOwnProperty.call(ab[sku], k))) at(`absorbed["${sku}"]: must not state a staff-only option (it converts to that option's default)`);
+      else if (Object.keys(ab[sku]).sort().join() !== publicKeys) at(`absorbed["${sku}"]: must state every option, and only the family's own`);
     }
     if (!Object.prototype.hasOwnProperty.call(ab, f.primary)) at('the primary SKU must be one of the absorbed SKUs');
-    else if (PF.canonicalConfig(fam, ab[f.primary]) !== PF.canonicalConfig(fam, PF.defaultConfig(fam))) at('the primary SKU\'s configuration must equal the family defaults (the zero point the option deltas are measured from)');
+    else if (PF.canonicalConfig(fam, PF.validateConfiguration(fam, ab[f.primary], { staff: true }).config) !== PF.canonicalConfig(fam, PF.defaultConfig(fam))) at('the primary SKU\'s configuration must equal the family defaults (the zero point the option deltas are measured from)');
   }
   // generated preview keys must be safe file-name stems that start with the family id
   if (f.preview) {
@@ -1030,7 +1049,7 @@ const FAMILY_PAGES = Object.freeze({
 function renderFamilyCard(fam, cat, photo, keywords) {
   const mark = photo ? PHOTO_FIGURE(photo, fam.label, FEATURE_PHOTO_SIZES) : TILE((cat && cat.id) || fam.category);
   const rows = [];
-  for (const g of fam.groups) {
+  for (const g of PF.publicGroups(fam)) {            // never a staff-only group (the 1.2 mm top plate is offered in the Quote Builder only)
     if (g.type === 'slots') rows.push([g.label, `Up to ${g.maxSlots} ${g.unit ? g.unit.many : 'positions'}, each chosen one by one`]);
     else rows.push([g.label, g.options.map((o) => o.l).join(' / ')]);
   }
@@ -1038,6 +1057,9 @@ function renderFamilyCard(fam, cat, photo, keywords) {
   const axes = ['W', 'D', 'H'].filter((k) => fam.dims && fam.dims[k]).map((k) => String(fam.dims[k].label).toLowerCase());
   const axesText = axes.length > 1 ? axes.slice(0, -1).join(', ') + ' and ' + axes[axes.length - 1] : (axes[0] || 'size');
   rows.push(['Size', 'Made to your ' + axesText]);
+  // the standard construction (owner ruling 2026-10-28): how the made-to-order piece is built, at the family's DEFAULT options (1.5 mm top, 1.2 mm body …)
+  const construction = PF.constructionLine(fam, PF.defaultConfig(fam));
+  if (construction) rows.push(['Construction', construction]);
   rows.push(['Material', FAMILY_MATERIAL]);
   return `<li class="cat-card cat-card-family cat-card-feature${photo ? ' has-photo' : ''}" data-family="${esc(fam.id)}" data-kw="${esc(keywords)}">` + mark +
     `<div class="cat-head"><p class="cat-code cat-tag">Configurable</p><h3>${esc(fam.label)}</h3><p class="cat-lead">${esc(fam.description)}</p></div>` +

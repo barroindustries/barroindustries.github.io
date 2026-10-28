@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.329';
+window.APP_VERSION = '14.0.330';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1608,8 +1608,8 @@ window.PAGE_SCRIPTS = {
   // renderBSQuotationsSummary/renderBKQuotationsSummary (js/screens/sales.js
   // itself) unguarded after the order is created. Same reach applies to
   // 'bk-quotations' below (same renderSales screen). ──
-  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js'],
-  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js'],
+  'dept:Sales':    ['js/screens/sales.js', 'js/screens/production.js', 'js/screens/tasks.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js', 'js/qb-configured.js'],
+  'bk-quotations': ['js/screens/sales.js', 'js/screens/production.js', 'js/cir-forms.js', 'js/screens/client-info-requests.js', 'js/qr-def.js', 'js/screens/quote-requests.js', 'js/qb-configured.js'],
 
   // ── CRM — its "AEC Leads" tab calls window.renderAECDirectory
   // (js/screens/sales.js) unguarded. ──
@@ -2859,10 +2859,13 @@ window.BRAND = {
     // name — blank until the accountant supplies the OPC TIN (D6).
     dtiName:         'BARRO KITCHENS — By Barro Industries OPC',
     dtiTin:          '',
-    address:         'Metro Manila',
-    addressShort:    'Metro Manila',
+    // 2026-10-28 owner ruling (STATUS open ruling #11, QUOTE-BUILDER-CONFIGURATOR-SPEC A5): documents carry the domain
+    // e-mail and the registered Quezon City office address, not the old Gmail one or the bare "Metro Manila". Pinned by
+    // tests/contact-details.test.mjs. The Brilliant Steel entry below is a different company and is deliberately untouched.
+    address:         '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
+    addressShort:    '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
     phone:           '09276836300',
-    email:           'barroindustries@gmail.com',
+    email:           'hello@barroindustries.com',
     signatory:       { name: 'NEIL BARRO', title: 'President, Barro Industries OPC' }
   },
 
@@ -2887,10 +2890,10 @@ window.BRAND = {
   companies: {
     BK: { name:'BARRO KITCHENS',
       sub:'By Barro Industries OPC',
-      addr:'Metro Manila', contact:'09276836300  |  barroindustries@gmail.com',
+      addr:'21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila', contact:'09276836300  |  hello@barroindustries.com',
       sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BK',
       thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
-      creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila' },
+      creds:'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila' },
     // BI (owner request 2026-08-07) — the PARENT company quoting in its own
     // name for GENERAL FABRICATION (railings, gates, structural, sheet metal),
     // i.e. work that isn't kitchens. Identity values are the corporate ones
@@ -2898,10 +2901,10 @@ window.BRAND = {
     // two can never disagree.
     BI: { name:'BARRO INDUSTRIES OPC',
       sub:'SEC-registered One Person Corporation',
-      addr:'Metro Manila', contact:'09276836300  |  barroindustries@gmail.com',
+      addr:'21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila', contact:'09276836300  |  hello@barroindustries.com',
       sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BI',
       thanks:'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
-      creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila' },
+      creds:'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila' },
     BS: { name:'BRILLIANT STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
       sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'}, code:'BS',
       thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',

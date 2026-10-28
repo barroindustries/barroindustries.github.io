@@ -7,6 +7,9 @@ const { CO, img, ic, icb, link } = L;
 const DOC = 'Company profile';
 // The owner's own 2026-10-10 catalogue carried "Narciso Neil Barro, President" with a portrait on its About page; it is carried over here. Set false to leave the card out.
 const SHOW_LEADERSHIP = true;
+// The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, three finishes"
+// (and of the catalogue PDF's materials page). tests/content-assets.test.mjs pins them together.
+const CONSTRUCTION_NOTE = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 // the PDF's document information (scripts/downloads/pdf-meta.js writes it, with the copyright, after Chrome has printed the file)
 const META = {
   title: `Company profile | ${CO.name}`,
@@ -143,7 +146,8 @@ function build() {
       <div><div class="sw satin"></div><div class="h3 mt1">Satin</div><p class="sm muted">A soft, low-sheen finish between brushed and mirror, with a smoother, more even look.</p></div>
     </div>
     <p class="xs muted mt1">The swatches are illustrations. Ask to see a sample before you decide.</p>
-    <div class="note mt3">Need SS316? Say so when you send a project brief or message us, and we will confirm it for your project.</div>
+    <div class="note mt3">${L.esc(CONSTRUCTION_NOTE)}</div>
+    <div class="note mt2">Need SS316? Say so when you send a project brief or message us, and we will confirm it for your project.</div>
     <div class="fill">${fig('ispsc-02.jpg', 'ISPSC 2026 — rows of stainless-steel work tables in the school room', 'Rows of stainless-steel work tables in a school room.', 'fill')}</div>` }));
 
   // 8 — built to order

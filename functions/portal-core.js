@@ -642,7 +642,8 @@ function buildOutboxBody(portalDoc, acceptance) {
     'Warm regards,',
     'Neil Barro',
     'President, Barro Industries OPC · Barro Kitchens',
-    '0927 683 6300 · barroindustries@gmail.com',
+    '0927 683 6300 · hello@barroindustries.com',
+    '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
   ].join('\n');
 }
 

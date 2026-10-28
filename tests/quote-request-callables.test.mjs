@@ -783,10 +783,10 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
     fake.seed('products/PW-023', base({ title: 'SS Wall Shelf', category: 'prep_washing', basePrice: 14503, formulaType: 'fixed', measurement: { W: 2908, D: 480, H: 38 } }));
     fake.seed('products/PW-010', base({ title: 'SS Dish Rack', category: 'prep_washing', basePrice: 16703, formulaType: 'per_length', measurement: { W: 600, D: 500, H: 1600 }, formula: { baseLengthMm: 600, pricePerExtraMm: 8, rateD100: 400, rateH100: 300 } }));
     const c = (flat, perW100) => ({ flat, perW100: perW100 == null ? null : perW100 });
-    fake.seed('product_pricing/prep_table', { familyId: 'prep_table', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { layers: { 2: c(8111, 101), 3: c(16231, 207) }, upper: { 1: c(3077, null), 2: c(null, null) } }, size: { perW100: null } });
-    fake.seed('product_pricing/sink', { familyId: 'sink', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { basins: { 2: c(6173, null), 3: c(null, null), 4: c(null, null) }, alignment: { left: c(0, null), right: c(0, null) }, undershelf: { true: c(2503, null) }, upper: { true: c(3011, null) }, faucet: { prerinse: c(4519, null) } }, size: { perW100: null } });
-    fake.seed('product_pricing/stove', { familyId: 'stove', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { positions: { wok: c(29111, null), hp_small: c(null, null), hp_large: c(37123, null), lp_small: c(16057, null), lp_large: c(null, null), soup: c(null, null) }, addons: { griller: c(null, null), griddle: c(15091, null), oven: c(22093, null), fryer: c(null, null) } }, size: { perW100: null } });
-    fake.seed('product_pricing/cabinet', { familyId: 'cabinet', schemaVersion: 1, approved: false, options: { type: { wall: c(5003, null) }, doors: { sliding: c(2003, null) }, shelves: { 1: c(-3001, null), 2: c(-1501, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/prep_table', { familyId: 'prep_table', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { layers: { 2: c(8111, 101), 3: c(16231, 207) }, upper: { 1: c(3077, null), 2: c(null, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/sink', { familyId: 'sink', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { basins: { 2: c(6173, null), 3: c(null, null), 4: c(null, null) }, alignment: { left: c(0, null), right: c(0, null) }, undershelf: { true: c(2503, null) }, upper: { true: c(3011, null) }, faucet: { prerinse: c(4519, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/stove', { familyId: 'stove', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { positions: { wok: c(29111, null), hp_small: c(null, null), hp_large: c(37123, null), lp_small: c(16057, null), lp_large: c(null, null), soup: c(null, null) }, addons: { griller: c(null, null), griddle: c(15091, null), oven: c(22093, null), fryer: c(null, null) } }, size: { perW100: null } });
+    fake.seed('product_pricing/cabinet', { familyId: 'cabinet', schemaVersion: FAMS.version, approved: false, options: { type: { wall: c(5003, null) }, doors: { sliding: c(2003, null) }, shelves: { 1: c(-3001, null), 2: c(-1501, null) } }, size: { perW100: null } });
     fake.seed('product_pricing/rack', { familyId: 'rack', schemaVersion: 99, approved: true, approvedBy: 'u_pres', options: { tiers: { 3: c(-1009, null), 5: c(1009, null), 6: c(2009, null) }, wheels: { false: c(-907, null) } }, size: { perW100: null } });
     // wall_shelf: NO sheet at all
   };
@@ -976,7 +976,7 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
       assert.equal(std.reviewCount, 0, 'the standard size needs no rate');
     });
     it('a wall-shelf depth other than the standard has no price in the sheet, so it is priced after review; the standard depth and any length are priced', async () => {
-      fake.seed('product_pricing/wall_shelf', { familyId: 'wall_shelf', schemaVersion: 1, approved: true, approvedBy: 'u_pres', options: { tiers: { 2: { flat: 3001, perW100: null }, 3: { flat: 6007, perW100: null } }, surface: { slotted: { flat: 1009, perW100: null } } }, size: { perW100: 479 } });
+      fake.seed('product_pricing/wall_shelf', { familyId: 'wall_shelf', schemaVersion: FAMS.version, approved: true, approvedBy: 'u_pres', options: { tiers: { 2: { flat: 3001, perW100: null }, 3: { flat: 6007, perW100: null } }, surface: { slotted: { flat: 1009, perW100: null } } }, size: { perW100: 479 } });
       const fine = await estimate([famLine('wall_shelf', { tiers: 2, surface: 'solid' }, { W: 1800, D: 450 }, 4), fixedLine()]);
       assert.equal(fine.reviewCount, 0);
       const deeper = await estimate([famLine('wall_shelf', { tiers: 2, surface: 'solid' }, { W: 1800, D: 600 }, 4), fixedLine()]);
@@ -1073,8 +1073,9 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
       assert.deepEqual(Object.keys(res).sort(), ['estimate', 'ok', 'receivedAt', 'refNo', 'submittedOnManila']);
       assert.deepEqual(doc.items[0], {
         n: 1, kind: 'family', id: 'PW-004', familyId: 'sink', name: 'Sink', cat: 'washing', unit: 'pc', qty: 1, runs: null,
-        size: { W: 1000, D: 500, H: 850 }, sizeCustom: false, config: sinkCfg(),           // 1000 mm is the usual length for two sinks
-        specs: [{ label: 'Sinks', value: '2' }, { label: 'Sink position', value: 'Centre' }, { label: 'Undershelf', value: 'Without' }, { label: 'Upper shelf', value: 'Without' }, { label: 'Faucet', value: 'Pre-rinse spray' }],
+        size: { W: 1000, D: 500, H: 850 }, sizeCustom: false, config: { ...sinkCfg(), top: 1.5 },           // 1000 mm is the usual length for two sinks; the staff-only top plate is stored at its standard 1.5 mm
+        specs: [{ label: 'Sinks', value: '2' }, { label: 'Sink position', value: 'Centre' }, { label: 'Undershelf', value: 'Without' }, { label: 'Upper shelf', value: 'Without' }, { label: 'Faucet', value: 'Pre-rinse spray' },
+          { label: 'Construction', value: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet' }],
         note: 'near the window',
       });
       assert.equal(doc.items[1].id, P_FIX);                                                 // the fixed item keeps its shape
@@ -1107,7 +1108,7 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
     });
     it('the stored configuration is the VALIDATED one: add-ons are put in the family\'s order, defaults are filled in, and a client-supplied extra never survives', async () => {
       const { doc } = await submit([famLine('stove', { addons: ['fryer', 'griddle'], positions: ['lp_small', 'wok'] }, { W: 1300, D: 700, H: 850 }), fixedLine()]);
-      assert.deepEqual(doc.items[0].config, { positions: ['lp_small', 'wok'], addons: ['griddle', 'fryer'] });
+      assert.deepEqual(doc.items[0].config, { positions: ['lp_small', 'wok'], addons: ['griddle', 'fryer'], top: 1.5 });
       assert.equal(doc.items[0].specs[0].value, '1. Low-pressure burner, small, 2. Wok burner');
       assert.equal(doc.items[0].specs[1].value, 'Griddle, Fryer');
     });

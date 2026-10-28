@@ -1186,6 +1186,23 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(read('functions/qr-published.json'))));
   });
 
+  it('standard construction (owner ruling 2026-10-28): the website configurator offers the PUBLIC groups only (js/quote-request.js walks publicGroups(), never fam.groups) and adds a read-only Construction line; the staff-only top plate is defined once, flagged, and named on no public surface', () => {
+    const js = read('js/quote-request.js');
+    const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    assert.ok(/publicGroups\(/.test(code), 'js/quote-request.js must iterate PF.publicGroups(fam)');
+    assert.ok(!/\bfam\.groups\b/.test(code), 'js/quote-request.js must never walk fam.groups: a staff-only group would get a control');
+    assert.ok(/qr-hint qr-construction/.test(code) && /PF\.constructionLine\(/.test(code), 'the read-only Construction line');
+    assert.ok(!/\{ ?staff: ?true/.test(code) && !/staffOnly/.test(code), 'the website never validates in staff mode');
+    const fams = JSON.parse(read('scripts/public-families.json'));
+    const flagged = Object.entries(fams.families).flatMap(([id, f]) => f.groups.filter((g) => g.staffOnly).map((g) => `${id}.${g.key}`));
+    assert.deepEqual(flagged, ['prep_table.top', 'sink.top', 'stove.top'], 'exactly the three top plates are staff-only');
+    // no public surface offers or names the lighter top plate: the catalogue cards, the product pages, the FAQ and llms.txt say only the standard
+    for (const f of ['catalogue/index.html', 'products/index.html', 'faq/index.html', 'llms.txt', ...fs.readdirSync(path.join(ROOT, 'products'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `products/${e.name}/index.html`)]) {
+      const t = read(f).replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '');
+      assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(t), `${f} offers or names the lighter top plate`);
+    }
+  });
+
   it('leaves the master\'s own product notes alone: every fixed card still carries exactly the note the generator takes from the master (the "(local only)" fresh-build test in catalogue-public.test.mjs), and the generator\'s display overrides name no grade', () => {
     for (const [id, v] of Object.entries(B.NOTE_OVERRIDES)) assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(v)), `NOTE_OVERRIDES ${id}`);
     for (const [id, v] of Object.entries(B.TEXT_FIXES)) assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(v)), `TEXT_FIXES ${id}`);

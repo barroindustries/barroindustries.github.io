@@ -17,6 +17,10 @@
 //   * The staff screen and the public page logic, run from their REAL source (vm): hostile text is inert, handlers carry
 //     only the server-minted ref, the page's size / unit-cap rules agree with the server's.
 //
+// QUOTE <-> REQUEST LINK (QUOTE-BUILDER-CONFIGURATOR-SPEC §8.2, at the end of this file): when a client answers a quote that was filed from a website
+// request or a project brief, respondToQuote writes the answer back onto that request — the pure status rule (qr.requestStatusAfterResponse), the
+// source-level shape of the glue, and the REAL respondToQuote run against the in-memory Firestore (tests/fixtures/fake-firestore.cjs).
+//
 // PRODUCT FAMILIES (owner ruling 2026-10-21): the SKUs a configurable family absorbs are no longer quotable as plain lines (the allowlist
 // lists only the FIXED items); a configured line { familyId, config, dims, qty, note } is validated strictly against the family and priced
 // from its primary SKU + the private sheet. The family logic itself is pinned in tests/product-families.test.mjs; here: the allowlist
@@ -31,9 +35,9 @@
 //
 // Run with: node --test tests/*.test.mjs
 
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
+import Module, { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -695,6 +699,109 @@ describe('publicEstimate — THE response (no price ever)', () => {
   });
 });
 
+// ── STANDARD CONSTRUCTION on the server (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14.4 / §14.7): made-to-order tables, sinks and stoves have a 1.5 mm (16 ga) top plate as the STANDARD; the
+// 1.2 mm top is a STAFF-ONLY option. qrEstimate / qrSubmit validate every configured line with ProductFamilies.validateLine WITHOUT options, so a visitor can never choose it; the stored line is the
+// standard one with its construction sentence; the definitions moved to schema 2, so a sheet approved against schema 1 prices nothing until it is approved again.
+// (Mutation-tested in a scratch copy: the server passing { staff: true }; the family version left at 1 — each must fail here.)
+describe('the staff-only top plate on the server: a visitor can never choose 1.2 mm, the stored line is the standard one with its construction, schema-1 sheets are "priced after review"', () => {
+  const PF = require('../functions/product-families.js');
+  const WITH_TOP = ['prep_table', 'sink', 'stove'];
+  const primaries = new Map(FAMS.order.map((f) => [f, { id: FAMS.families[f].primary }]));
+  const norm = (fid, config, dims) => Q.normaliseItems([{ familyId: fid, config, dims: dims || {}, qty: 1 }], byId, { families: FAMS, primaries });
+  const staffMsg = (fid) => `"${FAMS.families[fid].label}": "Top plate" is chosen by our staff when the quotation is prepared.`;
+
+  it('a 1.2 mm top is REFUSED with the staff message — for table, sink and stove, alone or with other options; any other non-standard value gets the same message', () => {
+    for (const fid of WITH_TOP) {
+      const dflt = PF.defaultConfig(FAMS.families[fid]);
+      for (const config of [{ top: 1.2 }, { ...dflt, top: 1.2 }]) {
+        const r = norm(fid, config);
+        assert.equal(r.ok, false, fid);
+        assert.deepEqual(r.errors, [staffMsg(fid)], fid);
+        assert.deepEqual(r.items, [], 'nothing is stored for a refused line');
+      }
+      for (const v of [9, '1.2', '1.5', null, true, 0, [1.2]]) assert.deepEqual(norm(fid, { top: v }).errors, [staffMsg(fid)], `${fid} ${JSON.stringify(v)}`);
+    }
+    // the other families have no top plate to choose: it is an unknown option there
+    for (const fid of ['cabinet', 'wall_shelf', 'rack']) assert.match(norm(fid, { top: 1.2 }).errors[0], /"top" is not an option of this product/, fid);
+  });
+
+  it('the standard 1.5 mm top, stated or absent, is accepted: the STORED configuration always carries top 1.5, and the same line hashes the same either way', () => {
+    for (const fid of WITH_TOP) {
+      for (const config of [{}, { top: 1.5 }]) {
+        const r = norm(fid, config);
+        assert.equal(r.ok, true, `${fid} ${JSON.stringify(config)}: ${(r.errors || []).join(' ')}`);
+        assert.equal(r.items[0].config.top, 1.5, `${fid}: stored config.top`);
+      }
+      assert.equal(Q.basketHash(norm(fid, {}).items), Q.basketHash(norm(fid, { top: 1.5 }).items), `${fid}: stating the standard top changes nothing`);
+    }
+    for (const fid of ['cabinet', 'wall_shelf', 'rack']) assert.ok(!('top' in norm(fid, {}).items[0].config), fid);
+  });
+
+  it('the stored specs end with the Construction row (the owner\'s sentence at the standard top) and never carry a "Top plate" row or the lighter top', () => {
+    const SENTENCE = {
+      prep_table: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet',
+      sink: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet',
+      stove: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm body and panels · square-tube posts with adjustable bullet feet',
+      cabinet: 'SS304 stainless steel · 1.2 mm body, doors and shelves · square-tube posts with adjustable bullet feet',
+      wall_shelf: 'SS304 stainless steel · 1.2 mm shelves · fixed to the wall',
+      rack: 'SS304 stainless steel · 1.2 mm shelves · square-tube frame · on wheels',
+    };
+    for (const fid of FAMS.order) {
+      const it = norm(fid, {}).items[0];
+      assert.deepEqual(it.specs.at(-1), { label: 'Construction', value: SENTENCE[fid] }, fid);
+      assert.ok(!it.specs.some((s) => /top plate/i.test(s.label)), `${fid}: a "Top plate" row`);
+      assert.ok(!/lighter|1\.2 mm top/.test(JSON.stringify(it.specs)), `${fid}: the lighter top in the stored specs`);
+      assert.deepEqual(it.specs.map((s) => s.label), [...PF.publicGroups(FAMS.families[fid]).map((g) => g.label), 'Construction'], fid);
+    }
+  });
+
+  describe('computeBasket: the standard configuration prices as before; a sheet approved against schema 1 is "not approved"', () => {
+    const prod = (id, formulaType, basePrice, dd, formula) => ({ id, category: 'prep_washing', name: id, formulaType, basePrice, defaultDimensions: dd, formula, specs: [], unit: 'pc' });
+    const PRIM = {
+      prep_table: prod('PW-001', 'per_length', 4217, { W: 900, D: 600, H: 850 }, { baseLengthMm: 900, pricePerExtraMm: 3.3, rateD100: 31, rateH100: 17 }),
+      sink: prod('PW-004', 'per_length', 6173, { W: 500, D: 500, H: 850 }, { baseLengthMm: 500, pricePerExtraMm: 4.1, rateD100: 29, rateH100: 13 }),
+      stove: prod('CE-001', 'per_length', 7770, { W: 600, D: 700, H: 850 }, { baseLengthMm: 600, pricePerExtraMm: 5.7, rateD100: 41, rateH100: 0 }),
+    };
+    const cell = (flat) => ({ flat, perW100: null });
+    // fixture sheets (synthetic figures): an amount for one public option, and the 1.2 mm top cell left BLANK
+    const SHEET = {
+      prep_table: { options: { upper: { 1: cell(3077) }, top: { 1.2: cell(null) } }, option: ['upper', 1, 3077] },
+      sink: { options: { faucet: { prerinse: cell(4519) }, top: { 1.2: cell(null) } }, option: ['faucet', 'prerinse', 4519] },
+      stove: { options: { addons: { oven: cell(22093) }, top: { 1.2: cell(null) } }, option: ['addons', ['oven'], 22093] },        // an oven adds no length (its width allowance is 0)
+    };
+    const sheetDoc = (fid, schemaVersion) => ({ id: fid, data: { familyId: fid, schemaVersion, approved: true, approvedBy: 'u_syn', options: SHEET[fid].options, size: { perW100: null } } });
+    const basket = (fid, config, schemaVersion) => {
+      const r = norm(fid, config);
+      assert.equal(r.ok, true, (r.errors || []).join(' '));
+      return Q.computeBasket(r.items, new Map(), {}, undefined, { families: FAMS, primaries: new Map([[fid, PRIM[fid]]]), pricing: Q.buildPricingIndex([sheetDoc(fid, schemaVersion)], FAMS) }).lines[0];
+    };
+
+    it('the default configuration — top plate included — prices as the base item alone, and a public option adds exactly its amount: nothing changed for a visitor', () => {
+      for (const fid of WITH_TOP) {
+        const std = basket(fid, {}, FAMS.version);
+        assert.equal(std.priced, true, fid);
+        assert.equal(std.unitPrice, PRIM[fid].basePrice, `${fid}: the list price of the base item now buys the 1.5 mm top`);
+        assert.deepEqual(std.deltas, []);
+        assert.equal(basket(fid, { top: 1.5 }, FAMS.version).unitPrice, PRIM[fid].basePrice, `${fid}: stating the standard top changes nothing`);
+        const [group, value, amount] = SHEET[fid].option;
+        const withOption = basket(fid, { [group]: value }, FAMS.version);
+        assert.equal(withOption.unitPrice, PRIM[fid].basePrice + amount, fid);
+      }
+    });
+
+    it('a sheet approved against schema 1 (before the 1.5 mm top was the standard) prices NOTHING — "priced after review" — until it is approved again; the same sheet at the current schema prices', () => {
+      assert.equal(FAMS.version, 2, 'the family definitions are on schema 2');
+      for (const fid of WITH_TOP) {
+        const old = basket(fid, {}, 1);
+        assert.equal(old.priced, false, fid); assert.equal(old.unitPrice, 0, fid);
+        assert.equal(old.reason, 'not_approved', fid);
+        assert.equal(basket(fid, {}, FAMS.version).priced, true, `${fid}: the control — the current schema prices`);
+        assert.equal(basket(fid, {}, 3).reason, 'not_approved', `${fid}: and a FUTURE schema is just as unapproved`);
+      }
+    });
+  });
+});
+
 describe('sessions, the bot check, duplicates, the LRU and the product cache', () => {
   it('sessionUsable: exists, unsubmitted, created within the 7-day TTL', () => {
     const t = NOW - 1000;
@@ -1100,6 +1207,248 @@ describe('functions/index.js — the qr* glue stays inside the rules', () => {
     assert.equal((src.match(/async function resolveSalesAndPresidentUids/g) || []).length, 1);
     assert.match(src, /resolveSalesAndPresidentUids\(db, '\[cirSubmit\]'\)/);
     assert.match(src, /resolveSalesAndPresidentUids\(db, '\[qrSubmit\]'\)/);
+  });
+});
+
+// ══════════════════════════ QUOTE <-> REQUEST LINK (QUOTE-BUILDER-CONFIGURATOR-SPEC §8.2) ══════════════════════════
+// A quote filed from a website request (kind 'qr') or a project brief (kind 'cir') carries `sourceRef`; when the CLIENT answers it on /q/,
+// respondToQuote (Admin SDK) writes the answer back onto THAT request. The status rule is the pure qr.requestStatusAfterResponse; the rest is glue.
+// Mutation-tested (scratch copies): the rule demoting a converted request, un-archiving an archived one, advancing on changes_requested or on a
+// near-miss spelling of "accepted"; the glue reading the ref from the client's payload, dropping the ref-shape guard or the kind allowlist,
+// matching quotes[] by position instead of docId, touching the request when the mirror is stale, writing the request outside its own try/catch
+// — each must fail here.
+describe('requestStatusAfterResponse — the request follows the client\'s answer to a quote filed from it, and never backwards', () => {
+  const OPEN = ['new', 'in_review', 'contacted', 'quoted'];     // quote_requests has no 'contacted'; the client_info_requests enum does — both advance the same way
+  it('is a pure export of qr-core', () => {
+    assert.equal(typeof Q.requestStatusAfterResponse, 'function');
+    assert.equal(Q.requestStatusAfterResponse.length, 2);
+  });
+  it('an ACCEPTED quote moves a new / in_review / contacted / quoted request to converted', () => {
+    for (const s of OPEN) assert.equal(Q.requestStatusAfterResponse(s, 'accepted'), 'converted', s);
+  });
+  it('an ACCEPTED quote never demotes or un-archives: converted and archived stay exactly as they are', () => {
+    assert.equal(Q.requestStatusAfterResponse('converted', 'accepted'), 'converted');
+    assert.equal(Q.requestStatusAfterResponse('archived', 'accepted'), 'archived');
+  });
+  it('CHANGES REQUESTED never changes the status, whatever it is', () => {
+    for (const s of [...OPEN, 'converted', 'archived']) assert.equal(Q.requestStatusAfterResponse(s, 'changes_requested'), s, s);
+  });
+  it('only the exact word "accepted" is an acceptance — a near miss, a wrong case or junk leaves the status alone (fails closed)', () => {
+    for (const r of ['accept', 'ACCEPTED', 'Accepted', ' accepted', 'needs_revision', 'declined', '', null, undefined, 0, 1, true, {}, []]) {
+      for (const s of [...OPEN, 'converted', 'archived']) assert.equal(Q.requestStatusAfterResponse(s, r), s, `${JSON.stringify(r)} on ${s}`);
+    }
+  });
+  it('is total: junk or a missing current status never throws, and an acceptance still converts anything that is not converted / archived', () => {
+    for (const s of [undefined, null, '', 'weird', 5, {}]) {
+      assert.doesNotThrow(() => Q.requestStatusAfterResponse(s, 'accepted'));
+      assert.equal(Q.requestStatusAfterResponse(s, 'accepted'), 'converted');
+      assert.equal(Q.requestStatusAfterResponse(s, 'changes_requested'), s);
+    }
+  });
+});
+
+describe('functions/index.js respondToQuote — writes the answer back onto the request the quote was filed from (§8.2) — source', () => {
+  const src = read('functions/index.js');
+  const a = src.indexOf('exports.respondToQuote = functions');
+  const fnSrc = src.slice(a, src.indexOf('recordAttendancePunch', a));
+  const b0 = fnSrc.indexOf('QUOTE-BUILDER-CONFIGURATOR-SPEC §8.2');
+  const blk = fnSrc.slice(b0, fnSrc.indexOf('// Notify: quote creator + the president'));
+
+  it('the block exists, once, inside respondToQuote', () => {
+    assert.ok(a > 0 && b0 > 0, 'respondToQuote or its §8.2 block is missing');
+    assert.equal((fnSrc.match(/QUOTE-BUILDER-CONFIGURATOR-SPEC §8\.2/g) || []).length, 1);
+    assert.ok(blk.length > 400);
+  });
+  it('the ref comes from the QUOTE DOC (a staff-written field), never from the anonymous client\'s payload', () => {
+    assert.match(blk, /const sref = qSnap\.data\(\)\.sourceRef;/);
+    assert.ok(!/data\.sourceRef|data && data\.source|data\.ref\b|data\.kind\b/.test(fnSrc), 'the callable reads a request ref from the client payload');
+  });
+  it('the ref is shape-checked (QR-/CIR- + yymmdd + 6 chars) and the kind is an allowlist before it is ever used as a document id', () => {
+    assert.ok(blk.includes('/^(QR|CIR)-\\d{6}-[A-Z0-9]{6}$/.test(sref.ref)'));
+    assert.match(blk, /typeof sref\.ref === 'string'/);
+    assert.match(blk, /\(sref\.kind === 'qr' \|\| sref\.kind === 'cir'\)/);
+    assert.match(blk, /sref\.kind === 'qr' \? 'quote_requests' : 'client_info_requests'/);
+  });
+  it('the new status comes from the pure rule and is written only when it differs; the matching quotes[] entry is found by docId and takes the quote\'s own status', () => {
+    assert.match(blk, /qr\.requestStatusAfterResponse\(existing\.status, newStatus\)/);
+    assert.match(blk, /if \(nextStatus !== existing\.status\) patch\.status = nextStatus;/);
+    assert.match(blk, /q\.docId === quoteId \? \{ \.\.\.q, status: internalStatus \} : q/);
+    assert.match(blk, /updatedAt: admin\.firestore\.FieldValue\.serverTimestamp\(\)/);
+    for (const k of ['statusChangedBy', 'convertedBy', 'convertedClientId']) assert.ok(!blk.includes(k), `the glue forges ${k}`);
+  });
+  it('it sits INSIDE the shareToken guard and after the internal quote update, before the notifications, in its OWN try/catch that only logs', () => {
+    const guard = fnSrc.indexOf('qSnap.data().shareToken === token');
+    const upd = fnSrc.indexOf('await qRef.update({');
+    const notify = fnSrc.indexOf('// Notify: quote creator + the president');
+    assert.ok(guard > 0 && guard < upd && upd < b0 && b0 < notify, 'wrong place in respondToQuote');
+    assert.match(blk, /\btry \{[\s\S]*\} catch \(e\) \{\s*console\.error\('\[respondToQuote\] request link sync failed/);
+    assert.ok(!/\bthrow\b/.test(blk), 'a throw in the best-effort block would fail the client\'s response');
+  });
+  it('the read-modify-write on the request is one transaction, and the callback returns without throwing when the request is gone', () => {
+    assert.match(blk, /await db\.runTransaction\(async \(tx\) => \{/);
+    assert.match(blk, /if \(!reqSnap\.exists\) return;/);
+  });
+});
+
+describe('functions/index.js respondToQuote — the request follows the client\'s answer, against the in-memory Firestore', {
+  skip: fs.existsSync(path.join(ROOT, 'functions', 'node_modules', 'firebase-functions', 'package.json')) ? false : 'functions/node_modules is not installed (firebase-functions missing)',
+}, () => {
+  const { createFake, FakeTimestamp } = require('./fixtures/fake-firestore.cjs');
+  const fk = createFake();
+  const TOKEN = 'abcd2345wxyz', QID = 'QdocId0001', REF = 'QR-261028-K7M2PX', CIR_REF = 'CIR-261028-AB23CD';
+  let fns;
+  function loadFns() {
+    const idx = require.resolve('../functions/index.js');
+    delete require.cache[idx];
+    const orig = Module._load;
+    Module._load = function (request) { if (request === 'firebase-admin') return fk.admin; return orig.apply(this, arguments); };
+    try { return require(idx); } finally { Module._load = orig; }
+  }
+  const entry = (docId, over) => ({ docId, coll: 'bk_quotes', quoteNumber: 'BK-ML-WB-261028-001', version: 1, total: 123456, status: 'filed', filedAt: '2026-10-28T01:00:00.000Z', byName: 'Sales One', ...(over || {}) });
+  const requestDoc = (over) => ({ refNo: REF, status: 'quoted', updatedAt: new FakeTimestamp(1000), quotes: [entry('Q0000OLD', { version: 1 }), entry(QID, { version: 2 })], ...(over || {}) });
+  function seedAll(o) {
+    o = o || {};
+    fk.reset();
+    fk.seed('users/u_pres', { role: 'president', displayName: 'Pres' });
+    fk.seed('users/u_sales', { role: 'employee', department: 'Sales', displayName: 'Sales One' });
+    fk.seed(`public_quotes/${TOKEN}`, { status: 'pending', clientResponse: { status: 'pending' }, src: { coll: 'bk_quotes', id: QID }, clientName: 'JDC Foods', quoteNumber: 'BK-ML-WB-261028-001', total: 123456 });
+    fk.seed(`bk_quotes/${QID}`, { shareToken: TOKEN, createdBy: 'u_sales', status: 'sent', bankDetails: '', sourceRef: { kind: 'qr', ref: REF }, ...(o.quote || {}) });
+    if (o.request !== null) fk.seed(`quote_requests/${REF}`, o.request || requestDoc());
+    if (o.cir) fk.seed(`client_info_requests/${CIR_REF}`, o.cir);
+  }
+  const answer = (action, extra) => fns.respondToQuote.run({ token: TOKEN, action, name: 'Juan Dela Cruz', note: action === 'request_changes' ? 'Please add a second sink' : '', ...(extra || {}) }, {});
+  beforeEach(() => { fns = loadFns(); });
+
+  it('ACCEPT: the request becomes converted, the matching quotes[] entry becomes accepted, every other entry and field is untouched', async () => {
+    seedAll();
+    const r = await answer('accept');
+    assert.equal(r.ok, true); assert.equal(r.status, 'accepted');
+    const req = fk.read(`quote_requests/${REF}`);
+    assert.equal(req.status, 'converted');
+    assert.deepEqual(req.quotes.map((q) => [q.docId, q.status]), [['Q0000OLD', 'filed'], [QID, 'accepted']]);
+    assert.deepEqual(req.quotes[0], entry('Q0000OLD', { version: 1 }), 'another quote\'s entry was edited');
+    assert.equal(req.quotes[1].version, 2); assert.equal(req.quotes[1].total, 123456); assert.equal(req.quotes[1].quoteNumber, 'BK-ML-WB-261028-001');
+    assert.ok(req.updatedAt instanceof FakeTimestamp && req.updatedAt.toMillis() !== 1000, 'updatedAt was not bumped');
+    assert.deepEqual(Object.keys(req).sort(), ['quotes', 'refNo', 'status', 'updatedAt'], 'the glue wrote a field the spec does not name');
+    assert.equal(fk.read(`bk_quotes/${QID}`).status, 'accepted');
+    assert.equal(fk.list('notifications/u_sales/items').length, 1, 'the quote creator is still notified');
+  });
+  it('ACCEPT on a project brief (kind cir) converts a client_info_requests doc — including one that was only "contacted"', async () => {
+    for (const from of ['quoted', 'contacted']) {
+      seedAll({ quote: { sourceRef: { kind: 'cir', ref: CIR_REF } }, cir: requestDoc({ refNo: CIR_REF, status: from }), request: null });
+      await answer('accept');
+      assert.equal(fk.read(`client_info_requests/${CIR_REF}`).status, 'converted', from);
+      assert.equal(fk.read(`client_info_requests/${CIR_REF}`).quotes[1].status, 'accepted');
+      assert.ok(!fk.has(`quote_requests/${REF}`), 'a cir source touched quote_requests');
+    }
+  });
+  it('REQUEST CHANGES: the request keeps its status, the matching entry becomes needs_revision', async () => {
+    seedAll();
+    const r = await answer('request_changes');
+    assert.equal(r.status, 'changes_requested');
+    const req = fk.read(`quote_requests/${REF}`);
+    assert.equal(req.status, 'quoted');
+    assert.deepEqual(req.quotes.map((q) => q.status), ['filed', 'needs_revision']);
+    assert.equal(fk.read(`bk_quotes/${QID}`).status, 'needs_revision');
+  });
+  it('NEVER DEMOTED: an accepted quote leaves a converted or archived request in that status (its quotes[] entry still follows the quote)', async () => {
+    for (const s of ['converted', 'archived']) {
+      seedAll({ request: requestDoc({ status: s }) });
+      await answer('accept');
+      const req = fk.read(`quote_requests/${REF}`);
+      assert.equal(req.status, s);
+      assert.equal(req.quotes[1].status, 'accepted');
+    }
+  });
+  it('a request that predates quotes[] (no array) still advances; no quotes field is invented', async () => {
+    seedAll({ request: { refNo: REF, status: 'in_review', updatedAt: new FakeTimestamp(1000) } });
+    await answer('accept');
+    const req = fk.read(`quote_requests/${REF}`);
+    assert.equal(req.status, 'converted');
+    assert.ok(!('quotes' in req));
+  });
+  it('a junk entry inside quotes[] is carried through untouched and breaks nothing', async () => {
+    seedAll({ request: requestDoc({ quotes: [null, 'x', 7, entry(QID)] }) });
+    await answer('accept');
+    const req = fk.read(`quote_requests/${REF}`);
+    assert.deepEqual(req.quotes.slice(0, 3), [null, 'x', 7]);
+    assert.equal(req.quotes[3].status, 'accepted');
+  });
+  it('a quote with no sourceRef (every quote filed before this feature) leaves every request alone and answers normally', async () => {
+    seedAll({ quote: { sourceRef: null } });
+    const before = fk.read(`quote_requests/${REF}`);
+    const r = await answer('accept');
+    assert.equal(r.ok, true);
+    assert.deepEqual(fk.read(`quote_requests/${REF}`), before);
+    assert.equal(fk.read(`bk_quotes/${QID}`).status, 'accepted');
+  });
+  it('a hostile or malformed sourceRef is ignored: bad shape, path tricks, wrong kind, wrong types — the request is untouched, the answer still lands', async () => {
+    const hostile = [
+      { kind: 'qr', ref: `${REF}/notes/n1` }, { kind: 'qr', ref: `../quote_requests/${REF}` }, { kind: 'qr', ref: REF.toLowerCase() },
+      { kind: 'qr', ref: `${REF}\n` }, { kind: 'qr', ref: 'QR-261028-K7M2P' }, { kind: 'qr', ref: 'QR-26102-K7M2PX' }, { kind: 'qr', ref: 'XX-261028-K7M2PX' },
+      { kind: 'users', ref: REF }, { kind: 'bk_quotes', ref: REF }, { kind: 'QR', ref: REF }, { kind: ['qr'], ref: REF }, { ref: REF }, { kind: 'qr' },
+      { kind: 'qr', ref: 5 }, { kind: 'qr', ref: null }, { kind: 'qr', ref: [REF] }, REF, 7, true, [REF], [],
+    ];
+    for (const sourceRef of hostile) {
+      seedAll({ quote: { sourceRef } });
+      const before = fk.read(`quote_requests/${REF}`);
+      const r = await answer('accept');
+      assert.equal(r.ok, true, JSON.stringify(sourceRef));
+      assert.deepEqual(fk.read(`quote_requests/${REF}`), before, `a request was touched through ${JSON.stringify(sourceRef)}`);
+      assert.equal(fk.read(`bk_quotes/${QID}`).status, 'accepted', JSON.stringify(sourceRef));
+    }
+  });
+  it('a kind that disagrees with the ref prefix only ever reads the collection the kind names (a missing doc there is a quiet no-op)', async () => {
+    seedAll({ quote: { sourceRef: { kind: 'cir', ref: REF } } });
+    const before = fk.read(`quote_requests/${REF}`);
+    await answer('accept');
+    assert.deepEqual(fk.read(`quote_requests/${REF}`), before);
+    assert.ok(!fk.has(`client_info_requests/${REF}`), 'a doc was created by the link sync');
+  });
+  it('a request that no longer exists (deleted) is skipped without error and without creating it', async () => {
+    seedAll({ request: null });
+    const r = await answer('accept');
+    assert.equal(r.ok, true);
+    assert.ok(!fk.has(`quote_requests/${REF}`));
+    assert.equal(fk.read(`bk_quotes/${QID}`).status, 'accepted');
+  });
+  it('a STALE mirror (the quote has since been re-shared under another token) touches neither the quote nor the request', async () => {
+    seedAll({ quote: { shareToken: 'someOtherToken9' } });
+    const before = fk.read(`quote_requests/${REF}`);
+    const r = await answer('accept');
+    assert.equal(r.ok, true);
+    assert.deepEqual(fk.read(`quote_requests/${REF}`), before);
+    assert.equal(fk.read(`bk_quotes/${QID}`).status, 'sent');
+  });
+  it('the anonymous caller cannot choose the request: a sourceRef / ref / kind inside the call payload is ignored', async () => {
+    seedAll({ quote: { sourceRef: null }, cir: requestDoc({ refNo: CIR_REF }) });
+    const before = fk.read(`quote_requests/${REF}`), beforeCir = fk.read(`client_info_requests/${CIR_REF}`);
+    await answer('accept', { sourceRef: { kind: 'qr', ref: REF }, ref: REF, kind: 'cir', refNo: CIR_REF });
+    assert.deepEqual(fk.read(`quote_requests/${REF}`), before);
+    assert.deepEqual(fk.read(`client_info_requests/${CIR_REF}`), beforeCir);
+  });
+  it('a failure while updating the request is logged and NEVER reaches the client or the notifications', async () => {
+    seedAll();
+    const realTx = fk.db.runTransaction;
+    let calls = 0;
+    fk.db.runTransaction = async (fn) => { calls++; if (calls >= 2) throw new Error('request link boom'); return realTx(fn); };
+    const logged = mock.method(console, 'error', () => {});
+    try {
+      const r = await answer('accept');
+      assert.equal(r.ok, true); assert.equal(r.status, 'accepted');
+      assert.equal(calls, 2, 'the link sync did not use a second transaction');
+      assert.ok(logged.mock.calls.some((c) => /request link sync failed/.test(String(c.arguments[0])) && /request link boom/.test(String(c.arguments[1]))));
+    } finally { logged.mock.restore(); fk.db.runTransaction = realTx; }
+    assert.equal(fk.read(`bk_quotes/${QID}`).status, 'accepted', 'the quote itself was not flipped');
+    assert.equal(fk.read(`quote_requests/${REF}`).status, 'quoted', 'the failed transaction left a partial write');
+    assert.equal(fk.list('notifications/u_sales/items').length, 1, 'the notifications were skipped');
+  });
+  it('a second answer is still refused by the mirror\'s once-only guard and cannot re-touch the request', async () => {
+    seedAll();
+    await answer('accept');
+    const after = fk.read(`quote_requests/${REF}`);
+    await assert.rejects(answer('request_changes'), (e) => e.code === 'failed-precondition');
+    assert.deepEqual(fk.read(`quote_requests/${REF}`), after);
   });
 });
 

@@ -26,6 +26,11 @@
  *              low = interpolated, or the evidence conflicts with other figures in the master, or the pair differs in more than the option.
  *              blank = no usable evidence. The text always says why, and lists the figures it was compared with.
  *
+ * THE STAFF-ONLY TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14.4): tables, sinks and stoves now have a 1.5 mm (16 ga) top plate as the
+ * STANDARD; the base item's list price is read as the 1.5 mm price, so the 1.5 mm choice needs no cell, and the lighter 1.2 mm choice (staff only, offered in the
+ * Quote Builder) has one cell per family, SIGNED, entered by Finance: a negative amount, or 0. It is ALWAYS written BLANK here — the master's own "Top Gauge" adder on
+ * BA-001 is quoted in the note as a cross-reference and never becomes the amount — so a 1.2 mm line is "priced after review" until Finance types the figure.
+ *
  * The MODEL these figures feed is js/pricing-core.js priceConfiguredItem(): configured price = the primary SKU priced at the requested size
  * through its own rules + the sum of the option deltas; an option equal to the family default adds nothing (the zero point).
  *   a choice value:   flat + perW100 x max(0, W - refW) / 100        (refW = the primary's standard length; a blank perW100 means none)
@@ -228,6 +233,18 @@ function deriveFamily(fid, fam, ctx) {
   };
   const lbl = (g, v) => { const gg = PF.groupOf(fam, g); const o = PF.optionOf(gg, v); return gg.label + ': ' + (o.f || o.l); };
 
+  // The staff-only 1.2 mm top plate: ONE blank cell on each of the three families that have a top plate. The note says how to fill it and, when the master has
+  // the BA-001 "Top Gauge" adder, quotes it as a cross-reference (before and after scripts/flip-top-gauge-default.js renamed the options). The cell stays BLANK.
+  const TOP_GAUGE = [['1.2mm (std)', '1.5mm heavy-duty'], ['1.2mm (lighter)', '1.5mm (16 ga, standard)']];
+  const topPlateCell = () => {
+    let note = 'The standard top is now 1.5 mm (16 ga); the base item\'s list price is read as the 1.5 mm price. Enter what a 1.2 mm top takes OFF (a negative amount), or 0 if it should cost the same.';
+    for (const [light, heavy] of TOP_GAUGE) {
+      const v = specAdder('BA-001', 'Top Gauge', light, heavy);
+      if (v != null) { note += ` For reference, the master\'s own "Top Gauge" adder on BA-001 (${light} versus ${heavy}) = ${fmt(round(v))}; not used as the amount.`; break; }
+    }
+    setCell('top', '1.2', lbl('top', 1.2), blank(note));
+  };
+
   // ── per-family recipes ────────────────────────────────────────────────────
   if (fid === 'prep_table') {
     const three = pairCand('PW-001', 'PW-003', 1, 'the 3-layer table (top + 2 undershelves) against the 1-layer table, as the owner prescribed; PW-002 is not used (it also has casters)');
@@ -244,6 +261,7 @@ function deriveFamily(fid, fam, ctx) {
     const over = adderCand('BA-010', 'Overshelf', 'Single overshelf', 'None', 'one overshelf on the bread slicing table');
     setCell('upper', '1', lbl('upper', 1), decide([over]));
     setCell('upper', '2', lbl('upper', 2), blank(`Only one upper shelf is priced in the master; a second one would be an extrapolation.${over ? ` Suggested if you agree it doubles: ${fmt(round(over.flat * 2))}.` : ''}`));
+    topPlateCell();
   } else if (fid === 'sink') {
     const basin = adderCand('PW-051', 'Basin Type', 'Double', 'Single (508x508x254)', 'the sink table, double basin against single');
     const faucetA = adderCand('PW-004', 'Faucet Type', 'Pre-rinse spray', 'Gooseneck', 'the primary sink');
@@ -267,6 +285,7 @@ function deriveFamily(fid, fam, ctx) {
     setCell('undershelf', 'true', lbl('undershelf', true), blank(`The master has no clean sink-undershelf figure.${slot ? ` PW-009 (2 sinks, slotted bottom, pull-out faucet) versus PW-006 differs by ${fmt(round(slot.flat))}, but also in the faucet and the length, so it is not used.` : ''}${(() => { const a = specAdder('BA-001', 'Undershelf', '1 undershelf', 'None'); return a == null ? '' : ` The baker's worktable undershelf adder is ${fmt(round(a))} (a table, not a sink).`; })()}`));
     setCell('upper', 'true', lbl('upper', true), blank(`The master has no sink upper-shelf figure.${(() => { const a = specAdder('BA-010', 'Overshelf', 'Single overshelf', 'None'); return a == null ? '' : ` The bread table's overshelf adder is ${fmt(round(a))} (a table, not a sink).`; })()}`));
     setCell('faucet', 'prerinse', lbl('faucet', 'prerinse'), decide([faucetA, faucetB]));
+    topPlateCell();
   } else if (fid === 'stove') {
     // Per-position costs. Model: price = P(CE-001 at the SKU's size) + (sum of position costs) - (cost of ONE low-pressure small position).
     const unitOf = (id, positions) => {
@@ -308,6 +327,7 @@ function deriveFamily(fid, fam, ctx) {
     setCell('addons', 'griddle', lbl('addons', 'griddle'), blank(`No clean griddle-section figure: CE-010 (a griddle on its own stand) includes a body. ${g && lp != null ? `For reference it is ${fmt(round(g.flat + lp))} once the burner cost is added back.` : ''} The combis CE-007 / CE-008 imply very different sums for griller + griddle together.`));
     setCell('addons', 'oven', lbl('addons', 'oven'), blank('CE-014 (the only range with an oven) has a default depth outside the stove\'s limits and costs less than the same range without an oven in the master: not usable.'));
     setCell('addons', 'fryer', lbl('addons', 'fryer'), blank('Only double and triple fryers are priced (CE-009, CE-022); there is no single fryer section to compare.'));
+    topPlateCell();
   } else if (fid === 'cabinet') {
     const why = 'No clean comparison in the master: ';
     setCell('type', 'wall', lbl('type', 'wall'), blank(why + 'the wall-hung cabinets (PW-045, PW-046) are fixed-price lots at sizes far from the floor cabinet.'));
@@ -345,7 +365,7 @@ function deriveFamily(fid, fam, ctx) {
   for (const id of absorbed) {
     const p = byId.get(id);
     if (!p || !(p.basePrice > 0)) continue;
-    const cfg = fam.absorbed[id];
+    const cfg = PF.validateConfiguration(fam, fam.absorbed[id], { staff: true }).config;      // an absorbed SKU never states the staff-only top plate: it is the standard one
     const dims = {};
     for (const k of Object.keys(fam.dims)) { const v = (p.defaultDimensions || {})[k]; dims[k] = isNum(v) ? Math.min(Math.max(v, fam.dims[k].min), fam.dims[k].max) : fam.dims[k].default; }
     const sheet = { approved: true, schemaVersion: fams_version(ctx), options: toSheetOptions(cells), size: { perW100: size.perW100 } };

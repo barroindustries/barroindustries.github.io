@@ -40,8 +40,15 @@
    same {label, value} rows a product line uses, in plain words, built by the server from the family definition — so it prints here with no
    new shape to learn: the family name, each chosen option, the size. `id` is the family's PRIMARY catalogue SKU (the price starts from it).
    For staff, a priced configured line also shows how the figure was built (primary SKU's list price at that size + the option amounts),
-   and an unpriced one says WHY ("the option sheet is not approved" / "no amount entered yet for: Faucet: Pre-rinse spray"). Open in Quote
-   Builder maps a configured line to its primary SKU with the options in the line's description (the builder has no configurator yet).
+   and an unpriced one says WHY ("the option sheet is not approved" / "no amount entered yet for: Faucet: Pre-rinse spray").
+
+   OPEN IN QUOTE BUILDER (QUOTE-BUILDER-CONFIGURATOR-SPEC §6.1, 2026-10-28): the builder has a configurator now, so a configured line lands as a
+   real configured line (family, options, size) at the figure the client's estimate was built from, and EVERY line (configured or fixed) is
+   protected from the builder's cost-plus auto-pricer — an unpriced one lands at zero for staff to price. The mapping is
+   QBConfigured.fromRequestItem (js/qb-configured.js, pure; this file passes the request's reference so each line knows which request line it
+   came from). The hand-off state also carries the company (BK), lead source (WB), the location code and purpose derived from the delivery
+   address / use, and `sourceRef` (the request, the estimate the client saw, the target date) — see _qrBuilderState. Filing a quote started
+   here links it back: the request lists its quotes (the Quotes card below) and moves to Quoted (js/app.js linkQuoteToRequest).
 
    Role gating (spec §7.4, same as CIR §5.2):
      qrCanWrite()  — president/manager/owner, OR a non-secretary member of the Sales department.
@@ -462,6 +469,57 @@ function _qrEstimateCardHtml(doc) {
     </div>`;
 }
 
+// ── Quotes filed from this request (QUOTE-BUILDER-CONFIGURATOR-SPEC §8.3) ──────────────────────────────────────────────────────────────
+// `quotes[]` is written by the staff session that files a quote started from this request (js/app.js linkQuoteToRequest — newest LAST, at most
+// 50) and its entries' status by respondToQuote when the client answers. Every entry is rendered as untrusted text: the document is writable by
+// any Sales user, so `coll` must be one of the two quote collections and `docId` a plain id before either goes into the Open handler (and the
+// handler is the existing reopenQuoteFromDoc, which only the quote's author or an admin can complete — it says so). The amount is staff-only:
+// the view-only role (the Corporate Secretary) sees the number, the status and the date, and has no Open.
+const QR_QUOTE_STATUS_META = {
+  filed:            { cls: 'badge-blue',   label: 'Filed' },
+  pending_approval: { cls: 'badge-orange', label: 'Awaiting approval' },
+  accepted:         { cls: 'badge-green',  label: 'Accepted' },
+  needs_revision:   { cls: 'badge-amber',  label: 'Changes requested' }
+};
+const QR_QUOTE_COLLS = { bk_quotes: 'bk-quote-builder', bs_quotes: 'bs-quote-builder' };   // collection -> the builder page that edits it
+function _qrQuoteStatusPill(status) {
+  const known = typeof status === 'string' && Object.prototype.hasOwnProperty.call(QR_QUOTE_STATUS_META, status);
+  const m = known ? QR_QUOTE_STATUS_META[status] : { cls: 'badge-gray', label: (typeof status === 'string' && status) ? status : 'unknown' };
+  return `<span class="badge ${m.cls}">${escHtml(m.label)}</span>`;
+}
+// An ISO instant string (the entry's filedAt) -> '12 Nov 2026' in Manila time; '' for anything that is not a date.
+function _qrQuotedOn(iso) {
+  if (typeof iso !== 'string' || !iso) return '';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '' : _qrFormatDate(window.bizDate(d));
+}
+function _qrQuotesCardHtml(doc, canWrite) {
+  const list = (Array.isArray(doc && doc.quotes) ? doc.quotes : []).filter(q => q && typeof q === 'object');
+  if (!list.length) {
+    return `<div class="card"><h4 style="margin-top:0">Quotes</h4><p style="font-size:12px;color:var(--text-muted);margin:0">${canWrite ? 'No quote yet — Open in Quote Builder.' : 'No quote yet.'}</p></div>`;
+  }
+  const rows = list.slice().reverse().map(q => {                       // newest first
+    const coll = (typeof q.coll === 'string' && Object.prototype.hasOwnProperty.call(QR_QUOTE_COLLS, q.coll)) ? q.coll : '';
+    const docId = (typeof q.docId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(q.docId)) ? q.docId : '';
+    const openHtml = (coll && docId)                                      // (the actions cell below is staff-only — the view-only role gets no cell at all)
+      ? `<button type="button" class="btn-secondary btn-sm" onclick="reopenQuoteFromDoc('${coll}','${docId}','${QR_QUOTE_COLLS[coll]}')">Open</button>` : '';
+    const ver = Math.floor(Number(q.version));
+    const total = (typeof q.total === 'number' && isFinite(q.total)) ? _qrPeso(q.total) : '';
+    const filed = _qrQuotedOn(q.filedAt);
+    // table-cards.no-toggle (css/styles.css §5): on a phone each quote is a card of label:value lines with Open (staff only) as the trailing
+    // action, instead of a table the staff must scroll sideways to reach Open. Each value sits in ONE span so the flex row keeps it together.
+    return `<tr>
+      <td data-label="Quote"><span><span style="font-family:monospace">${escHtml(q.quoteNumber || '—')}</span>${ver >= 1 ? ` <span style="font-size:11px;color:var(--text-muted)">v${ver}</span>` : ''}</span></td>
+      <td data-label="Status">${_qrQuoteStatusPill(q.status)}</td>
+      ${canWrite ? `<td data-label="Total" style="text-align:right"><span style="white-space:nowrap">${escHtml(total)}</span></td>` : ''}
+      <td data-label="Filed"><span>${escHtml(filed)}${q.byName ? ` <span style="font-size:11px;color:var(--text-muted)">· ${escHtml(q.byName)}</span>` : ''}</span></td>
+      ${canWrite ? `<td class="tc-actions" style="text-align:right">${openHtml}</td>` : ''}
+    </tr>`;
+  }).join('');
+  const head = `<tr><th>Quote</th><th>Status</th>${canWrite ? '<th style="text-align:right">Total</th>' : ''}<th>Filed</th>${canWrite ? '<th></th>' : ''}</tr>`;
+  return `<div class="card"><h4 style="margin-top:0">Quotes (${list.length})</h4><table class="data-table table-cards no-toggle"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function _qrRenderDetail() {
   const root = _qrContainer || deptContainer();
   const doc = _qrCurrent;
@@ -530,6 +588,7 @@ function _qrRenderDetail() {
     <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       ${statusSelectHtml}${builderHtml}${convertHtml}${printHtml}${deleteHtml}
     </div>
+    <div style="margin-top:12px">${_qrQuotesCardHtml(doc, canWrite)}</div>
     <div style="margin-top:12px">${_qrRequestCardHtml(doc)}</div>
     ${itemsHtml}
     ${_qrEstimateCardHtml(doc)}
@@ -675,59 +734,60 @@ window.qrConvert = async function (refNo) {
   }
 };
 
-// One request line -> the exact item shape quote-builder-v2's addItemFromCalc() pushes. A FIXED line deliberately has no `priceManual`
-// (the builder's auto-pricer may reprice a costed line, exactly as if staff had picked the item); an unpriced line (unitPrice 0) opens as a line
-// staff must price. A CONFIGURED line is ALWAYS priceManual: it lands as its primary SKU, so the auto-pricer would otherwise replace the
-// configured figure (or fill an unpriced one) with the BARE SKU's price, which is wrong for the chosen options. No cost fields: the builder
-// takes the live cost basis by product id.
-function _qrToBuilderItem(it, line) {
-  const unitPrice = line && line.priced ? Number(line.unitPrice) || 0 : 0;
-  const specs = (Array.isArray(it.specs) ? it.specs : []).map(s => ({ label: String(s && s.label || ''), value: String(s && s.value || '') }));
-  const qty = Math.max(1, parseInt(it.qty, 10) || 1);
-  if (it && it.familyId) {
-    // A CONFIGURED line: the builder has no configurator yet, so it lands as its primary catalogue SKU (the id the price started from) with the chosen
-    // options in the line description. priceManual ALWAYS: a priced one keeps its figure, an unpriced one stays at zero for staff to price — in neither case
-    // may the builder's auto-pricer put the bare SKU's price on a configured product.
-    const out = {
-      id: String(it.id || ''), category: String(it.cat || ''), name: String(it.name || '') + ' (configured)',
-      dims: _qrDimString(it),
-      specs: specs, specStr: specs.map(s => s.label + ': ' + s.value).filter(Boolean).join(', '),
-      qty: qty, unit: String(it.unit || 'pc'),
-      unitPrice: unitPrice, amount: unitPrice * qty,
-      leadTime: '—', laborHours: null,
-      formulaType: String((line && line.formulaType) || 'fixed'),
-      notes: String(it.note || '')
-    };
-    out.priceManual = true;
-    return out;
-  }
-  return {
-    id: String(it.id || ''), category: String(it.cat || ''), name: String(it.name || ''),
-    dims: _qrDimString(it),
-    specs: specs, specStr: specs.map(s => s.value).filter(Boolean).join(', '),
-    qty: qty, unit: String(it.unit || 'pc'),
-    unitPrice: unitPrice, amount: unitPrice * qty,
-    leadTime: '—', laborHours: null,
-    formulaType: String((line && line.formulaType) || 'fixed'),
-    notes: String(it.note || '')
+// The state window._qbReopenState carries into the builder (QUOTE-BUILDER-CONFIGURATOR-SPEC §6.1) — a pure function of the request, so it can be
+// read without a navigation.
+//   currentCo 'BK' / qnoMethod 'WB': a website lead is a Barro Kitchens quote from the Website lead source. qnoLoc / purpose come from the
+//   delivery address and the "what will you use this for" answer (QBConfigured.locationCodeFor / purposeFor — pinned tables). The subject stays
+//   empty (staff use Auto). `handoff: true` makes the builder boot as an authoritative load (js/app.js _qbIsAuthoritativeLoad).
+//   items: QBConfigured.fromRequestItem on each request line + its internal.lines[] row, given the request's reference so every line knows which
+//   request line it came from. A fixed or configured line that was priced lands at that figure under priceBasis 'website', which the builder's
+//   cost-plus auto-pricer leaves alone; an unpriced one lands at zero, marked needsPrice, for staff to price — never at a bare SKU's price.
+//   sourceRef: what the builder's hand-off bar shows (the reference, the range the client saw, the target date, the use, the client's notes);
+//   only { kind, ref } of it is ever filed on the quote. A reference that is not a real one (the server never mints one) gets no link at all.
+function _qrBuilderState(doc) {
+  const QB = window.QBConfigured;
+  const c = doc.contact || {}, it = doc.intake || {}, e = doc.estimate || {};
+  const ref = _qrRefAttr(doc.id);
+  const state = {
+    clientName: c.name || '',
+    clientCompany: c.company || '',
+    clientAddress: it.address || '',
+    clientPhone: c.mobile || '',
+    clientEmail: c.email || '',
+    currentCo: 'BK',
+    qnoMethod: 'WB',
+    qnoLoc: QB.locationCodeFor(it.address),
+    purpose: QB.purposeFor({ useFor: it.useFor, entityType: it.entityType }),
+    subject: '',
+    items: _qrItems(doc).map((x, i) => QB.fromRequestItem(x, _qrLineFor(doc, x, i), ref)),
+    handoff: true
   };
+  if (ref) {
+    const low = Number(e.low), high = Number(e.high);
+    state.sourceRef = {
+      kind: 'qr',
+      ref: ref,
+      estimate: (e.shown === true && low > 0 && high > 0)
+        ? { low: low, high: high, step: Number(e.step) || 0, vatBasis: String(e.vatBasis || ''), deliveryIncluded: !!e.deliveryIncluded } : null,
+      targetDate: it.targetDate || '',
+      targetFlexible: !!it.targetFlexible,
+      useForLabel: _qrLabel('useFor', it.useFor) + (it.useForOther ? ' — ' + it.useForOther : ''),
+      entityType: it.entityType || '',
+      notes: it.notes || '',
+      name: c.name || ''
+    };
+  }
+  return state;
 }
 
 window.qrOpenInBuilder = function (refNo) {
   if (!qrCanWrite()) return;
   const doc = (_qrCurrent && _qrCurrent.id === refNo) ? _qrCurrent : null;
   if (!doc) return;
-  const c = doc.contact || {};
-  const it = doc.intake || {};
-  const items = _qrItems(doc).map((x, i) => _qrToBuilderItem(x, _qrLineFor(doc, x, i)));
-  window._qbReopenState = {
-    clientName: c.name || '',
-    clientCompany: c.company || '',
-    clientAddress: it.address || '',
-    clientPhone: c.mobile || '',
-    clientEmail: c.email || '',
-    items: items
-  };
+  // QBConfigured is a lazy script of this page (js/config.js PAGE_SCRIPTS). Without it the lines cannot be mapped — and a fallback to a bare SKU
+  // mapping would hand the builder's auto-pricer lines to reprice — so stop and say so rather than open a wrong quote.
+  if (!window.QBConfigured) { Notifs.showToast('The quote builder helpers did not load — reload the app and try again.', 'error'); return; }
+  window._qbReopenState = _qrBuilderState(doc);
   window._qbReopenAsRevision = false;
   Notifs.showToast('Opening Quote Builder with this request’s client and items…', 'success');
   navigateTo('bk-quote-builder');

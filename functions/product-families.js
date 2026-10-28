@@ -18,6 +18,11 @@
 // It carries NO figure of any kind — no price, rate, formula or amount — because it ships to the public page. The option
 // amounts are kept in private staff data, read by server-side and staff-side code that no public page ever loads.
 //
+// STANDARD CONSTRUCTION (owner ruling 2026-10-28): a family may carry a public `construction` sentence (how the made-to-order piece is built,
+// e.g. the 1.5 mm top plate and the 1.2 mm body) — constructionLine() fills its {group} tokens from the chosen options — and a group may be
+// marked `staffOnly` (the 1.2 mm top plate): it is never offered on the website, the server (which validates without opts) refuses any value
+// but its default, and only a staff session (opts.staff === true: the Quote Builder, the Family pricing screen) may choose another.
+//
 // UMD-ish shim, like js/qr-def.js: browser <script> -> window.ProductFamilies; Node require() -> module.exports. No dependencies;
 // ES5 on purpose (the public pages target old phones too). Pure: no DOM, no clock, no randomness, no I/O.
 (function (root, factory) {
@@ -52,6 +57,11 @@
     for (var i = 0; i < os.length; i++) if (os[i].v === v) return i;
     return -1;
   }
+  // publicGroups(family) -> the groups a visitor to the WEBSITE may choose from: every group except the staff-only ones (the 1.2 mm top plate is
+  // offered in the Quote Builder only). The website's configurator, the catalogue card and the product pages walk THIS list, never `groups`.
+  function publicGroups(family) {
+    return ((family && family.groups) || []).filter(function (g) { return g.staffOnly !== true; });
+  }
 
   // ── defaults ───────────────────────────────────────────────────────────────
   function defaultConfig(family) {
@@ -66,12 +76,16 @@
   }
 
   // ── configuration ─────────────────────────────────────────────────────────
-  // validateConfiguration(family, raw) -> { ok, errors:string[], config }
+  // validateConfiguration(family, raw, opts) -> { ok, errors:string[], config }
   //   STRICT allowlist: `raw` must be a plain object; a key the family does not define is an error (so is __proto__ / constructor);
   //   a value must equal one of the group's option values exactly (type included). A key that is ABSENT takes the family default.
   //   slots: an array of option values, minSlots..maxSlots long, order kept. multi: an array of distinct option values, put into the
   //   family's own option order (so two equal selections always serialise identically).
-  function validateConfiguration(family, raw) {
+  //   `opts` is OPTIONAL. PUBLIC mode (no opts, or opts.staff !== true — the server, the website, the default): a staff-only group (g.staffOnly) that
+  //   is PRESENT with any value but its default is an error and the config takes the default; present-and-default is accepted. STAFF mode
+  //   (opts.staff === true): a staff-only group is validated like any other choice. An ABSENT key takes the default in both modes.
+  function validateConfiguration(family, raw, opts) {
+    var staff = !!(opts && opts.staff === true);
     var errors = [];
     var config = {};
     if (!isPlain(raw)) return { ok: false, errors: ['The options must be a set of choices.'], config: defaultConfig(family) };
@@ -83,6 +97,11 @@
       var present = has(raw, g.key) && raw[g.key] !== undefined;
       var v = present ? raw[g.key] : clone(g.default);
       if (g.type === 'choice') {
+        if (g.staffOnly === true && !staff && present && v !== g.default) {
+          errors.push('"' + g.label + '" is chosen by our staff when the quotation is prepared.');
+          config[g.key] = clone(g.default);
+          return;
+        }
         if (optionIndex(g, v) < 0) { errors.push('Choose one of the available options for "' + g.label + '".'); config[g.key] = clone(g.default); return; }
         config[g.key] = v;
       } else if (g.type === 'slots') {
@@ -192,9 +211,10 @@
     return { ok: errors.length === 0, errors: errors, warnings: warnings, dims: dims };
   }
 
-  // validateLine(family, rawConfig, rawDims) -> { ok, errors, warnings, config, dims, custom }   (the one call the server makes)
-  function validateLine(family, rawConfig, rawDims) {
-    var c = validateConfiguration(family, rawConfig);
+  // validateLine(family, rawConfig, rawDims, opts) -> { ok, errors, warnings, config, dims, custom }   (the one call the server makes — without opts,
+  // so a staff-only option is refused there; staff sessions pass { staff: true })
+  function validateLine(family, rawConfig, rawDims, opts) {
+    var c = validateConfiguration(family, rawConfig, opts);
     var d = validateDims(family, rawDims, c.config);
     var std = standardDims(family, c.config);
     var custom = Object.keys(std).some(function (k) { return d.dims[k] !== std[k]; });
@@ -216,10 +236,28 @@
   }
   function slotWords(g, v, field) { var o = optionOf(g, v); return o ? (o[field] || o.l) : String(v); }
 
-  // describe(family, config) -> [{ label, value }]  one row per option group, in the family's order (the staff view and the receipt)
+  // constructionLine(family, config) -> "SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm body and panels · square-tube posts with adjustable bullet feet"
+  //   The family's `construction` sentence with each {group} token replaced by the chosen option's `c` phrase (fallback its `f`, then its `l`). A value that is
+  //   absent or not one of the group's options reads as the group's default. '' for a family with no `construction`. No full stop at the end (a page adds
+  //   its own). Pure; never throws.
+  function constructionLine(family, config) {
+    var tpl = family && typeof family.construction === 'string' ? family.construction : '';
+    if (!tpl) return '';
+    var cfg = isPlain(config) ? config : {};
+    return tpl.replace(/\{([A-Za-z0-9_]+)\}/g, function (m, key) {
+      var g = groupOf(family, key);
+      if (!g) return '';
+      var o = has(cfg, key) ? optionOf(g, cfg[key]) : null;
+      if (!o) o = optionOf(g, g.default);
+      return o ? String(o.c || o.f || o.l) : '';
+    });
+  }
+
+  // describe(family, config) -> [{ label, value }]  one row per PUBLIC option group, in the family's order, then the Construction row (the staff view,
+  // the receipt and the printed quote). A staff-only group has no row of its own: the Construction row already says which top plate it is.
   function describe(family, config) {
     var rows = [];
-    (family.groups || []).forEach(function (g) {
+    publicGroups(family).forEach(function (g) {
       var v = config ? config[g.key] : undefined;
       if (g.type === 'choice') {
         var o = optionOf(g, v);
@@ -232,14 +270,17 @@
         rows.push({ label: g.label, value: sel.length ? sel.map(function (x) { return slotWords(g, x, 'l'); }).join(', ') : 'None' });
       }
     });
+    if (family && typeof family.construction === 'string' && family.construction) rows.push({ label: 'Construction', value: constructionLine(family, config) });
     return rows;
   }
-  // summaryParts(family, config) -> string[]   the short phrases of the one-line summary
+  // summaryParts(family, config) -> string[]   the short phrases of the one-line summary. A staff-only choice (the top plate) contributes its phrase only when
+  // it is NOT the standard one ("1.2 mm top"), so every public summary reads exactly as before.
   function summaryParts(family, config) {
     var parts = [];
     (family.groups || []).forEach(function (g) {
       var v = config ? config[g.key] : undefined;
       if (g.type === 'choice') {
+        if (g.staffOnly === true && (v === undefined || v === g.default)) return;
         var o = optionOf(g, v);
         parts.push(o ? (o.s || o.l) : String(v));
       } else if (g.type === 'slots') {
@@ -441,6 +482,7 @@
     groupOf: groupOf,
     optionOf: optionOf,
     optionIndex: optionIndex,
+    publicGroups: publicGroups,
     defaultConfig: defaultConfig,
     defaultDims: defaultDims,
     validateConfiguration: validateConfiguration,
@@ -452,6 +494,7 @@
     sizeTextLabelled: sizeTextLabelled,
     standardDims: standardDims,
     describe: describe,
+    constructionLine: constructionLine,
     summaryParts: summaryParts,
     summaryLine: summaryLine,
     canonicalConfig: canonicalConfig,

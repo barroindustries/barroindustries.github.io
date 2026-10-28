@@ -21,6 +21,9 @@ const META = {
 const PF = require(path.join(L.ROOT, 'js', 'product-families.js'));
 const QF = require(path.join(L.ROOT, 'js', 'qr-families.js'));
 const CAT_LABEL = { preparation: 'Preparation', washing: 'Washing', cooking: 'Cooking', storage: 'Storage', refrigeration: 'Refrigeration' };
+// The standard construction of the made-to-order pieces (owner ruling 2026-10-28): the very sentence of the website's /products/ page, under "Two grades, three finishes".
+// (Each family's own line — PF.constructionLine — reaches the family pages through the catalogue page's cards.) tests/content-assets.test.mjs pins the two together.
+const CONSTRUCTION_NOTE = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
 
 const dec = (t) => String(t || '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
 
@@ -112,10 +115,16 @@ const sizeLine = (fam) => {
 // ───────────────────────────── pages ─────────────────────────────
 function familyPage(fam, card, draw) {
   const photos = familyPhotos(fam.id, card.photo);
-  const optRows = card.specs.filter(([k]) => k !== 'Size').map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`);
+  // The rows are the website card's own, in its own order — the options, Size, Construction (the standard build: top plate, body, posts), Material — and each one is
+  // shown in full. Only the Size row is the PDF's own, with the size limits; it takes the place of the card's Size row. Each row sits a little tighter than print.css's
+  // default: with the Construction row (three lines) a sink page carries eight rows, and it must still end on its own A4 page with the project photograph.
+  const optRow = (label, valueHtml) => `<div><dt style="padding-top:1.5mm">${esc(label)}</dt><dd style="margin:.4mm 0 1.9mm">${valueHtml}</dd></div>`;
+  if (!card.specs.some(([k]) => k === 'Size')) throw new Error(`catalogue/index.html: the ${fam.id} card has no Size row`);
+  const optRows = card.specs.map(([k, v]) => (k === 'Size'
+    ? optRow('Size', `Made to your ${dimWords(fam)}<br><span class="xs muted" style="font-weight:400">${esc(sizeLine(fam))}</span>`)
+    : optRow(k, esc(v))));
   const slots = fam.groups.find((g) => g.type === 'slots');
-  if (slots) optRows.splice(1, 0, `<div><dt>Burner types</dt><dd>${slots.options.map((o) => esc(o.l)).join(' · ')}</dd></div>`);
-  optRows.splice(optRows.length - 1, 0, `<div><dt>Size</dt><dd>Made to your ${dimWords(fam)}<br><span class="xs muted" style="font-weight:400">${esc(sizeLine(fam))}</span></dd></div>`);
+  if (slots) optRows.splice(1, 0, optRow('Burner types', slots.options.map((o) => esc(o.l)).join(' · ')));
   const main = photos[0]
     ? `<div class="white-ph" style="height:${photos.length > 1 ? 58 : 92}mm"><img src="${img(photos[0])}" alt="${esc(fam.label)}, representative image"></div><p class="cap">Representative image</p>`
     : `<div class="pv" style="padding:4mm">${draw(fam.id, VARIANTS[fam.id][0]).svg}</div><p class="cap">Illustration</p>`;
@@ -131,14 +140,14 @@ function familyPage(fam, card, draw) {
     <p class="eyebrow">Configurable product · ${CAT_LABEL[fam.category] || ''}</p>
     <h1 class="h1">${esc(fam.label)}</h1>
     <p class="lead">${esc(fam.description)}</p>
-    <div class="cols c32 gap8 mt3 top">
+    <div class="cols c2 gap8 mt3 top">
       <div>${main}${thumbs}</div>
       <dl class="opt">${optRows.join('')}</dl>
     </div>
     <p class="h4 mt3">Layouts at a glance</p>
     <div class="cols c3 gap4 mt1">${dr}</div>
     ${projBlock}
-    <div class="band mt3" style="padding:4mm 6mm;display:flex;align-items:center;justify-content:space-between;gap:6mm"><span class="sm" style="color:#fff">Set up your ${esc(fam.label.toLowerCase())} online and add it to your quote request.</span><span class="sm" style="color:var(--goldlite);white-space:nowrap">${link(CO.quoteUrl, CO.quoteText)}</span></div>` });
+    <div class="band mt2" style="padding:4mm 6mm;display:flex;align-items:center;justify-content:space-between;gap:6mm"><span class="sm" style="color:#fff">Set up your ${esc(fam.label.toLowerCase())} online and add it to your quote request.</span><span class="sm" style="color:var(--goldlite);white-space:nowrap">${link(CO.quoteUrl, CO.quoteText)}</span></div>` });
 }
 
 function eqCard(it) {
@@ -324,9 +333,9 @@ function build() {
     <p class="h4 mt4">The six configurable products at a glance</p>
     <table class="tb mt1">
       <thead><tr><th>Product</th><th>You choose</th><th>Online size range (mm)</th></tr></thead>
-      <tbody>${fams.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(data.families[f.id].specs.filter(([k]) => k !== 'Size' && k !== 'Material').map(([k, v]) => k.toLowerCase()).join(', '))}</td><td>${esc(Object.keys(f.dims).map((k) => `${f.dims[k].label} ${f.dims[k].min}–${f.dims[k].max}`).join(' · '))}</td></tr>`).join('')}</tbody>
+      <tbody>${fams.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(data.families[f.id].specs.filter(([k]) => k !== 'Size' && k !== 'Construction' && k !== 'Material').map(([k, v]) => k.toLowerCase()).join(', '))}</td><td>${esc(Object.keys(f.dims).map((k) => `${f.dims[k].label} ${f.dims[k].min}–${f.dims[k].max}`).join(' · '))}</td></tr>`).join('')}</tbody>
     </table>
-    <p class="xs muted mt1">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. Need a different size? Ask us for a quotation built to your specifications.</p>
+    <p class="xs muted mt1">Every configurable product is built to order in SS304 or SS316, in a brushed, mirror or satin finish. ${esc(CONSTRUCTION_NOTE)} Need a different size? Ask us for a quotation built to your specifications.</p>
     <div class="fill"><figure class="fig"><div class="ph-box"><img src="${img('ispsc-04.jpg')}" alt="${esc(L.PROJ_ALT['ispsc-04'])}"></div><figcaption>${esc(L.projCap('ispsc-04'))}</figcaption></figure></div>` }));
 
   for (const f of fams) pages.push(familyPage(f, data.families[f.id], draw));

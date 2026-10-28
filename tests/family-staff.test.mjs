@@ -576,6 +576,133 @@ describe('Inventory › Family Pricing — "Try a configuration" prices with the
   });
 });
 
+// ── the staff-only TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14): tables, sinks and stoves have a 1.5 mm (16 ga) top as the STANDARD and a 1.2 mm top that only
+// staff can choose. Its sheet cell is the SIGNED amount added for 1.2 mm (a negative number, or 0); a blank is "priced after review", never zero. The definitions moved to schema 2, so
+// every sheet approved against schema 1 reads "Out of date — approve again" until Finance / the President approves it again knowing the base item's list price is the 1.5 mm price.
+describe('Inventory › Family Pricing — the staff-only Top plate: its own cells, a staff-only caption, priced in "Try a configuration", and the schema-2 re-approval', () => {
+  const WITH_TOP = ['prep_table', 'sink', 'stove'];
+  const CAPTION = 'Staff-only option — offered in the Quote Builder, never on the website';
+  const open = async (fid, docs) => {
+    const env = makeEnv({ docs: docs || {} });
+    await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+    await click(env, 'toggle', fid); await flush();
+    const html = env.el.innerHTML;
+    const a = html.indexOf(`data-fid="${fid}" style="margin-bottom:12px"`);
+    const b = html.indexOf('<div class="card fp-card"', a + 10);
+    return { env, card: html.slice(a, b < 0 ? html.length : b), inputs: inputsFromHtml(html, fid) };
+  };
+
+  it('table, sink and stove list a "Top plate" group: the 1.5 mm top is the standard (adds nothing), the 1.2 mm top has its own amount boxes, and the group header says it is staff only', async () => {
+    for (const fid of WITH_TOP) {
+      const { card, inputs } = await open(fid);
+      assert.match(card, /<strong>Top plate<\/strong>/, fid);
+      assert.equal(card.split(CAPTION).length - 1, 1, `${fid}: the staff-only caption appears once, on the Top plate header only`);
+      assert.match(card, /<strong>Top plate<\/strong>[^]*?Staff-only option — offered in the Quote Builder, never on the website/, `${fid}: the caption belongs to the Top plate header`);
+      assert.match(card, /1\.5 mm \(16 ga\)[^]*?Standard option — adds nothing/, `${fid}: the standard top adds nothing`);
+      const top = inputs.filter((i) => i.attrs['data-g'] === 'top');
+      assert.deepEqual(top.map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`), ['1.2|flat', '1.2|perW100'], `${fid}: boxes for the 1.2 mm top only`);
+      assert.equal(top[0].value, '', `${fid}: no amount yet is an EMPTY box, never 0`);
+    }
+  });
+  it('cabinet, wall shelving and rack have no Top plate and no staff-only caption', async () => {
+    for (const fid of ['cabinet', 'wall_shelf', 'rack']) {
+      const { card, inputs } = await open(fid);
+      assert.ok(!/Top plate/.test(card) && !card.includes(CAPTION), fid);
+      assert.ok(!inputs.some((i) => i.attrs['data-g'] === 'top'), fid);
+    }
+  });
+  it('the saved 1.2 mm amount fills its box (a negative amount is shown as typed), and "N of M amounts entered" counts the new cell', async () => {
+    const sheet = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { top: { 1.2: { flat: -300, perW100: null, confidence: 'entered', derivation: 'typed by Finance' } } }) });
+    const { card, inputs } = await open('sink', { sink: sheet });
+    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'top' && i.attrs['data-k'] === 'flat').value, '-300');
+    // the sink has 9 option cells besides the standard ones — the 1.2 mm top is one of them — and 3 of them have an amount
+    assert.match(card, /3 of 9 amounts entered/);
+    const none = await open('sink', { sink: OK_SHEET });
+    assert.match(none.card, /2 of 9 amounts entered/, 'the blank 1.2 mm cell is counted among the amounts still to enter');
+  });
+
+  describe('"Try a configuration" prices the staff-only top with the figures in the form', () => {
+    const BASE = { title: 'Synthetic Sink', formulaType: 'per_length', basePrice: 15555, measurement: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 0, rateW100: 0, rateD100: 0, rateH100: 0 }, specs: [] };
+    const sheetWith = (cell) => Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, cell === null ? {} : { top: { 1.2: cell } }) });
+    const setup = async (sheet) => {
+      const env = makeEnv({ docs: { sink: sheet }, products: { 'PW-004': BASE } });
+      await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+      await click(env, 'toggle', 'sink'); await flush();
+      env.stubs.inputs.sink = inputsFromHtml(env.el.innerHTML, 'sink');
+      const fam = env.ctx.window.QR_FAMILIES.families.sink;
+      const ins = {};
+      fam.groups.forEach((g) => { ins[g.key] = { value: String(Math.max(0, g.options.findIndex((o) => o.v === g.default))) }; });
+      const out = { innerHTML: '' };
+      const dims = [{ value: '500', getAttribute: () => 'W' }, { value: '500', getAttribute: () => 'D' }, { value: '850', getAttribute: () => 'H' }];
+      env.stubs.tryBox.sink = { querySelector: (sel) => { const m = sel.match(/^\.fp-try-in\[data-g="(\w+)"\]$/); if (m) return ins[m[1]] || null; if (sel === '.fp-try-out') return out; return null; }, querySelectorAll: () => dims };
+      const choose = (value) => { ins.top.value = String(fam.groups.find((g) => g.key === 'top').options.findIndex((o) => o.v === value)); };
+      return { env, ins, out, choose };
+    };
+    it('the control lists both top plates, the standard first and selected', async () => {
+      const { env } = await setup(sheetWith(null));
+      const select = env.el.innerHTML.match(/<select class="fp-try-in" data-g="top"[^>]*>([^]*?)<\/select>/);
+      assert.ok(select, 'a Top plate control in the try box');
+      assert.deepEqual([...select[1].matchAll(/<option value="(\d)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], !!m[2], unesc(m[3])]),
+        [['0', true, '1.5 mm (16 ga) — Standard'], ['1', false, '1.2 mm — Lighter']]);
+    });
+    it('a NEGATIVE amount lowers the figure by exactly that much and the summary says "1.2 mm top"; 0 keeps the figure; the standard top is the base item alone', async () => {
+      const { env, out, choose } = await setup(sheetWith({ flat: -300, perW100: null, confidence: 'entered', derivation: 'x' }));
+      choose(1.2);
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /15,255<\/strong> each/, '15,555 - 300');
+      assert.match(out.innerHTML, /− options ₱300/);
+      assert.match(out.innerHTML, /1\.2 mm top/);
+      choose(1.5);
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /15,555<\/strong> each/, 'the standard top needs no cell');
+      assert.ok(!/1\.2 mm top/.test(out.innerHTML));
+      // an unsaved edit in the form is used, not the stored figure; an explicit 0 IS a figure
+      choose(1.2);
+      env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'top' && i.attrs['data-v'] === '1.2' && i.attrs['data-k'] === 'flat').value = '0';
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /15,555<\/strong> each/);
+      assert.ok(!/Priced after review/.test(out.innerHTML), 'zero is a figure, not a blank');
+    });
+    it('a BLANK 1.2 mm cell is "Priced after review — … Top plate: 1.2 mm", never the base alone', async () => {
+      const { env, out, choose } = await setup(sheetWith(null));
+      choose(1.2);
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /Priced after review — no amount entered yet for: Top plate: 1\.2 mm\./);
+      assert.ok(!/each/.test(out.innerHTML));
+      assert.ok(!/chosen by our staff/.test(out.innerHTML), 'the screen is a STAFF session: the staff-only top is a valid choice here');
+    });
+  });
+
+  it('a sheet approved against the OLD definitions (schema 1) reads "Out of date — approve again"; the same sheet at the current schema is Approved', async () => {
+    assert.equal(FAKE_SCHEMA, 2, 'the families are on schema 2 (the 1.5 mm top plate is the standard)');
+    const old = Object.assign({}, OK_SHEET, { approved: true, approvedBy: 'u-1', approvedByName: 'Someone', schemaVersion: 1 });
+    const env = makeEnv({ docs: { sink: old, prep_table: Object.assign({}, old, { familyId: 'prep_table', schemaVersion: FAKE_SCHEMA }) } });
+    await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+    const html = env.el.innerHTML;
+    const cardOf = (fid) => { const a = html.indexOf(`data-fid="${fid}" style="margin-bottom:12px"`); const b = html.indexOf('<div class="card fp-card"', a + 10); return html.slice(a, b < 0 ? html.length : b); };
+    assert.match(cardOf('sink'), /Out of date — approve again/);
+    assert.match(cardOf('sink'), /data-act="approve"[^>]*data-fid="sink"(?![^>]*disabled)/, 'it can be approved again');
+    assert.match(cardOf('prep_table'), /Approved/);
+    assert.ok(!/Out of date/.test(cardOf('prep_table')));
+  });
+  it('the import refuses a seed made for schema 1 ("generate it again"); a schema-2 seed brings the 1.2 mm cell as typed (negative allowed), a blank stays blank, and a figure for the standard top is ignored', () => {
+    const FP = makeEnv({}).ctx.window.FamilyPricing;
+    const seed = (schemaVersion, families) => ({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion, generatedAt: '2026-10-28T00:00:00.000Z', families });
+    const old = FP.planImport(seed(1, { sink: { options: {} } }), {});
+    assert.match(old.error, /older family definition \(schema 1, the app is on 2\)/);
+    assert.match(old.error, /Generate it again/);
+    const typed = FP.planImport(seed(2, { sink: { options: { top: { 1.2: { flat: -300.4, perW100: null, confidence: 'medium', derivation: 'typed' }, 1.5: { flat: 99 } } } } }), {});
+    assert.ok(!typed.error, typed.error);
+    const top = typed.plan[0].options.top;
+    assert.equal(top['1.2'].flat, -300, 'a negative amount is kept (rounded to whole pesos)');
+    assert.ok(!('1.5' in top), 'the standard top is the zero point: it has no cell');
+    assert.ok(typed.skipped >= 1, 'the figure for the standard top is counted as ignored');
+    const blank = FP.planImport(seed(2, { sink: { options: {} } }), {});
+    assert.equal(blank.plan[0].options.top['1.2'].flat, null);
+    assert.equal(blank.plan[0].options.top['1.2'].confidence, 'blank');
+  });
+});
+
 describe('Inventory › Family Pricing — the one-time import of the private derived seed (president only) is strict and writes UNAPPROVED sheets only', () => {
   const FP = () => makeEnv({}).ctx.window.FamilyPricing;
   const seedOf = (over) => Object.assign({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion: FAKE_SCHEMA, generatedAt: '2026-10-21T00:00:00.000Z', families: {} }, over || {});
@@ -809,55 +936,170 @@ describe('Sales › Quote requests — a configured line: options and size for e
     assert.match(html, /font-family:monospace[^>]*>RF-003</);
   });
 
+  // QUOTE-BUILDER-CONFIGURATOR-SPEC §6.1 (2026-10-28): the builder has a configurator now. "Open in Quote Builder" maps every request line through
+  // QBConfigured.fromRequestItem (js/qb-configured.js, pure — its own tests are tests/qb-configured.test.mjs) and hands the builder the request's
+  // company / lead source / location / purpose / sourceRef. A priced line lands under priceBasis 'website' (the cost-plus auto-pricer leaves it
+  // alone because of the BASIS — no priceManual flag any more); an unpriced one lands at zero, 'manual', needsPrice. The Quotes card and the
+  // link-back to the request live in tests/quote-link.test.mjs.
   describe('Open in Quote Builder', () => {
-    it('a configured line lands as its PRIMARY SKU, named "(configured)", with every option in the description and the size; a priced one keeps its figure (priceManual)', () => {
-      const out = ctx._qrToBuilderItem(famItem(), famLine());
-      assert.equal(out.id, 'PW-004');
-      assert.equal(out.name, 'Sink (configured)');
+    const REF = 'QR-261021-K7M2PX';
+    const QB = (() => { const c = vm.createContext({ window: {}, console }); vm.runInContext(read('js/qb-configured.js'), c); return c.window.QBConfigured; })();
+    const plain = (x) => JSON.parse(JSON.stringify(x));
+    // the real screen + the real escHtml + the real QR_DEF (for the labels) + the real QBConfigured, with the few app globals the screen touches
+    const builderSandbox = (role, { helpers = true } = {}) => {
+      const toasts = [], navs = [];
+      const win = { currentRole: role, currentDepts: ['Sales'], bizDate: () => '2026-10-21', renderEmptyState: (o) => `<div>${o.title}</div>` };
+      const c = vm.createContext({ window: win, emojiIcon: (g) => `[${g}]`, console, Notifs: { showToast: (m, t) => toasts.push({ m, t }) }, navigateTo: (p) => navs.push(p) });
+      vm.runInContext(escSrc, c);
+      vm.runInContext(read('js/qr-def.js'), c);
+      if (helpers) vm.runInContext(read('js/qb-configured.js'), c);
+      vm.runInContext(read('js/screens/quote-requests.js'), c);
+      const open = (doc) => { c.__doc = doc; vm.runInContext('_qrCurrent = __doc', c); };
+      return { c, win, toasts, navs, open };
+    };
+    const fixedItem = (over) => Object.assign({ n: 2, kind: 'fixed', id: 'RF-003', name: 'Chiller', cat: 'Refrigeration', unit: 'pc', qty: 3, size: { W: 1200 }, specs: [{ label: 'Doors', value: 'Two' }], note: 'n' }, over || {});
+    const fixedLine = (over) => Object.assign({ n: 2, id: 'RF-003', kind: 'fixed', priced: true, unitPrice: 5111, lineTotal: 15333, formulaType: 'per_length' }, over || {});
+    const request = (over) => Object.assign({
+      id: REF,
+      contact: { name: 'Ana Reyes', company: 'Reyes Foods', mobile: '0917 555 0101', email: 'ana@example.test' },
+      intake: { need: 'equipment', useFor: 'restaurant_cafe', entityType: 'private', targetDate: '2026-11-30', targetFlexible: false, address: 'Unit 4, Katipunan Ave, Quezon City, Metro Manila', notes: 'Call before visiting' },
+      estimate: { shown: true, low: 87350, high: 104750, step: 50, vatBasis: 'exclusive', deliveryIncluded: false },
+      items: [famItem(), fixedItem()],
+      internal: { lines: [famLine(), fixedLine()], exactTotal: 88739 },
+    }, over || {});
+
+    it('a priced CONFIGURED line lands as a real configured line — family, options and size kept — at the figure the client\'s estimate was built from, under the website basis', () => {
+      const out = plain(QB.fromRequestItem(famItem(), famLine(), REF));
+      assert.equal(out.familyId, 'sink');
+      assert.deepEqual(out.config, { basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'gooseneck' });
+      assert.deepEqual(out.size, { W: 1800, D: 700, H: 900 });
+      assert.equal(out.id, 'PW-004', 'the family\'s primary SKU stays the line id');
+      assert.equal(out.name, 'Sink', 'no "(configured)" suffix any more — it IS configured');
       assert.equal(out.specStr, 'Sinks: 2 sinks, Position: Centre, Undershelf: With undershelf, Faucet: Gooseneck');
       assert.deepEqual(out.specs.map((s) => s.label), ['Sinks', 'Position', 'Undershelf', 'Faucet']);
       assert.equal(out.dims, 'L1800 × W700 × H900 mm');
       assert.equal(out.qty, 2);
-      assert.equal(out.unitPrice, 36703);
-      assert.equal(out.amount, 73406);
-      assert.equal(out.priceManual, true, 'the builder\'s auto-pricer must not replace the configured figure with the bare SKU price');
+      assert.equal(out.unitPrice, 36703); assert.equal(out.amount, 73406);
+      assert.equal(out.priceBasis, 'website'); assert.equal(out.basisUnitPrice, 36703);
+      assert.ok(!('priceManual' in out), 'no priceManual: the BASIS holds the auto-pricer off, so the staff can still choose the cost-based price per line');
+      assert.ok(!('needsPrice' in out));
       assert.equal(out.notes, 'Near the loading door');
       assert.equal(out.formulaType, 'fixed');
+      assert.deepEqual(out.sourceRef, { kind: 'qr', ref: REF, n: 1 }, 'the line knows which request line it came from');
+      assert.ok(!('_cfg' in out), '_cfg is runtime-only and is computed by the builder, never carried in');
     });
-    it('an UNPRICED configured line opens as a line staff must price: zero figure, and priceManual so the builder\'s auto-pricer can NOT fill in the bare SKU\'s price', () => {
-      const out = ctx._qrToBuilderItem(famItem(), famLine({ priced: false, unitPrice: 0, lineTotal: 0, reason: 'missing_input' }));
-      assert.equal(out.unitPrice, 0); assert.equal(out.amount, 0);
-      assert.equal(out.priceManual, true);
-      assert.equal(out.id, 'PW-004');
-      assert.match(out.name, /\(configured\)/);
-      const noLine = ctx._qrToBuilderItem(famItem(), null);
-      assert.equal(noLine.unitPrice, 0); assert.equal(noLine.priceManual, true);
-      for (const reason of ['not_approved', 'size_basis', 'no_price', 'no_base_price']) {
-        assert.equal(ctx._qrToBuilderItem(famItem(), famLine({ priced: false, unitPrice: 0, lineTotal: 0, reason })).priceManual, true, reason);
+
+    it('an UNPRICED configured line lands at zero as priceBasis "manual" with needsPrice — for every reason, and with no line at all — never at the bare SKU\'s price', () => {
+      const cases = [famLine({ priced: false, unitPrice: 0, lineTotal: 0, reason: 'missing_input' }), null, undefined];
+      for (const reason of ['not_approved', 'size_basis', 'no_price', 'no_base_price']) cases.push(famLine({ priced: false, unitPrice: 0, lineTotal: 0, reason }));
+      for (const line of cases) {
+        const out = plain(QB.fromRequestItem(famItem(), line, REF));
+        assert.equal(out.unitPrice, 0); assert.equal(out.amount, 0); assert.equal(out.basisUnitPrice, 0);
+        assert.equal(out.priceBasis, 'manual', JSON.stringify(line)); assert.equal(out.needsPrice, true);
+        assert.ok(!('priceManual' in out));
+        assert.equal(out.id, 'PW-004'); assert.equal(out.familyId, 'sink'); assert.equal(out.name, 'Sink');
+        assert.equal(QB.isAutoPriceable(out), false, 'the builder\'s auto-pricer must not fill in the bare SKU price');
+      }
+      // a line the server marked priced but with no usable figure is NOT priced either (fail closed: a string "yes" / a zero / a negative)
+      for (const bad of [{ priced: true, unitPrice: 0 }, { priced: true, unitPrice: -5 }, { priced: 'yes', unitPrice: 9000 }, { priced: true, unitPrice: 'x' }]) {
+        const out = QB.fromRequestItem(famItem(), famLine(bad), REF);
+        assert.equal(out.priceBasis, 'manual', JSON.stringify(bad)); assert.equal(out.unitPrice, 0); assert.equal(out.needsPrice, true);
       }
     });
-    it('a fixed line is mapped exactly as before: values only in the description, no suffix, never priceManual', () => {
-      const fixed = { n: 1, id: 'RF-003', name: 'Chiller', cat: 'Refrigeration', unit: 'pc', qty: 3, size: { W: 1200 }, specs: [{ label: 'Doors', value: 'Two' }], note: 'n' };
-      const out = ctx._qrToBuilderItem(fixed, { n: 1, priced: true, unitPrice: 5000, formulaType: 'per_length' });
+
+    it('a FIXED line: priced -> the website basis at the list figure (values only in the description, no suffix, no priceManual); unpriced -> manual + needsPrice', () => {
+      const out = plain(QB.fromRequestItem(fixedItem(), fixedLine(), REF));
       assert.equal(out.name, 'Chiller');
       assert.equal(out.specStr, 'Two');
-      assert.equal(out.unitPrice, 5000); assert.equal(out.amount, 15000);
-      assert.ok(!('priceManual' in out));
+      assert.equal(out.unitPrice, 5111); assert.equal(out.amount, 15333);
+      assert.equal(out.priceBasis, 'website'); assert.equal(out.basisUnitPrice, 5111);
+      assert.ok(!('priceManual' in out)); assert.ok(!('familyId' in out)); assert.ok(!('config' in out));
       assert.equal(out.formulaType, 'per_length');
       assert.equal(out.dims, 'L1200 mm');
+      assert.deepEqual(out.sourceRef, { kind: 'qr', ref: REF, n: 2 });
+      const un = plain(QB.fromRequestItem(fixedItem(), fixedLine({ priced: false, unitPrice: 0, lineTotal: 0 }), REF));
+      assert.equal(un.priceBasis, 'manual'); assert.equal(un.needsPrice, true); assert.equal(un.unitPrice, 0);
+      assert.equal(QB.isAutoPriceable(un), false, 'an unpriced plain line used to land at 0 and be auto-priced silently — that is what the basis now forbids');
     });
-    it('hostile or odd input cannot break the mapping: strings are coerced, qty is a positive integer', () => {
-      const out = ctx._qrToBuilderItem(famItem({ qty: '-4', specs: [null, { label: 5, value: undefined }], note: undefined, name: undefined }), famLine({ unitPrice: 'x' }));
+
+    it('hostile or odd input cannot break the mapping: strings are coerced, qty is a positive integer, nothing throws', () => {
+      const out = QB.fromRequestItem(famItem({ qty: '-4', specs: [null, { label: 5, value: undefined }], note: undefined, name: undefined }), famLine({ unitPrice: 'x' }), REF);
       assert.equal(out.qty, 1);
       assert.equal(typeof out.name, 'string');
       assert.equal(out.unitPrice, 0);
       assert.ok(Array.isArray(out.specs));
     });
+
+    describe('the hand-off state (qrOpenInBuilder -> window._qbReopenState)', () => {
+      const run = (doc, role) => { const S = builderSandbox(role || 'president'); S.open(doc || request()); S.win.qrOpenInBuilder(REF); return S; };
+
+      it('carries the client fields, Barro Kitchens (BK), the Website lead source (WB), the location code, the purpose, the sourceRef and handoff:true', () => {
+        const S = run();
+        const st = plain(S.win._qbReopenState);
+        assert.deepEqual([st.clientName, st.clientCompany, st.clientPhone, st.clientEmail, st.clientAddress], ['Ana Reyes', 'Reyes Foods', '0917 555 0101', 'ana@example.test', 'Unit 4, Katipunan Ave, Quezon City, Metro Manila']);
+        assert.equal(st.currentCo, 'BK');
+        assert.equal(st.qnoMethod, 'WB');
+        assert.equal(st.qnoLoc, 'ML');
+        assert.equal(st.purpose, 'Restaurant');
+        assert.equal(st.subject, '');
+        assert.equal(st.handoff, true);
+        assert.equal(st.sourceRef.kind, 'qr'); assert.equal(st.sourceRef.ref, REF);
+        assert.deepEqual(st.sourceRef.estimate, { low: 87350, high: 104750, step: 50, vatBasis: 'exclusive', deliveryIncluded: false });
+        assert.deepEqual([st.sourceRef.targetDate, st.sourceRef.targetFlexible, st.sourceRef.entityType, st.sourceRef.name], ['2026-11-30', false, 'private', 'Ana Reyes']);
+        assert.equal(st.sourceRef.useForLabel, 'Restaurant / café');
+        assert.equal(st.sourceRef.notes, 'Call before visiting');
+        assert.equal(S.win._qbReopenAsRevision, false);
+        assert.deepEqual(S.navs, ['bk-quote-builder']);
+        assert.ok(S.toasts.some((t) => t.t === 'success' && /Opening Quote Builder/.test(t.m)));
+      });
+      it('its lines are exactly fromRequestItem of each request line, each carrying the reference, and none of them is auto-priceable', () => {
+        const S = run();
+        const st = plain(S.win._qbReopenState);
+        assert.equal(st.items.length, 2);
+        assert.deepEqual(st.items, plain([QB.fromRequestItem(famItem(), famLine(), REF), QB.fromRequestItem(fixedItem(), fixedLine(), REF)]));
+        assert.deepEqual(st.items.map((i) => i.sourceRef), [{ kind: 'qr', ref: REF, n: 1 }, { kind: 'qr', ref: REF, n: 2 }]);
+        for (const i of st.items) assert.equal(QB.isAutoPriceable(i), false, i.id);
+      });
+      it('purpose follows the pinned table (a government entity is a bidding whatever the use); the location code follows the address', () => {
+        const t = (intake) => plain(run(request({ intake: Object.assign({}, request().intake, intake) })).win._qbReopenState);
+        assert.equal(t({ useFor: 'hospital' }).purpose, 'Hospital / Institutional');
+        assert.equal(t({ useFor: 'hotel_resort' }).purpose, 'Hotel Restaurant');
+        assert.equal(t({ useFor: 'home' }).purpose, 'Residential');
+        assert.equal(t({ useFor: 'restaurant_cafe', entityType: 'government' }).purpose, 'Government / Bidding');
+        assert.equal(t({ useFor: 'something-new' }).purpose, 'Other');
+        assert.equal(t({ address: 'San Fernando, La Union' }).qnoLoc, 'LU');
+        assert.equal(t({ address: 'Poblacion, Davao City' }).qnoLoc, 'DA');
+        assert.equal(t({ address: 'Somewhere remote' }).qnoLoc, 'OT');
+        assert.equal(t({ address: undefined }).qnoLoc, 'OT');
+      });
+      it('no estimate shown to the client -> sourceRef.estimate is null (never a made-up range)', () => {
+        for (const estimate of [{ shown: false, reason: 'below_min' }, {}, { shown: true }, { shown: true, low: 0, high: 0 }, { shown: 'yes', low: 5, high: 9 }]) {
+          assert.equal(plain(run(request({ estimate })).win._qbReopenState).sourceRef.estimate, null, JSON.stringify(estimate));
+        }
+      });
+      it('a reference that is not a real one gets no link anywhere (no sourceRef on the state, none on the lines) — but the hand-off still opens', () => {
+        const bad = request({ id: 'QR-1-X' });
+        const S = builderSandbox('president'); S.open(bad); S.win.qrOpenInBuilder('QR-1-X');
+        const st = plain(S.win._qbReopenState);
+        assert.ok(!('sourceRef' in st)); assert.ok(st.items.every((i) => !('sourceRef' in i)));
+        assert.equal(st.handoff, true); assert.deepEqual(S.navs, ['bk-quote-builder']);
+      });
+      it('only a staff writer opens it: the Corporate Secretary, a request that is not the open one, or a missing helper do NOT open the builder (the last says so)', () => {
+        const sec = builderSandbox('secretary'); sec.open(request()); sec.win.qrOpenInBuilder(REF);
+        assert.equal(sec.win._qbReopenState, undefined); assert.deepEqual(sec.navs, []);
+        const other = builderSandbox('president'); other.open(request()); other.win.qrOpenInBuilder('QR-261021-ZZZZZZ');
+        assert.equal(other.win._qbReopenState, undefined); assert.deepEqual(other.navs, []);
+        const nohelp = builderSandbox('president', { helpers: false }); nohelp.open(request()); nohelp.win.qrOpenInBuilder(REF);
+        assert.equal(nohelp.win._qbReopenState, undefined, 'without the helpers the lines cannot be mapped — and a bare-SKU fallback would hand the auto-pricer lines to reprice');
+        assert.deepEqual(nohelp.navs, []);
+        assert.ok(nohelp.toasts.some((t) => t.t === 'error' && /reload/.test(t.m)));
+      });
+    });
   });
 });
 
 // ══════════════════════════════════ firestore.rules ══════════════════════════════════
-describe('firestore.rules › product_pricing — finance tier only, never public, the approver is named, the approved figures cannot change, nothing is deleted', () => {
+describe('firestore.rules › product_pricing — writes finance tier only, reads finance tier + the Sales tier (cirWriter), never public, the approver is named, the approved figures cannot change, nothing is deleted', () => {
   const rules = read('firestore.rules');
   const start = rules.indexOf('match /product_pricing/{familyId} {');
   const block = rules.slice(start, rules.indexOf('\n    }\n', start) + 7);
@@ -870,14 +1112,25 @@ describe('firestore.rules › product_pricing — finance tier only, never publi
     if (catchAll > 0) assert.ok(start < catchAll, 'the product_pricing rule must sit before the catch-all');
     assert.ok(!/match \/product_pricing\/\{[^}]*=\*\*\}/.test(rules));
   });
-  it('read / create / update are signed-in, non-partner, senior-admin or finance — and nothing is open to the public or to any signed-in user', () => {
-    for (const op of ['read', 'create', 'update']) {
+  it('create / update are signed-in, non-partner, senior-admin or finance; READ is the same plus the Sales tier (cirWriter) — and nothing is open to the public or to any signed-in user', () => {
+    for (const op of ['create', 'update']) {
       const rule = allow(op);
       assert.match(rule, /isAuth\(\) && !isPartner\(\) && \(isSeniorAdmin\(\) \|\| canFinance\(\)\)/, op);
-      assert.ok(!/if true|if isAuth\(\);|if request\.auth != null;/.test(rule), `${op} must not be open`);
+      assert.ok(!/cirWriter/.test(rule), `${op} must stay finance tier: the Sales tier may only READ the sheet`);
+    }
+    assert.match(allow('read'), /isAuth\(\) && !isPartner\(\) && \(isSeniorAdmin\(\) \|\| canFinance\(\) \|\| cirWriter\(\)\)/);
+    for (const op of ['read', 'create', 'update']) {
+      assert.ok(!/if true|if isAuth\(\);|if request\.auth != null;/.test(allow(op)), `${op} must not be open`);
     }
     assert.ok(!/allow (read|get|list|write):\s*if (true|isAuth\(\))\s*;/.test(block));
     assert.ok(!/allow write/.test(block), 'write is spelled out as create + update (no shortcut that would include delete)');
+  });
+  it('QUOTE-BUILDER-CONFIGURATOR-SPEC §2.4: the read gate names cirWriter() — president / manager or a NON-secretary Sales member — and nothing else was widened', () => {
+    assert.match(allow('read'), /cirWriter\(\)/);
+    assert.match(rules, /function cirWriter\(\) \{ return isSeniorAdmin\(\) \|\| \(!isSecretary\(\) && inDept\('Sales'\)\); \}/);
+    assert.match(allow('read'), /!isPartner\(\)/, 'a partner session must never read the option amounts');
+    assert.ok(!/cirWriter/.test(allow('delete')) && !/cirWriter/.test(allow('create')) && !/cirWriter/.test(allow('update')));
+    assert.equal((block.match(/cirWriter/g) || []).length, 2, 'cirWriter may appear in the read rule and its explaining comment only');
   });
   it('a new sheet starts UNAPPROVED and can only be created under one of the six family ids', () => {
     const rule = allow('create');
@@ -907,5 +1160,49 @@ describe('firestore.rules › product_pricing — finance tier only, never publi
       assert.ok(!/product_pricing/.test(read(f)), `${f} must not mention the private collection`);
     }
     assert.match(read('functions/index.js'), /collection\('product_pricing'\)/);
+  });
+});
+
+// QUOTE-BUILDER-CONFIGURATOR-SPEC §3.5 (b)(c): a quote filed from a website request / project brief is linked back onto the request by the staff
+// session (js/app.js bridge), so the two request collections gain exactly the link fields — nothing else — and the CIR status enum gains 'quoted'.
+describe('firestore.rules › quote_requests / client_info_requests — the quote LINK fields, and nothing else, may be written by the Sales tier', () => {
+  const rules = read('firestore.rules');
+  const blockOf = (head) => { const s = rules.indexOf(head); assert.ok(s > 0, `no ${head}`); return rules.slice(s, rules.indexOf('\n    }\n', s) + 7); };
+  const qrBlock = blockOf('match /quote_requests/{ref} {');
+  const cirBlock = blockOf('match /client_info_requests/{ref} {');
+  const upd = (b) => { const m = b.match(/allow update:[\s\S]*?;/); assert.ok(m, 'no allow update'); return m[0]; };
+  const listOf = (re, b) => { const m = upd(b).match(re); assert.ok(m, `${re} not found`); return m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')); };
+  const LINK = ['quoteDocId', 'quotes', 'lastQuoteAt'];
+  const BASE = ['status', 'statusChangedAt', 'statusChangedBy', 'statusChangedByName', 'convertedClientId', 'convertedAt', 'convertedBy'];
+
+  it('the quote_requests update allowlist is EXACTLY the old keys + quoteDocId, quotes, lastQuoteAt (no request content can be rewritten)', () => {
+    assert.deepEqual(listOf(/hasOnly\(\[([^\]]*)\]\)/, qrBlock), [...BASE, ...LINK, 'updatedAt']);
+    const keys = listOf(/hasOnly\(\[([^\]]*)\]\)/, qrBlock);
+    assert.ok(keys.includes('quotes') && keys.includes('lastQuoteAt'));
+    for (const forbidden of ['items', 'contact', 'intake', 'estimate', 'internal', 'summary', 'consent', 'client', 'refNo']) assert.ok(!keys.includes(forbidden), forbidden);
+  });
+  it('the client_info_requests update allowlist is EXACTLY the old keys + quoteDocId, quotes, lastQuoteAt', () => {
+    assert.deepEqual(listOf(/hasOnly\(\[([^\]]*)\]\)/, cirBlock), [...BASE, ...LINK, 'updatedAt']);
+    for (const forbidden of ['answers', 'summary', 'photos', 'consent', 'client', 'refNo', 'formId']) assert.ok(!listOf(/hasOnly\(\[([^\]]*)\]\)/, cirBlock).includes(forbidden), forbidden);
+  });
+  it('the status enums: quote_requests unchanged; client_info_requests gains "quoted" between contacted and converted', () => {
+    assert.deepEqual(listOf(/get\('status',''\) in \[([^\]]*)\]/, qrBlock), ['new', 'in_review', 'quoted', 'converted', 'archived']);
+    assert.deepEqual(listOf(/get\('status',''\) in \[([^\]]*)\]/, cirBlock), ['new', 'in_review', 'contacted', 'quoted', 'converted', 'archived']);
+  });
+  it('quotes is a list of at most 50 entries whenever it is written — in BOTH collections, inside the update rule itself', () => {
+    const guard = "(!request.resource.data.diff(resource.data).affectedKeys().hasAny(['quotes']) || (request.resource.data.get('quotes', []) is list && request.resource.data.get('quotes', []).size() <= 50))";
+    for (const [name, b] of [['quote_requests', qrBlock], ['client_info_requests', cirBlock]]) {
+      assert.ok(upd(b).includes('&& ' + guard), `${name}: the quotes list guard is missing or not a conjunct of the update rule`);
+      assert.equal((b.match(/size\(\) <= 50/g) || []).length, 1, name);
+    }
+  });
+  it('the rest of both rules is untouched: signed-in non-partner read, no create / delete, Sales-tier writers only, attribution fields name the real writer', () => {
+    for (const b of [qrBlock, cirBlock]) {
+      assert.match(b, /allow read: if isAuth\(\) && !isPartner\(\);/);
+      assert.match(b, /allow create, delete: if false;/);
+      assert.match(upd(b), /allow update: if isAuth\(\) && cirWriter\(\)/);
+      assert.match(upd(b), /statusChangedBy'\]\)\s*\|\|\s*request\.resource\.data\.statusChangedBy == request\.auth\.uid/);
+      assert.match(upd(b), /convertedBy'\]\)\s*\|\|\s*request\.resource\.data\.convertedBy == request\.auth\.uid/);
+    }
   });
 });

@@ -151,6 +151,161 @@ input[type="checkbox"],input[type="radio"]{
 .spec-adder{font-size:11px;font-weight:600;color:var(--green);margin-left:auto;}
 .spec-adder.neg{color:var(--red);}
 
+/* ── CONFIGURATOR (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §4) ─────────────────────────────────────────
+   The ⚙ Configure chips, the #configPanel (inline on a desktop, a full-width bottom sheet at ≤768px), the
+   per-line ⚙ row, the "Sold online as" hints and the hand-off bar. EVERYTHING here is .no-print or lives in
+   the Estimator only: none of it reaches the printed or previewed client document (rule R7). */
+.cfg-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 12px;}
+.cfg-chips-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue);margin-right:2px;}
+.cfg-chip-btn{padding:6px 13px;border-radius:20px;border:1.5px solid var(--mid-blue);background:#fff;color:var(--dark-blue);
+  font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;min-height:34px;transition:background .15s,color .15s;}
+.cfg-chip-btn:hover,.cfg-chip-btn:focus-visible{background:var(--mid-blue);color:#fff;outline:none;}
+.cfg-hint{display:inline-block;font-size:10.5px;font-weight:600;color:var(--mid-blue);background:var(--light-blue);border-radius:10px;padding:1px 8px;margin-top:2px;}
+.cfg-link{background:none;border:none;padding:2px 4px;font-family:inherit;font-size:11.5px;font-weight:700;color:var(--mid-blue);
+  text-decoration:underline;cursor:pointer;border-radius:4px;}
+.cfg-link:hover,.cfg-link:focus-visible{background:var(--light-blue);outline:none;}
+.sd-item-hint{margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.pl-hint{margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.calc-hint{margin-left:6px;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;font-weight:400;}
+
+#configPanel{display:none;background:#fff;border:2px solid var(--mid-blue);border-radius:12px;margin-top:10px;
+  box-shadow:0 4px 18px rgba(30,58,95,.14);outline:none;}
+#configPanel.open{display:block;}
+.cfg-head{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--dark-blue);color:#fff;
+  padding:10px 14px;border-radius:10px 10px 0 0;flex-shrink:0;}
+.cfg-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;}
+.cfg-x{background:rgba(255,255,255,.14);border:none;color:#fff;font-size:18px;line-height:1;width:36px;height:36px;border-radius:8px;
+  cursor:pointer;flex-shrink:0;}
+.cfg-x:hover,.cfg-x:focus-visible{background:rgba(255,255,255,.28);outline:none;}
+.cfg-scroll{padding:12px 14px 6px;}
+.cfg-notice{background:#fdf2e2;color:#7a5300;border:1px solid #f0cf95;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12px;font-weight:600;line-height:1.45;}
+.cfg-preview{font-size:12.5px;color:var(--dark-blue);font-weight:600;background:var(--light-blue);border-radius:8px;padding:8px 11px;margin-bottom:12px;line-height:1.45;}
+.cfg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;}
+.cfg-group{border:1px solid var(--gray-mid);border-radius:9px;padding:9px 10px 10px;background:#fbfcfe;min-width:0;}
+.cfg-group.cfg-wide{grid-column:1/-1;}
+.cfg-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+.cfg-unit{font-size:10.5px;font-weight:700;color:var(--mid-blue);background:var(--light-blue);border-radius:8px;padding:0 7px;text-transform:none;letter-spacing:0;}
+/* a staff-only option (the 1.2 mm top plate — owner ruling 2026-10-28): offered here, never on the website */
+.cfg-staff-chip{font-size:10px;font-weight:800;color:#8a5a00;background:#fff3d6;border:1px solid #f0cf95;border-radius:8px;padding:0 7px;text-transform:none;letter-spacing:0;cursor:help;}
+.cfg-pills{display:flex;flex-wrap:wrap;gap:6px;}
+.cfg-pill{flex:1 1 auto;min-width:58px;min-height:40px;padding:8px 12px;border:1.5px solid var(--gray-mid);background:#fff;border-radius:8px;
+  font-family:inherit;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;transition:background .12s,border-color .12s;}
+.cfg-pill:hover{border-color:var(--mid-blue);}
+.cfg-pill[aria-pressed="true"]{background:var(--dark-blue);border-color:var(--dark-blue);color:#fff;}
+.cfg-pill:focus-visible,.cfg-check:focus-within,.cfg-mini:focus-visible,.cfg-slot-mv button:focus-visible,.cfg-stepper button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.cfg-hintline{font-size:11px;color:var(--gray-dark);margin-top:5px;min-height:14px;line-height:1.35;}
+.cfg-slots{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch;}
+.cfg-slot{flex:0 0 auto;width:138px;border:1.5px solid var(--gray-mid);background:#fff;border-radius:9px;padding:6px;display:flex;flex-direction:column;gap:5px;}
+.cfg-slot-n{font-size:10px;font-weight:700;color:var(--mid-blue);text-transform:uppercase;letter-spacing:.4px;}
+.cfg-slot select{font-size:13px;padding:6px 6px;}
+.cfg-slot-mv{display:flex;gap:4px;}
+.cfg-slot-mv button{flex:1;min-height:34px;border:1px solid var(--gray-mid);background:var(--gray-light);border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;}
+.cfg-slot-mv button:disabled{opacity:.3;cursor:default;}
+.cfg-slot-ctl{display:flex;gap:8px;margin-top:4px;flex-wrap:wrap;}
+.cfg-mini{min-height:36px;padding:6px 14px;border-radius:18px;border:1.5px solid var(--mid-blue);background:#fff;color:var(--dark-blue);
+  font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;}
+.cfg-mini:hover{background:var(--light-blue);}
+.cfg-mini:disabled{opacity:.35;cursor:default;background:#fff;}
+.cfg-multi{display:flex;flex-wrap:wrap;gap:6px;}
+.cfg-check{display:inline-flex;align-items:center;gap:7px;border:1.5px solid var(--gray-mid);background:#fff;border-radius:8px;padding:8px 12px;
+  min-height:40px;cursor:pointer;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--text);}
+.cfg-check.on{background:var(--light-blue);border-color:var(--mid-blue);}
+.cfg-dims{margin-top:10px;border:1px solid var(--gray-mid);border-radius:9px;padding:9px 10px 10px;background:#fbfcfe;}
+.cfg-dim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
+.cfg-dim label{display:block;margin-bottom:3px;}
+.cfg-dim input{font-variant-numeric:tabular-nums;}
+.cfg-dim input.cfg-bad{border-color:var(--red);background:#fff6f5;}
+.cfg-err{color:var(--red);font-size:11.5px;font-weight:600;margin-top:3px;line-height:1.35;}
+.cfg-err .cfg-link{color:var(--red);}
+.cfg-dimhint{font-size:11px;color:var(--gray-dark);margin-top:3px;line-height:1.35;}
+.cfg-errbox{background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:8px;padding:7px 10px;margin-top:8px;font-size:12px;font-weight:600;}
+.cfg-extras{display:grid;grid-template-columns:130px 140px minmax(160px,1fr);gap:10px;margin-top:12px;align-items:end;}
+.cfg-stepper{display:flex;align-items:stretch;}
+.cfg-stepper button{flex-shrink:0;width:38px;min-height:40px;border:1.5px solid var(--gray-mid);background:var(--gray-light);color:var(--dark-blue);
+  font-size:16px;font-weight:700;cursor:pointer;padding:0;line-height:1;font-family:inherit;}
+.cfg-stepper button:first-child{border-radius:6px 0 0 6px;border-right:none;}
+.cfg-stepper button:last-child{border-radius:0 6px 6px 0;border-left:none;}
+.cfg-stepper input{border-radius:0!important;text-align:center;min-width:0;}
+.cfg-foot{border-top:1px solid var(--gray-mid);background:#f7f9fd;padding:10px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;
+  border-radius:0 0 10px 10px;flex-shrink:0;margin-top:10px;}
+.cfg-price{flex:1 1 260px;min-width:0;}
+.cfg-pfig{font-size:22px;font-weight:800;color:var(--dark-blue);line-height:1.15;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.cfg-pfig small{font-size:12px;font-weight:600;color:var(--gray-dark);}
+.cfg-badge{display:inline-block;background:#fdf2e2;color:#a1610a;border:1px solid #f0cf95;border-radius:20px;padding:4px 12px;font-size:13px;font-weight:800;}
+.cfg-basis-chip{display:inline-block;background:#e6f7ee;color:#1f8f4e;border:1px solid #a8e0c2;border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:700;vertical-align:middle;}
+.cfg-pcap{font-size:11.5px;color:var(--gray-dark);margin-top:3px;line-height:1.4;}
+.cfg-pwarn{font-size:11.5px;color:#a1610a;font-weight:600;margin-top:3px;line-height:1.4;}
+.cfg-manual{flex:0 1 190px;min-width:140px;}
+.cfg-actions{display:flex;gap:8px;margin-left:auto;align-items:center;flex-wrap:wrap;}
+.cfg-actions .btn{min-height:40px;}
+.cfg-actions .btn:disabled{opacity:.45;cursor:not-allowed;}
+#cfgBackdrop{display:none;}
+
+/* per-line ⚙ row in the items table (Estimator only; .no-print) and the R4 two-figure line in the experiment table */
+.cfg-row{align-items:center!important;flex-wrap:wrap;gap:6px!important;}
+.cfg-row .cfg-detail{flex:1 1 100%;font-size:11px;color:var(--gray-dark);line-height:1.4;}
+.cfg-row .ms-chip{font-size:10px;padding:2px 8px;}
+.edit-price.needs-price{border-color:var(--red)!important;background:#fff4f2;}
+.cfg-basis-row{margin-top:3px;font-size:10.5px;color:var(--gray-dark);display:flex;gap:6px;align-items:center;flex-wrap:wrap;white-space:normal;}
+.cfg-basis-row .on{font-weight:800;color:var(--dark-blue);}
+.cfg-basis-row .cfg-link{font-size:10.5px;}
+.exp-tbl .cfg-basis-row{white-space:normal;}
+.cfg-allbtn{margin-left:8px;font-size:10.5px;padding:3px 10px;cursor:pointer;border:1px solid var(--mid-blue);background:#fff;color:var(--dark-blue);border-radius:20px;font-weight:700;font-family:inherit;text-transform:none;letter-spacing:0;}
+.cfg-allbtn:hover{background:var(--light-blue);}
+
+/* hand-off bar — a quote opened from a website request / project brief (§6.5) */
+.handoff-bar{background:#eef5fc;border:1.5px solid #9dc3e6;border-radius:10px;padding:9px 14px;margin:0 0 9px;font-size:12.5px;color:#1E3A5F;line-height:1.5;}
+.handoff-bar .ho-line{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;justify-content:space-between;}
+.handoff-bar .ho-text{flex:1 1 280px;min-width:0;}
+.handoff-bar details{margin-top:5px;font-size:12px;color:#33506f;}
+.handoff-bar summary{cursor:pointer;font-weight:700;}
+.handoff-bar .ho-notes{white-space:pre-wrap;margin-top:3px;background:#fff;border:1px solid #cfe1f3;border-radius:6px;padding:6px 9px;}
+body.body-terms-view #handoffBar{display:none!important;}
+
+@media(max-width:768px){
+  /* §4.8 — the configurator is a full-width bottom sheet on a phone: sticky header, scrolling body, sticky footer (live price + the
+     Add/Update button). All targets ≥ 44px; the stove's burner row scrolls sideways. During the guided demo it stays in the page
+     (.cfg-tour) so the tour card is never hidden behind it. */
+  #configPanel.open:not(.cfg-tour){display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;top:auto;z-index:1200;margin:0;
+    max-height:92vh;max-height:92dvh;border:none;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.35);}
+  #configPanel.open:not(.cfg-tour) .cfg-head{border-radius:16px 16px 0 0;position:sticky;top:0;}
+  #configPanel.open:not(.cfg-tour) .cfg-scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0;overscroll-behavior:contain;}
+  #configPanel.open:not(.cfg-tour) .cfg-foot{margin-top:0;border-radius:0;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));
+    box-shadow:0 -4px 12px rgba(0,0,0,.08);}
+  body.cfg-sheet-open{overflow:hidden;}
+  body.cfg-sheet-open #cfgBackdrop{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1190;}
+  /* Pre-existing at phone widths: the Estimator's calculator grid could not shrink below its experiment table (min-width 560px), which
+     stretched the whole page to ~610px — the page then scrolled sideways and a position:fixed sheet was 610px wide, not the screen's. */
+  .calc-grid>*{min-width:0;}
+  .cfg-grid{grid-template-columns:1fr;}
+  .cfg-x{width:44px;height:44px;}
+  #configPanel .cfg-pill{min-height:44px;font-size:14px;}
+  #configPanel .cfg-check{min-height:44px;}
+  #configPanel .cfg-mini{min-height:44px;}
+  #configPanel .cfg-stepper button{min-height:44px;width:46px;}
+  #configPanel .cfg-slot-mv button{min-height:44px;}
+  #configPanel .cfg-slot{width:150px;}
+  #configPanel select,#configPanel input:not([type="checkbox"]):not([type="radio"]){min-height:44px;}
+  #configPanel .cfg-link{min-height:44px;padding:0 10px;display:inline-flex;align-items:center;}
+  .cfg-dim-grid{grid-template-columns:1fr 1fr 1fr;}
+  .cfg-extras{grid-template-columns:1fr 1fr;}
+  .cfg-extras .cfg-note{grid-column:1/-1;}
+  .cfg-actions{width:100%;margin-left:0;}
+  .cfg-actions .btn{flex:1;justify-content:center;min-height:46px;font-size:14px;}
+  .cfg-pfig{font-size:20px;}
+  .cfg-manual{flex:1 1 100%;flex-direction:row;align-items:center;gap:10px;}
+  .cfg-manual label{white-space:nowrap;}
+  /* the ⚙ configure / use-website links under a quote line are thumb targets on a phone, not 11px text */
+  .cfg-row .cfg-link{min-height:40px;display:inline-flex;align-items:center;padding:0 10px;}
+  .cfg-chips{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .cfg-chips-lbl{grid-column:1/-1;}
+  .cfg-chip-btn{min-height:44px;border-radius:12px;padding:6px 8px;}
+}
+@media(max-width:420px){
+  .cfg-dim-grid{grid-template-columns:1fr 1fr;}
+}
+@media print{#configPanel,#cfgBackdrop,#cfgChips,#handoffBar{display:none!important;}}
+
 /* ── ITEMS TABLE ── */
 table{width:100%;border-collapse:collapse;}
 .items-table{table-layout:fixed;width:100%;}
@@ -1122,6 +1277,11 @@ body.body-workforce #costMarginWrap{display:none!important;}
   <span style="font-size:11px;color:var(--gray-dark);">The Estimator deals with the numbers — open this to edit the document fields without leaving it: quote number · client · photos · delivery &amp; timeline · payment · remarks.</span>
 </div>
 
+<!-- ── HAND-OFF BAR (CONFIGURATOR §6.5) — shown when this quote was opened from a website quote request (QR-…) or a project brief
+     (CIR-…): the reference, what the client told us, and the estimate range the client saw online. Deliberately NOT a .section, so the
+     Client-tab / Terms-tab CSS never hides it by accident; no-print, and absent for a partner. Rendered by renderHandoffBar(). ── -->
+<div class="handoff-bar no-print" id="handoffBar" style="display:none;"></div>
+
 <!-- ── DRAFT RESUME BANNER (Wave 3 Q1) — localStorage had a non-empty unfiled
      draft at boot; never auto-restore silently, always ask. Hidden again by
      LOAD_QUOTE (a real reopen/new-revision takes priority) or by the user's
@@ -1278,6 +1438,10 @@ body.body-workforce #costMarginWrap{display:none!important;}
 <div class="section no-print" id="addItemsSection">
   <div class="sec-title">Add Items to Quote</div>
 
+  <!-- ⚙ Configure chips (CONFIGURATOR §4.1) — one per website family, generated from QR_FAMILIES.order by renderCfgChips(); hidden when
+       the configurator is off (kill switch) or unavailable, and removed from a partner session by applyPartnerMode(). -->
+  <div class="cfg-chips no-print" id="cfgChips" style="display:none;"></div>
+
   <!-- Category filter tabs -->
   <div class="cat-tabs" id="catTabs">
     <button class="cat-tab active" onclick="filterCat('all',this)" style="background:var(--dark-blue);color:white;border-color:var(--dark-blue);">All</button>
@@ -1346,6 +1510,46 @@ body.body-workforce #costMarginWrap{display:none!important;}
       </div>
     </div>
   </div>
+
+  <!-- ── CONFIGURATOR PANEL (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §4) — sibling of #calcPanel, same .open mechanics. Generated
+       entirely from js/qr-families.js by openConfigurator()/cfgRenderBody(): nothing in it is written by hand per family, so a family
+       added to scripts/public-families.json lights up here with zero code change. A bottom sheet at ≤768px (CSS), Esc closes it,
+       focus returns to whatever opened it. applyPartnerMode() removes it (and the chips + backdrop) from a partner session. ── -->
+  <div class="cfg-panel no-print" id="configPanel" role="dialog" aria-modal="false" aria-labelledby="cfgTitle" tabindex="-1">
+    <div class="cfg-head">
+      <div class="cfg-title" id="cfgTitle">⚙ Configure</div>
+      <button type="button" class="cfg-x" id="cfgClose" onclick="closeConfigurator()" aria-label="Close the configurator" title="Close (Esc)">✕</button>
+    </div>
+    <div class="cfg-scroll" id="cfgScroll">
+      <div class="cfg-notice" id="cfgNotice" style="display:none;"></div>
+      <!-- #cfgPreview: a one-line text summary of the chosen options (PF.summaryLine). A picture of the product is a later follow-up (spec §4.4/§13). -->
+      <div class="cfg-preview" id="cfgPreview" aria-live="polite"></div>
+      <div id="cfgBody"></div>
+      <div class="cfg-extras" id="cfgExtras">
+        <div class="fg"><label for="cfgQty">Qty</label>
+          <div class="cfg-stepper">
+            <button type="button" onclick="cfgBumpQty(-1)" aria-label="One less">−</button>
+            <input type="number" id="cfgQty" min="1" value="1" inputmode="numeric" oninput="cfgQtyInput(this)">
+            <button type="button" onclick="cfgBumpQty(1)" aria-label="One more">+</button>
+          </div></div>
+        <div class="fg"><label for="cfgUnit">Unit</label><input type="text" id="cfgUnit" value="pc" oninput="cfgUnitInput(this)"></div>
+        <div class="fg cfg-note"><label for="cfgNote">Note <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional, prints under the line)</span></label>
+          <input type="text" id="cfgNote" maxlength="300" placeholder="e.g. install height, delivery floor…" oninput="cfgNoteInput(this)"></div>
+      </div>
+    </div>
+    <div class="cfg-foot" id="cfgFoot">
+      <div class="cfg-price" id="cfgPriceArea" aria-live="polite"></div>
+      <div class="fg cfg-manual" id="cfgManualWrap" style="display:none;">
+        <label for="cfgManualPrice" id="cfgManualLbl">Your price ₱</label>
+        <input type="number" id="cfgManualPrice" min="0" step="100" inputmode="decimal" placeholder="per unit" oninput="cfgManualInput(this)">
+      </div>
+      <div class="cfg-actions">
+        <button type="button" class="btn btn-green" id="cfgAddBtn" onclick="cfgCommit()">➕ Add to Quote</button>
+        <button type="button" class="btn btn-outline" id="cfgCancelBtn" style="background:var(--dark-blue);" onclick="closeConfigurator()">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <div class="no-print" id="cfgBackdrop" onclick="closeConfigurator()"></div>
 </div>
 
 <!-- ── QUOTE ITEMS TABLE ── -->
@@ -1747,10 +1951,11 @@ body.body-workforce #costMarginWrap{display:none!important;}
         <li><strong>Quote number</strong> <em>(Client Data)</em> — Auto builds the official number; Manual is only for re-issuing.</li>
         <li><strong>Client information</strong> <em>(Client Data)</em> — type the name; existing clients autocomplete.</li>
         <li><strong>Add items</strong> <em>(Estimator)</em> — filter by category or search; a calculator opens per product (dimensions, unit, qty). ➕ Custom item for non-catalog work — the 🧮 BOM &amp; computation popup on its line takes the bill of materials and labor days, and the item prices itself; tick <em>no costing</em> beside it for a line that genuinely has none. ＋ Section for Option A / Option B quotes. 📥 Import brings in a whole list at once — hand Claude any list and the 📋 button inside copies the exact format brief to give it.</li>
-        <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. A line ticked <strong>pass-through</strong> skips all of it: the supplier price is the client price (no OH, no MK), counted at cost in the calculator — and discounts never touch it. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
+        <li><strong>Configure a product</strong> <em>(Estimator)</em> — the ⚙ chips above the search box (Preparation table, Sink, Stove, Cabinet, Wall shelving, Rack) open the configurator: pick the options, set the size in mm, and the price shown is the <strong>website price</strong> — the catalogue base at that size plus the option amounts Finance approved, the same figure the website estimate is built from. An option nobody has priced yet shows <em>Priced after review</em> and asks for your price; a line left without one cannot be filed. Tables, sinks and stoves are built with a 1.5 mm (16 ga) top as standard and the quote prints their construction; the <em>Top plate</em> option (marked <em>staff</em> — it is never offered on the website) switches it to a lighter 1.2 mm top, which reads <em>Priced after review</em> until Finance has entered its amount. <em>⚙ configure</em> on a line changes it later, and <em>⚙ convert to configured</em> turns an older sink, table, stove… line into one without touching its price. A quote that starts from a website request or project brief opens with the client's details filled in and a bar showing what they told us.</li>
+        <li><strong>Pricing is automatic</strong> <em>(Estimator)</em> — direct cost = materials + 6% waste + 80% labor (real crew-days override it) + 10% consumables, and every costed line sells at direct × 2.50 — of each selling peso, 40¢ is direct cost, 30¢ overhead, 30¢ markup — rounded to the nearest ₱100 so prices end in two zeros. Type a price to override — it sticks, and the cost panel shows the markup your price really gives. A configured line (and a line from a website request) keeps the <strong>website price</strong> instead — the calculator shows the cost-based price beside it, and <em>Use cost-based</em> / <em>Use website</em> / <em>Apply cost-based to all</em> switch it. A line ticked <strong>pass-through</strong> skips all of it: the supplier price is the client price (no OH, no MK), counted at cost in the calculator — and discounts never touch it. VAT 12%, discount (percent or ₱), agent commission and Options mode sit below the items.</li>
         <li><strong>Miscellaneous costs</strong> <em>(Estimator)</em> — delivery, permits, subcontractors go in the misc table. No markup on pass-through costs: each quotes at cost + 25% OH, rounded to ₱100. Tick <em>On quote?</em> to show it as its own line, or untick and → distribute it into the item prices you choose.</li>
         <li><strong>Details</strong> <em>(Client Data)</em> — delivery &amp; installation, timeline, payment schedule, remarks, terms.</li>
-        <li><strong>Verify &amp; File</strong> — completeness checklist; filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
+        <li><strong>Verify &amp; File</strong> — completeness checklist (it also warns when the total is outside the estimate the client saw online, and waits for any line marked <em>needs a price</em>); filing makes the quote official. 💾 Save draft (same modal) parks the quote as-is any time — no amounts needed — and it shows up under Quotes → Drafts. Drafts are per client: starting a different client's quote saves as its own new draft automatically, and once a quote is a named draft the button becomes 💾 Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).</li>
         <li><strong>Save PDF</strong> — saves the client document as a PDF named "&lt;client&gt; - &lt;quote no. last segment&gt;". Agent Copy (confidential, with commission) prints separately, and 🛠 Workforce Copy prints the crew version with no prices — item details, qty and unit only. A quotation is always shared as the PDF.</li>
       </ol>
 
@@ -1877,6 +2082,13 @@ body.body-workforce #costMarginWrap{display:none!important;}
      One copy of the math, shared with the Cloud Functions' public estimate; already in sw.js PRECACHE so the builder
      still prices offline. Relative src, so file:// opens work too. -->
 <script defer src="js/pricing-core.js"></script>
+<!-- QUOTE-BUILDER-CONFIGURATOR-SPEC.md §2.1 — the CONFIGURATOR. The six website families' definitions (price-free, generated), the logic that
+     walks them (validation, wording, size rules) and the pure helpers that price / build / cost a configured line through js/pricing-core.js
+     above. All three are UMD files already in sw.js PRECACHE; relative src, so file:// opens work (no option sheets there -> every configured
+     line reads "Priced after review"). Order matters: qb-configured.js is handed the other three at run time, never at load time. -->
+<script defer src="js/qr-families.js"></script>
+<script defer src="js/product-families.js"></script>
+<script defer src="js/qb-configured.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
@@ -1891,10 +2103,10 @@ const CO = {
   // silently falling through to whatever js/letterhead.js's shared BRAND.logo.print default
   // happens to be — that default is app-wide and not this builder's to assume).
   BK:{name:'BARRO KITCHENS',sub:'By Barro Industries OPC',
-    addr:'Metro Manila',contact:'09276836300  |  barroindustries@gmail.com',
+    addr:'21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',contact:'09276836300  |  hello@barroindustries.com',
     sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK',
     thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
-    creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    creds:'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
     logo:'icons/barro-kitchens.png',
     // pay: Barro Kitchens' own bank account for client payments (owner request).
     // renderPaymentDetails() gates purely on THIS field's presence — same
@@ -1917,10 +2129,10 @@ const CO = {
   //   • pay IS carried: BI is the same legal entity that owns this account
   //     (Barro Industries OPC), unlike BS/PT which must never show it.
   BI:{name:'BARRO INDUSTRIES OPC',sub:'SEC-registered One Person Corporation',
-    addr:'Metro Manila',contact:'09276836300  |  barroindustries@gmail.com',
+    addr:'21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',contact:'09276836300  |  hello@barroindustries.com',
     sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>INDUSTRIES</span>',code:'BI',
     thanks:'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
-    creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    creds:'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
     logo:'icons/barro-industries.png',
     pay:{bank:'UnionBank',accountName:'Narciso Neil Barro',accountNo:'0015 3001 4016',
       other:['BDO','Metrobank','GCash','GoTyme'],contact:'Barro Industries'}},
@@ -1990,6 +2202,12 @@ const IS_TOUCH=('ontouchstart' in window)||(navigator.maxTouchPoints||0)>0;
 let _dragIdx=null;
 let currentCatFilter='all', focusedSearchIdx=-1;
 let DB={products:[],categories:[],laborRoles:[],constants:{}};
+// CONFIGURATOR (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §2.3 / §2.5 / §6 / §7) — the code is the CONFIGURATOR block below addCustomItem().
+let CONFIGURATOR_ON = true;            // false for every partner session (applyPartnerMode) and when productMeta/config.quoteBuilder.configurator === false
+let FAMILY_PRICING = {};               // { familyId: raw option-sheet doc } — read once by loadDatabase() for internal sessions, {} otherwise
+let FAMILY_PRICING_STATE = 'offline';  // 'live' (read ok) | 'denied' (this account may not read the sheets) | 'offline' (database not reached) | 'skipped' (partner)
+let sourceRef = null;                  // the website request / project brief this quote was opened from (hand-off), or null
+let estimateReason = '';               // ESTIMATE_RANGE_MODE 'reason': why the total sits outside the estimate the client saw
 // PRICING-TIERS-SPEC.md — per-item quantity-break volume discounts. Global,
 // set by loadDatabase (§4). Always an array; [] = feature off (§1.4 safety
 // contract: no config ⇒ no breaks ⇒ computeTotals stays byte-identical).
@@ -2253,6 +2471,9 @@ async function loadDatabase(force) {
   // previous successful Firestore load. Only the Firestore success branch
   // below may repopulate this.
   VOLUME_TIERS=[];
+  // CONFIGURATOR: same reset-every-run posture — a "Reload DB" that lands on a fallback path must not keep the previous run's option sheets
+  // or a stale kill switch; only the Firestore success branch below may repopulate them.
+  FAMILY_PRICING={}; FAMILY_PRICING_STATE=PARTNER_MODE?'skipped':'offline'; CONFIGURATOR_ON=!PARTNER_MODE;
   setStatus('loading','Loading product database…');
 
   // file:// protocol blocks Firestore/fetch — skip directly to embedded data
@@ -2273,6 +2494,9 @@ async function loadDatabase(force) {
     ]);
     if (snap.empty) throw new Error('no products in firestore yet');
     const meta = metaSnap.exists ? metaSnap.data() : {};
+    // CONFIGURATOR §2.3 kill switch — productMeta/config.quoteBuilder.configurator === false switches the configurator off with no deploy:
+    // no Configure chips or hints, existing configured lines still load, print and total at their stored price (marked "configurator off").
+    if (meta.quoteBuilder && meta.quoteBuilder.configurator === false) CONFIGURATOR_ON = false;
 
     // v14 re-audit HIGH fix — capitalMaterials/capitalLabor (Barro's cost
     // basis) have moved off the `products` doc into product_costs, which
@@ -2330,6 +2554,23 @@ async function loadDatabase(force) {
       } catch (me) {
         console.warn('[quote-builder] material_prices load skipped (senior-admin/finance/purchasing only)', me);
         MATERIAL_PRICE_LIST = [];
+      }
+
+      // CONFIGURATOR §2.3 / §2.4 — the family option sheets (product_pricing/{familyId}), so a configured line is priced live. Its OWN
+      // try/catch for the reason material_prices has one: this read is granted to a different set of accounts than the rest, and a denial
+      // must cost the configurator only its option amounts (every configured line then reads "Priced after review" and asks for a typed
+      // price), never the database load. Raw docs are kept as they are — the shared pricing code sanitises them. Never attempted for a
+      // partner session: it sits inside this !PARTNER_MODE branch.
+      try {
+        const sheetSnap = await db.collection('product_pricing').get();
+        const sheets = {};
+        sheetSnap.docs.forEach(sd => { sheets[sd.id] = sd.data(); });
+        FAMILY_PRICING = sheets;
+        FAMILY_PRICING_STATE = 'live';
+      } catch (pe) {
+        console.warn('[quote-builder] option sheets not readable in this session — configured lines will read "Priced after review"', pe);
+        FAMILY_PRICING = {};
+        FAMILY_PRICING_STATE = 'denied';
       }
     }
 
@@ -2468,6 +2709,12 @@ function applyPartnerMode(){
   document.getElementById('btnOpenProductDb')?.remove();   // partners never open the product database
   document.getElementById('btnImportItems')?.remove();     // QB-IMPORT-SPEC-2026-09-11 — imported costing data is internal-only; belt-and-braces alongside the PARTNER_MODE guard on every import function below
   document.getElementById('docDetailsBar')?.remove();      // partners always see the document sections
+  // CONFIGURATOR §2.5 — no configurator in ANY partner session: the panel, its backdrop, the Configure chips and every
+  // "Sold online as" hint come out of the DOM (same .remove() idiom as #btnAdmin). A configured line that reaches a partner renders as a
+  // plain read-only line at its stored price (cfgLineRowHtml / configuratorAvailable() are both PARTNER_MODE-gated).
+  CONFIGURATOR_ON = false;
+  ['configPanel', 'cfgBackdrop', 'cfgChips', 'handoffBar'].forEach(id => document.getElementById(id)?.remove());
+  document.querySelectorAll('[data-cfg-open],[data-cfg-sku],[data-cfg-edit],.cfg-hint').forEach(el => el.remove());
   document.body.classList.remove('doc-details-collapsed');
   // Hide the internal Labor & Timeline estimate (Barro's staffing/day-rates) from
   // partners — they keep the per-item Cost & Margin view for the 50/50 split.
@@ -2521,6 +2768,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
   setCompany(GENERIC_PARTNER ? 'PT' : (PARTNER_MODE ? 'BS' : 'BK'));
   applyPartnerMode();
+  cfgInit();   // CONFIGURATOR: Escape + Enter handling for the panel (null-guarded — absent in a partner session)
   renderTerms();
   loadFromStorage();
   // QB-DRAFTS-MULTI-FIX-SPEC-2026-09-11 §1 — restore the named draft id/key
@@ -2590,6 +2838,10 @@ function initUI(){
   if (typeof PARTNER_MODE!=='undefined' && !PARTNER_MODE && !document.body.classList.contains('doc-details-collapsed')) {
     document.body.classList.add('doc-details-collapsed');
   }
+  // CONFIGURATOR: the catalogue and the option sheets are in now — give every configured line its runtime figures and draw the chips
+  cfgRefreshAll();
+  renderCfgChips();
+  if (cfgState) cfgRenderAll();   // a panel opened before the catalogue arrived (or kept open across a Reload DB) picks the figures up
   renderItems();
   // Quick Quote retired (owner ruling 2026-08-31) — the ?mode=quick entry no
   // longer activates the wizard (no app screen links to it; the code stays
@@ -3299,6 +3551,7 @@ function renderDropdown(prods){
         <div class="sd-item-info">
           <div class="sd-item-name">${txtEsc(p.name)}</div>
           <div class="sd-item-meta">${p.id} · ${p.formulaType==='fixed'?'Fixed price':p.formulaType==='per_length'?'Scales by length':p.formulaType==='per_area'?'Per sqm':p.formulaType==='per_run'?'Per run':'Configurable'}</div>
+          ${(h=>h?`<div class="sd-item-hint">${h}</div>`:'')(cfgSoldOnlineHtml(p.id))}
         </div>
         <div class="sd-item-price">${p.formulaType==='fixed'?baseP:'from '+baseP}</div>
       </div>`;
@@ -3378,7 +3631,7 @@ function renderPricelist(){
     ps.forEach(p=>{
       const meta=p.formulaType==='fixed'?'Fixed price':p.formulaType==='per_length'?'Scales by length':p.formulaType==='per_area'?'Per sqm':p.formulaType==='per_run'?'Per run':'Configurable';
       html+=`<div class="pl-row" onclick="plAdd('${attrEsc(p.id)}')">
-        <div class="pl-info"><div class="pl-name">${txtEsc(p.name)}</div><div class="pl-meta">${txtEsc(p.id)} · ${meta} · per ${txtEsc(p.unit||'pc')}</div></div>
+        <div class="pl-info"><div class="pl-name">${txtEsc(p.name)}</div><div class="pl-meta">${txtEsc(p.id)} · ${meta} · per ${txtEsc(p.unit||'pc')}</div>${(h=>h?`<div class="pl-hint">${h}</div>`:'')(cfgSoldOnlineHtml(p.id))}</div>
         <div class="pl-price">${p.formulaType==='fixed'?'':'from '}${formatPeso(p.basePrice)}</div>
         <span class="pl-add">＋ Add</span>
       </div>`;
@@ -3451,7 +3704,8 @@ function bumpCalcQty(delta){
 
 function buildCalcPanel(p){
   const panel=document.getElementById('calcPanel');
-  document.getElementById('calcTitle').innerHTML=`⚙ Configure: <strong>${txtEsc(p.name)}</strong> <span class="formula-badge">${txtEsc(p.id)}</span>`;
+  document.getElementById('calcTitle').innerHTML=`⚙ Configure: <strong>${txtEsc(p.name)}</strong> <span class="formula-badge">${txtEsc(p.id)}</span>`
+    +(h=>h?`<span class="calc-hint no-print">${h}</span>`:'')(cfgSoldOnlineHtml(p.id));
   document.getElementById('calcUnit').value=p.unit||'pc';
   document.getElementById('calcQty').value=1;
 
@@ -3755,6 +4009,712 @@ function addCustomItem(){
     if(last){last.focus();document.getSelection()?.selectAllChildren(last);}
   },30);
   setTimeout(()=>openBomModal(items.length-1),80);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CONFIGURATOR — specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §4 (Package A)
+//  The six website families (js/qr-families.js, walked by js/product-families.js) configured right in the builder and priced by the SAME
+//  math as the public catalogue and the qrEstimate / qrSubmit callables — js/pricing-core.js, reached ONLY through js/qb-configured.js
+//  (QBConfigured.priceLine): this file never re-implements a price. A configured line stores familyId + config + size + specs and rides
+//  every save / reopen / revision / template / print path; the runtime-only `_cfg` (base, option deltas, reason) is recomputed on load
+//  and stripped from every payload. Staff only: removed from partner sessions (applyPartnerMode), off via productMeta/config
+//  .quoteBuilder.configurator === false (no deploy). Nothing in this block is ever printed (R7).
+//
+//  Price protection (A2): a configured line lands at the WEBSITE price when the option sheet prices it, otherwise at 0 flagged
+//  `needsPrice` — it is never guessed, and the cost-plus auto-pricer never touches a line whose priceBasis is 'website' or 'manual'
+//  (QBConfigured.isAutoPriceable, rule R1). Verify & File blocks until every such line has a price (rule R5).
+// ═══════════════════════════════════════════════════════════════════
+let cfgState = null;          // the open panel's working state, or null when it is closed
+let cfgTourOwned = false;     // the guided demo (not the user) opened the panel — the demo closes it again, and never adds anything
+
+// The pure helpers are handed their three dependencies at call time (never at load time: this inline script runs before the deferred ones).
+function qbDeps(){ return { PF:window.ProductFamilies, PC:window.PricingCore, FAM:window.QR_FAMILIES, constants:(DB && DB.constants) || {} }; }
+function configuratorAvailable(){
+  return !!(CONFIGURATOR_ON && !PARTNER_MODE && window.QBConfigured && window.ProductFamilies && window.QR_FAMILIES && window.PricingCore);
+}
+function cfgFamily(id){
+  const F = window.QR_FAMILIES;
+  return F && F.families && typeof id === 'string' && Object.prototype.hasOwnProperty.call(F.families, id) ? F.families[id] : null;
+}
+function cfgPrimary(fam){ return fam ? ((DB.products || []).find(p => p.id === fam.primary) || null) : null; }
+// The builder SECTION a configured line sits in. QBConfigured does the normal case: buildLine takes the category of the base product it is handed
+// (primary.category) and migrateLegacyConfiguredLine keeps the section a converted line already sat in (else the base product's, from the catalogue
+// it is handed). Two things it cannot do are done here, because the family's own category ('washing', 'cooking' …) is the website's PUBLIC one and
+// is not one of the builder's sections:
+//   • no base product in the loaded catalogue, so there is none to take a section from: the category of any model the family absorbed, else Miscellaneous;
+//   • a website hand-off line: QBConfigured.fromRequestItem emits the request's public category as it is, so cfgHomeHandoffLine() moves the line into its
+//     base product's section once the catalogue has one (when the line loads, and again when the database arrives) — only out of the public category itself,
+//     never out of a section the database, the preparer or a "convert" put it in.
+function cfgCatalogueSection(fam){
+  const prim = cfgPrimary(fam);
+  if (prim && prim.category) return prim.category;
+  const hit = (DB.products || []).find(p => fam && fam.absorbed && Object.prototype.hasOwnProperty.call(fam.absorbed, p.id) && p.category);
+  return hit ? hit.category : '';
+}
+function cfgHomeHandoffLine(it){
+  const fam = it && cfgFamily(it.familyId);
+  if (!fam || typeof it.category !== 'string' || it.category !== fam.category || dbCategory(it.category)) return;
+  const home = cfgCatalogueSection(fam);
+  if (home) it.category = home;
+}
+
+// reverse index: catalogue SKU -> the family that absorbed it (built once from QR_FAMILIES[*].absorbed)
+let _absorbedIndex = null;
+function absorbedFamilyOf(id){
+  const F = window.QR_FAMILIES;
+  if (!F || !F.families || typeof id !== 'string') return null;
+  if (!_absorbedIndex) {
+    _absorbedIndex = Object.create(null);
+    (F.order || Object.keys(F.families)).forEach(fid => {
+      const fam = F.families[fid];
+      if (!fam || !fam.absorbed) return;
+      Object.keys(fam.absorbed).forEach(sku => { if (!(sku in _absorbedIndex)) _absorbedIndex[sku] = { familyId:fid, label:fam.label }; });
+    });
+  }
+  return id in _absorbedIndex ? _absorbedIndex[id] : null;
+}
+
+// ── pricing of one configuration (one path: QBConfigured.priceLine) ─────────────────────────────────────
+function cfgPriceFor(fam, config, size){
+  const primary = cfgPrimary(fam);
+  if (!primary) return { unitPrice:0, priced:false, reason:'no_primary', missing:[], base:0, deltas:[], pricedSize:size, warnings:[] };
+  return QBConfigured.priceLine(qbDeps(), { family:fam, primary, config, size, sheet:FAMILY_PRICING[fam.id] || null, constants:DB.constants || {} });
+}
+// why a line has no price, in plain words (the same sentences as Sales > Quote requests). Staff-only text; escaped where it is shown.
+function cfgReasonText(r){
+  const reason = r && r.reason;
+  if (reason === 'not_approved' && FAMILY_PRICING_STATE === 'denied') return 'Option amounts not readable in this session — ask Finance.';
+  if (reason === 'not_approved' && FAMILY_PRICING_STATE === 'offline') return 'Option amounts unavailable — the live database could not be reached.';
+  if (reason === 'not_approved') return 'The option sheet for this product is not approved yet.';
+  if (reason === 'missing_input') return 'No amount entered yet for: ' + ((r.missing || []).join('; ')) + '.';
+  if (reason === 'no_base_price') return 'The catalogue base item has no list price.';
+  if (reason === 'size_basis') return 'The family\'s size basis no longer matches its base item — Finance should check the product.';
+  if (reason === 'no_price') return 'The configured total is not above zero — Finance should check the amounts.';
+  if (reason === 'no_primary') return 'The base product for this family is not in the loaded catalogue.';
+  return 'Priced after review.';
+}
+// the runtime-only figures of a configured line (`_cfg`): recomputed on load and after every (re)configure, stripped from every payload
+function cfgCompute(item){
+  if (!item || !item.familyId || !window.QBConfigured || !window.QR_FAMILIES) return null;
+  const fam = cfgFamily(item.familyId);
+  if (!fam) return null;
+  const size = (item.size && typeof item.size === 'object' && !Array.isArray(item.size)) ? item.size : {};
+  const none = { reason:'no_primary', missing:[], base:0, deltas:[], warnings:[], pricedSize:Object.assign({}, size), priced:false, livePrice:0 };
+  if (!cfgPrimary(fam)) return none;
+  try {
+    const r = cfgPriceFor(fam, item.config, size);
+    return { reason:r.reason, missing:r.missing, base:r.base, deltas:r.deltas, warnings:r.warnings, pricedSize:r.pricedSize, priced:!!r.priced, livePrice:r.priced ? r.unitPrice : 0 };
+  } catch (e) { return none; }
+}
+function cfgRefreshAll(){ items.forEach(it => { if (it && it.familyId) { cfgHomeHandoffLine(it); it._cfg = cfgCompute(it); } }); }
+// A configured line that arrives from storage, a reopened quote, a template or a website hand-off: make it safe and give it its runtime figures.
+function cfgHydrateLine(it){
+  if (!it || !it.familyId) return;
+  if (!it.config || typeof it.config !== 'object' || Array.isArray(it.config)) it.config = {};
+  if (!it.size || typeof it.size !== 'object' || Array.isArray(it.size)) it.size = {};
+  if (it.familyVersion == null && window.QR_FAMILIES) it.familyVersion = window.QR_FAMILIES.version;
+  // A configured line that reaches the builder with no (or an unknown) price basis is PROTECTED, never left to the cost-plus auto-pricer.
+  if (it.priceBasis !== 'website' && it.priceBasis !== 'cost' && it.priceBasis !== 'manual') {
+    it.priceBasis = 'manual';
+    if (!(Number(it.unitPrice) > 0)) it.needsPrice = true;
+  }
+  if (it.basisUnitPrice == null || !isFinite(Number(it.basisUnitPrice))) it.basisUnitPrice = it.priceBasis === 'website' ? (Number(it.unitPrice) || 0) : 0;
+  cfgHomeHandoffLine(it);
+  it._cfg = cfgCompute(it);
+}
+// R5: a line with the flag and still no price
+function lineNeedsPrice(item){ return !!(item && item.needsPrice && !(Number(item.unitPrice) > 0)); }
+
+// ── the line itself: pure functions (no DOM) — what the panel commits ───────────────────────────────────
+function cfgNumericSize(fam, raw){
+  const out = {};
+  Object.keys(fam.dims).forEach(k => {
+    const t = String(raw && raw[k] != null ? raw[k] : '').trim();
+    out[k] = t === '' ? NaN : Number(t);
+  });
+  return out;
+}
+function cfgEvaluate(st){
+  const fam = cfgFamily(st.familyId);
+  const size = cfgNumericSize(fam, st.sizeRaw);
+  const v = window.ProductFamilies.validateLine(fam, st.config, size, { staff:true });      // STAFF mode: the staff-only 1.2 mm top plate is a valid choice here, never on the website
+  return { fam, v, size, basis: v.ok ? cfgPriceFor(fam, v.config, v.dims) : null };
+}
+// buildLine + the builder-only fields. The section is the base product's own category (buildLine reads primary.category); only with no base product in
+// the loaded catalogue does the builder pick one (cfgCatalogueSection).
+function cfgMakeLine(ev, st){
+  const primary = cfgPrimary(ev.fam);
+  const item = QBConfigured.buildLine(qbDeps(), { family:ev.fam, primary, config:ev.v.config, size:ev.v.dims, qty:st.qty, unit:st.unit, note:st.note, basis:ev.basis });
+  if (!item) return null;
+  if (!(primary && primary.category)) item.category = cfgCatalogueSection(ev.fam) || 'miscellaneous';
+  item._cfg.priced = !!ev.basis.priced;
+  item._cfg.livePrice = ev.basis.priced ? ev.basis.unitPrice : 0;
+  return item;
+}
+function cfgTypedPrice(st){ const t = parseFloat(st && st.price); return t > 0 ? t : 0; }
+// R2: priced -> website basis (buildLine already set it); unpriced -> manual + needsPrice, unless the preparer typed a price
+function cfgNewLinePricing(item, basisPriced, typed){
+  if (basisPriced) return item;
+  if (typed > 0) {
+    item.unitPrice = typed; item.amount = typed * item.qty;
+    item.priceManual = true; item.priceBasis = 'manual'; delete item.needsPrice;
+  }
+  return item;
+}
+// R3: re-configuring an existing line. Mutates `old` in place (it keeps its _uid, section, name, passThrough…). Returns {specsRewritten}.
+function cfgApplyEdit(old, fresh, typed){
+  const was = (old.priceBasis === 'website' || old.priceBasis === 'cost' || old.priceBasis === 'manual') ? old.priceBasis : 'manual';
+  const priced = fresh.priceBasis === 'website';
+  const fam = window.ProductFamilies && cfgFamily(old.familyId);
+  const specsRewritten = old.specEdit !== undefined || !!(fam && old.size && typeof old.dims === 'string' && old.dims !== window.ProductFamilies.sizeTextLabelled(fam, old.size));
+  ['id', 'familyId', 'familyVersion', 'config', 'size', 'dims', 'specs', 'specStr', 'formulaType', 'qty', 'unit', 'notes', 'basisUnitPrice'].forEach(k => { old[k] = fresh[k]; });
+  old._cfg = fresh._cfg;
+  delete old.specEdit;                                    // the printed wording is regenerated from the options
+  if (was === 'website') {
+    if (priced) { old.priceBasis = 'website'; old.unitPrice = fresh.unitPrice; delete old.priceManual; delete old.needsPrice; }
+    else {                                                // the new options have no website price: a typed price, or flagged
+      old.priceBasis = 'manual';
+      if (typed > 0) { old.unitPrice = typed; old.priceManual = true; delete old.needsPrice; }
+      else { old.unitPrice = 0; delete old.priceManual; old.needsPrice = true; }
+    }
+  } else if (was === 'cost') {
+    old.priceBasis = 'cost';                              // the auto-pricer owns unitPrice and re-runs on the next pass
+  } else {                                                // manual: the staff price stays unless a fresh one was typed
+    old.priceBasis = 'manual';
+    if (!priced && typed > 0) { old.unitPrice = typed; old.priceManual = true; }
+    if (Number(old.unitPrice) > 0) delete old.needsPrice; else old.needsPrice = true;
+  }
+  old.amount = (Number(old.unitPrice) || 0) * (Number(old.qty) || 1);
+  return { specsRewritten };
+}
+// §10.3: an old plain line whose SKU a family absorbed -> a configured line (price kept, basis 'manual'). migrateLegacyConfiguredLine keeps the section the
+// line already sits in; the catalogue it is handed is only for a line that has none (its base product's section) — with no base product either, the builder picks one.
+function cfgConvertLine(it){
+  if (!window.QBConfigured) return null;
+  const conv = QBConfigured.migrateLegacyConfiguredLine(qbDeps(), it, new Map((DB.products || []).map(p => [p.id, p])));
+  if (!conv) return null;
+  const fam = cfgFamily(conv.familyId);
+  if (!(typeof it.category === 'string' && it.category) && !(cfgPrimary(fam) && cfgPrimary(fam).category)) conv.category = cfgCatalogueSection(fam) || 'miscellaneous';
+  conv._cfg = cfgCompute(conv);
+  return conv;
+}
+
+// ── the Configure chips, the hints and the per-line row ─────────────────────────────────────────────────
+function renderCfgChips(){
+  const box = document.getElementById('cfgChips');
+  if (!box) return;
+  if (!configuratorAvailable()) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const F = window.QR_FAMILIES;
+  box.innerHTML = '<span class="cfg-chips-lbl">Configure</span>' + F.order.map(id => {
+    const f = F.families[id];
+    return f ? `<button type="button" class="cfg-chip-btn" data-cfg-open="${attrEsc(id)}" onclick="cfgOpenFromChip(this)" title="${attrEsc(f.description || f.label)}">⚙ ${txtEsc(f.label)}</button>` : '';
+  }).join('');
+  box.style.display = '';
+}
+function cfgOpenFromChip(btn){
+  const id = btn && btn.dataset ? btn.dataset.cfgOpen : '';
+  openConfigurator(id, { openerSel:'[data-cfg-open="' + id + '"]' });
+}
+// "Sold online as: Sink (configurable)  [configure instead]" — beside an absorbed SKU in the search dropdown, the pricelist and the calculator title
+function cfgSoldOnlineHtml(sku){
+  if (!configuratorAvailable()) return '';
+  const a = absorbedFamilyOf(sku);
+  if (!a) return '';
+  return `<span class="cfg-hint no-print">Sold online as: ${txtEsc(a.label)} (configurable)</span> <button type="button" class="cfg-link no-print" data-cfg-sku="${attrEsc(sku)}" onclick="event.stopPropagation();configureInstead(this.dataset.cfgSku)">configure instead</button>`;
+}
+function configureInstead(sku){
+  if (!configuratorAvailable()) return;
+  let old = {};
+  if (selectedProduct && selectedProduct.id === sku) {       // carry what was already typed into the calculator
+    old = {
+      size: Object.assign({}, dimsMm),
+      specs: (selectedProduct.specs || []).map((s, i) => {
+        const sel = document.getElementById('spec_' + i);
+        return sel ? { label:s.label, value:(s.options || [])[parseInt(sel.value || 0)] || '' } : null;
+      }).filter(Boolean),
+    };
+  }
+  const mig = window.ProductFamilies.migrateAbsorbed(window.QR_FAMILIES, sku, old);
+  if (!mig) { showToast('This product has no configurable version.', 'error'); return; }
+  closeDropdown(); closePricelist(); dismissCalc();
+  openConfigurator(mig.familyId, { config:mig.config, dims:mig.dims });
+}
+
+function priceBasisChipHtml(item, long){
+  const pb = item.priceBasis;
+  if (pb === 'website') return `<span class="ms-chip ok" style="font-size:9px;" title="The website price: the catalogue base at this size plus the option amounts Finance approved — what the client\'s estimate was built from. The cost-plus auto-pricer leaves it alone.">${long ? 'website price' : 'website'}</span>`;
+  if (pb === 'manual' || item.priceManual) return `<span class="ms-chip" style="font-size:9px;background:#eee;color:var(--gray-dark);" title="Hand-typed price — auto-pricing leaves it alone. ↺ re-apply clears it.">${long ? 'manual price' : 'manual'}</span>`;
+  return `<span class="ms-chip ok" style="font-size:9px;" title="Computed price — follows the build and the dials automatically">${long && pb === 'cost' ? 'cost-based price' : 'auto'}</span>`;
+}
+function cfgCostChipHtml(basis){
+  if (!basis || !basis.basisSku) return '';
+  const sc = Number(basis.scale);
+  const txt = basis.approx ? `cost ≈ from ${basis.basisSku}${isFinite(sc) && sc > 0 ? ' ×' + sc.toFixed(2) : ''}` : `cost from ${basis.basisSku}`;
+  const tip = 'There are no per-option costs on file: a configured line is costed as the nearest standard model it absorbs, scaled to the configured list figure.'
+    + (basis.approx ? ' Approximate.' : ' This model matches the chosen options exactly.') + (basis.note ? ' (' + basis.note + ')' : '');
+  return `<span class="ms-chip" style="font-size:9px;background:#fff3d6;color:#8a5a00;" title="${attrEsc(tip)}">${txtEsc(txt)}</span>`;
+}
+
+// The ⚙ row under a quote line (Estimator only, never printed): configure / convert, the price basis, what is missing.
+function cfgLineRowHtml(item, idx){
+  if (PARTNER_MODE || !item) return '';
+  if (!item.familyId) {
+    if (item.id && item.id !== 'CUSTOM' && item.id !== 'MISCFEE' && configuratorAvailable() && absorbedFamilyOf(item.id)) {
+      return `<div class="spec-line cfg-row no-print"><span class="spec-tag no-print">Online</span><button type="button" class="cfg-link" onclick="convertToConfigured(${idx})" title="Sold online as a configurable product — turn this line into one: your price stays, the options become editable.">⚙ convert to configured</button></div>`;
+    }
+    return '';
+  }
+  if (!item._cfg) item._cfg = cfgCompute(item);
+  const cfg = item._cfg || {};
+  const on = configuratorAvailable();
+  let h = '<div class="spec-line cfg-row no-print"><span class="spec-tag no-print">Config</span>';
+  if (on) h += `<button type="button" class="cfg-link" data-cfg-edit="${idx}" onclick="configureLine(${idx})">⚙ configure</button>`;
+  else if (!CONFIGURATOR_ON) h += '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);" title="The configurator is switched off — this line keeps its stored price and cannot be re-configured.">configurator off</span>';
+  h += priceBasisChipHtml(item, true);
+  if (lineNeedsPrice(item)) h += '<span class="ms-chip bad" title="No price yet — type one in the Unit Price box, or ask Finance to approve the option sheet. Verify &amp; File is blocked until every such line has a price.">needs a price</span>';
+  const live = cfg.priced ? Number(cfg.livePrice) || 0 : 0;
+  const basisPrice = Number(item.basisUnitPrice) || 0;
+  if (live > 0 && item.priceBasis === 'manual' && Math.round(live) !== Math.round(Number(item.unitPrice) || 0)) {
+    h += `<span class="ms-chip warn" title="You typed a price for this line; the option sheet now prices these options.">manual — website basis now ${formatPeso(live)}</span><button type="button" class="cfg-link" onclick="setLinePriceBasis(${idx},'website')">use website price</button>`;
+  } else if (live > 0 && item.priceBasis === 'website' && Math.round(live) !== Math.round(basisPrice)) {
+    h += `<span class="ms-chip warn" title="The option sheet changed since this line was priced; the line keeps the price it was quoted at until you update it.">website figure now ${formatPeso(live)}</span><button type="button" class="cfg-link" onclick="setLinePriceBasis(${idx},'website')">update</button>`;
+  }
+  const deltaSum = (cfg.deltas || []).reduce((n, d) => n + (Number(d && d.amount) || 0), 0);
+  if (cfg.priced) h += `<div class="cfg-detail">Base ${formatPeso(cfg.base)} at this size ${deltaSum >= 0 ? '+' : '−'} options ${formatPeso(Math.abs(deltaSum))}${(cfg.warnings || []).length ? ' · ' + txtEsc(cfg.warnings.join(' ')) : ''}</div>`;
+  else if (cfg.reason) h += `<div class="cfg-detail">${txtEsc(cfgReasonText(cfg))}</div>`;
+  return h + '</div>';
+}
+function configureLine(idx){
+  const it = items[idx];
+  if (!it || !it.familyId) return;
+  if (!configuratorAvailable()) {
+    showToast(CONFIGURATOR_ON ? 'Configurator unavailable' : 'The configurator is switched off — this line keeps its stored price.', 'error');
+    return;
+  }
+  openConfigurator(it.familyId, { config:it.config, dims:it.size, qty:it.qty, unit:it.unit, notes:it.notes, editItem:it, openerSel:'[data-cfg-edit="' + idx + '"]' });
+}
+function convertToConfigured(idx){
+  if (!configuratorAvailable()) { showToast('Configurator unavailable', 'error'); return; }
+  const it = items[idx];
+  if (!it) return;
+  const conv = cfgConvertLine(it);
+  if (!conv) { showToast('This line cannot be converted.', 'error'); return; }
+  items[idx] = conv;
+  saveToStorage(); renderItems();
+  // pre-filled with the converted line; Cancel puts the original plain line back
+  openConfigurator(conv.familyId, { config:conv.config, dims:conv.size, qty:conv.qty, unit:conv.unit, notes:conv.notes, editItem:conv, revertTo:it, openerSel:'[data-cfg-edit="' + idx + '"]' });
+}
+
+// R4: per-line choice between the website price and the cost-based price
+function setLinePriceBasis(idx, basis){
+  const it = items[idx];
+  if (!it || PARTNER_MODE || it.id === 'MISCFEE') return;
+  if (basis === 'cost') {
+    it.priceBasis = 'cost'; delete it.priceManual;       // the auto-pricer fills unitPrice on this pass
+  } else if (basis === 'website') {
+    let w = Number(it.basisUnitPrice) || 0;
+    if (it.familyId) {
+      const live = cfgCompute(it);
+      if (live && live.priced && live.livePrice > 0) { w = live.livePrice; it.basisUnitPrice = w; it._cfg = live; }
+    }
+    if (!(w > 0)) { showToast('There is no website price for this line.', 'error'); return; }
+    it.priceBasis = 'website'; delete it.priceManual; delete it.needsPrice;
+    it.unitPrice = w; it.amount = w * (Number(it.qty) || 1);
+  } else return;
+  saveToStorage(); renderItems(); flashItemSaved();
+}
+function applyCostBasedToAll(){
+  if (PARTNER_MODE) return;
+  const liveById = new Map((DB.products || []).map(p => [p.id, p]));
+  const targets = items.filter(i => i.id !== 'MISCFEE' && itemCostBasis(i, liveById).hasBasis && (i.priceManual || (i.priceBasis !== undefined && i.priceBasis !== 'cost')));
+  if (!targets.length) { showToast('Every line that has a cost basis is already priced by cost.'); return; }
+  if (!confirm(`Switch ${targets.length} line(s) to the cost-based price?\n\nThe website and hand-typed prices on those lines are replaced by the calculator's figure (you can switch a line back any time).`)) return;
+  targets.forEach(i => { i.priceBasis = 'cost'; delete i.priceManual; });
+  saveToStorage(); renderItems(); flashItemSaved();
+  showToast(targets.length + ' line(s) now priced by cost.');
+}
+// the two-figure line under a quote line in the experiment table: website ₱X (m%) · cost-based ₱Y (m%) + the switch
+function lineBasisRowHtml(item, idx, calc){
+  if (PARTNER_MODE || item.priceBasis === undefined || !calc) return '';
+  const wp = Number(item.basisUnitPrice) || 0;
+  const cp = Math.round(calc.sellPerUnit / 100) * 100;
+  const mg = p => (p > 0 ? ' (' + ((p - calc.truePerUnit) / p * 100).toFixed(1) + '%)' : '');
+  const act = item.priceBasis;
+  const bits = [];
+  if (wp > 0) bits.push(`<span class="${act === 'website' ? 'on' : ''}" title="The website price. The percentage is the margin over true cost.">website ${formatPeso(wp)}${mg(wp)}</span>`);
+  bits.push(`<span class="${act === 'cost' ? 'on' : ''}" title="What the calculator would price this line at. The percentage is the margin over true cost.">cost-based ${formatPeso(cp)}${mg(cp)}</span>`);
+  if (act !== 'cost') bits.push(`<button type="button" class="cfg-link" onclick="setLinePriceBasis(${idx},'cost')">Use cost-based</button>`);
+  if (act !== 'website' && (wp > 0 || (item.familyId && item._cfg && item._cfg.priced))) bits.push(`<button type="button" class="cfg-link" onclick="setLinePriceBasis(${idx},'website')">Use website</button>`);
+  return '<div class="cfg-basis-row">' + bits.join(' · ') + '</div>';
+}
+
+// ── the panel ───────────────────────────────────────────────────────────────────────────────────────────
+function cfgIsSheetMode(){ return !!(window.matchMedia && window.matchMedia('(max-width:768px)').matches); }
+
+function openConfigurator(familyId, opts){
+  opts = opts || {};
+  if (!configuratorAvailable()) { showToast('Configurator unavailable', 'error'); return false; }
+  const PF = window.ProductFamilies;
+  const fam = cfgFamily(familyId);
+  const panel = document.getElementById('configPanel');
+  if (!fam || !panel) { showToast('Configurator unavailable', 'error'); return false; }
+  if (cfgState) closeConfigurator({ silent:true });          // a panel already open is replaced (a pending convert is reverted first)
+  if (!opts.tour) {
+    if (currentView !== 'internal' && document.getElementById('btnInternal')) setView('internal');   // the panel lives in the Estimator
+    dismissCalc(); closeDropdown();
+  }
+  let config, notice = '';
+  if (opts.config) {
+    const vc = PF.validateConfiguration(fam, opts.config, { staff:true });      // staff mode; an absent staff-only key (a line from before the top plate existed) is the standard 1.5 mm
+    config = vc.config;
+    if (!vc.ok) notice = 'Some of the saved options are no longer available and were reset to the default — check them before you update the line.';
+  } else config = PF.defaultConfig(fam);
+  const std = PF.standardDims(fam, config);
+  const sizeRaw = {}, touched = {};
+  Object.keys(fam.dims).forEach(k => {
+    const given = opts.dims && typeof opts.dims[k] === 'number' && isFinite(opts.dims[k]) ? opts.dims[k] : null;
+    sizeRaw[k] = String(given != null ? given : std[k]);
+    touched[k] = given != null && given !== std[k];          // an axis equal to the standard size keeps following the options
+  });
+  const ed = opts.editItem || null;
+  cfgState = {
+    familyId, config, sizeRaw, touched, notice,
+    qty: Math.max(1, parseInt(opts.qty, 10) || 1),
+    unit: (typeof opts.unit === 'string' && opts.unit) ? opts.unit : (fam.unit || 'pc'),
+    note: typeof opts.notes === 'string' ? opts.notes : '',
+    price: (ed && ed.priceBasis === 'manual' && Number(ed.unitPrice) > 0) ? String(ed.unitPrice) : '',
+    editItem: ed, revertTo: opts.revertTo || null,
+    opener: (!opts.tour && document.activeElement && document.activeElement !== document.body) ? document.activeElement : null,
+    openerSel: opts.openerSel || '',
+    tour: !!opts.tour,
+  };
+  panel.classList.toggle('cfg-tour', !!opts.tour);
+  panel.classList.add('open');
+  const sheet = cfgIsSheetMode() && !opts.tour;
+  document.body.classList.toggle('cfg-sheet-open', sheet);
+  panel.setAttribute('aria-modal', sheet ? 'true' : 'false');
+  cfgRenderAll();
+  const sc = document.getElementById('cfgScroll'); if (sc) sc.scrollTop = 0;
+  if (!opts.tour) {
+    try { panel.focus({ preventScroll:true }); } catch (e) {}
+    if (!sheet) { try { panel.scrollIntoView({ behavior:'smooth', block:'nearest' }); } catch (e) {} }
+  }
+  return true;
+}
+function closeConfigurator(o){
+  o = o || {};
+  const st = cfgState;
+  if (!st) return;
+  // "convert to configured" -> Cancel: the original plain line comes back
+  if (st.revertTo && st.editItem && !o.committed) {
+    const i = items.indexOf(st.editItem);
+    if (i >= 0) { items[i] = st.revertTo; saveToStorage(); renderItems(); }
+  }
+  cfgState = null;
+  const panel = document.getElementById('configPanel');
+  if (panel) panel.classList.remove('open', 'cfg-tour');
+  document.body.classList.remove('cfg-sheet-open');
+  if (!o.silent && !st.tour) {
+    let el = st.opener && document.contains(st.opener) ? st.opener : null;
+    if (!el && st.openerSel) el = document.querySelector(st.openerSel);
+    if (el && typeof el.focus === 'function') { try { el.focus({ preventScroll:true }); } catch (e) {} }
+  }
+}
+// the demo opens the panel read-only (never Add) at the family default, and closes it again; a panel the USER already had open is left alone
+function tourOpenConfigurator(){
+  if (cfgState) return;
+  const F = window.QR_FAMILIES;
+  const id = F && F.families && F.families.sink ? 'sink' : (F && F.order && F.order[0]);
+  if (id && openConfigurator(id, { tour:true })) cfgTourOwned = true;
+}
+function tourCloseConfigurator(){
+  if (cfgTourOwned) { cfgTourOwned = false; closeConfigurator({ silent:true }); }
+}
+
+function cfgGroupHtml(fam, g, gi, st){
+  const PF = window.ProductFamilies;
+  const cur = st.config[g.key];
+  let body = '';
+  if (g.type === 'choice') {
+    const idx = PF.optionIndex(g, cur);
+    if (g.options.length <= 4) {
+      body += `<div class="cfg-pills" role="group" aria-labelledby="cfgL${gi}">` + g.options.map((o, oi) =>
+        `<button type="button" class="cfg-pill" data-cfg-group="${attrEsc(g.key)}" data-cfg-v="${attrEsc(String(o.v))}" data-cfg-key="g${gi}o${oi}" aria-pressed="${oi === idx}"${o.hint ? ` title="${attrEsc(o.hint)}"` : ''} onclick="cfgPickOpt(${gi},${oi})">${txtEsc(o.l)}</button>`).join('') + '</div>';   // data-cfg-group / data-cfg-v: the spec's selectors; the click itself goes by index (values may be numbers or booleans)
+    } else {
+      body += `<select data-cfg-key="g${gi}" aria-labelledby="cfgL${gi}" onchange="cfgSelectOpt(${gi},this.value)">` +
+        g.options.map((o, oi) => `<option value="${oi}"${oi === idx ? ' selected' : ''}>${txtEsc(o.l)}</option>`).join('') + '</select>';
+    }
+    const sel = g.options[idx];
+    if (g.options.some(o => o.hint)) body += `<div class="cfg-hintline">${sel && sel.hint ? txtEsc(sel.hint) : ''}</div>`;   // only a group whose options carry hints (no empty gap otherwise)
+  } else if (g.type === 'slots') {
+    const list = Array.isArray(cur) ? cur : [];
+    const u = g.unit || { one:'position', many:'positions' };
+    body += `<div class="cfg-slots" role="group" aria-labelledby="cfgL${gi}">` + list.map((v, si) => {
+      const oi = PF.optionIndex(g, v);
+      return `<div class="cfg-slot"><div class="cfg-slot-n">${txtEsc(u.one)} ${si + 1}</div>` +
+        `<select data-cfg-key="g${gi}s${si}" aria-label="${attrEsc(u.one + ' ' + (si + 1))}" onchange="cfgSlotSet(${gi},${si},this.value)">` +
+        g.options.map((o, k) => `<option value="${k}"${k === oi ? ' selected' : ''}${o.f && o.f !== o.l ? ` title="${attrEsc(o.f)}"` : ''}>${txtEsc(o.l)}</option>`).join('') + '</select>' +
+        `<div class="cfg-slot-mv"><button type="button" data-cfg-key="g${gi}s${si}L" aria-label="Move ${attrEsc(u.one)} ${si + 1} left"${si === 0 ? ' disabled' : ''} onclick="cfgSlotMove(${gi},${si},-1)">◀</button>` +
+        `<button type="button" data-cfg-key="g${gi}s${si}R" aria-label="Move ${attrEsc(u.one)} ${si + 1} right"${si === list.length - 1 ? ' disabled' : ''} onclick="cfgSlotMove(${gi},${si},1)">▶</button></div></div>`;
+    }).join('') + '</div>';
+    body += `<div class="cfg-slot-ctl"><button type="button" class="cfg-mini" data-cfg-key="g${gi}add"${list.length >= g.maxSlots ? ' disabled' : ''} onclick="cfgSlotAdd(${gi})">＋ ${txtEsc(u.one)}</button>` +
+      `<button type="button" class="cfg-mini" data-cfg-key="g${gi}del"${list.length <= g.minSlots ? ' disabled' : ''} onclick="cfgSlotDel(${gi})">− ${txtEsc(u.one)}</button>` +
+      `<span class="cfg-hintline" style="align-self:center;margin:0;">${list.length} of ${g.minSlots}–${g.maxSlots}, in order from the left</span></div>`;
+  } else if (g.type === 'multi') {
+    const on = new Set(Array.isArray(cur) ? cur : []);
+    body += `<div class="cfg-multi" role="group" aria-labelledby="cfgL${gi}">` + g.options.map((o, oi) =>
+      `<label class="cfg-check${on.has(o.v) ? ' on' : ''}"><input type="checkbox" data-cfg-key="g${gi}c${oi}"${on.has(o.v) ? ' checked' : ''} onchange="cfgToggleMulti(${gi},${oi},this.checked)"> ${txtEsc(o.f || o.l)}</label>`).join('') + '</div>';
+  }
+  // A staff-only option (the 1.2 mm top plate, owner ruling 2026-10-28) renders like any other choice, marked so nobody mistakes it for something the website offers.
+  const staffChip = g.staffOnly === true ? ' <span class="cfg-staff-chip no-print" title="Not offered on the website">staff</span>' : '';
+  return `<div class="cfg-group${g.type === 'choice' ? '' : ' cfg-wide'}"><div class="cfg-lbl" id="cfgL${gi}">${txtEsc(g.label)}${staffChip}</div>${body}</div>`;
+}
+function cfgRenderBody(){
+  const st = cfgState; if (!st) return;
+  const PF = window.ProductFamilies;
+  const fam = cfgFamily(st.familyId); if (!fam) return;
+  const host = document.getElementById('cfgBody'); if (!host) return;
+  // keep keyboard focus on the same control across a re-render
+  const ae = document.activeElement;
+  const focusKey = ae && ae.dataset && host.contains(ae) ? ae.dataset.cfgKey : '';
+  let html = '<div class="cfg-grid">' + fam.groups.map((g, gi) => cfgGroupHtml(fam, g, gi, st)).join('') + '</div>';
+  html += '<div class="cfg-dims"><div class="cfg-lbl">Size <span class="cfg-unit">mm</span></div><div class="cfg-dim-grid">' +
+    PF.DIM_KEYS.filter(k => fam.dims[k]).map(k => {
+      const d = fam.dims[k];
+      return `<div class="cfg-dim"><label for="cfgDim_${k}">${txtEsc(d.label)}</label>` +
+        `<input type="number" id="cfgDim_${k}" data-cfg-key="d${k}" inputmode="numeric" min="${d.min}" max="${d.max}" step="${d.step}" value="${attrEsc(st.sizeRaw[k])}" oninput="cfgDimInput('${k}',this)">` +
+        `<div class="cfg-err" id="cfgErr_${k}" role="alert"></div><div class="cfg-dimhint" id="cfgDH_${k}"></div></div>`;
+    }).join('') + '</div><div class="cfg-errbox" id="cfgErrAll" style="display:none;" role="alert"></div></div>';
+  host.innerHTML = html;
+  if (focusKey) {
+    const again = host.querySelector('[data-cfg-key="' + focusKey + '"]');
+    if (again && !again.disabled) { try { again.focus({ preventScroll:true }); } catch (e) {} }
+  }
+}
+function cfgRenderAll(){
+  const st = cfgState; if (!st) return;
+  const fam = cfgFamily(st.familyId); if (!fam) return;
+  const primary = cfgPrimary(fam);
+  const title = document.getElementById('cfgTitle');
+  if (title) title.innerHTML = `⚙ ${st.editItem ? 'Edit' : 'Configure'}: <strong>${txtEsc(fam.label)}</strong> <span class="formula-badge">${txtEsc(fam.primary)}</span>` +
+    (primary ? '' : ' <span class="ms-chip warn" style="font-size:10px;">base product not in the catalogue</span>');
+  const nt = document.getElementById('cfgNotice');
+  if (nt) { nt.style.display = st.notice ? '' : 'none'; nt.textContent = st.notice || ''; }
+  cfgRenderBody();
+  const q = document.getElementById('cfgQty'); if (q) q.value = st.qty;
+  const u = document.getElementById('cfgUnit'); if (u) u.value = st.unit;
+  const n = document.getElementById('cfgNote'); if (n) n.value = st.note;
+  const mp = document.getElementById('cfgManualPrice'); if (mp) mp.value = st.price;
+  cfgRefresh();
+}
+// route a validation message to the control it is about; anything else goes in the box under the size
+function cfgSplitErrors(fam, errors){
+  const byDim = {}, general = [];
+  (errors || []).forEach(msg => {
+    let hit = null;
+    Object.keys(fam.dims).forEach(k => {
+      const lab = String(fam.dims[k].label || '');
+      if (msg.indexOf(lab + ' must be') === 0 || msg.indexOf('With these options the ' + lab.toLowerCase() + ' must be') === 0) hit = k;
+    });
+    if (!hit && msg.indexOf('The length must be at least') === 0 && fam.dims.W) hit = 'W';
+    if (hit) (byDim[hit] = byDim[hit] || []).push(msg); else general.push(msg);
+  });
+  return { byDim, general };
+}
+function cfgRefresh(){
+  const st = cfgState; if (!st) return;
+  const PF = window.ProductFamilies;
+  const ev = cfgEvaluate(st), fam = ev.fam;
+  const pv = document.getElementById('cfgPreview');
+  if (pv) pv.textContent = PF.summaryLine(fam, ev.v.config, ev.v.dims);
+  const split = cfgSplitErrors(fam, ev.v.errors);
+  const mw = PF.minWidth(fam, ev.v.config), fm = PF.forcedMins(fam, ev.v.config);
+  PF.DIM_KEYS.forEach(k => {
+    const d = fam.dims[k]; if (!d) return;
+    const inp = document.getElementById('cfgDim_' + k), err = document.getElementById('cfgErr_' + k), hint = document.getElementById('cfgDH_' + k);
+    const msgs = (split.byDim[k] || []).map(m => (k === 'W' && mw && mw.hard && m.indexOf('The length must be at least') === 0) ? 'Minimum ' + mw.mm + ' mm for these ' + mw.noun : m);
+    let lo = d.min;
+    if (k === 'W' && mw && mw.hard) lo = Math.max(lo, mw.mm);
+    if (fm[k] != null) lo = Math.max(lo, fm[k]);
+    if (inp) { inp.min = String(lo); inp.classList.toggle('cfg-bad', msgs.length > 0); inp.setAttribute('aria-invalid', msgs.length ? 'true' : 'false'); }
+    let eh = msgs.map(txtEsc).join('<br>');
+    const cur = ev.size[k];
+    if (msgs.length && isFinite(cur)) {
+      if (k === 'W' && mw && mw.hard && cur < mw.mm) eh += ` <button type="button" class="cfg-link" onclick="cfgUseMin('W',${mw.mm})">Use ${mw.mm} mm</button>`;
+      else if (fm[k] != null && cur < fm[k]) eh += ` <button type="button" class="cfg-link" onclick="cfgUseMin('${k}',${fm[k]})">Use ${fm[k]} mm</button>`;
+    }
+    if (err) err.innerHTML = eh;
+    const parts = [d.min + '–' + d.max + ' mm, steps of ' + d.step];
+    if (k === 'W' && mw) parts.push(mw.hard ? 'minimum ' + mw.mm + ' mm for these ' + txtEsc(mw.noun) : 'usual length for these ' + txtEsc(mw.noun) + ': ' + mw.mm + ' mm');
+    if (fm[k] != null) parts.push('minimum ' + fm[k] + ' mm with these options');
+    if (hint) hint.innerHTML = parts.join(' · ');
+  });
+  const all = document.getElementById('cfgErrAll');
+  if (all) { all.style.display = split.general.length ? '' : 'none'; all.innerHTML = split.general.map(txtEsc).join('<br>'); }
+
+  // footer: the live price, or "Priced after review" + the reason + a required price box
+  const area = document.getElementById('cfgPriceArea'), mWrap = document.getElementById('cfgManualWrap');
+  const addBtn = document.getElementById('cfgAddBtn');
+  const qty = Math.max(1, parseInt(st.qty, 10) || 1);
+  const old = st.editItem;
+  if (addBtn) { addBtn.textContent = old ? '✔ Update line' : '➕ Add to Quote'; addBtn.disabled = !ev.v.ok || st.tour; addBtn.title = st.tour ? 'The demo adds nothing' : ''; }
+  let ph = '', showManual = false;
+  if (!ev.v.ok) {
+    ph = '<div class="cfg-pfig">—</div><div class="cfg-pcap">Fix the highlighted fields to see the price.</div>';
+  } else if (ev.basis.priced) {
+    const b = ev.basis;
+    const dsum = (b.deltas || []).reduce((n, x) => n + (Number(x && x.amount) || 0), 0);
+    ph = `<div class="cfg-pfig">${formatPeso(b.unitPrice)} <span class="cfg-basis-chip" title="The catalogue base at this size plus the option amounts Finance approved — the figure the website estimate is built from.">website basis</span>` +
+      (qty > 1 ? `<small>× ${qty} = ${formatPeso(b.unitPrice * qty)}</small>` : '<small>each</small>') + '</div>' +
+      `<div class="cfg-pcap">Catalogue base ${txtEsc(fam.primary)} at this size ${formatPeso(b.base)} ${dsum >= 0 ? '+' : '−'} options ${formatPeso(Math.abs(dsum))}</div>`;
+    if (old && old.priceBasis === 'manual') ph += `<div class="cfg-pcap">This line keeps its manual price (${formatPeso(old.unitPrice)}); switch it to the website price from the line afterwards.</div>`;
+    else if (old && old.priceBasis === 'cost') ph += '<div class="cfg-pcap">This line is priced by cost; the figure above is the website price, for reference.</div>';
+    (b.warnings || []).forEach(w => { ph += `<div class="cfg-pwarn">${txtEsc(w)}</div>`; });
+  } else {
+    const b = ev.basis, t = cfgTypedPrice(st);
+    ph = '<div class="cfg-pfig"><span class="cfg-badge">Priced after review</span></div>' +
+      `<div class="cfg-pcap">${txtEsc(cfgReasonText(b))}</div>` +
+      `<div class="cfg-pcap">${t > 0 ? 'Your price ' + formatPeso(t) + (qty > 1 ? ' × ' + qty + ' = ' + formatPeso(t * qty) : '') : 'Type the price below — a line left without one cannot be filed.'}</div>`;
+    (b.warnings || []).forEach(w => { ph += `<div class="cfg-pwarn">${txtEsc(w)}</div>`; });
+    showManual = true;
+  }
+  if (area) area.innerHTML = ph;
+  if (mWrap) mWrap.style.display = showManual ? '' : 'none';
+}
+
+// ── panel handlers ──────────────────────────────────────────────────────────────────────────────────────
+function cfgAfterConfigChange(){
+  const st = cfgState; if (!st) return;
+  const fam = cfgFamily(st.familyId);
+  const std = window.ProductFamilies.standardDims(fam, st.config);      // untouched axes follow the options (sinks, burners, an oven)
+  Object.keys(fam.dims).forEach(k => { if (!st.touched[k] && std[k] != null) st.sizeRaw[k] = String(std[k]); });
+  cfgRenderBody();
+  cfgRefresh();
+}
+function cfgGroupAt(gi){ const st = cfgState; const fam = st && cfgFamily(st.familyId); return fam ? fam.groups[gi] : null; }
+function cfgPickOpt(gi, oi){
+  const g = cfgGroupAt(gi);
+  if (!g || g.type !== 'choice' || !g.options[oi]) return;
+  cfgState.config[g.key] = g.options[oi].v;
+  cfgAfterConfigChange();
+}
+function cfgSelectOpt(gi, oi){ cfgPickOpt(gi, parseInt(oi, 10)); }
+function cfgToggleMulti(gi, oi, on){
+  const g = cfgGroupAt(gi);
+  if (!g || g.type !== 'multi' || !g.options[oi]) return;
+  const set = new Set(cfgState.config[g.key] || []);
+  if (on) set.add(g.options[oi].v); else set.delete(g.options[oi].v);
+  cfgState.config[g.key] = g.options.map(o => o.v).filter(v => set.has(v));      // the family's own option order, like the validator
+  cfgAfterConfigChange();
+}
+function cfgSlotSet(gi, si, oi){
+  const g = cfgGroupAt(gi);
+  if (!g || g.type !== 'slots' || !g.options[parseInt(oi, 10)]) return;
+  const list = (cfgState.config[g.key] || []).slice();
+  if (si < 0 || si >= list.length) return;
+  list[si] = g.options[parseInt(oi, 10)].v;
+  cfgState.config[g.key] = list;
+  cfgAfterConfigChange();
+}
+function cfgSlotMove(gi, si, dir){
+  const g = cfgGroupAt(gi);
+  if (!g || g.type !== 'slots') return;
+  const list = (cfgState.config[g.key] || []).slice();
+  const to = si + dir;
+  if (si < 0 || to < 0 || si >= list.length || to >= list.length) return;
+  const x = list[si]; list[si] = list[to]; list[to] = x;
+  cfgState.config[g.key] = list;
+  cfgAfterConfigChange();
+}
+function cfgSlotAdd(gi){
+  const g = cfgGroupAt(gi);
+  if (!g || g.type !== 'slots') return;
+  const list = (cfgState.config[g.key] || []).slice();
+  if (list.length >= g.maxSlots) return;
+  list.push(list.length ? list[list.length - 1] : g.options[0].v);
+  cfgState.config[g.key] = list;
+  cfgAfterConfigChange();
+}
+function cfgSlotDel(gi){
+  const g = cfgGroupAt(gi);
+  if (!g || g.type !== 'slots') return;
+  const list = (cfgState.config[g.key] || []).slice();
+  if (list.length <= g.minSlots) return;
+  list.pop();
+  cfgState.config[g.key] = list;
+  cfgAfterConfigChange();
+}
+function cfgDimInput(k, el){
+  if (!cfgState) return;
+  cfgState.sizeRaw[k] = el.value;
+  cfgState.touched[k] = true;
+  cfgRefresh();
+}
+function cfgUseMin(k, mm){
+  if (!cfgState) return;
+  cfgState.sizeRaw[k] = String(mm);
+  cfgState.touched[k] = true;
+  const el = document.getElementById('cfgDim_' + k);
+  if (el) el.value = String(mm);
+  cfgRefresh();
+}
+function cfgQtyInput(el){ if (!cfgState) return; cfgState.qty = Math.max(1, parseInt(el.value, 10) || 1); cfgRefresh(); }
+function cfgBumpQty(d){
+  if (!cfgState) return;
+  cfgState.qty = Math.max(1, (cfgState.qty || 1) + d);
+  const el = document.getElementById('cfgQty'); if (el) el.value = cfgState.qty;
+  cfgRefresh();
+}
+function cfgUnitInput(el){ if (cfgState) cfgState.unit = el.value; }
+function cfgNoteInput(el){ if (cfgState) cfgState.note = el.value; }
+function cfgManualInput(el){ if (!cfgState) return; cfgState.price = el.value; cfgRefresh(); }
+
+// Add / Update. The tour never gets here (the button is disabled and this refuses).
+function cfgCommit(){
+  const st = cfgState;
+  if (!st || st.tour || (typeof tourActive !== 'undefined' && tourActive)) return;
+  const ev = cfgEvaluate(st);
+  if (!ev.v.ok) { showToast('Fix the highlighted fields first.', 'error'); return; }
+  const fresh = cfgMakeLine(ev, st);
+  if (!fresh) { showToast('Could not build this line — check the options.', 'error'); return; }
+  const typed = cfgTypedPrice(st);
+  let openerSel = st.openerSel, msg;
+  if (st.editItem) {
+    const idx = items.indexOf(st.editItem);
+    if (idx < 0) { showToast('That line was removed — nothing to update.', 'error'); closeConfigurator({ committed:true }); return; }
+    const r = cfgApplyEdit(st.editItem, fresh, typed);
+    openerSel = '[data-cfg-edit="' + idx + '"]';
+    msg = '✔ Updated: ' + (st.editItem.name || fresh.name) + (r.specsRewritten ? ' — specs rewritten from the options' : '');
+  } else {
+    cfgNewLinePricing(fresh, ev.basis.priced, typed);
+    items.push(fresh);
+    msg = '➕ Added: ' + fresh.name + ' (configured)';
+  }
+  st.openerSel = openerSel;
+  saveToStorage(); renderItems(); flashItemSaved();
+  showToast(msg);
+  closeConfigurator({ committed:true });
+}
+function cfgKeyHandler(e){
+  if (!cfgState || e.key !== 'Escape') return;
+  if ((typeof tourActive !== 'undefined' && tourActive) || cfgState.tour) return;
+  // a modal or the phone menu on top of the panel takes the Escape first
+  if (['helpModal', 'plModal', 'bomModal', 'verifyModal', 'importModal', 'miscDistModal'].some(id => document.getElementById(id)?.style.display === 'flex')) return;
+  if (document.getElementById('mtbOverlay')?.classList.contains('show')) return;
+  e.preventDefault();
+  closeConfigurator();
+}
+function cfgInit(){
+  document.addEventListener('keydown', cfgKeyHandler);
+  // Enter in a text/number box commits, like the calculator panel (selects, checkboxes and buttons keep their own Enter)
+  document.getElementById('configPanel')?.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const t = e.target, tag = (t.tagName || '').toUpperCase();
+    if (tag !== 'INPUT' || t.type === 'checkbox' || t.type === 'radio' || t.type === 'button') return;
+    e.preventDefault();
+    const b = document.getElementById('cfgAddBtn');
+    if (b && !b.disabled) cfgCommit();
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4378,6 +5338,8 @@ function togglePassThrough(idx, on){
   const next = (on===undefined) ? !it.passThrough : !!on;
   if (next) it.passThrough = true; else delete it.passThrough;
   delete it.priceManual;
+  // A website-hand-off PLAIN line re-prices for its new mode exactly as it always did (CONFIGURATOR: its basis would otherwise protect it).
+  if (!it.familyId && (it.priceBasis==='manual' || it.priceBasis==='website')) it.priceBasis = 'cost';
   saveToStorage();
   renderItems();
 }
@@ -4866,7 +5828,7 @@ function renderItems(){
           <div class="spec-line ${specText?'':'pe-empty'}"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
           <div class="spec-line ${(item.dims||'')?'':'pe-empty'}"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
           <div class="notes-cell cell-edit ${(item.notes||'')?'':'pe-empty'}" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
-          ${costGateHtml}${bsPtRowHtml}
+          ${costGateHtml}${bsPtRowHtml}${cfgLineRowHtml(item,idx)}
         </td>
         <td style="text-align:center;">
           <div class="qty-stepper compact" style="justify-content:center;">
@@ -4876,7 +5838,7 @@ function renderItems(){
           </div>
         </td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${attrEsc(item.unit||'')}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
-        <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${(_discFactor>0&&!item.passThrough)?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-_discFactor))}</span>`:formatPeso(item.unitPrice)}</span></td>
+        <td style="text-align:right;"><input class="edit-price${lineNeedsPrice(item)?' needs-price':''}" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"${lineNeedsPrice(item)?' title="No price yet — type one here"':''}><span class="price-print">${(_discFactor>0&&!item.passThrough)?`<span class="disc-old">${formatPeso(item.unitPrice)}</span> <span class="disc-new">${formatPeso(item.unitPrice*(1-_discFactor))}</span>`:formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${(_discFactor>0&&!item.passThrough)?`<span class="disc-old">${formatPeso(item.amount)}</span> <span class="disc-new">${formatPeso(item.amount*(1-_discFactor))}</span>`:formatPeso(item.amount)}${volNoteHtml}</td>
         <td class="no-print" style="text-align:center;">
           <div class="row-actions">
@@ -5771,7 +6733,16 @@ function bumpQty(idx,delta){
   saveToStorage();renderItems();flashItemSaved();
 }
 function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();flashItemSaved();}
-function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;items[idx].priceManual=true;/* OPTION B v2: a hand-typed price sticks — auto-pricing skips it and MK is read as the balancing figure */saveToStorage();renderItems();flashItemSaved();}
+function updatePrice(idx,el){
+  const it=items[idx];
+  it.unitPrice=parseFloat(el.value)||0;it.amount=it.unitPrice*it.qty;
+  it.priceManual=true;/* OPTION B v2: a hand-typed price sticks — auto-pricing skips it and MK is read as the balancing figure */
+  // CONFIGURATOR R4 — a line that carries a price basis (configured, or handed off from a website request) records the typed price as its
+  // basis too: priceBasis 'manual' is the PERSISTED twin of priceManual (which the filed payload strips), and a real price clears "needs a price".
+  // Plain catalogue lines have no basis and stay byte-identical to before.
+  if(it.priceBasis!==undefined){ it.priceBasis='manual'; if(it.unitPrice>0) delete it.needsPrice; }
+  saveToStorage();renderItems();flashItemSaved();
+}
 function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
 // Duplicate a line item (audit: "no duplicate/clone-line-item action") —
 // inserts an identical copy directly after the original; the copy is then
@@ -6192,6 +7163,12 @@ function paceSuggestedDiscount(){
 // a reconciled row in the per-item table until materials are added too.
 function itemCostBasis(item, liveById){
   if (GENERIC_PARTNER) return { mat:0, hrs:0, capLaborPesos:0, laborAbsent:false, hasBasis:false, isCustom:item.id==='CUSTOM' };
+  // CONFIGURATOR §4.5 — a configured line is NOT its primary SKU: costing it as one would treat a 6-burner stove as a 1-burner CE-001. Its
+  // basis is the nearest standard model the family absorbed, scaled to the configured list figure, labelled approximate where it is shown.
+  if (item.familyId) {
+    if (!window.QBConfigured) return { mat:0, hrs:0, capLaborPesos:0, laborAbsent:true, hasBasis:false, isCustom:false };
+    return QBConfigured.costBasisFor(qbDeps(), item, liveById);
+  }
   if (item.id==='CUSTOM') {
     const cs = COSTING_SETTINGS || COSTING_DEFAULTS;
     const dayRate = (cs.crewWeekRate||COSTING_DEFAULTS.crewWeekRate) / (cs.crewWeekDays||COSTING_DEFAULTS.crewWeekDays);
@@ -6470,7 +7447,9 @@ function renderTrueCostPanelHtml(cost){
     // Owner ruling 2026-09-21 — per-line pass-through toggle, right where the
     // pricing decision is made. On a PT line the row shows the supplier cost
     // as both Direct/u and Sell/u and "at cost" instead of a negative MK.
-    const ptToggle = PARTNER_MODE ? '' : `<button type="button" class="ms-chip" style="font-size:9px;border:none;cursor:pointer;background:${item.passThrough?'#dcecfb':'#f0f0f0'};color:${item.passThrough?'#1E5A8A':'var(--gray-dark)'};" onclick="togglePassThrough(${idx})" title="${item.passThrough?'Pass-through — supplier price = client price (no OH, no MK). Click to return to normal ×2.50 pricing.':'Click to make this a pass-through line — the supplier price is the client price: no OH, no markup, counted at cost (never as a negative).'}">⇄ ${item.passThrough?'pass-through':'PT'}</button>`;
+    // A CONFIGURED line is a made-to-order product, never a supplier resale (owner-suggested default, 2026-10-28), so the ⇄ PT opt-in is not offered on it.
+    // One that ALREADY carries the flag (converted from a pass-through line, or loaded from an older quote) keeps its chip, so the flag can still be cleared.
+    const ptToggle = (PARTNER_MODE || (item.familyId && !item.passThrough)) ? '' : `<button type="button" class="ms-chip" style="font-size:9px;border:none;cursor:pointer;background:${item.passThrough?'#dcecfb':'#f0f0f0'};color:${item.passThrough?'#1E5A8A':'var(--gray-dark)'};" onclick="togglePassThrough(${idx})" title="${item.passThrough?'Pass-through — supplier price = client price (no OH, no MK). Click to return to normal ×2.50 pricing.':'Click to make this a pass-through line — the supplier price is the client price: no OH, no markup, counted at cost (never as a negative).'}">⇄ ${item.passThrough?'pass-through':'PT'}</button>`;
     if(item.passThrough){
       const pu = ptUnitCostOf(item, basis, cs);
       const diff = unitPrice - pu;
@@ -6485,6 +7464,12 @@ function renderTrueCostPanelHtml(cost){
         <td style="text-align:right;font-weight:600;">${formatPeso(pu)}</td>
         <td style="text-align:right;">${ptPriceCell}</td>
         <td style="text-align:right;font-weight:700;">${mkCell}</td></tr>`;
+    }
+    if(!basis.hasBasis && item.familyId){
+      // CONFIGURATOR §4.5 — a configured line with no list figure or no cost on its nearest model: say so, exactly like an uncosted catalogue line
+      return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${priceBasisChipHtml(item)}</td><td style="text-align:center;">${qty}</td>
+        <td colspan="3" style="text-align:center;"><span class="ms-chip" style="background:#eee;color:var(--gray-dark);" title="${attrEsc(basis.note||'No cost is on file for the standard model nearest to these options.')}">No cost basis on this item yet</span></td>
+        <td style="text-align:right;">${formatPeso(unitPrice)}</td></tr>`;
     }
     if(!basis.hasBasis){
       // QB-IMPORT-NOCOSTING-SPEC-2026-09-11 Part 3.4 — a flagged custom line
@@ -6507,13 +7492,11 @@ function renderTrueCostPanelHtml(cost){
     const bT = !bF && unitPrice < truePerUnit;
     const bS = !bF && !bT && unitPrice < Math.round(sellPerUnit/100)*100;
     const color = bF?'var(--red)':bT?'var(--orange)':bS?'var(--accent)':'var(--green)';
-    const chip = item.priceManual
-      ? `<span class="ms-chip" style="font-size:9px;background:#eee;color:var(--gray-dark);" title="Hand-typed price — auto-pricing leaves it alone. ↺ re-apply clears it.">manual</span>`
-      : `<span class="ms-chip ok" style="font-size:9px;" title="Computed price — follows the build and the dials automatically">auto</span>`;
+    const chip = priceBasisChipHtml(item) + (item.familyId ? ' ' + cfgCostChipHtml(basis) : '');
     const priceCell = PARTNER_MODE
       ? `<strong>${formatPeso(unitPrice)}</strong>`
       : `<input type="number" class="calc-price" min="0" step="100" value="${unitPrice}" onchange="updatePrice(${idx},this)" title="Type any price to experiment — it sticks as a manual override and the MK column shows what it really gives.">`;
-    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${chip} ${ptToggle}</td><td style="text-align:center;">${qty}</td>
+    return `<tr><td style="font-size:12px;">${txtEsc(item.name||'')} ${chip} ${ptToggle}${lineBasisRowHtml(item, idx, {directPerUnit, truePerUnit, sellPerUnit})}</td><td style="text-align:center;">${qty}</td>
       <td style="text-align:right;">${formatPeso(directPerUnit)}</td>
       <td style="text-align:right;font-weight:600;">${formatPeso(sellPerUnit)}</td>
       <td style="text-align:right;">${priceCell}</td>
@@ -6521,7 +7504,7 @@ function renderTrueCostPanelHtml(cost){
   }).join('');
   const effMkTotal = cost.direct>0 ? (cost.sell-cost.trueCostTotal)/cost.direct : 0;
   const experiment = `<div class="calc-card">
-    <div class="calc-card-title">Experiment — type any price, MK adjusts</div>
+    <div class="calc-card-title">Experiment — type any price, MK adjusts${(!PARTNER_MODE && items.some(i=>i.id!=='MISCFEE' && (i.priceBasis!==undefined || i.priceManual))) ? '<button type="button" class="cfg-allbtn" onclick="applyCostBasedToAll()" title="Switch every line that has a cost basis to the calculator\'s cost-based price">Apply cost-based to all</button>' : ''}</div>
     <div style="overflow-x:auto;"><table class="labor-tbl exp-tbl" style="min-width:560px;">
       <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Direct/u</th><th style="text-align:right;">Sell/u</th><th style="text-align:right;">Price/u</th><th style="text-align:right;">MK eff</th></tr></thead>
       <tbody>${expRows || `<tr><td colspan="6" style="text-align:center;color:var(--gray-dark);padding:10px;">Add items — each line becomes a row you can experiment on.</td></tr>`}</tbody>
@@ -6574,7 +7557,12 @@ function onMkOverrideChange(val){
 // Clears hand-typed prices so every costed line snaps back to the computed
 // selling price (direct/unit × (1+OH+MK), rounded to the nearest ₱100).
 function resetPricesToComputed(){
-  items.forEach(i => { delete i.priceManual; });
+  // CONFIGURATOR R4: a hand-typed or website-basis line that HAS a cost basis goes back to the cost rule too; one without a basis keeps its price
+  const liveById = new Map((DB.products||[]).map(p => [p.id, p]));
+  items.forEach(i => {
+    delete i.priceManual;
+    if ((i.priceBasis==='manual' || i.priceBasis==='website') && i.id!=='MISCFEE' && itemCostBasis(i, liveById).hasBasis) i.priceBasis = 'cost';
+  });
   computeMarginSummary();
 }
 // OPTION B v2 — computed selling → quote price. Each costed line's unit
@@ -6592,7 +7580,10 @@ function applyComputedPricing(cost){
   const autos = [];
   const pts = [];   // pass-throughs price separately: supplier cost, verbatim
   items.forEach(item => {
-    if (item.id==='MISCFEE' || item.priceManual) return;
+    // CONFIGURATOR R1 — ONE predicate decides whether the cost-plus auto-pricer may touch a line: not a fee line, no hand-typed price, and a
+    // price basis that is absent (a plain catalogue line, today's behaviour) or 'cost'. 'website' (the figure the client saw) and 'manual'
+    // are protected. (Without the module the same rule, minus the configured-line cases, applies.)
+    if (!(window.QBConfigured ? QBConfigured.isAutoPriceable(item) : (item.id!=='MISCFEE' && !item.priceManual && item.priceBasis===undefined))) return;
     const qty = item.qty||1;
     const basis = itemCostBasis(item, cost.liveById);
     // Pass-through (owner 2026-09-21): price = supplier cost, exactly — no
@@ -6693,7 +7684,7 @@ function renderOhPerItemTableHtml(cost){
     // A hand-typed price is a different MK, read straight off this column.
     const sellPerUnit=directPerUnit*(1+cost.ohPct+cost.mkPct);
     const effMk = directPerUnit>0 ? (unitPrice-truePerUnit)/directPerUnit : 0;
-    const autoChip = item.priceManual ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">manual</span>' : '';
+    const autoChip = item.priceManual ? '<span class="ms-chip" style="background:#eee;color:var(--gray-dark);">manual</span>' : (item.priceBasis==='website' ? '<span class="ms-chip ok">website</span>' : '');
     const belowFloor = unitPrice < directPerUnit;
     const belowTrue = !belowFloor && unitPrice < truePerUnit;
     const belowTarget = !belowFloor && !belowTrue && unitPrice < Math.round(sellPerUnit/100)*100;
@@ -7025,7 +8016,8 @@ function _flushSaveToStorage(){
       qnoSeq:document.getElementById('qnoSeq').value,
     };
     localStorage.setItem('bkqb_client',JSON.stringify(client));
-    localStorage.setItem('bkqb_items',JSON.stringify(items));
+    localStorage.setItem('bkqb_items',JSON.stringify(items,(k,v)=>k==='_cfg'?undefined:v));   // CONFIGURATOR: `_cfg` is runtime-only
+    localStorage.setItem('bkqb_source',JSON.stringify(cleanSourceRef(sourceRef,true)));
     localStorage.setItem('bkqb_terms_content',JSON.stringify(termsContent));
     localStorage.setItem('bkqb_terms_enabled',JSON.stringify(termsEnabled));
     localStorage.setItem('bkqb_status',quoteStatus);
@@ -7135,6 +8127,7 @@ function applyPricingFields(o){
 function normalizeLoadedItems(arr){
   (arr||[]).forEach(it=>{
     if(!it||it.id==='MISCFEE') return;
+    if(it.familyId) cfgHydrateLine(it);   // CONFIGURATOR: protect the price basis and give the line its runtime figures
     const q=parseInt(it.qty,10);
     if(!Number.isFinite(q)||q<1){
       it.qty=1;
@@ -7219,6 +8212,7 @@ function captureDraftSnapshot(){
       status:localStorage.getItem('bkqb_status')||'draft',
       filedAt:localStorage.getItem('bkqb_filedAt')||'',
       pricing:JSON.parse(localStorage.getItem('bkqb_pricing')||'{}'),
+      source:JSON.parse(localStorage.getItem('bkqb_source')||'null'),
     };
   }catch(e){ _draftSnapshot=null; }
 }
@@ -7254,6 +8248,8 @@ function resumeDraft(){
     if(client.qnoMode==='manual'&&client.quoteNo){ setQnoMode('manual'); document.getElementById('quoteNo').value=client.quoteNo; }
     else { buildQuoteNo(); }
     applyPricingFields(_draftSnapshot.pricing);
+    sourceRef=cleanSourceRef(_draftSnapshot.source,true); estimateReason='';
+    renderHandoffBar();
     renderItems();
     renderTerms();
     renderQuotePhotos();
@@ -7267,7 +8263,7 @@ function resumeDraft(){
 }
 function discardDraft(){
   _draftSnapshot=null;
-  ['bkqb_client','bkqb_items','bkqb_terms_content','bkqb_terms_enabled','bkqb_status','bkqb_filedAt','bkqb_pricing','bkqb_photos','bkqb_labor'].forEach(k=>{
+  ['bkqb_client','bkqb_items','bkqb_terms_content','bkqb_terms_enabled','bkqb_status','bkqb_filedAt','bkqb_pricing','bkqb_photos','bkqb_labor','bkqb_source'].forEach(k=>{
     try{ localStorage.removeItem(k); }catch(e){}
   });
   hideDraftResumeBanner();
@@ -7282,6 +8278,7 @@ function clearForm(){
   // un-overridden (follows the live suggested value) and the per-item table
   // collapsed, same as any other quote-level state reset above.
   ohOverridePct=null; ohPerItemOpen=false;
+  sourceRef=null; estimateReason=''; renderHandoffBar();   // CONFIGURATOR — a brand-new quote answers no website request
   // Wave 3 Q4 — a brand new quote has no reopen lineage; don't carry a stale
   // "update original" choice over from whatever was open before.
   reopenSourceDocId=null; reopenSourceCollection=null; reopenRootQuoteId=null; reopenAsRevisionFlag=false; fileMode='revision';
@@ -7355,12 +8352,131 @@ function uncostedCustomLinesReason(){
   return `${n} custom line(s) have no cost basis — cost them in Internal view before filing.`;
 }
 
+// CONFIGURATOR rule R5 (A2, price protection) — '' when every line flagged "needs a price" has one; otherwise the block reason.
+// A HARD, non-waivable gate beside uncostedCustomLinesReason() (never in VERIFY_CHECKS, so "Mark as N/A" cannot get past it). The cost-plus
+// auto-pricer never fills such a line in (its price basis is 'manual'), so the ways out are a typed price, "Use cost-based" on the
+// calculator, or Finance approving the option sheet. '' in any PARTNER_MODE session, which never rendered the controls to fix it.
+function needsPriceReason(){
+  if (PARTNER_MODE) return '';
+  const bad = items.filter(lineNeedsPrice);
+  if (!bad.length) return '';
+  const noun = bad.every(i => i.familyId) ? 'configured line(s)' : 'line(s)';
+  return `${bad.length} ${noun} have no price yet — type a price or ask Finance to approve the option sheet.`;
+}
+
+// ── HAND-OFF + ESTIMATE-RANGE CHECK (CONFIGURATOR §6.5, §7) ───────────────────────────────────────────────
+// `sourceRef` = the website request (QR-…) or project brief (CIR-…) this quote was opened from. Only {kind, ref} is ever FILED (top level
+// of the payload); the full object — including the estimate range the CLIENT saw, never the internal exact total — rides editableState so a
+// reopened draft shows the hand-off bar again. Every string is plain text from the website intake: escaped where shown, capped here.
+function cleanSourceRef(sr, full){
+  if (!sr || typeof sr !== 'object' || Array.isArray(sr)) return null;
+  const kind = (sr.kind === 'qr' || sr.kind === 'cir') ? sr.kind : '';
+  const ref = typeof sr.ref === 'string' ? sr.ref.trim().slice(0, 40) : '';
+  if (!kind || !ref) return null;
+  const out = { kind, ref };
+  if (!full) return out;
+  const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const num = v => { const x = Number(v); return (v !== '' && v != null && isFinite(x)) ? x : null; };
+  out.estimate = null;
+  if (sr.estimate && typeof sr.estimate === 'object') {
+    const lo = num(sr.estimate.low), hi = num(sr.estimate.high);
+    if (lo > 0 && hi > 0) {
+      const vb = sr.estimate.vatBasis;
+      out.estimate = { low:lo, high:hi, step:num(sr.estimate.step), vatBasis:(typeof vb === 'boolean') ? vb : str(vb, 24), deliveryIncluded:!!sr.estimate.deliveryIncluded };
+    }
+  }
+  ['targetDate', 'useForLabel', 'entityType', 'name', 'projectType', 'budget'].forEach(k => { if (typeof sr[k] === 'string') out[k] = str(sr[k], 200); });
+  if (typeof sr.notes === 'string') out.notes = str(sr.notes, 2000);
+  if (typeof sr.targetFlexible === 'boolean') out.targetFlexible = sr.targetFlexible;
+  if (num(sr.photosCount) != null) out.photosCount = num(sr.photosCount);
+  return out;
+}
+function payloadSourceRef(){ return cleanSourceRef(sourceRef, false); }
+// the comparable total (ex-VAT, before delivery) against the range the client saw; null when this quote has no hand-off estimate
+function currentEstimateCheck(){
+  const est = sourceRef && sourceRef.estimate;
+  if (!est || !window.QBConfigured) return null;
+  let list = items, t;
+  if (optionsOn()) {                                       // an options quote compares the nominated option, never a sum across options
+    const b = basisOption();
+    if (b) { list = sectionItems(b.key); t = b.totals; } else t = computeTotals();
+  } else t = computeTotals();
+  return QBConfigured.estimateCheck(QBConfigured.comparableTotal(list, t), est);
+}
+function payloadEstimateCheck(){
+  const ec = currentEstimateCheck();
+  if (!ec || !ec.applicable) return null;
+  return { low:ec.low, high:ec.high, comparable:ec.comparable, inRange:ec.inRange, pctOff:ec.pctOff,
+           reason:(ESTIMATE_RANGE_MODE === 'reason' && !ec.inRange) ? String(estimateReason || '').trim().slice(0, 500) : '' };
+}
+// ESTIMATE_RANGE_MODE 'reason' only: '' when fine, else why File is blocked (the default 'warn' never blocks)
+function estimateReasonBlock(){
+  if (ESTIMATE_RANGE_MODE !== 'reason') return '';
+  const ec = currentEstimateCheck();
+  if (!ec || !ec.applicable || ec.inRange) return '';
+  return String(estimateReason || '').trim().length >= 10 ? '' : 'The total is outside the estimate the client saw — write at least 10 characters on why.';
+}
+function estimateVerifyHtml(){
+  const ec = currentEstimateCheck();
+  if (!ec || !ec.applicable || ec.inRange) return '';
+  let h = `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+    <div class="verify-icon">⚠️</div>
+    <div class="verify-info">
+      <div class="verify-label" style="font-size:13px;font-weight:700">Outside the estimate the client saw</div>
+      <div class="verify-val" style="margin-top:4px">The client saw ${formatPeso(ec.low)} – ${formatPeso(ec.high)} online; this quote's comparable total (ex-VAT, before delivery) is ${formatPeso(ec.comparable)}, ${ec.pctOff} % ${ec.direction === 'below' ? 'below' : 'above'} the range. Review the lines or explain the difference when you send it.</div>`;
+  if (ESTIMATE_RANGE_MODE === 'reason') {
+    h += `<textarea id="estimateReasonBox" rows="2" style="margin-top:8px;" placeholder="Why is the total outside the range the client saw? (at least 10 characters)" oninput="estimateReason=this.value;refreshFileBtn()">${txtEsc(estimateReason)}</textarea>`;
+  }
+  return h + '</div></div>';
+}
+// re-evaluate the File button without rebuilding the modal (a textarea being typed in must keep its caret)
+function refreshFileBtn(){
+  const ok = canFile();
+  const btn = document.getElementById('fileBtn');
+  if (btn) { btn.disabled = !ok; btn.style.opacity = ok ? '1' : '0.5'; }
+}
+function renderHandoffBar(){
+  const bar = document.getElementById('handoffBar');
+  if (!bar) return;
+  const sr = sourceRef;
+  if (PARTNER_MODE || !sr || !sr.kind || !sr.ref) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  const isQr = sr.kind === 'qr';
+  const t = v => (typeof v === 'string' ? v.trim() : '');
+  const bits = [];
+  if (isQr) {
+    if (t(sr.useForLabel)) bits.push(txtEsc(t(sr.useForLabel)));
+    if (t(sr.entityType)) bits.push(txtEsc(t(sr.entityType)));
+  } else {
+    if (t(sr.projectType)) bits.push(txtEsc(t(sr.projectType)));
+    if (t(sr.budget)) bits.push('budget ' + txtEsc(t(sr.budget)));
+    if (Number(sr.photosCount) > 0) bits.push(Number(sr.photosCount) + ' photo' + (Number(sr.photosCount) === 1 ? '' : 's'));
+  }
+  if (t(sr.targetDate)) bits.push('target ' + txtEsc(t(sr.targetDate)) + (sr.targetFlexible ? ' (flexible)' : ''));
+  const est = sr.estimate;
+  if (est && Number(est.low) > 0 && Number(est.high) > 0) bits.push('client saw ' + formatPeso(est.low) + ' – ' + formatPeso(est.high));
+  const notes = t(sr.notes);
+  bar.innerHTML = `<div class="ho-line"><div class="ho-text">📨 From ${isQr ? 'website request' : 'project brief'} <strong>${txtEsc(sr.ref)}</strong>${bits.length ? ' · ' + bits.join(' · ') : ''}</div>` +
+    `<button type="button" class="btn btn-outline btn-sm" style="background:var(--mid-blue);" onclick="openSourceRequest()">Open ${isQr ? 'request' : 'brief'}</button></div>` +
+    (notes ? `<details><summary>Client notes</summary><div class="ho-notes">${txtEsc(notes)}</div></details>` : '');
+  bar.style.display = '';
+}
+// "Open request" — the app (parent frame) navigates to Sales > Quote requests / briefs and opens it
+function openSourceRequest(){
+  const sr = payloadSourceRef();
+  if (!sr) return;
+  if (window.parent === window) { showToast('Open the builder from the Sales tab to jump back to the request.', 'error'); return; }
+  try { window.parent.postMessage({ type:'QB_OPEN_SOURCE', payload:{ sourceRef:sr } }, window.location.origin); }
+  catch (e) { showToast('Could not reach the app to open the request.', 'error'); }
+}
+
 function canFile(){
   // Milestone arithmetic is a HARD gate, deliberately outside VERIFY_CHECKS:
   // every check in that list is waivable ("Mark as N/A"), and a quote whose
   // stages don't add up to the contract price must never be waivable.
   if(milestoneBlockReason()) return false;
   if(uncostedCustomLinesReason()) return false;
+  if(needsPriceReason()) return false;       // CONFIGURATOR R5 — every flagged line has a price
+  if(estimateReasonBlock()) return false;    // CONFIGURATOR §7, ESTIMATE_RANGE_MODE 'reason' only
   return VERIFY_CHECKS.every(c=>!!c.get()||waiveFlags[c.id]);
 }
 
@@ -7426,6 +8542,8 @@ function buildVerifyModal(){
       </div>
     </div>`;
   }
+  // CONFIGURATOR §7 — the total against the estimate range the client saw online (warn by default; never blocks unless ESTIMATE_RANGE_MODE is 'reason')
+  html += estimateVerifyHtml();
   // Custom payment milestones — show the schedule that's about to be filed, and
   // when it doesn't add up, say exactly why File is blocked (canFile() already
   // returns false; this is the message, not the gate).
@@ -7462,6 +8580,17 @@ function buildVerifyModal(){
       <div class="verify-info">
         <div class="verify-label" style="font-size:13px;font-weight:700">Custom Line Costing</div>
         <div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600">${txtEsc(costReason)}</div>
+      </div>
+    </div>`;
+  }
+  // CONFIGURATOR R5 — lines still flagged "needs a price". Same pattern: canFile() already returns false; this is the message.
+  const priceReason=needsPriceReason();
+  if(priceReason){
+    html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+      <div class="verify-icon">⚠️</div>
+      <div class="verify-info">
+        <div class="verify-label" style="font-size:13px;font-weight:700">Lines Without a Price</div>
+        <div style="margin-top:8px;background:#fdecea;border:1px solid #f3b8b1;color:#b03024;border-radius:6px;padding:8px 10px;font-size:12px;font-weight:600">${txtEsc(priceReason)}</div>
       </div>
     </div>`;
   }
@@ -7599,6 +8728,9 @@ async function fileQuotation(){
   // gate for a programmatic call. '' (no block) in any PARTNER_MODE session.
   const costBlock=uncostedCustomLinesReason();
   if(costBlock){ showToast(costBlock,'error'); return; }
+  // CONFIGURATOR R5 — the same second gate for a programmatic call: a line flagged "needs a price" never reaches Firestore unpriced.
+  const priceBlock=needsPriceReason();
+  if(priceBlock){ showToast(priceBlock,'error'); return; }
   if(!canFile()) return;
   _isFiling=true;
   flushSaveToStorageNow(); // ensure the local draft is consistent before this quote is filed
@@ -7666,10 +8798,13 @@ async function fileQuotation(){
 function buildCostSidecar(){
   if (PARTNER_MODE) return null;
   const rows=[];
+  const _cfgLive = items.some(x=>x&&x.familyId) ? new Map((DB.products||[]).map(p=>[p.id,p])) : null;
   items.forEach((it,i)=>{
     if(!it) return;
     const r={};
     ['costMat','costHrs','costLaborDays','capitalMaterials','capitalLabor'].forEach(k=>{ if(it[k]!==undefined && it[k]!==null) r[k]=it[k]; });
+    // CONFIGURATOR §3.2 — which standard model a configured line was costed from (optional; recomputed on reopen anyway)
+    if(it.familyId && _cfgLive){ try{ const b=itemCostBasis(it,_cfgLive); if(b&&b.hasBasis&&b.basisSku) r.cfgCost={basisSku:b.basisSku,scale:b.scale,approx:!!b.approx}; }catch(e){} }
     if(Array.isArray(it.bom)&&it.bom.length) r.bom=it.bom.map(b=>({name:String(b.name||''),qty:Number(b.qty)||0,unitPrice:Number(b.unitPrice)||0,...(b.src?{src:String(b.src)}:{})}));
     if(it.priceManual) r.priceManual=true;
     if(Object.keys(r).length) rows.push({i, n:String(it.name||'').slice(0,120), ...r});
@@ -7719,7 +8854,8 @@ function buildQuotePayload(){
   // summary those BOM rows produce (syncCustomItemMaterialsSpec() →
   // item.specEdit) is NOT stripped — it carries no prices and already prints
   // on the quotation by design, same as any other spec line.
-  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, ...rest }) => rest);
+  // CONFIGURATOR: `_cfg` (a configured line's base, option deltas and reason — runtime only, recomputed on load) is stripped here too.
+  const strippedItems = items.map(({ capitalMaterials, capitalLabor, costMat, costHrs, bom, costLaborDays, priceManual, _bomOpen, _uid, _miscId, _cfg, ...rest }) => rest);
   const grand = t.grand;
   // ── Payment terms. BACK-COMPAT IS NON-NEGOTIABLE: downPayment /
   // downPaymentMode / balance / interestRate stay populated on EVERY filed
@@ -7772,6 +8908,7 @@ function buildQuotePayload(){
     photos,
     laborState,
     waiveFlags,
+    sourceRef: cleanSourceRef(sourceRef, true),   // CONFIGURATOR §6.5 — a reopened draft shows the hand-off bar again (templates drop it)
   };
 
   return {
@@ -7840,6 +8977,10 @@ function buildQuotePayload(){
     // own id as rootQuoteId when both are null (first-ever filing).
     parentQuoteId: reopenSourceDocId || null,
     rootQuoteId:   reopenRootQuoteId || null,
+    // CONFIGURATOR §3.2 / §7 — the request or brief this quote answers ({kind, ref} only) and how it sits against the estimate the client saw.
+    // The app bridge links the quote back onto the request; both are null on every quote that did not start from the website.
+    sourceRef:     payloadSourceRef(),
+    estimateCheck: payloadEstimateCheck(),
     status:        'filed',
     source:        'quote-builder-v2',
     filedAt:       filedAt||new Date().toISOString(),
@@ -7860,7 +9001,7 @@ const TEMPLATE_IDENTITY_STRIP_FIELDS=['clientName','clientCompany','clientAddres
 // and-braces: buildQuotePayload()'s editableState doesn't currently set these,
 // only window._qbReopenState does, but a template snapshot must stay safe even
 // if that ever changes).
-const TEMPLATE_LINEAGE_DROP_FIELDS=['sourceDocId','sourceCollection','rootQuoteId','asRevision'];
+const TEMPLATE_LINEAGE_DROP_FIELDS=['sourceDocId','sourceCollection','rootQuoteId','asRevision','sourceRef','estimateCheck'];
 
 // Builds a NEW object — never mutates/returns the live editableState — with
 // the client-identity fields blanked and lineage fields dropped.
@@ -7868,6 +9009,8 @@ function stripTemplateState(rawEditableState){
   const state={...(rawEditableState||{})};
   TEMPLATE_IDENTITY_STRIP_FIELDS.forEach(f=>{ state[f]=''; });
   TEMPLATE_LINEAGE_DROP_FIELDS.forEach(f=>{ delete state[f]; });
+  // …and no line of a template points back at the request it came from
+  if(Array.isArray(state.items)) state.items=state.items.map(it=>{ if(!it||typeof it!=='object'||!('sourceRef' in it)) return it; const {sourceRef:_s,...rest}=it; return rest; });
   return state;
 }
 
@@ -7922,6 +9065,8 @@ function loadEditableState(state, opts){
       return k==='|' ? '' : k;
     })());
     fileMode='revision';
+    // CONFIGURATOR §6 — the website request / brief this state came from (null for everything else); same reset-every-load posture
+    sourceRef=cleanSourceRef(state.sourceRef,true); estimateReason='';
     // COSTING-QB-UX-SPEC-2026-08-26 §3 — same reset-every-load posture as the
     // reopen-lineage fields just above: a previously-open quote's manual OH%
     // override (and per-item table open/closed state) must never leak onto
@@ -7933,7 +9078,14 @@ function loadEditableState(state, opts){
     ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','quoteDate','purpose','subject'].forEach(id=>{
       const el=document.getElementById(id);if(el&&state[id]!==undefined) el.value=state[id];
     });
+    // CONFIGURATOR §6.1 — a website hand-off brings the lead source (WB) and the location code with it. Only a code the selects really
+    // offer is applied; the quote number is rebuilt from them below unless the state came with its own.
+    ['qnoMethod','qnoLoc'].forEach(id=>{
+      const el=document.getElementById(id), v=state[id];
+      if(el && typeof v==='string' && v && Array.from(el.options||[]).some(o=>o.value===v)) el.value=v;
+    });
     applyPricingFields(state.pricing);
+    if(!state.quoteNo) buildQuoteNo();
     // NEW REVISION: same client/items, but bump the -Rn suffix, reset to a fresh
     // draft, and set today's date so the user just reviews & re-files.
     if(opts.asRevision){
@@ -7952,6 +9104,7 @@ function loadEditableState(state, opts){
       setStatus('online','🆕 New revision '+(qEl?qEl.value:'')+' — date set to today. Adjust as needed, then File.');
     }
     renderTerms();renderItems();updatePrintHeader();
+    renderHandoffBar();
   }catch(e){console.warn('loadEditableState failed',e);}
 }
 window.addEventListener('message',ev=>{
@@ -8247,8 +9400,21 @@ function getEmbeddedDB(){
 // TUTORIAL_VERSION + prepend a WHATS_NEW entry on every user-visible
 // quote-builder change): .claude/skills/quote-builder-tutorial/SKILL.md
 
-const TUTORIAL_VERSION = 42;   // integer; bump on every user-visible quote-builder change
+const TUTORIAL_VERSION = 43;   // integer; bump on every user-visible quote-builder change
+// CONFIGURATOR §7 — what the Verify & File modal does when the quote's total sits outside the estimate range the client saw online.
+// 'warn' (the owner's default, 2026-10-28) shows the difference and never blocks; 'reason' asks for at least 10 characters on why, files
+// them in estimateCheck.reason, and holds File until they are typed. One word to change, no other code.
+const ESTIMATE_RANGE_MODE = 'warn';
 const WHATS_NEW = [           // newest first; plain user language, no dev jargon
+  { ver:43, date:'2026-10-28', items:[
+    '⚙ Configure a sink, prep table, stove, cabinet, wall shelf or rack right in the builder — the same options and prices as the website. Tap a Configure chip above the search box. The price follows the option amounts Finance approved, and an option nobody has priced yet shows "Priced after review" and asks you for a price instead of guessing.',
+    'Website quote requests open as real configured lines at the website price, with the client\'s details, lead source, location and project type filled in. The calculator shows the cost-based price beside it — choose per line or "Apply cost-based to all". A line with no price yet is marked "needs a price", and Verify & File waits until you type one.',
+    'Verify & File warns when the total falls outside the estimate range the client saw online.',
+    'Filing a quote from a website request links it back: the request shows the quote number and status.',
+    'Older sink, table, stove, cabinet, shelf and rack lines get a "⚙ convert to configured" button — your price stays and the options become editable. Products sold online as a configurable one show "configure instead".',
+    'Letterheads now show hello@barroindustries.com and the Quezon City address.',
+    'Tables, sinks and stoves now quote with a 1.5 mm (16 ga) top as standard and print their construction on the quote; staff can still pick a lighter 1.2 mm top, priced once Finance enters its amount.',
+  ]},
   { ver:42, date:'2026-09-27', items:[
     '🔒 The built-in offline catalogue no longer carries any prices. It used to hold base prices, the per-metre and per-square-metre rates and crew day rates — and because this page is public, anyone could read them. Prices now come only from the live database once you are signed in.',
     'If the live database cannot be reached, the builder still shows the catalogue so you can browse items, but Save PDF and Agent Copy are blocked and the status bar says "Offline catalogue — no prices". This stops a ₱0 quote ever reaching a client. Workforce Copy still works, since it prints no prices by design. Reload once you are back online and everything returns to normal.',
@@ -8430,15 +9596,17 @@ const TOUR_STEPS = [
  { target:'#docDetailsBar', needsWorkspace:true, title:'Estimator = the numbers',
    body:'The Estimator keeps only the numbers: items, misc costs and the calculator. The document sections you just saw tuck behind this 📄 Quote details button here — a shortcut so you can fix a detail without leaving the numbers.' },
  { target:'#addItemsSection', needsWorkspace:true, title:'Add items',
-   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself — tick no costing beside it when a line genuinely has none. ＋ Section splits the quote into Option A / Option B. 📥 Import adds a whole list at once — hand Claude any list (photo, Excel, text) and the 📋 button inside copies the exact format brief.' },
+   body:'Filter by category or just search. Picking a product opens a calculator — set dimensions, unit and quantity. For a ➕ Custom item, the 🧮 BOM & computation popup on its line takes the bill of materials and labor days, and the item prices itself — tick no costing beside it when a line genuinely has none. ＋ Section splits the quote into Option A / Option B. 📥 Import adds a whole list at once — hand Claude any list (photo, Excel, text) and the 📋 button inside copies the exact format brief. The ⚙ chips above the search box configure a sink, stove, table, cabinet, shelf or rack — the next step.' },
+ { target:'#configPanel', needsWorkspace:true, needsConfigurator:true, title:'Configure a product',
+   body:'The ⚙ chips open this panel. Pick the options and set the size in mm — it tells you when a size is too short for the options. The price is the website price: the catalogue base at that size plus the option amounts Finance approved; an option nobody has priced yet shows "Priced after review" and asks you for a price instead of guessing. On a table, sink or stove the staff-only Top plate option switches the standard 1.5 mm top to a lighter 1.2 mm one. ➕ Add to Quote puts the line on the quote, and ⚙ configure on a configured line reopens it. (The demo opens it on a standard product and adds nothing.)' },
  { target:'#itemsSection', needsWorkspace:true, title:'Items price themselves',
-   body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
+   body:'Every line lands here — and every costed line\'s price is computed for you: selling = direct cost × 2.50 (of each peso: 40¢ direct, 30¢ overhead, 30¢ markup), rounded to the nearest ₱100 so prices end in two zeros. Type a price to override it; the calculator then shows the markup your price really gives. A configured line (or one from a website request) keeps the website price instead — the calculator shows the cost-based price beside it. Below the table: VAT (12%), discounts, agent commission, and Options mode.' },
  { target:'#laborTimelineWrap', needsWorkspace:true, title:'Miscellaneous costs',
    body:'Right under the quote items — one layout. Pick a type per entry: Delivery, Installation and Other are pass-throughs at cost + 25% OH; Additional labor carries the full × 2.50 like item labor. Delivery and Installation present as one combined line on the quotation. Ticked "On quote?" puts an entry on the document; unticked, its price is quietly distributed into the item prices you choose.' },
  { target:'#costMarginWrap', needsWorkspace:true, title:'The calculator (Estimator only)',
    body:'The calculator — one surface, two cards. The build: materials + 6% waste + 80% labor + 10% consumables = DIRECT, then the OH and MK dials (always 150% together) price it, plus misc at cost + 25% OH. The experiment table: every line with its computed sell and an editable price — type anything and the MK column shows what your price really gives. It all lands on the quote, live. Clients never see this.' },
  { target:'#btnVerify', title:'Verify & File',
-   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B).' },
+   body:'When the quote is ready, Verify & File runs a completeness checklist (waive anything genuinely N/A) and files the quote — that is what makes it official. 💾 Save draft, in the same modal, parks an unfinished quote any time — no amounts needed — and shows up under Quotes → Drafts. Drafts are per client — a different client always saves as its own new draft — and once named, 💾 becomes Update draft with a 🆕 Save as new draft beside it, so one client can keep several drafts (e.g. Option A / Option B). It also warns when the total is outside the estimate the client saw online, and waits for any line still marked "needs a price".' },
  { target:'#btnPrint', title:'Save PDF, Agent & Workforce copies',
    body:'📄 Save PDF saves the client document as a PDF — the ONLY way a quotation is shared. The file name is filled in automatically: the client name plus the quote number\'s last segment (e.g. "Juan Dela Cruz - 001R1"). Agent Copy prints a confidential internal version with commission details. 🛠 Workforce Copy prints the crew version: item details, qty and unit only — no prices anywhere.' },
  { target:'#btnOpenProductDb', title:'The Pricelist',
@@ -8553,9 +9721,13 @@ function showTourStep(i, dir){
   }
   if(step.needsWorkspace){
     const ws=document.getElementById('internalWorkspace');
-    if(ws && ws.offsetParent===null){
+    // …also from the Terms tab: there #internalWorkspace is on screen but every workspace section is hidden, so the old test alone
+    // (workspace not visible) never switched views and skipped EVERY Estimator step after the Terms step.
+    if(ws && (ws.offsetParent===null || document.body.classList.contains('body-terms-view'))){
       const btnInt=document.getElementById('btnInternal');
-      if(btnInt && btnInt.offsetParent!==null && typeof setView==='function'){
+      // The button only has to EXIST (a partner who has none stays put): on a phone it is hidden behind the ☰ menu (#mtbViewInternal does the
+      // same job), and requiring it to be visible skipped every Estimator step there. The Client / Terms steps above switch views unconditionally too.
+      if(btnInt && typeof setView==='function'){
         setView('internal');
         tourChangedView=true;
       }
@@ -8565,6 +9737,12 @@ function showTourStep(i, dir){
       }
     }
   }
+  // The configurator step opens the panel READ-ONLY on a standard product (the demo never adds anything, and the panel is closed again when
+  // the demo leaves the step); no configurator in this session (partner / switched off) -> the step is skipped like any hidden target.
+  if(step.needsConfigurator){
+    if(!configuratorAvailable()){ showTourStep(i+dir, dir); return; }
+    tourOpenConfigurator();
+  } else tourCloseConfigurator();
   let target=null;
   if(step.target){
     target=document.querySelector(step.target);
@@ -8643,6 +9821,7 @@ function positionTour(){
 function endTour(){
   if(!tourActive) return;
   tourActive=false;
+  tourCloseConfigurator();
   const hl=document.getElementById('qbTourHighlight'), card=document.getElementById('qbTourCard');
   if(hl) hl.style.display='none';
   if(card) card.style.display='none';

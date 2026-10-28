@@ -1015,10 +1015,22 @@ describe('REGRESSION — adding the configured price changed NOTHING about SKU p
       assert.equal(crypto.createHash('sha256').update(grab(name)).digest('hex'), PINS[name]);
     });
   }
-  it('the Quote Builder prices through priceCatalogItem only — it neither loads nor names the configured-price function (its delegation is untouched)', () => {
+  it('the Quote Builder prices a catalogue SKU through priceCatalogItem only and never names the configured-price function or the sheet sanitiser; the one new thing it may mention is the product_pricing READ inside loadDatabase()', () => {
+    // QUOTE-BUILDER-CONFIGURATOR-SPEC.md §2.3 (WS-2, 2026-10-28) consciously changed this guard. It used to forbid the builder from even NAMING
+    // product_pricing. The builder now reads the family option sheets in loadDatabase()'s internal-session (!PARTNER_MODE) branch, in its own
+    // try/catch, so staff can price a configured line live — and it prices through QBConfigured.priceLine, never by re-implementing the math. So:
+    // still no priceConfiguredItem / normalisePricingDoc anywhere in the file (the math lives only in js/pricing-core.js, behind qb-configured.js),
+    // and product_pricing may appear only inside loadDatabase(), in the branch a partner session never enters. tests/quote-builder-static.test.mjs
+    // pins the rest of the builder's behaviour.
     const qb = fs.readFileSync(path.join(ROOT, 'quote-builder-v2.html'), 'utf8');
     assert.ok(/window\.priceCatalogItem\(/.test(qb), 'computePrice no longer delegates to priceCatalogItem');
-    assert.ok(!/priceConfiguredItem|normalisePricingDoc|product_pricing/.test(qb), 'the Quote Builder was changed by the family work');
+    assert.ok(!/priceConfiguredItem|normalisePricingDoc/.test(qb), 'the Quote Builder re-implements (or names) the configured-price math');
+    const from = qb.indexOf('async function loadDatabase('), to = qb.indexOf('function reloadDatabase()');
+    assert.ok(from > 0 && to > from, 'loadDatabase() not found');
+    const hits = [...qb.matchAll(/product_pricing/g)].map((m) => m.index);
+    assert.ok(hits.every((i) => i > from && i < to), 'product_pricing is named outside loadDatabase()');
+    const branch = qb.indexOf('if (!PARTNER_MODE) {', from), read = qb.indexOf("db.collection('product_pricing')", from);
+    assert.ok(branch > 0 && read > branch && read < to, 'the option-sheet read is not inside the !PARTNER_MODE branch of loadDatabase()');
   });
   it('a plain SKU priced after the new functions are called is priced exactly as before (no shared state)', () => {
     const before = priceCatalogItem(PRIMARY, { dims: { W: 1300, D: 700, H: 850 }, runs: null, specIdx: [] }, {});

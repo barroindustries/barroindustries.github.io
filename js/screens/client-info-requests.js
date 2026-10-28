@@ -72,6 +72,11 @@
    the detail show the PROJECT TYPE prominently (summary.bizType holds its label; summary.location the city and province). Convert to
    client and Prefill Quote Builder read the facts they need through `_cirFacts` / `_cirClientAddress`, which work for both versions.
 
+   QUOTES FROM A BRIEF (QUOTE-BUILDER-CONFIGURATOR-SPEC §6.2 / §8.3, 2026-10-28). Prefill Quote Builder opens the builder as a hand-off
+   (company BK, lead source WB, the location code and purpose derived from the site and the project type, `sourceRef` naming this brief) —
+   see _cirBuilderState; a brief has no item list, so it carries none. Filing a quote started there links it back (js/app.js
+   linkQuoteToRequest): the brief lists its quotes (the Quotes card) and moves to Quoted — the status that sits between Contacted and Converted.
+
    SPEC AMBIGUITY FLAGGED #1 — `fillEmptyOnly`. Spec §5.6 step 4 calls
    `fillEmptyOnly({ company, phone, email, address })` as if it were an
    existing shared helper ("fill-empty-only exactly as the two precedents").
@@ -124,6 +129,7 @@ const CIR_STATUS_META = {
   new:        { cls: 'badge-blue',   label: 'New' },
   in_review:  { cls: 'badge-orange', label: 'In review' },
   contacted:  { cls: 'badge-purple', label: 'Contacted' },
+  quoted:     { cls: 'badge-teal',   label: 'Quoted' },        // 2026-10-28: a quote was filed from this brief (set by the Quote Builder link, or by staff)
   converted:  { cls: 'badge-green',  label: 'Converted' },
   archived:   { cls: 'badge-gray',   label: 'Archived' }
 };
@@ -135,7 +141,7 @@ let _cirView = 'list';         // 'list' | 'detail'
 let _cirRows = [];             // cached list rows (client_info_requests docs)
 let _cirCurrent = null;        // full doc of the open detail view
 let _cirNotes = [];            // notes of the open detail view
-let _cirStatusFilter = 'all';  // 'all' | 'new' | 'in_review' | 'contacted' | 'converted' | 'archived'
+let _cirStatusFilter = 'all';  // 'all' | 'new' | 'in_review' | 'contacted' | 'quoted' | 'converted' | 'archived'
 let _cirSearch = '';           // lowercased search string
 let _cirUrlCache = {};         // Storage path → getDownloadURL() promise, memoised across the session
 
@@ -364,13 +370,14 @@ async function _cirLoadList() {
 function _cirPaintFilterRow() {
   const row = document.getElementById('cir-filter-row');
   if (!row) return;
-  const counts = { all: _cirRows.length, new: 0, in_review: 0, contacted: 0, converted: 0, archived: 0 };
+  const counts = { all: _cirRows.length, new: 0, in_review: 0, contacted: 0, quoted: 0, converted: 0, archived: 0 };
   _cirRows.forEach(r => { if (counts[r.status] != null) counts[r.status]++; });
   const items = [
     { key: 'all', label: 'All', count: counts.all },
     { key: 'new', label: 'New', count: counts.new },
     { key: 'in_review', label: 'In review', count: counts.in_review },
     { key: 'contacted', label: 'Contacted', count: counts.contacted },
+    { key: 'quoted', label: 'Quoted', count: counts.quoted },
     { key: 'converted', label: 'Converted', count: counts.converted },
     { key: 'archived', label: 'Archived', count: counts.archived }
   ];
@@ -462,6 +469,57 @@ window.cirBackToList = function () {
   if (root) window.renderClientBriefs(root, window.currentUser, window.currentRole);
 };
 
+// ── Quotes filed from this brief (QUOTE-BUILDER-CONFIGURATOR-SPEC §8.3) ───────────────────────────────────────────────────────────────
+// `quotes[]` is written by the staff session that files a quote started from this brief (js/app.js linkQuoteToRequest — newest LAST, at most
+// 50) and its entries' status by respondToQuote when the client answers. Every entry is rendered as untrusted text: the document is writable by
+// any Sales user, so `coll` must be one of the two quote collections and `docId` a plain id before either goes into the Open handler (and the
+// handler is the existing reopenQuoteFromDoc, which only the quote's author or an admin can complete — it says so). The amount is staff-only:
+// the view-only role (the Corporate Secretary) sees the number, the status and the date, and has no Open.
+const CIR_QUOTE_STATUS_META = {
+  filed:            { cls: 'badge-blue',   label: 'Filed' },
+  pending_approval: { cls: 'badge-orange', label: 'Awaiting approval' },
+  accepted:         { cls: 'badge-green',  label: 'Accepted' },
+  needs_revision:   { cls: 'badge-amber',  label: 'Changes requested' }
+};
+const CIR_QUOTE_COLLS = { bk_quotes: 'bk-quote-builder', bs_quotes: 'bs-quote-builder' };   // collection -> the builder page that edits it
+function _cirQuoteStatusPill(status) {
+  const known = typeof status === 'string' && Object.prototype.hasOwnProperty.call(CIR_QUOTE_STATUS_META, status);
+  const m = known ? CIR_QUOTE_STATUS_META[status] : { cls: 'badge-gray', label: (typeof status === 'string' && status) ? status : 'unknown' };
+  return `<span class="badge ${m.cls}">${escHtml(m.label)}</span>`;
+}
+// An ISO instant string (the entry's filedAt) -> '12 Nov 2026' in Manila time; '' for anything that is not a date.
+function _cirQuotedOn(iso) {
+  if (typeof iso !== 'string' || !iso) return '';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '' : _cirFormatDate(window.bizDate(d));
+}
+function _cirQuotesCardHtml(sub, canWrite) {
+  const list = (Array.isArray(sub && sub.quotes) ? sub.quotes : []).filter(q => q && typeof q === 'object');
+  if (!list.length) {
+    return `<div class="card" style="margin-top:12px;padding:14px 16px"><h4 style="margin-top:0">Quotes</h4><p style="font-size:12px;color:var(--text-muted);margin:0">${canWrite ? 'No quote yet — Prefill Quote Builder.' : 'No quote yet.'}</p></div>`;
+  }
+  const rows = list.slice().reverse().map(q => {                       // newest first
+    const coll = (typeof q.coll === 'string' && Object.prototype.hasOwnProperty.call(CIR_QUOTE_COLLS, q.coll)) ? q.coll : '';
+    const docId = (typeof q.docId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(q.docId)) ? q.docId : '';
+    const openHtml = (coll && docId)                                      // (the actions cell below is staff-only — the view-only role gets no cell at all)
+      ? `<button type="button" class="btn-secondary btn-sm" onclick="reopenQuoteFromDoc('${coll}','${docId}','${CIR_QUOTE_COLLS[coll]}')">Open</button>` : '';
+    const ver = Math.floor(Number(q.version));
+    const total = (typeof q.total === 'number' && isFinite(q.total)) ? '₱' + q.total.toLocaleString('en-PH') : '';
+    const filed = _cirQuotedOn(q.filedAt);
+    // table-cards.no-toggle (css/styles.css §5): on a phone each quote is a card of label:value lines with Open (staff only) as the trailing
+    // action, instead of a table the staff must scroll sideways to reach Open. Each value sits in ONE span so the flex row keeps it together.
+    return `<tr>
+      <td data-label="Quote"><span><span style="font-family:monospace">${escHtml(q.quoteNumber || '—')}</span>${ver >= 1 ? ` <span style="font-size:11px;color:var(--text-muted)">v${ver}</span>` : ''}</span></td>
+      <td data-label="Status">${_cirQuoteStatusPill(q.status)}</td>
+      ${canWrite ? `<td data-label="Total" style="text-align:right"><span style="white-space:nowrap">${escHtml(total)}</span></td>` : ''}
+      <td data-label="Filed"><span>${escHtml(filed)}${q.byName ? ` <span style="font-size:11px;color:var(--text-muted)">· ${escHtml(q.byName)}</span>` : ''}</span></td>
+      ${canWrite ? `<td class="tc-actions" style="text-align:right">${openHtml}</td>` : ''}
+    </tr>`;
+  }).join('');
+  const head = `<tr><th>Quote</th><th>Status</th>${canWrite ? '<th style="text-align:right">Total</th>' : ''}<th>Filed</th>${canWrite ? '<th></th>' : ''}</tr>`;
+  return `<div class="card" style="margin-top:12px;padding:14px 16px"><h4 style="margin-top:0">Quotes (${list.length})</h4><table class="data-table table-cards no-toggle"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function _cirRenderDetail() {
   const root = _cirContainer || deptContainer();
   const sub = _cirCurrent;
@@ -482,7 +540,7 @@ function _cirRenderDetail() {
   if (s.phone) contactBits.push(`<a href="${telHref}">${escHtml(s.phone)}</a>`);
   if (s.email) contactBits.push(`<a href="${mailHref}">${escHtml(s.email)}</a>`);
 
-  const statusOptions = [['new', 'New'], ['in_review', 'In review'], ['contacted', 'Contacted'], ['converted', 'Converted'], ['archived', 'Archived']];
+  const statusOptions = [['new', 'New'], ['in_review', 'In review'], ['contacted', 'Contacted'], ['quoted', 'Quoted'], ['converted', 'Converted'], ['archived', 'Archived']];
   const statusSelectHtml = canWrite
     ? `<select onchange="cirSetStatus('${refNoEsc}', this.value)">${statusOptions.map(o => `<option value="${o[0]}"${o[0] === sub.status ? ' selected' : ''}>${o[1]}</option>`).join('')}</select>`
     : '';
@@ -540,6 +598,7 @@ function _cirRenderDetail() {
     <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:14px 16px">
       ${statusSelectHtml}${convertHtml}${prefillHtml}${printHtml}${deleteHtml}
     </div>
+    ${_cirQuotesCardHtml(sub, canWrite)}
     ${glanceHtml}
     <div style="margin-top:12px">${bodyHtml}</div>
     ${consentHtml}
@@ -734,19 +793,54 @@ window.cirConvert = async function (refNo) {
   }
 };
 
-window.cirPrefillQuote = function (refNo) {
-  if (!cirCanWrite()) return;
-  const sub = (_cirCurrent && _cirCurrent.id === refNo) ? _cirCurrent : null;
-  if (!sub) return;
+// The state window._qbReopenState carries into the builder (QUOTE-BUILDER-CONFIGURATOR-SPEC §6.2) — a pure function of the brief. A brief has no
+// item list, so there are none; everything else is what a website lead is: a Barro Kitchens quote (BK) from the Website lead source (WB).
+//   qnoLoc    the quote-number location code from where the project is (_cirFacts().location: v2 "City, Province", v1 the site address)
+//   purpose   v2: the project type the client chose (answers.project_type); v1: a keyword scan of the free-text business type (summary.bizType)
+//   sourceRef what the builder's hand-off bar shows (the brief, its project type, the budget band the CLIENT chose, the target date, how many
+//             photos); only { kind, ref } of it is ever filed on the quote. There is no estimate for a brief. A reference that is not a real
+//             one (the server never mints one) gets no link at all.
+//   handoff   makes the builder boot as an authoritative load (js/app.js _qbIsAuthoritativeLoad)
+const CIR_REF_RE = /^CIR-\d{6}-[A-Z0-9]{6}$/;
+function _cirBuilderState(sub) {
+  const QB = window.QBConfigured;
   const s = sub.summary || {};
   const a = sub.answers || {};
-  window._qbReopenState = {
+  const facts = _cirFacts(sub, _cirDef(sub.formId));
+  const state = {
     clientName: s.name || '',
     clientCompany: s.company || '',
     clientAddress: _cirClientAddress(sub),
     clientPhone: s.phone || '',
-    clientEmail: s.email || ''
+    clientEmail: s.email || '',
+    currentCo: 'BK',
+    qnoMethod: 'WB',
+    qnoLoc: QB.locationCodeFor(facts.location),
+    purpose: QB.purposeFor(a.project_type ? { cirProjectType: a.project_type } : { cirBizType: s.bizType || a.biz_type || '' }),
+    handoff: true
   };
+  if (typeof sub.id === 'string' && CIR_REF_RE.test(sub.id)) {
+    state.sourceRef = {
+      kind: 'cir',
+      ref: sub.id,
+      projectType: facts.type,
+      budget: facts.budget,
+      targetDate: facts.target,
+      photosCount: Number(s.photoCount) || 0,
+      estimate: null
+    };
+  }
+  return state;
+}
+
+window.cirPrefillQuote = function (refNo) {
+  if (!cirCanWrite()) return;
+  const sub = (_cirCurrent && _cirCurrent.id === refNo) ? _cirCurrent : null;
+  if (!sub) return;
+  // QBConfigured is a lazy script of this page (js/config.js PAGE_SCRIPTS): without it the location code and purpose cannot be derived.
+  if (!window.QBConfigured) { Notifs.showToast('The quote builder helpers did not load — reload the app and try again.', 'error'); return; }
+  window._qbReopenState = _cirBuilderState(sub);
+  window._qbReopenAsRevision = false;
   Notifs.showToast('Opening Quote Builder with this client’s details…', 'success');
   navigateTo('bk-quote-builder');
 };

@@ -16,11 +16,17 @@
 //      path, files present, readable WebP) against a fixture; the shipped manifest is empty; the preview widget (js/qr-preview.js) picks the
 //      right photo, falls back, and draws a placeholder for every family and every option — in a fake DOM.
 //
+//   5. STANDARD CONSTRUCTION (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14): every family states how a made-to-order piece is built
+//      (`construction`, with {group} tokens filled from the chosen option's `c` phrase), and tables, sinks and stoves carry a STAFF-ONLY `top` group
+//      (1.5 mm (16 ga) standard, 1.2 mm lighter): never on a website surface, refused by the server's validation, chosen only with { staff: true }.
+//
 // Fixtures are synthetic; no price figure exists anywhere in the public family files (and this test asserts that).
 //
 // Mutation-tested (scratch copies, never the shared tree): dropping the strict unknown-key refusal, letting a string 'true' pass for the
 // boolean, skipping the hard width rule, dropping the absorbed/fixed completeness check, a preview chain in the wrong order, a key outside
-// the family's valid set accepted by the manifest loader, the preview widget ignoring the fallback — each must fail here.
+// the family's valid set accepted by the manifest loader, the preview widget ignoring the fallback — each must fail here. 2026-10-28: the public
+// validation accepting the 1.2 mm top, describe() printing a "Top plate" row, constructionLine() ignoring the configuration, summaryParts()
+// printing the standard top, the staff mode refusing the 1.2 mm top, the generator dropping `construction` from the public keys — each must fail here too.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -49,6 +55,8 @@ const PUBLISHED = new Set(Object.keys(PUB.products));
 const fam = (id) => FAMS.families[id];
 const ORDER = ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack'];
 const vals = (g) => g.options.map((o) => o.v);
+// an ABSORBED configuration never states the staff-only top plate (it is the standard 1.5 mm one): this is the complete configuration it converts to
+const filled = (f, cfg) => PF.validateConfiguration(f, cfg).config;
 
 describe('the mapping: every published SKU is absorbed by exactly one family or fixed — never both, never neither', () => {
   const loaded = B.loadPublicFamilies({ published: PUBLISHED });
@@ -125,12 +133,12 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
   it('each family\'s primary is one of its absorbed SKUs and its configuration IS the family default (the zero point the option amounts are measured from)', () => {
     for (const f of ORDER) {
       assert.ok(Object.prototype.hasOwnProperty.call(fam(f).absorbed, fam(f).primary), `${f}: the primary is not absorbed`);
-      assert.ok(PF.sameConfig(fam(f), fam(f).absorbed[fam(f).primary], PF.defaultConfig(fam(f))), `${f}: the primary's configuration differs from the family default`);
+      assert.ok(PF.sameConfig(fam(f), filled(fam(f), fam(f).absorbed[fam(f).primary]), PF.defaultConfig(fam(f))), `${f}: the primary's configuration differs from the family default`);
     }
   });
   it('every absorbed SKU\'s configuration states every option and is valid for its family', () => {
     for (const f of ORDER) for (const [sku, cfg] of Object.entries(fam(f).absorbed)) {
-      assert.deepEqual(Object.keys(cfg).sort(), fam(f).groups.map((g) => g.key).sort(), `${f}/${sku}: must state every option`);
+      assert.deepEqual(Object.keys(cfg).sort(), PF.publicGroups(fam(f)).map((g) => g.key).sort(), `${f}/${sku}: must state every public option, and never a staff-only one`);
       const v = PF.validateConfiguration(fam(f), cfg);
       assert.ok(v.ok, `${f}/${sku}: ${v.errors.join(' | ')}`);
     }
@@ -172,16 +180,16 @@ describe('the mapping: every published SKU is absorbed by exactly one family or 
 describe('THE OPTION SETS ARE EXACTLY THE OWNER\'S — nothing more', () => {
   const shape = (f) => fam(f).groups.map((g) => [g.key, g.type, vals(g)]);
   it('Preparation table: layers 1 / 2 / 3 and upper shelves none / 1 / 2, with a length × width × height size', () => {
-    assert.deepEqual(shape('prep_table'), [['layers', 'choice', [1, 2, 3]], ['upper', 'choice', [0, 1, 2]]]);
+    assert.deepEqual(shape('prep_table'), [['layers', 'choice', [1, 2, 3]], ['upper', 'choice', [0, 1, 2]], ['top', 'choice', [1.5, 1.2]]]);   // top: owner ruling 2026-10-28, staff only
     assert.deepEqual(Object.keys(fam('prep_table').dims), ['W', 'D', 'H']);
     assert.deepEqual(fam('prep_table').groups[0].options.map((o) => o.hint), ['Top only', 'Top + 1 undershelf', 'Top + 2 undershelves']);
   });
   it('Sink: 1-4 sinks, centre / left / right, undershelf with / without, upper shelf with / without, faucet pre-rinse / gooseneck, and a size', () => {
-    assert.deepEqual(shape('sink'), [['basins', 'choice', [1, 2, 3, 4]], ['alignment', 'choice', ['center', 'left', 'right']], ['undershelf', 'choice', [true, false]], ['upper', 'choice', [true, false]], ['faucet', 'choice', ['gooseneck', 'prerinse']]]);
+    assert.deepEqual(shape('sink'), [['basins', 'choice', [1, 2, 3, 4]], ['alignment', 'choice', ['center', 'left', 'right']], ['undershelf', 'choice', [true, false]], ['upper', 'choice', [true, false]], ['faucet', 'choice', ['gooseneck', 'prerinse']], ['top', 'choice', [1.5, 1.2]]]);   // top: owner ruling 2026-10-28, staff only
     assert.deepEqual(Object.keys(fam('sink').dims), ['W', 'D', 'H']);
   });
   it('Stove: 1-6 burner positions chosen one by one from wok / HP small / HP large / LP small / LP large / soup, and add-ons griller / griddle / oven / fryer', () => {
-    assert.deepEqual(shape('stove'), [['positions', 'slots', ['wok', 'hp_small', 'hp_large', 'lp_small', 'lp_large', 'soup']], ['addons', 'multi', ['griller', 'griddle', 'oven', 'fryer']]]);
+    assert.deepEqual(shape('stove'), [['positions', 'slots', ['wok', 'hp_small', 'hp_large', 'lp_small', 'lp_large', 'soup']], ['addons', 'multi', ['griller', 'griddle', 'oven', 'fryer']], ['top', 'choice', [1.5, 1.2]]]);   // top: owner ruling 2026-10-28, staff only
     const g = fam('stove').groups[0];
     assert.equal(g.minSlots, 1); assert.equal(g.maxSlots, 6);
     assert.deepEqual(Object.keys(fam('stove').dims), ['W', 'D', 'H']);
@@ -293,7 +301,7 @@ describe('js/product-families.js — STRICT validation (an unknown key, value, t
     assert.equal(PF.validateConfiguration(stove, { addons: ['oven', 'oven'] }).ok, false);
     assert.equal(PF.validateConfiguration(stove, { addons: ['salamander'] }).ok, false);
     assert.equal(PF.validateConfiguration(stove, { addons: 'oven' }).ok, false);
-    assert.ok(PF.sameConfig(stove, { positions: ['wok'], addons: ['oven', 'fryer'] }, { positions: ['wok'], addons: ['fryer', 'oven'] }.addons && PF.validateConfiguration(stove, { positions: ['wok'], addons: ['fryer', 'oven'] }).config));
+    assert.ok(PF.sameConfig(stove, PF.validateConfiguration(stove, { positions: ['wok'], addons: ['oven', 'fryer'] }).config, PF.validateConfiguration(stove, { positions: ['wok'], addons: ['fryer', 'oven'] }).config));
   });
   it('canonicalConfig is stable: the same selection (any key order, any add-on order) gives the same string; a different burner order does not', () => {
     const a = PF.validateConfiguration(stove, { addons: ['fryer', 'oven'], positions: ['wok', 'soup'] }).config;
@@ -379,8 +387,8 @@ describe('words: describe / summaryLine — the plain-English option list a requ
   });
   it('describe() gives one {label, value} row per option — the shape a product line\'s specs use, so every consumer prints it unchanged', () => {
     const rows = PF.describe(fam('stove'), { positions: ['wok', 'soup'], addons: ['fryer'] });
-    assert.deepEqual(rows, [{ label: 'Burner positions', value: '1. Wok burner, 2. Soup burner' }, { label: 'Add-ons', value: 'Fryer' }]);
-    assert.deepEqual(PF.describe(fam('prep_table'), { layers: 2, upper: 1 }), [{ label: 'Layers', value: '2 (Top + 1 undershelf)' }, { label: 'Upper shelves', value: '1' }]);
+    assert.deepEqual(rows, [{ label: 'Burner positions', value: '1. Wok burner, 2. Soup burner' }, { label: 'Add-ons', value: 'Fryer' }, { label: 'Construction', value: PF.constructionLine(fam('stove'), {}) }]);
+    assert.deepEqual(PF.describe(fam('prep_table'), { layers: 2, upper: 1 }), [{ label: 'Layers', value: '2 (Top + 1 undershelf)' }, { label: 'Upper shelves', value: '1' }, { label: 'Construction', value: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet' }]);
     assert.deepEqual(PF.describe(fam('stove'), { positions: ['wok'], addons: [] })[1], { label: 'Add-ons', value: 'None' });
     for (const f of ORDER) for (const r of PF.describe(fam(f), PF.defaultConfig(fam(f)))) assert.ok(typeof r.label === 'string' && typeof r.value === 'string' && r.value.length > 0, f);
   });
@@ -392,7 +400,7 @@ describe('converting an old saved SKU line to its family line (a draft saved bef
       const m = PF.migrateAbsorbed(FAMS, sku, { id: sku });
       assert.ok(m, `${sku} did not convert`);
       assert.equal(m.familyId, f);
-      assert.deepEqual(m.config, fam(f).absorbed[sku]);
+      assert.deepEqual(m.config, filled(fam(f), fam(f).absorbed[sku]), `${sku}: the configuration (the staff-only top plate takes its standard default)`);
       const expected = PF.defaultDims(fam(f));
       const mw = PF.minWidth(fam(f), m.config);
       if (mw && mw.hard && expected.W < mw.mm) expected.W = mw.mm;
@@ -467,11 +475,12 @@ describe('converting an old saved SKU line to its family line (a draft saved bef
 describe('the cells of a family\'s private option sheet', () => {
   it('one cell per option value; the family default of a choice is the baseline (no amount entered); slots and add-ons are never baseline', () => {
     const c = PF.cells(fam('sink'));
-    assert.equal(c.length, 4 + 3 + 2 + 2 + 2);
-    assert.deepEqual(c.filter((x) => x.baseline).map((x) => `${x.group}:${x.value}`), ['basins:1', 'alignment:center', 'undershelf:false', 'upper:false', 'faucet:gooseneck']);
+    assert.equal(c.length, 4 + 3 + 2 + 2 + 2 + 2);                                       // … + the two top plates (owner ruling 2026-10-28)
+    assert.deepEqual(c.filter((x) => x.baseline).map((x) => `${x.group}:${x.value}`), ['basins:1', 'alignment:center', 'undershelf:false', 'upper:false', 'faucet:gooseneck', 'top:1.5']);
     const s = PF.cells(fam('stove'));
-    assert.equal(s.length, 6 + 4);
-    assert.ok(s.every((x) => !x.baseline));
+    assert.equal(s.length, 6 + 4 + 2);
+    assert.ok(s.filter((x) => x.group !== 'top').every((x) => !x.baseline), 'slots and add-ons are never baseline');
+    assert.deepEqual(s.filter((x) => x.group === 'top').map((x) => `${x.value}:${x.baseline}`), ['1.5:true', '1.2:false'], 'the 1.5 mm top is the zero point; the 1.2 mm cell is the one Finance enters');
     assert.deepEqual(s.filter((x) => x.kind === 'slot').map((x) => x.value), ['wok', 'hp_small', 'hp_large', 'lp_small', 'lp_large', 'soup']);
     assert.deepEqual(s.filter((x) => x.kind === 'addon').map((x) => x.value), ['griller', 'griddle', 'oven', 'fryer']);
   });
@@ -964,7 +973,7 @@ describe('the generated files and what ships to the public', () => {
     const txt = JSON.stringify(FAMS);
     assert.ok(!B.MONEY_RE.test(txt) && !B.FORMULA_RE.test(txt), 'a money pattern is in the family definitions');
     assert.ok(!/basePrice|priceAdder|pricePer|rateW100|rateD100|rateH100|formulaType|unitPrice|lineTotal|exactTotal|listPrice|laborHours/.test(txt));
-    for (const f of ORDER) assert.deepEqual(Object.keys(fam(f)).filter((k) => !['id', 'label', 'category', 'description', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'].includes(k)), [], f);
+    for (const f of ORDER) assert.deepEqual(Object.keys(fam(f)).filter((k) => !['id', 'label', 'category', 'description', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'specMap', 'preview', 'absorbed'].includes(k)), [], f);
     assert.deepEqual(Object.keys(FAMS).sort(), ['families', 'order', 'version']);
   });
   it('the three public scripts carry NO pricing vocabulary, no markup injection and no code evaluation (the same pattern CHECK 9 runs)', () => {
@@ -992,6 +1001,236 @@ describe('the generated files and what ships to the public', () => {
     const w2 = {};
     vm.runInNewContext(read('js/qr-families.js'), { window: w2 });
     assert.deepEqual([...w2.QR_FAMILIES.order], ORDER);
+  });
+});
+
+// ══════════════════════════════════ STANDARD CONSTRUCTION (owner ruling 2026-10-28) ══════════════════════════════════
+// Made-to-order fabricated equipment is SS304 · 1.5 mm (16 ga) top plates on tables, sinks and stoves · square-tube posts with adjustable bullet feet · 1.2 mm
+// body and shelving. 1.5 mm is the DEFAULT; 1.2 mm is a lighter option that ONLY staff may choose (QUOTE-BUILDER-CONFIGURATOR-SPEC §14).
+const CONSTRUCTION_AT_DEFAULT = {
+  prep_table: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet',
+  sink: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet',
+  stove: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm body and panels · square-tube posts with adjustable bullet feet',
+  cabinet: 'SS304 stainless steel · 1.2 mm body, doors and shelves · square-tube posts with adjustable bullet feet',
+  wall_shelf: 'SS304 stainless steel · 1.2 mm shelves · fixed to the wall',
+  rack: 'SS304 stainless steel · 1.2 mm shelves · square-tube frame · on wheels',
+};
+const WITH_TOP = ['prep_table', 'sink', 'stove'];
+const STAFF_ONLY_MSG = '"Top plate" is chosen by our staff when the quotation is prepared.';
+
+describe('STANDARD CONSTRUCTION (owner ruling 2026-10-28) — every family states how it is built; the 1.2 mm top plate is STAFF-ONLY', () => {
+  it('the source sentences are the owner\'s wording, with a {token} only where the construction depends on an option', () => {
+    assert.deepEqual(Object.fromEntries(ORDER.map((f) => [f, SRC.families[f].construction])), {
+      prep_table: 'SS304 stainless steel · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet',
+      sink: 'SS304 stainless steel · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet',
+      stove: 'SS304 stainless steel · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet',
+      cabinet: 'SS304 stainless steel · 1.2 mm body, doors and shelves · {type}',
+      wall_shelf: 'SS304 stainless steel · 1.2 mm shelves · fixed to the wall',
+      rack: 'SS304 stainless steel · 1.2 mm shelves · square-tube frame · {wheels}',
+    });
+    // sink bowls are NOT claimed as 1.5 mm (owner question 5): the sink sentence says "top plate" only
+    assert.ok(!/bowl|basin/i.test(fam('sink').construction));
+    // the option phrases the tokens take
+    assert.deepEqual(fam('cabinet').groups.find((g) => g.key === 'type').options.map((o) => o.c), ['square-tube posts with adjustable bullet feet', 'wall-hung']);
+    assert.deepEqual(fam('rack').groups.find((g) => g.key === 'wheels').options.map((o) => [o.v, o.c]), [[true, 'on wheels'], [false, 'adjustable bullet feet']]);
+  });
+
+  it('constructionLine() at the family defaults is exactly the owner\'s sentence for each of the six families', () => {
+    for (const f of ORDER) assert.equal(PF.constructionLine(fam(f), PF.defaultConfig(fam(f))), CONSTRUCTION_AT_DEFAULT[f], f);
+    for (const f of ORDER) assert.ok(!PF.constructionLine(fam(f), PF.defaultConfig(fam(f))).endsWith('.'), `${f}: no full stop — each page adds its own`);
+  });
+
+  it('the tokens follow the chosen options: a 1.2 mm top, a wall-hung cabinet, a rack without wheels; a missing or invalid value reads as the default; junk never throws', () => {
+    for (const f of WITH_TOP) {
+      const light = PF.constructionLine(fam(f), { ...PF.defaultConfig(fam(f)), top: 1.2 });
+      assert.equal(light, CONSTRUCTION_AT_DEFAULT[f].replace('1.5 mm (16 ga) top plate', '1.2 mm top plate (lighter)'), f);
+      assert.notEqual(light, CONSTRUCTION_AT_DEFAULT[f]);
+    }
+    assert.equal(PF.constructionLine(fam('cabinet'), { type: 'wall', doors: 'swing', shelves: 1 }), 'SS304 stainless steel · 1.2 mm body, doors and shelves · wall-hung');
+    assert.equal(PF.constructionLine(fam('rack'), { tiers: 4, wheels: false }), 'SS304 stainless steel · 1.2 mm shelves · square-tube frame · adjustable bullet feet');
+    // absent / invalid / wrongly typed values are the group default
+    const prep = fam('prep_table');
+    for (const cfg of [{}, { layers: 2 }, { top: undefined }, { top: 9 }, { top: '1.2' }, { top: null }, { top: [1.2] }, null, undefined, 5, 'x', [], true]) assert.equal(PF.constructionLine(prep, cfg), CONSTRUCTION_AT_DEFAULT.prep_table, JSON.stringify(cfg));
+    // an inherited key is not a value
+    assert.equal(PF.constructionLine(prep, Object.create({ top: 1.2 })), CONSTRUCTION_AT_DEFAULT.prep_table);
+    // a family with no `construction` says nothing; junk families never throw
+    assert.equal(PF.constructionLine({ groups: [], dims: {} }, {}), '');
+    for (const bad of [null, undefined, 0, 'x', [], {}, { construction: 5 }, { construction: '' }]) assert.equal(PF.constructionLine(bad, {}), '', JSON.stringify(bad));
+    assert.equal(PF.constructionLine({ construction: 'a {nope} b', groups: [] }, {}), 'a  b', 'an unknown token is dropped, never thrown on (the build refuses such a family)');
+  });
+
+  it('describe() ends with the Construction row, has a row for every PUBLIC group and NEVER a "Top plate" row — for every family and every top plate', () => {
+    for (const f of ORDER) {
+      const cfgs = [PF.defaultConfig(fam(f))].concat(WITH_TOP.includes(f) ? [{ ...PF.defaultConfig(fam(f)), top: 1.2 }] : []);
+      for (const cfg of cfgs) {
+        const rows = PF.describe(fam(f), cfg);
+        assert.deepEqual(rows.map((r) => r.label), [...PF.publicGroups(fam(f)).map((g) => g.label), 'Construction'], f);
+        assert.equal(rows[rows.length - 1].value, PF.constructionLine(fam(f), cfg), f);
+        assert.ok(!rows.some((r) => /top plate/i.test(r.label)), `${f}: a "Top plate" row`);
+        assert.ok(rows.every((r) => typeof r.label === 'string' && typeof r.value === 'string' && r.value.length > 0), f);
+      }
+    }
+    // the plain-words row carries the chosen top plate, so the printed quote says which one it is
+    assert.match(PF.describe(fam('sink'), { ...PF.defaultConfig(fam('sink')), top: 1.2 }).at(-1).value, /1\.2 mm top plate \(lighter\)/);
+    // a family without `construction` gets no such row
+    assert.deepEqual(PF.describe({ groups: [], dims: {} }, {}), []);
+  });
+
+  it('the one-line summary says nothing about the standard top plate and "1.2 mm top" for the lighter one; every public summary reads as it did before', () => {
+    const sink = fam('sink');
+    const cfg = { basins: 1, alignment: 'center', undershelf: false, upper: false, faucet: 'gooseneck' };
+    const size = { W: 500, D: 500, H: 850 };
+    const before = 'Sink — 1 sink · centred · without undershelf · without upper shelf · gooseneck faucet · 500 × 500 × 850 mm';
+    assert.equal(PF.summaryLine(sink, cfg, size), before, 'a configuration with no top stated');
+    assert.equal(PF.summaryLine(sink, { ...cfg, top: 1.5 }, size), before, 'the standard top is not mentioned');
+    assert.equal(PF.summaryLine(sink, { ...cfg, top: 1.2 }, size), 'Sink — 1 sink · centred · without undershelf · without upper shelf · gooseneck faucet · 1.2 mm top · 500 × 500 × 850 mm');
+    for (const f of ORDER) assert.ok(!PF.summaryParts(fam(f), PF.defaultConfig(fam(f))).some((p) => /mm top/.test(p)), f);
+    assert.deepEqual(PF.summaryParts(fam('stove'), { ...PF.defaultConfig(fam('stove')), top: 1.2 }).at(-1), '1.2 mm top');
+  });
+
+  it('PUBLIC validation (the server, the website, the default) refuses a 1.2 mm top with the exact message and keeps the default; the standard 1.5 mm top and an absent key are accepted', () => {
+    for (const f of WITH_TOP) {
+      const F = fam(f);
+      const bad = PF.validateConfiguration(F, { ...PF.defaultConfig(F), top: 1.2 });
+      assert.equal(bad.ok, false, f);
+      assert.deepEqual(bad.errors, [STAFF_ONLY_MSG], f);
+      assert.equal(bad.config.top, 1.5, `${f}: the configuration takes the default`);
+      assert.equal(PF.validateConfiguration(F, { ...PF.defaultConfig(F), top: 1.5 }).ok, true, `${f}: the standard top may be stated`);
+      const { top, ...withoutTop } = PF.defaultConfig(F);
+      void top;
+      const absent = PF.validateConfiguration(F, withoutTop);
+      assert.equal(absent.ok, true, `${f}: an absent top is the default`);
+      assert.equal(absent.config.top, 1.5);
+      assert.equal(PF.validateConfiguration(F, { ...withoutTop, top: undefined }).ok, true, `${f}: undefined is absent`);
+      // ANY present value other than the default gets the same staff message — a visitor learns nothing about the options (not even that 9 is not one)
+      for (const v of [1.2, 9, '1.2', '1.5', null, true, 0, [], {}, 'x', NaN]) assert.deepEqual(PF.validateConfiguration(F, { ...withoutTop, top: v }).errors, [STAFF_ONLY_MSG], `${f} ${String(v)}`);
+      // the server\'s call (validateLine with no opts) refuses it too, in one place only
+      const line = PF.validateLine(F, { top: 1.2 }, PF.defaultDims(F));
+      assert.equal(line.ok, false, f);
+      assert.deepEqual(line.errors, [STAFF_ONLY_MSG], f);
+    }
+    // the other three families have no top plate at all: it is an unknown key there, not a staff-only one
+    for (const f of ['cabinet', 'wall_shelf', 'rack']) assert.match(PF.validateConfiguration(fam(f), { top: 1.5 }).errors[0], /"top" is not an option of this product/, f);
+    // opts that are not exactly { staff: true } are PUBLIC mode
+    for (const o of [undefined, null, {}, { staff: false }, { staff: 'true' }, { staff: 1 }, { staff: [] }, true, 'staff']) {
+      assert.equal(PF.validateConfiguration(fam('sink'), { ...PF.defaultConfig(fam('sink')), top: 1.2 }, o).ok, false, JSON.stringify(o));
+      assert.equal(PF.validateLine(fam('sink'), { top: 1.2 }, {}, o).ok, false, JSON.stringify(o));
+    }
+  });
+
+  it('STAFF validation ({ staff: true }) accepts the 1.2 mm top like any choice, still refuses a value that is not an option, and validateLine passes the option through', () => {
+    for (const f of WITH_TOP) {
+      const F = fam(f);
+      const light = PF.validateConfiguration(F, { ...PF.defaultConfig(F), top: 1.2 }, { staff: true });
+      assert.equal(light.ok, true, `${f}: ${light.errors.join(' ')}`);
+      assert.equal(light.config.top, 1.2);
+      assert.equal(PF.validateConfiguration(F, { ...PF.defaultConfig(F), top: 1.5 }, { staff: true }).config.top, 1.5);
+      assert.equal(PF.validateConfiguration(F, {}, { staff: true }).config.top, 1.5, 'absent -> the default in staff mode too');
+      for (const v of [9, '1.2', null, true, [], 'x']) assert.deepEqual(PF.validateConfiguration(F, { top: v }, { staff: true }).errors, ['Choose one of the available options for "Top plate".'], `${f} ${String(v)}`);
+      const line = PF.validateLine(F, { top: 1.2 }, PF.defaultDims(F), { staff: true });
+      assert.equal(line.ok, true, `${f}: ${line.errors.join(' ')}`);
+      assert.equal(line.config.top, 1.2);
+      assert.equal(line.custom, false, 'a lighter top is not a custom SIZE');
+    }
+  });
+
+  it('publicGroups() leaves out exactly the staff-only group — `top` on tables, sinks and stoves, nothing on the others — and `top` is the LAST group, marked only where it belongs', () => {
+    for (const f of ORDER) {
+      const left = fam(f).groups.filter((g) => !PF.publicGroups(fam(f)).includes(g)).map((g) => g.key);
+      assert.deepEqual(left, WITH_TOP.includes(f) ? ['top'] : [], f);
+      fam(f).groups.forEach((g, i, all) => {
+        if (g.staffOnly === undefined) return;
+        assert.equal(g.staffOnly, true, `${f}.${g.key}`);
+        assert.equal(g.type, 'choice', `${f}.${g.key}: staff-only belongs to a choice group`);
+        assert.equal(g.key, 'top');
+        assert.equal(i, all.length - 1, `${f}: appended LAST`);
+      });
+    }
+    assert.deepEqual(PF.publicGroups(null), []);
+    assert.deepEqual(PF.publicGroups({}), []);
+    // the group itself is the owner's, word for word
+    for (const f of WITH_TOP) {
+      assert.deepEqual(fam(f).groups.at(-1), {
+        key: 'top', label: 'Top plate', type: 'choice', default: 1.5, staffOnly: true,
+        options: [
+          { v: 1.5, l: '1.5 mm (16 ga)', s: '1.5 mm top', c: '1.5 mm (16 ga) top plate', hint: 'Standard' },
+          { v: 1.2, l: '1.2 mm', s: '1.2 mm top', c: '1.2 mm top plate (lighter)', hint: 'Lighter' },
+        ],
+      }, f);
+    }
+  });
+
+  it('no absorbed configuration states a staff-only key, and all 44 absorbed SKUs convert (migrateAbsorbed) to a configuration that validates PUBLIC — at the standard 1.5 mm top', () => {
+    let n = 0;
+    for (const f of ORDER) for (const [sku, cfg] of Object.entries(fam(f).absorbed)) {
+      for (const g of fam(f).groups.filter((x) => x.staffOnly === true)) assert.ok(!Object.prototype.hasOwnProperty.call(cfg, g.key), `${sku} states ${g.key}`);
+      const m = PF.migrateAbsorbed(FAMS, sku, { id: sku });
+      assert.ok(m, sku);
+      const v = PF.validateLine(fam(f), m.config, m.dims);                          // PUBLIC mode: no opts
+      assert.equal(v.ok, true, `${sku}: ${v.errors.join(' ')}`);
+      if (WITH_TOP.includes(f)) assert.equal(m.config.top, 1.5, `${sku}: converts to the standard top`);
+      n++;
+    }
+    assert.equal(n, 44);
+  });
+
+  it('the cells of the private sheet: the 1.5 mm top is the zero point and the 1.2 mm cell is the one Finance enters (signed)', () => {
+    for (const f of WITH_TOP) {
+      const top = PF.cells(fam(f)).filter((c) => c.group === 'top');
+      assert.deepEqual(top.map((c) => [c.value, c.label, c.kind, c.baseline]), [['1.5', '1.5 mm (16 ga)', 'option', true], ['1.2', '1.2 mm', 'option', false]], f);
+      assert.equal(top[1].groupLabel, 'Top plate');
+    }
+    for (const f of ['cabinet', 'wall_shelf', 'rack']) assert.ok(!PF.cells(fam(f)).some((c) => c.group === 'top'), f);
+  });
+
+  it('the public wording rules: "Top plate" (no "gauge" word anywhere), no price or partner name, no grade or finish OPTION — standard text only', () => {
+    const words = JSON.stringify([...WITH_TOP.map((f) => fam(f).groups.find((g) => g.key === 'top')), ...ORDER.map((f) => fam(f).construction)]);
+    assert.ok(!/gauge/i.test(words), 'the word "gauge" in the new wording (the abbreviation "16 ga" is the owner\'s)');
+    // the staff-only option ships inside the PUBLIC family file even though no website surface shows it: its hints say "Standard" and "Lighter" and nothing about money
+    assert.deepEqual(WITH_TOP.map((f) => fam(f).groups.find((g) => g.key === 'top').options.map((o) => o.hint)), WITH_TOP.map(() => ['Standard', 'Lighter']));
+    assert.ok(!/cheap|budget|discount|bargain|saving|econom|afford|low[- ]?cost|price/i.test(JSON.stringify(WITH_TOP.map((f) => fam(f).groups.find((g) => g.key === 'top')))), 'the staff-only option hints at money in the public file');
+    assert.ok(!/cheap|budget/i.test(read('js/qr-families.js')) && !/cheap|budget/i.test(read('scripts/public-families.json')), 'cheaper / budget wording anywhere in the public family files');
+    assert.ok(!B.MONEY_RE.test(words) && !B.FORMULA_RE.test(words), 'a pricing pattern in the new wording');
+    assert.ok(!B.BRAND_RE.test(words) && !/vesta|barro steel/i.test(words), 'a partner or sister-company name in the new wording');
+    assert.ok(!/316|finish|brushed|mirror|satin/i.test(JSON.stringify(ORDER.map((f) => fam(f).construction))), 'the construction sentence offers no grade or finish');
+    for (const f of ORDER) for (const g of fam(f).groups) assert.ok(!/grade|finish|material/i.test(g.key + g.label), `${f}.${g.key}: a grade / finish / material OPTION`);
+  });
+
+  it('the build refuses a malformed construction, staffOnly, c or absorbed configuration with a plain-text problem (ids and keys only, never a value)', () => {
+    const bad = (mut) => { const j = JSON.parse(JSON.stringify(SRC)); mut(j); return () => B.loadPublicFamilies({ source: j, published: PUBLISHED }); };
+    assert.throws(bad((j) => { delete j.families.sink.construction; }), /family "sink": "construction" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.construction = '   '; }), /"construction" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.construction = 5; }), /"construction" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.construction = 'SS304 · {nope}'; }), /construction: \{nope\} does not name a choice group of this family/);
+    assert.throws(bad((j) => { j.families.stove.construction = 'SS304 · {positions}'; }), /construction: \{positions\} does not name a choice group/);
+    assert.throws(bad((j) => { j.families.sink.construction = 'SS304 · {basins}'; }), /every option of "basins" needs a "c" phrase/);
+    assert.throws(bad((j) => { j.families.sink.construction = 'SS304 · {top'; }), /a brace that is not a \{groupKey\} token/);
+    assert.throws(bad((j) => { delete j.families.sink.groups.at(-1).options[0].c; }), /every option of "top" needs a "c" phrase/);
+    assert.throws(bad((j) => { j.families.sink.groups.at(-1).options[0].c = ''; }), /"c" must be a non-empty string/);
+    assert.throws(bad((j) => { j.families.sink.groups.at(-1).staffOnly = 'yes'; }), /"staffOnly" must be true or false, and belongs to a choice group only/);
+    assert.throws(bad((j) => { j.families.stove.groups[0].staffOnly = true; }), /groups\[0\]: "staffOnly" must be true or false, and belongs to a choice group only/);
+    assert.doesNotThrow(bad((j) => { j.families.sink.groups[0].staffOnly = false; }), 'false is a harmless boolean');
+    // an absorbed SKU never states a staff-only option — not even the default
+    assert.throws(bad((j) => { j.families.sink.absorbed['PW-004'].top = 1.5; }), /absorbed\["PW-004"\]: must not state a staff-only option/);
+    assert.throws(bad((j) => { j.families.sink.absorbed['PW-004'].top = 1.2; }), /absorbed\["PW-004"\]: not a valid configuration/);
+    // the public-text guard scans the new strings
+    assert.throws(bad((j) => { j.families.sink.construction = 'SS304 · {top} · only ₱1,500'; }), /construction: pricing pattern/);
+    assert.throws(bad((j) => { j.families.sink.groups.at(-1).options[1].c = 'costs less'; }), /pricing pattern/);
+    assert.throws(bad((j) => { j.families.sink.groups.at(-1).options[1].hint = 'Made by ' + 'Brilliant' + ' Steel'; }), /partner-brand/);
+    // and the problem list never echoes the offending text
+    try { bad((j) => { j.families.sink.construction = 'SS304 · {top} · only ₱1,500'; })(); assert.fail('should have thrown'); } catch (e) { assert.ok(!e.message.includes('1,500'), 'the offending text was echoed'); }
+  });
+
+  it('the generated family file carries `construction` and the staff-only group, deterministically: the committed js/qr-families.js is what the generator makes, and the mirror is byte-identical; version 2', () => {
+    const fresh = B.renderFamiliesJs(B.loadPublicFamilies({ published: PUBLISHED }));
+    assert.equal(read('js/qr-families.js'), fresh, 'js/qr-families.js is stale — run: node scripts/build-catalogue.js');
+    assert.equal(read('functions/qr-families.js'), fresh);
+    assert.match(fresh, /"construction": "SS304 stainless steel · \{top\} · 1\.2 mm undershelves and upper shelves/);
+    assert.equal((fresh.match(/"staffOnly": true/g) || []).length, 3, 'exactly the three top plates');
+    assert.equal((fresh.match(/"construction":/g) || []).length, 6, 'one sentence per family');
+    for (const f of ORDER) assert.equal(typeof fam(f).construction, 'string', f);
+    assert.equal(SRC.version, 2);
+    assert.equal(FAMS.version, 2, 'owner question 1: the schema is 2, so every option sheet must be approved again knowing the base item is the 1.5 mm price');
   });
 });
 

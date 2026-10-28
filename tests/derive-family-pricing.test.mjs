@@ -9,8 +9,14 @@
 //   * The model the figures feed (priceConfiguredItem) can consume the output as it stands: an imported seed prices what it covers and leaves the rest
 //     "priced after review".
 //
+//   * THE STAFF-ONLY TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14.4): tables, sinks and stoves get ONE extra cell, "Top plate: 1.2 mm" — the SIGNED
+//     amount (a negative number, or 0) for the lighter top — and it is ALWAYS BLANK in the seed: the master's BA-001 "Top Gauge" adder is quoted in the note as a
+//     cross-reference only, never used as the amount. The seed is written for the current family schema (2), so an older seed is refused by the importer.
+//
 // Mutation-tested in scratch copies (see the commit message): turning a blank into 0, dropping the "prefer" order of the owner-prescribed pair,
 // ignoring the adder cross-check, deriving the wall-shelf length rate without the standard length, writing the output next to the source, and so on.
+// 2026-10-28: filling the 1.2 mm top cell from the master's adder, dropping the cell for one family, the absorbed-SKU check pricing a configuration without the
+// top plate — each must fail here too.
 //
 // Run with: node --test tests/*.test.mjs
 
@@ -69,8 +75,9 @@ describe('derive-family-pricing — the output covers every option of every fami
 
   it('is a versioned, labelled private seed for the current family schema, with all six families', () => {
     assert.equal(seed.kind, 'barro-family-pricing-seed');
-    assert.equal(seed.version, 1);
+    assert.equal(seed.version, 1, 'the seed FILE format is unchanged');
     assert.equal(seed.schemaVersion, FAMS.version);
+    assert.equal(seed.schemaVersion, 2, 'the families are on schema 2 (the 1.5 mm top plate is the standard): an older seed is refused by the importer');
     assert.deepEqual(Object.keys(seed.families), FAMS.order);
     assert.match(seed._readme, /PRIVATE/);
     assert.match(seed._readme, /never be committed/);
@@ -154,7 +161,7 @@ describe('derive-family-pricing — the output covers every option of every fami
         if (mw && dims.W < mw.mm) dims.W = mw.mm;
         const fm = PF.forcedMins(fam, cfg);
         Object.keys(fm).forEach((k) => { if (dims[k] < fm[k]) dims[k] = fm[k]; });
-        const v = PF.validateLine(fam, cfg, dims);
+        const v = PF.validateLine(fam, cfg, dims, { staff: true });                    // STAFF mode: the 1.2 mm top plate is a staff-only choice
         assert.ok(v.ok, `${fid} ${c.group}.${c.value}: the probe configuration must itself be valid (${(v.errors || []).join(' ')})`);
         const r = price(v.config, v.dims);
         assert.equal(r.priced, false, `${fid} ${c.group}.${c.value}: a blank amount was priced`);
@@ -352,6 +359,83 @@ describe('derive-family-pricing — figures come only from evidence the master r
     const r2 = PC.priceConfiguredItem(prim, fam, Object.assign(PF.defaultConfig(fam), { upper: 2 }), PF.defaultDims(fam), sheet, {}, { schemaVersion: FAMS.version });
     assert.equal(r2.priced, false);
     assert.equal(r2.reason, 'missing_input');
+  });
+});
+
+describe('derive-family-pricing — the staff-only 1.2 mm top plate (owner ruling 2026-10-28): one SIGNED cell per table, sink and stove, always BLANK', () => {
+  const WITH_TOP = ['prep_table', 'sink', 'stove'];
+  const topAdder = (light, heavy, adders) => prod('BA-001', { basePrice: 7000, specs: [spec('Top Gauge', [light, heavy], light, adders)] });
+
+  it('prep table, sink and stove each have a "Top plate: 1.2 mm" cell, BLANK (no amount, confidence blank), and the other three families have none; the standard 1.5 mm top has no cell at all', () => {
+    const seed = derive();
+    for (const fid of FAMS.order) {
+      const opts = seed.families[fid].options;
+      if (!WITH_TOP.includes(fid)) { assert.ok(!('top' in opts), `${fid} must have no top plate cell`); continue; }
+      assert.deepEqual(Object.keys(opts.top), ['1.2'], `${fid}: only the 1.2 mm cell — the standard top is the zero point`);
+      const c = opts.top['1.2'];
+      assert.equal(c.flat, null, `${fid}: the 1.2 mm cell must be BLANK`);
+      assert.equal(c.perW100, null);
+      assert.equal(c.confidence, 'blank');
+      assert.ok(seed.families[fid].table.some((r) => r.group === 'top' && r.value === '1.2' && r.status === 'blank' && r.label === 'Top plate: 1.2 mm'), `${fid}: the console table lists it once, blank`);
+      assert.equal(seed.families[fid].table.filter((r) => r.group === 'top').length, 1);
+    }
+  });
+
+  it('the note tells Finance what to enter: the standard is now 1.5 mm (16 ga), the list price is read as the 1.5 mm price, and the figure is a NEGATIVE amount or 0', () => {
+    const note = cellOf(derive(), 'sink', 'top', '1.2').derivation;
+    assert.match(note, /The standard top is now 1\.5 mm \(16 ga\)/);
+    assert.match(note, /the base item's list price is read as the 1\.5 mm price/);
+    assert.match(note, /Enter what a 1\.2 mm top takes OFF \(a negative amount\), or 0 if it should cost the same\./);
+    assert.ok(!/BA-001/.test(note), 'with no evidence in the master the note carries no cross-reference');
+    assert.equal(cellOf(derive(), 'prep_table', 'top', '1.2').derivation, note, 'the same instruction on all three families');
+    assert.equal(cellOf(derive(), 'stove', 'top', '1.2').derivation, note);
+  });
+
+  it('the master\'s BA-001 "Top Gauge" adder is quoted as a CROSS-REFERENCE in the note only — the cell stays BLANK, whatever the master says (before and after the options were renamed)', () => {
+    for (const [light, heavy] of [['1.2mm (std)', '1.5mm heavy-duty'], ['1.2mm (lighter)', '1.5mm (16 ga, standard)']]) {
+      const s = derive([topAdder(light, heavy, [0, 1234])]);
+      for (const fid of WITH_TOP) {
+        const c = cellOf(s, fid, 'top', '1.2');
+        assert.equal(c.flat, null, `${fid}: never derived from the master's adder`);
+        assert.equal(c.confidence, 'blank');
+        assert.match(c.derivation, /For reference, the master's own "Top Gauge" adder on BA-001/);
+        assert.ok(c.derivation.includes(`(${light} versus ${heavy})`), `${fid}: names the two options`);
+        assert.match(c.derivation, /= -1,234; not used as the amount\./, `${fid}: the master's signed figure for the lighter top versus the heavier one`);
+      }
+    }
+    // an adder that does not fit the pair (other labels, no adders, not numbers) adds nothing to the note
+    for (const odd of [topAdder('1.2mm (std)', 'Heavy', [0, 1234]), prod('BA-001', { specs: [spec('Top Gauge', ['1.2mm (std)', '1.5mm heavy-duty'], '1.2mm (std)', undefined)] }), topAdder('1.2mm (std)', '1.5mm heavy-duty', [0, 'x'])]) {
+      const c = cellOf(derive([odd]), 'sink', 'top', '1.2');
+      assert.equal(c.flat, null); assert.ok(!/BA-001/.test(c.derivation));
+    }
+  });
+
+  it('the seed still prices nothing it should not: a 1.2 mm top with the blank cell is "priced after review" naming "Top plate: 1.2 mm", and the standard top prices from the base item alone', () => {
+    const seed = derive();
+    const byId = new Map(PRIMARIES().map((p) => [p.id, p]));
+    for (const fid of WITH_TOP) {
+      const fam = FAMS.families[fid];
+      const sheet = { approved: true, schemaVersion: FAMS.version, options: Object.fromEntries(Object.entries(seed.families[fid].options).map(([g, vs]) => [g, Object.fromEntries(Object.entries(vs).map(([v, c]) => [v, { flat: c.flat, perW100: c.perW100 }]))])), size: { perW100: seed.families[fid].size.perW100 } };
+      const price = (cfg) => PC.priceConfiguredItem(byId.get(fam.primary), fam, cfg, PF.defaultDims(fam), sheet, {}, { schemaVersion: FAMS.version });
+      const std = price(PF.defaultConfig(fam));
+      assert.equal(std.priced, true, fid); assert.deepEqual(std.deltas, []);
+      const light = price({ ...PF.defaultConfig(fam), top: 1.2 });
+      assert.equal(light.priced, false, fid); assert.equal(light.reason, 'missing_input'); assert.deepEqual(light.missing, ['Top plate: 1.2 mm']);
+      // once Finance types a negative amount the line prices, exactly that much lower
+      const typed = { ...sheet, options: { ...sheet.options, top: { 1.2: { flat: -777, perW100: null } } } };
+      const cheaper = PC.priceConfiguredItem(byId.get(fam.primary), fam, { ...PF.defaultConfig(fam), top: 1.2 }, PF.defaultDims(fam), typed, {}, { schemaVersion: FAMS.version });
+      assert.equal(cheaper.unitPrice, std.unitPrice - 777, fid);
+    }
+  });
+
+  it('the absorbed-SKU check prices each absorbed model at the STANDARD top plate (they never state one): a priced primary is "ok", not "cannot be checked: blank cells (Top plate)"', () => {
+    const seed = derive();
+    for (const [fid, sku] of [['prep_table', 'PW-001'], ['sink', 'PW-004'], ['stove', 'CE-001']]) {
+      const row = seed.families[fid].absorbedCheck.find((r) => r.sku === sku);
+      assert.ok(row, `${fid}/${sku}`);
+      assert.equal(row.flag, 'ok', `${fid}/${sku}: ${row.flag}`);
+      assert.equal(row.familyEstimateVsList, 1);
+    }
   });
 });
 

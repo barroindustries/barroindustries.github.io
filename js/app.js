@@ -2212,6 +2212,22 @@ function exitQbFullscreen() {
 }
 
 // ── Quote Builder iframe ─────────────────────────
+// QUOTE-BUILDER-CONFIGURATOR-SPEC §6.6 — two small pure rules renderQuoteBuilderIframe() applies to whatever was stashed in
+// window._qbReopenState (pinned by tests/quote-link.test.mjs).
+//   _qbIsAuthoritativeLoad: the load must NOT be overridden by a stale local draft's Resume banner (the builder boots with ?reopen=1) —
+//     a reopen/revision of a filed quote (sourceDocId) or a website hand-off from a quote request / project brief (handoff).
+//   _qbReopenStripLabel: the one-line strip above the builder. A hand-off that somehow carries a sourceDocId is a reopened quote, not a
+//     fresh hand-off, so "from a website request" needs a state with no sourceDocId.
+function _qbIsAuthoritativeLoad(state) {
+  return !!(state && (state.sourceDocId || state.handoff));
+}
+function _qbReopenStripLabel(state, asRevision) {
+  if (asRevision) return 'new revision';
+  if (state && state.draftDocId && !state.sourceDocId) return 'resuming a saved draft';
+  if (state && state.handoff && !state.sourceDocId) return 'from a website request';
+  return 'editing a copy';
+}
+
 function renderQuoteBuilderIframe() {
   // Render the builder INSIDE the normal content area so the app's top bar and
   // navigation stay visible (navigateTo replaces this when leaving the builder).
@@ -2254,7 +2270,10 @@ function renderQuoteBuilderIframe() {
   // off a fresh, never-filed basket) don't. Without this gate, reopen=1 fired
   // for ANY caller and silently suppressed the draft-resume prompt for a
   // genuinely different unsaved draft sitting in localStorage.
-  if (reopenState && reopenState.sourceDocId) qbSrc += (qbSrc.includes('?') ? '&' : '?') + 'reopen=1';
+  // QUOTE-BUILDER-CONFIGURATOR-SPEC §6.6: a website HAND-OFF (Open in Quote Builder on a quote request / project brief) is the other
+  // authoritative load — it stamps `handoff: true` and no sourceDocId, and a stale local draft's Resume banner must not override it
+  // (_qbIsAuthoritativeLoad, below). Quick Estimate's hand-off still sets neither, so its draft prompt is untouched.
+  if (_qbIsAuthoritativeLoad(reopenState)) qbSrc += (qbSrc.includes('?') ? '&' : '?') + 'reopen=1';
   const reopenAsRevision = window._qbReopenAsRevision; window._qbReopenAsRevision = false;
   // President-review mode: editing a partner's quote to hand it back. The edits
   // are saved to the SAME (partner-owned) quote doc, not a new president copy.
@@ -2274,11 +2293,10 @@ function renderQuoteBuilderIframe() {
   // A reopened quote keeps a one-line strip so "editing a copy" vs "new
   // revision" stays visible; a partner review keeps its banner.
   const isMobile = _qbIsMobile();
-  // QB-DRAFTS-SPEC-2026-09-11 — a draft resume (resumeDraftFromDoc) carries
-  // draftDocId but no sourceDocId — no revision chain — so it gets its own
-  // label instead of "editing a copy".
-  const isDraftResume = !!(reopenState && reopenState.draftDocId && !reopenState.sourceDocId);
-  const reopenStripLabel = reopenAsRevision ? 'new revision' : (isDraftResume ? 'resuming a saved draft' : 'editing a copy');
+  // The strip's wording comes from _qbReopenStripLabel (below): "new revision", "resuming a saved draft" (QB-DRAFTS-SPEC-2026-09-11 —
+  // a draft resume carries draftDocId but no sourceDocId, so no revision chain), "from a website request" (the §6.6 hand-off) or
+  // "editing a copy".
+  const reopenStripLabel = _qbReopenStripLabel(reopenState, reopenAsRevision);
   const reopenStrip = (!reviewCtx && reopenState)
     ? `<div style="font-size:12px;font-weight:600;color:var(--text-muted);padding:6px 12px">${emojiIcon('🧮',14)} Quote Builder — ${reopenStripLabel}</div>` : '';
   document.body.classList.toggle('qb-desktop', !isMobile);
@@ -2435,7 +2453,12 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     await graftQuoteCosts(collection, id, window._qbReopenState);   // QUOTE-COSTS
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
-  } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
+  } catch (ex) {
+    // QUOTE-BUILDER-CONFIGURATOR-SPEC §8.3: the Quotes card on a request / brief offers Open on every quote filed from it, but a filed quote
+    // is readable only by its author or an admin (firestore.rules) — say so instead of a raw "Missing or insufficient permissions".
+    if (ex && ex.code === 'permission-denied') Notifs.showToast('Only its author or an admin can open this quote', 'error');
+    else Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error');
+  }
 };
 // QB-DRAFTS-SPEC-2026-09-11 — resume an explicit draft (Quotes → Drafts) into
 // the builder. Unlike reopenQuoteFromDoc above, a draft carries NO revision
@@ -5073,6 +5096,108 @@ window.fitKpiValues = function(root){
 // per this wave's convention. The 'help' case in navigateTo below still
 // calls renderHelp() as a bare global identifier.
 
+// ── Quote ↔ website request link (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §3.2, §6.5, §8.1) ──────────────────────────────
+// A quote started from a website quote request ("QR-yymmdd-XXXXXX") or project brief ("CIR-yymmdd-XXXXXX") carries
+// `sourceRef: { kind: 'qr' | 'cir', ref }`. The helpers below are the bridge side of that link; tests/quote-link.test.mjs runs them
+// from this file's own source. Everything the builder iframe posts is untrusted until it has been through _qbCleanSourceRef /
+// _qbCleanEstimateCheck: only the exact keys come out, and only finite numbers, booleans and short strings. The ref pattern is
+// pinned to its kind (a 'qr' link can only ever name a QR- reference), so a forged message cannot point a write at another
+// collection's document. Partner sessions never carry a link (the request screens are not theirs; firestore.rules agree).
+const QB_SOURCE_REF_RE = { qr: /^QR-\d{6}-[A-Z0-9]{6}$/, cir: /^CIR-\d{6}-[A-Z0-9]{6}$/ };
+function _qbCleanSourceRef(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const kind = v.kind;
+  if (kind !== 'qr' && kind !== 'cir') return null;
+  const ref = v.ref;
+  return (typeof ref === 'string' && QB_SOURCE_REF_RE[kind].test(ref)) ? { kind, ref } : null;
+}
+// The estimate-range check the builder filed with the quote (§7): the range the client saw, the quote's comparable total, whether it
+// fell inside, and — in 'reason' mode — the sentence staff typed. null unless low/high/comparable are real numbers and a range exists.
+function _qbCleanEstimateCheck(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const num = x => (typeof x === 'number' && isFinite(x)) ? x : null;
+  const low = num(v.low), high = num(v.high), comparable = num(v.comparable);
+  if (low === null || high === null || comparable === null || !(low > 0) || !(high > 0)) return null;
+  return { low, high, comparable, inRange: v.inRange === true, pctOff: num(v.pctOff) || 0, reason: typeof v.reason === 'string' ? v.reason.slice(0, 500) : '' };
+}
+
+// §8.1 — record a filed / sent-for-approval / updated quote on the request or brief it came from, and move that request to 'quoted'.
+//   sourceRef  the (untrusted) link the builder posted        info  { docId, coll, quoteNumber, version, total, status, byName }
+//   -> true when the request was updated; false for anything else. NEVER throws and never blocks a filing: a request that is gone
+//   (erased under RA 10173) is a quiet false; a failed write (rules not deployed yet, offline) logs and toasts "could not update the
+//   request link" — the quote itself is already saved.
+//   quotes[]  newest last, one entry per quote doc (re-filing or editing the SAME doc replaces its entry, keeping its first filedAt and its
+//             number — the quote's FILE NAME, "…-001 (2)", which an in-place edit does not change — and, when the caller does not know
+//             them, as an in-place update does not, its status / version), at most 50 (the cap firestore.rules enforces), the oldest
+//             dropped first.
+//   status    new / in_review / contacted -> 'quoted'; anything else (quoted, converted, archived) is NEVER touched — a request is never
+//             demoted by filing another revision.
+window.linkQuoteToRequest = async function (sourceRef, info) {
+  try {
+    const sr = _qbCleanSourceRef(sourceRef);
+    const q = (info && typeof info === 'object') ? info : {};
+    const docId = (typeof q.docId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(q.docId)) ? q.docId : '';
+    if (!sr || !docId || !window.QUOTE_COLLECTIONS.includes(q.coll)) return false;
+    if (typeof isPartner === 'function' && isPartner()) return false;
+    const FV = firebase.firestore.FieldValue;
+    const reqRef = db.collection(sr.kind === 'qr' ? 'quote_requests' : 'client_info_requests').doc(sr.ref);
+    const snap = await reqRef.get();
+    if (!snap.exists) return false;
+    const existing = snap.data() || {};
+    const prior = Array.isArray(existing.quotes) ? existing.quotes.filter(x => x && typeof x === 'object' && typeof x.docId === 'string') : [];
+    const prev = prior.filter(x => x.docId === docId)[0] || {};
+    const STATUSES = ['filed', 'pending_approval', 'accepted', 'needs_revision'];
+    const version = Math.floor(Number(q.version)), prevVersion = Math.floor(Number(prev.version));
+    const total = Number(q.total), prevTotal = Number(prev.total);
+    const entry = {
+      docId,
+      coll: q.coll,
+      quoteNumber: String(prev.quoteNumber || q.quoteNumber || '').slice(0, 80),
+      version: version >= 1 ? version : (prevVersion >= 1 ? prevVersion : 1),
+      total: (q.total != null && isFinite(total)) ? total : (isFinite(prevTotal) ? prevTotal : 0),
+      status: STATUSES.includes(q.status) ? q.status : (STATUSES.includes(prev.status) ? prev.status : 'filed'),
+      filedAt: (typeof prev.filedAt === 'string' && prev.filedAt) ? prev.filedAt : new Date().toISOString(),
+      byName: String(q.byName || prev.byName || '').slice(0, 120)
+    };
+    const patch = {
+      quotes: prior.filter(x => x.docId !== docId).concat([entry]).slice(-50),
+      quoteDocId: docId,
+      lastQuoteAt: FV.serverTimestamp(),
+      updatedAt: FV.serverTimestamp()
+    };
+    if (['new', 'in_review', 'contacted'].includes(existing.status)) {
+      patch.status = 'quoted';
+      patch.statusChangedAt = FV.serverTimestamp();
+      patch.statusChangedBy = currentUser.uid;
+      patch.statusChangedByName = userProfile?.displayName || currentUser.email || '';
+    }
+    await reqRef.update(patch);
+    // the Sales lists cache their rows for 30 s (dbCachedGet): drop the one this request is in so the new status shows at once
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate(sr.kind === 'qr' ? 'qr-list' : 'cir-list');
+    return true;
+  } catch (err) {
+    console.warn('[QB bridge] could not link the quote to its request', err);
+    try { if (typeof Notifs !== 'undefined' && Notifs.showToast) Notifs.showToast('Quote filed; could not update the request link', 'info'); } catch (_) {}
+    return false;
+  }
+};
+
+// §6.5 — "Open request" in the builder's hand-off bar posts QB_OPEN_SOURCE: leave the builder for the Sales tab and the request / brief detail
+// it came from. -> true when the detail was opened. The Sales page paints the tab synchronously (its list loads behind it), so the detail
+// opener can run as soon as navigateTo returns; the currentPage guard stops it painting a request into some other page when the
+// navigation was rewritten (layoff lockdown) or refused.
+window.openQuoteSource = async function (sourceRef) {
+  const sr = _qbCleanSourceRef(sourceRef);
+  if (!sr) return false;
+  if (typeof isPartner === 'function' && isPartner()) return false;
+  const isQr = sr.kind === 'qr';
+  await navigateTo('dept:Sales', { subtab: isQr ? 'Quote requests' : 'Briefs' });
+  const open = isQr ? window.qrOpen : window.cirOpen;
+  if (window.currentPage !== 'dept:Sales' || typeof open !== 'function') return false;
+  open(sr.ref);
+  return true;
+};
+
 // ── Quote Builder iframe → Firestore bridge ───────
 window.addEventListener('message', async (e) => {
   if (e.origin !== window.location.origin) return;  // same-origin only — but that alone doesn't prove it came from the builder
@@ -5104,6 +5229,14 @@ window.addEventListener('message', async (e) => {
   if (_payloadCo === 'BI' && _qbPartner) {
     console.warn('[QB bridge] partner session attempted to file as Barro Industries — refused');
     Notifs?.showToast && Notifs.showToast('Partners cannot quote as Barro Industries.', 'error');
+    return;
+  }
+
+  // QUOTE-BUILDER-CONFIGURATOR-SPEC §6.5: "Open request" in the builder's hand-off bar. No write, so it needs no costSidecar / collection;
+  // openQuoteSource re-validates the ref (kind-pinned pattern) and refuses partner sessions.
+  if (type === 'QB_OPEN_SOURCE') {
+    try { await window.openQuoteSource(payload.sourceRef); }
+    catch (err) { console.warn('[QB bridge] QB_OPEN_SOURCE failed', err); }
     return;
   }
 
@@ -5314,6 +5447,12 @@ window.addEventListener('message', async (e) => {
         commissionAmount:payload.commissionAmount || 0,
         payment:        payload.payment || null,
         editableState:  payload.editableState || null,
+        // QUOTE-BUILDER-CONFIGURATOR-SPEC §3.2 — the link to the website request / brief this quote came from, and the estimate-range check
+        // filed with it. Written ONLY when the builder sent the key (a builder page still cached from before this feature sends neither, and
+        // must not blank a link the quote already has — respondToQuote reads it to move the request to 'converted'); both pass through the
+        // allowlist sanitisers, and a partner session never carries either.
+        ...((!_qbPartner && Object.prototype.hasOwnProperty.call(payload, 'sourceRef')) ? { sourceRef: _qbCleanSourceRef(payload.sourceRef) } : {}),
+        ...((!_qbPartner && Object.prototype.hasOwnProperty.call(payload, 'estimateCheck')) ? { estimateCheck: _qbCleanEstimateCheck(payload.estimateCheck) } : {}),
         // rootQuoteId/parentQuoteId are deliberately NOT touched here — this is
         // the SAME doc being edited, its place in the revision chain doesn't change.
         editedAt:       firebase.firestore.FieldValue.serverTimestamp(),
@@ -5322,6 +5461,9 @@ window.addEventListener('message', async (e) => {
       };
       await db.collection(collection).doc(docId).update(update);
       await saveCostSidecar(collection, docId);   // QUOTE-COSTS — in-place edit refreshes the private cost basis
+      // §8.1 — best-effort, never fails the update: refresh this quote's entry on the request / brief it came from (no status / version /
+      // number given: the entry keeps what filing recorded).
+      await window.linkQuoteToRequest(_qbPartner ? null : payload.sourceRef, { docId, coll: collection, quoteNumber: payload.quoteNumber, total: payload.total, byName: agentName });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
       // QB-DRAFTS-SPEC-2026-09-11 — this session may have also picked up a
       // NAMED draft doc along the way (e.g. saved a draft, then reopened and
@@ -5399,6 +5541,11 @@ window.addEventListener('message', async (e) => {
       payment:        payload.payment || null,
       // Full editable snapshot — lets the quote be re-opened and edited from the Quotations tab
       editableState:  payload.editableState || null,
+      // QUOTE-BUILDER-CONFIGURATOR-SPEC §3.2 — which website request / project brief this quote came from, and the estimate-range check
+      // filed with it (null when there is none). Sanitised to the exact keys; a partner session never carries either. The same `data`
+      // serves QUOTE_FILED and QUOTE_APPROVAL_REQUESTED below, so both paths carry them.
+      sourceRef:      _qbPartner ? null : _qbCleanSourceRef(payload.sourceRef),
+      estimateCheck:  _qbPartner ? null : _qbCleanEstimateCheck(payload.estimateCheck),
       // Wave 3 Q5 — revision-chain links. parentQuoteId is null for a
       // from-scratch quote. rootQuoteId is patched to the new doc's own id
       // below when this is the first-ever filing in its chain (payload didn't
@@ -5458,6 +5605,8 @@ window.addEventListener('message', async (e) => {
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
+      // §8.1 — link the filed quote back onto its website request / brief (best-effort: never fails the filing)
+      await window.linkQuoteToRequest(data.sourceRef, { docId: docRef.id, coll, quoteNumber: data.fileName, version: data.version, total: data.total, status: data.status, byName: agentName });
       await saveCostSidecar(coll, docRef.id);   // QUOTE-COSTS — the filed quote's cost basis, stored privately
       await deleteDraftSlot();
       await deleteNamedDraft();
@@ -5478,6 +5627,8 @@ window.addEventListener('message', async (e) => {
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
       await stampRoot(docRef);
+      // §8.1 — a quote sent for approval is linked too (status 'pending_approval'); best-effort, never fails the request for approval
+      await window.linkQuoteToRequest(data.sourceRef, { docId: docRef.id, coll, quoteNumber: data.fileName, version: data.version, total: data.total, status: data.status, byName: agentName });
       await saveCostSidecar(coll, docRef.id);   // QUOTE-COSTS — same private store on the approval path
       await deleteDraftSlot();
       await deleteNamedDraft();

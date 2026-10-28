@@ -2446,7 +2446,7 @@ window.QUOTE_SHAREABLE_STATUSES = ['filed', 'approved', 'accepted'];
 window.QUOTE_BRANDS = {
   BK: {
     name: 'BARRO KITCHENS', sub: 'By Barro Industries OPC',
-    creds: 'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    creds: 'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
     thanks: 'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
   },
   // Barro Industries — the parent company quoting general fabrication in its
@@ -2455,7 +2455,7 @@ window.QUOTE_BRANDS = {
   // ("In partnership with Barro Industries"), which is exactly backwards.
   BI: {
     name: 'BARRO INDUSTRIES OPC', sub: 'SEC-registered One Person Corporation',
-    creds: 'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    creds: 'Barro Industries OPC  •  SEC Registered  •  hello@barroindustries.com  •  09276836300  •  21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila',
     thanks: 'Thank you for considering Barro Industries. We look forward to fabricating work you can rely on for years.',
   },
   BS: {

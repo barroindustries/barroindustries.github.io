@@ -25,6 +25,8 @@
    window.ProductFamilies (js/product-families.js) — the very same files the server validates with. A configured line is sent as
    { familyId, config, dims, qty, note }; the server re-validates every key and value. The SKUs a family absorbed are no longer cards: a
    draft saved before this change is converted line by line to the closest configuration (a notice says so).
+   STANDARD CONSTRUCTION (owner ruling 2026-10-28): the sheet lists PF.publicGroups(fam) only — the staff-only group (the 1.2 mm top plate) is never shown,
+   kept in the draft or sent — and a read-only "Construction: …" line (PF.constructionLine) says how the made-to-order piece is built.
 
    QA seam: ?mock=1 resolves every call locally (no Firebase init); sim=gate|disabled|ratelimit|error|dup|slow|stale|
    expired|unauth exercises each state. It never reaches a backend and is harmless in production.
@@ -171,6 +173,15 @@
   }
   // A configurable family line: { uid, familyId, name, cat, unit, config, dims, qty, note }. Everything below tells the two kinds apart by `familyId`.
   function isFam(it) { return !!(it && it.familyId); }
+  // The configuration the WEBSITE holds, shows and sends: the PUBLIC option groups only (owner ruling 2026-10-28). A staff-only group — the 1.2 mm top plate — is
+  // never offered here, so it is never kept in the draft or put on the wire: the server fills in its default (the standard 1.5 mm top plate), and the Quote Builder
+  // is the only place a lighter one is chosen. PF.validateLine() hands back EVERY group, so each line the page builds or rebuilds passes through this.
+  function publicConfig(fam, config) {
+    if (!fam || !isObj(config)) return config;
+    var out = {};
+    PF.publicGroups(fam).forEach(function (g) { if (Object.prototype.hasOwnProperty.call(config, g.key)) out[g.key] = config[g.key]; });
+    return out;
+  }
   function famCustom(fam, it) { var d = PF.standardDims(fam, it.config); return Object.keys(d).some(function (k) { return it.dims[k] !== d[k]; }); }
   function lineKey(it) { return isFam(it) ? JSON.stringify([it.familyId, it.dims, PF.canonicalConfig(famById(it.familyId), it.config)]) : JSON.stringify([it.id, it.size, it.runs, it.specs]); }
   // One product, ONE multiplier: the units of a product (qty x runs) across ALL of its lines are capped at LIMITS.maxQtyPerProduct
@@ -235,6 +246,8 @@
     return out;
   }
   // A saved CONFIGURED line: rebuilt from the family definition, never trusted. A line that is no longer valid for its family is dropped (and counted).
+  // Validated PUBLICLY (no staff option): a stored line that asks for a staff-only choice (a 1.2 mm top plate) is not a line this page can have made, so it is
+  // dropped; the standard value is accepted but not kept — the line holds its public options only.
   function sanitizeFamilyItem(raw) {
     var fam = isObj(raw) ? famById(raw.familyId) : null;
     if (!fam) return null;
@@ -243,7 +256,7 @@
     var qty = Number(raw.qty);
     if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || qty > LIMITS.maxQtyPerLine) qty = 1;
     var note = typeof raw.note === 'string' ? raw.note.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, LIMITS.maxNote) : '';
-    return { uid: typeof raw.uid === 'string' ? raw.uid.slice(0, 40) : uid(), familyId: fam.id, name: fam.label, cat: fam.category || '', unit: fam.unit || 'pc', config: v.config, dims: v.dims, qty: qty, note: note };
+    return { uid: typeof raw.uid === 'string' ? raw.uid.slice(0, 40) : uid(), familyId: fam.id, name: fam.label, cat: fam.category || '', unit: fam.unit || 'pc', config: publicConfig(fam, v.config), dims: v.dims, qty: qty, note: note };
   }
   var convertedLines = 0;
   // A line saved by the PREVIOUS page (before the families existed): a fixed item stays as it is; a SKU a family absorbed becomes that family at the
@@ -452,9 +465,9 @@
     var rows = draft.items.map(function (it) { return isFam(it) ? JSON.stringify(['family', it.familyId, it.dims, PF.canonicalConfig(famById(it.familyId), it.config), it.qty]) : JSON.stringify([it.id, it.size, it.runs, it.specs, it.qty]); }).sort();
     return entityNow() + '|' + rows.join('~');
   }
-  function itemPayload(it) { return isFam(it) ? { familyId: it.familyId, config: it.config, dims: it.dims, qty: it.qty, note: it.note } : { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs, note: it.note }; }
+  function itemPayload(it) { return isFam(it) ? { familyId: it.familyId, config: publicConfig(famById(it.familyId), it.config), dims: it.dims, qty: it.qty, note: it.note } : { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs, note: it.note }; }
   // An estimate does not need the free-text note (it never changes a price), and nothing is sent before the visitor agrees to send.
-  function estimateItemPayload(it) { return isFam(it) ? { familyId: it.familyId, config: it.config, dims: it.dims, qty: it.qty } : { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs }; }
+  function estimateItemPayload(it) { return isFam(it) ? { familyId: it.familyId, config: publicConfig(famById(it.familyId), it.config), dims: it.dims, qty: it.qty } : { id: it.id, qty: it.qty, size: it.size, runs: it.runs, specs: it.specs }; }
   function setEst(status, data) { est = { status: status, data: data || null }; renderTray(); if (sheet.kind === 'review' && sheet.refresh) sheet.refresh(); }
   function scheduleEstimate() {
     clearTimeout(estTimer);
@@ -1041,7 +1054,7 @@
     var unitsMsg = function () { return 'You can request up to ' + LIMITS.maxQtyPerProduct + ' of one product in a quote — your list already has ' + others + (room > 0 ? ', which leaves ' + room + '.' : '.'); };
     var usualW0 = existing ? PF.standardDims(fam, existing.config).W : null;
     var st = {
-      config: existing ? clone(existing.config) : PF.defaultConfig(fam),
+      config: publicConfig(fam, existing ? clone(existing.config) : PF.defaultConfig(fam)),       // the public options only: the website never holds a staff-only one (the 1.2 mm top plate)
       dims: existing ? clone(existing.dims) : PF.defaultDims(fam),
       qty: existing ? existing.qty : 1,
       note: existing ? existing.note : '',
@@ -1163,12 +1176,21 @@
       return fs;
     }
 
+    // Only the PUBLIC groups are choices here (PF.publicGroups): the staff-only 1.2 mm top plate is offered in the Quote Builder, never on the website.
     var groupEls = [];
-    fam.groups.forEach(function (g) {
+    PF.publicGroups(fam).forEach(function (g) {
       var node = g.type === 'slots' ? renderSlots(g) : g.type === 'multi' ? renderMulti(g) : renderChoice(g);
       groupEls.push(node);
       f.body.appendChild(node);
     });
+    // The standard construction (owner ruling 2026-10-28), read-only: how this made-to-order piece is built — the top plate, the body, the posts. A few options
+    // change it (a wall-hung cabinet, a rack on wheels), so it follows the choices.
+    if (PF.constructionLine(fam, st.config)) {
+      var constructionText = function () { return 'Construction: ' + PF.constructionLine(fam, st.config); };
+      var constructionEl = el('p', { class: 'qr-hint qr-construction', 'aria-live': 'polite', text: constructionText() });
+      f.body.appendChild(constructionEl);
+      syncers.push(function () { var t = constructionText(); if (constructionEl.textContent !== t) constructionEl.textContent = t; });
+    }
 
     // ── size ──
     var dimFields = {};
@@ -1278,7 +1300,7 @@
       if (!isFinite(qty) || Math.floor(qty) !== qty || qty < 1 || qty > LIMITS.maxQtyPerLine) bad(qtyFld, 'Quantity must be a whole number from 1 to ' + LIMITS.maxQtyPerLine + '.', qtyInput);
       else if (qty + others > LIMITS.maxQtyPerProduct) bad(qtyFld, unitsMsg(), qtyInput);
       if (!ok) { try { if (firstBad.focus) firstBad.focus(); if (firstBad === errBanner) errBanner.scrollIntoView({ block: 'nearest' }); } catch (_) { /* nothing to do */ } return null; }
-      return { uid: existing ? existing.uid : uid(), familyId: fam.id, name: fam.label, cat: fam.category || '', unit: fam.unit || 'pc', config: clone(v.config), dims: clone(v.dims), qty: qty, note: note.value.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, LIMITS.maxNote) };
+      return { uid: existing ? existing.uid : uid(), familyId: fam.id, name: fam.label, cat: fam.category || '', unit: fam.unit || 'pc', config: publicConfig(fam, clone(v.config)), dims: clone(v.dims), qty: qty, note: note.value.replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, LIMITS.maxNote) };
     }
     function commit(it, mode) {
       var tgt = mode === 'merge' ? draft.items.filter(function (x) { return lineKey(x) === lineKey(it) && x.uid !== it.uid; })[0] : null;

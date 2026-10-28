@@ -213,6 +213,8 @@ html.qr-lock,html.qr-lock body{overflow:hidden}
 #qr-root .qr-slot-foot .qr-hint{margin:0}
 #qr-root .qr-dims-2{grid-template-columns:repeat(2,minmax(0,1fr))}
 #qr-root .qr-wide-hint{color:var(--qr-ink)}
+/* the standard construction line (read-only) after the option groups: the same gap below as a group has, so it never sits against the size fields */
+#qr-root .qr-construction{margin:0 0 18px}
 
 /* the preview image: ~4:3, contained on a soft neutral ground, pinned to the top of the sheet so it stays in view while the options below change.
    top:-16px = the sheet body's top padding, so it pins flush under the header (a sticky box is held at the padding's inner edge, which would leave a 16px band for scrolled content to show through).

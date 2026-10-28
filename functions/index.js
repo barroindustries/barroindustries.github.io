@@ -1710,6 +1710,34 @@ exports.respondToQuote = functions
             clientRespondedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
 
+          // QUOTE-BUILDER-CONFIGURATOR-SPEC §8.2 — a quote filed from a website request (kind 'qr') or a project brief (kind 'cir')
+          // carries `sourceRef`: write the client's answer back onto THAT request. Own try/catch (Admin SDK, best-effort): a failure
+          // here is logged and never reaches the client or the notifications below. The ref is shape-checked before it is used as a
+          // document id; the new request status comes from the pure qr.requestStatusAfterResponse (accepted -> converted, never
+          // demoting converted / archived; changes_requested leaves the status alone). The matching quotes[] entry always follows
+          // the quote's own status. A transaction, so a revision filed in the same instant is not overwritten by this read-modify-write.
+          try {
+            const sref = qSnap.data().sourceRef;
+            if (sref && typeof sref === 'object' && (sref.kind === 'qr' || sref.kind === 'cir')
+                && typeof sref.ref === 'string' && /^(QR|CIR)-\d{6}-[A-Z0-9]{6}$/.test(sref.ref)) {
+              const reqRef = db.collection(sref.kind === 'qr' ? 'quote_requests' : 'client_info_requests').doc(sref.ref);
+              await db.runTransaction(async (tx) => {
+                const reqSnap = await tx.get(reqRef);
+                if (!reqSnap.exists) return;
+                const existing = reqSnap.data() || {};
+                const nextStatus = qr.requestStatusAfterResponse(existing.status, newStatus);
+                const patch = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+                if (nextStatus !== existing.status) patch.status = nextStatus;
+                if (Array.isArray(existing.quotes)) {
+                  patch.quotes = existing.quotes.map((q) => (q && q.docId === quoteId ? { ...q, status: internalStatus } : q));
+                }
+                tx.update(reqRef, patch);
+              });
+            }
+          } catch (e) {
+            console.error('[respondToQuote] request link sync failed (client response was already recorded):', e.message);
+          }
+
           // Notify: quote creator + the president (if different).
           const notifyUids = new Set();
           const createdBy = qSnap.data().createdBy;

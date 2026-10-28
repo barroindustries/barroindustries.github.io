@@ -672,6 +672,23 @@ function buildNotification(doc) {
   return { title, body, icon: '🧾', type: 'quote_request', link: 'dept:Sales' };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+//  Quote <-> request link (QUOTE-BUILDER-CONFIGURATOR-SPEC §8.2)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * The status a quote_requests / client_info_requests doc should carry after the CLIENT answers a quote that was filed from it
+ * (respondToQuote, Admin SDK). `current` = the request's status now; `response` = the quote's new client-response status.
+ *   'accepted'          -> 'converted', unless the request is already 'converted' or 'archived' — it is never demoted and never un-archived
+ *   'changes_requested' -> unchanged (a client asking for a revision never moves the request)
+ *   anything else       -> unchanged (fails closed)
+ * Pure; never throws. Returns `current` itself whenever there is nothing to change.
+ */
+function requestStatusAfterResponse(current, response) {
+  if (response !== 'accepted') return current;
+  return current === 'converted' || current === 'archived' ? current : 'converted';
+}
+
 function privacyNoticeSha256() {
   return crypto.createHash('sha256').update(JSON.stringify(PRIVACY_NOTICE.sections)).digest('hex');
 }
@@ -714,5 +731,6 @@ module.exports = {
   createLru,
   buildSummary,
   buildNotification,
+  requestStatusAfterResponse,
   privacyNoticeSha256,
 };

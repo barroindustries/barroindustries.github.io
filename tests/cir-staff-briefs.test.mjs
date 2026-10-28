@@ -394,16 +394,83 @@ describe('Sales › Briefs — Convert to client, Prefill Quote Builder and Prin
     assert.ok(u[2].notes.startsWith('Earlier note\n\nClient brief CIR-261022-ABCDEF'));
   });
 
-  it('Prefill Quote Builder: the client\'s name, organisation, phone, e-mail and the project address (v2) — or the office address (v1)', () => {
-    const S = load();
-    S.ctx.__sub = v2Brief(); S.run('_cirCurrent = __sub');
-    S.call('window.cirPrefillQuote', 'CIR-261022-ABCDEF');
-    assert.deepEqual(JSON.parse(JSON.stringify(S.ctx._qbReopenState)), { clientName: 'Dr. Ana Reyes', clientCompany: 'Reyes Medical Centre', clientAddress: 'Near the old market, Cebu City, Cebu', clientPhone: '0917 555 0101', clientEmail: 'ana@example.test' });
-    assert.ok(S.log.some((l) => l[0] === 'navigateTo' && l[1] === 'bk-quote-builder'));
-    const S1 = load();
-    S1.ctx.__sub = v1Brief(); S1.run('_cirCurrent = __sub');
-    S1.call('window.cirPrefillQuote', 'CIR-260927-ZZZZZZ');
-    assert.equal(S1.ctx._qbReopenState.clientAddress, '1 Main St, Quezon City');
+  // QUOTE-BUILDER-CONFIGURATOR-SPEC §6.2 (2026-10-28): Prefill Quote Builder is a hand-off now — client fields as before PLUS Barro Kitchens (BK), the
+  // Website lead source (WB), the location code and purpose derived by QBConfigured (pure; its tables are pinned in tests/qb-configured.test.mjs),
+  // the sourceRef naming the brief, and handoff:true. A brief has no item list, so the state carries no items. QBConfigured is a lazy script of the
+  // Sales page (js/config.js PAGE_SCRIPTS), loaded into the same context here.
+  describe('Prefill Quote Builder — the hand-off state', () => {
+    const withHelpers = (S) => { vm.runInContext(read('js/qb-configured.js'), S.ctx); return S; };
+    const prefill = (sub, opts) => { const S = withHelpers(load(opts)); S.ctx.__sub = sub; S.run('_cirCurrent = __sub'); S.call('window.cirPrefillQuote', sub.id); return S; };
+
+    it('project brief (v2): the client fields, the project address, BK + WB, the location code from "City, Province", the purpose from the project type, the sourceRef and handoff:true — no items', () => {
+      const S = prefill(v2Brief());
+      assert.deepEqual(plain(S.ctx._qbReopenState), {
+        clientName: 'Dr. Ana Reyes', clientCompany: 'Reyes Medical Centre', clientAddress: 'Near the old market, Cebu City, Cebu', clientPhone: '0917 555 0101', clientEmail: 'ana@example.test',
+        currentCo: 'BK', qnoMethod: 'WB', qnoLoc: 'CB', purpose: 'Hospital / Institutional', handoff: true,
+        sourceRef: { kind: 'cir', ref: 'CIR-261022-ABCDEF', projectType: 'Hospital or clinic', budget: '', targetDate: '6 to 12 months', photosCount: 2, estimate: null },
+      });
+      assert.ok(!('items' in S.ctx._qbReopenState), 'a brief has no item list');
+      assert.equal(S.ctx._qbReopenAsRevision, false);
+      assert.deepEqual(S.log.filter((l) => l[0] === 'navigateTo'), [['navigateTo', 'bk-quote-builder']]);
+      assert.ok(S.log.some((l) => l[0] === 'toast' && l[1] === 'success'));
+    });
+
+    it('old commissary brief (v1): the client\'s OWN office address, the site address for the location code, the business type for the purpose, the budget the client chose', () => {
+      const S = prefill(v1Brief());
+      assert.deepEqual(plain(S.ctx._qbReopenState), {
+        clientName: 'Joseph Asis', clientCompany: 'Chibab Foods', clientAddress: '1 Main St, Quezon City', clientPhone: '0917 000 0000', clientEmail: 'j@example.test',
+        currentCo: 'BK', qnoMethod: 'WB', qnoLoc: 'ML', purpose: 'Hotel Restaurant', handoff: true,
+        sourceRef: { kind: 'cir', ref: 'CIR-260927-ZZZZZZ', projectType: 'Hotel or resort', budget: '₱1M – ₱3M', targetDate: '2026-12-01', photosCount: 0, estimate: null },
+      });
+      assert.equal(S.ctx._qbReopenState.clientAddress, '1 Main St, Quezon City');
+    });
+
+    it('a hospital brief opens as "Hospital / Institutional"; every project type lands on the pinned purpose (bakery has no builder equivalent -> Other)', () => {
+      const WANT = { restaurant: 'Restaurant', cafe: 'Cafe / Coffee Shop', bakery: 'Other', commissary: 'Catering / Food Service', hotel: 'Hotel Restaurant', catering: 'Catering / Food Service',
+        hospital: 'Hospital / Institutional', school: 'Hospital / Institutional', laboratory: 'Hospital / Institutional', government: 'Government / Bidding', home: 'Residential', other: 'Other' };
+      assert.deepEqual(Object.keys(WANT).sort(), TYPES.slice().sort(), 'the table must cover exactly the project types the form offers');
+      for (const [type, purpose] of Object.entries(WANT)) {
+        const sub = v2Brief(); sub.answers.project_type = type;     // the screen reads the stored answer; the part-validation is the server\'s job
+        assert.equal(prefill(sub).ctx._qbReopenState.purpose, purpose, type);
+      }
+      assert.equal(prefill(v2Brief()).ctx._qbReopenState.purpose, 'Hospital / Institutional');
+    });
+
+    it('the old form\'s free-text business type is keyword-scanned; an unknown one is "Other"', () => {
+      const t = (biz) => { const sub = v1Brief(); sub.summary.bizType = biz; sub.answers.biz_type = biz; return prefill(sub).ctx._qbReopenState.purpose; };
+      assert.equal(t('Hotel or resort'), 'Hotel Restaurant');
+      assert.equal(t('Cafe / coffee shop'), 'Cafe / Coffee Shop');
+      assert.equal(t('Fast food chain'), 'Restaurant');
+      assert.equal(t('Private hospital'), 'Hospital / Institutional');
+      assert.equal(t('LGU kitchen'), 'Government / Bidding');
+      assert.equal(t('Central commissary'), 'Catering / Food Service');
+      assert.equal(t('Something unusual'), 'Other');
+      assert.equal(t(''), 'Other');
+      const thin = v1Brief(); thin.summary.bizType = '';                       // a thin summary falls back to the stored answer, like the rest of the screen
+      assert.equal(prefill(thin).ctx._qbReopenState.purpose, 'Hotel Restaurant');
+    });
+
+    it('the location code follows the project place (and falls back to OT); the address handed over is unchanged', () => {
+      const t = (over) => { const sub = v2Brief(); Object.assign(sub.summary, over); return prefill(sub).ctx._qbReopenState.qnoLoc; };
+      assert.equal(t({ location: 'Quezon City, Metro Manila' }), 'ML');
+      assert.equal(t({ location: 'San Fernando, La Union' }), 'LU');
+      assert.equal(t({ location: 'Baguio City, Benguet' }), 'BG');
+      assert.equal(t({ location: 'Nowhere Town, Elsewhere' }), 'OT');
+      assert.equal(t({ location: '', siteAddress: 'Subic Bay Freeport' }), 'SB');
+    });
+
+    it('a reference that is not a real one gets no sourceRef (the hand-off still opens); the secretary, a non-open brief or a missing helper open nothing', () => {
+      const bad = v2Brief(); bad.id = 'CIR-1-X';
+      const S = prefill(bad); assert.ok(!('sourceRef' in S.ctx._qbReopenState)); assert.equal(S.ctx._qbReopenState.handoff, true);
+      const sec = prefill(v2Brief(), { role: 'secretary', depts: ['Sales'] }); assert.equal(sec.ctx._qbReopenState, undefined);
+      assert.deepEqual(sec.log.filter((l) => l[0] === 'navigateTo'), []);
+      const other = withHelpers(load()); other.ctx.__sub = v2Brief(); other.run('_cirCurrent = __sub'); other.call('window.cirPrefillQuote', 'CIR-261022-ZZZZZZ');
+      assert.equal(other.ctx._qbReopenState, undefined);
+      const nohelp = load(); nohelp.ctx.__sub = v2Brief(); nohelp.run('_cirCurrent = __sub'); nohelp.call('window.cirPrefillQuote', 'CIR-261022-ABCDEF');
+      assert.equal(nohelp.ctx._qbReopenState, undefined, 'without the helpers the location code and purpose cannot be derived');
+      assert.deepEqual(nohelp.log.filter((l) => l[0] === 'navigateTo'), []);
+      assert.ok(nohelp.log.some((l) => l[0] === 'toast' && l[1] === 'error' && /reload/.test(l[2])));
+    });
   });
 
   it('Print: "PROJECT BRIEF" with the type in the letterhead for a v2 brief, "CLIENT INFORMATION REQUEST" for a v1 brief, each with the consent line of the notice it ticked', async () => {

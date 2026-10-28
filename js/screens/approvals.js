@@ -47,6 +47,10 @@
      screen's Quote Approvals tab (and by svc-approvals.js's
      'quote-approval' registry entry, which calls them as bare globals
      — same runtime-only resolution pattern).
+   - window.syncQuoteStatusToRequest (2026-10-28) — after any of the four
+     approve / return writes below, mirrors the quote's new status onto its
+     entry in the website request / brief it was started from (best-effort,
+     `quotes` + `updatedAt` only; see the comment above the function).
 
    8-point treatment: verified intact post-move, no stragglers found.
    1. chipTabs — window.chipTabs/bindChipTabs already used throughout;
@@ -1443,6 +1447,53 @@ window.renderApprovals = async function(currentUser) {
   loadApprovalsSub('all');
 };
 
+// ── Website-request status sync (specs/QUOTE-BUILDER-CONFIGURATOR-SPEC.md §8) ──────────────────────────────────────────
+// A quote that was started from a website quote request ("QR-yymmdd-XXXXXX") or project brief ("CIR-yymmdd-XXXXXX") carries `sourceRef: { kind, ref }`, and
+// filing it (or sending it for approval) wrote an entry for it into that request's `quotes[]` (js/app.js linkQuoteToRequest). When the President or a Manager
+// then approves the quote, or returns it for revision, HERE, the quote's own status changes — and its entry on the request has to follow, or the request keeps
+// showing "Awaiting approval" for a quote that is long since filed.
+//   state  the quote state just written to the quote doc, as window.quoteStateFields knows it: 'approved' (the doc's status is then 'filed'), 'needs_revision', 'rejected'
+//   -> true when an entry was updated; false for everything else (no link on the quote, a request that is gone, no entry for this quote, nothing to change).
+//   BEST-EFFORT: it never throws and never blocks an approval — a failed read or write (offline, the rules not deployed yet) is logged and toasted, and the approval
+//   it follows has already been saved. It writes ONLY `quotes` and `updatedAt` (both on the firestore.rules allowlist of the two request collections) and NEVER the
+//   request's own status, `quoteDocId` or `lastQuoteAt`: it changes the status of an entry that filing already created and creates none (so a forged sourceRef on a
+//   quote cannot plant an entry on someone else's request), and it never moves the request itself along (filing did that; the staff and the client own the rest).
+window.syncQuoteStatusToRequest = async function (coll, quoteId, state) {
+  try {
+    const qs = typeof window.quoteStateFields === 'function' ? window.quoteStateFields(state) : null;
+    const status = qs && qs.status;
+    if (!Array.isArray(window.QUOTE_COLLECTIONS) || !window.QUOTE_COLLECTIONS.includes(coll)) return false;
+    if (typeof quoteId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(quoteId)) return false;
+    if (!['filed', 'pending_approval', 'accepted', 'needs_revision', 'rejected'].includes(status)) return false;
+    const qSnap = await db.collection(coll).doc(quoteId).get();
+    const sr = (qSnap.data() || {}).sourceRef;                       // a quote that is gone has no data(): nothing to follow
+    // the same shape js/app.js _qbCleanSourceRef enforces when the link is filed: a kind, and a reference of THAT kind's pattern (so the write below can only
+    // ever land on the matching request collection)
+    const REF_RE = { qr: /^QR-\d{6}-[A-Z0-9]{6}$/, cir: /^CIR-\d{6}-[A-Z0-9]{6}$/ };
+    const kind = (sr && typeof sr === 'object') ? sr.kind : '', ref = (sr && typeof sr === 'object') ? sr.ref : '';
+    if ((kind !== 'qr' && kind !== 'cir') || typeof ref !== 'string' || !REF_RE[kind].test(ref)) return false;
+    const reqRef = db.collection(kind === 'qr' ? 'quote_requests' : 'client_info_requests').doc(ref);
+    const snap = await reqRef.get();
+    const reqData = snap.data() || {};                                 // a request that is gone (erased) has no data(), so no entries: nothing to change
+    const quotes = Array.isArray(reqData.quotes) ? reqData.quotes : [];
+    let changed = false;
+    const next = quotes.map(x => {
+      if (!x || typeof x !== 'object' || x.docId !== quoteId || x.status === status) return x;
+      changed = true;
+      return Object.assign({}, x, { status });
+    });
+    if (!changed) return false;
+    await reqRef.update({ quotes: next, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    // the Sales lists cache their rows for 30 s (dbCachedGet): drop the one this request is in so the new status shows at once
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate(kind === 'qr' ? 'qr-list' : 'cir-list');
+    return true;
+  } catch (err) {
+    console.warn('[approvals] could not sync the quote status to its website request', err);
+    try { if (typeof Notifs !== 'undefined' && Notifs.showToast) Notifs.showToast('Quote updated; could not update the request link', 'info'); } catch (_) {}
+    return false;
+  }
+};
+
 // ── Partner quote-approval helpers (shared by Approvals page) ──────────
 // Approve a partner-submitted quote: file it + resolve its approval request + notify.
 async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
@@ -1452,6 +1503,7 @@ async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
     await db.collection(coll).doc(quoteId).update({
       ...window.quoteStateFields('approved'),
       approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
+    await window.syncQuoteStatusToRequest(coll, quoteId, 'approved');   // best-effort: the website request this quote came from follows its status
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
     if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
@@ -1468,6 +1520,7 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
     const upd={ ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid };
     if(notes) upd.presidentNotes=notes;
     await db.collection(coll).doc(quoteId).update(upd);
+    await window.syncQuoteStatusToRequest(coll, quoteId, 'needs_revision');   // best-effort: the website request this quote came from follows its status
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
     if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned', link: coll==='bk_quotes'?'bk-quotations':'bs-quotations' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
@@ -1603,6 +1656,7 @@ async function openQuoteApprovalReview(ctx, onDone){
     const e=getEdits();
     try{
       await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('approved'), approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
+      await window.syncQuoteStatusToRequest(QC, quoteId, 'approved');   // best-effort: the website request this quote came from follows its status
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
       if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
@@ -1615,6 +1669,7 @@ async function openQuoteApprovalReview(ctx, onDone){
     const e=getEdits();
     try{
       await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });
+      await window.syncQuoteStatusToRequest(QC, quoteId, 'needs_revision');   // best-effort: the website request this quote came from follows its status
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
       if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned', link: QC==='bk_quotes'?'bk-quotations':'bs-quotations' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });

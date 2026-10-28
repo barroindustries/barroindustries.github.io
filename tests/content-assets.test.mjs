@@ -47,6 +47,10 @@ const ADDRESS = '21 Capricorn St., Tandang Sora, Quezon City, 1116 Metro Manila,
 const PHONE = '0927 683 6300';
 const EMAIL = 'hello@barroindustries.com';
 const MSGR = 'https://m.me/barrokitchens';
+// the standard construction (owner ruling 2026-10-28), always scoped to MADE-TO-ORDER pieces: the website's /products/ hub sentence (also on the catalogue PDF's and the
+// company profile PDF's materials pages) and the llms.txt key fact. A bought-in item keeps its own catalogue note.
+const HUB_CONSTRUCTION = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
+const LLMS_CONSTRUCTION = '- Construction: made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving 1.2 mm; square-tube posts with adjustable bullet feet.';
 const FB = 'https://www.facebook.com/barrokitchens';
 const PLACES = ['Ilocos Sur', 'La Union', 'Baguio', 'La Trinidad', 'Tarlac', 'Pampanga', 'Bulacan', 'Iba', 'Subic', 'Manila', 'Cavite', 'Laguna', 'Batangas'];
 // pages another agent is building now (2026-10-22): they may not exist yet, but links to them are intended
@@ -190,6 +194,15 @@ describe('llms.txt: what an AI assistant should know about the business', () => 
     assert.deepEqual([...new Set([...txt.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g)].map((m) => m[0].toLowerCase()))], [EMAIL]);
     assert.deepEqual([...new Set([...txt.matchAll(/(?:\+?63[\s-]?|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}/g)].map((m) => m[0].replace(/\D/g, '').replace(/^63/, '0')))], ['09276836300']);
     assert.ok(!/\b(Barangay|Brgy|Makati|Pasig|Taguig|Cebu|Davao)\b/.test(txt), 'another address');
+  });
+
+  it('states the standard construction as a key fact, right after Materials: made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving 1.2 mm; square-tube posts with adjustable bullet feet — scoped to made-to-order pieces, as on the website', () => {
+    const at = lines.indexOf('- Materials: food-grade SS304 stainless steel as standard; laboratory-grade SS316 on request.');
+    assert.ok(at > 0 && lines.indexOf('Key facts:') > 0 && lines.indexOf('Key facts:') < at, 'the Materials key fact');
+    assert.equal(lines[at + 1], LLMS_CONSTRUCTION, 'the Construction key fact must follow the Materials line');
+    assert.equal(lines.filter((l) => /top plate/.test(l)).length, 1, 'said once');
+    assert.ok(/made-to-order/.test(LLMS_CONSTRUCTION) && !/\b(fryers?|ovens?|refrigerat\w+)\b/i.test(txt.split('\n').filter((l) => /top plate/.test(l)).join(' ')), 'scoped to made-to-order pieces; no claim for bought-in equipment');
+    assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(txt), 'the lighter top plate is chosen by staff in the Quote Builder only; the website says only the standard');
   });
 
   it('carries no amount, no banned name, no old contact detail, no system, no superlative, no project count, no client but DMMMSU and ISPSC, in British spelling', () => {
@@ -837,9 +850,9 @@ describe('the PDF text extractor reads what Chrome writes', () => {
 const MAX_BYTES = 8 * 1024 * 1024;
 const DOCS = [
   { key: 'company profile', file: 'downloads/barro-industries-company-profile.pdf', pages: [10, 14], title: 'Company profile | Barro Industries',
-    must: ['Premium stainless-steel kitchens, built to order in Metro Manila.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens'] },
+    must: ['Premium stainless-steel kitchens, built to order in Metro Manila.', 'Barro Industries OPC', 'well known as Barro Kitchens', '23 years', 'began as a family business in Baguio City and La Union', 'Quezon City', 'Excellence', 'Integrity', 'People first', 'Growth', 'Building the Future, Brick by Brick.', 'Exhaust & fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'Consultation & site visit', 'After-sales support', 'SS304', 'SS316', 'brushed', 'mirror', 'satin', 'welded and ground smooth', 'Restaurants', 'Cafés', 'Hotels', 'Hospitals', 'Schools and laboratories', 'Commissaries', 'Government and LGUs', 'Homes', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'PhilGEPS-registered', 'SEC-registered', 'VAT-registered', '6-month service warranty', '12 months of preventive maintenance service (PMS) with KitchenShield™', 'm.me/barrokitchens', HUB_CONSTRUCTION] },
   { key: 'catalogue', file: 'downloads/barro-industries-catalogue.pdf', pages: [16, 24], title: 'Product catalogue | Barro Industries',
-    must: ['Stainless-steel kitchen equipment, made to order.', 'Preparation table', 'Sink', 'Stove', 'Cabinet', 'Wall shelving', 'Rack', 'Layouts at a glance', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Default sizes are in millimetres', 'food-grade SS304', 'laboratory-grade SS316'] },
+    must: ['Stainless-steel kitchen equipment, made to order.', 'Preparation table', 'Sink', 'Stove', 'Cabinet', 'Wall shelving', 'Rack', 'Layouts at a glance', 'Exhaust and fresh-air systems', 'LPG gas line installation', 'Kitchen fire suppression', 'A standard example', 'A 4-metre SS304 stainless-steel range hood with filters, lighting and integrated switch controls', 'A 10-metre rectangular duct of fully welded BI sheet, powered by a 3HP centrifugal blower', 'A 15-metre GI (galvanised iron) duct system with a 3HP blower', 'A secured cage designed to hold four 50 kg gas tanks', 'A 16 L wet chemical tank', 'These dimensions and specifications are standard examples and are not exhaustive', 'Online quote request', 'Project brief', 'Message us', 'No account is needed', 'Default sizes are in millimetres', 'food-grade SS304', 'laboratory-grade SS316', HUB_CONSTRUCTION] },
   { key: 'portfolio', file: 'downloads/barro-industries-portfolio.pdf', pages: [8, 12], title: 'Portfolio | Barro Industries',
     must: ['Completed kitchens and stainless-steel installations.', 'ISPSC 2026', 'Ilocos Sur Polytechnic State College (ISPSC)', 'Stainless-steel laboratory and kitchen work tables, sinks, gas ranges and exhaust hoods, fabricated and installed in a school room (March 2026).', 'DMMMSU 2022–2023', 'Don Mariano Marcos Memorial State University (DMMMSU)', 'Stainless-steel equipment delivered and installed on campus in La Union (March 2023 – December 2025).', 'Restaurant kitchen, Bulacan', 'Shown without the client’s name', 'La Union', 'Bulacan', 'KitchenShield™'] },
 ];
@@ -874,7 +887,8 @@ for (const d of DOCS) {
         assert.equal(lines[lines.length - 1], String(i + 1), `page ${i + 1}: the page number`);
         assert.ok(pages[i].includes('barroindustries.com'), `page ${i + 1}: the website address`);
       }
-      assert.ok(/Barro Industries/i.test(pages[0]) && /Barro Kitchens/i.test(pages[0]), 'the cover carries both names');
+      // compared without spaces: a letter-spaced line ("BARRO KITCHENS™") is read out of the PDF as one text run by one Chrome and as one run per word by another
+      assert.ok(compact(pages[0]).includes('barroindustries') && compact(pages[0]).includes('barrokitchens'), 'the cover carries both names');
     });
 
     it('is copyright-marked (owner approved 2026-10-22): "© 2026 Barro Industries OPC · barroindustries.com" on EVERY page, cover included, and on the back page the sentence that the photos, designs and content are ours and may not be copied or reused without written permission', () => {
@@ -942,6 +956,17 @@ for (const d of DOCS) {
     it('says everything it is designed to say', () => {
       for (const m of d.must) assert.ok(comp.includes(compact(m)), `the ${d.key} does not say "${m}"`);
     });
+
+    if (d.key !== 'portfolio') {
+      it('says the standard construction on its "Two grades, three finishes" page, word for word as the website\'s /products/ hub does (owner ruling 2026-10-28), scoped to made-to-order pieces', () => {
+        assert.ok(visibleText(read('products/index.html')).includes(HUB_CONSTRUCTION), 'the website hub no longer says the sentence this PDF repeats');
+        const page = pages.find((p) => compact(p).includes('twogradesthreefinishes'));
+        assert.ok(page, 'no "Two grades, three finishes" page');
+        assert.ok(compact(page).includes(compact(HUB_CONSTRUCTION)), 'the materials page lacks the construction sentence');
+        assert.ok(/^Made-to-order/.test(HUB_CONSTRUCTION));
+        assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(flat), 'the lighter top plate is chosen by staff in the Quote Builder only; a PDF says only the standard');
+      });
+    }
   });
 }
 
@@ -968,6 +993,33 @@ describe('catalogue PDF: the website\'s products, notes and specifications in fu
       assert.ok(comp.includes(compact(c.lead)), `the PDF lacks the description of ${c.name}`);
       for (const [k, v] of c.specs) { if (k === 'Size') continue; assert.ok(comp.includes(compact(k)) && comp.includes(compact(v)), `${c.name}: the option "${k}: ${v}" is missing`); }
     }
+  });
+
+  it('shows the Construction row of each of the six configurable products on the product\'s own page — the website card\'s own words, in full, the family\'s construction line at its defaults — between its Size and Material rows', () => {
+    const PFm = require(path.join(ROOT, 'js/product-families.js'));
+    const QFm = require(path.join(ROOT, 'js/qr-families.js'));
+    const pages = fs.existsSync(pdf) ? pdfPages(pdf).map(compact) : [];
+    assert.equal(cards.filter((c) => c.family).length, 6);
+    for (const c of cards.filter((x) => x.family)) {
+      const fam = QFm.families[c.family];
+      const row = c.specs.find(([k]) => k === 'Construction');
+      assert.ok(row, `${c.name}: the website card has no Construction row`);
+      assert.equal(row[1], PFm.constructionLine(fam, PFm.defaultConfig(fam)), `${c.name}: the card's Construction row`);
+      const page = pages.find((p) => p.includes('configurableproduct') && p.includes(compact(c.lead)));
+      assert.ok(page, `the PDF has no page for ${c.name}`);
+      const at = page.indexOf(compact('Construction' + row[1]));
+      assert.ok(at > 0, `${c.name}: the Construction row is not shown in full on its page`);
+      assert.ok(page.indexOf(compact('Size' + 'Made to your')) > 0 && page.indexOf(compact('Size' + 'Made to your')) < at, `${c.name}: Size comes before Construction`);
+      const material = c.specs.find(([k]) => k === 'Material')[1];
+      assert.ok(page.indexOf(compact('Material' + material)) > at, `${c.name}: Material comes after Construction`);
+    }
+  });
+
+  it('keeps Construction out of the "You choose" column of the materials table: it is how a piece is built, not something the buyer chooses', () => {
+    const page = (fs.existsSync(pdf) ? pdfPages(pdf) : []).find((p) => compact(p).includes('thesixconfigurableproductsataglance'));
+    assert.ok(page, 'no materials page');
+    assert.ok(compact(page).includes(compact('sinks, sink position, undershelf, upper shelf, faucet')), 'the sink row of the table');
+    assert.ok(!/,\s*construction\b/i.test(page) && !/^construction\b/im.test(page), 'Construction is listed as a choice');
   });
 
   it('shows every fixed item with ITS OWN code, name, size line, notes (in full) and specification lines — checked inside the item\'s own block of the PDF, so a note that two items share cannot hide a change to one of them', () => {

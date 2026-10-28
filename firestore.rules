@@ -333,8 +333,9 @@ service cloud.firestore {
       allow create, delete: if false;
       allow update: if isAuth() && cirWriter()
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status','statusChangedAt','statusChangedBy','statusChangedByName','convertedClientId','convertedAt','convertedBy','updatedAt'])
-        && request.resource.data.get('status','') in ['new','in_review','contacted','converted','archived']
+             .hasOnly(['status','statusChangedAt','statusChangedBy','statusChangedByName','convertedClientId','convertedAt','convertedBy','quoteDocId','quotes','lastQuoteAt','updatedAt'])
+        && request.resource.data.get('status','') in ['new','in_review','contacted','quoted','converted','archived']
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['quotes']) || (request.resource.data.get('quotes', []) is list && request.resource.data.get('quotes', []).size() <= 50))
         // Attribution fields must name the real writer when set, else forgeable.
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['statusChangedBy']) || request.resource.data.statusChangedBy == request.auth.uid)
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
@@ -355,8 +356,9 @@ service cloud.firestore {
       allow create, delete: if false;
       allow update: if isAuth() && cirWriter()
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status','statusChangedAt','statusChangedBy','statusChangedByName','convertedClientId','convertedAt','convertedBy','quoteDocId','updatedAt'])
+             .hasOnly(['status','statusChangedAt','statusChangedBy','statusChangedByName','convertedClientId','convertedAt','convertedBy','quoteDocId','quotes','lastQuoteAt','updatedAt'])
         && request.resource.data.get('status','') in ['new','in_review','quoted','converted','archived']
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['quotes']) || (request.resource.data.get('quotes', []) is list && request.resource.data.get('quotes', []).size() <= 50))
         // Attribution fields must name the real writer when set, else forgeable.
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['statusChangedBy']) || request.resource.data.statusChangedBy == request.auth.uid)
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['convertedBy']) || request.resource.data.convertedBy == request.auth.uid);
@@ -1434,7 +1436,9 @@ service cloud.firestore {
     // must not change the figures (options / size) in the same write, so a changed figure always needs a fresh approval. A sheet can only be
     // created under one of the six family ids (a stray document can never crowd a real one out). No delete.
     match /product_pricing/{familyId} {
-      allow read: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance());
+      // 2026-10-28 QUOTE-BUILDER-CONFIGURATOR-SPEC §2.4: the quote builder prices options live for the same Sales tier that already
+      // sees the per-line build-up on Sales › Quote requests (cirWriter). Writes stay finance-tier; partners and the secretary never.
+      allow read: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance() || cirWriter());
       allow create: if isAuth() && !isPartner() && (isSeniorAdmin() || canFinance())
         && familyId in ['prep_table', 'sink', 'stove', 'cabinet', 'wall_shelf', 'rack']
         && request.resource.data.get('approved', false) == false;

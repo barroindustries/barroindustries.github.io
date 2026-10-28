@@ -14,6 +14,10 @@
    file the owner picks from his own computer (private/family-pricing.seed.json, written by scripts/derive-family-pricing.js and never
    committed) and writes UNAPPROVED sheets.
 
+   A STAFF-ONLY option (QUOTE-BUILDER-CONFIGURATOR-SPEC §14, owner ruling 2026-10-28: the 1.2 mm top plate of tables, sinks and stoves) is priced here like any
+   other option, with a caption saying it is offered in the Quote Builder only; the amount is the SIGNED amount added for the non-standard choice (a
+   negative number, or 0). "Try a configuration" validates in staff mode so Finance can price it.
+
    Gating mirrors firestore.rules `product_pricing` exactly: president / manager / finance role, or a non-secretary member of the Finance
    department. Partners and the secretary never see it. Import is President-only (UI rule; the Firestore rule is the finance tier).
 
@@ -218,7 +222,9 @@
         var g = window.ProductFamilies.groupOf(fam, c.group);
         var what = g.type === 'slots' ? 'Cost of ONE ' + ((g.unit && g.unit.one) || 'position') + ' of each type (the standard ' + escHtml((g.default || []).length) + '-position layout is the zero point)'
           : g.type === 'multi' ? 'Amount each add-on adds' : 'Amount added when this is chosen instead of the standard option';
-        rows += '<tr class="fp-grp"><td colspan="5" style="background:var(--surface-2,#f4f5f7)"><strong>' + escHtml(c.groupLabel) + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + what + '</span></td></tr>';
+        // a staff-only option (the 1.2 mm top plate, owner ruling 2026-10-28) is priced here like any other, but a visitor to the website can never choose it
+        var staffNote = g.staffOnly === true ? ' <span class="fp-staffonly" style="font-size:11px;color:var(--text-muted)">· Staff-only option — offered in the Quote Builder, never on the website</span>' : '';
+        rows += '<tr class="fp-grp"><td colspan="5" style="background:var(--surface-2,#f4f5f7)"><strong>' + escHtml(c.groupLabel) + '</strong> <span style="font-size:11px;color:var(--text-muted)">' + what + '</span>' + staffNote + '</td></tr>';
       }
       if (c.baseline) {
         rows += '<tr><td>' + escHtml(c.label) + (c.hint ? ' <span style="font-size:11px;color:var(--text-muted)">(' + escHtml(c.hint) + ')</span>' : '') + '</td><td colspan="4" style="color:var(--text-muted);font-size:12px">Standard option — adds nothing</td></tr>';
@@ -473,7 +479,7 @@
     });
     var dims = {};
     [].slice.call(box.querySelectorAll('.fp-try-dim')).forEach(function (inp) { dims[inp.getAttribute('data-k')] = Number(inp.value); });
-    var v = PF.validateLine(fam, cfg, dims);
+    var v = PF.validateLine(fam, cfg, dims, { staff: true });      // STAFF mode: Finance can price the staff-only 1.2 mm top plate too
     if (!v.ok) { show('<span style="color:var(--danger,#b42318)">' + v.errors.map(escHtml).join(' ') + '</span>'); return; }
     var r = fpCollect(fid);
     if (r.invalid.length) { show('<span style="color:var(--danger,#b42318)">Fix the amounts that are not numbers first.</span>'); return; }

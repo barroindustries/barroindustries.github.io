@@ -10,7 +10,7 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   return {
-    "version": 1,
+    "version": 2,
     "order": [
       "prep_table",
       "sink",
@@ -25,6 +25,7 @@
         "label": "Preparation table",
         "category": "preparation",
         "description": "Stainless steel worktable. Choose one to three layers and up to two upper shelves, then set your own size.",
+        "construction": "SS304 stainless steel · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet",
         "primary": "PW-001",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -75,6 +76,29 @@
                 "v": 2,
                 "l": "2",
                 "s": "2 upper shelves"
+              }
+            ]
+          },
+          {
+            "key": "top",
+            "label": "Top plate",
+            "type": "choice",
+            "default": 1.5,
+            "staffOnly": true,
+            "options": [
+              {
+                "v": 1.5,
+                "l": "1.5 mm (16 ga)",
+                "s": "1.5 mm top",
+                "c": "1.5 mm (16 ga) top plate",
+                "hint": "Standard"
+              },
+              {
+                "v": 1.2,
+                "l": "1.2 mm",
+                "s": "1.2 mm top",
+                "c": "1.2 mm top plate (lighter)",
+                "hint": "Lighter"
               }
             ]
           }
@@ -160,6 +184,7 @@
         "label": "Sink",
         "category": "washing",
         "description": "Stainless steel sink table. Choose one to four sinks, their position, the shelves and the faucet, then set your own size.",
+        "construction": "SS304 stainless steel · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet",
         "primary": "PW-004",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -266,6 +291,29 @@
                 "v": "prerinse",
                 "l": "Pre-rinse spray",
                 "s": "pre-rinse faucet"
+              }
+            ]
+          },
+          {
+            "key": "top",
+            "label": "Top plate",
+            "type": "choice",
+            "default": 1.5,
+            "staffOnly": true,
+            "options": [
+              {
+                "v": 1.5,
+                "l": "1.5 mm (16 ga)",
+                "s": "1.5 mm top",
+                "c": "1.5 mm (16 ga) top plate",
+                "hint": "Standard"
+              },
+              {
+                "v": 1.2,
+                "l": "1.2 mm",
+                "s": "1.2 mm top",
+                "c": "1.2 mm top plate (lighter)",
+                "hint": "Lighter"
               }
             ]
           }
@@ -441,6 +489,7 @@
         "label": "Stove",
         "category": "cooking",
         "description": "Gas range built to your layout. Choose each burner position one by one, add a griller, griddle, oven or fryer, then set your own size.",
+        "construction": "SS304 stainless steel · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet",
         "primary": "CE-001",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -540,6 +589,29 @@
                 "l": "Fryer",
                 "s": "fryer",
                 "w": 350
+              }
+            ]
+          },
+          {
+            "key": "top",
+            "label": "Top plate",
+            "type": "choice",
+            "default": 1.5,
+            "staffOnly": true,
+            "options": [
+              {
+                "v": 1.5,
+                "l": "1.5 mm (16 ga)",
+                "s": "1.5 mm top",
+                "c": "1.5 mm (16 ga) top plate",
+                "hint": "Standard"
+              },
+              {
+                "v": 1.2,
+                "l": "1.2 mm",
+                "s": "1.2 mm top",
+                "c": "1.2 mm top plate (lighter)",
+                "hint": "Lighter"
               }
             ]
           }
@@ -759,6 +831,7 @@
         "label": "Cabinet",
         "category": "storage",
         "description": "Stainless steel storage cabinet, floor-standing or wall-hung. Choose the doors and the shelves inside, then set your own size.",
+        "construction": "SS304 stainless steel · 1.2 mm body, doors and shelves · {type}",
         "primary": "PW-015",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -772,12 +845,14 @@
               {
                 "v": "floor",
                 "l": "Floor-standing",
-                "s": "floor-standing"
+                "s": "floor-standing",
+                "c": "square-tube posts with adjustable bullet feet"
               },
               {
                 "v": "wall",
                 "l": "Wall-hung",
-                "s": "wall-hung"
+                "s": "wall-hung",
+                "c": "wall-hung"
               }
             ]
           },
@@ -896,6 +971,7 @@
         "label": "Wall shelving",
         "category": "storage",
         "description": "Stainless steel shelving fixed to the wall. Choose one to three tiers and a solid or slotted surface, then set your own size.",
+        "construction": "SS304 stainless steel · 1.2 mm shelves · fixed to the wall",
         "primary": "PW-023",
         "unit": "pc",
         "sizeBasis": "linear",
@@ -992,6 +1068,7 @@
         "label": "Rack",
         "category": "storage",
         "description": "Stainless steel dish and storage rack. Choose three to six tiers, with or without wheels, then set your own size.",
+        "construction": "SS304 stainless steel · 1.2 mm shelves · square-tube frame · {wheels}",
         "primary": "PW-010",
         "unit": "pc",
         "sizeBasis": "primary",
@@ -1033,12 +1110,14 @@
               {
                 "v": true,
                 "l": "With",
-                "s": "on wheels"
+                "s": "on wheels",
+                "c": "on wheels"
               },
               {
                 "v": false,
                 "l": "Without",
-                "s": "without wheels"
+                "s": "without wheels",
+                "c": "adjustable bullet feet"
               }
             ]
           }
