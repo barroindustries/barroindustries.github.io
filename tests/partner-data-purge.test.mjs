@@ -25,7 +25,7 @@
 //
 // Every fixture is invented (this repository is public). No Firebase, no network: `run` is handed an in-memory fake Firestore + Auth + file system.
 //
-// Mutation-tested in scratch copies of the script (never in the shared tree): 168 textual mutants, 166 killed, 2 survived by design (below).
+// Mutation-tested in scratch copies of the script (never in the shared tree): 241 textual mutants, 239 killed, 2 survived by design (below).
 //   who is a partner: each of the four arms removed (role, team, title, Partners department), role/title compared without trim or case, the admin guard
 //     removed and each of its six roles dropped, the legacy department string / the departments array ignored, Auth-only partners not selected, a stale
 //     Auth claim on a staff account selected, knownPartnerUids ignored, the Brilliant-Steel-only count taking partners / ignoring a second department /
@@ -33,10 +33,17 @@
 //   bs_quotes: each of the five partner arms removed (createdByRole, createdBy, draftBy, the draft_<uid> id, company PT), role and company compared
 //     case-sensitively, 'draft_' matched mid-id, every staff quote selected, the "tagged partner but made by staff" guard removed.
 //   other buckets: partner_deals filtered or not selected; the SOP pattern broadened / narrowed / missing the plural, the sops bucket dropped or never read, an
-//     untitled SOP matched; approvals and posts with each arm removed; conversations: mixed ones kept (the pre-Q4 default), mixed counted as wholly partner,
-//     department-channel handling removed (by type, by id), the Partners channel not selected, every department channel selected, a conversation with no
-//     participants selected; job_projects deleted or not reported; usernames with either arm removed; notification items / per-uid docs of ANY uid selected;
-//     registry entries dropped.
+//     untitled SOP matched; approvals and posts with each arm removed; conversations: the direct-thread / group threshold moved either way, direct threads kept,
+//     a member listed twice counted twice, department-channel handling removed (by type, by id), the Partners channel not selected, every department channel
+//     selected, a conversation with no participants selected; job_projects deleted or not reported; usernames with either arm removed; notification items /
+//     per-uid docs of ANY uid selected; registry entries dropped.
+//   group chats (kept, partner taken out): group chats deleted whole or ignored; every message / reader / typing mark of the group deleted instead of the partner's,
+//     or none, or matched on the wrong field, or children of any conversation taken; each of the five per-member maps dropped, a
+//     whole map or the whole member list overwritten, a map-only edit ignored; the preview blanked for staff / always / never / text-only / name-only / with lastMessageBy; the unsafe-uid
+//     guard removed or loosened; the edit written before the messages are deleted, after the Auth accounts, never, un-awaited, to the wrong collection, with
+//     the patch built late; the FieldValue guard removed or weakened; the partner query on the wrong field / unchunked / chunked to 11; read and typing marks
+//     never read; the group children read for no uid or never handed to the selection; the backup without the originals (empty, untagged, unmanifested) or
+//     the originals made a delete bucket; every new verification line removed or blind; the two report lines missing or off; a second update call in the code.
 //   report: names, emails, totals, a message body printed; uids printed without --show-uids (or with emails); counts wrong; the Q3 and SAFETY lines missing.
 //   backup: manifest never written / also written first; the read-back skipped; the sha256 check skipped or weak; the overwrite refusals removed (run, writeBackup);
 //     the manifest not read back; a password hash exported; Timestamps or references not converted; a doc id losing to a data field; file names; an uid with no
