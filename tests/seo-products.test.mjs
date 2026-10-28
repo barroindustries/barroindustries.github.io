@@ -221,6 +221,9 @@ const msgLink = (cls, text) => `<a ${cls ? `class="${cls}" ` : ''}href="${MSGR}"
 const PRICE_SENTENCE = 'Prices depend on size and options.';
 const PRICE_LINE = 'Prices depend on size and options. Get an estimated range online in minutes — no account needed.';
 const SS_SENTENCE = 'Food-grade SS304 stainless steel as standard, and laboratory-grade SS316 on request, in a brushed, mirror or satin finish.';
+// Owner ruling 2026-10-28 ("just 304 for oven"): the deck-oven page states SS304 only for the oven itself (the company-wide proof bar is unchanged).
+const SS_SENTENCE_OVEN = 'Food-grade SS304 stainless steel, in a brushed, mirror or satin finish.';
+const OVEN_PATH = '/products/gas-deck-ovens/';
 // the standard construction (owner ruling 2026-10-28): said on the /products/ hub, in the FAQ answer about the material, in llms.txt and in the two PDFs — always scoped to
 // MADE-TO-ORDER pieces, so it cannot contradict the notes of the bought-in items (CE-016 "SS202 1.0mm inner", CE-020 "SS1.2mm top, 0.8mm lower", ...)
 const HUB_CONSTRUCTION = 'Made-to-order tables, sinks and stoves have a 1.5 mm (16 gauge) top plate; bodies and shelving are 1.2 mm; floor-standing pieces stand on square-tube posts with adjustable bullet feet.';
@@ -627,7 +630,7 @@ describe('the FAQ: 5 questions per page, answered only with facts already on the
   it('repeats the facts word for word where the site already says them: the grade and finish sentence, the install sentence, the warranty sentence', () => {
     each((p) => {
       const text = p.faq.map((x) => x[1]).join(' ');
-      if (p.kind !== 'service' && !/stoves/.test(p.path)) assert.ok(text.includes(SS_SENTENCE), `${p.path}: the FAQ lacks the grade sentence`);
+      if (p.kind !== 'service' && !/stoves/.test(p.path)) assert.ok(text.includes(p.path === OVEN_PATH ? SS_SENTENCE_OVEN : SS_SENTENCE), `${p.path}: the FAQ lacks the grade sentence`);
       const last = p.faq[p.faq.length - 1][1];
       assert.equal(last, `${INSTALL_TEXT} ${WARRANTY_TEXT}`, `${p.path}: the install and warranty answer`);
     });
@@ -787,7 +790,8 @@ describe('the options on each product page are the ones the configurators offer 
       const p = byPath(`/products/${s}/`), r = rows(p), fam = FAMS.families[FAMILIES[s].fam];
       assert.ok(r.Size.startsWith(sizeText(FAMILIES[s].fam)), `${s}: Size is "${r.Size}", wanted "${sizeText(FAMILIES[s].fam)}"`);
       assert.equal(r.Construction, PF.constructionLine(fam, PF.defaultConfig(fam)) + '.', `${s}: the Construction row is not the family's construction line at its defaults`);
-      assert.equal(r.Material, 'Food-grade SS304 as standard, or laboratory-grade SS316 on request.');
+      assert.equal(r.Material, s === OVEN_PATH.split('/')[2] ? 'Food-grade SS304.' : 'Food-grade SS304 as standard, or laboratory-grade SS316 on request.');
+      if (s === OVEN_PATH.split('/')[2]) assert.ok(!/SS316/.test(textOf(p.main).replace(/SS304 \/ SS316[^.]*?laboratory-grade/, '')), 'the oven page names SS316 outside the company proof bar');
       assert.equal(r.Finish, 'Brushed, mirror or satin.');
       assert.equal(Object.keys(r).filter((k) => !['Size', 'Construction', 'Material', 'Finish'].includes(k)).length, PF.publicGroups(fam).length, `${s}: the page lists a different number of option groups than the configurator offers the public`);
       assert.deepEqual(Object.keys(r).slice(-4), ['Size', 'Construction', 'Material', 'Finish'], `${s}: the rows end Size, Construction, Material, Finish`);
