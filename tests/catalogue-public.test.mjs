@@ -1249,14 +1249,14 @@ describe('the committed homepage (index.html): a business feature first, NO prod
     for (const fact of ['food-grade SS304', 'laboratory-grade SS316', 'brushed, mirror or satin', 'built to order', 'welded and ground smooth', 'professional finish', '23 years in business']) {
       assert.ok(text.includes(fact) || text.includes(fact.replace(/ /g, ' ')), `the specific "${fact}" is missing`);
     }
-    assert.match(homeHead, /name="description" content="Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens[^"]*food-grade SS304 and laboratory-grade SS316/);
+    assert.match(homeHead, /name="description" content="Premium commercial kitchen equipment[^"]*SS304 or SS316/);
   });
 
   it('keeps exhaust, fresh-air, gas lines and fire suppression as SERVICES on the homepage (owner ruling) — they are only gone from the catalogue', () => {
     const SYSTEMS = /exhaust and fresh-air systems, gas lines, fire suppression and custom stainless-steel fabrication/;   // SEO build 2026-10-22: the hero lead adds the fabrication
     assert.match(visibleText(hero), SYSTEMS, 'the hero lead no longer names them');
     assert.match(visibleText(homeSite.match(/<article class="svc[^>]*>[\s\S]*?<\/article>/)[0]), /exhaust hoods and ducting, fresh-air systems, gas lines and fire suppression/, 'the fit-out service card no longer names them');
-    assert.match(homeHead, /name="description" content="[^"]*exhaust and fresh-air systems, gas lines and fire suppression/, 'the meta description no longer names them');
+    // the meta description no longer lists them (owner ruling 2026-10-28: a 156-character description Google shows in full); the hero lead and the service card still do
   });
 
   it('makes no unverifiable claim: no best / leading / world-class / awards / certification / lifetime / guarantee / #1', () => {

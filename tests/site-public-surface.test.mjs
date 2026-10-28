@@ -344,19 +344,18 @@ describe('2 · header: "Get a quote" top right, no Login · footer: a discreet "
 // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitemap, robots', () => {
   it('gives each page its own keyword-rich title: the exact titles, distinct, short enough, not stuffed — and both carry "Barro Kitchens by Barro Industries" (owner ruling 2026-10-22: Barro Kitchens is a permanent, historic name of the business)', () => {
-    assert.equal(home.title, 'Barro Kitchens by Barro Industries — Premium Stainless-Steel Kitchens, Metro Manila');
+    assert.equal(home.title, 'Stainless Steel Kitchen Equipment | Barro Kitchens by Barro Industries');   // owner ruling 2026-10-28: the search words lead, the permanent name follows (Google shows ~60 characters)
     assert.equal(catalogue.title, 'Commercial Kitchen Equipment Catalogue | Barro Kitchens by Barro Industries');
     assert.notEqual(home.title, catalogue.title);
     for (const p of [home, catalogue]) {
       assert.ok(p.title.length >= 30 && p.title.length <= 90, `${p.file}: title length ${p.title.length}`);
       assert.equal(p.S.texts.filter((t) => inHead(t.chain) && t.chain[t.chain.length - 1].tag === 'title').length, 1);
-      // the only words repeated in a title are those the ruling itself repeats: "Barro" (the brand's and the company's) and, in the home title, "Kitchens" (the brand's and
-      // the product's); nothing else is stuffed
+      // the only word repeated in a title is the one the ruling itself repeats: "Barro" (the brand's and the company's); nothing else is stuffed
       const seen = {}; for (const w of wordsOf(p.title)) seen[w] = (seen[w] || 0) + 1;
-      assert.deepEqual(Object.entries(seen).filter(([, n]) => n > 1), p === home ? [['barro', 2], ['kitchens', 2]] : [['barro', 2]], `${p.file}: a word is repeated in the title`);
+      assert.deepEqual(Object.entries(seen).filter(([, n]) => n > 1), [['barro', 2]], `${p.file}: a word is repeated in the title`);
       assert.ok(p.title.includes('Barro Kitchens by Barro Industries'), 'the permanent name and the primary public name are in the title');
     }
-    assert.ok(/Metro Manila/.test(home.title) && /Stainless-Steel/.test(home.title) && /Premium/.test(home.title) && /Kitchens/.test(home.title));
+    assert.ok(/^Stainless Steel Kitchen Equipment/.test(home.title));
     assert.ok(/Commercial Kitchen Equipment/.test(catalogue.title));
   });
 
@@ -374,7 +373,7 @@ describe('3 · SEO: titles, descriptions, canonical, social cards, icons, sitema
       assert.ok(maxRepeat(d) <= 2, `${p.file}: a word is repeated in the description`);
       assert.ok(/\.$/.test(d), 'the description is a finished sentence');
     }
-    assert.ok(/^Barro Kitchens by Barro Industries builds premium stainless-steel commercial kitchens and custom stainless steel fabrication in Metro Manila: food-grade SS304 and laboratory-grade SS316, exhaust and fresh-air systems, gas lines and fire suppression\.$/.test(hd));
+    assert.ok(/^Premium commercial kitchen equipment and stainless steel fabrication in SS304 or SS316, built to order in Quezon City by Barro Kitchens by Barro Industries\.$/.test(hd));   // owner ruling 2026-10-28: 156 characters, so Google shows all of it
     assert.ok(hd.includes('stainless steel fabrication'), 'the homepage description names the fabrication (SEO build 2026-10-22)');
     assert.ok(/^Browse premium commercial kitchen equipment from Barro Kitchens in SS304 or SS316 stainless steel for preparation, washing, cooking, ventilation, storage and refrigeration, for restaurants, hotels and bakeries\. Request a quote\.$/.test(cd));   // the six public categories (Ventilation added 2026-10-28)
     // the permanent name, once, in each (owner ruling 2026-10-22)
@@ -589,7 +588,7 @@ describe('4 · the brand: "Barro Industries" is the primary public name; "Barro 
       assert.equal(p.meta('og:site_name'), 'Barro Industries', 'og:site_name stays the company');
       for (const k of ['og:site_name', 'og:image:alt', 'twitter:image:alt']) assert.ok(!p.meta(k).includes(BRAND), `${p.file}: ${k}`);
     }
-    assert.ok(home.title.startsWith(PHRASE + ' — '), 'the home title leads with the permanent name');
+    assert.ok(home.title.endsWith(' | ' + PHRASE), 'the home title ends with the permanent name, after the search words (owner ruling 2026-10-28)');
     assert.ok(catalogue.title.endsWith(' | ' + PHRASE), 'the catalogue title ends with it, as the content pages end with "| Barro Industries"');
     assert.ok(siteTitleInApp.includes(PHRASE));
   });
