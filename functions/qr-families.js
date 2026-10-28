@@ -10,7 +10,7 @@
 })(typeof window !== 'undefined' ? window : null, function () {
   'use strict';
   return {
-    "version": 3,
+    "version": 4,
     "order": [
       "prep_table",
       "sink",
@@ -30,11 +30,34 @@
         "label": "Preparation table",
         "category": "preparation",
         "description": "Stainless steel worktable. Choose one to three layers and up to two upper shelves, then set your own size.",
-        "construction": "SS304 stainless steel · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet",
+        "title": "SS Preparation Table",
+        "construction": "{grade} · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet",
         "primary": "PW-001",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "layers",
             "label": "Layers",
@@ -189,11 +212,34 @@
         "label": "Sink",
         "category": "washing",
         "description": "Stainless steel sink table. Choose one to four sinks, their position, the shelves and the faucet, then set your own size.",
-        "construction": "SS304 stainless steel · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet",
+        "title": "SS Sink",
+        "construction": "{grade} · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet",
         "primary": "PW-004",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "basins",
             "label": "Sinks",
@@ -494,11 +540,34 @@
         "label": "Dish table",
         "category": "washing",
         "description": "Stainless steel dish table for the dishwasher. Choose the clean or the soiled side, which hand it sits on, a pre-rinse sink and an undershelf, then set your own size.",
-        "construction": "SS304 stainless steel · {top} · 1.2 mm undershelf and splash · {side} · square-tube posts with adjustable bullet feet",
+        "title": "SS Dish Table",
+        "construction": "{grade} · {top} · 1.2 mm undershelf and splash · {side} · square-tube posts with adjustable bullet feet",
         "primary": "PW-029",
         "unit": "pc",
         "sizeBasis": "linear",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "side",
             "label": "Side",
@@ -655,11 +724,38 @@
         "label": "Stove",
         "category": "cooking",
         "description": "Gas range built to your layout. Choose each burner position one by one, add a griller, griddle, oven or fryer, then set your own size.",
-        "construction": "SS304 stainless steel · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet",
+        "title": "SS Range Stove",
+        "titleAny": {
+          "group": "addons",
+          "template": "SS Range Stove Combination ({addons})"
+        },
+        "construction": "{grade} · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet",
         "primary": "CE-001",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "positions",
             "label": "Burner positions",
@@ -984,11 +1080,34 @@
         "label": "Wok range",
         "category": "cooking",
         "description": "Gas wok range with high-pressure burners. Choose one to three wok holes, a rear stock burner and a swan-neck water faucet, then set your own size.",
-        "construction": "SS304 stainless steel · {top} · 1.2 mm body and panels · recessed wok rings with high-pressure burners · square-tube posts with adjustable bullet feet",
+        "title": "SS Wok Range",
+        "construction": "{grade} · {top} · 1.2 mm body and panels · recessed wok rings with high-pressure burners · square-tube posts with adjustable bullet feet",
         "primary": "CE-006",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "holes",
             "label": "Wok holes",
@@ -1138,11 +1257,34 @@
         "label": "Griddle, griller or fryer",
         "category": "cooking",
         "description": "Gas griddle, lava-rock griller, fryer or a griller-and-griddle combination on its own stand. Choose the type, the burners or baskets and the base, then set your own size.",
-        "construction": "SS304 stainless steel · 1.2 mm body and panels · {type} · {base}",
+        "title": "{type}",
+        "construction": "{grade} · 1.2 mm body and panels · {type} · {base}",
         "primary": "CE-010",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "type",
             "label": "Type",
@@ -1153,25 +1295,29 @@
                 "v": "griddle",
                 "l": "Griddle",
                 "s": "griddle",
-                "c": "semi-non-stick griddle plate, gas-fired"
+                "c": "semi-non-stick griddle plate, gas-fired",
+                "t": "SS Griddle"
               },
               {
                 "v": "griller",
                 "l": "Lava-rock griller",
                 "s": "lava-rock griller",
-                "c": "V-type grill plates over lava rock, gas-fired"
+                "c": "V-type grill plates over lava rock, gas-fired",
+                "t": "SS Lava-Rock Griller"
               },
               {
                 "v": "fryer",
                 "l": "Fryer",
                 "s": "fryer",
-                "c": "stainless fry tanks with baskets, gas-fired"
+                "c": "stainless fry tanks with baskets, gas-fired",
+                "t": "SS Fryer"
               },
               {
                 "v": "combi",
                 "l": "Griller + griddle",
                 "s": "griller and griddle",
-                "c": "lava-rock griller and griddle side by side, one burner under each, gas-fired"
+                "c": "lava-rock griller and griddle side by side, one burner under each, gas-fired",
+                "t": "SS Griller + Griddle Combination"
               }
             ]
           },
@@ -1380,11 +1526,34 @@
         "label": "Gas deck oven",
         "category": "cooking",
         "description": "Gas-fired deck oven. Choose one to three decks, three or six trays per deck and a heavy-duty stand.",
+        "title": "Gas Deck Oven",
         "construction": "Insulated double-wall decks with a gas burner, gas valve and thermometer per deck · stainless steel outer body · {stand}",
         "primary": "CE-012",
         "unit": "pc",
         "sizeBasis": "linear",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "decks",
             "label": "Decks",
@@ -1511,11 +1680,34 @@
         "label": "Range hood",
         "category": "ventilation",
         "description": "Stainless steel kitchen exhaust hood. Choose a wall, island or slim canopy, baffle grease filters and lighting, then set your own length and depth.",
-        "construction": "SS304 stainless steel · welded canopy with grease trough and oil cup · {type} · {filters}",
+        "title": "SS Range Hood",
+        "construction": "{grade} · welded canopy with grease trough and oil cup · {type} · {filters}",
         "primary": "EX-001",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "type",
             "label": "Type",
@@ -1680,11 +1872,34 @@
         "label": "Cabinet",
         "category": "storage",
         "description": "Stainless steel storage cabinet, floor-standing or wall-hung. Choose the doors and the shelves inside, then set your own size.",
-        "construction": "SS304 stainless steel · 1.2 mm body, doors and shelves · {type}",
+        "title": "SS Cabinet",
+        "construction": "{grade} · 1.2 mm body, doors and shelves · {type}",
         "primary": "PW-015",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "type",
             "label": "Type",
@@ -1820,11 +2035,34 @@
         "label": "Wall shelving",
         "category": "storage",
         "description": "Stainless steel shelving fixed to the wall. Choose one to three tiers and a solid or slotted surface, then set your own size.",
-        "construction": "SS304 stainless steel · 1.2 mm shelves · fixed to the wall",
+        "title": "SS Wall Shelving",
+        "construction": "{grade} · 1.2 mm shelves · fixed to the wall",
         "primary": "PW-023",
         "unit": "pc",
         "sizeBasis": "linear",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "tiers",
             "label": "Tiers",
@@ -1917,11 +2155,34 @@
         "label": "Rack",
         "category": "storage",
         "description": "Stainless steel dish and storage rack. Choose three to six tiers, with or without wheels, then set your own size.",
-        "construction": "SS304 stainless steel · 1.2 mm shelves · square-tube frame · {wheels}",
+        "title": "SS Rack",
+        "construction": "{grade} · 1.2 mm shelves · square-tube frame · {wheels}",
         "primary": "PW-010",
         "unit": "pc",
         "sizeBasis": "primary",
         "groups": [
+          {
+            "key": "grade",
+            "label": "Material",
+            "type": "choice",
+            "default": 304,
+            "staffOnly": true,
+            "specRow": true,
+            "options": [
+              {
+                "v": 304,
+                "l": "Stainless Steel 304 Food Grade",
+                "s": "SS304",
+                "c": "SS304 stainless steel"
+              },
+              {
+                "v": 316,
+                "l": "Stainless Steel 316 Laboratory Grade",
+                "s": "SS316",
+                "c": "SS316 stainless steel"
+              }
+            ]
+          },
           {
             "key": "tiers",
             "label": "Tiers",

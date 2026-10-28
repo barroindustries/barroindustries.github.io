@@ -15,7 +15,9 @@
 // MUTATION RECORD 2026-10-28 (scratch copies, cf2-ws1-mut/; each must fail here): the group header not saying when a conditional option applies, the "Disabled on the website" chip
 // never shown / shown on every card, the switch read from the wrong key, reading the switch losing the material multiplier of the same document.
 // 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §6.4, §9): the screen lists ELEVEN families; a conditional option's group header says when it applies ("Only when Type is Fryer"); a family
-// listed in productMeta/config families.disabled carries a read-only "Disabled on the website" chip. The families are on schema 3.
+// listed in productMeta/config families.disabled carries a read-only "Disabled on the website" chip. The families are on schema 4.
+// 2026-10-28 (CONFIGURATOR-GRADE-TITLES-SPEC, schema 4): every card lists the staff-only MATERIAL group first — SS304 is the standard (adds nothing), SS316 has one signed amount pair (flat, per 100 mm),
+// blank until Finance enters it, the header carries the staff-only caption — and the import brings that cell as typed.
 // 2026-10-28 WS-2 (CONFIGURATOR-FAMILIES-2-SPEC §8.1, scratch copy cf2-ws2-mut/, 7 rules mutants, all killed; each must fail here): the rules create list missing "hood" or "dish_table", back to the old six ids, naming a twelfth id nobody
 // ships, listing an id twice, opened to any id, or reordered (the literal pin) — the list is pinned both as text and against QR_FAMILIES.order.
 //
@@ -601,18 +603,21 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
     for (const fid of WITH_TOP) {
       const { card, inputs } = await open(fid);
       assert.match(card, /<strong>Top plate<\/strong>/, fid);
-      assert.equal(card.split(CAPTION).length - 1, 1, `${fid}: the staff-only caption appears once, on the Top plate header only`);
+      assert.equal(card.split(CAPTION).length - 1, 2, `${fid}: the staff-only caption appears twice — on the Material header and on the Top plate header, nowhere else`);
       assert.match(card, /<strong>Top plate<\/strong>[^]*?Staff-only option — offered in the Quote Builder, never on the website/, `${fid}: the caption belongs to the Top plate header`);
+      assert.match(card, /<strong>Material<\/strong>[^]*?Staff-only option — offered in the Quote Builder, never on the website[^]*?<strong>Top plate<\/strong>/, `${fid}: and one to the Material header, ahead of it`);
       assert.match(card, /1\.5 mm \(16 ga\)[^]*?Standard option — adds nothing/, `${fid}: the standard top adds nothing`);
       const top = inputs.filter((i) => i.attrs['data-g'] === 'top');
       assert.deepEqual(top.map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`), ['1.2|flat', '1.2|perW100'], `${fid}: boxes for the 1.2 mm top only`);
       assert.equal(top[0].value, '', `${fid}: no amount yet is an EMPTY box, never 0`);
     }
   });
-  it('the cooking line, deck oven, hood, cabinet, wall shelving and rack have no Top plate and no staff-only caption', async () => {
+  it('the cooking line, deck oven, hood, cabinet, wall shelving and rack have no Top plate, and their only staff-only caption is the Material header\'s', async () => {
     for (const fid of ['cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']) {
       const { card, inputs } = await open(fid);
-      assert.ok(!/Top plate/.test(card) && !card.includes(CAPTION), fid);
+      assert.ok(!/Top plate/.test(card), fid);
+      assert.equal(card.split(CAPTION).length - 1, 1, `${fid}: one staff-only caption, on the Material header`);
+      assert.match(card, /<strong>Material<\/strong>[^]*?Staff-only option/, fid);
       assert.ok(!inputs.some((i) => i.attrs['data-g'] === 'top'), fid);
     }
   });
@@ -620,10 +625,10 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
     const sheet = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { top: { 1.2: { flat: -300, perW100: null, confidence: 'entered', derivation: 'typed by Finance' } } }) });
     const { card, inputs } = await open('sink', { sink: sheet });
     assert.equal(inputs.find((i) => i.attrs['data-g'] === 'top' && i.attrs['data-k'] === 'flat').value, '-300');
-    // the sink has 9 option cells besides the standard ones — the 1.2 mm top is one of them — and 3 of them have an amount
-    assert.match(card, /3 of 9 amounts entered/);
+    // the sink has 10 option cells besides the standard ones — the SS316 grade and the 1.2 mm top are two of them — and 3 of them have an amount
+    assert.match(card, /3 of 10 amounts entered/);
     const none = await open('sink', { sink: OK_SHEET });
-    assert.match(none.card, /2 of 9 amounts entered/, 'the blank 1.2 mm cell is counted among the amounts still to enter');
+    assert.match(none.card, /2 of 10 amounts entered/, 'the blank 1.2 mm cell (and the blank SS316 cell) are counted among the amounts still to enter');
   });
 
   describe('"Try a configuration" prices the staff-only top with the figures in the form', () => {
@@ -679,7 +684,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
   });
 
   it('a sheet approved against the OLD definitions (schema 1) reads "Out of date — approve again"; the same sheet at the current schema is Approved', async () => {
-    assert.equal(FAKE_SCHEMA, 3, 'the families are on schema 3 (five more families and conditional options on top of the 1.5 mm top plate): every sheet must be approved against it');
+    assert.equal(FAKE_SCHEMA, 4, 'the families are on schema 4 (the staff-only steel grade and the line titles on top of the five more families and the 1.5 mm top plate): every sheet must be approved against it');
     const old = Object.assign({}, OK_SHEET, { approved: true, approvedBy: 'u-1', approvedByName: 'Someone', schemaVersion: 1 });
     const env = makeEnv({ docs: { sink: old, prep_table: Object.assign({}, old, { familyId: 'prep_table', schemaVersion: FAKE_SCHEMA }) } });
     await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
@@ -693,7 +698,7 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
   it('the import refuses a seed made for an older schema ("generate it again"); a current-schema seed brings the 1.2 mm cell as typed (negative allowed), a blank stays blank, and a figure for the standard top is ignored', () => {
     const FP = makeEnv({}).ctx.window.FamilyPricing;
     const seed = (schemaVersion, families) => ({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion, generatedAt: '2026-10-28T00:00:00.000Z', families });
-    for (const older of [1, 2]) {
+    for (const older of [1, 2, 3]) {
       const old = FP.planImport(seed(older, { sink: { options: {} } }), {});
       assert.match(old.error, new RegExp(`older family definition \\(schema ${older}, the app is on ${FAKE_SCHEMA}\\)`));
       assert.match(old.error, /Generate it again/);
@@ -707,6 +712,117 @@ describe('Inventory › Family Pricing — the staff-only Top plate: its own cel
     const blank = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: {} } }), {});
     assert.equal(blank.plan[0].options.top['1.2'].flat, null);
     assert.equal(blank.plan[0].options.top['1.2'].confidence, 'blank');
+  });
+});
+
+describe('Inventory › Family Pricing — the staff-only steel grade (Material): the first group of every card, one SS316 cell (signed; flat + per 100 mm), schema 4', () => {
+  const CAPTION = 'Staff-only option — offered in the Quote Builder, never on the website';
+  const ALL = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack'];
+  const open = async (fid, docs) => {
+    const env = makeEnv({ docs: docs || {} });
+    await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+    await click(env, 'toggle', fid); await flush();
+    const html = env.el.innerHTML;
+    const a = html.indexOf(`data-fid="${fid}" style="margin-bottom:12px"`);
+    const b = html.indexOf('<div class="card fp-card"', a + 10);
+    return { env, card: html.slice(a, b < 0 ? html.length : b), inputs: inputsFromHtml(html, fid) };
+  };
+
+  it('EVERY card lists Material FIRST, with the staff-only caption on its header: SS304 is the standard (adds nothing, no boxes), SS316 has its two amount boxes — blank is an EMPTY box, never 0', async () => {
+    for (const fid of ALL) {
+      const { card, inputs } = await open(fid);
+      const firstHeader = card.match(/<tr class="fp-grp"><td[^>]*><strong>([^<]*)<\/strong>/);
+      assert.equal(unesc(firstHeader[1]), 'Material', `${fid}: the first group on the card`);
+      assert.match(card, /<strong>Material<\/strong>[^]*?Staff-only option — offered in the Quote Builder, never on the website/, fid);
+      assert.match(card, /Stainless Steel 304 Food Grade[^]*?Standard option — adds nothing/, `${fid}: SS304 is the zero point`);
+      assert.match(card, /Stainless Steel 316 Laboratory Grade/, fid);
+      const grade = inputs.filter((i) => i.attrs['data-g'] === 'grade');
+      assert.deepEqual(grade.map((i) => `${i.attrs['data-v']}|${i.attrs['data-k']}`), ['316|flat', '316|perW100'], `${fid}: boxes for SS316 only`);
+      assert.equal(grade[0].value, '', `${fid}: no amount yet is an EMPTY box`);
+      assert.equal(inputs[0].attrs['data-g'], 'grade', `${fid}: the first input on the card is the grade's`);
+      assert.ok(card.split(CAPTION).length - 1 >= 1, fid);
+    }
+  });
+
+  it('a saved SS316 amount fills its box (flat and per 100 mm, as typed) and is counted in "N of M amounts entered"', async () => {
+    const sheet = Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, { grade: { 316: { flat: 4217, perW100: 38, confidence: 'entered', derivation: 'typed by Finance' } } }) });
+    const { card, inputs } = await open('sink', { sink: sheet });
+    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-k'] === 'flat').value, '4217');
+    assert.equal(inputs.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-k'] === 'perW100').value, '38');
+    assert.match(card, /3 of 10 amounts entered/, 'the three entered amounts of the fixture sheet… ');
+    const plain = await open('sink', { sink: OK_SHEET });
+    assert.match(plain.card, /2 of 10 amounts entered/, 'and the blank SS316 cell is one still to enter');
+  });
+
+  it('the import: a schema-4 seed brings the SS316 cell as typed (a negative or zero figure and the per-100-mm part too), a blank stays blank, a figure for SS304 (the zero point) is ignored, and a schema-3 seed is refused', () => {
+    const FP = makeEnv({}).ctx.window.FamilyPricing;
+    const seed = (schemaVersion, families) => ({ kind: 'barro-family-pricing-seed', version: 1, schemaVersion, generatedAt: '2026-10-28T00:00:00.000Z', families });
+    const typed = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { grade: { 316: { flat: 4217.4, perW100: 38, confidence: 'medium', derivation: 'typed' }, 304: { flat: 99 } } } } }), {});
+    assert.ok(!typed.error, typed.error);
+    const grade = typed.plan[0].options.grade;
+    assert.equal(grade['316'].flat, 4217, 'rounded to whole pesos');
+    assert.equal(grade['316'].perW100, 38);
+    assert.ok(!('304' in grade), 'the standard grade is the zero point: it has no cell');
+    assert.ok(typed.skipped >= 1, 'the figure for the standard grade is counted as ignored');
+    const zero = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: { grade: { 316: { flat: 0, perW100: null, confidence: 'entered', derivation: 'x' } } } } }), {});
+    assert.equal(zero.plan[0].options.grade['316'].flat, 0, 'an explicit 0 IS a figure');
+    const blank = FP.planImport(seed(FAKE_SCHEMA, { sink: { options: {} } }), {});
+    assert.equal(blank.plan[0].options.grade['316'].flat, null);
+    assert.equal(blank.plan[0].options.grade['316'].confidence, 'blank');
+    const old = FP.planImport(seed(FAKE_SCHEMA - 1, { sink: { options: { grade: { 316: { flat: 4217 } } } } }), {});
+    assert.match(old.error, new RegExp(`older family definition \\(schema ${FAKE_SCHEMA - 1}, the app is on ${FAKE_SCHEMA}\\)`));
+  });
+
+  describe('"Try a configuration" prices SS316 with the figures in the form', () => {
+    const BASE = { title: 'Synthetic Sink', formulaType: 'per_length', basePrice: 15555, measurement: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 0, rateW100: 0, rateD100: 0, rateH100: 0 }, specs: [] };
+    const sheetWith = (cell) => Object.assign({}, OK_SHEET, { options: Object.assign({}, OK_SHEET.options, cell === null ? {} : { grade: { 316: cell } }) });
+    const setup = async (sheet) => {
+      const env = makeEnv({ docs: { sink: sheet }, products: { 'PW-004': BASE } });
+      await env.ctx.window.renderFamilyPricing(env.el, env.win.currentUser, 'president');
+      await click(env, 'toggle', 'sink'); await flush();
+      env.stubs.inputs.sink = inputsFromHtml(env.el.innerHTML, 'sink');
+      const fam = env.ctx.window.QR_FAMILIES.families.sink;
+      const ins = {};
+      fam.groups.forEach((g) => { ins[g.key] = { value: String(Math.max(0, g.options.findIndex((o) => o.v === g.default))) }; });
+      const out = { innerHTML: '' };
+      const dims = [{ value: '500', getAttribute: () => 'W' }, { value: '500', getAttribute: () => 'D' }, { value: '850', getAttribute: () => 'H' }];
+      env.stubs.tryBox.sink = { querySelector: (sel) => { const m = sel.match(/^\.fp-try-in\[data-g="(\w+)"\]$/); if (m) return ins[m[1]] || null; if (sel === '.fp-try-out') return out; return null; }, querySelectorAll: () => dims };
+      const choose = (value) => { ins.grade.value = String(fam.groups.find((g) => g.key === 'grade').options.findIndex((o) => o.v === value)); };
+      return { env, ins, out, choose };
+    };
+    it('the control lists both grades, the standard first and selected, in the same box as the other options', async () => {
+      const { env } = await setup(sheetWith(null));
+      const select = env.el.innerHTML.match(/<select class="fp-try-in" data-g="grade"[^>]*>([^]*?)<\/select>/);
+      assert.ok(select, 'a Material control in the try box');
+      assert.deepEqual([...select[1].matchAll(/<option value="(\d)"( selected)?>([^<]*)<\/option>/g)].map((m) => [m[1], !!m[2], unesc(m[3])]),
+        [['0', true, 'Stainless Steel 304 Food Grade'], ['1', false, 'Stainless Steel 316 Laboratory Grade']]);
+    });
+    it('a POSITIVE amount raises the figure by exactly that much and the summary says "SS316"; the standard grade is the base item alone; an unsaved edit in the form is used', async () => {
+      const { env, out, choose } = await setup(sheetWith({ flat: 4217, perW100: null, confidence: 'entered', derivation: 'x' }));
+      choose(316);
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /19,772<\/strong> each/, '15,555 + 4,217');
+      assert.match(out.innerHTML, /\+ options ₱4,217/);
+      assert.match(out.innerHTML, /SS316/);
+      choose(304);
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /15,555<\/strong> each/, 'the standard grade needs no cell');
+      assert.ok(!/SS316/.test(out.innerHTML));
+      choose(316);
+      env.stubs.inputs.sink.find((i) => i.attrs['data-g'] === 'grade' && i.attrs['data-v'] === '316' && i.attrs['data-k'] === 'flat').value = '0';
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /15,555<\/strong> each/, 'an explicit 0 IS a figure');
+      assert.ok(!/Priced after review/.test(out.innerHTML));
+    });
+    it('a BLANK SS316 cell is "Priced after review — … Material: Stainless Steel 316 Laboratory Grade", never the base alone', async () => {
+      const { out, choose, env } = await setup(sheetWith(null));
+      choose(316);
+      await click(env, 'try', 'sink');
+      assert.match(out.innerHTML, /Priced after review — no amount entered yet for: Material: Stainless Steel 316 Laboratory Grade\./);
+      assert.ok(!/each/.test(out.innerHTML));
+      assert.ok(!/chosen by our staff/.test(out.innerHTML), 'the screen is a STAFF session: SS316 is a valid choice here');
+      void env;
+    });
   });
 });
 
@@ -726,14 +842,14 @@ describe('Inventory › Family Pricing — a conditional option says when it app
 
   it('the cooking line: "Burners" and "Fry baskets" headers carry their condition, "Type" and "Base" carry none — and the caption has the same muted style as the staff-only one', async () => {
     const { card } = await open('cooking_line');
-    assert.deepEqual(headers(card), [['Type', []], ['Burners', ['Type is Griddle or Lava-rock griller']], ['Fry baskets', ['Type is Fryer']], ['Base', []]]);
+    assert.deepEqual(headers(card), [['Material', []], ['Type', []], ['Burners', ['Type is Griddle or Lava-rock griller']], ['Fry baskets', ['Type is Fryer']], ['Base', []]]);
     assert.match(card, /<span class="fp-when" style="font-size:11px;color:var\(--text-muted\)">· Only when Type is Fryer<\/span>/);
-    assert.ok(!card.includes('fp-staffonly'), 'no staff-only caption on the cooking line');
+    assert.equal(card.split('fp-staffonly').length - 1, 1, 'the only staff-only caption on the cooking line is the Material header\'s (it has no top plate)');
   });
   it('the dish table: only the pre-rinse sink is conditional; its staff-only top plate keeps its own caption beside the others', async () => {
     const { card } = await open('dish_table');
-    assert.deepEqual(headers(card), [['Side', []], ['Dishwasher on the', []], ['Pre-rinse sink', ['Side is Soiled']], ['Undershelf', []], ['Top plate', []], ['Length', []]], 'the dish table is a linear family: its length rate is the last group');
-    assert.equal(card.split('fp-staffonly').length - 1, 1);
+    assert.deepEqual(headers(card), [['Material', []], ['Side', []], ['Dishwasher on the', []], ['Pre-rinse sink', ['Side is Soiled']], ['Undershelf', []], ['Top plate', []], ['Length', []]], 'the dish table is a linear family: its length rate is the last group');
+    assert.equal(card.split('fp-staffonly').length - 1, 2, 'Material and Top plate: the two staff-only groups');
   });
   it('every family that has no conditional option shows no "Only when" caption anywhere', async () => {
     for (const fid of ['prep_table', 'sink', 'stove', 'wok_range', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']) {
@@ -748,8 +864,9 @@ describe('Inventory › Family Pricing — a conditional option says when it app
     assert.deepEqual(boxes('burners'), ['2|flat', '2|perW100', '3|flat', '3|perW100']);
     assert.deepEqual(boxes('type'), ['griller|flat', 'griller|perW100', 'fryer|flat', 'fryer|perW100', 'combi|flat', 'combi|perW100']);
     assert.deepEqual(boxes('base'), ['shelf|flat', 'shelf|perW100']);
+    assert.deepEqual(boxes('grade'), ['316|flat', '316|perW100'], 'the staff-only steel grade: SS304 is the standard');
     assert.match(card, /Fry baskets[^]*?2 baskets|Fry baskets[^]*?Standard option — adds nothing/, 'the default basket count adds nothing');
-    assert.match(card, /0 of 8 amounts entered/, 'the cooking line has 8 cells to fill (spec §5.2)');
+    assert.match(card, /0 of 9 amounts entered/, 'the cooking line has 8 cells to fill (spec §5.2) and the SS316 cell');
   });
   it('the length-rate row is for the linear families only (dish table, deck oven, wall shelving)', async () => {
     for (const [fid, linear] of [['dish_table', true], ['deck_oven', true], ['wall_shelf', true], ['cooking_line', false], ['hood', false], ['wok_range', false], ['sink', false]]) {

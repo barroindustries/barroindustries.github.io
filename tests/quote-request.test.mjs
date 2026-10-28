@@ -740,6 +740,26 @@ describe('the staff-only top plate on the server: a visitor can never choose 1.2
     for (const fid of WITHOUT_TOP) assert.match(norm(fid, { top: 1.2 }).errors[0], /"top" is not an option of this product/, fid);
   });
 
+  const gradeMsg = (fid) => `"${FAMS.families[fid].label}": "Material" is chosen by our staff when the quotation is prepared.`;
+  it('the steel grade is the same: SS316 is REFUSED with the staff message — on EVERY family, alone or with other options; any other non-standard value gets the same message; the standard grade, stated or absent, is accepted and stored as 304', () => {
+    for (const fid of FAMS.order) {
+      const dflt = PF.defaultConfig(FAMS.families[fid]);
+      for (const config of [{ grade: 316 }, { ...dflt, grade: 316 }]) {
+        const r = norm(fid, config);
+        assert.equal(r.ok, false, fid);
+        assert.deepEqual(r.errors, [gradeMsg(fid)], fid);
+        assert.deepEqual(r.items, [], 'nothing is stored for a refused line');
+      }
+      for (const v of [9, '316', '304', null, true, 0, [316]]) assert.deepEqual(norm(fid, { grade: v }).errors, [gradeMsg(fid)], `${fid} ${JSON.stringify(v)}`);
+      for (const config of [{}, { grade: 304 }]) {
+        const r = norm(fid, config);
+        assert.equal(r.ok, true, `${fid} ${JSON.stringify(config)}: ${(r.errors || []).join(' ')}`);
+        assert.equal(r.items[0].config.grade, 304, `${fid}: stored config.grade`);
+      }
+      assert.equal(Q.basketHash(norm(fid, {}).items), Q.basketHash(norm(fid, { grade: 304 }).items), `${fid}: stating the standard grade changes nothing`);
+    }
+  });
+
   it('the standard 1.5 mm top, stated or absent, is accepted: the STORED configuration always carries top 1.5, and the same line hashes the same either way', () => {
     for (const fid of WITH_TOP) {
       for (const config of [{}, { top: 1.5 }]) {
@@ -771,8 +791,11 @@ describe('the staff-only top plate on the server: a visitor can never choose 1.2
       assert.deepEqual(it.specs.at(-1), { label: 'Construction', value: SENTENCE[fid] }, fid);
       assert.ok(!it.specs.some((s) => /top plate/i.test(s.label)), `${fid}: a "Top plate" row`);
       assert.ok(!/lighter|1\.2 mm top/.test(JSON.stringify(it.specs)), `${fid}: the lighter top in the stored specs`);
-      // one row per public option THAT APPLIES to the stored configuration (a conditional option that does not apply has none), then the Construction row
-      assert.deepEqual(it.specs.map((s) => s.label), [...PF.publicActiveGroups(FAMS.families[fid], it.config).map((g) => g.label), 'Construction'], fid);
+      // the Material row (the standard steel grade — a website line is always SS304) first, then one row per public option THAT APPLIES to the stored configuration (a conditional option that does not apply has none), then the Construction row
+      assert.deepEqual(it.specs.map((s) => s.label), ['Material', ...PF.publicActiveGroups(FAMS.families[fid], it.config).map((g) => g.label), 'Construction'], fid);
+      assert.deepEqual(it.specs[0], { label: 'Material', value: 'Stainless Steel 304 Food Grade' }, fid);
+      assert.equal(it.config.grade, 304, `${fid}: the stored configuration states the standard steel grade`);
+      assert.ok(!/316|laboratory/i.test(JSON.stringify([it.specs, it.config])), `${fid}: the other grade in what a website line stores`);
     }
   });
 
@@ -814,10 +837,10 @@ describe('the staff-only top plate on the server: a visitor can never choose 1.2
       }
     });
 
-    it('a sheet approved against schema 1 or 2 (before the 1.5 mm top was the standard, before the five new families) prices NOTHING — "priced after review" — until it is approved again; the same sheet at the current schema prices', () => {
-      assert.equal(FAMS.version, 3, 'the family definitions are on schema 3');
+    it('a sheet approved against schema 1, 2 or 3 (before the 1.5 mm top was the standard, before the five new families, before the steel grade) prices NOTHING — "priced after review" — until it is approved again; the same sheet at the current schema prices', () => {
+      assert.equal(FAMS.version, 4, 'the family definitions are on schema 4');
       for (const fid of WITH_TOP) {
-        for (const older of [1, 2]) {
+        for (const older of [1, 2, 3]) {
           const old = basket(fid, {}, older);
           assert.equal(old.priced, false, `${fid} at schema ${older}`); assert.equal(old.unitPrice, 0, fid);
           assert.equal(old.reason, 'not_approved', fid);
@@ -861,9 +884,9 @@ describe('the five families of 2026-10-28 on the server: conditional options, up
     assert.deepEqual(refused('cooking_line', { type: 'combi', burners: 3, baskets: 1 }, { W: 1200, D: 700 }).length, 2, 'both misused options are reported (the server shows the first two)');
     assert.deepEqual(refused('dish_table', { side: 'clean', sink: 'prerinse' }, { W: 1200, D: 660 }), ['"Dish table": "Pre-rinse sink" applies only when Side is Soiled.']);
     const fryer = ok('cooking_line', { type: 'fryer', baskets: 3 }, { W: 1000, D: 700 });
-    assert.deepEqual(fryer.config, { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, 'the burners that do not apply are stored at their default');
-    assert.deepEqual(fryer.specs.map((x) => x.label), ['Type', 'Fry baskets', 'Base', 'Construction'], 'and have no row');
-    assert.deepEqual(ok('cooking_line', { type: 'griddle', baskets: 2, burners: 2 }, { W: 900, D: 700 }).config, { type: 'griddle', burners: 2, baskets: 2, base: 'stand' }, 'stated at the default (2 baskets): accepted');
+    assert.deepEqual(fryer.config, { grade: 304, type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, 'the burners that do not apply are stored at their default');
+    assert.deepEqual(fryer.specs.map((x) => x.label), ['Material', 'Type', 'Fry baskets', 'Base', 'Construction'], 'and have no row');
+    assert.deepEqual(ok('cooking_line', { type: 'griddle', baskets: 2, burners: 2 }, { W: 900, D: 700 }).config, { grade: 304, type: 'griddle', burners: 2, baskets: 2, base: 'stand' }, 'stated at the default (2 baskets): accepted');
     // the same line hashes the same whether the option that does not apply is stated at its default or left out
     const h = (cfg) => Q.basketHash([ok('cooking_line', cfg, { W: 1000, D: 700 })]);
     assert.equal(h({ type: 'fryer', baskets: 3 }), h({ type: 'fryer', baskets: 3, burners: 1 }));

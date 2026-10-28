@@ -31,6 +31,11 @@
  * Quote Builder) has one cell per family, SIGNED, entered by Finance: a negative amount, or 0. It is ALWAYS written BLANK here — the master's own "Top Gauge" adder on
  * BA-001 is quoted in the note as a cross-reference and never becomes the amount — so a 1.2 mm line is "priced after review" until Finance types the figure.
  *
+ * THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, specs/CONFIGURATOR-GRADE-TITLES-SPEC.md): EVERY family's first group is the grade (SS304 standard, SS316 staff-only). The
+ * base item's list price is read as the SS304 price, so the SS304 choice needs no cell; the SS316 choice has ONE cell per family, SIGNED, entered by Finance (a positive amount,
+ * with a per-100-mm rate only if the premium grows with length, or 0). The master has no SS316 figure, so the cell is ALWAYS written BLANK here — with no figure and no
+ * cross-reference — and an SS316 line is "priced after review" until Finance types the amount.
+ *
  * THE FIVE FAMILIES ADDED 2026-10-28 (specs/CONFIGURATOR-FAMILIES-2-SPEC.md §7): dish table, wok range, griddle / griller / fryer, gas deck oven, range hood. Same helpers,
  * same rule: a figure only where the master really says it. Most of their cells are BLANK on purpose (the single-hole wok range and the three-basket fryer are the only
  * unpriced-or-lonely comparisons the master offers), and where a related price exists (BA-005 for a deck-oven stand, EX-026 / EX-027 for a hood's filters and lamps,
@@ -260,6 +265,10 @@ function deriveFamily(fid, fam, ctx) {
     }
     setCell('top', '1.2', lbl('top', 1.2), blank(note));
   };
+  // The staff-only steel grade: ONE blank cell on EVERY family (called once, after the recipes). No figure and no cross-reference: the master has nothing to quote.
+  const gradeCell = () => {
+    setCell('grade', '316', lbl('grade', 316), blank('The standard material is SS304; the base item\'s list price is read as the SS304 price. Enter what SS316 ADDS for this family (a positive amount; add a per-100-mm rate only if the premium grows with length), or 0. The master has no SS316 figure, so this is always left blank here.'));
+  };
 
   // ── per-family recipes ────────────────────────────────────────────────────
   if (fid === 'prep_table') {
@@ -413,6 +422,8 @@ function deriveFamily(fid, fam, ctx) {
     setCell('filters', 'none', lbl('filters', 'none'), blank(`No hood in the master is sold without its baffle filters.${accessory('EX-026', 'a baffle filter block')}`));
     setCell('lighting', 'false', lbl('lighting', false), blank(`No hood in the master is sold without its lamp.${accessory('EX-027', 'the 3-bulb lighting case')}`));
   }
+
+  gradeCell();                                                                         // every family: the SS316 premium cell, always blank
 
   // The length rate for a family whose primary SKU has no length rule of its own: the master has none, so it is derived as list price per 100 mm of the
   // primary's standard length (price assumed proportional to length) — low confidence, and flagged as such.

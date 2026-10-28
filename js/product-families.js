@@ -23,6 +23,12 @@
 // marked `staffOnly` (the 1.2 mm top plate): it is never offered on the website, the server (which validates without opts) refuses any value
 // but its default, and only a staff session (opts.staff === true: the Quote Builder, the Family pricing screen) may choose another.
 //
+// STAFF-ONLY GRADE AND LINE TITLES (owner rulings 2026-10-28, specs/CONFIGURATOR-GRADE-TITLES-SPEC.md): the FIRST group of every family is a staff-only `grade` choice (the
+// standard one by default), marked `specRow` — a staff-only group that still has a specification row of its own in describe(): the first row, because its group is first (the
+// top plate has none; the Construction row says which one it is). The {grade} token in a Construction sentence keeps it consistent with that choice. lineTitle() names a
+// configured line in the Quote Builder from the family's `title` / `titleAny` templates and the options' `t` title words; the card and page names (`label`) are untouched,
+// and a title never mentions the grade (the Material row does).
+//
 // CONDITIONAL OPTIONS (CONFIGURATOR-FAMILIES-2-SPEC §4): a group may carry `when: { <earlier choice group>: [values] }` — it applies only while the choices made before it
 // are in those lists (fry baskets only for a fryer, a pre-rinse sink only on the soiled side of a dish table). An option that does not apply is ALWAYS at its default in
 // a validated configuration, so a stored configuration is canonical and the pricing code (which adds nothing for a default) needs no knowledge of it. A family may also
@@ -62,8 +68,8 @@
     for (var i = 0; i < os.length; i++) if (os[i].v === v) return i;
     return -1;
   }
-  // publicGroups(family) -> the groups a visitor to the WEBSITE may choose from: every group except the staff-only ones (the 1.2 mm top plate is
-  // offered in the Quote Builder only). The website's configurator, the catalogue card and the product pages walk THIS list, never `groups`.
+  // publicGroups(family) -> the groups a visitor to the WEBSITE may choose from: every group except the staff-only ones (the 1.2 mm top plate and the
+  // steel grade are offered in the Quote Builder only). The website's configurator, the catalogue card and the product pages walk THIS list, never `groups`.
   function publicGroups(family) {
     return ((family && family.groups) || []).filter(function (g) { return g.staffOnly !== true; });
   }
@@ -318,13 +324,14 @@
     });
   }
 
-  // describe(family, config) -> [{ label, value }]  one row per PUBLIC option group that APPLIES to this configuration, in the family's order, then the Construction
-  // row (the staff view, the receipt and the printed quote). A staff-only group has no row of its own: the Construction row already says which top plate it is. An
-  // option that does not apply (fry baskets on a griddle) has no row.
+  // describe(family, config) -> [{ label, value }]  one row per option group that APPLIES to this configuration, in the family's order, then the Construction
+  // row (the staff view, the receipt and the printed quote). A staff-only group has no row of its own unless it is marked `specRow`: the Construction row already says
+  // which top plate it is, while the grade row is first because its group is first. An option that does not apply (fry baskets on a griddle) has no row.
   function describe(family, config) {
     var rows = [];
-    publicGroups(family).forEach(function (g) {
+    ((family && family.groups) || []).forEach(function (g) {
       if (!groupApplies(family, g, config)) return;
+      if (g.staffOnly === true && g.specRow !== true) return;      // a staff-only group is a row only when it says so
       var v = config ? config[g.key] : undefined;
       if (g.type === 'choice') {
         var o = optionOf(g, v);
@@ -340,8 +347,40 @@
     if (family && typeof family.construction === 'string' && family.construction) rows.push({ label: 'Construction', value: constructionLine(family, config) });
     return rows;
   }
-  // summaryParts(family, config) -> string[]   the short phrases of the one-line summary. A staff-only choice (the top plate) contributes its phrase only when
-  // it is NOT the standard one ("1.2 mm top"), so every public summary reads exactly as before. An option that does not apply contributes nothing.
+
+  // lineTitle(family, config) -> "SS Range Stove Combination (Griller, Fryer)"   the NAME of a configured line in the Quote Builder (what the quote prints above the specs).
+  //   The family's `title` template — or, when its `titleAny` names a MULTI group that applies and has at least one selection, that template instead — with each {group}
+  //   token filled from the configuration. A CHOICE token takes the chosen option's `t` (its title word; fallback its `l`), an absent or invalid value reading as the
+  //   group's default. A MULTI token takes the labels `l` of the SELECTED options, in the family's own option order, joined ", " (empty when none). An unknown or slots
+  //   token is dropped (the build refuses such a family). '' for a family with no usable `title` — the caller then falls back to family.label. Titles never name the grade
+  //   (the Material row does). Pure; never throws.
+  function pickedOptions(g, cfg) {                    // the options of a MULTI group that are selected, in the group's own option order; an absent value is the default
+    var v = has(cfg, g.key) && cfg[g.key] !== undefined ? cfg[g.key] : g.default;
+    var sel = Array.isArray(v) ? v : [];
+    return (g.options || []).filter(function (o) { return sel.indexOf(o.v) >= 0; });
+  }
+  function lineTitle(family, config) {
+    if (!isPlain(family) || typeof family.title !== 'string' || !family.title.trim()) return '';
+    var cfg = isPlain(config) ? config : {};
+    var tpl = family.title;
+    var any = isPlain(family.titleAny) ? family.titleAny : null;
+    if (any && typeof any.group === 'string' && typeof any.template === 'string' && any.template) {
+      var ag = groupOf(family, any.group);
+      if (ag && ag.type === 'multi' && groupApplies(family, ag, cfg) && pickedOptions(ag, cfg).length) tpl = any.template;
+    }
+    return tpl.replace(/\{([A-Za-z0-9_]+)\}/g, function (m, key) {
+      var g = groupOf(family, key);
+      if (!g) return '';
+      if (g.type === 'multi') return pickedOptions(g, cfg).map(function (o) { return String(o.l); }).join(', ');
+      if (g.type !== 'choice') return '';
+      var o = has(cfg, key) ? optionOf(g, cfg[key]) : null;
+      if (!o) o = optionOf(g, g.default);
+      return o ? String(o.t || o.l) : '';
+    });
+  }
+
+  // summaryParts(family, config) -> string[]   the short phrases of the one-line summary. A staff-only choice (the top plate, the grade) contributes its phrase only
+  // when it is NOT the standard one ("1.2 mm top"), so every public summary reads exactly as before. An option that does not apply contributes nothing.
   function summaryParts(family, config) {
     var parts = [];
     (family.groups || []).forEach(function (g) {
@@ -573,6 +612,7 @@
     sizeTextLabelled: sizeTextLabelled,
     standardDims: standardDims,
     describe: describe,
+    lineTitle: lineTitle,
     constructionLine: constructionLine,
     summaryParts: summaryParts,
     summaryLine: summaryLine,

@@ -2,8 +2,8 @@
 //
 // quote-builder-v2.html is one 9,000-line HTML file with one inline <script> and no module system, so it cannot be require()d. Two layers:
 //
-//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 45, the What's New
-//      entries 45, 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
+//   1. STATIC — the markup and the constants: the three new script tags and their order, the tutorial (TUTORIAL_VERSION 46, the What's New
+//      entries 46, 45, 44 and 43, the guided-demo step and every selector it targets), ESTIMATE_RANGE_MODE, the A5 letterhead strings, CO.BS
 //      byte-for-byte, and the two rules of the price-protection design that are about WHAT THE FILE MAY NAME: it never names the pricing
 //      function (it prices only through QBConfigured) and it reads the option sheets (the product_pricing collection) in exactly one place —
 //      inside loadDatabase(), in its own try/catch (spec §2.3).
@@ -60,6 +60,11 @@
 // the ⚙ configure action / the panel itself; the demo trying the sink when it is listed / showing its step with every product listed; the version not bumped / the entry carrying
 // 44 / its second bullet removed; Help listing the old six / the old three-product top-plate sentence / no sentence on conditional options; the demo's Add-items step naming six /
 // its configurator step naming three top plates / saying nothing on conditional options.
+//
+// CONFIGURATOR-GRADE-TITLES-SPEC (2026-10-28) — the staff-only steel grade and the line titles in the builder (section "GRADE-TITLES" at the end of the file; the panel tests above address
+// groups by KEY, never by position, because the grade is now the FIRST group of every family): TUTORIAL_VERSION 46 with its entry, Help and demo sentences; the Material group drawn
+// first, with its "staff" chip and two pills; a 316 line (preview "SS316", "Priced after review" until the sheet's grade cell is filled, then dearer by exactly that cell); a line named by
+// its TITLE ("SS Sink", "SS Range Stove Combination (Griller, Fryer)"); ⚙ configure refreshing the name (cfgApplyEdit copies `name`).
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -80,6 +85,8 @@ const PF = require('../js/product-families.js');
 const FAM = require('../js/qr-families.js');
 const PC = require('../js/pricing-core.js');
 const QB = require('../js/qb-configured.js');
+// a group's index in the definition: the panel's ids and handlers use it (the staff-only grade is group 0 of every family, so nothing may assume 0 is the first public group)
+const gAt = (id, key) => FAM.families[id].groups.findIndex((g) => g.key === key);
 
 // ═══════════════════════════════════════ the harness: the real builder script in a vm context ═══════════════════════════════════════
 const COMPILED = new vm.Script(SCRIPT, { filename: 'quote-builder-v2.html<script>' });   // parsed once; every environment below only RUNS it
@@ -171,11 +178,14 @@ const CATALOGUE = (() => {
   out.set('CE-030', prod('CE-030', 'cooking_line', 'fixed', 21911, {}, {}));      // the salamander oven: a fixed item no family absorbed (CE-016 is the deck oven's 12-tray model now)
   return [...out.values()];
 })();
+const GRADE_FLAT = 2917;       // the synthetic SS316 premium of every approved fixture sheet (an odd figure; the real amounts are private)
 function sheetFor(familyId, { approved = true } = {}) {
   const f = FAM.families[familyId];
   const options = {};
   let i = 0;
   for (const c of PF.cells(f)) {
+    // the staff-only steel grade: its SS316 cell has a synthetic figure of its own and does not count in `i`, so every other cell keeps the figure it had before the grade existed
+    if (c.group === 'grade') { if (!c.baseline) (options.grade = options.grade || {})[c.value] = { flat: GRADE_FLAT, perW100: null }; continue; }
     i++;
     if (c.baseline) continue;
     (options[c.group] = options[c.group] || {})[c.value] = { flat: (i % 7 === 3 ? -1 : 1) * (311 + 97 * i), perW100: (i % 4 === 1 && familyId !== 'deck_oven') ? 13 + i : null };
@@ -237,27 +247,35 @@ describe('static — the script tags, the tutorial, the letterhead', () => {
     assert.equal((HTML.match(/js\/qb-configured\.js/g) || []).length >= 1, true);
   });
 
-  it('TUTORIAL_VERSION is 45: the newest What\'s New entry is version 45 (five more configurable products), dated; entry 44 (the partner portal is retired) and 43 stay as history', () => {
+  it('TUTORIAL_VERSION is 46: the newest What\'s New entry is version 46 (the line titles and the staff-only Material row), dated; entries 45 (five more configurable products), 44 (the partner portal is retired) and 43 stay as history', () => {
     const b = makeEnv();
-    assert.equal(b.run('TUTORIAL_VERSION'), 45);
+    assert.equal(b.run('TUTORIAL_VERSION'), 46);
     const wn = b.plain('WHATS_NEW');
-    assert.equal(wn[0].ver, 45);
-    assert.equal(wn[1].ver, 44, '44 stays as history: the five families are a new entry');
-    assert.equal(wn[2].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
+    assert.equal(wn[0].ver, 46);
+    assert.equal(wn[1].ver, 45, '45 stays as history: the titles and the Material row are a new entry');
+    assert.equal(wn[2].ver, 44, '44 stays as history');
+    assert.equal(wn[3].ver, 43, '43 had shipped (origin/master d491b5d): it stays as history');
     assert.match(wn[0].date, /^2026-10-\d\d$/);
     assert.deepEqual(wn.map((e) => e.ver), [...wn.map((e) => e.ver)].sort((x, y) => y - x), 'newest first');
-    const t45 = wn[0].items.join(' ');
+    const t46 = wn[0].items.join(' ');
+    for (const must of ['Configured lines now carry a proper name on the quote', '"SS Range Stove"', '"SS Range Stove Combination (Griller, Fryer)"', '"SS Griddle"', '"SS Lava-Rock Griller"', '"Gas Deck Oven"',
+      'the name updates when you re-configure the line', 'Every configured product starts with a Material row', 'Stainless Steel 304 Food Grade as standard', 'Stainless Steel 316 Laboratory Grade',
+      'a staff-only choice (the website never offers it)', 'shows "Priced after review" until Finance enters the 316 amount for that product in Inventory › Family pricing']) {
+      assert.ok(t46.includes(must), `What's New 46 does not say: ${must}`);
+    }
+    assert.equal(wn[0].items.length, 2, 'two bullets: the line names, and the Material row');
+    const t45 = wn[1].items.join(' ');
     for (const must of ['Five more products can be configured right in the builder', 'dish tables, wok ranges, griddles / grillers / fryers, gas deck ovens and range hoods', 'an option Finance has not priced yet asks you for a price instead of guessing',
       '"⚙ convert to configured"', 'Some choices only show when they apply', 'fry baskets for a fryer', 'pre-rinse sink on the soiled side of a dish table', 'a size an option does not allow is flagged as you type', '"Use N mm"',
       'a slim hood is at most 500 mm deep', 'a deck oven\'s width follows its trays per deck']) {
       assert.ok(t45.includes(must), `What's New 45 does not say: ${must}`);
     }
-    assert.equal(wn[0].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
-    const t44 = wn[1].items.join(' ');
+    assert.equal(wn[1].items.length, 2, 'two bullets: the products, and the conditional options with their size limits');
+    const t44 = wn[2].items.join(' ');
     for (const must of ['partner portal is retired', 'Brilliant Steel pill', 'pass-through tick', 'Nothing changes for Barro Kitchens or Barro Industries quotes']) {
       assert.ok(t44.includes(must), `What's New 44 does not say: ${must}`);
     }
-    const text = wn[2].items.join(' ');
+    const text = wn[3].items.join(' ');
     for (const must of ['Configure a sink, prep table, stove, cabinet, wall shelf or rack', 'Priced after review', 'Apply cost-based to all', 'estimate range', 'links it back', 'hello@barroindustries.com']) {
       assert.ok(text.includes(must), `What's New 43 does not say: ${must}`);
     }
@@ -658,7 +676,7 @@ describe('R2 / R3 — a configured line lands at the website price when the shee
     assert.equal(r.old.basisUnitPrice, r.fresh.unitPrice);
     assert.equal(r.old.config.basins, 3);
     assert.equal(r.old._uid, 'u1');
-    assert.equal(r.old.name, 'My renamed sink');
+    assert.equal(r.old.name, 'SS Sink', 're-configuring refreshes the line\'s name to the fresh TITLE (owner ruling 2026-10-28) — the stored name is replaced');
     assert.equal(r.old.catLabel, 'Option A');
     assert.equal('specEdit' in r.old, false, 'the overtyped specs are rewritten from the options');
     assert.equal(r.r.specsRewritten, true);
@@ -1267,7 +1285,7 @@ describe('§4.3 / §4.4 — validation before pricing; the live price; "Priced a
     const b = builder();
     open(b, 'sink');
     assert.equal(b.el('cfgAddBtn').disabled, false);
-    pick(b, 0, 2);                                                       // 3 sinks
+    pick(b, gAt('sink', 'basins'), 2);                                   // 3 sinks
     assert.equal(b.el('cfgDim_W').value || b.run('cfgState.sizeRaw.W'), b.run('cfgState.sizeRaw.W'));
     assert.equal(b.run('cfgState.sizeRaw.W'), '1500', 'the untouched length follows the options');
     dim(b, 'W', 900);
@@ -1284,7 +1302,7 @@ describe('§4.3 / §4.4 — validation before pricing; the live price; "Priced a
     const b = builder();
     open(b, 'sink');
     dim(b, 'W', 2300);
-    pick(b, 0, 2);
+    pick(b, gAt('sink', 'basins'), 2);
     assert.equal(b.run('cfgState.sizeRaw.W'), '2300');
     assert.equal(b.el('cfgAddBtn').disabled, false);
   });
@@ -1306,13 +1324,14 @@ describe('§4.3 / §4.4 — validation before pricing; the live price; "Priced a
   it('a stove oven forces a minimum width and height (hint, min attribute, "Use N mm"); a short stove is a soft warning priced at the usual length — Add stays enabled', () => {
     const b = builder();
     open(b, 'stove');
-    b.run(`cfgToggleMulti(1, 2, true)`);                                          // oven
+    b.run(`cfgToggleMulti(${gAt('stove', 'addons')}, 2, true)`);                  // oven
     assert.match(b.el('cfgDH_H').innerHTML, /minimum 850 mm with these options/);
     dim(b, 'H', 800);
     assert.equal(b.el('cfgAddBtn').disabled, true);
     assert.match(b.el('cfgErr_H').innerHTML, /Use 850 mm/);
     dim(b, 'H', 850);
-    b.run(`cfgSlotAdd(0); cfgSlotAdd(0); cfgSlotAdd(0)`);                         // 4 burners: usual length is longer than the default
+    const P = gAt('stove', 'positions');
+    b.run(`cfgSlotAdd(${P}); cfgSlotAdd(${P}); cfgSlotAdd(${P})`);                // 4 burners: usual length is longer than the default
     dim(b, 'W', 700);
     assert.equal(b.el('cfgAddBtn').disabled, false, 'the soft rule never blocks');
     assert.match(b.el('cfgPriceArea').innerHTML, /priced at the usual \d+ mm length for these burners/);
@@ -1321,16 +1340,17 @@ describe('§4.3 / §4.4 — validation before pricing; the live price; "Priced a
   it('slots: add / remove are bounded by the definition, reorder keeps the order (it is part of the configuration)', () => {
     const b = builder();
     open(b, 'stove');
-    for (let i = 0; i < 8; i++) b.run('cfgSlotAdd(0)');
+    const P = gAt('stove', 'positions');
+    for (let i = 0; i < 8; i++) b.run(`cfgSlotAdd(${P})`);
     assert.equal(b.run('cfgState.config.positions.length'), 6);
-    assert.match(b.el('cfgBody').innerHTML, /data-cfg-key="g0add" disabled/);
-    for (let i = 0; i < 8; i++) b.run('cfgSlotDel(0)');
+    assert.match(b.el('cfgBody').innerHTML, new RegExp(`data-cfg-key="g${P}add" disabled`));
+    for (let i = 0; i < 8; i++) b.run(`cfgSlotDel(${P})`);
     assert.equal(b.run('cfgState.config.positions.length'), 1);
-    b.run(`cfgSlotAdd(0); cfgSlotSet(0, 1, 2)`);
+    b.run(`cfgSlotAdd(${P}); cfgSlotSet(${P}, 1, 2)`);
     const before = b.plain('cfgState.config.positions');
-    b.run('cfgSlotMove(0, 0, 1)');
+    b.run(`cfgSlotMove(${P}, 0, 1)`);
     assert.deepEqual(b.plain('cfgState.config.positions'), [before[1], before[0]]);
-    b.run('cfgSlotMove(0, 1, 1)');
+    b.run(`cfgSlotMove(${P}, 1, 1)`);
     assert.deepEqual(b.plain('cfgState.config.positions'), [before[1], before[0]], 'moving the last one right is a no-op');
   });
 
@@ -1338,7 +1358,7 @@ describe('§4.3 / §4.4 — validation before pricing; the live price; "Priced a
     const b = builder();
     const defsBefore = JSON.stringify(FAM);
     open(b, 'sink');
-    pick(b, 0, 1);
+    pick(b, gAt('sink', 'basins'), 1);
     b.run('cfgBumpQty(2)');
     const area = b.el('cfgPriceArea').innerHTML;
     const direct = b.plain('cfgEvaluate(cfgState).basis');
@@ -1381,16 +1401,16 @@ describe('§4.3 / §4.4 — validation before pricing; the live price; "Priced a
   it('Add puts a configured line on the quote and closes the panel; ⚙ configure re-opens it as an UPDATE of the same line; a removed line cannot be updated', () => {
     const b = builder();
     open(b, 'sink');
-    pick(b, 0, 1);
+    pick(b, gAt('sink', 'basins'), 1);
     b.run('cfgCommit()');
     assert.equal(b.run('items.length'), 1);
     assert.equal(b.run('cfgState'), null);
     assert.equal(b.run('items[0].config.basins'), 2);
-    assert.match(b.toast(), /Added: Sink/);
+    assert.match(b.toast(), /Added: SS Sink \(configured\)/, 'the toast names the line by its title');
     b.run('configureLine(0)');
     assert.match(b.el('cfgTitle').innerHTML, /Edit:/);
     assert.equal(b.el('cfgAddBtn').textContent, '✔ Update line');
-    pick(b, 0, 2);
+    pick(b, gAt('sink', 'basins'), 2);
     b.run('cfgCommit()');
     assert.equal(b.run('items.length'), 1, 'an update replaces, never appends');
     assert.equal(b.run('items[0].config.basins'), 3);
@@ -1603,8 +1623,9 @@ describe('WS-5C — the staff-only 1.2 mm top plate: offered in the panel with a
   const SINK_CONSTRUCTION = (top) => `SS304 stainless steel · ${top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet`;
   const specText = (html) => { const m = /<span class="spec-edit cell-edit"[^>]*>([^<]*)<\/span>/.exec(html); return m ? m[1] : null; };   // what the quote prints for the line's specs
 
-  it('premise: the definitions mark the Top plate staff-only on exactly the table, the sink, the dish table, the stove and the wok range — and a PUBLIC validation refuses its 1.2 mm value', () => {
-    assert.deepEqual(FAM.order.filter((id) => FAM.families[id].groups.some((g) => g.staffOnly)), STAFF);
+  it('premise: the definitions mark the Top plate staff-only on exactly the table, the sink, the dish table, the stove and the wok range (and the steel grade on all eleven, first) — and a PUBLIC validation refuses its 1.2 mm value', () => {
+    assert.deepEqual(FAM.order.filter((id) => FAM.families[id].groups.some((g) => g.staffOnly && g.key === 'top')), STAFF);
+    assert.deepEqual(FAM.order.filter((id) => FAM.families[id].groups[0].key === 'grade' && FAM.families[id].groups[0].staffOnly === true), FAM.order, 'the grade is the staff-only FIRST group of every family');
     for (const id of STAFF) {
       const f = FAM.families[id];
       const top = f.groups.find((g) => g.key === 'top');
@@ -1712,7 +1733,7 @@ describe('WS-5C — the staff-only 1.2 mm top plate: offered in the panel with a
     assert.ok(printed, 'the line\'s specs cell was not found in the items table');
     assert.ok(printed.endsWith('Construction: ' + SINK_CONSTRUCTION('1.2 mm top plate (lighter)')), `printed: ${printed}`);
     assert.equal(/Top plate:/.test(printed), false, 'a "Top plate" row is never printed');
-    assert.match(printed, /^Sinks: /);
+    assert.match(printed, /^Material: Stainless Steel 304 Food Grade • Sinks: /, 'the Material row is the first printed row');
     // …and what is filed
     const pl = b.plain('buildQuotePayload()');
     for (const row of [pl.items[0], pl.editableState.items[0]]) {
@@ -1750,7 +1771,7 @@ describe('WS-5C — the staff-only 1.2 mm top plate: offered in the panel with a
     assert.equal(b.run('cfgState.config.top'), 1.5);
     assert.equal(b.el('cfgNotice').textContent, '', 'a missing staff-only key is the default, not a saved option that went away');
     assert.equal(b.el('cfgNotice').style.display, 'none');
-    assert.match(b.el('cfgBody').innerHTML, /data-cfg-v="1\.5" data-cfg-key="g5o0" aria-pressed="true"/);
+    assert.match(b.el('cfgBody').innerHTML, new RegExp(`data-cfg-v="1\\.5" data-cfg-key="g${gAt('sink', 'top')}o0" aria-pressed="true"`));
     b.run('cfgCommit()');
     const it = b.plain('items[0]');
     assert.equal(it.config.top, 1.5);
@@ -1938,24 +1959,24 @@ describe('FAMILIES-2 — conditional options in the panel: only the groups that 
   it('a cooking line draws Burners for a griddle or a griller, Fry baskets for a fryer, and neither for a griller + griddle — Type and Base always', () => {
     const b = builder();
     open(b, 'cooking_line');
-    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base'], 'the default is a griddle: no fry baskets');
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Burners', 'Base'], 'the default is a griddle: no fry baskets');
     assert.equal(b.el('cfgBody').innerHTML.includes('data-cfg-group="baskets"'), false);
     pickV(b, 'cooking_line', 'type', 'fryer');
-    assert.deepEqual(groupsShown(b), ['Type', 'Fry baskets', 'Base']);
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Fry baskets', 'Base']);
     assert.equal(b.el('cfgBody').innerHTML.includes('data-cfg-group="burners"'), false, 'no burner choice on a fryer');
     assert.ok(b.el('cfgBody').innerHTML.includes('data-cfg-group="baskets" data-cfg-v="3"'));
     pickV(b, 'cooking_line', 'type', 'griller');
-    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base']);
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Burners', 'Base']);
     pickV(b, 'cooking_line', 'type', 'combi');
-    assert.deepEqual(groupsShown(b), ['Type', 'Base'], 'a griller + griddle has one burner under each side: nothing to choose');
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Base'], 'a griller + griddle has one burner under each side: nothing to choose');
   });
 
   it('a dish table draws the pre-rinse sink only on the soiled side; the Top plate keeps its staff chip and stays last', () => {
     const b = builder();
     open(b, 'dish_table');
-    assert.deepEqual(groupsShown(b), ['Side', 'Dishwasher on the', 'Undershelf', 'Top plate'], 'the clean side: no sink to choose');
+    assert.deepEqual(groupsShown(b), ['Material', 'Side', 'Dishwasher on the', 'Undershelf', 'Top plate'], 'the clean side: no sink to choose');
     pickV(b, 'dish_table', 'side', 'soiled');
-    assert.deepEqual(groupsShown(b), ['Side', 'Dishwasher on the', 'Pre-rinse sink', 'Undershelf', 'Top plate']);
+    assert.deepEqual(groupsShown(b), ['Material', 'Side', 'Dishwasher on the', 'Pre-rinse sink', 'Undershelf', 'Top plate']);
     assert.ok(b.el('cfgBody').innerHTML.includes('<span class="cfg-staff-chip no-print" title="Not offered on the website">staff</span>'));
   });
 
@@ -1980,7 +2001,7 @@ describe('FAMILIES-2 — conditional options in the panel: only the groups that 
     assert.equal(b.run('cfgState.config.baskets'), 3);
     assert.equal(b.run('cfgState.sizeRaw.W'), '1000', 'three baskets lift an untouched length to the minimum');
     pickV(b, 'cooking_line', 'type', 'griddle');
-    assert.deepEqual(b.plain('cfgState.config'), { type: 'griddle', burners: 1, baskets: 2, base: 'stand' }, 'baskets are back at the default 2');
+    assert.deepEqual(b.plain('cfgState.config'), { grade: 304, type: 'griddle', burners: 1, baskets: 2, base: 'stand' }, 'baskets are back at the default 2');
     assert.equal(b.el('cfgErrAll').style.display, 'none', 'no "applies only when" box');
     assert.equal(b.el('cfgAddBtn').disabled, false);
     assert.equal(b.run('cfgState.sizeRaw.W'), '700', 'and the untouched length followed the options back');
@@ -2029,8 +2050,8 @@ describe('FAMILIES-2 — conditional options in the panel: only the groups that 
     assert.deepEqual(priced.deltas.map((d) => d.key).sort(), ['burners:2'], 'one cell: the burners — no fryer, no baskets');
     b.run('cfgCommit()');
     const it = b.plain('items[0]');
-    assert.deepEqual(it.config, { type: 'griddle', burners: 2, baskets: 2, base: 'stand' });
-    assert.deepEqual(it.specs.map((r) => r.label).filter((l) => l !== 'Construction'), ['Type', 'Burners', 'Base'], 'no "Fry baskets" row on the printed quote');
+    assert.deepEqual(it.config, { grade: 304, type: 'griddle', burners: 2, baskets: 2, base: 'stand' });
+    assert.deepEqual(it.specs.map((r) => r.label).filter((l) => l !== 'Construction'), ['Material', 'Type', 'Burners', 'Base'], 'no "Fry baskets" row on the printed quote');
     assert.equal(it.specStr.includes('basket'), false);
     // the same line made without the detour prices the same, to the peso
     const fresh = builder();
@@ -2040,7 +2061,7 @@ describe('FAMILIES-2 — conditional options in the panel: only the groups that 
     assert.equal(it.unitPrice, priced.unitPrice);
     // ⚙ configure on it opens with only the groups that apply
     b.run('configureLine(0)');
-    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base']);
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Burners', 'Base']);
   });
 
   it('a saved line that states a value for an option that does not apply opens with the visible "reset" notice and that option at its default', () => {
@@ -2048,11 +2069,11 @@ describe('FAMILIES-2 — conditional options in the panel: only the groups that 
     open(b, 'cooking_line', { config: { type: 'griddle', burners: 1, baskets: 3, base: 'stand' }, dims: { W: 700, D: 700 } });
     assert.match(b.el('cfgNotice').textContent, /no longer available/);
     assert.equal(b.run('cfgState.config.baskets'), 2);
-    assert.deepEqual(groupsShown(b), ['Type', 'Burners', 'Base']);
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Burners', 'Base']);
     // a canonical line opens with no notice
     open(b, 'cooking_line', { config: { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }, dims: { W: 1000, D: 700 } });
     assert.equal(b.el('cfgNotice').textContent, '');
-    assert.deepEqual(groupsShown(b), ['Type', 'Fry baskets', 'Base']);
+    assert.deepEqual(groupsShown(b), ['Material', 'Type', 'Fry baskets', 'Base']);
   });
 });
 
@@ -2355,7 +2376,7 @@ describe('FAMILIES-2 — a website hand-off of the five families (the request ca
     b.run('configureLine(2)');
     assert.equal(b.run('cfgState.familyId'), 'cooking_line');
     assert.equal(b.el('cfgNotice').textContent, '', 'a canonical request line opens with no "reset" notice');
-    assert.deepEqual([...b.el('cfgBody').innerHTML.matchAll(/<div class="cfg-lbl" id="cfgL\d+">([^<]*)/g)].map((m) => m[1].trim()), ['Type', 'Fry baskets', 'Base']);
+    assert.deepEqual([...b.el('cfgBody').innerHTML.matchAll(/<div class="cfg-lbl" id="cfgL\d+">([^<]*)/g)].map((m) => m[1].trim()), ['Material', 'Type', 'Fry baskets', 'Base']);
     b.run('configureLine(4)');
     assert.equal(b.run('cfgState.sizeRaw.D'), '500');
     assert.equal(b.el('cfgDim_D').max, '500');
@@ -2370,20 +2391,20 @@ describe('FAMILIES-2 — convert an old line, "configure instead", "sold online 
   it('an old plain line of each absorbed SKU converts to its family\'s configuration of that SKU: the price is kept (manual), the section is kept', () => {
     const b = builder();
     const want = {
-      'PW-029': ['dish_table', { side: 'clean', hand: 'left', sink: 'none', undershelf: true, top: 1.5 }],
-      'CE-006': ['wok_range', { holes: 1, rear: false, faucet: 'none', top: 1.5 }],
-      'CE-025': ['wok_range', { holes: 2, rear: true, faucet: 'none', top: 1.5 }],
-      'CE-007': ['cooking_line', { type: 'combi', burners: 1, baskets: 2, base: 'stand' }],
-      'CE-009': ['cooking_line', { type: 'fryer', burners: 1, baskets: 2, base: 'stand' }],
-      'CE-020': ['cooking_line', { type: 'fryer', burners: 1, baskets: 1, base: 'stand' }],
-      'CE-022': ['cooking_line', { type: 'fryer', burners: 1, baskets: 3, base: 'stand' }],
-      'CE-023': ['cooking_line', { type: 'griddle', burners: 3, baskets: 2, base: 'stand' }],
-      'CE-026': ['cooking_line', { type: 'griller', burners: 1, baskets: 2, base: 'shelf' }],
-      'CE-012': ['deck_oven', { decks: 2, trays: 3, stand: 'none' }],
-      'CE-016': ['deck_oven', { decks: 2, trays: 6, stand: 'none' }],
-      'EX-018': ['hood', { type: 'island', filters: 'baffle', lighting: true }],
-      'EX-020': ['hood', { type: 'slim', filters: 'baffle', lighting: true }],
-      'EX-021': ['hood', { type: 'wall', filters: 'baffle', lighting: true }],
+      'PW-029': ['dish_table', { grade: 304, side: 'clean', hand: 'left', sink: 'none', undershelf: true, top: 1.5 }],
+      'CE-006': ['wok_range', { grade: 304, holes: 1, rear: false, faucet: 'none', top: 1.5 }],
+      'CE-025': ['wok_range', { grade: 304, holes: 2, rear: true, faucet: 'none', top: 1.5 }],
+      'CE-007': ['cooking_line', { grade: 304, type: 'combi', burners: 1, baskets: 2, base: 'stand' }],
+      'CE-009': ['cooking_line', { grade: 304, type: 'fryer', burners: 1, baskets: 2, base: 'stand' }],
+      'CE-020': ['cooking_line', { grade: 304, type: 'fryer', burners: 1, baskets: 1, base: 'stand' }],
+      'CE-022': ['cooking_line', { grade: 304, type: 'fryer', burners: 1, baskets: 3, base: 'stand' }],
+      'CE-023': ['cooking_line', { grade: 304, type: 'griddle', burners: 3, baskets: 2, base: 'stand' }],
+      'CE-026': ['cooking_line', { grade: 304, type: 'griller', burners: 1, baskets: 2, base: 'shelf' }],
+      'CE-012': ['deck_oven', { grade: 304, decks: 2, trays: 3, stand: 'none' }],
+      'CE-016': ['deck_oven', { grade: 304, decks: 2, trays: 6, stand: 'none' }],
+      'EX-018': ['hood', { grade: 304, type: 'island', filters: 'baffle', lighting: true }],
+      'EX-020': ['hood', { grade: 304, type: 'slim', filters: 'baffle', lighting: true }],
+      'EX-021': ['hood', { grade: 304, type: 'wall', filters: 'baffle', lighting: true }],
     };
     for (const [sku, [familyId, config]] of Object.entries(want)) {
       const c = conv(b, plain(sku, { category: 'baking' }));
@@ -2418,7 +2439,7 @@ describe('FAMILIES-2 — convert an old line, "configure instead", "sold online 
     b.run(`selectedProduct = DB.products.find(p => p.id === 'CE-016'); dimsMm = { W: 1200, D: 700, H: 1400 };`);
     b.run(`configureInstead('CE-016')`);
     assert.equal(b.run('cfgState.familyId'), 'deck_oven');
-    assert.deepEqual(b.plain('cfgState.config'), { decks: 2, trays: 6, stand: 'none' });
+    assert.deepEqual(b.plain('cfgState.config'), { grade: 304, decks: 2, trays: 6, stand: 'none' });
     assert.equal(b.run('cfgState.sizeRaw.W'), '1200');
     assert.equal(b.el('cfgAddBtn').disabled, false);
     b.run(`selectedProduct = DB.products.find(p => p.id === 'EX-020'); dimsMm = { W: 1800, D: 305, H: 355 };`);
@@ -2430,7 +2451,7 @@ describe('FAMILIES-2 — convert an old line, "configure instead", "sold online 
     assert.equal(b.el('cfgAddBtn').disabled, false);
     b.run(`configureInstead('CE-022')`);
     assert.equal(b.run('cfgState.familyId'), 'cooking_line');
-    assert.deepEqual(groupsOf(b), ['Type', 'Fry baskets', 'Base']);
+    assert.deepEqual(groupsOf(b), ['Material', 'Type', 'Fry baskets', 'Base']);
     function groupsOf(env) { return [...env.el('cfgBody').innerHTML.matchAll(/<div class="cfg-lbl" id="cfgL\d+">([^<]*)/g)].map((m) => m[1].trim()); }
   });
 });
@@ -2604,5 +2625,172 @@ describe('FAMILIES-2 — the tutorial (TUTORIAL_VERSION 45, Help and the demo te
     const wn = makeEnv().plain('WHATS_NEW')[0].items.join(' ');
     const copy = helpLi + ' ' + wn + ' ' + makeEnv().plain('TOUR_STEPS').filter((s) => s.target === '#configPanel' || s.target === '#addItemsSection').map((s) => s.body).join(' ');
     assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(copy.replace(/₱20,000/g, '')), false);
+  });
+});
+
+// ═══════════════════════════════════════ GRADE-TITLES — the staff-only steel grade and the line titles (owner rulings 2026-10-28) ═══════════════════════════════════════
+// specs/CONFIGURATOR-GRADE-TITLES-SPEC.md §5 / §6. Nothing in the builder is written per family: the Material group is the FIRST group of every family in the definitions, so the panel
+// draws it first with the existing "staff" chip and two pills; a 316 line is priced from the sheet's grade cell (blank = "Priced after review"); a line is NAMED by its family's title; and
+// re-configuring a line refreshes that name (cfgApplyEdit copies `name`). A saved or filed quote is never retitled by a load.
+describe('GRADE-TITLES — Material is drawn first, a 316 line is "Priced after review" until the sheet\'s grade cell is filled, and a line is named by its title', () => {
+  const G304 = 'Stainless Steel 304 Food Grade';
+  const G316 = 'Stainless Steel 316 Laboratory Grade';
+  const CHIP = '<span class="cfg-staff-chip no-print" title="Not offered on the website">staff</span>';
+  const TITLE = { prep_table: 'SS Preparation Table', sink: 'SS Sink', dish_table: 'SS Dish Table', stove: 'SS Range Stove', wok_range: 'SS Wok Range', cooking_line: 'SS Griddle', deck_oven: 'Gas Deck Oven', hood: 'SS Range Hood', cabinet: 'SS Cabinet', wall_shelf: 'SS Wall Shelving', rack: 'SS Rack' };
+  const open = (b, id, opts = {}) => { b.run(`openConfigurator(${JSON.stringify(id)}, ${JSON.stringify(opts)})`); };
+  const oAt = (id, key, v) => FAM.families[id].groups[gAt(id, key)].options.findIndex((o) => o.v === v);
+  const pickV = (b, id, key, v) => b.run(`cfgPickOpt(${gAt(id, key)}, ${oAt(id, key, v)})`);
+  const specText = (html) => { const m = /<span class="spec-edit cell-edit"[^>]*>([^<]*)<\/span>/.exec(html); return m ? m[1] : null; };
+
+  it('every family draws Material FIRST: the label with the "staff" chip, a pill group with the two grade labels (304 pressed), and no hint line under it', () => {
+    const b = builder();
+    for (const id of FAM.order) {
+      open(b, id);
+      const html = b.el('cfgBody').innerHTML;
+      assert.equal(gAt(id, 'grade'), 0, `${id}: the grade is the first group of the definition`);
+      assert.ok(html.includes(`<div class="cfg-lbl" id="cfgL0">Material ${CHIP}</div>`), `${id}: label + chip`);
+      assert.ok(html.indexOf('id="cfgL0"') < html.indexOf('id="cfgL1"'), `${id}: Material comes before the next group`);
+      assert.ok(html.includes('role="group" aria-labelledby="cfgL0"'), `${id}: a pill group`);
+      assert.ok(html.includes(`>${G304}</button>`) && html.includes(`>${G316}</button>`), id);
+      assert.match(html, /data-cfg-group="grade" data-cfg-v="304" data-cfg-key="g0o0" aria-pressed="true"/);
+      assert.match(html, /data-cfg-group="grade" data-cfg-v="316" data-cfg-key="g0o1" aria-pressed="false"/);
+      const firstGroup = html.split('<div class="cfg-group')[1];
+      assert.equal(firstGroup.includes('cfg-hintline'), false, `${id}: the grade options carry no hint, so no hint line is drawn`);
+    }
+  });
+
+  it('picking 316: the summary starts "SS316", Add stays enabled and nothing is called an error; the figure is the 304 one plus exactly the sheet\'s grade cell; going back to 304 takes it away', () => {
+    const b = builder();
+    open(b, 'sink');
+    const std = b.plain('cfgEvaluate(cfgState).basis');
+    assert.equal(std.priced, true);
+    assert.equal(/SS3\d\d/.test(b.el('cfgPreview').textContent), false, 'the standard grade is not repeated in the summary');
+    pickV(b, 'sink', 'grade', 316);
+    assert.equal(b.run('cfgState.config.grade'), 316);
+    assert.match(b.el('cfgPreview').textContent, /^Sink — SS316 · /);
+    assert.deepEqual(b.plain('cfgEvaluate(cfgState).v.errors'), [], 'no "chosen by our staff" error in the builder');
+    assert.equal(b.el('cfgAddBtn').disabled, false);
+    assert.equal(b.el('cfgBody').innerHTML.includes('chosen by our staff'), false);
+    const dearer = b.plain('cfgEvaluate(cfgState).basis');
+    assert.equal(dearer.priced, true);
+    assert.deepEqual(dearer.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: GRADE_FLAT }]);
+    assert.equal(dearer.unitPrice - std.unitPrice, GRADE_FLAT);
+    pickV(b, 'sink', 'grade', 304);
+    assert.equal(b.run('cfgState.config.grade'), 304);
+    assert.equal(b.plain('cfgEvaluate(cfgState).basis').unitPrice, std.unitPrice);
+    assert.deepEqual(b.plain('cfgEvaluate(cfgState).basis').deltas.filter((d) => /^grade:/.test(d.key)), []);
+  });
+
+  it('316 with the grade cell blank, or no cell at all: "Priced after review — Material: …", a required price box, Add enabled; a blank cell is never read as 0', () => {
+    for (const how of ['blank', 'missing']) {
+      const b = builder();
+      b.run(how === 'blank' ? `FAMILY_PRICING.sink.options.grade = { '316': { flat: null, perW100: null } }` : `delete FAMILY_PRICING.sink.options.grade`);
+      open(b, 'sink');
+      assert.equal(b.plain('cfgEvaluate(cfgState).basis').priced, true, `${how}: the standard grade is the zero point and needs no cell`);
+      pickV(b, 'sink', 'grade', 316);
+      const area = b.el('cfgPriceArea').innerHTML;
+      assert.match(area, /<span class="cfg-badge">Priced after review<\/span>/, how);
+      assert.match(area, /No amount entered yet for: Material: Stainless Steel 316 Laboratory Grade\./, how);
+      assert.notEqual(b.el('cfgManualWrap').style.display, 'none', how);
+      assert.equal(b.el('cfgAddBtn').disabled, false, how);
+      assert.deepEqual(b.plain('cfgEvaluate(cfgState).basis').missing, ['Material: ' + G316], how);
+      assert.equal(b.plain('cfgEvaluate(cfgState).basis').unitPrice, 0, `${how}: a blank cell is never zero`);
+    }
+  });
+
+  it('a 316 line added with a typed price: named by its title, Material 316 first in the printed specs, the Construction sentence agrees (SS316), manual + priceManual, the grade stored and filed', () => {
+    const b = builder();
+    b.run(`delete FAMILY_PRICING.sink.options.grade`);
+    open(b, 'sink');
+    pickV(b, 'sink', 'grade', 316);
+    b.run(`cfgManualInput({ value: '39000' }); cfgCommit()`);
+    const it = b.plain('items[0]');
+    assert.equal(it.name, 'SS Sink');
+    assert.equal(it.config.grade, 316);
+    assert.deepEqual([it.priceBasis, it.priceManual, it.unitPrice], ['manual', true, 39000]);
+    assert.equal(it.needsPrice, undefined);
+    assert.deepEqual(it.specs[0], { label: 'Material', value: G316 });
+    assert.equal(it.specs.filter((s) => s.label === 'Material').length, 1);
+    assert.match(it.specs.at(-1).value, /^SS316 stainless steel · 1\.5 mm \(16 ga\) top plate · /, 'the Construction line cannot contradict the Material row');
+    assert.ok(it.specStr.startsWith('Material: ' + G316 + ', '));
+    const printed = specText(b.el('itemsTbody').innerHTML);
+    assert.match(printed, /^Material: Stainless Steel 316 Laboratory Grade • Sinks: /);
+    assert.match(printed, /Construction: SS316 stainless steel/);
+    assert.equal(/SS304/.test(printed), false, 'a 316 line never prints the 304 wording');
+    const pl = b.plain('buildQuotePayload()');
+    for (const row of [pl.items[0], pl.editableState.items[0]]) {
+      assert.equal(row.name, 'SS Sink'); assert.equal(row.config.grade, 316); assert.equal(row.specs[0].label, 'Material'); assert.equal(row.specs[0].value, G316);
+    }
+  });
+
+  it('every family: the line the panel builds is named by its TITLE and prints Material first; at 316 the name is the same and only the Material row (and the Construction sentence) change', () => {
+    const b = builder();
+    for (const id of FAM.order) {
+      const f = FAM.families[id];
+      const std = makeLine(b, stateFor(id, {})).line;
+      assert.equal(std.name, TITLE[id], id);
+      assert.notEqual(std.name, f.label, `${id}: not the website's name`);
+      assert.deepEqual(std.specs[0], { label: 'Material', value: G304 }, id);
+      assert.equal(std.config.grade, 304, id);
+      const l316 = makeLine(b, stateFor(id, { config: { ...PF.defaultConfig(f), grade: 316 } })).line;
+      assert.equal(l316.name, TITLE[id], `${id}: the title never names the grade`);
+      assert.deepEqual(l316.specs[0], { label: 'Material', value: G316 }, id);
+      assert.deepEqual(l316.specs.slice(1, -1), std.specs.slice(1, -1), `${id}: only Material and Construction differ`);
+      assert.equal(l316.config.grade, 316, id);
+    }
+  });
+
+  it('the stove and the griddle / griller / fryer are named from what is chosen in the panel; ⚙ configure refreshes the name (cfgApplyEdit copies `name`), and the toast says the new one', () => {
+    const b = builder();
+    open(b, 'stove');
+    const nameNow = () => b.run('cfgMakeLine(cfgEvaluate(cfgState), cfgState).name');
+    const A = gAt('stove', 'addons');
+    assert.equal(nameNow(), 'SS Range Stove');
+    b.run(`cfgToggleMulti(${A}, 3, true); cfgToggleMulti(${A}, 0, true)`);                       // the fryer, then the griller: named in the family's own order
+    assert.equal(nameNow(), 'SS Range Stove Combination (Griller, Fryer)');
+    b.run('cfgCommit()');
+    assert.equal(b.run('items[0].name'), 'SS Range Stove Combination (Griller, Fryer)');
+    assert.match(b.toast(), /Added: SS Range Stove Combination \(Griller, Fryer\) \(configured\)/);
+    b.run('configureLine(0)');
+    b.run(`cfgToggleMulti(${A}, 3, false); cfgToggleMulti(${A}, 0, false)`);
+    b.run('cfgCommit()');
+    assert.equal(b.run('items.length'), 1);
+    assert.equal(b.run('items[0].name'), 'SS Range Stove', 'the name follows the configuration back');
+    assert.match(b.toast(), /Updated: SS Range Stove/);
+    b.run(`items[0].name = 'My own name'`);                                                       // a hand-typed name is replaced by the title on the next re-configure
+    b.run('configureLine(0)'); b.run('cfgCommit()');
+    assert.equal(b.run('items[0].name'), 'SS Range Stove');
+    for (const [type, name] of [['griddle', 'SS Griddle'], ['griller', 'SS Lava-Rock Griller'], ['fryer', 'SS Fryer'], ['combi', 'SS Griller + Griddle Combination']]) {
+      open(b, 'cooking_line');
+      pickV(b, 'cooking_line', 'type', type);
+      assert.equal(b.run('cfgMakeLine(cfgEvaluate(cfgState), cfgState).name'), name, type);
+    }
+    // the pin: the Update path copies `name` from the fresh line (the Add path takes the whole fresh line)
+    assert.match(SCRIPT, /\['id', 'name', 'familyId', 'familyVersion', 'config', 'size', 'dims', 'specs', 'specStr', 'formulaType', 'qty', 'unit', 'notes', 'basisUnitPrice'\]\.forEach\(k => \{ old\[k\] = fresh\[k\]; \}\);/);
+  });
+
+  it('a stored line is never retitled by a load: a saved quote, a draft or a template keeps the name it was filed with (only a new line, a re-configure or a conversion get a title)', () => {
+    const b = builder();
+    const { line } = makeLine(b, sinkState({ qty: 1 }));
+    const stored = { ...line, name: 'Sink', specs: line.specs.filter((s) => s.label !== 'Material'), _uid: 'old1' };       // as it was filed before the titles and the Material row existed
+    b.run(`items.length = 0; items.push(${JSON.stringify(stored)}); normalizeLoadedItems(items);`);
+    const it = b.plain('items[0]');
+    assert.equal(it.name, 'Sink');
+    assert.deepEqual(it.specs.map((s) => s.label), stored.specs.map((s) => s.label), 'its printed specs are untouched too');
+    assert.equal(it._cfg.priced, true, 'and it still prices like the standard grade: an absent grade is the default');
+    assert.deepEqual(it._cfg.missing, []);
+  });
+
+  it('the Help text and the demo say the Material option and the line names (the tutorial contract); no figure in the new copy', () => {
+    const helpBody = (HTML.match(/<div class="modal-body" id="helpBody">[\s\S]*?<h4>What's new<\/h4>/) || [''])[0];
+    const li = (helpBody.match(/<li><strong>Configure a product<\/strong>[\s\S]*?<\/li>/) || [''])[0];
+    assert.ok(li.length > 500, 'could not find the Configure a product item');
+    for (const must of ['Every product opens with a <em>Material</em> option', 'Stainless Steel 304 Food Grade as standard', 'the <em>staff</em> choice Stainless Steel 316 Laboratory Grade (the website never offers it)',
+      'reads <em>Priced after review</em> until Finance has entered the 316 amount for that product in Inventory › Family pricing', 'each configured line is named for what it is on the quote', '<em>SS Sink</em>', '<em>SS Range Stove Combination (Griller, Fryer)</em>']) {
+      assert.ok(li.includes(must), `Help does not say: ${must}`);
+    }
+    const cfg = makeEnv().plain('TOUR_STEPS').find((s) => s.target === '#configPanel').body;
+    assert.match(cfg, /Every product opens with the staff-only Material option — Stainless Steel 304 Food Grade as standard, or 316 Laboratory Grade — and each line is named for what it is on the quote \(SS Sink, SS Griddle…\)\./);
+    assert.equal(/₱\s*\d|PHP\s*\d|\bpesos?\b/i.test(li + ' ' + cfg + ' ' + makeEnv().plain('WHATS_NEW')[0].items.join(' ')), false);
   });
 });

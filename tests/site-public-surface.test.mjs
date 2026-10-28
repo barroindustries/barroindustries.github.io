@@ -1177,15 +1177,27 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     for (const t of [homeText, catText]) for (const sentence of t.split(/(?<=[.!?])\s+/)) if (/SS ?316/.test(sentence)) assert.ok(!/ISPSC|DMMMSU|Don Mariano|Ilocos|completed|delivered to|installed (at|in|for)|our (previous|past) /i.test(sentence), `SS316 is tied to a project: ${sentence.slice(0, 80)}`);
   });
 
-  it('adds NO grade or finish option to the configurators or the quote flow yet (pricing is undecided): no group, option, label or script mentions SS316, grade, mirror or satin', () => {
+  it('adds NO grade or finish option to the WEBSITE configurators or the quote flow (the steel grade is a staff-only Quote Builder choice since 2026-10-28): no PUBLIC group, option or label mentions SS316, grade, mirror, satin or a material, and no public script names SS316 or a finish', () => {
+    const FAMS = require('../js/qr-families.js');
+    const PFX = require('../js/product-families.js');
+    const WORDS = /316|grade|mirror|satin|brushed|finish|material/i;
+    // (a) what the website offers is PF.publicGroups of each family: none of them (key, label, options, hints) carries such a word, nor do the sizes or the old-option map
+    for (const id of FAMS.order) {
+      const f = FAMS.families[id];
+      for (const g of PFX.publicGroups(f)) assert.ok(!WORDS.test(JSON.stringify(g)), `${id}.${g.key}: a public group offers a grade or finish`);
+      assert.ok(!WORDS.test(JSON.stringify([f.dims, f.specMap])), `${id}: its sizes or old-option map offer a grade or finish`);
+    }
+    // ... and the source agrees: the only group with such a word is the staff-only grade group
     const fams = JSON.parse(read('scripts/public-families.json'));
-    const text = JSON.stringify(Object.values(fams.families).map((f) => [f.groups, f.dims, f.specMap]));
-    assert.ok(!/316|grade|mirror|satin|brushed|finish|material/i.test(text), 'a family group offers a grade or finish');
-    for (const f of ['js/qr-families.js', 'js/qr-def.js', 'js/quote-request.js', 'js/qr-preview.js', 'js/product-families.js', 'functions/qr-families.js', 'functions/qr-def.js']) assert.ok(!/SS ?316|316L|satin|mirror finish|laboratory/i.test(read(f)), `${f} offers SS316 or a finish`);
+    for (const [id, f] of Object.entries(fams.families)) for (const g of f.groups) {
+      if (WORDS.test(JSON.stringify(g))) assert.ok(g.key === 'grade' && g.staffOnly === true, `${id}.${g.key}: a grade or finish outside the staff-only grade group`);
+    }
+    // (b) the public scripts never name SS316 or a finish (js/qr-families.js and its mirror carry the staff-only group, exactly as they carry the 1.2 mm top plate: they are not in this list)
+    for (const f of ['js/qr-def.js', 'js/quote-request.js', 'js/qr-preview.js', 'js/product-families.js', 'functions/qr-def.js']) assert.ok(!/SS ?316|316L|satin|mirror finish|laboratory/i.test(read(f)), `${f} offers SS316 or a finish`);
     assert.ok(!/SS ?316|satin|mirror/i.test(JSON.stringify(read('functions/qr-published.json'))));
   });
 
-  it('standard construction (owner ruling 2026-10-28): the website configurator offers the PUBLIC groups only (js/quote-request.js walks publicGroups(), never fam.groups) and adds a read-only Construction line; the staff-only top plate is defined once, flagged, and named on no public surface', () => {
+  it('standard construction (owner ruling 2026-10-28): the website configurator offers the PUBLIC groups only (js/quote-request.js walks publicGroups(), never fam.groups) and adds a read-only Construction line; the staff-only top plate and steel grade are defined once, flagged, and named on no public surface', () => {
     const js = read('js/quote-request.js');
     const code = js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
     assert.ok(/publicGroups\(/.test(code), 'js/quote-request.js must iterate PF.publicGroups(fam)');
@@ -1194,11 +1206,14 @@ describe('7 · the material: SS304 food-grade (standard) and SS316 laboratory-gr
     assert.ok(!/\{ ?staff: ?true/.test(code) && !/staffOnly/.test(code), 'the website never validates in staff mode');
     const fams = JSON.parse(read('scripts/public-families.json'));
     const flagged = Object.entries(fams.families).flatMap(([id, f]) => f.groups.filter((g) => g.staffOnly).map((g) => `${id}.${g.key}`));
-    assert.deepEqual(flagged, ['prep_table.top', 'sink.top', 'dish_table.top', 'stove.top', 'wok_range.top'], 'exactly the five top plates are staff-only (the hood, the griddle / griller / fryer and the deck oven have none)');
+    assert.deepEqual(flagged, ['prep_table.grade', 'prep_table.top', 'sink.grade', 'sink.top', 'dish_table.grade', 'dish_table.top', 'stove.grade', 'stove.top', 'wok_range.grade', 'wok_range.top', 'cooking_line.grade', 'deck_oven.grade', 'hood.grade', 'cabinet.grade', 'wall_shelf.grade', 'rack.grade'],
+      'exactly the eleven steel grades and the five top plates are staff-only (the hood, the griddle / griller / fryer and the deck oven have a grade but no top plate)');
     // no public surface offers or names the lighter top plate: the catalogue cards, the product pages, the FAQ and llms.txt say only the standard
     for (const f of ['catalogue/index.html', 'products/index.html', 'faq/index.html', 'llms.txt', ...fs.readdirSync(path.join(ROOT, 'products'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `products/${e.name}/index.html`)]) {
       const t = read(f).replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '');
       assert.ok(!/Top plate|\blighter\b|1\.2 mm top/.test(t), `${f} offers or names the lighter top plate`);
+      // ... nor the exact labels of the staff-only steel grade (the owner's own "SS304 food-grade" / "SS316 laboratory-grade" marketing wording there is different text and stays)
+      assert.ok(!/Stainless Steel 316 Laboratory Grade|Stainless Steel 304 Food Grade/.test(t), `${f} carries the staff-only grade's labels`);
     }
   });
 

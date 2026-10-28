@@ -11,7 +11,10 @@
 //
 //   * THE STAFF-ONLY TOP PLATE (owner ruling 2026-10-28, QUOTE-BUILDER-CONFIGURATOR-SPEC §14.4): tables, sinks, dish tables, stoves and wok ranges get ONE extra cell, "Top plate: 1.2 mm" — the
 //     SIGNED amount (a negative number, or 0) for the lighter top — and it is ALWAYS BLANK in the seed: the master's BA-001 "Top Gauge" adder is quoted in the note as a
-//     cross-reference only, never used as the amount. The seed is written for the current family schema (3), so an older seed is refused by the importer.
+//     cross-reference only, never used as the amount. The seed is written for the current family schema (4), so an older seed is refused by the importer.
+//   * THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, CONFIGURATOR-GRADE-TITLES-SPEC §4): EVERY family gets ONE extra cell, "Material: Stainless Steel 316 Laboratory Grade" — the SIGNED
+//     amount SS316 ADDS (the base item's list price is read as the SS304 price, so SS304 has no cell) — and it is ALWAYS BLANK in the seed: the master has no SS316 figure, and the note
+//     carries no figure and no cross-reference. An SS316 line is "priced after review" until Finance types the amount.
 //   * THE FIVE FAMILIES OF 2026-10-28 (CONFIGURATOR-FAMILIES-2-SPEC §7): dish table (PW-029 has no list price: every cell blank, with the reason), wok range (no usable
 //     comparison: all blank, related figures only QUOTED), griddle / griller / fryer (the fryer, the combination and the three-basket fryer from SKU pairs, the rest blank),
 //     gas deck oven (the six-tray oven from the CE-016 / CE-012 pair; NO length rate: the width follows the trays), range hood (the island and slim types from SKU pairs; the
@@ -90,7 +93,7 @@ describe('derive-family-pricing — the output covers every option of every fami
     assert.equal(seed.kind, 'barro-family-pricing-seed');
     assert.equal(seed.version, 1, 'the seed FILE format is unchanged');
     assert.equal(seed.schemaVersion, FAMS.version);
-    assert.equal(seed.schemaVersion, 3, 'the families are on schema 3 (five more families, conditional options): an older seed is refused by the importer');
+    assert.equal(seed.schemaVersion, 4, 'the families are on schema 4 (the staff-only steel grade, the line titles): an older seed is refused by the importer');
     assert.deepEqual(Object.keys(seed.families), FAMS.order);
     assert.deepEqual(Object.keys(seed.families), ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range', 'cooking_line', 'deck_oven', 'hood', 'cabinet', 'wall_shelf', 'rack']);
     assert.match(seed._readme, /PRIVATE/);
@@ -187,7 +190,7 @@ describe('derive-family-pricing — the output covers every option of every fami
         checked++;
       }
     }
-    assert.ok(checked >= 55, `only ${checked} option cells were probed`);
+    assert.ok(checked >= 66, `only ${checked} option cells were probed`);
   });
 });
 
@@ -631,6 +634,79 @@ describe('derive-family-pricing — the staff-only 1.2 mm top plate (owner rulin
       assert.ok(row, `${fid}/${sku}`);
       assert.equal(row.flag, 'ok', `${fid}/${sku}: ${row.flag}`);
       assert.equal(row.familyEstimateVsList, 1);
+    }
+  });
+});
+
+describe('derive-family-pricing — the staff-only steel grade (owner ruling 2026-10-28): ONE SIGNED SS316 cell on every family, always BLANK, with no figure and no cross-reference', () => {
+  const G316 = 'Material: Stainless Steel 316 Laboratory Grade';
+  it('every family has exactly one grade cell — SS316 — BLANK (no amount, no length rate, confidence blank); SS304 is the zero point and has none; the console table lists it once, blank', () => {
+    const seed = derive();
+    for (const fid of FAMS.order) {
+      const opts = seed.families[fid].options;
+      assert.deepEqual(Object.keys(opts.grade), ['316'], `${fid}: only the SS316 cell — SS304 is the zero point`);
+      const c = opts.grade['316'];
+      assert.deepEqual([c.flat, c.perW100, c.confidence], [null, null, 'blank'], `${fid}: the SS316 cell must be BLANK`);
+      const rows = seed.families[fid].table.filter((r) => r.group === 'grade');
+      assert.equal(rows.length, 1, `${fid}: listed once`);
+      assert.deepEqual([rows[0].value, rows[0].status, rows[0].confidence, rows[0].label], ['316', 'blank', 'blank', G316], fid);
+    }
+  });
+
+  it('the note tells Finance what to enter and carries no figure and no cross-reference: names SS316, says what it ADDS (positive, a per-100-mm rate only if it grows with length, or 0), says the master has none — and is the same on all eleven families', () => {
+    const note = cellOf(derive(), 'sink', 'grade', '316').derivation;
+    assert.match(note, /The standard material is SS304; the base item's list price is read as the SS304 price\./);
+    assert.match(note, /Enter what SS316 ADDS for this family/);
+    assert.match(note, /a positive amount; add a per-100-mm rate only if the premium grows with length\), or 0\./);
+    assert.match(note, /The master has no SS316 figure, so this is always left blank here\./);
+    assert.ok(!/₱|PHP|\d{1,3}(,\d{3})+|\d+\.\d{2}/.test(note), 'a peso figure in the note');
+    assert.ok(!/\b\d{3,}\b/.test(note.replace(/SS304|SS316|per-100-mm/g, '')), 'a long number in the note');
+    assert.ok(!/BA-\d|CE-\d|PW-\d|EX-\d/.test(note), 'a cross-reference to a master SKU in the note');
+    for (const fid of FAMS.order) assert.equal(cellOf(derive(), fid, 'grade', '316').derivation, note, `the same instruction on every family (${fid})`);
+  });
+
+  it('whatever the master holds — even a spec that mentions SS316 or a price adder named like the grade — the cell stays BLANK and the note stays the same (nothing is derived or quoted)', () => {
+    const base = cellOf(derive(), 'sink', 'grade', '316').derivation;
+    const odd = [
+      prod('PW-004', { basePrice: 15555, formulaType: 'per_length', defaultDimensions: dd(500, 500, 850), formula: { baseLengthMm: 500, pricePerExtraMm: 0 }, specs: [spec('Material', ['SS304', 'SS316'], 'SS304', [0, 4321])] }),
+      prod('BA-002', { basePrice: 9000, specs: [spec('Material Grade', ['SS304', 'SS316'], 'SS304', [0, 2345]), spec('Grade', ['304', '316'], '304', [0, 1111])] }),
+    ];
+    const s = derive(odd);
+    for (const fid of FAMS.order) {
+      const c = cellOf(s, fid, 'grade', '316');
+      assert.deepEqual([c.flat, c.perW100, c.confidence], [null, null, 'blank'], fid);
+      assert.equal(c.derivation, base, `${fid}: the note does not quote the master`);
+    }
+  });
+
+  it('the seed prices an SS316 line as "priced after review" naming "Material: Stainless Steel 316 Laboratory Grade" while the cell is blank; the standard grade prices from the base item alone; once Finance types a POSITIVE amount (flat, and a per-100-mm part) the line prices, dearer by exactly that', () => {
+    const seed = derive();
+    const byId = new Map(PRIMARIES().map((p) => [p.id, p]));
+    for (const fid of FAMS.order) {
+      const fam = FAMS.families[fid];
+      const sheet = { approved: true, schemaVersion: FAMS.version, options: Object.fromEntries(Object.entries(seed.families[fid].options).map(([g, vs]) => [g, Object.fromEntries(Object.entries(vs).map(([v, c]) => [v, { flat: c.flat, perW100: c.perW100 }]))])), size: { perW100: seed.families[fid].size.perW100 } };
+      const dims = PF.standardDims(fam, PF.defaultConfig(fam));
+      const price = (cfg, sh) => PC.priceConfiguredItem(byId.get(fam.primary), fam, cfg, dims, sh || sheet, {}, { schemaVersion: FAMS.version });
+      const std = price(PF.defaultConfig(fam));
+      assert.equal(std.priced, true, fid); assert.deepEqual(std.deltas, [], fid);
+      const lab = price({ ...PF.defaultConfig(fam), grade: 316 });
+      assert.equal(lab.priced, false, fid); assert.equal(lab.reason, 'missing_input', fid); assert.deepEqual(lab.missing, [G316], fid);
+      const typed = { ...sheet, options: { ...sheet.options, grade: { 316: { flat: 1234, perW100: null } } } };
+      const dearer = price({ ...PF.defaultConfig(fam), grade: 316 }, typed);
+      assert.equal(dearer.priced, true, fid);
+      assert.equal(dearer.unitPrice, std.unitPrice + 1234, `${fid}: exactly the typed amount`);
+      assert.deepEqual(dearer.deltas, [{ key: 'grade:316', amount: 1234 }], fid);
+    }
+  });
+
+  it('the absorbed-SKU check is unaffected: each absorbed model is priced at the standard grade (they never state one), so a priced primary is "ok", not "cannot be checked: blank cells (Material)"', () => {
+    const seed = derive();
+    for (const fid of FAMS.order) {
+      for (const row of seed.families[fid].absorbedCheck) assert.ok(!/Material/.test(row.flag), `${fid}/${row.sku}: ${row.flag}`);
+    }
+    for (const [fid, sku] of [['cabinet', 'PW-015'], ['rack', 'PW-010'], ['wall_shelf', 'PW-023']]) {
+      const row = seed.families[fid].absorbedCheck.find((r) => r.sku === sku);
+      assert.equal(row.flag, 'ok', `${fid}/${sku}: ${row.flag}`);
     }
   });
 });

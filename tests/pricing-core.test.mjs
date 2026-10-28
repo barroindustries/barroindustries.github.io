@@ -17,6 +17,9 @@
 //   6. PRODUCT FAMILIES (owner ruling 2026-10-21): normalisePricingDoc + priceConfiguredItem — a configured price = the primary SKU
 //      through the UNCHANGED machinery + signed option deltas from a private sheet; an unapproved sheet / a stale schema / a BLANK cell
 //      is "priced after review" (never zero, never a partial figure); an option equal to the family default adds nothing (identity).
+//   6b. THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, CONFIGURATOR-GRADE-TITLES-SPEC §3, the last describe block): js/pricing-core.js is UNCHANGED — the generic `choice` pricing already
+//      prices the `grade` group of the real definitions: SS304 is the zero point (no cell, no delta), SS316 reads one signed { flat, perW100 } cell, a blank cell is "missing input" naming
+//      "Material: Stainless Steel 316 Laboratory Grade" (never zero), an older-schema sheet is "not approved". FAKE odd figures only (the repository is public).
 //   7. REGRESSION: the four original exports are pinned by the SHA-256 of their source (taken before the families were added), on top of
 //      the frozen-oracle parity sweep above, so adding the configured price provably changed nothing about SKU pricing or the Quote Builder.
 //
@@ -1039,5 +1042,88 @@ describe('REGRESSION — adding the configured price changed NOTHING about SKU p
     priceConfiguredItem(PRIMARY, FAM, { ...STD, layers: 3 }, { W: 1300, D: 700, H: 850 }, SHEET(), {}, OPT);
     normalisePricingDoc(FAM, SHEET());
     assert.deepEqual(priceCatalogItem(PRIMARY, { dims: { W: 1300, D: 700, H: 850 }, runs: null, specIdx: [] }, {}), before);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  THE STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28) — priced by the UNCHANGED generic `choice` code, on the REAL definitions. FAKE odd figures.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('priceConfiguredItem — the staff-only steel grade (Material): SS304 is the zero point, SS316 reads one signed cell, a blank cell is "priced after review"', () => {
+  const FAMS = require('../js/qr-families.js');
+  const PFX = require('../js/product-families.js');
+  const sink = FAMS.families.sink;
+  const SINK_PRIMARY = perLength({ id: 'PW-004', basePrice: 1000, defaultDimensions: { W: 500, D: 500, H: 850 }, formula: { baseLengthMm: 500, pricePerExtraMm: 2, rateD100: 30, rateH100: 0 } });
+  const G316 = 'Material: Stainless Steel 316 Laboratory Grade';
+  const sheet = (cell) => ({ approved: true, schemaVersion: FAMS.version, options: cell === undefined ? {} : { grade: { 316: cell } }, size: { perW100: null } });
+  const opt = { schemaVersion: FAMS.version };
+  const price = (grade, sh, dims) => priceConfiguredItem(SINK_PRIMARY, sink, { ...PFX.defaultConfig(sink), grade }, dims || PFX.defaultDims(sink), sh, {}, opt);
+
+  it('an approved schema-4 sheet whose SS316 flat is blank: the 316 line is "missing input" naming Material, priced at nothing — the 304 line prices from the base item alone with no delta', () => {
+    assert.equal(FAMS.version, 4, 'the premise: the grade is part of schema 4');
+    for (const sh of [sheet({ flat: null, perW100: null }), sheet({ flat: null, perW100: 40 }), sheet(undefined)]) {
+      const lab = price(316, sh);
+      assert.equal(lab.priced, false); assert.equal(lab.unitPrice, 0); assert.equal(lab.reason, 'missing_input');
+      assert.deepEqual(lab.missing, [G316]);
+      const std = price(304, sh);
+      assert.equal(std.priced, true); assert.equal(std.reason, null); assert.deepEqual(std.deltas, []); assert.deepEqual(std.missing, []);
+      assert.equal(std.unitPrice, std.base, 'the base item alone');
+    }
+  });
+
+  it('a FAKE odd figure in flat adds the delta grade:316 — exactly that amount; an explicit 0 is a figure (priced, the same as 304); a NEGATIVE one is signed', () => {
+    const std = price(304, sheet({ flat: 2917, perW100: null }));
+    for (const [flat, want] of [[2917, 2917], [0, 0], [-413, -413]]) {
+      const lab = price(316, sheet({ flat, perW100: null }));
+      assert.equal(lab.priced, true, String(flat));
+      assert.deepEqual(lab.deltas, [{ key: 'grade:316', amount: want }], String(flat));
+      assert.equal(lab.unitPrice, std.unitPrice + want, String(flat));
+    }
+    assert.deepEqual(std.deltas, [], 'a 304 line adds no delta, whatever the 316 cell holds');
+  });
+
+  it('a perW100 figure scales with the length ABOVE the standard one only (a non-linear family), flat + perW100 x (W - standard) / 100', () => {
+    const sh = sheet({ flat: 1000, perW100: 70 });
+    const atStd = price(316, sh, { W: 500, D: 500, H: 850 });
+    assert.deepEqual(atStd.deltas, [{ key: 'grade:316', amount: 1000 }], 'at the standard length: the flat part alone');
+    const longer = price(316, sh, { W: 1500, D: 500, H: 850 });
+    assert.deepEqual(longer.deltas, [{ key: 'grade:316', amount: 1000 + 70 * (1500 - 500) / 100 }]);
+    const shorter = price(316, sh, { W: 500, D: 500, H: 850 });
+    assert.equal(shorter.deltas[0].amount, 1000, 'shrinking never discounts');
+  });
+
+  it('a 304 line adds no delta and reads no cell, however odd the grade group of the sheet is (a huge figure, a string, the standard value\'s own key)', () => {
+    const base = price(304, sheet(undefined));
+    for (const odd of [{ flat: 99999999, perW100: 5 }, { flat: '12', perW100: null }, null]) assert.deepEqual(price(304, sheet(odd)), base);
+    const withStdKey = { ...sheet(undefined), options: { grade: { 304: { flat: 777, perW100: null }, 316: { flat: 5, perW100: null } } } };
+    assert.deepEqual(price(304, withStdKey).deltas, [], 'the standard grade has no cell: a figure keyed 304 is never charged');
+    assert.equal(price(304, withStdKey).unitPrice, base.unitPrice);
+  });
+
+  it('a sheet approved against the previous schema (3, before the grade existed) prices NOTHING — "not approved" — for the standard grade as well; an unapproved one too', () => {
+    for (const older of [1, 2, 3]) {
+      const r = price(304, { ...sheet({ flat: 2917, perW100: null }), schemaVersion: older });
+      assert.equal(r.priced, false, `schema ${older}`); assert.equal(r.reason, 'not_approved', `schema ${older}`);
+    }
+    assert.equal(price(316, { ...sheet({ flat: 2917, perW100: null }), approved: false }).reason, 'not_approved');
+  });
+
+  it('every family prices its SS316 line the same way — a cell per family, SS304 free — with a synthetic primary (the generic code needs nothing per family)', () => {
+    for (const id of FAMS.order) {
+      const fam = FAMS.families[id];
+      const lengthPriced = fam.sizeBasis !== 'linear';
+      const prim = lengthPriced
+        ? perLength({ id: fam.primary, basePrice: 1000, defaultDimensions: PFX.defaultDims(fam), formula: { baseLengthMm: PFX.defaultDims(fam).W, pricePerExtraMm: 2, rateD100: 30, rateH100: 0 } })
+        : fixedP({ id: fam.primary, basePrice: 1000, defaultDimensions: PFX.defaultDims(fam) });
+      const dims = PFX.standardDims(fam, PFX.defaultConfig(fam));
+      const sh = { approved: true, schemaVersion: FAMS.version, options: { grade: { 316: { flat: 3113, perW100: null } } }, size: { perW100: lengthPriced ? null : 0 } };
+      const std = priceConfiguredItem(prim, fam, PFX.defaultConfig(fam), dims, sh, {}, opt);
+      const lab = priceConfiguredItem(prim, fam, { ...PFX.defaultConfig(fam), grade: 316 }, dims, sh, {}, opt);
+      assert.equal(std.priced, true, `${id}: ${std.missing.join(', ')}`); assert.deepEqual(std.deltas, [], id);
+      assert.equal(lab.priced, true, `${id}: ${lab.missing.join(', ')}`);
+      assert.equal(lab.unitPrice - std.unitPrice, 3113, id);
+      assert.deepEqual(lab.deltas, [{ key: 'grade:316', amount: 3113 }], id);
+      const blank = priceConfiguredItem(prim, fam, { ...PFX.defaultConfig(fam), grade: 316 }, dims, { ...sh, options: {} }, {}, opt);
+      assert.deepEqual(blank.missing, [G316], id); assert.equal(blank.reason, 'missing_input', id);
+    }
   });
 });

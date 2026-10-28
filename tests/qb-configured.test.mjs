@@ -21,6 +21,11 @@
 //      burner cell only; a six-tray deck oven at 1200 mm prices the 6-tray cell + the (zero) width rate, and without a width rate it is "Size" missing; the nearest-model match
 //      finds CE-022 / CE-009 / CE-025 for a fryer with 3 / 2 baskets and a two-hole wok range with a rear burner, and a stove that asks for a wok burner no longer finds CE-006.
 //
+//   7. THE STAFF-ONLY STEEL GRADE AND THE LINE TITLES (owner rulings 2026-10-28, specs/CONFIGURATOR-GRADE-TITLES-SPEC.md, section 11 at the end of the file): buildLine /
+//      migrateLegacyConfiguredLine name a line by PF.lineTitle ("SS Sink", "SS Range Stove Combination (Griller, Fryer)"; the family label only when there is no title or no
+//      lineTitle), fromRequestItem retitles when it is given the family definitions AND PF and keeps the server's name otherwise, an ABSENT `grade` reads as the standard 304 (no
+//      "Material" ever missing), the Material row is the first spec row, and a 316 line is priced from the sheet's grade cell exactly as the server's computeBasket prices it.
+//
 // Fixtures are SYNTHETIC odd-figure pesos (the repository is PUBLIC; the real price master and option sheets are private).
 //
 // Mutation-tested in scratch copies (never the shared tree) — each of these must fail here: dropping the soft-width substitution,
@@ -93,6 +98,7 @@ const PRIMARIES = {
 };
 const PRIMARY_MAP = new Map(Object.entries(PRIMARIES));
 
+const GRADE_FLAT = 2917;       // the synthetic SS316 premium of every approved fixture sheet (an odd figure; the real amounts are private)
 // kind: 'approved' (every non-standard cell has an amount, some per-100-mm rates, some negative) | 'unapproved' (the same, approved:false)
 //       | 'blank' (approved, but every 4th cell is blank and the linear family has no length rate)
 function sheetFor(familyId, kind) {
@@ -100,6 +106,9 @@ function sheetFor(familyId, kind) {
   const options = {};
   let i = 0;
   for (const c of PF.cells(f)) {
+    // the staff-only steel grade (owner ruling 2026-10-28): its SS316 cell is a synthetic odd figure of its own, blank in the 'blank' kind — and it does not count in `i`, so every
+    // other cell keeps exactly the figure and the blank pattern it had before the grade existed
+    if (c.group === 'grade') { if (!c.baseline) (options.grade = options.grade || {})[c.value] = { flat: kind === 'blank' ? null : GRADE_FLAT, perW100: null }; continue; }
     i++;
     if (c.baseline) continue;
     const flat = (i % 7 === 3 ? -1 : 1) * (311 + 97 * i);
@@ -231,7 +240,7 @@ describe('priceLine — PARITY with functions/qr-core.js computeBasket (the serv
   });
 
   describe('a HARD width rule (sinks) is never substituted — validation refuses such a line before it can be priced', () => {
-    const sinkCfg = { basins: 3, alignment: 'center', undershelf: false, upper: false, faucet: 'gooseneck', top: 1.5 };   // 3 x 500 = 1500 mm, hard
+    const sinkCfg = { grade: 304, basins: 3, alignment: 'center', undershelf: false, upper: false, faucet: 'gooseneck', top: 1.5 };   // 3 x 500 = 1500 mm, hard
     it('a too-short sink is priced at the size it was given, with no warning (exactly what computeBasket does with the same hand-built line)', () => {
       assert.equal(PF.minWidth(fam('sink'), sinkCfg).hard, true);
       const size = { W: 1000, D: 500, H: 850 };
@@ -291,7 +300,7 @@ describe('priceLine — PARITY with functions/qr-core.js computeBasket (the serv
 
 // ═══════════════════════════════════════ buildLine ═══════════════════════════════════════
 describe('buildLine — a configured line in the builder\'s item shape (§3.1, rule R2)', () => {
-  const sinkCfg = { basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'prerinse', top: 1.5 };
+  const sinkCfg = { grade: 304, basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'prerinse', top: 1.5 };
   const sinkSize = { W: 1800, D: 700, H: 900 };
   const build = (kind, extra) => {
     const basis = kind === undefined ? undefined : ours('sink', sinkCfg, sinkSize, kind);
@@ -303,14 +312,14 @@ describe('buildLine — a configured line in the builder\'s item shape (§3.1, r
     const it = build('approved');
     assert.equal(it.id, 'PW-004', 'every downstream consumer keeps a real product id: the family\'s PRIMARY SKU');
     assert.equal(it.category, 'washing');
-    assert.equal(it.name, 'Sink');
+    assert.equal(it.name, 'SS Sink', 'the line is named by its TITLE, not by the website\'s card name ("Sink")');
     assert.equal(it.familyId, 'sink');
     assert.equal(it.familyVersion, FAM.version);
     assert.deepEqual(it.config, sinkCfg);
     assert.deepEqual(it.size, sinkSize);
     assert.equal(it.dims, 'L1800 × W700 × H900 mm');
     assert.deepEqual(it.specs, PF.describe(fam('sink'), sinkCfg));
-    assert.equal(it.specStr, 'Sinks: 2, Sink position: Centre, Undershelf: With, Upper shelf: Without, Faucet: Pre-rinse spray, Construction: SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet');
+    assert.equal(it.specStr, 'Material: Stainless Steel 304 Food Grade, Sinks: 2, Sink position: Centre, Undershelf: With, Upper shelf: Without, Faucet: Pre-rinse spray, Construction: SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet');
     assert.equal(it.qty, 2); assert.equal(it.unit, 'pc');
     assert.equal(it.unitPrice, basis.unitPrice);
     assert.equal(it.amount, basis.unitPrice * 2);
@@ -362,7 +371,8 @@ describe('buildLine — a configured line in the builder\'s item shape (§3.1, r
   });
   it('the configuration is stored in its CANONICAL form (add-ons in the family\'s own order, burner order kept)', () => {
     const it = QB.buildLine(DEPS, { family: fam('stove'), primary: PRIMARIES.stove, config: { positions: ['wok', 'lp_small'], addons: ['griddle', 'griller'] }, size: { W: 1500, D: 700, H: 850 }, qty: 1 });
-    assert.deepEqual(it.config, { positions: ['wok', 'lp_small'], addons: ['griller', 'griddle'], top: 1.5 }, 'the staff-only top plate is stated, at its default');
+    assert.deepEqual(it.config, { grade: 304, positions: ['wok', 'lp_small'], addons: ['griller', 'griddle'], top: 1.5 }, 'the staff-only steel grade and top plate are stated, at their defaults');
+    assert.equal(it.name, 'SS Range Stove Combination (Griller, Griddle)');
     assert.equal(it.formulaType, 'per_length');
   });
   it('a configuration or size the family would refuse builds NOTHING (null), and so does a missing family', () => {
@@ -440,17 +450,17 @@ describe('nearestAbsorbed — the standard model a configuration is closest to (
   it('choice groups score +1 each when equal: the best-scoring SKU wins and the partial match is not exact', () => {
     const cfg = { basins: 2, alignment: 'left', undershelf: false, upper: false, faucet: 'prerinse' };
     const got = QB.nearestAbsorbed(sink, cfg);
-    assert.equal(got.sku, 'PW-006');                 // PW-006 and PW-007 share a configuration and both score 4 (+1 for the standard top plate both share): the first in map order wins
-    assert.ok(near(got.score, 5));
+    assert.equal(got.sku, 'PW-006');                 // PW-006 and PW-007 share a configuration and both score 4 (+1 for the standard steel grade and +1 for the standard top plate both share): the first in map order wins
+    assert.ok(near(got.score, 6));
     assert.equal(got.exact, false);
     assert.equal(QB.nearestAbsorbed(sink, { basins: 3, alignment: 'right', undershelf: false, upper: false, faucet: 'gooseneck' }).sku, 'PW-008');
     assert.equal(QB.nearestAbsorbed(sink, { basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'gooseneck' }).sku, 'PW-037');
   });
   it('a multi group scores the Jaccard overlap of the selected sets; a slots group the multiset overlap over the longer list', () => {
-    // two lp_small burners + a griller: CE-008 (two lp_small + griller & griddle) scores 1 (slots) + 1/2 (Jaccard) + 1 (the standard top plate) = 2.5
+    // two lp_small burners + a griller: CE-008 (two lp_small + griller & griddle) scores 1 (slots) + 1/2 (Jaccard) + 1 (the standard top plate) + 1 (the standard steel grade) = 3.5
     const got = QB.nearestAbsorbed(stove, { positions: ['lp_small', 'lp_small'], addons: ['griller'] });
     assert.equal(got.sku, 'CE-008');
-    assert.ok(near(got.score, 2.5), String(got.score));
+    assert.ok(near(got.score, 3.5), String(got.score));
     assert.equal(got.exact, false);
     // slots: [A,A,B] against [A,B,B] shares two of three positions -> 2/3
     const synth = { groups: [{ key: 'p', type: 'slots' }], absorbed: { X: { p: ['a', 'b', 'b'] } } };
@@ -741,7 +751,7 @@ describe('estimateCheck — outside the range the client saw?', () => {
 // ═══════════════════════════════════════ 5. fromRequestItem (R2 / §6.1) ═══════════════════════════════════════
 describe('fromRequestItem — a website request line in the builder\'s item shape', () => {
   const REF = 'QR-261021-K7M2PX';
-  const sinkCfg = { basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'prerinse', top: 1.5 };
+  const sinkCfg = { grade: 304, basins: 2, alignment: 'center', undershelf: true, upper: false, faucet: 'prerinse', top: 1.5 };
   const sinkSize = { W: 1800, D: 700, H: 900 };
   // a REAL request row (the server's normaliseItems) and a REAL internal line (its computeBasket) for a configured sink
   const real = (kind) => { const { row, line } = serverLine('sink', sinkCfg, sinkSize, 2, kind); return { row: { ...row, n: 3, note: 'Near the loading door' }, line: { ...line, n: 3 } }; };
@@ -754,11 +764,11 @@ describe('fromRequestItem — a website request line in the builder\'s item shap
     assert.deepEqual(it.config, sinkCfg);
     assert.deepEqual(it.size, sinkSize);
     assert.equal(it.id, 'PW-004');
-    assert.equal(it.name, 'Sink', 'a real configured line: no "(configured)" stand-in suffix');
+    assert.equal(it.name, 'Sink', 'a real configured line: no "(configured)" stand-in suffix — and, without the family definitions, the name the server stored');
     assert.equal(it.category, 'washing');
     assert.equal(it.dims, 'L1800 × W700 × H900 mm');
     assert.deepEqual(it.specs, PF.describe(fam('sink'), sinkCfg));
-    assert.equal(it.specStr, 'Sinks: 2, Sink position: Centre, Undershelf: With, Upper shelf: Without, Faucet: Pre-rinse spray, Construction: SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet');
+    assert.equal(it.specStr, 'Material: Stainless Steel 304 Food Grade, Sinks: 2, Sink position: Centre, Undershelf: With, Upper shelf: Without, Faucet: Pre-rinse spray, Construction: SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet');
     assert.equal(it.qty, 2); assert.equal(it.unit, 'pc');
     assert.equal(it.unitPrice, line.unitPrice); assert.equal(it.amount, line.unitPrice * 2);
     assert.equal(it.basisUnitPrice, line.unitPrice);
@@ -1025,15 +1035,15 @@ describe('migrateLegacyConfiguredLine — an old plain line becomes a configured
   it('a PW-006 plain line becomes a sink: the SKU\'s configuration with the saved faucet applied through specMap, the saved size kept on the step', () => {
     const out = migrate(plain());
     assert.equal(out.familyId, 'sink');
-    assert.deepEqual(out.config, { basins: 2, alignment: 'center', undershelf: false, upper: false, faucet: 'gooseneck', top: 1.5 }, 'the SKU converts to the standard 1.5 mm top plate');
+    assert.deepEqual(out.config, { grade: 304, basins: 2, alignment: 'center', undershelf: false, upper: false, faucet: 'gooseneck', top: 1.5 }, 'the SKU converts to the standard steel grade and the standard 1.5 mm top plate');
     assert.deepEqual(out.size, { W: 1200, D: 500, H: 850 });
     assert.equal(out.dims, 'L1200 × W500 × H850 mm');
     assert.equal(out.id, 'PW-004', 'the family\'s primary SKU');
-    assert.equal(out.name, 'Sink');
+    assert.equal(out.name, 'SS Sink', 'a converted line is named by its title, like a line built in the panel');
     assert.equal(out.category, 'prep_washing', 'the section the line already sat in is KEPT — never the family\'s public category ("washing")');
     assert.equal(out.familyVersion, FAM.version);
     assert.deepEqual(out.specs, PF.describe(fam('sink'), out.config));
-    assert.equal(out.specStr, 'Sinks: 2, Sink position: Centre, Undershelf: Without, Upper shelf: Without, Faucet: Gooseneck, Construction: SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet');
+    assert.equal(out.specStr, 'Material: Stainless Steel 304 Food Grade, Sinks: 2, Sink position: Centre, Undershelf: Without, Upper shelf: Without, Faucet: Gooseneck, Construction: SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet');
     assert.equal(PF.validateLine(fam('sink'), out.config, out.size).ok, true);
   });
   it('KEEPS the unit price, lands on the MANUAL basis (a typed price sticks), and is never auto-priceable', () => {
@@ -1055,7 +1065,7 @@ describe('migrateLegacyConfiguredLine — an old plain line becomes a configured
   it('an old request hand-off line "<family> (configured)" at its primary SKU converts too, losing the stand-in suffix and keeping its price', () => {
     const legacy = { id: 'PW-004', category: 'washing', name: 'Sink (configured)', dims: 'L1800 × W700 × H900 mm', specs: [{ label: 'Faucet', value: 'Pre-rinse spray' }], specStr: 'Sinks: 2', qty: 2, unit: 'pc', unitPrice: 36703, amount: 73406, leadTime: '—', laborHours: null, formulaType: 'fixed', notes: '', priceManual: true };
     const out = migrate(legacy);
-    assert.equal(out.name, 'Sink'); assert.equal(out.id, 'PW-004'); assert.equal(out.familyId, 'sink');
+    assert.equal(out.name, 'SS Sink', 'losing the stand-in suffix, the line takes the title'); assert.equal(out.id, 'PW-004'); assert.equal(out.familyId, 'sink');
     assert.equal(out.unitPrice, 36703); assert.equal(out.amount, 73406);
     assert.equal(out.priceBasis, 'manual'); assert.equal(out.priceManual, true);
     assert.equal(out.config.faucet, 'prerinse', 'the saved faucet row maps through specMap');
@@ -1167,6 +1177,7 @@ describe('js/qb-configured.js — surface, purity, nothing sensitive', () => {
 describe('the staff-only top plate: default fill in the nearest-model match, staff-mode validation, a blank 1.2 mm cell, and the builder section of a line', () => {
   const WITH_TOP = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];
   const withoutTop = (cfg) => { const { top, ...rest } = cfg; void top; return rest; };
+  const withoutStaff = (cfg) => { const { top, grade, ...rest } = cfg; void top; void grade; return rest; };       // a configuration stored before EITHER staff-only group existed
   // a copy of the approved sheet whose 1.2 mm top cell is `cell` ({ flat, perW100 }); the standard 1.5 mm top never has a cell of its own to fill
   const sheetWithTop = (id, cell) => ({ ...SHEETS.approved[id], options: { ...SHEETS.approved[id].options, top: { 1.2: cell } } });
   const priceAt = (id, cfg, sheet) => QB.priceLine(DEPS, { family: fam(id), primary: PRIMARIES[id], config: cfg, size: PF.defaultDims(fam(id)), sheet });
@@ -1243,9 +1254,9 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
       });
     }
     it('a sheet approved against the OLD definitions (schema 1) prices nothing: the base item\'s list price must be approved again as the 1.5 mm price', () => {
-      assert.equal(FAM.version, 3, 'schema 3: five more families and conditional options (no sheet is approved against it yet, so the bump costs nothing live)');
+      assert.equal(FAM.version, 4, 'schema 4: the staff-only steel grade and the line titles (no sheet is approved against it yet, so the bump costs nothing live)');
       for (const id of FIDS) {
-        for (const older of [1, 2]) {
+        for (const older of [1, 2, 3]) {
           const old = priceAt(id, PF.defaultConfig(fam(id)), { ...SHEETS.approved[id], schemaVersion: older });
           assert.equal(old.priced, false, `${id} at schema ${older}`); assert.equal(old.reason, 'not_approved', `${id} at schema ${older}`);
         }
@@ -1309,6 +1320,9 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
           const old = ours(fid, withoutTop(config), size, kind);
           assert.deepEqual(old, std, `${fid} ${kind} ${JSON.stringify(config)}`);                    // every field: price, reason, missing, base, deltas, pricedSize, warnings
           assert.ok(!old.missing.includes('Top plate'), `${fid} ${kind}: "Top plate" reported missing`);
+          const older = ours(fid, withoutStaff(config), size, kind);                                  // ... and one stored before the steel grade existed either
+          assert.deepEqual(older, std, `${fid} ${kind}: no grade stated`);
+          assert.ok(!older.missing.includes('Material'), `${fid} ${kind}: "Material" reported missing`);
           assert.deepEqual(pickKeys(old), pickKeys(serverLine(fid, config, size, qty, kind).line), `${fid} ${kind}: not what the server prices`);
         }
         if (WITH_TOP.includes(fid)) withTop++;
@@ -1365,13 +1379,13 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
     });
   });
 
-  describe('fromRequestItem with the family definitions — a request stored before the top plate existed gets the standard 1.5 mm top, and nothing else changes', () => {
+  describe('fromRequestItem with the family definitions — a request stored before the top plate (or the steel grade) existed gets the standard 1.5 mm top and the standard grade, and nothing else changes', () => {
     const REF = 'QR-261021-K7M2PX';
     // a request row as it was stored BEFORE the staff-only top plate existed: no `top` in the configuration, no Construction row in the options
-    const preChange = (row) => ({ ...row, config: withoutTop(row.config), specs: row.specs.filter((s) => s.label !== 'Construction') });
+    const preChange = (row) => ({ ...row, config: withoutStaff(row.config), specs: row.specs.filter((s) => s.label !== 'Construction' && s.label !== 'Material') });
     const without = (item) => { const { config, ...rest } = item; void config; return rest; };
 
-    it('every family: with deps the stored configuration is the complete one (only `top: 1.5` added), it prices as the figure the client saw, and "Top plate" is never missing; without deps it is carried over as stored and still prices the same', () => {
+    it('every family: with deps the stored configuration is the complete one (only `grade: 304` and `top: 1.5` added), it prices as the figure the client saw, and neither "Top plate" nor "Material" is ever missing; without deps it is carried over as stored and still prices the same', () => {
       const r = rng(4242);
       let added = 0, pricedLines = 0;
       for (let i = 0; i < 60; i++) {
@@ -1385,13 +1399,16 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
         assert.deepEqual(bare.config, old.config, `${fid}: without deps the configuration is carried over exactly as stored`);
         assert.deepEqual(done.config, row.config, `${fid}: with deps it is the complete configuration — every stored value kept, the missing groups at their defaults`);
         if (WITH_TOP.includes(fid)) { assert.equal(done.config.top, 1.5, fid); assert.ok(!('top' in bare.config), fid); added++; }
-        assert.deepEqual(without(done), without(bare), `${fid}: nothing but the configuration differs`);
+        assert.equal(done.config.grade, 304, `${fid}: the standard steel grade`); assert.ok(!('grade' in bare.config), fid);
+        assert.deepEqual(without({ ...done, name: '' }), without({ ...bare, name: '' }), `${fid}: nothing but the configuration (and the title the family definitions give the line) differs`);
+        assert.equal(bare.name, row.name, `${fid}: without deps the server's name passes through`);
+        assert.equal(done.name, PF.lineTitle(fam(fid), row.config), `${fid}: with the family definitions the line is named by its title`);
         for (const it of [bare, done]) {
           const priced = ours(fid, it.config, it.size, 'approved');
           assert.equal(priced.priced, line.priced, `${fid}: the builder's own recomputation agrees with the server on whether it prices`);
           assert.equal(priced.unitPrice, line.unitPrice, `${fid}: at the figure the client saw`);
           assert.equal(it.basisUnitPrice, line.priced ? line.unitPrice : 0);
-          assert.ok(!priced.missing.includes('Top plate'), fid);
+          assert.ok(!priced.missing.includes('Top plate') && !priced.missing.includes('Material'), fid);
         }
       }
       assert.ok(added >= 25 && pricedLines >= 30, `the sweep must cover the top-plate families and priced lines (${added} / ${pricedLines})`);
@@ -1413,11 +1430,11 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
     });
 
     it('only the missing groups are filled: every stated value stays as stored (a 1.2 mm top, an invalid value, add-on and burner order); a row whose configuration is not an object is not turned into a default line', () => {
-      const stated = { positions: ['wok', 'lp_small'], addons: ['oven', 'fryer'], top: 1.2 };
+      const stated = { grade: 316, positions: ['wok', 'lp_small'], addons: ['oven', 'fryer'], top: 1.2 };
       const row = { n: 1, kind: 'family', id: 'CE-001', familyId: 'stove', name: 'Stove', cat: 'cooking', unit: 'pc', qty: 1, size: { W: 1400, D: 700, H: 850 }, config: stated, specs: [], note: '' };
-      assert.deepEqual(QB.fromRequestItem(row, null, REF, DEPS).config, stated, 'nothing is missing: nothing changes (the stated 1.2 mm top stays 1.2 mm)');
+      assert.deepEqual(QB.fromRequestItem(row, null, REF, DEPS).config, stated, 'nothing is missing: nothing changes (the stated 1.2 mm top stays 1.2 mm, a stated 316 stays 316)');
       const part = QB.fromRequestItem({ ...row, config: { addons: ['fryer'], positions: 'x' } }, null, REF, DEPS).config;
-      assert.deepEqual(part, { addons: ['fryer'], positions: 'x', top: 1.5 }, 'an invalid stated value is not "fixed"; only the absent top plate is added');
+      assert.deepEqual(part, { addons: ['fryer'], positions: 'x', grade: 304, top: 1.5 }, 'an invalid stated value is not "fixed"; only the absent steel grade and top plate are added');
       for (const notObject of [null, undefined, 5, 'x', [], [1]]) assert.deepEqual(QB.fromRequestItem({ ...row, config: notObject }, null, REF, DEPS).config, {}, String(notObject));
     });
 
@@ -1443,7 +1460,7 @@ describe('the staff-only top plate: default fill in the nearest-model match, sta
       const deps = deepFreeze({ FAM: JSON.parse(JSON.stringify(FAM)) });
       let done;
       assert.doesNotThrow(() => { done = QB.fromRequestItem(row, null, REF, deps); });
-      assert.deepEqual(done.config, { addons: [], positions: ['lp_small'], top: 1.5 });
+      assert.deepEqual(done.config, { addons: [], positions: ['lp_small'], grade: 304, top: 1.5 });
       done.config.positions.push('wok');
       assert.deepEqual(f.groups.find((g) => g.key === 'positions').default, ['lp_small'], 'the family definition shares nothing with the completed configuration');
       assert.deepEqual(row.config, { addons: [] });
@@ -1652,18 +1669,21 @@ describe('the five families of 2026-10-28 — conditional options are never pric
         const size = PF.standardDims(f, cfg);
         const it = QB.buildLine(DEPS, { family: f, primary: PRIMARIES[id], config: cfg, size, qty: 2, basis: ours(id, cfg, size, 'approved') });
         assert.ok(it, id);
-        assert.equal(it.id, f.primary); assert.equal(it.name, f.label); assert.equal(it.familyId, id);
+        assert.equal(it.id, f.primary); assert.equal(it.name, { dish_table: 'SS Dish Table', wok_range: 'SS Wok Range', cooking_line: 'SS Griddle', deck_oven: 'Gas Deck Oven', hood: 'SS Range Hood' }[id]); assert.equal(it.familyId, id);
         assert.equal(it.dims, PF.sizeTextLabelled(f, size));
         assert.ok(!/H\d/.test(it.dims), `${id}: no height in "${it.dims}"`);
         assert.deepEqual(it.specs, PF.describe(f, it.config));
+        assert.equal(it.specs[0].label, 'Material', `${id}: the Material row is the first`);
         assert.equal(it.specs.at(-1).label, 'Construction');
       }
       const ck = fam('cooking_line');
       const fryer = QB.buildLine(DEPS, { family: ck, primary: PRIMARIES.cooking_line, config: { type: 'fryer', baskets: 3 }, size: { W: 1000, D: 700 }, qty: 1 });
-      assert.deepEqual(fryer.specs.map((x) => x.label), ['Type', 'Fry baskets', 'Base', 'Construction'], 'no "Burners" row on a fryer');
-      assert.deepEqual(fryer.config, { type: 'fryer', burners: 1, baskets: 3, base: 'stand' });
+      assert.deepEqual(fryer.specs.map((x) => x.label), ['Material', 'Type', 'Fry baskets', 'Base', 'Construction'], 'no "Burners" row on a fryer');
+      assert.deepEqual(fryer.config, { grade: 304, type: 'fryer', burners: 1, baskets: 3, base: 'stand' });
+      assert.equal(fryer.name, 'SS Fryer');
       const griddle = QB.buildLine(DEPS, { family: ck, primary: PRIMARIES.cooking_line, config: { type: 'griddle', burners: 2 }, size: { W: 900, D: 700 }, qty: 1 });
-      assert.deepEqual(griddle.specs.map((x) => x.label), ['Type', 'Burners', 'Base', 'Construction'], 'no "Fry baskets" row on a griddle');
+      assert.deepEqual(griddle.specs.map((x) => x.label), ['Material', 'Type', 'Burners', 'Base', 'Construction'], 'no "Fry baskets" row on a griddle');
+      assert.equal(griddle.name, 'SS Griddle');
     });
     it('a saved plain line converts to the new family: CE-006 -> a wok range, CE-025 -> two holes with a rear burner, CE-010 / CE-009 / CE-022 -> the cooking line, CE-016 -> a six-tray oven, EX-020 -> a slim hood, PW-029 -> a dish table — keeping its price, at a VALID size', () => {
       const cases = [['CE-006', 'wok_range', (c) => c.holes === 1 && c.rear === false], ['CE-025', 'wok_range', (c) => c.holes === 2 && c.rear === true], ['CE-010', 'cooking_line', (c) => c.type === 'griddle'],
@@ -1682,3 +1702,168 @@ describe('the five families of 2026-10-28 — conditional options are never pric
   });
 });
 
+
+// ═══════════════════════════════ 11. the staff-only steel grade and the line titles (owner rulings 2026-10-28) ═══════════════════════════════
+// specs/CONFIGURATOR-GRADE-TITLES-SPEC.md §5 / §6. A configured line is NAMED by its family's title ("SS Sink", "SS Range Stove Combination (Griller, Fryer)"); the website's
+// card names are unchanged. The first spec row is Material. A 316 line is a staff-only choice: built in staff mode, priced from the sheet's grade cell exactly as the server's
+// computeBasket prices the same hand-built line, "priced after review" while that cell is blank. An ABSENT grade is the standard 304 (never a missing "Material").
+describe('the staff-only steel grade (Material) and the line titles', () => {
+  const TITLE = { prep_table: 'SS Preparation Table', sink: 'SS Sink', dish_table: 'SS Dish Table', stove: 'SS Range Stove', wok_range: 'SS Wok Range', cooking_line: 'SS Griddle', deck_oven: 'Gas Deck Oven', hood: 'SS Range Hood', cabinet: 'SS Cabinet', wall_shelf: 'SS Wall Shelving', rack: 'SS Rack' };
+  const G316 = 'Stainless Steel 316 Laboratory Grade';
+  const REF = 'QR-261028-T1TL3S';
+  const build = (id, cfg, extra) => { const f = fam(id); const c = full(f, cfg); return QB.buildLine(DEPS, { family: f, primary: PRIMARIES[id], config: c, size: PF.standardDims(f, c), qty: 1, ...(extra || {}) }); };
+
+  describe('buildLine / migrateLegacyConfiguredLine name a line by its title', () => {
+    it('every family at its defaults is named by its title — never by the website\'s card name, never empty', () => {
+      for (const id of FIDS) {
+        const it = build(id, {});
+        assert.equal(it.name, TITLE[id], id);
+        assert.notEqual(it.name, fam(id).label, `${id}: the card name is not the line name`);
+      }
+    });
+    it('the title follows the configuration: the stove\'s add-ons (in the family\'s option order) and the griddle / griller / fryer type', () => {
+      assert.equal(build('stove', { addons: ['fryer', 'griller'] }).name, 'SS Range Stove Combination (Griller, Fryer)');
+      assert.equal(build('stove', { addons: ['griller', 'griddle', 'oven', 'fryer'] }).name, 'SS Range Stove Combination (Griller, Griddle, Oven, Fryer)');
+      assert.equal(build('stove', { addons: [] }).name, 'SS Range Stove');
+      for (const [type, name] of [['griddle', 'SS Griddle'], ['griller', 'SS Lava-Rock Griller'], ['fryer', 'SS Fryer'], ['combi', 'SS Griller + Griddle Combination']]) assert.equal(build('cooking_line', { type }).name, name, type);
+      assert.equal(build('sink', { grade: 316 }).name, 'SS Sink', 'the title never names the grade: the Material row does');
+    });
+    it('a PF without lineTitle (or one that answers nothing), or a family without a usable title, falls back to the family label — a line is never nameless', () => {
+      const f = fam('sink'), cfg = PF.defaultConfig(f), size = PF.defaultDims(f);
+      for (const pf of [{ ...PF, lineTitle: undefined }, { ...PF, lineTitle: () => '' }, { ...PF, lineTitle: 'x' }, { ...PF, lineTitle: null }]) {
+        assert.equal(QB.buildLine({ ...DEPS, PF: pf }, { family: f, primary: PRIMARIES.sink, config: cfg, size }).name, 'Sink');
+      }
+      for (const title of [undefined, '', '   ', 5, null]) assert.equal(QB.buildLine(DEPS, { family: { ...f, title }, primary: PRIMARIES.sink, config: cfg, size }).name, 'Sink', String(title));
+      const legacy = { id: 'PW-006', category: 'prep_washing', name: 'Sink 2 bowls', dims: '', specs: [], qty: 1, unit: 'pc', unitPrice: 100, amount: 100 };
+      assert.equal(QB.migrateLegacyConfiguredLine({ ...DEPS, PF: { ...PF, lineTitle: undefined } }, legacy).name, 'Sink');
+    });
+    it('migrateLegacyConfiguredLine: every one of the 64 absorbed SKUs converts to a line named by the title of its configuration', () => {
+      let n = 0;
+      for (const id of FIDS) for (const sku of Object.keys(fam(id).absorbed)) {
+        const out = QB.migrateLegacyConfiguredLine(DEPS, { id: sku, category: 'prep_washing', name: sku, dims: '', specs: [], qty: 1, unit: 'pc', unitPrice: 1000, amount: 1000 });
+        assert.equal(out.name, PF.lineTitle(fam(id), out.config), sku);
+        assert.ok(out.name.length > 0 && out.name !== fam(id).label, sku);
+        assert.equal(out.specs[0].label, 'Material', `${sku}: the Material row first`);
+        assert.equal(out.config.grade, 304, `${sku}: converts at the standard steel grade`);
+        n++;
+      }
+      assert.equal(n, 64);
+      const conv = (sku) => QB.migrateLegacyConfiguredLine(DEPS, { id: sku, category: 'x', name: sku, dims: '', specs: [], qty: 1, unit: 'pc', unitPrice: 1, amount: 1 }).name;
+      assert.equal(conv('PW-006'), 'SS Sink'); assert.equal(conv('CE-009'), 'SS Fryer'); assert.equal(conv('CE-007'), 'SS Griller + Griddle Combination'); assert.equal(conv('CE-008'), 'SS Range Stove Combination (Griller, Griddle)');
+    });
+  });
+
+  describe('fromRequestItem: with the family definitions AND PF the line is named by its title; otherwise the name the server stored passes through', () => {
+    const real = (id, cfg) => { const f = fam(id); const c = full(f, cfg); return serverLine(id, c, PF.standardDims(f, c), 1, 'approved'); };
+    it('with deps every family\'s request line takes the title; with no deps, only FAM, a PF without lineTitle, an unknown family or a family id that is not text it keeps the server\'s name', () => {
+      for (const id of FIDS) {
+        const { row, line } = real(id, {});
+        assert.equal(row.name, fam(id).label, `${id}: the premise — the server stores the card name`);
+        assert.equal(QB.fromRequestItem(row, line, REF, DEPS).name, TITLE[id], id);
+        assert.equal(QB.fromRequestItem(row, line, REF, { PF, FAM }).name, TITLE[id], `${id}: {PF, FAM} is enough`);
+        for (const deps of [undefined, null, {}, { FAM }, { PF }, { PF: { ...PF, lineTitle: undefined }, FAM }, { PF, FAM: { families: {} } }, { PF: { ...PF, lineTitle: () => '' }, FAM }]) assert.equal(QB.fromRequestItem(row, line, REF, deps).name, fam(id).label, `${id} ${Object.keys(deps || {}).join('+') || String(deps)}`);
+        assert.equal(QB.fromRequestItem({ ...row, familyId: 'toaster' }, line, REF, DEPS).name, fam(id).label, `${id}: an unknown family`);
+      }
+      const stove = real('stove', { addons: ['fryer', 'griller'] });
+      assert.equal(QB.fromRequestItem(stove.row, stove.line, REF, DEPS).name, 'SS Range Stove Combination (Griller, Fryer)');
+      assert.equal(QB.fromRequestItem(stove.row, stove.line, REF).name, 'Stove', 'no deps: the server\'s name');
+    });
+    it('a family that has no usable title keeps the name the server stored — never the family\'s label', () => {
+      const { row, line } = real('sink', {});
+      const stored = { ...row, name: 'Stored by the server' };
+      for (const title of [undefined, '', '   ', 5]) {
+        const noTitle = { ...FAM, families: { ...FAM.families, sink: { ...FAM.families.sink, title } } };
+        assert.equal(QB.fromRequestItem(stored, line, REF, { PF, FAM: noTitle }).name, 'Stored by the server', String(title));
+      }
+      assert.equal(QB.fromRequestItem(stored, line, REF, DEPS).name, 'SS Sink', 'the control: with its title the family names the line');
+    });
+    it('a row that is not configured (a plain catalogue line) is never retitled, and junk rows never throw', () => {
+      const plain = { n: 2, id: 'RF-003', name: 'Chiller', cat: 'refrigeration', unit: 'pc', qty: 3, specs: [], note: '' };
+      assert.equal(QB.fromRequestItem(plain, null, REF, DEPS).name, 'Chiller');
+      for (const bad of [null, undefined, 0, 'x', []]) assert.doesNotThrow(() => QB.fromRequestItem(bad, bad, bad, DEPS), String(bad));
+      assert.equal(QB.fromRequestItem({ familyId: 'sink', config: 'nope', name: 'Sink' }, null, REF, DEPS).name, 'Sink', 'a configuration that is not an object is not completed, nor titled');
+    });
+  });
+
+  describe('an ABSENT grade is the standard 304; a stated 316 is kept', () => {
+    it('fromRequestItem(…, DEPS) fills `grade: 304` into a request stored without it, keeps a stated 316, and the line prices as the standard grade', () => {
+      const { row, line } = serverLine('sink', full(fam('sink'), {}), PF.defaultDims(fam('sink')), 1, 'approved');
+      const old = { ...row, config: { ...row.config } };
+      delete old.config.grade;
+      assert.ok(!('grade' in QB.fromRequestItem(old, line, REF).config), 'without deps the configuration is carried over as stored');
+      assert.equal(QB.fromRequestItem(old, line, REF, DEPS).config.grade, 304);
+      assert.equal(QB.fromRequestItem({ ...old, config: { ...old.config, grade: 316 } }, line, REF, DEPS).config.grade, 316);
+      const done = QB.fromRequestItem(old, line, REF, DEPS);
+      const priced = ours('sink', done.config, done.size, 'approved');
+      assert.equal(priced.unitPrice, line.unitPrice); assert.ok(!priced.missing.includes('Material'));
+    });
+  });
+
+  describe('a 316 line: built in staff mode, priced from the sheet\'s grade cell exactly as the server prices it, "priced after review" while that cell is blank', () => {
+    it('every family: the Material row first, the same title as at 304, the grade in the stored configuration, dearer than the 304 line by exactly the grade cell', () => {
+      for (const id of FIDS) {
+        const f = fam(id);
+        const cfg = full(f, { grade: 316 });
+        const size = PF.standardDims(f, cfg);
+        const basis = ours(id, cfg, size, 'approved');
+        const std = ours(id, { ...cfg, grade: 304 }, size, 'approved');
+        assert.equal(std.priced, true, `${id}: the premise — the 304 line prices`);
+        assert.equal(basis.priced, true, `${id}: ${basis.missing.join(', ')}`);
+        assert.deepEqual(basis.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: GRADE_FLAT }], id);
+        assert.ok(!std.deltas.some((d) => d.key.startsWith('grade:')), `${id}: the standard grade adds no delta`);
+        assert.equal(basis.unitPrice - std.unitPrice, GRADE_FLAT, `${id}: exactly the grade cell`);
+        const it = QB.buildLine(DEPS, { family: f, primary: PRIMARIES[id], config: cfg, size, qty: 1, basis });
+        assert.ok(it, `${id}: a staff session builds a 316 line`);
+        assert.equal(it.config.grade, 316, id);
+        assert.equal(it.name, TITLE[id], id);
+        assert.deepEqual(it.specs[0], { label: 'Material', value: G316 }, id);
+        assert.ok(it.specStr.startsWith('Material: ' + G316 + ', '), id);
+        assert.equal(it.priceBasis, 'website'); assert.equal(it.unitPrice, basis.unitPrice);
+        assert.ok(!it.needsPrice);
+      }
+    });
+    it('a per-100-mm figure in the grade cell scales with the length above the standard one — a fake odd figure, never a real amount', () => {
+      const f = fam('sink'), cfg = full(f, { grade: 316 });
+      const size = { W: 1500, D: 500, H: 850 };
+      const sheet = { ...SHEETS.approved.sink, options: { ...SHEETS.approved.sink.options, grade: { 316: { flat: 1000, perW100: 70 } } } };
+      const r = QB.priceLine(DEPS, { family: f, primary: PRIMARIES.sink, config: cfg, size, sheet });
+      assert.equal(r.priced, true, r.missing.join(', '));
+      assert.deepEqual(r.deltas.filter((d) => d.key === 'grade:316'), [{ key: 'grade:316', amount: 1000 + 70 * (1500 - 500) / 100 }]);
+    });
+    it('while the SS316 cell is blank the line is "priced after review", naming exactly that option; buildLine flags it needsPrice at zero on the manual basis', () => {
+      for (const id of FIDS) {
+        const f = fam(id);
+        const cfg = full(f, { grade: 316 });
+        const size = PF.standardDims(f, cfg);
+        const basis = ours(id, cfg, size, 'blank');
+        assert.equal(basis.priced, false, id); assert.equal(basis.reason, 'missing_input', id);
+        assert.deepEqual(basis.missing, ['Material: ' + G316], id);
+        const it = QB.buildLine(DEPS, { family: f, primary: PRIMARIES[id], config: cfg, size, qty: 1, basis });
+        assert.equal(it.priceBasis, 'manual', id); assert.equal(it.needsPrice, true, id); assert.equal(it.unitPrice, 0, id);
+        assert.deepEqual(it._cfg.missing, ['Material: ' + G316], id);
+        assert.equal(it.config.grade, 316, id);
+        assert.equal(ours(id, { ...cfg, grade: 304 }, size, 'blank').missing.includes('Material: ' + G316), false, `${id}: the standard grade never reads the cell`);
+      }
+    });
+    it('the builder prices a 316 line exactly as the server\'s computeBasket prices the same hand-built line (the website refuses such a line before it gets there)', () => {
+      for (const id of FIDS) for (const kind of ['approved', 'blank']) {
+        const f = fam(id);
+        const cfg = full(f, { grade: 316 });
+        const size = PF.standardDims(f, cfg);
+        const handBuilt = [{ n: 1, kind: 'family', id: f.primary, familyId: id, name: f.label, cat: f.category, unit: 'pc', qty: 1, runs: null, size, sizeCustom: false, config: cfg, specs: [], note: '' }];
+        const basket = Q.computeBasket(handBuilt, new Map(), {}, undefined, { families: FAM, primaries: PRIMARY_MAP, pricing: Q.buildPricingIndex(sheetDocs(kind), FAM) });
+        assert.deepEqual(pickKeys(ours(id, cfg, size, kind)), pickKeys(basket.lines[0]), `${id} ${kind}`);
+        // ... and the server's own validation refuses such a line, with the staff message
+        const norm = Q.normaliseItems([{ familyId: id, config: cfg, dims: size, qty: 1, note: '' }], new Map(), { families: FAM, primaries: PRIMARY_MAP });
+        assert.equal(norm.ok, false, id); assert.match(norm.errors.join(' '), /"Material" is chosen by our staff when the quotation is prepared\./, id);
+      }
+    });
+    it('buildLine validates a 316 line in STAFF mode only: a value that is not a grade builds nothing, and an absent grade is built at 304', () => {
+      const f = fam('sink');
+      for (const g of [9, '316', null, true, [], 'x']) assert.equal(QB.buildLine(DEPS, { family: f, primary: PRIMARIES.sink, config: { ...PF.defaultConfig(f), grade: g }, size: PF.defaultDims(f) }), null, String(g));
+      const { grade, ...noGrade } = PF.defaultConfig(f);
+      void grade;
+      assert.equal(QB.buildLine(DEPS, { family: f, primary: PRIMARIES.sink, config: noGrade, size: PF.defaultDims(f) }).config.grade, 304);
+    });
+  });
+});

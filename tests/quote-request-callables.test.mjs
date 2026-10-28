@@ -843,8 +843,9 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
     it('the stored request is canonical and price-free: the options that do not apply sit at their defaults and have no row; the staff line says how the figure was built', async () => {
       const { doc } = await submit([famLine('cooking_line', fryerCfg(), { W: 1000, D: 700 }, 2, 'for the new branch')]);
       const it = doc.items[0];
-      assert.deepEqual(it.config, fryerCfg());
-      assert.deepEqual(it.specs.map((x) => x.label), ['Type', 'Fry baskets', 'Base', 'Construction']);
+      assert.deepEqual(it.config, { grade: 304, ...fryerCfg() });
+      assert.deepEqual(it.specs.map((x) => x.label), ['Material', 'Type', 'Fry baskets', 'Base', 'Construction']);
+      assert.deepEqual(it.specs[0], { label: 'Material', value: 'Stainless Steel 304 Food Grade' });
       assert.equal(it.cat, 'cooking'); assert.equal(it.name, 'Griddle, griller or fryer'); assert.equal(it.id, 'CE-010'); assert.equal(it.qty, 2);
       assert.deepEqual(it.size, { W: 1000, D: 700 }); assert.equal(it.sizeCustom, false);
       assert.ok(!/baskets/i.test(JSON.stringify(doc.estimate)) && !JSON.stringify(doc.summary).includes('baskets'), 'no option name leaks into what the client or the notification sees');
@@ -1183,6 +1184,29 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
       await bad(famLine('stove', { positions: ['wok', 'laser'], addons: [] }, {}), /Burner positions/);
       await bad(famLine('stove', { positions: ['wok'], addons: ['oven', 'oven'] }, {}), /Add-ons/);
     });
+    it('a submitted `config.grade = 316` (the staff-only steel grade) is REFUSED by both callables, on every family, with the staff message — nothing is stored; the standard grade, or none at all, is accepted', async () => {
+      const MSG = /"Material" is chosen by our staff when the quotation is prepared\./;
+      const token = await newSession();
+      for (const fid of FAMS.order) {
+        const f = FAMS.families[fid];
+        const size = PFX.standardDims(f, PFX.defaultConfig(f));
+        const withGrade = (g) => famLine(fid, { ...PFX.defaultConfig(f), grade: g }, size);
+        await bad(withGrade(316), MSG);                                                                      // qrEstimate
+        const ok = await fns.qrEstimate.run(estimatePayload(token, { items: [withGrade(304)] }), ctx());
+        assert.equal(ok.ok, true, `${fid}: the standard grade may be stated`);
+        const none = await fns.qrEstimate.run(estimatePayload(token, { items: [famLine(fid, (({ grade, ...rest }) => rest)(PFX.defaultConfig(f)), size)] }), ctx());
+        assert.equal(none.ok, true, `${fid}: and so may no grade at all`);
+      }
+      // qrSubmit: each family from its own address (the submit rate limit counts every attempt, refused ones included) and a session past its minimum fill time
+      for (const [i, fid] of FAMS.order.entries()) {
+        const ip = `203.0.113.${20 + i}`;
+        const t = await newSession(ip); tick(21000);
+        const f = FAMS.families[fid];
+        const item = famLine(fid, { ...PFX.defaultConfig(f), grade: 316 }, PFX.standardDims(f, PFX.defaultConfig(f)));
+        await assert.rejects(fns.qrSubmit.run(submitPayload(t, { items: [item] }), ctx(ip)), (e) => { assert.equal(e.code, 'invalid-argument', fid); assert.match(e.message, MSG, fid); return true; });
+      }
+      assert.deepEqual(fake.paths('quote_requests/'), [], 'nothing was stored');
+    });
     it('sizes: out of range, off the step, not a number, an axis the family does not have, the sink\'s hard length rule, the oven\'s minimums', async () => {
       await bad(famLine('sink', sinkCfg(), { W: 99999 }), /Length must be a whole number/);
       await bad(famLine('sink', sinkCfg(), { W: 1005 }), /Length must be a whole number/);
@@ -1243,8 +1267,8 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
       assert.deepEqual(Object.keys(res).sort(), ['estimate', 'ok', 'receivedAt', 'refNo', 'submittedOnManila']);
       assert.deepEqual(doc.items[0], {
         n: 1, kind: 'family', id: 'PW-004', familyId: 'sink', name: 'Sink', cat: 'washing', unit: 'pc', qty: 1, runs: null,
-        size: { W: 1000, D: 500, H: 850 }, sizeCustom: false, config: { ...sinkCfg(), top: 1.5 },           // 1000 mm is the usual length for two sinks; the staff-only top plate is stored at its standard 1.5 mm
-        specs: [{ label: 'Sinks', value: '2' }, { label: 'Sink position', value: 'Centre' }, { label: 'Undershelf', value: 'Without' }, { label: 'Upper shelf', value: 'Without' }, { label: 'Faucet', value: 'Pre-rinse spray' },
+        size: { W: 1000, D: 500, H: 850 }, sizeCustom: false, config: { grade: 304, ...sinkCfg(), top: 1.5 },   // 1000 mm is the usual length for two sinks; the staff-only grade and top plate are stored at their standard SS304 / 1.5 mm
+        specs: [{ label: 'Material', value: 'Stainless Steel 304 Food Grade' }, { label: 'Sinks', value: '2' }, { label: 'Sink position', value: 'Centre' }, { label: 'Undershelf', value: 'Without' }, { label: 'Upper shelf', value: 'Without' }, { label: 'Faucet', value: 'Pre-rinse spray' },
           { label: 'Construction', value: 'SS304 stainless steel · 1.5 mm (16 ga) top plate · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet' }],
         note: 'near the window',
       });
@@ -1278,9 +1302,10 @@ describe('qr callables — the configurable product families', { skip: SKIP }, (
     });
     it('the stored configuration is the VALIDATED one: add-ons are put in the family\'s order, defaults are filled in, and a client-supplied extra never survives', async () => {
       const { doc } = await submit([famLine('stove', { addons: ['fryer', 'griddle'], positions: ['lp_small', 'wok'] }, { W: 1300, D: 700, H: 850 }), fixedLine()]);
-      assert.deepEqual(doc.items[0].config, { positions: ['lp_small', 'wok'], addons: ['griddle', 'fryer'], top: 1.5 });
-      assert.equal(doc.items[0].specs[0].value, '1. Low-pressure burner, small, 2. Wok burner');
-      assert.equal(doc.items[0].specs[1].value, 'Griddle, Fryer');
+      assert.deepEqual(doc.items[0].config, { grade: 304, positions: ['lp_small', 'wok'], addons: ['griddle', 'fryer'], top: 1.5 });
+      assert.equal(doc.items[0].specs[0].label, 'Material');
+      assert.equal(doc.items[0].specs[1].value, '1. Low-pressure burner, small, 2. Wok burner');
+      assert.equal(doc.items[0].specs[2].value, 'Griddle, Fryer');
     });
     it('a re-price at submit uses the sheet AS IT IS THEN (an edit between the estimate and the submit is honoured), never what the page reported', async () => {
       const token = await readyToken();

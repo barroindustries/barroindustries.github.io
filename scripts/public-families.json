@@ -1,6 +1,6 @@
 {
-  "_readme": "PUBLIC product families (owner ruling 2026-10-21): the catalogue shows eleven CONFIGURABLE products, each ONE card with a configurator sheet, and every other published product stays a FIXED item (quantity + size + note only). This file is the single source of truth and holds NO price of any kind: each family lists its options, defaults and size limits, the published SKUs it ABSORBS (they no longer appear as their own cards; each maps to the closest configuration, which is also what a saved draft line is converted to), and its primary SKU (whose list price, with its own size rules, is the base the server prices from; the option amounts are kept in private staff data). \"fixed\" lists every published SKU that is NOT absorbed (the specialised items of Preparation, Washing and Storage are not published at all: scripts/public-categories.json excludedProducts, owner ruling 2026-10-21 (b)); scripts/build-catalogue.js refuses a published product that is in neither place, or in both. scripts/build-catalogue.js GENERATES js/qr-families.js (+ the byte-identical functions/qr-families.js), the catalogue cards, the data island and functions/qr-published.json from this file. Edit here, then run: node scripts/build-catalogue.js. Option values (v) are what is stored and validated; labels (l), summaries (s) and hints are what is shown. widthRule is the usual minimum length for the chosen options (hard: refused below it; otherwise guidance only). Preview rules (preview) build the file names of the owner's photo shot list, see docs/configurator-preview-photo-list.md. version is the schema the private option sheets are approved against: raising it makes every approved sheet \"Out of date — approve again\" (2 = the 1.5 mm top plate is the standard construction, owner ruling 2026-10-28; 3 = five more families: dish table, wok range, griddle / griller / fryer, gas deck oven, range hood). A group may carry \"when\": { <earlier choice group>: [values] } — it applies only while the choices made before it are in those lists (fry baskets only for a fryer); an option that does not apply is always at its default in a validated configuration. A family may carry \"maxDimWhen\" (the upper-limit twin of \"minDimWhen\"): a slim hood is at most 500 mm deep, a deck oven's width follows its trays. construction is a family's public statement of how a made-to-order piece is built; a {group} token in it is replaced by the chosen option's c phrase (its construction wording), and every option of a group named by a token must carry c. A group marked staffOnly (the 1.2 mm top plate) is never offered on the website: the server refuses any value but its default, only the Quote Builder (staff) can choose another, and an absorbed SKU never states one (it converts to the default).",
-  "version": 3,
+  "_readme": "PUBLIC product families (owner ruling 2026-10-21): the catalogue shows eleven CONFIGURABLE products, each ONE card with a configurator sheet, and every other published product stays a FIXED item (quantity + size + note only). This file is the single source of truth and holds NO price of any kind: each family lists its options, defaults and size limits, the published SKUs it ABSORBS (they no longer appear as their own cards; each maps to the closest configuration, which is also what a saved draft line is converted to), and its primary SKU (whose list price, with its own size rules, is the base the server prices from; the option amounts are kept in private staff data). \"fixed\" lists every published SKU that is NOT absorbed (the specialised items of Preparation, Washing and Storage are not published at all: scripts/public-categories.json excludedProducts, owner ruling 2026-10-21 (b)); scripts/build-catalogue.js refuses a published product that is in neither place, or in both. scripts/build-catalogue.js GENERATES js/qr-families.js (+ the byte-identical functions/qr-families.js), the catalogue cards, the data island and functions/qr-published.json from this file. Edit here, then run: node scripts/build-catalogue.js. Option values (v) are what is stored and validated; labels (l), summaries (s) and hints are what is shown. widthRule is the usual minimum length for the chosen options (hard: refused below it; otherwise guidance only). Preview rules (preview) build the file names of the owner's photo shot list, see docs/configurator-preview-photo-list.md. version is the schema the private option sheets are approved against: raising it makes every approved sheet \"Out of date — approve again\" (2 = the 1.5 mm top plate is the standard construction, owner ruling 2026-10-28; 3 = five more families: dish table, wok range, griddle / griller / fryer, gas deck oven, range hood; 4 = the staff-only steel grade (304 / 316, \"grade\", the first group, with its own first specification row via \"specRow\") on every family, and the line titles (\"title\", \"titleAny\", option \"t\") the Quote Builder names a configured line with). A group may carry \"when\": { <earlier choice group>: [values] } — it applies only while the choices made before it are in those lists (fry baskets only for a fryer); an option that does not apply is always at its default in a validated configuration. A family may carry \"maxDimWhen\" (the upper-limit twin of \"minDimWhen\"): a slim hood is at most 500 mm deep, a deck oven's width follows its trays. construction is a family's public statement of how a made-to-order piece is built; a {group} token in it is replaced by the chosen option's c phrase (its construction wording), and every option of a group named by a token must carry c. A group marked staffOnly (the 1.2 mm top plate, the SS316 grade) is never offered on the website: the server refuses any value but its default, only the Quote Builder (staff) can choose another, and an absorbed SKU never states one (it converts to the default).",
+  "version": 4,
   "order": [
     "prep_table",
     "sink",
@@ -19,11 +19,34 @@
       "label": "Preparation table",
       "category": "preparation",
       "description": "Stainless steel worktable. Choose one to three layers and up to two upper shelves, then set your own size.",
-      "construction": "SS304 stainless steel · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet",
+      "title": "SS Preparation Table",
+      "construction": "{grade} · {top} · 1.2 mm undershelves and upper shelves · square-tube posts with adjustable bullet feet",
       "photo": "PW-003",
       "primary": "PW-001",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "layers",
           "label": "Layers",
@@ -177,11 +200,34 @@
       "label": "Sink",
       "category": "washing",
       "description": "Stainless steel sink table. Choose one to four sinks, their position, the shelves and the faucet, then set your own size.",
-      "construction": "SS304 stainless steel · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet",
+      "title": "SS Sink",
+      "construction": "{grade} · {top} · 1.2 mm undershelf, upper shelf and panels · square-tube posts with adjustable bullet feet",
       "photo": "PW-008",
       "primary": "PW-004",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "basins",
           "label": "Sinks",
@@ -481,12 +527,35 @@
       "label": "Dish table",
       "category": "washing",
       "description": "Stainless steel dish table for the dishwasher. Choose the clean or the soiled side, which hand it sits on, a pre-rinse sink and an undershelf, then set your own size.",
-      "construction": "SS304 stainless steel · {top} · 1.2 mm undershelf and splash · {side} · square-tube posts with adjustable bullet feet",
+      "title": "SS Dish Table",
+      "construction": "{grade} · {top} · 1.2 mm undershelf and splash · {side} · square-tube posts with adjustable bullet feet",
       "photo": null,
       "primary": "PW-029",
       "sizeBasis": "linear",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "side",
           "label": "Side",
@@ -642,11 +711,38 @@
       "label": "Stove",
       "category": "cooking",
       "description": "Gas range built to your layout. Choose each burner position one by one, add a griller, griddle, oven or fryer, then set your own size.",
-      "construction": "SS304 stainless steel · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet",
+      "title": "SS Range Stove",
+      "titleAny": {
+        "group": "addons",
+        "template": "SS Range Stove Combination ({addons})"
+      },
+      "construction": "{grade} · {top} · 1.2 mm body and panels · square-tube posts with adjustable bullet feet",
       "photo": "CE-004",
       "primary": "CE-001",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "positions",
           "label": "Burner positions",
@@ -970,11 +1066,34 @@
       "label": "Wok range",
       "category": "cooking",
       "description": "Gas wok range with high-pressure burners. Choose one to three wok holes, a rear stock burner and a swan-neck water faucet, then set your own size.",
-      "construction": "SS304 stainless steel · {top} · 1.2 mm body and panels · recessed wok rings with high-pressure burners · square-tube posts with adjustable bullet feet",
+      "title": "SS Wok Range",
+      "construction": "{grade} · {top} · 1.2 mm body and panels · recessed wok rings with high-pressure burners · square-tube posts with adjustable bullet feet",
       "photo": null,
       "primary": "CE-006",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "holes",
           "label": "Wok holes",
@@ -1123,11 +1242,34 @@
       "label": "Griddle, griller or fryer",
       "category": "cooking",
       "description": "Gas griddle, lava-rock griller, fryer or a griller-and-griddle combination on its own stand. Choose the type, the burners or baskets and the base, then set your own size.",
-      "construction": "SS304 stainless steel · 1.2 mm body and panels · {type} · {base}",
+      "title": "{type}",
+      "construction": "{grade} · 1.2 mm body and panels · {type} · {base}",
       "photo": "CE-021",
       "primary": "CE-010",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "type",
           "label": "Type",
@@ -1138,25 +1280,29 @@
               "v": "griddle",
               "l": "Griddle",
               "s": "griddle",
-              "c": "semi-non-stick griddle plate, gas-fired"
+              "c": "semi-non-stick griddle plate, gas-fired",
+              "t": "SS Griddle"
             },
             {
               "v": "griller",
               "l": "Lava-rock griller",
               "s": "lava-rock griller",
-              "c": "V-type grill plates over lava rock, gas-fired"
+              "c": "V-type grill plates over lava rock, gas-fired",
+              "t": "SS Lava-Rock Griller"
             },
             {
               "v": "fryer",
               "l": "Fryer",
               "s": "fryer",
-              "c": "stainless fry tanks with baskets, gas-fired"
+              "c": "stainless fry tanks with baskets, gas-fired",
+              "t": "SS Fryer"
             },
             {
               "v": "combi",
               "l": "Griller + griddle",
               "s": "griller and griddle",
-              "c": "lava-rock griller and griddle side by side, one burner under each, gas-fired"
+              "c": "lava-rock griller and griddle side by side, one burner under each, gas-fired",
+              "t": "SS Griller + Griddle Combination"
             }
           ]
         },
@@ -1364,12 +1510,35 @@
       "label": "Gas deck oven",
       "category": "cooking",
       "description": "Gas-fired deck oven. Choose one to three decks, three or six trays per deck and a heavy-duty stand.",
+      "title": "Gas Deck Oven",
       "construction": "Insulated double-wall decks with a gas burner, gas valve and thermometer per deck · stainless steel outer body · {stand}",
       "photo": null,
       "primary": "CE-012",
       "sizeBasis": "linear",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "decks",
           "label": "Decks",
@@ -1495,11 +1664,34 @@
       "label": "Range hood",
       "category": "ventilation",
       "description": "Stainless steel kitchen exhaust hood. Choose a wall, island or slim canopy, baffle grease filters and lighting, then set your own length and depth.",
-      "construction": "SS304 stainless steel · welded canopy with grease trough and oil cup · {type} · {filters}",
+      "title": "SS Range Hood",
+      "construction": "{grade} · welded canopy with grease trough and oil cup · {type} · {filters}",
       "photo": "EX-001",
       "primary": "EX-001",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "type",
           "label": "Type",
@@ -1663,11 +1855,34 @@
       "label": "Cabinet",
       "category": "storage",
       "description": "Stainless steel storage cabinet, floor-standing or wall-hung. Choose the doors and the shelves inside, then set your own size.",
-      "construction": "SS304 stainless steel · 1.2 mm body, doors and shelves · {type}",
+      "title": "SS Cabinet",
+      "construction": "{grade} · 1.2 mm body, doors and shelves · {type}",
       "photo": null,
       "primary": "PW-015",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "type",
           "label": "Type",
@@ -1802,12 +2017,35 @@
       "label": "Wall shelving",
       "category": "storage",
       "description": "Stainless steel shelving fixed to the wall. Choose one to three tiers and a solid or slotted surface, then set your own size.",
-      "construction": "SS304 stainless steel · 1.2 mm shelves · fixed to the wall",
+      "title": "SS Wall Shelving",
+      "construction": "{grade} · 1.2 mm shelves · fixed to the wall",
       "photo": "PW-023",
       "primary": "PW-023",
       "sizeBasis": "linear",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "tiers",
           "label": "Tiers",
@@ -1899,11 +2137,34 @@
       "label": "Rack",
       "category": "storage",
       "description": "Stainless steel dish and storage rack. Choose three to six tiers, with or without wheels, then set your own size.",
-      "construction": "SS304 stainless steel · 1.2 mm shelves · square-tube frame · {wheels}",
+      "title": "SS Rack",
+      "construction": "{grade} · 1.2 mm shelves · square-tube frame · {wheels}",
       "photo": "PW-030",
       "primary": "PW-010",
       "unit": "pc",
       "groups": [
+        {
+          "key": "grade",
+          "label": "Material",
+          "type": "choice",
+          "default": 304,
+          "staffOnly": true,
+          "specRow": true,
+          "options": [
+            {
+              "v": 304,
+              "l": "Stainless Steel 304 Food Grade",
+              "s": "SS304",
+              "c": "SS304 stainless steel"
+            },
+            {
+              "v": 316,
+              "l": "Stainless Steel 316 Laboratory Grade",
+              "s": "SS316",
+              "c": "SS316 stainless steel"
+            }
+          ]
+        },
         {
           "key": "tiers",
           "label": "Tiers",

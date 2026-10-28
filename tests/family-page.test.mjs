@@ -499,16 +499,18 @@ describe('what is SENT: a configured line carries exactly { familyId, config, di
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // STANDARD CONSTRUCTION (owner ruling 2026-10-28): the staff-only 1.2 mm top plate is never kept, offered or sent by the website.
-describe('the staff-only 1.2 mm top plate is never kept, offered or sent by the website (owner ruling 2026-10-28)', () => {
+// STAFF-ONLY STEEL GRADE (owner ruling 2026-10-28, CONFIGURATOR-GRADE-TITLES-SPEC): the same for the grade — the FIRST group of every family: the SS316 choice is never kept, offered or sent.
+describe('the staff-only 1.2 mm top plate and steel grade are never kept, offered or sent by the website (owner ruling 2026-10-28)', () => {
   const STAFF = ['prep_table', 'sink', 'dish_table', 'stove', 'wok_range'];                    // the families that carry the staff-only group
   const primaries = new Map(FAMS.order.map((f) => [f, { id: FAMS.families[f].primary }]));
   const lineOf = (fid, extra) => Object.assign({ uid: 'u-1', familyId: fid, config: json(PFmod.defaultConfig(FAMS.families[fid])), dims: json(PFmod.defaultDims(FAMS.families[fid])), qty: 2, note: '' }, extra || {});
 
-  it('the premise: exactly the preparation table, the sink, the dish table, the stove and the wok range carry a staff-only group, it is "top", and PF.publicGroups is every other group', () => {
+  it('the premise: every family carries the staff-only steel grade ("grade", first), exactly the preparation table, the sink, the dish table, the stove and the wok range also carry "top", and PF.publicGroups is every other group', () => {
     for (const fid of FAMS.order) {
       const fam = FAMS.families[fid];
-      assert.deepEqual(fam.groups.filter((g) => g.staffOnly === true).map((g) => g.key), STAFF.includes(fid) ? ['top'] : [], fid);
-      assert.deepEqual(PFmod.publicGroups(fam).map((g) => g.key), fam.groups.map((g) => g.key).filter((k) => k !== 'top'), fid);
+      assert.deepEqual(fam.groups.filter((g) => g.staffOnly === true).map((g) => g.key), STAFF.includes(fid) ? ['grade', 'top'] : ['grade'], fid);
+      assert.equal(fam.groups[0].key, 'grade', fid);
+      assert.deepEqual(PFmod.publicGroups(fam).map((g) => g.key), fam.groups.map((g) => g.key).filter((k) => k !== 'top' && k !== 'grade'), fid);
     }
   });
 
@@ -519,23 +521,25 @@ describe('the staff-only 1.2 mm top plate is never kept, offered or sent by the 
       const full = json(PFmod.defaultConfig(fam));
       const out = json(pg.ctx.publicConfig(fam, Object.assign({ colour: 'red', constructor: 1 }, full)));
       assert.deepEqual(out, publicOnly(fam, full), fid);
-      assert.ok(!('top' in out) && !('colour' in out), fid);
+      assert.ok(!('top' in out) && !('grade' in out) && !('colour' in out), fid);
+      assert.equal(full.grade, 304, `${fid}: the premise — the configuration held a grade for publicConfig to drop`);
     }
     assert.equal(pg.ctx.publicConfig(FAMS.families.sink, 'basins=2'), 'basins=2');
   });
 
-  it('a stored line with the STANDARD top plate (1.5) is kept — it holds its public options only — and the draft written back to the device carries no staff-only key', () => {
-    for (const fid of STAFF) {
-      const stored = lineOf(fid);                                    // the full default configuration, top: 1.5 included
-      assert.equal(stored.config.top, 1.5);
+  it('a stored line with the STANDARD top plate (1.5) and the standard steel grade (304) is kept — it holds its public options only — and the draft written back to the device carries no staff-only key', () => {
+    for (const fid of FAMS.order) {
+      const stored = lineOf(fid);                                    // the full default configuration, top: 1.5 (where there is one) and grade: 304 included
+      assert.equal(stored.config.grade, 304);
+      if (STAFF.includes(fid)) assert.equal(stored.config.top, 1.5);
       const pg = loadV2([stored]);
       const [it] = items(pg);
-      assert.ok(it, `${fid}: a line with the standard top plate must survive`);
+      assert.ok(it, `${fid}: a line with the standard top plate and grade must survive`);
       assert.deepEqual(it.config, publicOnly(FAMS.families[fid], stored.config), fid);
-      assert.ok(!('top' in it.config), fid);
+      assert.ok(!('top' in it.config) && !('grade' in it.config), fid);
       assert.equal(pg.ctx.pendingToast, '', fid);
       pg.ctx.saveDraftNow();
-      assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)), `${fid}: the draft on the visitor's device carries a staff-only key`);
+      assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)) && !/"grade"/.test(pg.store.get(pg.keys.v2)), `${fid}: the draft on the visitor's device carries a staff-only key`);
     }
   });
 
@@ -547,18 +551,27 @@ describe('the staff-only 1.2 mm top plate is never kept, offered or sent by the 
     }
   });
 
-  it('the payloads never carry a staff-only key — submit and estimate, even from a line that holds one — and the server accepts what is sent; the same payload WITH the lighter top is refused (why the page never sends it)', () => {
+  it('a stored line that asks for the SS316 grade is dropped and the visitor is told — 316, and every other value but the standard one, however it is spelt', () => {
+    for (const fid of FAMS.order) for (const grade of [316, '316', '304', 304.5, 0, 2, true, null, [304], { v: 304 }]) {
+      const pg = loadV2([lineOf(fid, { config: Object.assign(lineOf(fid).config, { grade }) })]);
+      assert.deepEqual(items(pg), [], `${fid}: grade ${JSON.stringify(grade)} must not survive`);
+      assert.match(pg.ctx.pendingToast, /no longer in the catalogue/, `${fid}: grade ${JSON.stringify(grade)}: the visitor must be told`);
+    }
+  });
+
+  it('the payloads never carry a staff-only key — submit and estimate, even from a line that holds one — and the server accepts what is sent; the same payload WITH the lighter top, or SS316, is refused (why the page never sends it)', () => {
     const pg = makePage();
     for (const fid of FAMS.order) {
       const fam = FAMS.families[fid];
       const holding = lineOf(fid);                                   // holds top: 1.5 when the family has one
       for (const make of [pg.ctx.itemPayload, pg.ctx.estimateItemPayload]) {
         const p = json(make(holding));
-        assert.ok(!('top' in p.config), `${fid}: the payload carries a staff-only key`);
+        assert.ok(!('top' in p.config) && !('grade' in p.config), `${fid}: the payload carries a staff-only key`);
         assert.deepEqual(p.config, publicOnly(fam, holding.config), fid);
         const r = Q.normaliseItems([p], new Map(), { families: FAMS, primaries });
         assert.equal(r.ok, true, `${fid}: ${r.errors.join(' | ')}`);
         if (STAFF.includes(fid)) assert.equal(r.items[0].config.top, 1.5, `${fid}: the server stores the standard top plate`);
+        assert.equal(r.items[0].config.grade, 304, `${fid}: the server stores the standard steel grade`);
       }
       if (STAFF.includes(fid)) {
         const lighter = json(pg.ctx.itemPayload(holding));
@@ -567,6 +580,11 @@ describe('the staff-only 1.2 mm top plate is never kept, offered or sent by the 
         assert.equal(r.ok, false, `${fid}: the server must refuse a lighter top plate from the website`);
         assert.match(r.errors.join(' '), /is chosen by our staff when the quotation is prepared/);
       }
+      const lab = json(pg.ctx.itemPayload(holding));
+      lab.config.grade = 316;
+      const rg = Q.normaliseItems([lab], new Map(), { families: FAMS, primaries });
+      assert.equal(rg.ok, false, `${fid}: the server must refuse the SS316 grade from the website`);
+      assert.match(rg.errors.join(' '), /"Material" is chosen by our staff when the quotation is prepared/, fid);
     }
   });
 });
@@ -630,9 +648,10 @@ describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no
       const body = sheetBody(openSheet(fid));
       const groups = where(body, (n) => n.tag === 'fieldset' && hasCls(n, 'qr-group'));
       assert.deepEqual(groups.map((g) => g.children[0].textContent), PFmod.publicGroups(fam).map((g) => g.label), `${fid}: the option groups on the sheet`);
-      assert.equal(groups.length, fam.groups.length - (STAFF.includes(fid) ? 1 : 0), fid);
+      assert.equal(groups.length, fam.groups.length - 1 - (STAFF.includes(fid) ? 1 : 0), `${fid}: every group but the staff-only grade (and top plate)`);
       assert.ok(!/Top plate/.test(body.textContent), `${fid}: the sheet names the top plate as an option`);
-      assert.ok(!/lighter|\(16 ga\)\s*Standard|staff/i.test(where(body, (n) => n.tag === 'label' || n.tag === 'legend').map((n) => n.textContent).join(' ')), `${fid}: a staff-only choice is on the sheet`);
+      assert.ok(!/Material|316|laboratory|food grade/i.test(body.textContent.replace(/SS304 stainless steel/g, '')), `${fid}: the sheet names the steel grade as an option`);
+      assert.ok(!/lighter|\(16 ga\)\s*Standard|staff|316|laboratory|food grade|material/i.test(where(body, (n) => n.tag === 'label' || n.tag === 'legend').map((n) => n.textContent).join(' ')), `${fid}: a staff-only choice is on the sheet`);
       const size = where(body, (n) => n.tag === 'fieldset' && !hasCls(n, 'qr-group'));
       assert.equal(size.length, 1, `${fid}: the size fieldset`);
       assert.match(size[0].children[0].textContent, /^Size \(mm\)/);
@@ -689,14 +708,14 @@ describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no
       const [it] = json(pg.ctx.draft.items);
       assert.ok(it, `${fid}: nothing was added to the draft`);
       assert.deepEqual(it.config, publicOnly(fam, PFmod.defaultConfig(fam)), fid);
-      assert.ok(!('top' in it.config), fid);
-      assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)), `${fid}: the draft on the visitor's device carries a staff-only key`);
-      for (const p of [json(pg.ctx.itemPayload(it)), json(pg.ctx.estimateItemPayload(it))]) assert.ok(!('top' in p.config), `${fid}: a payload carries a staff-only key`);
+      assert.ok(!('top' in it.config) && !('grade' in it.config), fid);
+      assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)) && !/"grade"/.test(pg.store.get(pg.keys.v2)), `${fid}: the draft on the visitor's device carries a staff-only key`);
+      for (const p of [json(pg.ctx.itemPayload(it)), json(pg.ctx.estimateItemPayload(it))]) assert.ok(!('top' in p.config) && !('grade' in p.config), `${fid}: a payload carries a staff-only key`);
     }
   });
 
   it('editing a line: the sheet opens on its options (no top plate, its own construction) and Save writes the public options only — even for a line that, wrongly, still holds the staff-only key', () => {
-    const holding = { uid: 'u-1', familyId: 'sink', config: Object.assign(publicOnly(FAMS.families.sink, PFmod.defaultConfig(FAMS.families.sink)), { basins: 2, top: 1.5 }), dims: { W: 1800, D: 700, H: 900 }, qty: 2, note: 'near the door' };
+    const holding = { uid: 'u-1', familyId: 'sink', config: Object.assign(publicOnly(FAMS.families.sink, PFmod.defaultConfig(FAMS.families.sink)), { basins: 2, top: 1.5, grade: 304 }), dims: { W: 1800, D: 700, H: 900 }, qty: 2, note: 'near the door' };
     const pg = openSheet('sink', 'u-1', [holding]);
     assert.equal(pg.ctx.sheetFrame.step, 'Edit your selection');
     assert.ok(!/Top plate/.test(sheetBody(pg).textContent));
@@ -705,9 +724,9 @@ describe('the configurator sheet — the REAL openConfigurator in a fake DOM: no
     const [it] = json(pg.ctx.draft.items);
     assert.equal(pg.ctx.draft.items.length, 1);
     assert.equal(it.config.basins, 2);
-    assert.ok(!('top' in it.config), 'a saved line must not hold the staff-only key');
+    assert.ok(!('top' in it.config) && !('grade' in it.config), 'a saved line must not hold a staff-only key');
     assert.equal(it.qty, 2); assert.equal(it.note, 'near the door');
-    assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)));
+    assert.ok(!/"top"/.test(pg.store.get(pg.keys.v2)) && !/"grade"/.test(pg.store.get(pg.keys.v2)));
   });
 });
 

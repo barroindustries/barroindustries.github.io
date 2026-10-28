@@ -615,12 +615,12 @@ const FAMILY_ID_RE = /^[a-z][a-z0-9_]{1,30}$/;
 const GROUP_KEY_RE = /^[a-z][a-zA-Z0-9_]{0,30}$/;
 const PREVIEW_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,78}$/;
 const FAMILY_TOP_KEYS = ['_readme', 'version', 'order', 'families', 'fixed'];
-const FAMILY_KEYS = ['label', 'category', 'description', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
-const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'when', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
-const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 'hint', 'short', 'w'];
+const FAMILY_KEYS = ['label', 'category', 'description', 'title', 'titleAny', 'construction', 'photo', 'primary', 'sizeBasis', 'unit', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
+const GROUP_KEYS = ['key', 'label', 'type', 'default', 'staffOnly', 'specRow', 'when', 'options', 'minSlots', 'maxSlots', 'unit', 'withText', 'noneText'];
+const OPTION_KEYS = ['v', 'l', 'f', 's', 'c', 't', 'hint', 'short', 'w'];
 const GROUP_TYPES = ['choice', 'slots', 'multi'];
 // the fields of a family that reach the public/server file js/qr-families.js, in a fixed order (deterministic output)
-const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
+const FAMILY_PUBLIC_KEYS = ['id', 'label', 'category', 'description', 'title', 'titleAny', 'construction', 'primary', 'unit', 'sizeBasis', 'groups', 'dims', 'widthRule', 'minDimWhen', 'maxDimWhen', 'specMap', 'preview', 'absorbed'];
 
 const isPlainObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isIntNum = (n) => typeof n === 'number' && Number.isInteger(n);
@@ -669,6 +669,8 @@ function checkFamily(fid, f, add) {
     if (!Array.isArray(g.options) || !g.options.length || g.options.length > 12) { at(`${gt}: "options" must be 1 to 12 entries`); groupsOk = false; return; }
     // staffOnly (owner ruling 2026-10-28): a group only the Quote Builder (staff) may choose a non-default value of; a choice group, and only true / false
     if (g.staffOnly !== undefined && (typeof g.staffOnly !== 'boolean' || (g.staffOnly === true && g.type !== 'choice'))) { at(`${gt}: "staffOnly" must be true or false, and belongs to a choice group only`); groupsOk = false; }
+    // specRow (owner ruling 2026-10-28): a staff-only group that still has a specification row of its own (the steel grade; the top plate has none, the Construction row says it) — a boolean, and only on a staff-only group
+    if (g.specRow !== undefined && (typeof g.specRow !== 'boolean' || g.staffOnly !== true)) { at(`${gt}: "specRow" must be true or false, and belongs to a staff-only group only`); groupsOk = false; }
     const seenV = [];
     g.options.forEach((o, j) => {
       const ot = `${gt}.options[${j}]`;
@@ -679,7 +681,7 @@ function checkFamily(fid, f, add) {
       else seenV.push(o.v);
       if (g.type !== 'choice' && typeof o.v !== 'string') { at(`${ot}: a ${g.type} option value must be a string`); groupsOk = false; }
       if (!nonEmpty(o.l)) { at(`${ot}: "l" must be a non-empty string`); groupsOk = false; }
-      for (const k of ['f', 's', 'c', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
+      for (const k of ['f', 's', 'c', 't', 'hint', 'short']) if (o[k] !== undefined && !nonEmpty(o[k])) { at(`${ot}: "${k}" must be a non-empty string`); groupsOk = false; }
       if (o.w !== undefined && !(isIntNum(o.w) && o.w >= 0 && o.w <= 5000)) { at(`${ot}: "w" must be a whole number of mm from 0 to 5000`); groupsOk = false; }
     });
     if (g.type === 'slots') {
@@ -738,6 +740,29 @@ function checkFamily(fid, f, add) {
       if (!g || g.type !== 'choice') at(`construction: {${t}} does not name a choice group of this family`);
       else if (!g.options.every((o) => nonEmpty(o.c))) at(`construction: every option of "${t}" needs a "c" phrase (its construction wording)`);
       else if (g.when !== undefined) at(`construction: {${t}} names a conditional option (it has "when"): a construction phrase cannot depend on it`);
+    }
+  }
+
+  // title (owner ruling 2026-10-28): the NAME the Quote Builder gives a configured line ("SS Sink", "SS Range Stove Combination (Griller, Fryer)"); the card and page names (label) are
+  // untouched. A {token} in it names a choice or multi group of this family (a choice contributes its option's "t" title word, falling back to "l"; a multi, the labels of the
+  // selected options). titleAny = { group, template }: used INSTEAD of "title" when that multi group has at least one selection (PF.lineTitle).
+  const titleTokens = (tpl) => [...new Set([...tpl.matchAll(/\{([A-Za-z0-9_]+)\}/g)].map((m) => m[1]))];
+  const checkTitleTokens = (where, tpl) => {
+    for (const t of titleTokens(tpl)) {
+      const g = gOf(t);
+      if (!g || (g.type !== 'choice' && g.type !== 'multi')) at(`${where}: {${t}} does not name a choice or multi group of this family`);
+    }
+  };
+  if (!nonEmpty(f.title)) at('"title" must be a non-empty string');
+  else checkTitleTokens('title', f.title);
+  if (f.titleAny !== undefined) {
+    const ta = f.titleAny;
+    if (!isPlainObj(ta) || Object.keys(ta).sort().join() !== 'group,template') at('"titleAny" must be an object with exactly "group" and "template"');
+    else {
+      const tg = typeof ta.group === 'string' ? gOf(ta.group) : null;
+      if (!tg || tg.type !== 'multi') at('titleAny: "group" must name a multi group of this family');
+      if (!nonEmpty(ta.template)) at('titleAny: "template" must be a non-empty string');
+      else checkTitleTokens('titleAny', ta.template);
     }
   }
 
@@ -1069,8 +1094,9 @@ const SPEC_LIST = (rows) => `<dl class="cat-specs">${rows.map((r) => `<div><dt>$
 
 // The material line of every configurable card. NOT a new claim: it is the owner's own public statement of what is offered — two stainless grades,
 // SS304 food-grade (the standard) and SS316 laboratory-grade, and three finishes, brushed, mirror or satin (owner, 2026-10-21) — the same as the
-// homepage proof bar, hero lead and Fabrication step and the catalogue lede. The configurators and the quote flow offer NO grade or finish choice yet
-// (pricing is undecided): the line only says what Barro can supply; the customer asks for it in the quote's notes. tests/catalogue-layout.test.mjs
+// homepage proof bar, hero lead and Fabrication step and the catalogue lede. The WEBSITE configurators and the quote flow offer no grade or finish choice
+// (the SS316 grade is a staff-only choice in the Quote Builder, 2026-10-28; website pricing for a grade is undecided): the line only says what Barro can supply;
+// the customer asks for it in the quote's notes. tests/catalogue-layout.test.mjs
 // and tests/site-public-surface.test.mjs pin it to the homepage wording, so a card can never claim a material the homepage does not.
 const FAMILY_MATERIAL = 'SS304 food-grade (standard) or SS316 laboratory-grade · brushed, mirror or satin finish';
 

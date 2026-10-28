@@ -65,6 +65,12 @@
   function specString(specs) {                  // "Sinks: 2, Sink position: Centre, …" — the description printed under the line name
     return arr(specs).map(function (s) { return s.label + ': ' + s.value; }).join(', ');
   }
+  // The NAME of a configured line (owner ruling 2026-10-28, specs/CONFIGURATOR-GRADE-TITLES-SPEC.md): the family's title for this configuration ("SS Sink", "SS Range Stove
+  // Combination (Griller, Fryer)" — PF.lineTitle), else the given fallback (the family's label, or the name the server stored). The website's card and page names are untouched.
+  function lineName(deps, fam, config, fallback) {
+    var t = deps && deps.PF && typeof deps.PF.lineTitle === 'function' ? deps.PF.lineTitle(fam, config) : '';
+    return t || fallback;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   //  priceLine — the builder's ONE configured-price path
@@ -113,6 +119,7 @@
   //   (the panel disables Add while they are not, so null is "a bug upstream", and a line that the server would refuse for any other reason is never built).
   //   `category` is the PRIMARY PRODUCT's own category — the builder section the line sits in ('prep_washing' …), never the family's public one — and falls back to
   //   the family's public category only when no primary product (with a category) was passed in.
+  //   `name` is the family's TITLE for this configuration (PF.lineTitle: "SS Sink", "SS Range Stove Combination (Griller, Fryer)"), the family's label only when it has none.
   //   The item carries `_cfg` (RUNTIME ONLY — the builder strips it from every payload and recomputes it on load) and never a sourceRef.
   function buildLine(deps, args) {
     var d = isObj(deps) ? deps : {};
@@ -130,7 +137,7 @@
     var item = {
       id: fam.primary,
       category: sectionOf(a.primary, fam),
-      name: fam.label,
+      name: lineName(d, fam, v.config, fam.label),               // the title ("SS Sink"), not the website's card name
       familyId: fam.id,
       familyVersion: d.FAM ? d.FAM.version : null,
       config: clone(v.config),
@@ -329,9 +336,11 @@
   // fromRequestItem(it, line, ref, deps) -> item
   //   it    one quote_requests.items[] row            line  its internal.lines[] row (staff-only, may be null)
   //   ref   the request's reference number ('QR-…'); when given, the line carries sourceRef { kind: 'qr', ref, n } (the request line number)
-  //   deps  OPTIONAL { FAM: QR_FAMILIES } (the other helpers' deps object works): a configured row stored BEFORE the staff-only top plate existed has no `top`; with the
-  //         family definitions the missing groups are filled with their defaults (the standard 1.5 mm top), so the stored configuration is complete — and EVERY other value
-  //         stays exactly as the server stored it. Without deps the configuration is carried over as it is (priceLine reads an absent group as its default anyway).
+  //   deps  OPTIONAL { FAM: QR_FAMILIES, PF: ProductFamilies } (the other helpers' deps object works): a configured row stored BEFORE the staff-only top plate (or grade) existed
+  //         has no `top` / `grade`; with the family definitions the missing groups are filled with their defaults (the standard 1.5 mm top, the standard steel grade), so the
+  //         stored configuration is complete — and EVERY other value stays exactly as the server stored it. With the family definitions AND PF the line is also NAMED by its
+  //         title (PF.lineTitle, the same name a line built in the panel gets) instead of the card name the server stored. Without deps the configuration is carried over as it is
+  //         (priceLine reads an absent group as its default anyway) and the server's name passes through.
   //   A CONFIGURED row (it.familyId) becomes a real configured line (familyId, config, size, the server-written option words) at the
   //   figure the client's estimate was built from; a plain row keeps today's shape. Priced -> priceBasis 'website', basisUnitPrice = the
   //   figure, no priceManual (the auto-pricer is held off by the basis, not by a flag). Not priced -> 'manual', needsPrice, unitPrice 0:
@@ -382,7 +391,10 @@
       out.familyId = str(row.familyId);
       out.config = isObj(row.config) ? clone(row.config) : {};
       var rowFam = isObj(row.config) ? familyOf(deps, out.familyId) : null;
-      if (rowFam) out.config = completeConfig(rowFam, out.config);
+      if (rowFam) {
+        out.config = completeConfig(rowFam, out.config);
+        out.name = lineName(deps, rowFam, out.config, str(row.name));
+      }
       out.size = numericSize(row.size);
     }
     if (!priced) out.needsPrice = true;
@@ -513,7 +525,7 @@
     out.id = fam.primary;
     // the section the line already sits in is KEPT (a converted line does not move); a line with none takes the base product's category from the catalogue passed in, else the family's public one
     if (!(typeof item.category === 'string' && item.category)) out.category = sectionOf(lookup(catalogue, fam.primary), fam);
-    out.name = fam.label;
+    out.name = lineName(d, fam, v.config, fam.label);          // the title, like a line built in the panel
     out.familyId = fam.id;
     out.familyVersion = d.FAM.version;
     out.config = clone(v.config);
