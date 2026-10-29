@@ -2,7 +2,7 @@
 /**
  * inline-page-css.js — keeps the stylesheet of the standalone public content pages INLINE in their <head>, together with the
  * Content-Security-Policy hash that lets the browser run it. Every static page of the public site opts in except the homepage (its own
- * block, scripts/inline-site-css.js) and /catalogue/: the product pages, /services/ and its service pages, /work/ and its project pages,
+ * block, scripts/inline-site-css.js): /catalogue/ (since 2026-10-29; marker css/site.css css/catalogue.css css/quote-request.css), the product pages, /services/ and its service pages, /work/ and its project pages,
  * /areas-we-serve/, /faq/ and the guides. tests/page-first-paint.test.mjs finds them on disk and in sitemap.xml and fails for a page that has no block.
  *
  *   node scripts/inline-page-css.js            rewrite every opted-in page from the css files named in its marker

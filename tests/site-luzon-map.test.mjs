@@ -308,10 +308,14 @@ describe('JSON-LD: the 13 areas served, the verified Google Maps place, and noth
     assert.deepEqual(ld.address, { '@type': 'PostalAddress', streetAddress: '21 Capricorn St., Tandang Sora', addressLocality: 'Quezon City', postalCode: '1116', addressRegion: 'Metro Manila', addressCountry: 'PH' });
   });
 
-  it('carries the Google Maps place\'s coordinates (geo) and its URL (hasMap), and still no rating, opening hours or price range', () => {
+  it('carries the Google Maps place\'s coordinates (geo) and its URL (hasMap), the owner-ruled hours, and still no rating or price range', () => {
     assert.deepEqual(ld.geo, { '@type': 'GeoCoordinates', latitude: 14.6852336, longitude: 121.0376564 });
     assert.equal(ld.hasMap, PLACE_URL);
-    for (const k of ['priceRange', 'aggregateRating', 'openingHours', 'openingHoursSpecification', 'review']) assert.ok(!(k in ld), `${k} must not be claimed`);
+    for (const k of ['priceRange', 'aggregateRating', 'openingHours', 'review']) assert.ok(!(k in ld), `${k} must not be claimed`);
+    // Hours (owner ruling 2026-10-29, the same as the Google Business Profile): Monday to Saturday 07:00-17:00, Sunday closed —
+    // and the contact section says the same in words, so the markup describes what the page shows.
+    assert.deepEqual(ld.openingHoursSpecification, [{ '@type': 'OpeningHoursSpecification', dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], opens: '07:00', closes: '17:00' }]);
+    assert.ok(homeSite.includes('<li><span class="contact-label">Hours</span><span>Monday to Saturday, 7:00 AM – 5:00 PM (closed Sunday)</span></li>'));
     // the coordinates are the place URL's own (@lat,lon, !3d, !4d) and are in Tandang Sora, Quezon City
     assert.ok(PLACE_URL.includes(`@${ld.geo.latitude},${ld.geo.longitude},`) && PLACE_URL.includes(`!3d${ld.geo.latitude}`) && PLACE_URL.includes(`!4d${ld.geo.longitude}`));
     assert.ok(ld.geo.latitude > 14.65 && ld.geo.latitude < 14.72 && ld.geo.longitude > 121.0 && ld.geo.longitude < 121.08);

@@ -1447,7 +1447,8 @@ function injectIsland(html, json, label) {
  * catalogue/index.html: every product the page shows, in PAGE ORDER (the five public categories as ruled; inside each, the
  * configurable products first, then the fixed items), and for each one ONLY
  *   { "@type": "ListItem", "position": n, "name": <the card's name>, "url": "https://barroindustries.com/catalogue/#cat-<category>" }
- * The url is the anchor of the product's CATEGORY section: that is the only anchor the page has (cards carry no id of their own).
+ * The url is the anchor of the product's CATEGORY section (cards carry no id of their own) — except a configurable FAMILY that has its own page
+ * under /products/ (FAMILY_PAGES, the target of its card's "Learn more" link): that item's url is the product page (absolute).
  * Price-free BY CONSTRUCTION, like the cards and the data island: no price, offer, availability, sku, image or description key ever
  * enters the list (it is built field by field from the names), every name goes through the same publicProduct() allowlist, the same
  * TEXT_FIXES / NOTE_OVERRIDES and the same money / partner-brand scans as the cards, and the finished string is scanned again.
@@ -1466,14 +1467,14 @@ function renderItemListLd(db, opts) {
   const byId = new Map(db.products.map(p => [str(p && p.id), p]));
   const items = [];
   for (const c of report.categories) {
-    for (const f of report.families.filter(x => x.category === c.id)) items.push({ name: fams.families[f.id].label, cat: c.id });
+    for (const f of report.families.filter(x => x.category === c.id)) items.push({ name: fams.families[f.id].label, cat: c.id, url: FAMILY_PAGES[f.id] ? SITE_ORIGIN + FAMILY_PAGES[f.id].path : null });
     for (const p of report.published.filter(x => x.category === c.id)) {
       items.push({ name: publicProduct(byId.get(p.id), { noteOverrides: overrides, textFixes: fixes }).name, cat: c.id });
     }
   }
   if (items.length !== report.total) throw new Error('item list lost a product');
   const listName = str(opts.listName) || ITEM_LIST_NAME;               // an option only so the last-line guard below can be exercised
-  const rows = items.map((x, i) => JSON.stringify({ '@type': 'ListItem', position: i + 1, name: x.name, url: `${CATALOGUE_URL}#cat-${x.cat}` }));
+  const rows = items.map((x, i) => JSON.stringify({ '@type': 'ListItem', position: i + 1, name: x.name, url: x.url || `${CATALOGUE_URL}#cat-${x.cat}` }));
   const json = (`{"@context":"https://schema.org","@type":"ItemList","name":${JSON.stringify(listName)},"url":${JSON.stringify(CATALOGUE_URL)},` +
     `"numberOfItems":${items.length},"itemListElement":[\n${rows.join(',\n')}\n]}`).replace(/</g, '\\u003c');
   const last = [];

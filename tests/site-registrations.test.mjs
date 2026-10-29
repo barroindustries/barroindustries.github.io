@@ -200,7 +200,7 @@ describe('JSON-LD is unchanged: no registration fields (schema.org\'s vatID / ta
   const ld = JSON.parse(homeHead.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
 
   it('keeps exactly the keys it had, and none that claims or numbers a registration', () => {
-    assert.deepEqual(Object.keys(ld), ['@context', '@type', '@id', 'name', 'legalName', 'alternateName', 'url', 'logo', 'image', 'telephone', 'email', 'address', 'founder', 'brand', 'sameAs', 'knowsAbout', 'geo', 'hasMap', 'areaServed']);
+    assert.deepEqual(Object.keys(ld), ['@context', '@type', '@id', 'name', 'legalName', 'alternateName', 'url', 'logo', 'image', 'telephone', 'email', 'address', 'founder', 'brand', 'sameAs', 'knowsAbout', 'openingHoursSpecification', 'geo', 'hasMap', 'areaServed']);
     assert.equal(ld['@id'], 'https://barroindustries.com/#business', 'the content pages\' Service.provider references resolve to this id');
     for (const k of ['vatID', 'taxID', 'hasCredential', 'award', 'memberOf', 'iso6523Code', 'leiCode', 'duns', 'naics', 'isicV4', 'globalLocationNumber', 'hasOfferCatalog', 'slogan']) assert.ok(!(k in ld), `${k} was added to the JSON-LD`);
     assert.ok(!/registered|PhilGEPS|accredit|certif|licen/i.test(JSON.stringify(ld)));
@@ -236,7 +236,7 @@ describe('the badges are premium, legible and wrap on a phone (css/site.css)', (
   });
 
   it('is shared by both pages through css/site.css (the catalogue page loads it), scoped under #site like every other public rule, and adds no 4-digit z-index', () => {
-    assert.ok(cat.includes('<link rel="stylesheet" href="/css/site.css">'));
+    assert.ok(cat.includes('<!-- PAGE-CSS:START css/site.css css/catalogue.css css/quote-request.css ') && cat.includes(siteCss.replace(/\s+$/, '')), 'the catalogue inlines css/site.css');
     for (const m of siteCss.matchAll(/(^|\})\s*(#site \.regs[^{]*)\{/g)) assert.ok(m[2].startsWith('#site '), m[2]);
     assert.ok(!/z-index:\s*\d{4}/.test(siteCss));
   });

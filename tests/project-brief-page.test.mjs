@@ -148,7 +148,7 @@ describe('the CSP stays strict: no inline script, style or handler — in the pa
   it('is the catalogue\'s policy plus blob: images and nothing more (the same approach as the other public pages)', () => {
     const cat = read('catalogue/index.html');
     const catCsp = (cat.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/) || [])[1];
-    assert.equal(csp, catCsp.replace("img-src 'self' data:;", "img-src 'self' data: blob:;"));
+    assert.equal(csp, catCsp.replace(/ 'sha256-[^']*'/, '').replace("img-src 'self' data:;", "img-src 'self' data: blob:;"));   // minus the hash of the catalogue's one inline stylesheet (2026-10-29)
   });
 
   it('has no inline <script>, no <style>, no style= attribute and no on…= handler in the page', () => {

@@ -258,6 +258,9 @@ const GUIDES = [
   { path: '/guides/ss304-vs-ss316-stainless-steel/', kind: 'article', h1: 'SS304 vs SS316 Stainless Steel: Which Do You Need for Your Kitchen or Laboratory?', ogImage: 'og-fabrication.webp', published: '2026-10-22' },
   { path: '/guides/how-to-plan-a-commercial-kitchen-layout/', kind: 'article', h1: 'How to Plan a Commercial Kitchen Layout: Workflow, Aisles, Ventilation and Gas', ogImage: 'og-ispsc.webp', published: '2026-10-28' },
   { path: '/guides/commercial-kitchen-equipment-checklist/', kind: 'article', h1: 'Commercial Kitchen Equipment List: A Zone-by-Zone Checklist', ogImage: 'og-services.webp', published: '2026-10-28', priceLine: true },
+  { path: '/guides/commercial-kitchen-exhaust-hood-guide/', kind: 'article', h1: 'Commercial Kitchen Exhaust Hood Guide: Sizing, Filters, Ducting and Fresh Air', ogImage: 'og-exhaust.webp', published: '2026-10-29' },
+  { path: '/guides/lpg-gas-line-for-restaurants/', kind: 'article', h1: 'LPG Gas Line Installation for Restaurants: Tanks, Piping, Testing and Safety', ogImage: 'og-lpg.webp', published: '2026-10-29' },
+  { path: '/guides/how-to-clean-and-care-for-stainless-steel/', kind: 'article', h1: 'How to Clean Stainless Steel Kitchen Equipment and Prevent Rust', ogImage: 'og-fabrication.webp', published: '2026-10-29' },
 ];
 // the owner's own sentence, the one answer to the price question that the product pages give (CHECK 9 takes it out of the product pages and of the equipment list before it scans for the word "price")
 const PRICE_SENTENCE = 'Prices depend on size and options.';
@@ -306,8 +309,8 @@ const firstHit = (p, re) => { const hit = publicStrings(p).find((s) => re.test(s
 const allStrings = (v, out = []) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach((x) => allStrings(x, out)); else if (v && typeof v === 'object') Object.values(v).forEach((x) => allStrings(x, out)); return out; };
 const allKeys = (v, out = new Set()) => { if (Array.isArray(v)) v.forEach((x) => allKeys(x, out)); else if (v && typeof v === 'object') for (const k of Object.keys(v)) { out.add(k); allKeys(v[k], out); } return out; };
 
-describe('guides: the pages exist (the index and four articles), nothing else lives in the folder, and the stylesheet is scoped and clean', () => {
-  it('has an index and the four articles, and no other file under /guides/', () => {
+describe('guides: the pages exist (the index and seven articles), nothing else lives in the folder, and the stylesheet is scoped and clean', () => {
+  it('has an index and the seven articles, and no other file under /guides/', () => {
     for (const p of PAGES) assert.ok(p.html.length > 8000, `${p.file} is missing or empty`);
     const files = [];
     const walk = (d) => { for (const e of fs.readdirSync(path.join(ROOT, d), { withFileTypes: true })) (e.isDirectory() ? walk(`${d}/${e.name}`) : files.push(`${d}/${e.name}`)); };
@@ -822,9 +825,9 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
       const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
       assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
     }
-    assert.ok(new RegExp(`<loc>${BASE}/guides/</loc>\\s*<lastmod>2026-10-28</lastmod>`).test(sm), 'the hub changed on 2026-10-28, so its lastmod is that day');
+    assert.ok(new RegExp(`<loc>${BASE}/guides/</loc>\\s*<lastmod>2026-10-29</lastmod>`).test(sm), 'the hub changed on 2026-10-29 (three more guides), so its lastmod is that day');
     const order = hub.node('CollectionPage')[0].mainEntity.itemListElement.map((i) => i.url.replace(BASE, ''));
-    assert.deepEqual(order, ['/guides/commissary-kitchen-requirements-philippines/', '/guides/ss304-vs-ss316-stainless-steel/', layout.path, list.path]);
+    assert.deepEqual(order, ['/guides/commissary-kitchen-requirements-philippines/', '/guides/ss304-vs-ss316-stainless-steel/', layout.path, list.path, '/guides/commercial-kitchen-exhaust-hood-guide/', '/guides/lpg-gas-line-for-restaurants/', '/guides/how-to-clean-and-care-for-stainless-steel/']);
     assert.ok(/layout/i.test(hub.meta('description')) && /equipment/i.test(hub.meta('description')), 'the hub description names the two new guides');
   });
 
@@ -1043,7 +1046,7 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
     assert.ok(/sp_body "\$sp" /.test(ci), 'the body scan goes through sp_body(), which takes the sentence out');
   });
 
-  it('CHECK 9 itself, its content-page scan run against scratch trees: passes the five guides, lets the equipment list say the owner\'s sentence, and refuses that sentence — and every other use of "price", an amount or a missing page — anywhere else', () => {
+  it('CHECK 9 itself, its content-page scan run against scratch trees: passes the eight guides, lets the equipment list say the owner\'s sentence, and refuses that sentence — and every other use of "price", an amount or a missing page — anywhere else', () => {
     const ci = read('scripts/ci-invariants.sh');
     const a = ci.indexOf('page_head() {'), b = ci.indexOf('if [ "$seo_fail" -eq 0 ]; then');
     assert.ok(a > 0 && b > a, 'the content-page scan is no longer between page_head() and the seo_fail verdict');
@@ -1088,6 +1091,126 @@ describe('guides: the layout guide and the equipment list (2026-10-28) — dates
         assert.ok(/seo_fail=1/.test(out) && /FAIL: public content page guides\/how-to-plan-a-commercial-kitchen-layout\/index\.html is missing/.test(out), `a missing guide must fail CHECK 9\n${out}`);
       }
     } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// The three guides of 2026-10-29 (exhaust hood, LPG gas line, stainless steel care). Every generic rule above already holds for them (they are in GUIDES). This block pins what is
+// particular to them: the date, the keyword in the title / H1 / description, five FAQ questions, their sections, the same "no code, permit or regulation named, rules of thumb labelled
+// as such" discipline as the 2026-10-28 guides, where to ask, the safety wording of the LPG guide, and the links in and out.
+describe('guides: the exhaust hood, LPG gas line and stainless steel care guides (2026-10-29) — dates, keywords, structure, rules of thumb, safety wording and links', () => {
+  const hood = byPath('/guides/commercial-kitchen-exhaust-hood-guide/');
+  const lpg = byPath('/guides/lpg-gas-line-for-restaurants/');
+  const care = byPath('/guides/how-to-clean-and-care-for-stainless-steel/');
+  const THREE = [hood, lpg, care];
+  const hrefsOf = (p) => new Set(p.S.attrs.filter((a) => a.tag === 'a' && a.name === 'href').map((a) => a.value));
+  const sectionIds = (p) => [...p.article.matchAll(/<section id="([^"]+)" aria-labelledby="[^"]+">/g)].map((m) => m[1]);
+  const faqOf = (p) => [...p.html.matchAll(/<div class="faq-item">\s*<h3>([\s\S]*?)<\/h3>\s*<p>([\s\S]*?)<\/p>\s*<\/div>/g)].map((m) => ({ q: visibleText(m[1]), a: visibleText(m[2]) }));
+
+  it('are dated 29 October 2026, in sitemap.xml with that lastmod, on the hub (card and ItemList, after the first four guides) and in llms.txt', () => {
+    const sm = read('sitemap.xml'), llms = read('llms.txt'), hub = byPath('/guides/');
+    for (const p of THREE) {
+      assert.equal(p.published, '2026-10-29');
+      assert.ok(new RegExp(`<loc>${p.url}</loc>\\s*<lastmod>2026-10-29</lastmod>`).test(sm), `${p.path}: its sitemap entry, or its lastmod`);
+      assert.ok(llms.includes(`](${p.url}):`), `${p.path}: llms.txt does not list it`);
+      const card = hub.html.match(new RegExp(`<article class="pg-card">(?:(?!</article>)[\\s\\S])*?href="${p.path}"[\\s\\S]*?</article>`));
+      assert.ok(card && card[0].includes(`>${p.h1}</a>`) && /<img [^>]*loading="lazy"/.test(card[0]), `${p.path}: its card on the hub`);
+    }
+    assert.ok(/exhaust/i.test(hub.meta('description')) && /LPG/.test(hub.meta('description')) && /stainless steel care/i.test(hub.meta('description')), 'the hub description names the three new guides');
+  });
+
+  it('put the primary keyword in the title, the H1 and the description, and the secondary keywords in the visible text — without stuffing', () => {
+    const KW = [
+      [hood, 'commercial kitchen exhaust hood', ['wall', 'island', 'baffle filter', 'ducting', 'exhaust blower', 'fresh air', 'makeup air']],
+      [lpg, 'lpg gas line installation', ['restaurant', 'manifold', 'regulator', 'black iron', 'leak', 'shut-off', 'leak detector', 'ventilation']],
+      [care, 'clean stainless steel kitchen equipment', ['rust', 'bleach', 'steel wool', 'grain', 'tea staining', 'passivation', 'ss304', 'ss316']],
+    ];
+    for (const [p, primary, secondary] of KW) {
+      for (const [what, text] of [['title', p.title], ['H1', p.headings.find((h) => h.level === 1).text], ['description', p.meta('description')]]) assert.ok(text.toLowerCase().includes(primary), `${p.path}: "${primary}" is not in the ${what}`);
+      for (const k of secondary) assert.ok(p.body.toLowerCase().includes(k), `${p.path}: "${k}" is not in the text`);
+      const n = (p.body.toLowerCase().match(new RegExp(primary, 'g')) || []).length;
+      assert.ok(n >= 1 && n <= 9, `${p.path}: "${primary}" appears ${n} times`);
+    }
+    assert.ok(/stainless steel rust prevention|rust prevention/i.test(care.body), 'the care guide names rust prevention');
+  });
+
+  it('have five FAQ questions, an article of 1000-1500 words, and the sections their contents list names', () => {
+    for (const p of THREE) {
+      assert.equal(faqOf(p).length, 5, `${p.path}: FAQ questions`);
+      const n = words(p.article);
+      assert.ok(n >= 1000 && n <= 1500, `${p.path}: ${n} words`);
+    }
+    assert.deepEqual(sectionIds(hood), ['what-it-does', 'sizing', 'canopy-types', 'filters', 'duct-blower', 'fresh-air', 'fire-upkeep', 'help', 'faq']);
+    assert.deepEqual(sectionIds(lpg), ['plan', 'storage', 'regulator', 'piping', 'testing', 'safety-controls', 'ventilation-upkeep', 'help', 'faq']);
+    assert.deepEqual(sectionIds(care), ['why', 'routine', 'avoid', 'grain', 'humid-coastal', 'grade', 'passivation', 'help', 'faq']);
+    assert.equal(hood.article.match(/<div class="art-pick">[\s\S]*?<\/div>\s*<\/div>\s*<p>/)[0].match(/<h3>/g).length, 3, 'three canopy types');
+  });
+
+  it('name no code, permit, licence, certificate, regulation or standard and no specific legal instrument, no statistic, no price word; they send the reader to the BFP, the LPG supplier and the city or municipal building office', () => {
+    for (const p of THREE) {
+      assert.equal(firstHit(p, RE.legal), null, p.path);
+      assert.ok(!/\b(regulations?|compliance|compliant|complies|standards)\b|\b(?:industry|international|national|safety|quality|building|fire|sanitation) standard\b/i.test(p.body), `${p.path}: a regulation, compliance or standards claim`);
+      assert.ok(!/\b(permits?|licen[cs]es?|certificates?|certification)\b/i.test(p.body), `${p.path}: a permit, licence or certificate`);
+      assert.ok(!/\bcodes?\b/i.test(p.body.replace(/\bnot codes\b/gi, '')), `${p.path}: the word "code" outside "not codes"`);
+      assert.ok(!/\d+(\.\d+)?\s*(%|per cent|percent)/.test(p.body), `${p.path}: a statistic`);
+      assert.ok(!/\b(free|offer(?:s|ed)?|budget|cost\w*|pric\w*)\b/i.test(p.body), `${p.path}: a price word`);
+    }
+    for (const p of [hood, lpg]) assert.ok(/Bureau of Fire Protection \(BFP\)/.test(p.body) && /city or municipal building office/.test(p.body), `${p.path}: where to ask`);
+    assert.ok(/LPG supplier/.test(lpg.body));
+    assert.ok(/rule of thumb|rules of thumb/.test(hood.body) && /not codes/.test(hood.body), 'the hood guide labels its figures');
+  });
+
+  it('hood guide: only these distances and sizes, each a rule of thumb or one of our own pages\' made-to-order limits', () => {
+    const figs = [...hood.article.matchAll(/(\d+(?:\.\d+)?(?: to \d+(?:\.\d+)?)?)(?:&nbsp;|\s)?(mm|metres?)\b/g)].map((m) => `${m[1]} ${m[2]}`).sort();
+    assert.deepEqual(figs, ['1200 mm', '150 mm', '150 mm', '2 metres', '500 mm', '500 mm', '700 mm'], 'a distance or size that nobody reviewed');
+    const range = visibleText(read('products/stainless-steel-range-hoods/index.html'));
+    assert.ok(/A wall canopy is at least 500 mm deep, an island canopy at least 1200 mm long and 700 mm deep, and a slim canopy no deeper than 500 mm/.test(range), 'the made-to-order limits come from the range hood page');
+    assert.ok(/Stainless baffle filters/.test(range) && /grease trough and oil cup/.test(range) && /Fully welded rectangular exhaust ducting[\s\S]*an access door for maintenance/.test(visibleText(read('services/exhaust-and-fresh-air-systems/index.html'))));
+  });
+
+  it('LPG guide: cylinders outside, heavier than air, welded black-iron pipe, a pressure test then a soap test, never a flame, a leak detector with an auto-shutoff, a manual shut-off, and a conservative "if you smell gas" list', () => {
+    const t = lpg.article;
+    for (const f of ['LPG is heavier than air', 'Cylinders belong outside the kitchen', 'secured cage', 'fully welded black iron (BI) pipe', 'Pressure test', 'Soap test', 'Never look for a leak with a flame or a lighter', 'emergency auto-shutoff valve', 'manual shut-off', 'Do not switch anything on or off', 'keep flames and sparks away', 'call your LPG supplier', 'Do not go back in until the leak has been found and fixed', 'pressurised with air or an inert gas, not LPG', 'four 50&nbsp;kg tanks']) assert.ok(t.includes(f), `the LPG guide lacks "${f}"`);
+    assert.ok(/Never use a flame/.test(faqOf(lpg).map((x) => x.a).join(' ')), 'the FAQ also says never to use a flame');
+    const svc = visibleText(read('services/lpg-gas-line-installation/index.html'));
+    assert.ok(/A secured cage designed to hold four 50 kg gas tanks/.test(svc) && /Fully welded black iron \(BI\) pipes/.test(svc) && /gas leak detection system paired with an emergency auto-shutoff valve/.test(svc) && /test the installation to make sure there are no leaks/.test(svc), 'the claims come from the LPG service page');
+    assert.ok(!/\b(ppm|psi|bar|kPa|mbar)\b/i.test(lpg.body), 'no pressure figure that nobody reviewed');
+  });
+
+  it('care guide: no chlorine bleach, steel wool or abrasive pad; along the grain; tea staining; passivation described but not offered as a service; SS316 on request; KitchenShield worded as the site words it', () => {
+    const t = care.article;
+    for (const f of ['Chlorine bleach and chlorine-based cleaners', 'Steel wool, wire brushes, abrasive pads', 'along the grain', 'tea staining', 'Passivation is a chemical treatment', 'We make SS316 on request', 'food-grade SS304 as standard', 'protective film', 'Rust prevention in humid and coastal kitchens']) assert.ok(t.includes(f), `the care guide lacks "${f}"`);
+    assert.ok(!/we (?:do|offer|provide|carry out) passivation/i.test(care.body), 'passivation is not offered as a service');
+    assert.ok(!/online quote[^.]*SS316|SS316[^.]*online quote/i.test(care.body), 'no SS316 option in the online quote flow');
+    assert.ok(care.body.includes('full-kitchen projects include 12 months of preventive maintenance service (PMS) with KitchenShield™'), 'KitchenShield worded as the site words it');
+    assert.ok(care.body.includes('6-month service warranty on our equipment and work'));
+  });
+
+  it('link to the matching pages, and the three guides link each other where they overlap', () => {
+    const need = {
+      [hood.path]: ['/products/stainless-steel-range-hoods/', '/services/exhaust-and-fresh-air-systems/', '/services/fresh-air-systems/', '/services/kitchen-fire-suppression/', '/products/commercial-wok-ranges/', '/products/commercial-griddles-grillers-and-fryers/', '/services/lpg-gas-line-installation/', '/sales/clientinformationrequest/'],
+      [lpg.path]: ['/services/lpg-gas-line-installation/', '/products/commercial-gas-stoves/', '/products/commercial-wok-ranges/', '/products/gas-deck-ovens/', '/services/kitchen-fire-suppression/', '/guides/commercial-kitchen-exhaust-hood-guide/', '/sales/clientinformationrequest/'],
+      [care.path]: ['/guides/ss304-vs-ss316-stainless-steel/', '/products/stainless-steel-sinks/', '/products/stainless-steel-work-tables/', '/products/stainless-steel-dish-tables/', '/products/stainless-steel-shelving/', '/products/stainless-steel-racks/', '/services/', '/guides/commercial-kitchen-exhaust-hood-guide/'],
+    };
+    for (const p of THREE) {
+      const h = hrefsOf(p);
+      for (const u of need[p.path]) assert.ok(h.has(u), `${p.path} does not link ${u}`);
+      const rel = p.html.match(/<section id="related"[\s\S]*?<\/section>/)[0];
+      assert.equal((rel.match(/<article class="pg-card">/g) || []).length, 3, `${p.path}: three related cards`);
+      assert.ok(!/site\/img\/products\//.test(p.html) && !/Representative image/.test(p.html), `${p.path}: a product picture`);
+      assert.equal(p.imgs.filter((i) => /site\/img\/projects\//.test(i.attrs.src)).length, 2, `${p.path}: the hero and one inline project photograph`);
+    }
+    // the guides are linked back from the pages they are about (one contextual link each, outside the FAQPage JSON-LD)
+    const FROM = {
+      '/guides/commercial-kitchen-exhaust-hood-guide/': ['products/stainless-steel-range-hoods', 'services/exhaust-and-fresh-air-systems', 'services/fresh-air-systems'],
+      '/guides/lpg-gas-line-for-restaurants/': ['services/lpg-gas-line-installation', 'products/commercial-gas-stoves', 'products/commercial-wok-ranges'],
+      '/guides/how-to-clean-and-care-for-stainless-steel/': ['products/stainless-steel-sinks', 'products/stainless-steel-work-tables', 'services/stainless-steel-fabrication'],
+    };
+    for (const [g, pages] of Object.entries(FROM)) for (const pg of pages) {
+      const html = read(`${pg}/index.html`);
+      assert.equal(html.split(`href="${g}"`).length - 1, 1, `${pg}: exactly one link to ${g}`);
+      assert.ok(!(html.match(/"@type":\s*"FAQPage"[\s\S]*?<\/script>/) || [''])[0].includes(g), `${pg}: the guide link stays out of the FAQPage JSON-LD`);
+    }
   });
 });
 

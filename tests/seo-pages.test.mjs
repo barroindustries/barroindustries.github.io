@@ -408,7 +408,7 @@ describe('markup: one H1, a logical heading order, unique ids, every image sized
 });
 
 describe('JSON-LD: LocalBusiness, BreadcrumbList, Service / CreativeWork / ItemList / FAQPage — and nothing that is a price, an offer, a rating or a credential', () => {
-  const BAD_KEYS = ['price', 'priceRange', 'priceCurrency', 'lowPrice', 'highPrice', 'offers', 'offer', 'makesOffer', 'hasOfferCatalog', 'availability', 'aggregateRating', 'ratingValue', 'ratingCount', 'reviewCount', 'bestRating', 'review', 'reviews', 'rating', 'openingHours', 'openingHoursSpecification', 'award', 'awards', 'hasCredential', 'vatID', 'taxID', 'slogan', 'paymentAccepted', 'currenciesAccepted', 'isicV4', 'naics', 'duns', 'leiCode'];
+  const BAD_KEYS = ['price', 'priceRange', 'priceCurrency', 'lowPrice', 'highPrice', 'offers', 'offer', 'makesOffer', 'hasOfferCatalog', 'availability', 'aggregateRating', 'ratingValue', 'ratingCount', 'reviewCount', 'bestRating', 'review', 'reviews', 'rating', 'openingHours', 'award', 'awards', 'hasCredential', 'vatID', 'taxID', 'slogan', 'paymentAccepted', 'currenciesAccepted', 'isicV4', 'naics', 'duns', 'leiCode'];
 
   it('has exactly one JSON-LD block that parses, is schema.org, and is one @graph', () => {
     each((p) => {
@@ -433,8 +433,10 @@ describe('JSON-LD: LocalBusiness, BreadcrumbList, Service / CreativeWork / ItemL
       const lb = p.node('LocalBusiness');
       assert.equal(lb.length, 1, `${p.path}: LocalBusiness count`);
       const b = lb[0];
-      assert.deepEqual(Object.keys(b).sort(), ['@id', '@type', 'address', 'alternateName', 'areaServed', 'brand', 'email', 'geo', 'hasMap', 'image', 'legalName', 'logo', 'name', 'sameAs', 'telephone', 'url']);
+      assert.deepEqual(Object.keys(b).sort(), ['@id', '@type', 'address', 'alternateName', 'areaServed', 'brand', 'email', 'geo', 'hasMap', 'image', 'legalName', 'logo', 'name', 'openingHoursSpecification', 'sameAs', 'telephone', 'url']);
       assert.equal(b['@id'], BASE + '/#business');
+      // Hours (owner ruling 2026-10-29, as on the Google Business Profile): Monday to Saturday 07:00-17:00, Sunday closed.
+      assert.deepEqual(b.openingHoursSpecification, [{ '@type': 'OpeningHoursSpecification', dayOfWeek: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'], opens: '07:00', closes: '17:00' }], `${p.path}: opening hours`);
       assert.equal(b.name, 'Barro Industries');
       assert.equal(b.legalName, 'Barro Industries OPC');
       assert.deepEqual(b.alternateName, ALT_NAMES, `${p.path}: the permanent alternate names`);
@@ -1374,8 +1376,7 @@ describe('"Message us": the Messenger chat is linked from every public footer, t
   it('styles the icon with one shared rule (currentColor, so it follows the link and its hover), in css/site.css which every one of these pages carries (the catalogue links it; the 12 content pages inline it, byte for byte)', () => {
     const css = read('css/site.css');
     assert.ok(/#site \.msg-ic\{flex:none;margin-right:8px;vertical-align:-3px\}/.test(css));
-    assert.ok(/<link rel="stylesheet" href="\/css\/site\.css">/.test(catalogue), '/catalogue/: does not link css/site.css');
-    for (const [p, html] of ALL.filter(([x]) => x !== '/' && x !== '/catalogue/')) assert.ok((html.match(STYLE_RE) || [, ''])[1].includes(css.replace(/\s+$/, '')), `${p}: the inline stylesheet does not carry css/site.css`);
+    for (const [p, html] of ALL.filter(([x]) => x !== '/')) assert.ok((html.match(STYLE_RE) || [, ''])[1].includes(css.replace(/\s+$/, '')), `${p}: the inline stylesheet does not carry css/site.css`);
     assert.ok(!/data-brand/.test(css) && !/data-brand/.test(read('js/site.js')), 'a stylesheet or script reads [data-brand]');
   });
 });

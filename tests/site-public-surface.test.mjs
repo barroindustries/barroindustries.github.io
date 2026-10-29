@@ -512,7 +512,7 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     assert.ok(home.html.includes('<p class="foot-legal" id="copyright">'), 'the usage-terms page the markup points at: the homepage footer notice, #copyright');
   });
 
-  it('on /catalogue/: one ItemList with a ListItem per card, in page order — name and the #cat-… anchor of its category, no other key', () => {
+  it('on /catalogue/: one ItemList with a ListItem per card, in page order — name and url (the product page of a family that has one, else the #cat-… anchor of its category), no other key', () => {
     assert.equal(catalogue.ld.length, 1);
     const list = catalogue.ld[0];
     assert.equal(list['@type'], 'ItemList');
@@ -520,9 +520,14 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
     assert.equal(list.name, 'Commercial kitchen equipment catalogue');
     const sections = catalogue.html.split('<section class="cat-group" id="cat-').slice(1).map((g) => ({
       id: g.match(/^([a-z_]+)"/)[1],
-      names: [...g.matchAll(/<li class="cat-card[^"]*"[^>]*>[\s\S]*?<h3>([^<]*)<\/h3>/g)].map((m) => decode(m[1])),
+      cards: [...g.matchAll(/<li class="cat-card[^"]*"[^>]*>([\s\S]*?)<\/li>/g)].map((m) => ({
+        name: decode(m[1].match(/<h3>([^<]*)<\/h3>/)[1]),
+        learn: (m[1].match(/<p class="cat-learn"><a class="link-arrow" href="(\/products\/[a-z0-9-]+\/)"/) || [])[1] || null,   // the "Learn more" page of a configurable family
+      })),
     }));
-    const expected = sections.flatMap((s) => s.names.map((name) => ({ name, url: `${catalogue.url}#cat-${s.id}` })));
+    // a family with its own /products/ page points there (the target of its card's "Learn more" link); every other item points at its category anchor
+    const expected = sections.flatMap((s) => s.cards.map((c) => ({ name: c.name, url: c.learn ? `https://barroindustries.com${c.learn}` : `${catalogue.url}#cat-${s.id}` })));
+    assert.equal(expected.filter((e) => e.url.includes('/products/')).length, 11, 'all eleven configurable families point at their product page');
     assert.equal(expected.length, 25, 'the page shows 25 products: the eleven configurable families first in their categories, then the 14 fixed items');
     assert.equal(list.numberOfItems, 25);
     assert.deepEqual(list.itemListElement.map((i) => ({ name: i.name, url: i.url })), expected);
@@ -530,7 +535,8 @@ describe('3b · structured data (JSON-LD): LocalBusiness + WebSite on "/", the p
       assert.deepEqual(Object.keys(item), ['@type', 'position', 'name', 'url']);
       assert.equal(item['@type'], 'ListItem');
       assert.equal(item.position, i + 1);
-      assert.ok(catalogue.html.includes(`id="${item.url.split('#')[1]}"`), `${item.url} has no anchor on the page`);
+      if (item.url.includes('#')) assert.ok(catalogue.html.includes(`id="${item.url.split('#')[1]}"`), `${item.url} has no anchor on the page`);
+      else assert.match(item.url, /^https:\/\/barroindustries\.com\/products\/[a-z0-9-]+\/$/);
     });
     assert.deepEqual([...allKeys(list)].sort(), ['@context', '@type', 'itemListElement', 'name', 'numberOfItems', 'position', 'url']);
     assert.deepEqual(sections.map((s) => s.id), ['preparation', 'washing', 'cooking', 'ventilation', 'storage', 'refrigeration']);

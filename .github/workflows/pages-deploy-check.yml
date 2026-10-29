@@ -85,3 +85,32 @@ jobs:
           done
           echo "::warning::Live site has not served $want within ~3 minutes (CDN lag, or a custom-domain problem)."
           echo "::warning::Build reported 'built', so this is a propagation warning, not a build failure."
+
+  # IndexNow (2026-10-29): once this commit is confirmed published, tell Bing /
+  # Yandex / Seznam / Naver which public pages the push changed so they recrawl now.
+  # Google ignores IndexNow (Search Console + sitemap.xml cover it). Key file:
+  # /56a23bfe1bfdd002453891cc782415f3.txt at the site root — never delete it.
+  # A failed ping is a warning, never a red deploy.
+  indexnow:
+    name: IndexNow ping for the changed public pages
+    needs: verify-published
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Send the changed sitemap URLs
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            node scripts/indexnow.js --changed "$BEFORE" "$AFTER"
+          else
+            node scripts/indexnow.js
+          fi

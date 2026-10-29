@@ -486,7 +486,7 @@ describe('markup: one H1, a logical heading order, unique ids, every image sized
 });
 
 describe('JSON-LD: LocalBusiness, BreadcrumbList, WebPage / CollectionPage, Service, FAQPage — and nothing that is a price, an offer, a product, a rating or a credential', () => {
-  const BAD_KEYS = ['price', 'priceRange', 'priceCurrency', 'lowPrice', 'highPrice', 'offers', 'offer', 'makesOffer', 'hasOfferCatalog', 'availability', 'aggregateRating', 'ratingValue', 'ratingCount', 'reviewCount', 'bestRating', 'review', 'reviews', 'rating', 'openingHours', 'openingHoursSpecification', 'award', 'awards', 'hasCredential', 'vatID', 'taxID', 'slogan', 'paymentAccepted', 'currenciesAccepted', 'sku', 'gtin', 'gtin13', 'mpn', 'itemCondition', 'priceSpecification', 'eligibleQuantity'];
+  const BAD_KEYS = ['price', 'priceRange', 'priceCurrency', 'lowPrice', 'highPrice', 'offers', 'offer', 'makesOffer', 'hasOfferCatalog', 'availability', 'aggregateRating', 'ratingValue', 'ratingCount', 'reviewCount', 'bestRating', 'review', 'reviews', 'rating', 'openingHours', 'award', 'awards', 'hasCredential', 'vatID', 'taxID', 'slogan', 'paymentAccepted', 'currenciesAccepted', 'sku', 'gtin', 'gtin13', 'mpn', 'itemCondition', 'priceSpecification', 'eligibleQuantity'];
   const BAD_TYPES = ['Product', 'ProductGroup', 'IndividualProduct', 'Offer', 'AggregateOffer', 'AggregateRating', 'Review', 'Rating', 'PriceSpecification', 'OfferCatalog', 'ItemAvailability'];
 
   it('has exactly one JSON-LD block that parses, is schema.org, and is one @graph with unique @ids', () => {
@@ -1412,10 +1412,10 @@ describe('guides and downloads: the footer of every public page, sitemap.xml, ro
   })(ROOT, 0);
   const PDFS = [['Company profile (PDF)', 'barro-industries-company-profile.pdf'], ['Catalogue (PDF)', 'barro-industries-catalogue.pdf'], ['Portfolio (PDF)', 'barro-industries-portfolio.pdf']];
   const FILES_ROW = `<p class="foot-files">${PDFS.map(([t, f]) => `<a href="/downloads/${f}">${t}</a>`).join('')}</p>`;
-  const GUIDES = ['guides/', 'guides/commissary-kitchen-requirements-philippines/', 'guides/ss304-vs-ss316-stainless-steel/', 'guides/how-to-plan-a-commercial-kitchen-layout/', 'guides/commercial-kitchen-equipment-checklist/'];
+  const GUIDES = ['guides/', 'guides/commissary-kitchen-requirements-philippines/', 'guides/ss304-vs-ss316-stainless-steel/', 'guides/how-to-plan-a-commercial-kitchen-layout/', 'guides/commercial-kitchen-equipment-checklist/', 'guides/commercial-kitchen-exhaust-hood-guide/', 'guides/lpg-gas-line-for-restaurants/', 'guides/how-to-clean-and-care-for-stainless-steel/'];
   const GUIDE_SS = '/guides/ss304-vs-ss316-stainless-steel/', GUIDE_COM = '/guides/commissary-kitchen-requirements-philippines/';
 
-  it('puts "Guides" right after FAQ in the footer link row and the three PDFs under the registrations, written the same way, on every public page (found by its footer: the homepage, the catalogue, the brief page, the 14 content pages, the 13 product and fresh-air pages and the 5 guide pages)', () => {
+  it('puts "Guides" right after FAQ in the footer link row and the three PDFs under the registrations, written the same way, on every public page (found by its footer: the homepage, the catalogue, the brief page, the 14 content pages, the 13 product and fresh-air pages and the 8 guide pages)', () => {
     assert.ok(publicPages.length >= 31, `only ${publicPages.length} public pages have the site footer`);
     for (const must of ['index.html', 'catalogue/index.html', 'sales/clientinformationrequest/index.html', 'faq/index.html', ...PAGE_PATHS.map((x) => x.slice(1) + 'index.html'), ...GUIDES.map((g) => g + 'index.html')]) assert.ok(publicPages.includes(must), `${must}: no site footer found`);
     for (const f of publicPages) {
