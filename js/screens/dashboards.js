@@ -978,7 +978,7 @@ async function renderPresidentDashboard() {
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
       dbCachedGet('all-quotes',    getAllQuotes,                                                          30000),
       dbCachedGet('approvals-pending',   () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'),     30000),
-      dbCachedGet('ca-pending',          () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),         30000),
+      dbCachedGet('ca-pending',          () => safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),         30000),
       // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — attendance_extensions pending
       // fetch removed. The request-creation flow (bindAttendanceCard) that fed
       // this queue is gone, so this source can no longer contribute a genuine
@@ -1228,7 +1228,7 @@ async function renderManagerDashboard() {
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
       dbCachedGet('approvals-pending', () => safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'), 30000),
-      dbCachedGet('ca-pending',        () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),     30000),
+      dbCachedGet('ca-pending',        () => safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),     30000),
       // OFFICE-KPI-PAY-SPEC-2026-08-25 R1/item4 — attendance_extensions pending
       // fetch removed. The request-creation flow (bindAttendanceCard) that fed
       // this queue is gone, so this source can no longer contribute a genuine
@@ -1354,7 +1354,7 @@ async function renderSecretaryDashboard() {
       dbCachedGet('tasks-all',   () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
       safeGet(db.collection('approval_requests').where('status','==','pending'), 'approval_requests'),
-      safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),
+      safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),
       safeGet(db.collection('signup_requests').where('status','==','pending'), 'signup_requests'),
       safeGet(db.collection('leave_requests').where('status','==','pending'), 'leave_requests'),
       safeGet(db.collection('finance_delete_requests').where('status','==','pending'), 'finance_delete_requests'),
@@ -1469,7 +1469,7 @@ async function renderFinanceDashboard() {
       ledgerForPeriod(period),
       ledgerForPeriod('prev'),
       dbCachedGet('expenses-pending', () => safeGet(db.collection('expenses').where('status','==','pending'), 'expenses'),         45000),
-      dbCachedGet('ca-pending',      () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),      30000),
+      dbCachedGet('ca-pending',      () => safeGet(window.caScope(db.collection('cash_advances').where('status','==','pending')), 'cash_advances'),      30000),
       dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                   45000),
       dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs'), 'job_costs'),                                         45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(e => { _dashWarnOnce('projects', e); return []; }),
@@ -1631,7 +1631,7 @@ async function renderEmployeeDashboard() {
           .catch(()=>db.collection('tasks').where('assignedTo','==', uid).get()),
         30000),
       dbCachedGet('ca-mine-' + uid, () =>
-        db.collection('cash_advances').where('userId','==', uid).get().catch(e => { _dashWarnOnce('cash_advances', e); return {docs:[]}; }),
+        db.collection('cash_advances').where('userId','==', currentUser.uid).get().catch(e => { _dashWarnOnce('cash_advances', e); return {docs:[]}; }),
         60000),
       dbCachedGet('kpi-' + uid, () =>
         db.collection('kpi_targets').doc(uid).get().catch(e => { _dashWarnOnce('kpi_targets', e); return null; }),
@@ -3367,7 +3367,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
 
     const [attScore, caSnap, attRecSnap] = await Promise.all([
       getAttendanceScore(uid),
-      db.collection('cash_advances').where('userId','==',uid).get().catch(()=>({docs:[]})),
+      (uid === currentUser.uid ? db.collection('cash_advances').where('userId','==',currentUser.uid) : window.caScope(db.collection('cash_advances')).where('userId','==',uid)).get().catch(()=>({docs:[]})),
       db.collection('attendance').doc(uid).collection('records')
         .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart).get()
         .catch(()=>({docs:[]}))
@@ -3592,7 +3592,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       // computation — see this panel's own "Payslip" button for the real one).
       const [kpi, caSnap, userSnap, evalSnap] = await Promise.all([
         getKpiScore(uid),
-        db.collection('cash_advances').where('userId','==',uid).get().catch(()=>({docs:[]})),
+        (uid === currentUser.uid ? db.collection('cash_advances').where('userId','==',currentUser.uid) : window.caScope(db.collection('cash_advances')).where('userId','==',uid)).get().catch(()=>({docs:[]})),
         db.collection('users').doc(uid).get().catch(()=>null),
         db.collection('kpi_evals').doc(uid).get().catch(()=>null)
       ]);
@@ -5717,7 +5717,7 @@ async function renderAnalytics() {
     // v13 review fix: CA Outstanding/Pending are BALANCE-BOOK metrics — an advance
     // from last year that still carries a balance must always count. Never bound
     // this fetch by period (the 60s cg cache keeps the cost acceptable).
-    const caQ = db.collection('cash_advances');
+    const caQ = window.caScope(db.collection('cash_advances'));
     const psQ = _boundStart ? db.collection('payslips').where('payPeriodStart','>=',_boundStart) : db.collection('payslips');
     const [caSnap, psSnap] = await Promise.all([cg('cash_advances:all', caQ), cg('payslips:'+anKey, psQ)]);
     cas = caSnap.docs.map(d=>({id:d.id,...d.data()}));

@@ -572,10 +572,14 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
   //     president/manager/finance). Deliberately narrower: the rules will not
   //     let a secretary write pay, and a button whose write is refused is worse
   //     than no button.
-  const canPrepare = (typeof window.isOpsPriv === 'function') ? window.isOpsPriv()
+  let canPrepare = (typeof window.isOpsPriv === 'function') ? window.isOpsPriv()
                    : ['president', 'owner', 'manager', 'secretary', 'finance'].includes(role);
-  const canPay     = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv()
+  let canPay     = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv()
                    : ['president', 'owner', 'manager', 'finance'].includes(role);
+  // Owner ruling 2026-10-29: running the MONTHLY payroll (pay_runs) is President
+  // and Finance only — managers keep viewing it. Narrowed per paint, below, once
+  // the selected period's team is known (the weekly Operations run is unchanged).
+  const _canPrepareBase = canPrepare, _canPayBase = canPay;
 
   // Manila, via the app's own helper — a raw toISOString() is UTC and picks the
   // WRONG week for the first eight hours of every Manila day, which would open
@@ -718,6 +722,9 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
     const activeTeam = _pyTeam(selected);
     PY_LAST_TEAM = activeTeam;
     PY_LAST_PERIOD_BY_TEAM[activeTeam] = selected;
+    const _mayRun = activeTeam === 'operations' || (typeof window.canRunPayroll === 'function' && window.canRunPayroll());
+    canPrepare = _canPrepareBase && _mayRun;
+    canPay     = _canPayBase && _mayRun;
 
     // Every extra id offered to the picker is filtered to THIS team — an
     // Office tab lists only months, an Operations tab only weeks (D8).
@@ -905,6 +912,7 @@ window.renderPayrollPage = async function (container, currentUser, currentRole) 
           ? '<button class="btn-secondary btn-sm" id="py-rework" title="Read the rates, records and punches again as they stand now, and rebuild this period from them">Work these out again</button>' : ''}
       </div>
 
+      ${(!_mayRun && _canPrepareBase) ? '<div class="py-cost" style="color:var(--text-muted);font-size:12px;margin-bottom:10px">Payroll is run by the President or Finance.</div>' : ''}
       <div id="py-headline"></div>
       <div id="py-unreadable"></div>
       <div id="py-waiting" style="margin-bottom:14px"></div>

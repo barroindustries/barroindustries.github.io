@@ -1042,6 +1042,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const pendingDelIds = new Set(delReqs.map(r=>r.historyId));
   const canFinance = isFinancePriv();
   const isPres     = isRealPresident(currentUser);
+  // Owner ruling 2026-10-29: computing/adjusting/holding/verifying/disbursing a
+  // pay run is President + Finance only; managers keep viewing the payroll.
+  const canRun     = typeof window.canRunPayroll === 'function' && window.canRunPayroll();
+  const _noRunMsg  = 'Payroll is run by the President or Finance.';
   const months    = [...new Set(history.map(h=>h.month))].sort().reverse();
   const thisMonth = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)).slice(0,7); // Manila YYYY-MM
 
@@ -1103,7 +1107,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         ${monthOptionsHtml}
       </select>
       <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-        <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
+        ${canRun ? '<button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>' : `<span style="font-size:12px;color:var(--text-muted);align-self:center">${_noRunMsg}</span>`}
         <button class="btn-secondary btn-sm" id="raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
         <button class="btn-secondary btn-sm" id="print-payroll-btn">${emojiIcon('🖨',16)} Print All</button>
         ${(typeof isRealPresident === 'function' && isRealPresident()) ? `<button class="btn-secondary btn-sm" id="payroll-recon-btn">${emojiIcon('🔍',16)} Reconciliation</button>` : ''}
@@ -1464,7 +1468,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         ? window.fmtManila(runData.computedAt) : '';
       if (captionEl) captionEl.innerHTML =
         `Showing the computed run (state: <strong>${escHtml(runData.state||'computed')}</strong>${runData.computedByName?`, computed by ${escHtml(runData.computedByName)}`:''}${computedAtLabel?` at ${computedAtLabel}`:''})`;
-      const canAdjust = runData.state === 'computed' && canFinance;
+      const canAdjust = runData.state === 'computed' && canFinance && canRun;
       tbody.innerHTML = runData.lines.map(line => {
         const u = employees.find(e=>e.id===line.uid) || null;
         const depts = u ? ((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—') : '—';
@@ -1500,7 +1504,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <td class="tc-net"><strong style="color:${line.finalPay>=0?'var(--success)':'var(--danger)'}">₱${fmt(line.finalPay)}</strong></td>
           <td class="tc-actions">
             ${canAdjust?`<button class="btn-secondary btn-sm pr-adjust-btn" data-uid="${line.uid}" title="Adjust" aria-label="Adjust pay line">${emojiIcon('✎',16)}</button>`:''}
-            ${canFinance?`<button class="btn-secondary btn-sm pr-note-btn" data-uid="${line.uid}" data-name="${escHtml(line.name||'')}" title="Note to employee" aria-label="Note to employee">${emojiIcon('📝',16)}</button>`:''}
+            ${(canFinance && canRun)?`<button class="btn-secondary btn-sm pr-note-btn" data-uid="${line.uid}" data-name="${escHtml(line.name||'')}" title="Note to employee" aria-label="Note to employee">${emojiIcon('📝',16)}</button>`:''}
             <button class="btn-secondary btn-sm print-slip-btn" data-uid="${line.uid}" title="Payslip" aria-label="Print payslip">${emojiIcon('🖨',16)}</button>
           </td>
         </tr>`;
@@ -1745,7 +1749,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <button class="btn-secondary btn-sm ep-profile-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Employee profile" aria-label="Employee profile">${emojiIcon('🪪',16)}</button>
           <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit" aria-label="Edit payroll">${emojiIcon('✎',16)}</button>
           ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise" aria-label="Give raise">${emojiIcon('banknote',14)}</button>` : ''}
-          ${canFinance ? `<button class="btn-secondary btn-sm pr-exclude-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Not on payroll" aria-label="Remove from payroll">${emojiIcon('user-minus',14)}</button>` : ''}
+          ${(canFinance && canRun) ? `<button class="btn-secondary btn-sm pr-exclude-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Not on payroll" aria-label="Remove from payroll">${emojiIcon('user-minus',14)}</button>` : ''}
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip" aria-label="Print payslip">${emojiIcon('🖨',16)}</button>
         </td>
       </tr>`;
@@ -1798,7 +1802,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td class="tc-detail" data-label="ID"><code>${escHtml(u.employeeId||'—')}</code></td>
         <td class="tc-detail" data-label="Department" colspan="9" style="color:var(--text-muted)">${_note}</td>
         <td class="tc-net"><span style="color:var(--text-muted)">—</span></td>
-        <td class="tc-actions">${(canFinance && _isExcl)?`<button class="btn-secondary btn-sm pr-include-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Put back on payroll" aria-label="Put back on payroll">${emojiIcon('user-plus',14)}</button>`:''}</td>
+        <td class="tc-actions">${(canFinance && canRun && _isExcl)?`<button class="btn-secondary btn-sm pr-include-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email||'')}" title="Put back on payroll" aria-label="Put back on payroll">${emojiIcon('user-plus',14)}</button>`:''}</td>
       </tr>`;
       }).join('');
     }
@@ -1842,6 +1846,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // without it the state-transition rule would have denied this write on a
     // draft month.
     const _setPayrollExcluded = async (uid, excluded, reason) => {
+      if (!canRun) { Notifs.showToast(_noRunMsg, 'error'); return; }
       const F = firebase.firestore.FieldValue;
       await db.collection('pay_runs').doc(month).set({
         excluded: { [uid]: excluded ? (reason || true) : F.delete() },
@@ -2397,6 +2402,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   //     need a firestore.rules change (out of scope for this pass — see the
   //     pass report for the exact clause).
   async function openEmployeeNoteModal(month, uid, name) {
+    if (!canRun) { Notifs.showToast(_noRunMsg, 'error'); return; }
     const runSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
     const runData = (runSnap && runSnap.exists) ? runSnap.data() : null;
     const state   = runData ? (runData.state || 'draft') : 'draft';
@@ -2477,6 +2483,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   // override map then re-run computePayRun so the frozen lines[] stay the
   // single source of truth (no separate client-side money math to drift).
   async function openAdjustModal(month, uid) {
+    if (!canRun) { Notifs.showToast(_noRunMsg, 'error'); return; }
     const runSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
     const runData = (runSnap && runSnap.exists) ? runSnap.data() : null;
     if (!runData) { Notifs.showToast('Could not load this run.','error'); return; }
@@ -2619,7 +2626,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         </div>
         ${grace?`<div style="font-size:12px;color:var(--text-muted)">${emojiIcon('⏳',12)} ${grace}</div>`:''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          ${(canFinance && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">${emojiIcon('✓',16)} Mark Verified</button>`:''}
+          ${(canFinance && canRun && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">${emojiIcon('✓',16)} Mark Verified</button>`:''}
           ${(isPres && state==='verified' && data.state!=='disbursing')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">${emojiIcon('💵',16)} Disburse</button><button class="btn-secondary btn-sm" id="pr-reopen-btn">↺ Reopen</button>`:''}
           ${state==='draft'?`<span style="font-size:12px;color:var(--text-muted)">Use <strong>Compute Payroll</strong> to start this month's run.</span>`:''}
           ${data.state==='disbursing'?`<span class="badge badge-amber" style="font-size:11px">${emojiIcon('🔒',12)} Disbursing… (locked)${data.disbursingByName?` — started by ${escHtml(data.disbursingByName)}`:''}</span>${isPres?`<button class="btn-primary btn-sm" id="pr-resume-btn">Resume Disburse</button><button class="btn-secondary btn-sm" id="pr-unlock-btn">↺ Reopen (unlock)</button>`:''}`:''}
@@ -2630,6 +2637,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // Verify — only from 'computed' (re-checked here, not just hidden by the UI,
     // since a stale page could still fire a click after someone else acted).
     document.getElementById('pr-verify-btn')?.addEventListener('click', async ()=>{
+      if (!canRun) { Notifs.showToast(_noRunMsg, 'error'); return; }
       const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
       if (!chk || !chk.exists || chk.data().state !== 'computed') { Notifs.showToast('Run must be Computed before Verify.','error'); loadPayRunStrip(month); return; }
       const chkData = chk.data();
@@ -2700,7 +2708,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   document.getElementById('payroll-recon-btn')?.addEventListener('click', () => openPayrollReconciliation());
   document.getElementById('pr-view-raises')?.addEventListener('click', () => window.openScheduledRaises());
 
-  document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
+  document.getElementById('gen-payroll-btn')?.addEventListener('click', async () => {
+    if (!canRun) { Notifs.showToast(_noRunMsg, 'error'); return; }
     const month = document.getElementById('pr-month-sel').value;
 
     // Compute is allowed only in draft/computed — once Verified, the President

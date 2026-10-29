@@ -168,7 +168,7 @@ window.renderApprovals = async function(currentUser) {
   });
   const [sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2, deptSpendSnap2] = await Promise.all([
     _apq('Sign-ups', 'signups', 'signup_requests-pending',                                 db.collection('signup_requests').where('status','==','pending')),
-    _apq('Cash Advances', 'ca', 'cash_advances-pending',                                    db.collection('cash_advances').where('status','==','pending')),
+    _apq('Cash Advances', 'ca', 'cash_advances-pending',                                    window.caScope(db.collection('cash_advances').where('status','==','pending'))),
     _apq('Work submissions', 'all', 'submissions-pending',                                  db.collection('submissions').where('status','==','pending')),
     _apq('Tasks for Review', 'review-tasks', 'tasks-review',                                db.collection('tasks').where('status','==','review')),
     _apq('Payroll delete requests', 'finance-requests', 'payroll_delete_requests-pending',  db.collection('payroll_delete_requests').where('status','==','pending')),
@@ -452,7 +452,7 @@ window.renderApprovals = async function(currentUser) {
         // re-querying all 13 collections again.
         ([sgSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2] = await Promise.all([
           dbCachedGet('approvals-pending:signup_requests-pending', () => db.collection('signup_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
-          dbCachedGet('approvals-pending:cash_advances-pending', () => db.collection('cash_advances').where('status','==','pending').get(), 30000).catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
+          dbCachedGet('approvals-pending:cash_advances-pending', () => window.caScope(db.collection('cash_advances').where('status','==','pending')).get(), 30000).catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:submissions-pending', () => db.collection('submissions').where('status','==','pending').get(), 30000).catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:tasks-review', () => db.collection('tasks').where('status','==','review').get(), 30000).catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
           dbCachedGet('approvals-pending:payroll_delete_requests-pending', () => db.collection('payroll_delete_requests').where('status','==','pending').get(), 30000).catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
@@ -973,7 +973,7 @@ window.renderApprovals = async function(currentUser) {
       // and is not re-derived per pane, so History has to say it itself.
       const [sgH, caH, subH, frH, fdH, qaH, lvH, rzH, poH] = await Promise.all([
         _paneQ('Sign-ups',                 db.collection('signup_requests').orderBy('createdAt','desc').limit(150)),
-        _paneQ('Cash Advances',            db.collection('cash_advances').orderBy('createdAt','desc').limit(150)),
+        _paneQ('Cash Advances',            window.caScope(db.collection('cash_advances')).orderBy('createdAt','desc').limit(150)),
         _paneQ('Work submissions',         db.collection('submissions').orderBy('createdAt','desc').limit(150)),
         _paneQ('Payroll delete requests',  db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(150)),
         _paneQ('Finance delete requests',  db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(150)),
@@ -1338,7 +1338,7 @@ window.renderApprovals = async function(currentUser) {
 
     if (sub === 'ca') {
       // Cash Advances
-      const snap = await db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+      const snap = await window.caScope(db.collection('cash_advances')).orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
       const items = snap.docs.map(d=>({id:d.id,...d.data()}));
       const pending = items.filter(i=>i.status==='pending');
 

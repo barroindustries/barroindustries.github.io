@@ -863,7 +863,7 @@ async function _epTabCashAdvance(tb, ctx) {
   const _epCaMonth = window.bizDate ? window.bizDate().slice(0, 7) : new Date().toISOString().slice(0, 7);
   const [caRes, planRes] = await Promise.all([
     uid
-      ? _epRead(db.collection('cash_advances').where('userId', '==', uid).get(), { docs: [] })
+      ? _epRead((uid === currentUser.uid ? db.collection('cash_advances').where('userId','==',currentUser.uid) : window.caScope(db.collection('cash_advances')).where('userId', '==', uid)).get(), { docs: [] })
       : Promise.resolve({ ok: true, value: { docs: [] } }),
     (uid && window.CashAdvance && typeof window.CashAdvance.planFor === 'function')
       ? _epRead(window.CashAdvance.planFor(uid, _epCaMonth), null)

@@ -350,6 +350,9 @@
     const periodId = opts.periodId;
     const kind = kindOf(periodId);
     const isMonth = kind === 'month';
+    if (isMonth && typeof window.canRunPayroll === 'function' && !window.canRunPayroll()) {
+      throw new Error('Payroll is run by the President or Finance.');
+    }
     const entries = opts.entries;              // [{ person, vals }]
     const postToBooks = opts.postToBooks;
     const label = periodLabel(periodId);
@@ -767,8 +770,11 @@
     // ~300ms and its ids are identical to this one's.
     const $ = (sel) => c.querySelector(sel);
 
-    const canWrite = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv()
+    const _canWriteBase = (typeof window.isMoneyPriv === 'function') ? window.isMoneyPriv()
       : ['president', 'owner', 'manager', 'finance'].includes(window.currentRole || '');
+    // Owner ruling 2026-10-29: month records (pay_runs) are President/Finance only;
+    // weeks (pay_weeks) are unchanged. Narrowed per period in drawPeriod().
+    let canWrite = _canWriteBase;
     const isPres = (typeof window.isRealPresident === 'function') ? window.isRealPresident()
       : (window.currentRole === 'president');
 
@@ -811,6 +817,7 @@
         return;
       }
       const kind = kindOf(periodId);
+      canWrite = _canWriteBase && (kind === 'week' || (typeof window.canRunPayroll === 'function' && window.canRunPayroll()));
       const label = periodLabel(periodId);
       bodyEl.innerHTML = window.skeletonHtml ? window.skeletonHtml('rows') : '<p>Loading…</p>';
 
@@ -890,6 +897,9 @@
             : '')
         + (roster.payrollDenied
             ? '<div class="pbf-panel pbf-warn">' + ico('⚠', 16) + ' Pay details could not be read for this list, so nothing is pre-filled. Type every figure from the paper payslip.</div>'
+            : '')
+        + (!canWrite && _canWriteBase && kind !== 'week'
+            ? '<div class="pbf-note" style="color:var(--text-muted);font-size:12px;margin-bottom:10px">Payroll is run by the President or Finance.</div>'
             : '')
         + (!canFinish && canWrite
             ? '<div class="pbf-panel pbf-warn"><strong>' + ico('🔒', 16) + ' Only the President can save a month.</strong>'

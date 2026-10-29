@@ -2244,6 +2244,8 @@ window.buildPayRunLines = async function(month, { policy, overrides } = {}) {
 };
 
 window.computePayRun = async function(month, { policy } = {}) {
+  // Owner ruling 2026-10-29: only the President or Finance run payroll (rules agree).
+  if (typeof window.canRunPayroll === 'function' && !window.canRunPayroll()) throw new Error('Payroll is run by the President or Finance.');
   // Payroll recall spec §C3 — read any existing run doc FIRST, before any
   // other work. Two jobs: (1) fail fast if this month is past the editable
   // window (verified/disbursing/disbursed) — the UI already pre-checks this
@@ -2289,6 +2291,7 @@ window.computePayRun = async function(month, { policy } = {}) {
 };
 
 window.disbursePayRun = async function(month, opts = {}) {
+  if (typeof window.canRunPayroll === 'function' && !window.canRunPayroll()) { Notifs.showToast('Payroll is run by the President or Finance.','error'); return; }
   const bankAcct = opts.bankAccount || { bankAccountId: null, bankAccountName: null };
   // Fail fast, before any write — firestore.rules only rejects the FINAL
   // state-flip to 'disbursed' for a non-president, which would otherwise let
@@ -3044,6 +3047,7 @@ window.disbursePayRun = async function(month, opts = {}) {
 // President-only: verified → computed (undoes an in-progress run before it's
 // disbursed). disbursed is terminal — there is no reopen from there.
 window.reopenPayRun = async function(month) {
+  if (typeof window.canRunPayroll === 'function' && !window.canRunPayroll()) { Notifs.showToast('Payroll is run by the President or Finance.','error'); return; }
   const ref  = db.collection('pay_runs').doc(month);
   const snap = await ref.get();
   const st = snap.exists ? snap.data().state : null;

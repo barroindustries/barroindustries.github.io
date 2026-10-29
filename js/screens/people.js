@@ -2035,7 +2035,7 @@ async function renderCashAdvanceAdmin(c) {
   // don't swallow the primary fetch's errors into {docs:[]}; let them reach
   // renderCashAdvancePage's try/catch + Retry.
   const [snap, usersSnap] = await Promise.all([
-    db.collection('cash_advances').orderBy('createdAt','desc').limit(200).get(),
+    window.caScope(db.collection('cash_advances')).orderBy('createdAt','desc').limit(200).get(),
     typeof dbCachedGet === 'function'
       ? dbCachedGet('users', () => db.collection('users').get(), 60000)
       : db.collection('users').get()
@@ -2206,10 +2206,10 @@ async function openPresidentCashAdvanceModal(users) {
     <div class="form-group"><label>Purpose / Notes</label>
       <textarea id="pca-reason" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
     </div>
-    <label class="check-row" style="display:flex;align-items:flex-start;margin-top:6px">
+    ${window.canSeePrivateCA() ? `<label class="check-row" style="display:flex;align-items:flex-start;margin-top:6px">
       <input type="checkbox" id="pca-private" checked/>
       <span style="font-size:13px">${emojiIcon('🔒',13)} Private — visible only to this employee, president &amp; finance</span>
-    </label>
+    </label>` : ''}
   `, `<button class="btn-primary" id="save-pca-btn">Save Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   // ⚠ SCOPED TO THIS PANEL, NOT document.
@@ -2226,7 +2226,8 @@ async function openPresidentCashAdvanceModal(users) {
     const terms   = parseInt(_panel.querySelector('#pca-terms').value)||1;
     const date    = _panel.querySelector('#pca-date').value;
     const reason  = _panel.querySelector('#pca-reason').value.trim();
-    const isPriv  = _panel.querySelector('#pca-private').checked;
+    // Managers/secretary never see the checkbox and can only record non-private (rules enforce it too).
+    const isPriv  = window.canSeePrivateCA() ? !!_panel.querySelector('#pca-private')?.checked : false;
 
     if (!uid)    { Notifs.showToast('Please select an employee.','error'); return; }
     if (!amount) { Notifs.showToast('Enter a valid amount.','error'); return; }
@@ -3229,7 +3230,7 @@ window.renderRecentActivity = async function(host, uid) {
         .orderBy('createdAt', 'desc').limit(30).get().catch(() => ({ docs: [] })),
       db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
       db.collection('leave_requests').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
-      db.collection('cash_advances').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
+      (uid === currentUser.uid ? db.collection('cash_advances').where('userId','==',currentUser.uid) : window.caScope(db.collection('cash_advances')).where('userId', '==', uid)).get().catch(() => ({ docs: [] })),
       db.collection('attendance').doc(uid).collection('records')
         .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get().catch(() => ({ docs: [] })),
       db.collection('posts').where('authorId', '==', uid).get().catch(() => ({ docs: [] })),

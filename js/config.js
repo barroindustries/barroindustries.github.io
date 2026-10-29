@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.355';
+window.APP_VERSION = '14.0.356';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -2956,6 +2956,15 @@ function _caInstallmentNo(a) {
   return ((a.payments||[]).filter(p => p && p.source === 'payroll').length) + 1;
 }
 
+// Owner ruling 2026-10-29: a Private cash advance (private:true) is visible only
+// to its employee, the President and Finance. Firestore rules are not filters,
+// so any list query that can run as a manager/secretary MUST carry
+// .where('private','==',false) or the whole query is denied — wrap it in caScope().
+window.canSeePrivateCA = () => ['president','finance'].includes(window.currentRole);
+window.caScope = (q) => window.canSeePrivateCA() ? q : q.where('private','==',false);
+// Owner ruling 2026-10-29: running payroll (pay_runs writes) is President/Finance only.
+window.canRunPayroll = () => ['president','finance'].includes(window.currentRole);
+
 window.CashAdvance = {
   RATE_DEFAULT: 2, // %/mo — approval-time prefill; nothing charges until an approver confirms
 
@@ -2996,7 +3005,8 @@ window.CashAdvance = {
       reason: (reason||'').trim(),
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
-    if (typeof isPrivate !== 'undefined') docData.private = isPrivate;
+    // Always an explicit boolean — the rules hide docs with no `private` key from managers/secretary.
+    docData.private = !!isPrivate; // undefined -> false
     const ref = await db.collection('cash_advances').add(docData);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     // Admin-issued records are approved immediately by the same actor — the
@@ -3347,7 +3357,7 @@ window.CashAdvance = {
   // every row this widened query touches — see firestore.rules ~415, ~915).
   async planFor(uid, month) {
     const caAllSnap = await dbCachedGet('ca-approved-all',
-      () => db.collection('cash_advances').where('status','==','approved').get().catch(()=>({docs:[]})), 0);
+      () => window.caScope(db.collection('cash_advances').where('status','==','approved')).get().catch(()=>({docs:[]})), 0);
     const cas = caAllSnap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(a => a.userId === uid && (a.balance||0) > 0)
       .sort((a,b) => (a.createdAt?.toMillis?.()||0) - (b.createdAt?.toMillis?.()||0)); // oldest-first

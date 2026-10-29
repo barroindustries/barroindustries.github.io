@@ -70,15 +70,19 @@ describe('C2 — cash_advances: the borrower cannot touch what payroll trusts', 
     assert.match(ownerArm, /caOwnCreateShapeOk\(\)/);
   });
 
-  it('the create shape is exactly what CashAdvance.request() writes (no private, no pre-seeded schedule)', () => {
+  it('the create shape is exactly what CashAdvance.request() writes (private:false only, no pre-seeded schedule)', () => {
     const fn = block(ca, 'function caOwnCreateShapeOk()');
     const ruleKeys = sorted(quoted(fn.match(/keys\(\)\.hasOnly\((\[[\s\S]*?\])\)/)[1]));
     const cfg = read('js/config.js');
     const req = cfg.slice(cfg.indexOf('async request({ amount, terms'));
     const lit = req.slice(req.indexOf('const docData = {'), req.indexOf('};', req.indexOf('const docData = {')));
     const clientKeys = sorted([...lit.matchAll(/(?:^|[{,\s])([A-Za-z]+)\s*:/g)].map(m => m[1]));
-    assert.deepEqual(ruleKeys, clientKeys, 'rules key list drifted from CashAdvance.request() docData');
-    assert.ok(!ruleKeys.includes('private'), "'private' is the admin-issued path only (isMoneyAdmin arm)");
+    // Owner ruling 2026-10-29: every advance carries a boolean `private` (managers/secretary query
+    // where('private','==',false)), so a self-request writes private:false — and only false.
+    const noPriv = (ks) => ks.filter((k) => k !== 'private');
+    assert.deepEqual(noPriv(ruleKeys), noPriv(clientKeys), 'rules key list drifted from CashAdvance.request() docData');
+    assert.ok(ruleKeys.includes('private'), 'a self-request must be allowed to carry private:false');
+    assert.match(fn, /d\.get\('private', false\) == false/, 'a self-request may never mark itself private');
     assert.match(fn, /d\.get\('payments', \[\]\)\.size\(\) == 0/);
     assert.match(fn, /d\.get\('monthlyPayment', null\) == null/);
     assert.match(fn, /d\.get\('totalPayable', null\) == null/);

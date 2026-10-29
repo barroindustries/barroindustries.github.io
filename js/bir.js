@@ -1060,7 +1060,7 @@ window.finArReceivable = async function () {
 //    'approved' + balance>0) — reused, not re-derived, so this can never
 //    disagree with the Cash Advances tab's own number.
 window.finCaReceivable = async function () {
-  const snap = await db.collection('cash_advances').get().catch(() => ({ docs: [] }));
+  const snap = await window.caScope(db.collection('cash_advances')).get().catch(() => ({ docs: [] }));
   return snap.docs.map(d => d.data())
     .filter(a => a.status === 'approved' && (a.balance || 0) > 0)
     .reduce((s, a) => s + (a.balance || 0), 0);

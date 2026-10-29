@@ -633,8 +633,8 @@ async function checkCAReminder(user) {
     const dedupKey = `bi-ca-remind-${user.uid}-${todayStr}`;
     if (localStorage.getItem(dedupKey)) return;
 
-    const snap = await db.collection('cash_advances')
-      .where('userId','==',user.uid).where('status','==','approved').get().catch(()=>({docs:[]}));
+    const snap = await db.collection('cash_advances').where('userId','==',currentUser.uid)  // own advances — never caScope'd
+      .where('status','==','approved').get().catch(()=>({docs:[]}));
     const activeCA = snap.docs.filter(d=>(d.data().balance||0)>0);
     if (!activeCA.length) return;
 

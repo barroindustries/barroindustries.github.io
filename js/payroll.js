@@ -826,6 +826,13 @@ if (typeof window === 'undefined') {
   const myUid = () => (me() && me().uid) || null;
   const myName = () => (window.userProfile && window.userProfile.displayName) || (me() && me().email) || null;
   const isPresident = () => typeof window.isRealPresident === 'function' && window.isRealPresident();
+  // Owner ruling 2026-10-29: the MONTHLY run (pay_runs) is run by the President or
+  // Finance only (firestore.rules agree). The weekly run (pay_weeks) is unchanged.
+  // Under Node (tests) there is no role, so the guard only bites in the app.
+  const assertMayRun = (kind) => {
+    if (kind === 'week' || typeof window === 'undefined' || typeof window.canRunPayroll !== 'function') return;
+    if (!window.canRunPayroll()) throw new Error('Payroll is run by the President or Finance.');
+  };
   const warn = (code, message, extra) => Object.assign({ code: code, message: message }, extra || {});
 
   /** Read the stored run. THROWS on a failed read (a denial must never arrive
@@ -1166,6 +1173,7 @@ if (typeof window === 'undefined') {
      */
     async prepare(periodId) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       const existing = await readRun(periodId, kind);
       const state = PC.stateOf(existing && existing.state);
       if (!PC.canPrepare(state)) {
@@ -1201,6 +1209,7 @@ if (typeof window === 'undefined') {
      */
     async setHeld(periodId, personId, reasonOrNull) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       if (!personId) throw new Error('Holding someone back needs to know who.');
       if (kind === 'week') {
         if (!window.WeeklyRun || typeof window.WeeklyRun.setExcluded !== 'function') {
@@ -1258,6 +1267,7 @@ if (typeof window === 'undefined') {
      */
     async setAdjustment(periodId, personId, patch) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       if (!personId) throw new Error('Changing a line needs to know whose.');
       const d = await readRun(periodId, kind);
       const state = PC.stateOf(d && d.state);
@@ -1328,6 +1338,7 @@ if (typeof window === 'undefined') {
      */
     async addOneOff(periodId, personId, one) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       const o = one || {};
       const label = String(o.label == null ? '' : o.label).trim();
       const amount = r2(o.amount);
@@ -1393,6 +1404,7 @@ if (typeof window === 'undefined') {
      */
     async markHoursCorrect(periodId, opts) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       const o = opts || {};
 
       // ── D5 — a period that has not ended cannot be checked/paid ──────────
@@ -1506,6 +1518,7 @@ if (typeof window === 'undefined') {
      */
     async pay(periodId, receiptsByPersonId, opts) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       const receipts = receiptsByPersonId || {};
       const o = opts || {};
       const d = await readRun(periodId, kind);
@@ -1646,6 +1659,7 @@ if (typeof window === 'undefined') {
      */
     async reopen(periodId) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       const d = await readRun(periodId, kind);
       if (!d) throw new Error('There is nothing to reopen for ' + PC.label(periodId) + '.');
       const rawState = d.state || 'draft';
@@ -1725,6 +1739,7 @@ if (typeof window === 'undefined') {
      */
     async correctAfterPay(periodId, personId, patch) {
       const kind = PC.kindOf(periodId);
+      assertMayRun(kind);
       const p = patch || {};
       const reason = String(p.reason == null ? '' : p.reason).trim();
       if (!personId) throw new Error('A correction needs to know whose pay it is.');

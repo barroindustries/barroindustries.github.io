@@ -389,6 +389,31 @@ window.runCADataRepair = async function(dryRun = true) {
   return report;
 };
 
+// ── Mark existing cash advances as not private (owner ruling 2026-10-29) ──
+// The rules now hide any cash_advances doc WITHOUT an explicit `private` key from
+// managers/secretary (they can only list with .where('private','==',false)).
+// This one-time president backfill stamps private:false on every doc that has no
+// `private` key. Idempotent — docs that already carry the key (true or false) are
+// left alone, so re-running reports 0. The President reads every doc, so no
+// caScope() wrap is needed here.
+window.runMarkCAsNotPrivate = async function () {
+  if (!isPresident()) { Notifs.showToast('President only', 'error'); return; }
+  if (!(await confirmDialog({message:'Mark every existing cash advance that has no Private setting as NOT private (so managers and the secretary can see them again)?\n\nRecords already marked Private (or already set) are not touched. Safe to run repeatedly.'}))) return;
+  Notifs.info('Updating cash advances…');
+  try {
+    const snap = await db.collection('cash_advances').get();
+    const todo = snap.docs.filter(d => !Object.prototype.hasOwnProperty.call(d.data(), 'private'));
+    for (let i = 0; i < todo.length; i += 400) {
+      const batch = db.batch();
+      todo.slice(i, i + 400).forEach(d => batch.update(d.ref, { private: false }));
+      await batch.commit();
+    }
+    window.logAudit && window.logAudit('ca-mark-not-private', 'cash_advances', 'bulk', { updated: todo.length, total: snap.size });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
+    Notifs.success(`Done ✓ ${todo.length} cash advance${todo.length===1?'':'s'} marked not private, ${snap.size - todo.length} already set.`);
+  } catch (e) { Notifs.showToast('Backfill failed: ' + (e.message || e), 'error'); }
+};
+
 // ── Product cost-basis split-out (v14 re-audit HIGH fix, president-run) ──
 // Firestore has no field-level read security: any authenticated user,
 // including role 'partner', could read the whole products/{docId} doc —

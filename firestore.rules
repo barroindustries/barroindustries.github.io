@@ -585,13 +585,20 @@ service cloud.firestore {
 
     // [RN-52] Cash advances ─ -> docs/firestore-rules-notes.md#rn-52
     match /cash_advances/{docId} {
+      // Owner ruling 2026-10-29 — a PRIVATE advance (private:true) is seen only by its employee,
+      // the President and Finance (role). Managers and the Corporate Secretary reach only docs
+      // that carry private:false — rules can't filter a list, so their queries add
+      // where('private','==',false) (window.caScope, js/config.js). A doc with no private key
+      // counts as private until the President's one-time backfill stamps it.
+      function caPrivateReader() { return isPresident() || getRole() == 'finance'; }
       // Audit 2026-10-28 C2 — a self-filed request carries exactly what CashAdvance.request() writes
       // (js/config.js), unfunded and with no schedule: no pre-seeded payments/monthlyPayment/interest.
       function caOwnCreateShapeOk() {
         let d = request.resource.data;
         return d.keys().hasOnly(['userId', 'userName', 'employeeId', 'amount', 'terms', 'interest',
                  'interestCharged', 'monthlyPayment', 'totalPayable', 'balance', 'status', 'payments',
-                 'date', 'reason', 'createdAt'])
+                 'date', 'reason', 'createdAt', 'private'])
+          && d.get('private', false) == false
           && d.get('amount', 0) is number && d.get('amount', 0) > 0 && d.get('amount', 0) <= 50000
           && d.get('terms', 1) in [1, 2, 3, 6, 12]
           && d.get('interest', 0) == 0
@@ -601,7 +608,8 @@ service cloud.firestore {
           && d.get('payments', []).size() == 0;
       }
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isMoneyAdmin() || isSecretary()
+        resource.data.userId == request.auth.uid || caPrivateReader()
+        || (getRole() in ['manager', 'secretary'] && resource.data.get('private', true) == false)
       );
       // [RN-53] Employees may only file their OWN request, pending and unf -> docs/firestore-rules-notes.md#rn-53
       allow create: if isAuth() && isNonNegNumber(request.resource.data.get('amount', 0)) && (
@@ -609,7 +617,8 @@ service cloud.firestore {
         // filed pending like anyone's (only the President may approve their own).
         (isMoneyAdmin() && (isPresident()
           || request.resource.data.get('userId', '') != request.auth.uid
-          || request.resource.data.get('status', '') == 'pending')) ||
+          || request.resource.data.get('status', '') == 'pending')
+          && (caPrivateReader() || request.resource.data.get('private', true) == false)) ||
         (request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending'
           && request.resource.data.balance == 0
@@ -624,7 +633,10 @@ service cloud.firestore {
         (isMoneyAdmin() && (isPresident()
           || resource.data.get('userId', '') != request.auth.uid
           || resource.data.get('status', '') != 'pending'
-          || request.resource.data.get('status', '') == 'pending')) ||
+          || request.resource.data.get('status', '') == 'pending')
+          && (caPrivateReader()
+              || (resource.data.get('private', true) == false
+                  && request.resource.data.get('private', true) == false))) ||
         (resource.data.userId == request.auth.uid
           && resource.data.status == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reason', 'date']))
@@ -1201,6 +1213,11 @@ service cloud.firestore {
 
     // [RN-86] THE SAME RULE AS pay_weeks ABOVE, clause for clause — read -> docs/firestore-rules-notes.md#rn-86
     match /pay_runs/{month} {
+      // Owner ruling 2026-10-29 — computing, adjusting, verifying, disbursing and correcting a run
+      // is President + Finance (role) only: a run's CA deductions come from cash_advances, and a
+      // manager can no longer read the private ones, so a manager-run payroll would skip them.
+      // Managers keep READ.
+      function payRunner() { return isPresident() || getRole() == 'finance'; }
       function stPrev()  { return payState(resource.data.get('state','draft')); }
       function stNext()  { return payState(request.resource.data.get('state','draft')); }
       function touched() { return request.resource.data.diff(resource.data).affectedKeys(); }
@@ -1218,18 +1235,18 @@ service cloud.firestore {
       // A backfilled month is created ALREADY PAID; `create` only fires when the
       // month does not exist, which is what stops a backfill landing on top of a
       // real run. See pay_weeks.
-      allow create: if isAuth() && isMoneyAdmin() && (
+      allow create: if isAuth() && payRunner() && (
         payState(request.resource.data.get('state','draft')) in ['draft','computed']
         || backfillMarked()
       );
       allow update: if isAuth() && (
         // Backfill over an untouched draft — the only clause that may SET the
         // marker, and only from 'draft'.
-        ( isMoneyAdmin() && stPrev() == 'draft' && backfillMarked() )
+        ( payRunner() && stPrev() == 'draft' && backfillMarked() )
         ||
         ( markerHeld() && (
         // [RN-87] PERIOD-SCOPED PAYROLL EXCLUSION (owner ruling 2026-08-10) -> docs/firestore-rules-notes.md#rn-87
-        ( isMoneyAdmin() &&
+        ( payRunner() &&
           stPrev() in ['draft','computed','verified'] &&
           stNext() == stPrev() &&
           touched().hasOnly(['excluded','excludedUpdatedAt','excludedUpdatedBy',
@@ -1238,25 +1255,25 @@ service cloud.firestore {
         // Receipts, saved as they are attached — evidence, never a figure.
         // (The monthly run demanded no proof of payment at all; one receipt per
         // person is now the same rule on both sides.)
-        ( isMoneyAdmin() &&
+        ( payRunner() &&
           stPrev() in ['computed','verified'] &&
           stNext() == stPrev() &&
           touched().hasOnly(['receipts','receiptsUpdatedAt','receiptsUpdatedBy','state']) )
         ||
         // Per-line adjustments and one-off amounts, up to CHECKED only.
-        ( isMoneyAdmin() &&
+        ( payRunner() &&
           stPrev() in ['draft','computed'] &&
           stNext() == stPrev() &&
           touched().hasOnly(['adjustments','oneOffs','lines','totals','warnings',
                              'adjustedAt','adjustedBy','preparedAt','preparedBy','state']) )
         ||
         // prepare / re-prepare / check
-        ( isMoneyAdmin() &&
+        ( payRunner() &&
           stPrev() in ['draft','computed'] &&
           stNext() in ['computed','verified'] )
         ||
         // [RN-88] RELEASE ─ -> docs/firestore-rules-notes.md#rn-88
-        ( isMoneyAdmin() && (
+        ( payRunner() && (
             // verify → disbursing (transactional lock acquisition — Part E Phase 11)
             ( stPrev()=='verified'   && stNext()=='disbursing' ) ||
             // disbursing → disbursed (lock release on success)
@@ -1274,7 +1291,7 @@ service cloud.firestore {
         // Correction after payment — an APPEND to `corrections` only. Every
         // figure that was paid stays frozen and the state cannot move; see the
         // pay_weeks block for the full reasoning.
-        ( isMoneyAdmin() &&
+        ( payRunner() &&
           stPrev() == 'disbursed' && stNext() == 'disbursed' &&
           touched().hasOnly(['corrections','correctionRefs','correctedAt','correctedBy','state']) &&
           request.resource.data.get('correctedBy','') == request.auth.uid )

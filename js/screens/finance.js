@@ -359,11 +359,13 @@ function openFinanceToolsPage() {
       <div class="card-header"><h3>Cash Advances</h3></div>
       <div class="card-body">
         <button class="btn-secondary btn-sm" id="fin-tools-ca-repair-btn" title="Scan every cash_advances record for legacy/inconsistent data (dry run first)">${emojiIcon('🔄',16)} CA Data Repair</button>
+        <button class="btn-secondary btn-sm" id="fin-tools-ca-notprivate-btn" style="margin-left:8px" title="One-time: stamp private:false on every cash advance that has no Private setting, so managers and the secretary can see them">${emojiIcon('🔓',16)} Mark existing CAs as not private</button>
       </div>
     </div>
   `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
   // ⚠ SCOPED TO THIS PANEL, NOT document — see financeEditModal's note above.
   _panel.querySelector('#fin-tools-ca-repair-btn')?.addEventListener('click', () => openCADataRepairModal());
+  _panel.querySelector('#fin-tools-ca-notprivate-btn')?.addEventListener('click', () => window.runMarkCAsNotPrivate());
 }
 
 // ── v14 Wave 4 Batch F2: Rebuild rollups (president, Finance Tools) ────────
@@ -2434,7 +2436,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
   const isPrivileged = isFinancePriv();
   container.innerHTML = window.skeletonHtml('rows');
 
-  const snap = await db.collection('cash_advances').get().catch(()=>({docs:[]}));
+  const snap = await window.caScope(db.collection('cash_advances')).get().catch(()=>({docs:[]}));
   const all  = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
     const ta = a.createdAt?.toMillis?.() || 0;
     const tb = b.createdAt?.toMillis?.() || 0;
