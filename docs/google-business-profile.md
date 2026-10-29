@@ -1,5 +1,24 @@
 # Google Business Profile — Barro Industries (2026-10-28)
 
+> **Done 2026-10-29 (Claude, in the owner's signed-in Chrome):** the 7 services in §4 added with their
+> descriptions, no prices (Google shows "pending review", up to a day). **Review link:**
+> `https://g.page/r/CTfy7v-fDzwEEBM/review` (the QR code is in the profile → Ask for reviews).
+>
+> **What the profile already had** (the public Maps view showed less): primary category Manufacturer plus
+> Bakery equipment, Steel fabricator, Kitchen remodeler, Equipment supplier, Kitchen supply store; the owner's
+> own description; 12 service areas (Luzon, Rizal, Cavite, Laguna, Tarlac, Batangas, Pampanga, Zambales,
+> Metro Manila, Baguio, Subic, Bulacan); hours 07:00–17:00 Monday–Saturday (**Sunday set to Closed
+> 2026-10-29, owner ruling** — was listed as open); free street
+> parking; on-site services. A **location edit is stuck "pending"** ("taking longer than expected" → Contact
+> support in the editor).
+>
+> **Left for the owner:** (1) products — Google requires a photo per product, which Claude could not attach
+> through the embedded editor: add them yourself from §5, using your own project photos (sinks = ISPSC 06,
+> work tables = ISPSC 02, gas stoves = ISPSC 07, range hoods = DMMMSU 01, shelving = DMMMSU 02,
+> racks = DMMMSU 03, in `private/img-masters/projects/`); skip dish tables, wok ranges, griddles, deck ovens
+> and cabinets until you have your own photo of each. (2) Decide: keep Manufacturer as primary category or
+> switch to "Kitchen supply store"; keep your description or use §2's. Add the opening date (year founded). (3) Send the review link to recent clients (§7).
+
 The profile already exists and is live on Google Maps:
 **Barro Industries · Manufacturer · 21 Capricorn St, Tandang Sora, Quezon City, 1116 Metro Manila ·
 0927 683 6300 · barroindustries.com · 14 photos · no reviews yet**
