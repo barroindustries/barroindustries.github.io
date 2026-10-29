@@ -1395,9 +1395,18 @@ service cloud.firestore {
 
     // ── Quote cost sidecars (QB, owner 2026-09-21) ─ the cost basis (BOM/
     // costMat/labor/capital) stripped from quote docs, keyed <coll>_<docId>.
-    // Internal-only.
+    // Internal-only. Sweep 2026-10-29 — a commission Sales Agent reaches only
+    // the sidecars of quotes they saved themselves (createdBy, stamped by the
+    // QB bridge in js/app.js); every other profile keeps company-wide access.
     match /quote_costs/{id} {
-      allow read, write: if isAuth() && hasProfile();
+      allow read, delete: if isAuth() && hasProfile()
+        && (getRole() != 'agent' || resource.data.get('createdBy', '') == request.auth.uid);
+      allow create: if isAuth() && hasProfile()
+        && (getRole() != 'agent' || request.resource.data.get('createdBy', '') == request.auth.uid);
+      allow update: if isAuth() && hasProfile()
+        && (getRole() != 'agent'
+            || (resource.data.get('createdBy', '') == request.auth.uid
+                && request.resource.data.get('createdBy', '') == request.auth.uid));
     }
 
     // [RN-93] Quote Templates (QUOTE-TEMPLATES-SPEC.md) ─ -> docs/firestore-rules-notes.md#rn-93
@@ -1822,7 +1831,11 @@ service cloud.firestore {
       }
       allow read: if isAuth() && canFinance();
       // [RN-120] v14 re-audit fix — was unfenced `write` (create+update+del -> docs/firestore-rules-notes.md#rn-120
-      allow create, update: if isAuth() && (canFinance() || (isProductionDept() && !isSecretary()))
+      // Sweep 2026-10-29 — finance tier only. The Production arm could overwrite any open
+      // month's totals, and it never worked as intended: _syncRollup is a transaction that
+      // READS the doc first, and Production cannot read finance_rollup, so its sync was
+      // always denied (a Production ledger post is picked up by Rebuild rollups).
+      allow create, update: if isAuth() && canFinance()
         && request.resource.data.keys().hasOnly(
              ['month','income','expense','vatOutput','vatInput','byCategory','count','updatedAt'])
         && rollupMonthOpen(docId)
@@ -2305,21 +2318,28 @@ service cloud.firestore {
             && srcQuote(rd).get('createdBy', '') == request.auth.uid;
       }
       // A staff write may never fabricate or alter a client response:
-      // create must start it 'pending'; update must leave it untouched or
-      // reset it to 'pending' (deliberate "re-open for response" after a fix).
-      function responseUntouchedOrReset() {
-        return request.resource.data.get('clientResponse', {}).get('status', 'pending') == 'pending'
-            || request.resource.data.get('clientResponse', {}) == resource.data.get('clientResponse', {});
+      // create must start it 'pending'; update must leave the response (and the
+      // mirrored status) exactly as recorded — the qrRespond callable is the one
+      // writer of a response. Sweep 2026-10-29: the old "reset to pending" arm
+      // let any profile erase a client's acceptance, and no screen uses it
+      // (resyncPublicQuoteMirror preserves both fields).
+      function responseUntouched() {
+        return request.resource.data.get('clientResponse', {}) == resource.data.get('clientResponse', {})
+            && request.resource.data.get('status', '') == resource.data.get('status', '');
       }
 
+      // Sweep 2026-10-29 — only the quote's creator or an admin manages its
+      // client link (the same people the bs_quotes/bk_quotes update rules let
+      // set shareToken); was any profile. An update never re-points src.
       allow create: if isAuth()
         && request.resource.data.get('clientResponse', {}).get('status', '') == 'pending'
-        && (hasProfile() || srcIsMine(request.resource.data));
+        && ((hasProfile() && isAdmin()) || srcIsMine(request.resource.data));
       allow update: if isAuth()
-        && responseUntouchedOrReset()
-        && (hasProfile() || (srcIsMine(resource.data) && srcIsMine(request.resource.data)));
+        && responseUntouched()
+        && request.resource.data.get('src', {}) == resource.data.get('src', {})
+        && ((hasProfile() && isAdmin()) || srcIsMine(resource.data));
       allow delete: if isAuth()
-        && (hasProfile() || srcIsMine(resource.data));
+        && ((hasProfile() && isAdmin()) || srcIsMine(resource.data));
     }
 
     // [RN-152] Public ID verification (QR scan target, WS27) ─ -> docs/firestore-rules-notes.md#rn-152

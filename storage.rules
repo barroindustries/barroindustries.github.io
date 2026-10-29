@@ -195,8 +195,12 @@ service firebase.storage {
     // Note: getDownloadURL() on this path returns a token-bearing URL that gets
     // stored in the PUBLIC id_verify.photoUrl — intentional, the ID photo is
     // public-by-design (printed on a physical card, shown on the verify page).
+    // Sweep 2026-10-29 — get needs a staff role claim (a fresh Auth account with
+    // no profile has none) and listing every worker's photo is finance-only;
+    // nothing in the app lists this folder.
     match /worker-id-photos/{profileId}/{allPaths=**} {
-      allow read:  if isSignedIn();
+      allow get:   if isSignedIn() && hasRoleClaim();
+      allow list:  if isSignedIn() && hasRoleClaim() && isFinanceClaim();
       allow write: if isSignedIn() && isFinanceClaim()
         && (request.resource == null || isValidImage());
     }
@@ -299,8 +303,13 @@ service firebase.storage {
         && financeTreeOpenToCaller(subfolder)
         && (isFinanceClaim() || financeOperationalSubfolder(subfolder) || isUploader());
       allow list: if isSignedIn() && subfolder != 'payslips' && isFinanceClaim();
+      // Sweep 2026-10-29 — a NEW object outside the finance tier lands only in the
+      // operational subfolders (SalesOrders, Collections, BudgetProofs — the only
+      // non-Finance upload areas); was any subfolder, so any staffer could drop
+      // files into Taxes/Ledger/Records.
       allow write: if isSignedIn() && subfolder != 'payslips' && hasRoleClaim()
         && financeTreeOpenToCaller(subfolder)
+        && (isFinanceClaim() || financeOperationalSubfolder(subfolder))
         && (request.resource == null || isValidDocument())   // size cap on writes
         && (resource == null || isFinanceClaim());           // overwrite/delete → finance
     }

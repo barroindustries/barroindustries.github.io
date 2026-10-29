@@ -562,7 +562,7 @@ describe('Phase 3: nothing widens — the retired partner term stands in as hasP
     assert.ok(!/exists\(\s*\/databases\/\$\(database\)\/documents\/users\/\$\(request\.auth\.uid\)/.test(RULES_STRIP(RULES)), 'an exists() of the caller\'s own users doc is back');
   });
   it('the 111 statements that carried the retired term in HEAD still require a profile — the list is pinned (tests/fixtures/rules-profile-statements.json)', () => {
-    assert.equal(FIX.firestoreProfile.length, 111);
+    assert.equal(FIX.firestoreProfile.length, 113);   // 111 at the partner removal; sweep 2026-10-29 split quote_costs read,write → read+delete / create / update
     assert.deepEqual(NOW.firestoreProfile, FIX.firestoreProfile);
   });
   it('and no read has become a bare `isAuth()`: the five that always were are the only ones', () => {
@@ -572,7 +572,7 @@ describe('Phase 3: nothing widens — the retired partner term stands in as hasP
   it('the sensitive reads named by the review still sit behind it: client info requests and quote requests (+ their notes), clients, quote costs, approvals, gov biddings, the users list and the counters write', () => {
     const stmts = ruleStatements(RULES);
     const need = [['/client_info_requests/{ref} :: allow read #1'], ['/client_info_requests/{ref}/notes/{nid} :: allow read #1'], ['/quote_requests/{ref} :: allow read #1'], ['/quote_requests/{ref}/notes/{nid} :: allow read #1'],
-      ['/clients/{docId} :: allow read #1'], ['/quote_costs/{id} :: allow read,write #1'], ['/approval_requests/{docId} :: allow read #1'], ['/gov_biddings/{docId} :: allow read #1'],
+      ['/clients/{docId} :: allow read #1'], ['/quote_costs/{id} :: allow delete,read #1'], ['/quote_costs/{id} :: allow create #1'], ['/quote_costs/{id} :: allow update #1'], ['/approval_requests/{docId} :: allow read #1'], ['/gov_biddings/{docId} :: allow read #1'],
       ['/users/{uid} :: allow list #1'], ['/_counters/{docId} :: allow write #1'], ['/worker_directory/{docId} :: allow read #1'], ['/tasks/{taskId} :: allow read #1']];
     for (const [key] of need) {
       const s = stmts.find((x) => x.key === key);
@@ -594,13 +594,14 @@ describe('Phase 3: nothing widens — the retired partner term stands in as hasP
     assert.match(at('/tasks/{taskId} :: allow read #1'), /hasProfile\(\) \|\| request\.auth\.uid in resource\.data\.get\(/);
     assert.match(at('/settings/{docId} :: allow read #1'), /hasProfile\(\) \|\| docId ==/);
     assert.match(at('/order_tracking/{token} :: allow create #1'), /hasProfile\(\)\s*\|\|\s*\(\s*request\.resource\.data\.get\([^)]*\) != ''\s*&& exists\(/);
-    assert.match(at('/public_quotes/{token} :: allow update #1'), /hasProfile\(\) \|\| \(srcIsMine\(resource\.data\) && srcIsMine\(request\.resource\.data\)\)/);
+    // Sweep 2026-10-29 narrowed the profile arm to admins (any profile could reset a client's response); the own-source arm is unchanged.
+    assert.match(at('/public_quotes/{token} :: allow update #1'), /\(hasProfile\(\) && isAdmin\(\)\) \|\| srcIsMine\(resource\.data\)/);
   });
   it('storage.rules: hasRoleClaim() is `\'role\' in request.auth.token`, defined once, and sits in the eleven statements the retired claim term sat in', () => {
     const defs = RULES_STRIP(STORAGE, true).match(/function hasRoleClaim\(\) \{[^}]*\}/g) || [];
     assert.equal(defs.length, 1, 'hasRoleClaim() must be defined exactly once');
     assert.equal(norm(defs[0]), "function hasRoleClaim() { return 'role' in request.auth.token; }", "hasRoleClaim() must test presence with `'role' in request.auth.token` (it never throws; reading request.auth.token.role would)");
-    assert.equal(FIX.storageRoleClaim.length, 15);   // 11 at the partner removal; audit 2026-10-28 H1 split read → get+list and gave HR its own block
+    assert.equal(FIX.storageRoleClaim.length, 17);   // 11 at the partner removal; audit 2026-10-28 H1 split read → get+list and gave HR its own block; sweep 2026-10-29 put worker-id-photos get+list behind it
     assert.deepEqual(NOW.storageRoleClaim, FIX.storageRoleClaim);
   });
 });
