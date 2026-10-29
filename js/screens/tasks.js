@@ -475,7 +475,9 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
   }
 }
 
+let _tasksListTok = 0;
 async function loadTasksList(currentUser, currentRole, currentDept) {
+  const tok = ++_tasksListTok;
   const list   = document.getElementById('tasks-list');
   const filter = document.getElementById('task-filter')?.value||'mine';
   list.innerHTML = window.skeletonHtml('rows');
@@ -509,6 +511,7 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
       : await db.collection('tasks').get().catch(()=>({docs:[]}));
   }
 
+  if (tok !== _tasksListTok) return;   // a newer filter query started; don't paint over it
   let tasks = scopeTasksToRole(snap.docs.map(d=>normTask(d.data(),d.id))).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
   // For non-admin: filter to dept tasks or their own tasks
   if (!isPriv && filter!=='mine') {
@@ -742,10 +745,12 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
   const canEdit    = isAdmin||isAssignee||isCreator;
+  // A non-admin cannot move a task out of a finished state; hide Edit / Change Status then.
+  const canEditFull = canEdit && (isAdmin || !['done','approved','archived'].includes(t.status));
   // Re-audit 2026-08-03: was missing 'done' — an assignee whose task was already
   // marked Done could still click Submit and re-open it into the review queue.
   const canSubmit  = isAssignee&&!['submitted','review','approved','done','on-hold','archived'].includes(t.status);
-  const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
+  const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value)||s.value===t.status);
 
   // Follow-up requests — admin asks the assignee(s) for an update; assignees (or
   // admins) mark them addressed. Wrapped in #fu-section so the panel can refresh it
@@ -767,7 +772,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   // visible.
   const headerRightHTML = `
     ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">${emojiIcon('📤',16)} Submit</button>`:''}
-    ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn" aria-label="Edit task">${emojiIcon('✎',16)}</button>`:''}
+    ${canEditFull?`<button class="btn-secondary btn-sm" id="edit-task-btn" aria-label="Edit task">${emojiIcon('✎',16)}</button>`:''}
     ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn" aria-label="Delete task">${emojiIcon('trash-2',14)}</button>`:''}
   `;
 
@@ -832,7 +837,7 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
         </div>`:''}
       </div>
 
-      ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+      ${canEditFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Change Status</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select id="status-sel" style="flex:1;min-width:160px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
@@ -935,6 +940,10 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
 
   // Current Standing save
   $p('cs-save-btn')?.addEventListener('click', async () => {
+    const _btn = $p('cs-save-btn');
+    if (_btn.disabled) return;
+    _btn.disabled = true;
+    try {
     const val = $p('cs-input').value.trim();
     const uSnap = await db.collection('users').doc(currentUser.uid).get();
     const actorName = uSnap.exists ? uSnap.data().displayName : currentUser.email;
@@ -951,6 +960,10 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     }, currentUser.uid);
     Notifs.success('Standing updated!');
     window.Overlay.dismissTop(); renderTasks(currentUser, currentRole, t.department);
+    } catch(e) {
+      Notifs.showToast('Could not save — ' + (e.message||'try again'), 'error');
+      _btn.disabled = false;
+    }
   });
 
   // Load employees for designate
@@ -963,8 +976,12 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
   }
 
   $p('update-status-btn')?.addEventListener('click', async()=>{
+    const _btn=$p('update-status-btn');
     const newStatus=$p('status-sel').value;
     if (newStatus===t.status) { Notifs.showToast('Status unchanged','error'); return; }
+    if (_btn.disabled) return;
+    _btn.disabled=true;
+    try {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const _statusUpd={status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
@@ -980,9 +997,17 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.success(`Status → ${statusLabel(newStatus)}`);
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
+    } catch(e) {
+      Notifs.showToast('Could not save — '+(e.message||'try again'),'error');
+      _btn.disabled=false;
+    }
   });
 
   $p('submit-task-btn')?.addEventListener('click', async()=>{
+    const _btn=$p('submit-task-btn');
+    if (_btn.disabled) return;
+    _btn.disabled=true;
+    try {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     await db.collection('tasks').doc(taskId).update({status:'review',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
@@ -992,6 +1017,10 @@ function paintTaskDetail(panel, bodyEl, taskId, snap, currentUser, currentRole) 
     await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
     Notifs.success('Submitted for review!');
     window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
+    } catch(e) {
+      Notifs.showToast('Could not save — '+(e.message||'try again'),'error');
+      _btn.disabled=false;
+    }
   });
 
   // v14 Phase 2a — Edit now opens directly ON TOP of the task detail page
@@ -1180,7 +1209,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
   // that is already on its way out. (pageStillLive, not isConnected — see there.)
   if (!pageStillLive(panel)) return;
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${t.department===k?' selected':''}>${k}</option>`).join('');
-  const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
+  const allowedStatuses = isAdmin?selectableTaskStatuses(TASK_STATUSES, t.status):TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value)||s.value===t.status);
 
   bodyEl.innerHTML = `
     <div class="form-group"><label>Title</label><input id="et-title" value="${(t.title||'').replace(/"/g,'&quot;')}"/></div>
@@ -1245,7 +1274,6 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
       description:$p('et-desc').value.trim(),
       priority:$p('et-priority').value,
       dueDate:$p('et-due').value,
-      status:$p('et-status').value,
       department:$p('et-dept').value,
       lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,
       lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
@@ -1254,8 +1282,15 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     // Payroll recall spec §A3.1 — same completedAt stamp/clear rule as the
     // status-select handler above; this edit path can also move a task
     // across the DONE_STATUSES boundary via the Status dropdown.
-    if (DONE_STATUSES.includes(update.status)) update.completedAt=firebase.firestore.FieldValue.serverTimestamp();
-    else if (DONE_STATUSES.includes(t.status)) update.completedAt=firebase.firestore.FieldValue.delete();
+    // Only write status/completedAt when the dropdown value actually differs
+    // from the task's current status — a non-admin whose task sits in a status
+    // outside EMP_STATUSES must not have it silently rewritten.
+    const selStatus=$p('et-status').value;
+    if (selStatus!==t.status) {
+      update.status=selStatus;
+      if (DONE_STATUSES.includes(selStatus)) update.completedAt=firebase.firestore.FieldValue.serverTimestamp();
+      else if (DONE_STATUSES.includes(t.status)) update.completedAt=firebase.firestore.FieldValue.delete();
+    }
     await db.collection('tasks').doc(taskId).update(update);
     // Covers both the pre-edit assignee set (t.assignedTo) and, when isAdmin
     // changed it, the post-edit set (update.assignedTo) — an assignee who was
@@ -1266,7 +1301,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     // Build a SPECIFIC change summary so the notification says what actually changed
     const changes=[];
     if ((t.title||'')!==title) changes.push('renamed');
-    if ((t.status||'')!==update.status) changes.push(`status → ${statusLabel(update.status)}`);
+    if (update.status!==undefined && (t.status||'')!==update.status) changes.push(`status → ${statusLabel(update.status)}`);
     if ((t.priority||'')!==update.priority) changes.push(`priority → ${update.priority}`);
     if ((t.dueDate||'')!==(update.dueDate||'')) changes.push(`due date → ${update.dueDate||'none'}`);
     if ((t.department||'')!==(update.department||'')) changes.push(`dept → ${update.department||'none'}`);
@@ -1379,6 +1414,10 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     // depts.includes(t.department) scoping, excluded from renderDeptTasks
     // entirely — even though it may still have named assignees.
     if (!$p('t-dept').value){Notifs.showToast('Select a department','error');return;}
+    const _btn=$p('create-task-btn');
+    if (_btn.disabled) return;
+    _btn.disabled=true;
+    try {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const creatorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const desc=$p('t-desc').value.trim();
@@ -1419,6 +1458,10 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     invalidateTaskCaches([currentUser.uid, ...newAssignees.map(a=>a.uid)]);
     closeModal(); Notifs.success('Task created!');
     renderTasks(currentUser,currentRole,$p('t-dept')?.value||'');
+    } catch(e) {
+      Notifs.showToast('Could not save — '+(e.message||'try again'),'error');
+      _btn.disabled=false;
+    }
   });
 }
 

@@ -27,7 +27,8 @@ window.Drive = (() => {
         null,
         reject,
         async () => {
-          const url = await ref.getDownloadURL();
+          let url;
+          try { url = await ref.getDownloadURL(); } catch (e) { reject(e); return; }
           resolve({
             id:         path,
             name:       file.name,
@@ -370,6 +371,8 @@ window.Drive = (() => {
     };
 
     const handleFile = async (file) => {
+      // In-flight counter on the container so callers can refuse to save mid-upload.
+      container.dataset.busy = String((parseInt(container.dataset.busy, 10) || 0) + 1);
       progress.classList.remove('hidden');
       // Clear a previous failure's red bar — the error state is now persistent
       // (see the catch below), so the NEXT attempt has to reset it explicitly
@@ -405,12 +408,15 @@ window.Drive = (() => {
         // Plain text sink: never emojiIcon() here (it returns markup).
         try { window.Notifs && Notifs.showToast(`Upload failed — ${msg}`, 'error'); } catch (_) {}
         console.warn('[drive] upload failed', err);
+      } finally {
+        const n = (parseInt(container.dataset.busy, 10) || 1) - 1;
+        container.dataset.busy = String(Math.max(0, n));
       }
     };
 
     const handleFiles = (files) => { Array.from(files).forEach(handleFile); };
 
-    input.addEventListener('change', e => handleFiles(e.target.files));
+    input.addEventListener('change', e => { handleFiles(e.target.files); input.value = ''; });
     lbl.addEventListener('dragover',  e => { e.preventDefault(); lbl.classList.add('drag-over'); });
     lbl.addEventListener('dragleave', ()  => lbl.classList.remove('drag-over'));
     lbl.addEventListener('drop', e => {

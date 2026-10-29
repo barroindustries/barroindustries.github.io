@@ -1924,6 +1924,10 @@ async function renderSOPs() {
     ? snap.docs.map(d=>({id:d.id, ...d.data()}))
     : DEFAULT_SOPS.map((s,i)=>({id:null, order:i, ...s}));
 
+  // SOP text is admin-written and stored: escape it (a manager's step text ran
+  // as script in the President's session), then re-allow only the plain
+  // emphasis tags the built-in SOPs use.
+  const sopHtml = t => escHtml(t == null ? '' : String(t)).replace(/&lt;(\/?)(strong|em|b|i)&gt;/g, '<$1$2>');
   c.innerHTML = `
     <div class="page-header">
       <h2>${emojiIcon('📋',20)} Standard Operating Procedures</h2>
@@ -1934,15 +1938,15 @@ async function renderSOPs() {
       ${sops.map((s,i)=>`
         <div class="card sop-card" style="overflow:hidden">
           <div class="sop-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;user-select:none" data-sop-idx="${i}">
-            <div style="font-size:15px;font-weight:700">${s.title}</div>
+            <div style="font-size:15px;font-weight:700">${sopHtml(s.title)}</div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-              ${canEditSOPs&&s.id?`<button class="sop-edit-btn btn-secondary btn-sm" data-sop-id="${s.id}" onclick="event.stopPropagation()" title="Edit">${emojiIcon('✎',16)}</button>`:''}
+              ${canEditSOPs&&s.id?`<button class="sop-edit-btn btn-secondary btn-sm" data-sop-id="${escHtml(s.id)}" onclick="event.stopPropagation()" title="Edit">${emojiIcon('✎',16)}</button>`:''}
               <span class="sop-chevron" style="font-size:18px;transition:transform .2s">›</span>
             </div>
           </div>
           <div class="sop-body" style="display:none;padding:0 16px 16px 16px">
             <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px">
-              ${(s.items||[]).map(item=>`<li style="font-size:13px;line-height:1.6;color:var(--text-primary)">${item}</li>`).join('')}
+              ${(s.items||[]).map(item=>`<li style="font-size:13px;line-height:1.6;color:var(--text-primary)">${sopHtml(item)}</li>`).join('')}
             </ol>
           </div>
         </div>`).join('')}
@@ -4245,12 +4249,16 @@ async function renderCompanyOverview(ct, canAdd) {
   if (canAdd) {
     document.getElementById('co-force-logout-btn')?.addEventListener('click', async () => {
       if (!await confirmDialog({ message: 'This will immediately sign out ALL active members. Continue?', danger: true })) return;
-      await db.collection('settings').doc('system').set({
-        forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
-        excludeUid: currentUser.uid,
-        triggeredBy: currentUser.uid
-      }, { merge: true });
-      Notifs.showToast('All members have been logged out.', 'success');
+      try {
+        await db.collection('settings').doc('system').set({
+          forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
+          excludeUid: currentUser.uid,
+          triggeredBy: currentUser.uid
+        }, { merge: true });
+        Notifs.showToast('All members have been logged out.', 'success');
+      } catch (err) {
+        Notifs.showToast('Could not log everyone out: ' + (err.message || err.code || err), 'error');
+      }
     });
   }
   if (window.lucide) lucide.createIcons({ nodes: [ct] });
@@ -6503,7 +6511,7 @@ async function renderAnalytics() {
     `;
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
-    wrap.querySelector('#cost-edit-overhead-btn')?.addEventListener('click', () => navigateTo('Finance', { subtab: 'Break-even' }));
+    wrap.querySelector('#cost-edit-overhead-btn')?.addEventListener('click', () => navigateTo('dept:Finance', { subtab: 'Break-even' }));
 
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('cost-trend-chart'), {
@@ -6858,7 +6866,7 @@ async function renderTeam() {
         <button class="btn-secondary btn-sm" id="team-csv-btn">${emojiIcon('⬇',16)} CSV</button>
         <button class="btn-secondary btn-sm" id="add-worker-btn">${emojiIcon('👷',16)} Create Worker Account</button>
         ${flagOnlyAdmin?'':`<button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>`}
-        ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">${emojiIcon('🔴',16)} Logout All</button>`:''}
+        ${isPresident()?`<button class="btn-danger btn-sm" id="force-logout-all-btn">${emojiIcon('🔴',16)} Logout All</button>`:''}
       </div>
     </div>
     <div id="team-table">${window.skeletonHtml('table')}</div>`;
@@ -6932,12 +6940,16 @@ async function renderTeam() {
   ]));
   document.getElementById('force-logout-all-btn')?.addEventListener('click', async () => {
     if (!await confirmDialog({ message: 'This will immediately sign out ALL active members. Continue?', danger: true })) return;
-    await db.collection('settings').doc('system').set({
-      forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
-      excludeUid: currentUser.uid,
-      triggeredBy: currentUser.uid
-    }, { merge: true });
-    Notifs.showToast('All members have been logged out.', 'success');
+    try {
+      await db.collection('settings').doc('system').set({
+        forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
+        excludeUid: currentUser.uid,
+        triggeredBy: currentUser.uid
+      }, { merge: true });
+      Notifs.showToast('All members have been logged out.', 'success');
+    } catch (err) {
+      Notifs.showToast('Could not log everyone out: ' + (err.message || err.code || err), 'error');
+    }
   });
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('team-table')] });
 }

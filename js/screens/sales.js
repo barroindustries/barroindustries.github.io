@@ -134,8 +134,10 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
     <div id="sales-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
-  loadSalesContent(currentUser, currentRole, subtab);
+  // Bind the OUTER bar first: loadSalesContent can render inner sub-nav chips,
+  // and binding afterwards would also attach this outer handler to those.
   window.bindChipTabs(c, (key) => { window.setSubroute(key); loadSalesContent(currentUser, currentRole, key); });
+  loadSalesContent(currentUser, currentRole, subtab);
 };
 
 // Scoped inner sub-nav (chip toggle) for a consolidated Sales tab. Binds ONLY
@@ -2155,7 +2157,9 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
   el.querySelectorAll('.bs-delreq-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
-      const reason = (await promptDialog({message:'Reason for deleting this quote? (sent to the president for approval)', required:true, multiline:true}))||'';
+      const reasonIn = await promptDialog({message:'Reason for deleting this quote? (sent to the president for approval)', required:true, multiline:true});
+      if (reasonIn == null) return;
+      const reason = reasonIn || '';
       try {
         await db.collection('bs_quotes').doc(b.dataset.id).update({
           deleteRequested:true, deleteReason:reason,

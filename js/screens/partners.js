@@ -175,7 +175,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
                   <td class="tc-detail" data-label="Date" style="color:var(--text-muted);font-size:11px">${ts}</td>
                   ${isPrivileged?`<td class="tc-detail" data-label="By" style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
                   <td class="tc-actions" style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}
-                  ${window.QUOTE_SHAREABLE_STATUSES.includes(status)?` <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.shareQuoteWithClient('bs_quotes','${q.id}',()=>renderBSClientData(container, currentUser, currentRole))" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}</td>
+                  ${window.QUOTE_SHAREABLE_STATUSES.includes(status)?` <button class="btn-secondary btn-sm bsq-share-btn" data-id="${q.id}" title="Get a client-facing link — no login needed — to Accept or Request changes">${emojiIcon('🔗',16)} Share</button>`:''}</td>
                 </tr>`;
               }).join('')}</tbody>
             </table></div>
@@ -183,6 +183,10 @@ async function renderBSClientData(container, currentUser, currentRole) {
         </div>
       `).join('');
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+      wrap.querySelectorAll('.bsq-share-btn').forEach(b => b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        window.shareQuoteWithClient('bs_quotes', b.dataset.id, () => renderBSClientData(container, currentUser, currentRole));
+      }));
       wrap.querySelectorAll('tr.bsq-row').forEach(tr => tr.addEventListener('click', (ev) => {
         if (ev.target.closest('button, a')) return;
         tr.classList.toggle('tc-expanded');

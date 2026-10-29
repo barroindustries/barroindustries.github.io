@@ -205,7 +205,9 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       if (!(window.isLaidOff && window.isLaidOff())) Notifs.checkDeadlines(user.uid);
-      if (!(window.isLaidOff && window.isLaidOff()) && !window.isAttendanceExempt(userProfile)) Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
+      // No morning "time in" reminder: office attendance is retired
+      // (OFFICE-KPI-PAY-SPEC-2026-08-25) and nothing writes the records it
+      // checked, so it nagged every office/agent employee every workday.
       Notifs.checkLowStock?.(user.uid, userProfile.role);
       Notifs.checkAECFollowups?.(user.uid, userProfile.role);
       checkPayrollDuties(user);
@@ -239,6 +241,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     } else {
       _bootstrappedUid = null;
+      // The inbox + chat-badge listeners otherwise outlive the session (every
+      // explicit sign-out path skipped this) and keep the old user's items in memory.
+      Notifs.stopListener();
       stopClaimsListener();
       Session.runCleanups();
       // Catch-all for the session boundary: the four explicit sign-out paths
@@ -2726,7 +2731,9 @@ window.hashFor = hashFor;
 function parseHash(h) {
   h = (h == null ? location.hash : h).replace(/^#\/?/, '');
   if (!h) return { page: 'dashboard', subtab: null };
-  const s = h.split('/').map(decodeURIComponent);
+  // A stray '%' in a shared link must not throw URIError mid-boot (it aborted
+  // the rest of the sign-in bootstrap: auto-logout, heartbeat, claims listener).
+  const s = h.split('/').map(x => { try { return decodeURIComponent(x); } catch (_) { return x; } });
   if (s[0] === 'dept' && s[1]) return { page: 'dept:' + s[1], subtab: s[2] || null };
   return { page: s[0] || 'dashboard', subtab: s[1] || null };
 }
@@ -2927,6 +2934,9 @@ async function navigateTo(page, opts) {
   try {
     await window.ensurePage(_pageScriptsKey);
   } catch (err) {
+    // Superseded while loading: the user already moved on — don't paint a
+    // Retry card (or roll currentPage back) over the page they're on now.
+    if (window.currentPage !== page) return;
     // Never a blank screen: replace the skeleton with a retry card. A real
     // <button> + addEventListener (not an inline onclick="navigateTo('…')")
     // sidesteps quoting `page`/`opts` into an HTML attribute entirely, and
@@ -2946,6 +2956,9 @@ async function navigateTo(page, opts) {
     if (typeof window.devCheckStacking === 'function') window.devCheckStacking();
     return;
   }
+  // A slow lazy load (e.g. hr.js) resolving after the user tapped elsewhere
+  // must not render its page over the one they navigated to.
+  if (window.currentPage !== page) return;
 
   // dept: prefix for dual dept tabs
   if (page.startsWith('dept:')) {

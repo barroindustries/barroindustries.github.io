@@ -715,6 +715,8 @@ window.qrConvert = async function (refNo) {
       });
       clientId = ref.id;
     }
+    // Invalidate as soon as the clients write lands, so a failure of the request-status update below can't leave a stale list.
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
 
     const a = _qrActor();
     await db.collection('quote_requests').doc(refNo).update({

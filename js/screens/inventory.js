@@ -293,6 +293,7 @@ function itemModal(item, onSaved) {
     const name=$iv('iv-name').value.trim();
     const err=$iv('iv-err');
     if(!name){ err.textContent='Name is required.'; err.classList.remove('hidden'); return; }
+    const _ivBtn=$iv('iv-save'); if(_ivBtn.disabled) return; _ivBtn.disabled=true;
     const data={ name, kind:$iv('iv-kind').value,
       unit:$iv('iv-unit').value.trim(), category:$iv('iv-cat').value.trim(),
       qty:parseFloat($iv('iv-qty').value)||0, reorderLevel:parseFloat($iv('iv-reorder').value)||0,
@@ -321,7 +322,7 @@ function itemModal(item, onSaved) {
       else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); const _r=await db.collection('inventory_items').add(data); window.logAudit&&window.logAudit('create','inventory_item',_r.id,{name,qty:data.qty}); }
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
       closeModal(); Notifs.success('Item saved'); onSaved&&onSaved();
-    }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }catch(ex){ _ivBtn.disabled=false; err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
   $iv('iv-del')?.addEventListener('click', async ()=>{
     if(!(await confirmDialog({ message: 'Delete this item?', danger: true }))) return;
@@ -352,7 +353,9 @@ function moveModal(item, type, onSaved) {
     const qty=parseFloat($mv('mv-qty').value)||0;
     const err=$mv('mv-err');
     if(qty<=0){ err.textContent='Enter a quantity greater than 0.'; err.classList.remove('hidden'); return; }
+    if(type==='out' && qty > (item.qty||0)){ err.textContent=`Only ${num(item.qty||0)} ${item.unit||''} on hand — cannot remove ${num(qty)}.`; err.classList.remove('hidden'); return; }
     const delta = type==='in'? qty : -qty;
+    const _mvBtn=$mv('mv-save'); if(_mvBtn.disabled) return; _mvBtn.disabled=true;
     try{
       await db.collection('inventory_items').doc(item.id).update({ qty: firebase.firestore.FieldValue.increment(delta), updatedAt:firebase.firestore.FieldValue.serverTimestamp() });
       await window.postStockMovement({ itemId:item.id, itemName:item.name||'', type, qty,
@@ -362,7 +365,7 @@ function moveModal(item, type, onSaved) {
       window.logAudit&&window.logAudit('create','stock_movement',item.id,{itemName:item.name||'',type,qty,delta});
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
       closeModal(); Notifs.success('Stock updated'); onSaved&&onSaved();
-    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }catch(ex){ _mvBtn.disabled=false; err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
 }
 

@@ -543,8 +543,14 @@ window.Meetings = (function () {
     panel.querySelectorAll('[data-open-task]').forEach(b =>
       b.addEventListener('click', () => {
         const id = b.getAttribute('data-open-task');
-        if (window.openTaskDetail) window.openTaskDetail(id, window.currentUser, window.currentRole);
-        else if (window.navigateTo) window.navigateTo('tasks');
+        const go = () => window.openTaskDetail(id, window.currentUser, window.currentRole);
+        if (typeof window.openTaskDetail === 'function') go();
+        else if (typeof window.ensureScript === 'function') {
+          // tasks.js is lazy-loaded; load it, then open the specific task.
+          window.ensureScript('js/screens/tasks.js').then(go).catch(() => {
+            if (window.navigateTo) window.navigateTo('tasks');
+          });
+        } else if (window.navigateTo) window.navigateTo('tasks');
       }));
     panel.querySelectorAll('[data-open-bid]').forEach(b =>
       b.addEventListener('click', () => window.navigateTo && window.navigateTo('dept:Government Biddings')));

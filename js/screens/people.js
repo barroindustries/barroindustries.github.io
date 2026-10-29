@@ -348,6 +348,7 @@ function postShareLabel(p) {
 async function loadPosts(dept, pageSize) {
   pageSize = pageSize || 30;
   const container = document.getElementById('posts-content');
+  const _tok = window._postsLoadTok = (window._postsLoadTok || 0) + 1;   // stale-response guard
   container.innerHTML = window.skeletonHtml('rows');
   try {
     let q = db.collection('posts').orderBy('createdAt','desc');
@@ -359,6 +360,7 @@ async function loadPosts(dept, pageSize) {
       q = db.collection('posts').where('dept','==',dept).where('status','==','published').orderBy('createdAt','desc');
     }
     const snap = await q.limit(pageSize + 1).get();
+    if (_tok !== window._postsLoadTok) return;   // a newer tab/load superseded this one
     const hasMore = snap.docs.length > pageSize;
     const posts = snap.docs.slice(0, pageSize).map(d => ({id:d.id,...d.data()}));
     if (!posts.length) {
@@ -478,7 +480,8 @@ async function loadPosts(dept, pageSize) {
       window.openMemoById?.(card.dataset.memoId, reloadFeed);
     }));
   } catch(err) {
-    container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
+    if (_tok !== window._postsLoadTok) return;
+    container.innerHTML = `<div class="empty-state"><p>Error: ${escHtml(err.message)}</p></div>`;
   }
 }
 
@@ -517,6 +520,9 @@ function openNewPostModal(publishDirectly) {
     if (!content) { Notifs.showToast('Write something first.', 'error'); return; }
     const dept = _panel.querySelector('#post-dept').value;
     const status = publishDirectly ? 'published' : 'pending';
+    const _btn = _panel.querySelector('#save-post-btn');
+    _btn.disabled = true;
+    try {
     await db.collection('posts').add({
       title:       _panel.querySelector('#post-title').value.trim(),
       content,
@@ -541,6 +547,10 @@ function openNewPostModal(publishDirectly) {
     closeModal();
     Notifs.success(status==='published' ? 'Announcement published!' : 'Submitted for approval!');
     window.renderPosts();
+    } catch (err) {
+      _btn.disabled = false;
+      Notifs.showToast('Could not post: ' + (err.message || err.code || err), 'error');
+    }
   });
 }
 
@@ -714,6 +724,8 @@ window.renderTeamTab = async function() {
         const email = _panel.querySelector('#inv-email').value.trim();
         if (!email) { Notifs.showToast('Enter an email.','error'); return; }
         const depts = [..._panel.querySelectorAll('.inv-dept-cb:checked')].map(cb=>cb.value);
+        const _invBtn = _panel.querySelector('#save-inv-btn');
+        _invBtn.disabled = true;
         try {
           // '__freelancer' is a TEAM classification, not a permission role: the
           // account signs in and is permissioned as a plain employee (so the
@@ -749,6 +761,7 @@ window.renderTeamTab = async function() {
           }
           window.renderTeamTab();
         } catch(err) {
+          _invBtn.disabled = false;
           if (err && (err.code === 'functions/already-exists' || err.code === 'already-exists')) {
             // The account may be a previously-orphaned invite (auth user + profile
             // created, but the reset email never went out or was never used) —
@@ -1277,7 +1290,7 @@ function renderTeamCards(users, currentUser) {
       e.stopPropagation();
       const { uid, name } = btn.dataset;
       if (!(await confirmDialog({ message: `Send a nudge to ${escHtml(name)}?`, html: true }))) return;
-      btn.disabled = true; btn.textContent = '⏳';
+      btn.disabled = true; btn.innerHTML = emojiIcon('⏳',16); if (window.lucide) lucide.createIcons({ nodes: [btn] });
       const senderName = window.userProfile?.displayName || currentUser?.displayName || 'Someone';
       await Notifs.send(uid, {
         title: `👋 You've been nudged!`,
@@ -1285,9 +1298,9 @@ function renderTeamCards(users, currentUser) {
         icon: '👋', type: 'nudge',
         dedupKey: `nudge-${uid}-${window.bizDate()}-${currentUser?.uid}`
       });
-      btn.textContent = '✅'; btn.title = 'Nudge sent!';
+      btn.innerHTML = emojiIcon('✅',16); btn.title = 'Nudge sent!'; if (window.lucide) lucide.createIcons({ nodes: [btn] });
       Notifs.success(`Nudge sent to ${name}!`);
-      setTimeout(() => { btn.disabled = false; btn.textContent = '👋'; btn.title = `Nudge ${name}`; }, 3000);
+      setTimeout(() => { btn.disabled = false; btn.innerHTML = emojiIcon('👋',16); btn.title = `Nudge ${name}`; if (window.lucide) lucide.createIcons({ nodes: [btn] }); }, 3000);
     });
   });
 
@@ -1616,9 +1629,11 @@ window.renderAttendancePage = async function() {
     }
   }
 
+  let _attTok = 0;
   async function renderAttMonth() {
     const calEl  = document.getElementById('att-calendar');
     const sumEl  = document.getElementById('att-summary');
+    const _tok = ++_attTok;   // stale-response guard: a slower earlier month must not paint over a newer one
     calEl.innerHTML = window.skeletonHtml('rows');
     const label = new Date(viewYear, viewMonth).toLocaleString('en-PH',{month:'long',year:'numeric'});
     document.getElementById('att-month-label').textContent = label;
@@ -1634,7 +1649,9 @@ window.renderAttendancePage = async function() {
       snap = await db.collection('attendance').doc(targetUid).collection('records')
         .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart)
         .where(firebase.firestore.FieldPath.documentId(),'<=',monthEnd).get();
+      if (_tok !== _attTok) return;
     } catch (err) {
+      if (_tok !== _attTok) return;
       calEl.innerHTML =
         '<div class="empty-state"><div class="empty-icon">' + emojiIcon('⚠️',44) + '</div>' +
         '<h4>Something went wrong</h4><p>' + escHtml(err && err.message ? err.message : String(err)) + '</p>' +
@@ -1690,7 +1707,7 @@ window.renderAttendancePage = async function() {
       }
       const cls = isSunday?'att-weekend':holiday?'att-holiday':status?`att-${status}`:'att-future';
       const isToday = dateStr===todayStr;
-      const holidayTitle = holiday ? ` title="${holiday.name}"` : '';
+      const holidayTitle = holiday ? ` title="${escHtml(holiday.name)}"` : '';
       html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}"${holidayTitle}>
         <span class="att-day-num">${day}</span>
         ${holiday?`<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">${emojiIcon('🎌',9)}</span>`:
@@ -1963,7 +1980,7 @@ function renderCAEmployeeCards(advances, container) {
     const payRows = payments.map((p,i)=>`
       <tr>
         <td style="padding:6px 8px;font-size:12px;color:var(--text-muted)">#${i+1}</td>
-        <td style="padding:6px 8px;font-size:12px">${p.date||'&#x2014;'}</td>
+        <td style="padding:6px 8px;font-size:12px">${p.date?escHtml(p.date):'&#x2014;'}</td>
         <td style="padding:6px 8px;font-size:13px;font-weight:700;color:var(--success)">&#8369;${fmtN(p.amount)}</td>
       </tr>`).join('');
     return `
@@ -1971,7 +1988,7 @@ function renderCAEmployeeCards(advances, container) {
       <div class="ca-card-header">
         <div style="display:flex;flex-direction:column;gap:3px">
           <div style="font-size:18px;font-weight:800;color:var(--text)">&#8369;${fmtN(a.amount)}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${a.date||''} &middot; ${a.terms||1}-month plan</div>
+          <div style="font-size:11px;color:var(--text-muted)">${escHtml(a.date||'')} &middot; ${a.terms||1}-month plan</div>
         </div>
         ${window.statusBadge2('ca', caId, {fontSize:'11px'})}
       </div>
@@ -2088,7 +2105,7 @@ function renderCAList(advances, container, isAdmin) {
           <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${pct}%;background:var(--success)"></div></div>
         </div>
         `:''}
-        ${a.date?`<div class="ca-detail" style="margin-top:6px"><span>Date</span><span>${a.date}</span></div>`:''}
+        ${a.date?`<div class="ca-detail" style="margin-top:6px"><span>Date</span><span>${escHtml(a.date)}</span></div>`:''}
       </div>
       ${isAdmin&&a.status==='pending'?`
       <div class="ca-card-actions">
@@ -2598,13 +2615,10 @@ async function openPresidentCashAdvanceModal(users) {
 
   async function approveLeave(r, c){
     if(!r) return;
-    if(r.status==='approved') return;   // idempotency guard — already applied; a retry must not re-decrement the balance
     try{
-      const lt=leaveType(r.type);
-      await applyLeaveApproval(r);   // decrement FIRST (single source) — status flips only after this succeeds
-      await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-      window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
-      try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', link:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
+      // Delegates to the shared path, which re-reads FRESH status (a stale list row must not debit a rejected request)
+      await window.approveLeaveRequest(r.id);
+      window.dbCacheInvalidate && dbCacheInvalidate('approvals-pending:leave_requests-pending');
       Notifs.success('Leave approved'); window.renderLeavePage(c);
     }catch(ex){ Notifs.showToast('Approve failed: '+(ex.message||ex.code),'error'); }
   }
@@ -2613,11 +2627,10 @@ async function openPresidentCashAdvanceModal(users) {
     if(!r) return;
     const reason = (await promptDialog({ message: 'Reason for rejection (optional):', multiline: true }))||'';
     try{
-      await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-      window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
-      try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', link:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
+      await window.rejectLeaveRequest(r.id, reason);
+      window.dbCacheInvalidate && dbCacheInvalidate('approvals-pending:leave_requests-pending');
       Notifs.error('Leave rejected'); window.renderLeavePage(c);
-    }catch(ex){ Notifs.showToast('Reject failed','error'); }
+    }catch(ex){ Notifs.showToast('Reject failed: '+(ex.message||ex.code),'error'); }
   }
 
   // Exposed so the President's Approvals page (renderApprovals in departments.js) can
@@ -2628,6 +2641,7 @@ async function openPresidentCashAdvanceModal(users) {
     if(!s.exists) throw new Error('Leave request not found');
     const r = { id:s.id, ...s.data() };
     if(r.status==='approved') return r;   // idempotency guard — already applied; a retry must not re-decrement the balance
+    if(r.status!=='pending') throw new Error('Leave request already '+r.status);   // e.g. rejected — never debit
     const lt = leaveType(r.type);
     await applyLeaveApproval(r);    // decrement FIRST (single source) — status flips only after this succeeds
     await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
@@ -2639,6 +2653,7 @@ async function openPresidentCashAdvanceModal(users) {
     const s = await db.collection('leave_requests').doc(id).get();
     if(!s.exists) throw new Error('Leave request not found');
     const r = { id:s.id, ...s.data() };
+    if(r.status!=='pending') throw new Error('Leave request already '+r.status);   // rejecting an approved request would leave the balance deducted
     await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason||'', approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
     window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
     try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', link:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}

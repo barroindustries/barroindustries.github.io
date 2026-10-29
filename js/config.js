@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.354';
+window.APP_VERSION = '14.0.355';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -981,6 +981,9 @@ window.fetchUsersWithPayroll = async function() {
     // since a meeting created 'now' can land on someone else's calendar too
     // (oversight tier) and cache keys are month+uid-scoped.
     'cal-meetings': { prefixes: ['cal-meetings-'] },
+    // A quote filed/revised from the Quote Builder only invalidates 'all-quotes';
+    // the Brilliant Steel lists read their own keys and stayed stale for ~50 s.
+    'all-quotes': { alsoKeys: ['bs_quotes-ord-all', 'bs_quotes-flat-all'], prefixes: ['bs_quotes-ord-own-', 'bs_quotes-flat-own-'] },
   };
   window.dbCacheInvalidate = function(key) {
     if (!key) {
@@ -2998,7 +3001,12 @@ window.CashAdvance = {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     // Admin-issued records are approved immediately by the same actor — the
     // "requests approval" owner ping only makes sense for self-service requests.
-    if (!isAdminIssued) await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${fmt(amt)} (${t}-month plan).`, icon:'💸', type:'cash_advance' });
+    // The request is already saved: a failed owner ping must not make it look
+    // failed (the employee retried and filed a duplicate).
+    if (!isAdminIssued) {
+      try { await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${fmt(amt)} (${t}-month plan).`, icon:'💸', type:'cash_advance' }); }
+      catch (e) { console.warn('[CashAdvance.request] owner notification failed', e); }
+    }
     return ref.id;
   },
 
@@ -3035,7 +3043,12 @@ window.CashAdvance = {
     // reads the PREVIOUS record's amounts and writes them onto this one.
     // (Corporate Secretary report, reproduced in-browser 2026-08-10.)
     const $ = (id) => _panel.querySelector('#' + id);
-    $('ca-req-submit-btn').addEventListener('click', async () => {
+    $('ca-req-submit-btn').addEventListener('click', async (e) => {
+      // In-flight guard: offline, add() doesn't resolve until sync, and each
+      // extra tap queued another request (plus another owner ping).
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      btn.disabled = true;
       try {
         await window.CashAdvance.request({
           amount:     $('ca-req-amt').value,
@@ -3045,9 +3058,12 @@ window.CashAdvance = {
         });
         closeModal();
         Notifs.showToast('Request submitted! Waiting for approval.');
-        if (typeof window.renderCashAdvancePage === 'function') window.renderCashAdvancePage();
+        // Re-render the page the form was opened FROM (it is also on My Finance;
+        // once people.js is loaded renderCashAdvancePage exists everywhere).
+        if (window.currentPage === 'cash-advances' && typeof window.renderCashAdvancePage === 'function') window.renderCashAdvancePage();
         else if (typeof window.renderPersonalFinance === 'function' && window.currentUser) window.renderPersonalFinance(window.currentUser, window.currentRole);
       } catch (err) {
+        btn.disabled = false;
         Notifs.showToast(err.message || 'Could not submit request.', 'error');
       }
     });
@@ -3063,6 +3079,12 @@ window.CashAdvance = {
       if (!fresh.exists) throw new Error('Record no longer exists.');
       const cur = fresh.data();
       if (cur.status !== 'pending') throw new Error('This request is no longer pending (already actioned).');
+      // Separation of duties: a manager/finance approver can't release cash to
+      // themselves (and set their own interest to 0). Only the President may.
+      const _me = window.currentUser && window.currentUser.uid;
+      if (cur.userId && cur.userId === _me && window.currentRole !== 'president') {
+        throw new Error('You cannot approve your own cash advance — ask the President.');
+      }
       const pct     = interestPct != null ? interestPct : (cur.interest || 0);
       const terms   = cur.terms || 1;
       const total   = pct > 0 ? cur.amount * Math.pow(1 + pct/100, terms) : cur.amount;
@@ -3368,39 +3390,46 @@ window.CashAdvance = {
   // the payments[] audit trail); omit only for system/backfill callers.
   async deduct(uid, month, plan, actorUid) {
     if (!Array.isArray(plan) || !plan.length) return [];
-    const batch = db.batch();
-    const caDeductions = [];
-    for (const p of plan) {
-      if (!p.caId || !(p.amount > 0)) continue;
-      const ref  = db.collection('cash_advances').doc(p.caId);
-      const snap = await ref.get().catch(()=>null);
-      if (!snap || !snap.exists) continue;
-      const cur = snap.data();
-      // Idempotency (payroll recall spec §D2 — fixes G4): a resumed
-      // disbursePayRun re-runs this whole step (Resume Disburse on a stuck
-      // 'disbursing' run, or a reopen→recompute→re-disburse of the SAME
-      // month). If THIS month's payroll deduction already posted to this CA,
-      // skip it — never deduct the same month twice. Correct both for
-      // resume-after-crash (attempt 1 committed the batch -> attempt 2 skips
-      // every CA for this month; attempt 1 crashed pre-commit -> nothing to
-      // skip) and for the reopen/re-disburse case (the month key is the
-      // identity, regardless of which attempt actually wrote it).
-      if ((cur.payments || []).some(pm => pm.source === 'payroll' && pm.month === month)) continue;
-      const toDeduct = Math.min(cur.balance||0, p.amount);
-      if (toDeduct <= 0) continue;
-      const newBal   = Math.max(0, (cur.balance||0) - toDeduct);
-      const payments = [...(cur.payments||[]), { amount:_caRound2(toDeduct), date:(window.bizDate?window.bizDate():today()), recordedBy: actorUid||'system', source:'payroll', month }];
-      batch.update(ref, {
-        balance: newBal, payments,
-        ...(newBal <= 0 ? { status:'paid', paidAt: firebase.firestore.FieldValue.serverTimestamp() } : {})
-      });
-      // Carry the principal/interest split out with the amount so
-      // disbursePayRun can credit the receivable and Other Income separately
-      // (it has no access to the CA doc; `cur` is only in scope here).
-      const _sp = _caSplitPayment(toDeduct, cur);
-      caDeductions.push({ caId: p.caId, amount: _caRound2(toDeduct), principal: _sp.principal, interest: _sp.interest });
-    }
-    if (caDeductions.length) await batch.commit();
+    let caDeductions = [];
+    // ONE transaction for the idempotency check AND the write. As a plain
+    // read-then-batch, two overlapping disburses (Resume Disburse in a second
+    // tab while the first is still posting) both read "not yet deducted this
+    // month" and both wrote — the second overwrote balance/payments computed
+    // from the same stale read. Firestore retries the transaction when a CA it
+    // read changes, so the loser re-reads, sees this month's payment, skips.
+    await db.runTransaction(async t => {
+      caDeductions = [];   // reset: the callback re-runs on contention
+      const writes = [];
+      for (const p of plan) {
+        if (!p.caId || !(p.amount > 0)) continue;
+        const ref  = db.collection('cash_advances').doc(p.caId);
+        const snap = await t.get(ref);
+        if (!snap || !snap.exists) continue;
+        const cur = snap.data();
+        // Idempotency (payroll recall spec §D2 — fixes G4): a resumed
+        // disbursePayRun re-runs this whole step (Resume Disburse on a stuck
+        // 'disbursing' run, or a reopen→recompute→re-disburse of the SAME
+        // month). If THIS month's payroll deduction already posted to this CA,
+        // skip it — never deduct the same month twice. The month key is the
+        // identity, regardless of which attempt actually wrote it.
+        if ((cur.payments || []).some(pm => pm.source === 'payroll' && pm.month === month)) continue;
+        const toDeduct = Math.min(cur.balance||0, p.amount);
+        if (toDeduct <= 0) continue;
+        const newBal   = Math.max(0, (cur.balance||0) - toDeduct);
+        const payments = [...(cur.payments||[]), { amount:_caRound2(toDeduct), date:(window.bizDate?window.bizDate():today()), recordedBy: actorUid||'system', source:'payroll', month }];
+        writes.push([ref, {
+          balance: newBal, payments,
+          ...(newBal <= 0 ? { status:'paid', paidAt: firebase.firestore.FieldValue.serverTimestamp() } : {})
+        }]);
+        // Carry the principal/interest split out with the amount so
+        // disbursePayRun can credit the receivable and Other Income separately
+        // (it has no access to the CA doc; `cur` is only in scope here).
+        const _sp = _caSplitPayment(toDeduct, cur);
+        caDeductions.push({ caId: p.caId, amount: _caRound2(toDeduct), principal: _sp.principal, interest: _sp.interest });
+      }
+      // Transactions need every read before any write.
+      writes.forEach(([ref, patch]) => t.update(ref, patch));
+    });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     if (caDeductions.length) {
       await Notifs.send(uid, {

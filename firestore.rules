@@ -96,6 +96,21 @@ service cloud.firestore {
     }
 
     // [RN-15] True when a user-profile update leaves all privileged fiel -> docs/firestore-rules-notes.md#rn-15
+    // Owner-only extra freeze (the secretary legitimately edits employmentStatus /
+    // startDate via employee-profile.js, so these are NOT in the shared helper).
+    // employmentStatus drives statutory rules; title/jobTitle/status feed the
+    // self-minted ID card (selfMintMatchesCaller). The self-edit screens write
+    // only photoUrl, phone, displayName, notifSettings and statusNote.
+    function ownerProfileFieldsUnchanged() {
+      let n = request.resource.data;
+      let o = resource.data;
+      return n.get('employmentStatus', null) == o.get('employmentStatus', null)
+          && n.get('startDate', null)        == o.get('startDate', null)
+          && n.get('title', null)            == o.get('title', null)
+          && n.get('jobTitle', null)         == o.get('jobTitle', null)
+          && n.get('status', null)           == o.get('status', null);
+    }
+
     function userPrivilegedFieldsUnchanged() {
       let n = request.resource.data;
       let o = resource.data;
@@ -122,6 +137,17 @@ service cloud.firestore {
           // [RN-19] TEAM-PAGE-ORG-SPEC-2026-08-25 — accountAdmin is the "desig -> docs/firestore-rules-notes.md#rn-19
           && n.get('accountAdmin', null)  == o.get('accountAdmin', null)
           && n.get('team', null)          == o.get('team', null)
+          // Sweep 2026-10-29 — statutory/pay inputs. fetchUsersWithPayroll merges
+          // {...users, ...payroll}, so a key missing from payroll/{uid} is read from
+          // the users doc: an employee could set statConfig {sss:'exempt',…} on
+          // their own profile and zero their contributions on the next Compute.
+          && n.get('statConfig', null)         == o.get('statConfig', null)
+          && n.get('sss', null)                == o.get('sss', null)
+          && n.get('philhealth', null)         == o.get('philhealth', null)
+          && n.get('pagibig', null)            == o.get('pagibig', null)
+          && n.get('tax', null)                == o.get('tax', null)
+          && n.get('deductionsUnearned', null) == o.get('deductionsUnearned', null)
+          && n.get('payClass', null)           == o.get('payClass', null)
           // v14 re-audit ROUND 2 — see userIdentityBindingUnchanged() above.
           // Covers the OWNER and the non-senior isAdmin() (secretary) branches,
           // which are the two that call this helper.
@@ -201,7 +227,7 @@ service cloud.firestore {
           && hrFlagUnchanged()
           && accountAdminUnchanged()
           && userIdentityBindingUnchanged()) ||
-        (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||
+        (isOwner(uid) && userPrivilegedFieldsUnchanged() && ownerProfileFieldsUnchanged()) ||
         (isAdmin() && userPrivilegedFieldsUnchanged() && fcmTokenUnchangedForOthers()) ||
         (inDept('HR') && !isOwner(uid)
           && resource.data.get('role', 'employee') != 'president'
@@ -254,7 +280,11 @@ service cloud.firestore {
           : request.resource.data.get('status', '') == 'pending');
       // [RN-36] Author/admin may edit anything, EXCEPT the publish/reject -> docs/firestore-rules-notes.md#rn-36
       allow update: if isAuth() && (
-        resource.data.authorId == request.auth.uid
+        // Sweep 2026-10-29: the author branch had no field limit, so an author
+        // could flip their own 'pending' post to 'published' (RN-36 says the
+        // publish transition is senior-admin only).
+        (resource.data.authorId == request.auth.uid
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'authorId']))
         || (isSeniorAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']))
         || (isAdmin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']))
         || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hearts'])
@@ -476,8 +506,11 @@ service cloud.firestore {
         // Phase 68 quota observer (functions/index.js sendNotificationQuota) keys off
         // senderUid — optional (system/scheduled sends omit it), but when present it
         // must be truthful: a caller can't attribute a notif to another sender.
-        && (!request.resource.data.keys().hasAny(['senderUid'])
-            || request.resource.data.get('senderUid', '') == request.auth.uid);
+        // Sweep 2026-10-29: REQUIRED now. Optional senderUid let a client omit it,
+        // skipping the push quota (it keys off senderUid) for an unthrottled,
+        // unattributed push flood. Every client send stamps it; the Admin SDK
+        // (scheduled/server sends) bypasses rules.
+        && request.resource.data.get('senderUid', '') == request.auth.uid;
     }
 
     // [RN-44] Attendance ─ -> docs/firestore-rules-notes.md#rn-44
@@ -572,7 +605,11 @@ service cloud.firestore {
       );
       // [RN-53] Employees may only file their OWN request, pending and unf -> docs/firestore-rules-notes.md#rn-53
       allow create: if isAuth() && isNonNegNumber(request.resource.data.get('amount', 0)) && (
-        isMoneyAdmin() ||
+        // Sweep 2026-10-29 — separation of duties: a money-admin's OWN advance is
+        // filed pending like anyone's (only the President may approve their own).
+        (isMoneyAdmin() && (isPresident()
+          || request.resource.data.get('userId', '') != request.auth.uid
+          || request.resource.data.get('status', '') == 'pending')) ||
         (request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending'
           && request.resource.data.balance == 0
@@ -581,7 +618,13 @@ service cloud.firestore {
       // Only money-tier can approve or change the money. Audit 2026-10-28 C2: owners may
       // touch ONLY reason/date, ONLY while pending (monthlyPayment/payments/userId drive payroll).
       allow update: if isAuth() && (
-        isMoneyAdmin() ||
+        // Sweep 2026-10-29 — a money-admin can't move their OWN request out of
+        // 'pending' (approve it to themselves at 0%); later states (payroll's
+        // approved→paid deduction) are unaffected. Matches CashAdvance.approve().
+        (isMoneyAdmin() && (isPresident()
+          || resource.data.get('userId', '') != request.auth.uid
+          || resource.data.get('status', '') != 'pending'
+          || request.resource.data.get('status', '') == 'pending')) ||
         (resource.data.userId == request.auth.uid
           && resource.data.status == 'pending'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reason', 'date']))

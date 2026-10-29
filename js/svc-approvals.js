@@ -21,6 +21,21 @@
   // was the fuller of the two identical sites (it also drove the
   // Firebase-Console-instructions modal — that UI stays in departments.js;
   // this function is just the write path).
+  // Compare-and-set a status: re-reads `ref` inside a transaction and applies
+  // `patch` only when its current status is still `from`. Returns true when it
+  // applied, false when someone else already moved it (stale tab, double click,
+  // second approver) so callers can say "Already handled" instead of blindly
+  // overwriting a decision.
+  async function transitionStatus(ref, from, patch) {
+    return db.runTransaction(async t => {
+      const s = await t.get(ref);
+      if (!s.exists || (s.data() || {}).status !== from) return false;
+      t.update(ref, patch);
+      return true;
+    });
+  }
+  window.transitionStatus = transitionStatus;
+
   async function signupApprove(id, ctx) {
     const { name, email, phone, currentUser } = ctx;
     const reqRef = db.collection('signup_requests').doc(id);
@@ -29,52 +44,69 @@
     // with a real account (and employeeId) already minted, so the admin's
     // retry created a SECOND account for the same person. Resume from the
     // stored uid instead, and commit user-create + request-approve atomically.
-    const prior = await reqRef.get().catch(() => null);
-    const priorData = (prior && prior.exists) ? prior.data() : {};
-    if (priorData.createdUid) {
-      return { password: priorData.generatedPassword, empId: priorData.createdEmpId, already: true };
+    // Transactional claim: a double-click (or two admins) used to both pass the
+    // createdUid check below before either committed, minting two users docs.
+    // Only the call that flips approving:false->true proceeds; the other gets
+    // the same {already:true} shape a finished request returns.
+    const claim = await db.runTransaction(async t => {
+      const s = await t.get(reqRef);
+      const d = s.exists ? (s.data() || {}) : {};
+      if (d.createdUid) return { already: d };
+      if (!s.exists || d.status !== 'pending' || d.approving) return { already: d };
+      t.update(reqRef, { approving: true });
+      return { already: null };
+    });
+    if (claim.already) {
+      return { password: claim.already.generatedPassword, empId: claim.already.createdEmpId, already: true };
     }
-    const pwd = generatePassword(name);
-    const empId = await nextCounterId('employees',
-      async () => (await db.collection('users').get().catch(() => ({ size: 0 }))).size,
-      n => `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(n).padStart(3, '0')}`);
-    const newStartDate = today();
-    const newUserRef = db.collection('users').doc();
-    const batch = db.batch();
-    batch.set(newUserRef, {
-      displayName: name, email, phone,
-      role: 'employee', departments: [],
-      employeeId: empId,
-      photoUrl: '', startDate: newStartDate,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      pendingPasswordSetup: true
-    });
-    batch.update(reqRef, {
-      status: 'approved',
-      generatedPassword: pwd,
-      createdUid: newUserRef.id,
-      createdEmpId: empId,
-      approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      approvedBy: currentUser.uid
-    });
-    await batch.commit();
-    // PERF-WAVE1 WP6 — the signups count/list on the Approvals page is now
-    // cached (dbCachedGet, 'approvals-pending:signup_requests-pending', 30s);
-    // this is the single write path (Approvals.dispatch('signup','approve')),
-    // so invalidating here covers every caller.
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:signup_requests-pending');
-    // After the atomic pair: a failed accrual no longer strands the request —
-    // the account exists and is resolvable; surface it for a manual grant.
-    await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate }).catch(e => {
-      Notifs.showToast('Account created, but leave accrual failed: ' + (e && e.message || e) + ' — re-grant from HR.', 'error');
-    });
-    return { password: pwd, empId };
+    try {
+      const pwd = generatePassword(name);
+      const empId = await nextCounterId('employees',
+        async () => (await db.collection('users').get().catch(() => ({ size: 0 }))).size,
+        n => `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(n).padStart(3, '0')}`);
+      const newStartDate = today();
+      const newUserRef = db.collection('users').doc();
+      const batch = db.batch();
+      batch.set(newUserRef, {
+        displayName: name, email, phone,
+        role: 'employee', departments: [],
+        employeeId: empId,
+        photoUrl: '', startDate: newStartDate,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        pendingPasswordSetup: true
+      });
+      batch.update(reqRef, {
+        status: 'approved',
+        generatedPassword: pwd,
+        createdUid: newUserRef.id,
+        createdEmpId: empId,
+        approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        approvedBy: currentUser.uid
+      });
+      await batch.commit();
+      // PERF-WAVE1 WP6 — the signups count/list on the Approvals page is now
+      // cached (dbCachedGet, 'approvals-pending:signup_requests-pending', 30s);
+      // this is the single write path (Approvals.dispatch('signup','approve')),
+      // so invalidating here covers every caller.
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:signup_requests-pending');
+      // After the atomic pair: a failed accrual no longer strands the request —
+      // the account exists and is resolvable; surface it for a manual grant.
+      await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate }).catch(e => {
+        Notifs.showToast('Account created, but leave accrual failed: ' + (e && e.message || e) + ' — re-grant from HR.', 'error');
+      });
+      return { password: pwd, empId };
+    } catch (e) {
+      // Release the claim so the admin can retry (nothing was committed).
+      await reqRef.update({ approving: false }).catch(() => {});
+      throw e;
+    }
   }
   async function signupReject(id, ctx) {
-    await db.collection('signup_requests').doc(id).update({
+    const ok = await transitionStatus(db.collection('signup_requests').doc(id), 'pending', {
       status: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:signup_requests-pending');
+    return { already: !ok };
   }
 
   // ── Payroll delete request (type 'finance-req' in the approvals feed). ──
@@ -103,15 +135,17 @@
   }
   async function payrollDeleteDeny(id, ctx) {
     const { currentUser, name, month, reqBy } = ctx;
-    await db.collection('payroll_delete_requests').doc(id).update({
+    const ok = await transitionStatus(db.collection('payroll_delete_requests').doc(id), 'pending', {
       status: 'denied', resolvedBy: currentUser.uid, resolvedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (!ok) return { already: true };
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:payroll_delete_requests-pending');
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '❌ Payroll Delete Denied',
       body: `Your request to delete ${name}'s ${month} payroll record was denied by the President.`,
       icon: '❌', type: 'payroll_delete_denied', link: 'approvals'
     }));
+    return { already: false };
   }
 
   // ── Generic finance delete request (type 'finance-del'). ──
@@ -135,14 +169,16 @@
   }
   async function financeDeleteDeny(id, ctx) {
     const { currentUser, label, reqBy } = ctx;
-    await db.collection('finance_delete_requests').doc(id).update({
+    const ok = await transitionStatus(db.collection('finance_delete_requests').doc(id), 'pending', {
       status: 'denied', resolvedBy: currentUser.uid, resolvedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (!ok) return { already: true };
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:finance_delete_requests-pending');
     if (reqBy) await safeNotify(() => Notifs.send(reqBy, {
       title: '❌ Delete Denied', body: `Your request to delete ${label} was denied by the President.`,
       icon: '❌', type: 'finance_delete_denied', link: 'approvals'
     }));
+    return { already: false };
   }
 
   // ── Leave — delegates to the existing shared helpers (modules.js) so leave

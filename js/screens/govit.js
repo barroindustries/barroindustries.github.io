@@ -335,7 +335,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           </div>
         </div>
         <div class="form-group"><label>Description</label><textarea id="it-t-desc" rows="4" placeholder="What's happening? Include any error messages."></textarea></div>
-        <div class="form-group"><label>Requested By</label><input id="it-t-req" value="${escHtml(currentUser.displayName||'')}"/></div>
+        <div class="form-group"><label>Requested By</label><input id="it-t-req" value="${escHtml(window.userProfile?.displayName||currentUser.email||'')}"/></div>
       `, `<button class="btn-primary" id="save-it-ticket-btn">Submit Ticket</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       // ⚠ SCOPED TO THIS PANEL, NOT document.
       // openPage keeps a CLOSING page in the DOM for ~300ms. Open a second record
@@ -435,6 +435,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         `, `<button class="btn-primary" id="save-asset-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
         // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
         _panel.querySelector('#save-asset-btn').addEventListener('click', async () => {
+          if (!_panel.querySelector('#a-name').value.trim()) { Notifs.showToast('Enter an asset name.','error'); return; }
           await db.collection('it_assets').add({
             name: _panel.querySelector('#a-name').value.trim(),
             type: _panel.querySelector('#a-type').value,
@@ -469,6 +470,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           `, `<button class="btn-primary" id="upd-asset-btn">Update</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
           // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
           _panel.querySelector('#upd-asset-btn').addEventListener('click', async () => {
+            if (!_panel.querySelector('#ea-name').value.trim()) { Notifs.showToast('Enter an asset name.','error'); return; }
             await db.collection('it_assets').doc(asset.id).update({
               name: _panel.querySelector('#ea-name').value.trim(),
               assignedTo: _panel.querySelector('#ea-assigned').value.trim(),
@@ -705,12 +707,13 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       `, `<button class="btn-primary" id="save-access-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       // ⚠ Scoped to this panel, not document — see the openPage-teardown note above.
       _panel.querySelector('#save-access-btn').addEventListener('click', async () => {
+        if (!_panel.querySelector('#ac-emp').value.trim() || !_panel.querySelector('#ac-sys').value.trim()) { Notifs.showToast('Enter the employee and the system.','error'); return; }
         await db.collection('it_access').add({
           employee: _panel.querySelector('#ac-emp').value.trim(),
           system: _panel.querySelector('#ac-sys').value.trim(),
           level: _panel.querySelector('#ac-lvl').value,
           date: _panel.querySelector('#ac-date').value,
-          grantedBy: currentUser.displayName||currentUser.uid,
+          grantedBy: window.userProfile?.displayName||currentUser.email,
           notes: _panel.querySelector('#ac-notes').value.trim(),
           status: 'active', createdBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()

@@ -1596,8 +1596,8 @@ window.renderProjectLifecycle = async function(){
 function jobDaysElapsed(p){
   const start = p.createdAt?.toDate ? p.createdAt.toDate() : (p.createdAt ? new Date(p.createdAt) : null);
   if (!start || isNaN(start)) return null;
-  const today = new Date((window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)) + 'T00:00:00');
-  return Math.max(0, Math.round((today - new Date(start.toISOString().slice(0,10) + 'T00:00:00')) / 86400000));
+  const today = new Date((window.bizDate ? window.bizDate() : new Date().toLocaleDateString('en-CA',{timeZone:window.BIZ_TZ||'Asia/Manila'})) + 'T00:00:00');
+  return Math.max(0, Math.round((today - new Date(start.toLocaleDateString('en-CA',{timeZone:window.BIZ_TZ||'Asia/Manila'}) + 'T00:00:00')) / 86400000));
 }
 function jobDaysToTarget(p){
   if (!p.targetDate) return null;
@@ -1878,6 +1878,7 @@ function openJobProjectDetail(p, opts){
         acknowledgedAt: firebase.firestore.FieldValue.serverTimestamp(), acknowledgedBy: who,
         timeline: firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Production acknowledged receipt', by:who })
       });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
       window.logAudit && window.logAudit('update','project',p.id,{ acknowledged:true });
       Notifs.success('Receipt acknowledged — you can now update the job\'s status.');
       closeModal();
@@ -2010,6 +2011,7 @@ function openProjectMarginModal(p){
     const saveBtn=$pm('pm-save'); saveBtn.disabled=true; // guard against double-click double-posting
     try{
       await db.collection('job_projects').doc(p.id).update(update);
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
       window.logAudit && window.logAudit('update','project',p.id,{ capital:cap });
       // reflect locally so the reopened detail shows fresh numbers
       p.capital=cap;
@@ -2065,6 +2067,7 @@ async function advanceProjectStage(p, nextId){
       stage:nextId, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
       timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to '+ns.label, by:who })
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('job_projects');
     // keep the client's public tracker in step with the internal lifecycle
     const _trkStage = trackerKeyFor(nextId);   // v12 WS28 — single shared translator (old qc/ready keys were dead)
     if(p.trackingToken && _trkStage) window.syncOrderTracking(p.trackingToken, { status:_trkStage });

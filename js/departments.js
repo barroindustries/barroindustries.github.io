@@ -102,13 +102,18 @@ window.isMoneyPriv = isMoneyPriv;
 
 // Wrap a click handler so Firestore/JS errors surface as a toast + console.error
 // instead of failing silently (the button just looks like it "did nothing").
+// The button is disabled while fn runs: a second tap during a slow approve used
+// to start the same action twice (two accounts from one signup approval).
 function onClickSafe(btn, fn) {
   btn.addEventListener('click', async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
     try { await fn(); }
     catch (e) {
       console.error('[action failed]', e);
       Notifs.showToast(`Action failed: ${e.message||e}`, 'error');
     }
+    finally { if (btn.isConnected) btn.disabled = false; }
   });
 }
 
@@ -765,6 +770,7 @@ window.requestQuoteDelete = async function(collection, docId, label, createdBy, 
   }
   if (createdBy && u.uid === createdBy) {
     const reason = ((await promptDialog({message:'Reason for deleting this quote? (sent to the President for approval)', required:true, multiline:true})) || '').trim();
+    if (!reason) return;
     return db.collection(collection).doc(docId).update({
       deleteRequested: true, deleteReason: reason,
       deleteRequestedBy: u.uid, deleteRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -3567,6 +3573,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
   const $ = (id) => _panel.querySelector('#' + id);
   $('so-save').addEventListener('click', () => window.busy($('so-save'), async ()=>{
     const err=$('so-err');
+    if (parseInt($('so-receipt-upload')?.dataset.busy, 10) > 0) { Notifs.showToast('Wait for the upload to finish','error'); return; }
     const contract=parseFloat($('so-contract').value)||0;
     const paid=parseFloat($('so-paid').value)||0;
     const project=$('so-project').value.trim();
@@ -4238,6 +4245,7 @@ window.transferOrderToDesign = async function(o){
           upd.timeline = firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Design (sale recorded)', by:who });
         }
         await db.collection('job_projects').doc(o.projectId).update(upd);
+        if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('job_projects');
       }
     }
     // 5) stamp the sales order
@@ -4303,6 +4311,7 @@ async function transferOrderToProduction(o){
       if(ps.exists && ['won','in_design'].includes(stage)){
         await db.collection('job_projects').doc(o.projectId).update({ stage:'in_production', updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
           timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Production (sale recorded)', by:who }) });
+        if (typeof dbCacheInvalidate==='function'){ dbCacheInvalidate('job_projects'); dbCacheInvalidate('projects-unified'); }
       }
     }
     await db.collection('sales_orders').doc(o.id).update({ sentToProduction:true,
@@ -4491,7 +4500,9 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     }));
     container.querySelectorAll('.cl-delreq-btn').forEach(b => b.addEventListener('click', async () => {
-      const reason = (await promptDialog({message:'Reason for deleting this client folder? (sent to the president for approval)', required:true, multiline:true}))||'';
+      const reasonIn = await promptDialog({message:'Reason for deleting this client folder? (sent to the president for approval)', required:true, multiline:true});
+      if (reasonIn == null) return;
+      const reason = reasonIn || '';
       try {
         await db.collection(COLL).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
         if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
@@ -4696,7 +4707,9 @@ async function openClientHub(cl, opts) {
     try { await patch({ lastContact: today }, { date: today, by: who(), note: note.trim() }); Notifs.success('Contact logged'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   body.querySelector('#ch-fu-done')?.addEventListener('click', async () => {
-    const next = ((await promptDialog({message:`Follow-up done ${emojiIcon('✓',16)} — schedule the next one? (YYYY-MM-DD, blank = none)`}))||'').trim();
+    const nextIn = await promptDialog({message:`Follow-up done ${emojiIcon('✓',16)} — schedule the next one? (YYYY-MM-DD, blank = none)`});
+    if (nextIn == null) return; // cancelled: do not log or clear the follow-up
+    const next = (nextIn||'').trim();
     try { await patch({ followUpDate: next, lastContact: today }, { date: today, by: who(), note: 'Follow-up done' + (next ? ' → next ' + next : '') }); Notifs.success('Follow-up updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   body.querySelector('#ch-fu-set')?.addEventListener('click', async () => {
@@ -5128,7 +5141,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
           <button class="btn-secondary btn-sm fh-preview" data-id="${f.id}" title="Preview">${emojiIcon('👁',16)}</button>
           ${canEdit?`<button class="btn-secondary btn-sm fh-version" data-id="${f.id}" title="Upload new version">${emojiIcon('⬆',16)}</button>`:''}
           ${canShare(f)?`<button class="btn-secondary btn-sm fh-share" data-id="${f.id}" title="Share">${emojiIcon('🔀',16)}</button>`:''}
-          <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?`${emojiIcon('♻️',16)}`:`${emojiIcon('🗄',16)}`}</button>
+          ${canEdit?`<button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?`${emojiIcon('♻️',16)}`:`${emojiIcon('🗄',16)}`}</button>`:''}
           ${canEdit?`<button class="btn-danger btn-sm fh-delete" data-id="${f.id}" data-name="${escHtml(f.name||'File')}" title="Move to Recycle Bin">${emojiIcon('🗑',16)}</button>`:''}
         `}</td>
       </tr>`;
@@ -5336,6 +5349,8 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     let uploadedFile = null, uploadedRaw = null;
     Drive.renderUploadArea('fn-upload-area', (r, file) => { uploadedFile = r; uploadedRaw = file; }, { label: 'Choose file', dept, subfolder: 'Files' });
     $('save-fn-btn').addEventListener('click', async () => {
+      if (parseInt($('fn-upload-area')?.dataset.busy, 10) > 0) { Notifs.showToast('Wait for the upload to finish','error'); return; }
+      if (!uploadedFile) { Notifs.showToast('Choose a file first','error'); return; }
       const uploaderName = (window.userProfile && userProfile.displayName) || currentUser.email;
       let folderId = $('fn-folder').value;
       if (folderId === '__new__') {
@@ -5535,9 +5550,11 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
     // the PREVIOUS bid's title, agency, deadline and ABC onto THIS bid — and the
     // bucket read decides a move (create-in-target + delete-here) batch.
     const $ = (id) => _panel.querySelector('#' + id);
-    $('gb-save')?.addEventListener('click', async () => {
+    $('gb-save')?.addEventListener('click', () => window.busy($('gb-save'), async () => {
+      if (parseInt($('gb-file-area')?.dataset.busy, 10) > 0) { Notifs.showToast('Wait for the upload to finish','error'); return; }
       const title = $('gb-title').value.trim();
       if (!title) { Notifs.showToast('Enter a title.','error'); return; }
+      try {
       const targetCol = $('gb-bucket').value;
       const payload = {
         title,
@@ -5565,12 +5582,15 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
         Notifs.success('Bid updated.');
       }
       closeModal(); loadDocs();
-    });
-    $('gb-del')?.addEventListener('click', async () => {
+      } catch (ex) { Notifs.showToast('Could not save bid: '+(ex.message||ex.code||ex),'error'); }
+    }));
+    $('gb-del')?.addEventListener('click', () => window.busy($('gb-del'), async () => {
       if (!(await confirmDialog({message:`Delete "${escHtml(d.title||d.name||'this bid')}"? This cannot be undone.`, danger:true, html:true}))) return;
-      await db.collection(collection).doc(d.id).delete();
-      closeModal(); Notifs.success('Bid deleted.'); loadDocs();
-    });
+      try {
+        await db.collection(collection).doc(d.id).delete();
+        closeModal(); Notifs.success('Bid deleted.'); loadDocs();
+      } catch (ex) { Notifs.showToast('Could not delete bid: '+(ex.message||ex.code||ex),'error'); }
+    }));
   }
 
   loadDocs();
@@ -5588,9 +5608,11 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
     // and would win the getElementById race, so this could file the PREVIOUS
     // entry's title, agency, deadline and ABC as a brand-new record.
     const $ = (id) => _panel.querySelector('#' + id);
-    $('save-gd-btn').addEventListener('click', async () => {
+    $('save-gd-btn').addEventListener('click', () => window.busy($('save-gd-btn'), async () => {
+      if (parseInt($('gd-file-area')?.dataset.busy, 10) > 0) { Notifs.showToast('Wait for the upload to finish','error'); return; }
       const title = $('gd-title').value.trim();
       if (!title) { Notifs.showToast('Enter a title.','error'); return; }
+      try {
       await db.collection(collection).add({
         title,
         description: $('gd-desc').value.trim(),
@@ -5609,7 +5631,8 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); loadDocs();
-    });
+      } catch (ex) { Notifs.showToast('Could not save: '+(ex.message||ex.code||ex),'error'); }
+    }));
   });
 };
 

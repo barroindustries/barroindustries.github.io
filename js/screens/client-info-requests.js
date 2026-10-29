@@ -773,6 +773,8 @@ window.cirConvert = async function (refNo) {
       });
       clientId = ref.id;
     }
+    // Invalidate as soon as the clients write lands, so a failure of the request-status update below can't leave a stale list.
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
 
     const uid = (window.currentUser && window.currentUser.uid) || null;
     const uname = (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '';

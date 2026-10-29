@@ -265,7 +265,7 @@ window.renderApprovals = async function(currentUser) {
     </div>` : '';
 
   c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon('✅',20)} Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending}${_deniedQueues.length?'+':''} pending</span>`:''}</div>
+    <div class="page-header"><h2>${emojiIcon('✅',20)} Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending}${_deniedQueues.length?'+':''} pending</span>`:''}<button class="btn-secondary btn-sm" id="approvals-refresh-btn" style="margin-left:auto">${emojiIcon('🔄',16)} Refresh</button></div>
     ${window.sopPanel('How approvals work', [
       'Every request (sign-ups, cash advances, leave, deletes, quotes, etc.) lands here as one unified queue — default view is All Requests, pending only.',
       'Use the chips to filter by type; each chip shows a live pending count.',
@@ -373,6 +373,20 @@ window.renderApprovals = async function(currentUser) {
       toRestore.forEach(b => { if (b.isConnected) b.disabled = false; });
     }
   };
+
+  // Refresh: the pending queues are cached 30s (dbCachedGet); drop every
+  // 'approvals-pending:<coll>-pending' key, then reload the current sub-tab.
+  const _apBtn = document.getElementById('approvals-refresh-btn');
+  if (_apBtn) _apBtn.addEventListener('click', () => {
+    if (typeof dbCacheInvalidate === 'function') {
+      ['signup_requests-pending','cash_advances-pending','submissions-pending','tasks-review','payroll_delete_requests-pending',
+       'finance_delete_requests-pending','approval_requests-pending','bs_quotes-delete','bk_quotes-delete','clients-delete',
+       'leave_requests-pending','pending_raises-pending','purchase_requisitions-pending','dept_spend_logs-pending'
+      ].forEach(k => dbCacheInvalidate('approvals-pending:' + k));
+      dbCacheInvalidate('tasks-all');
+    }
+    loadApprovalsSub(_paneSub, { fromChip: true });
+  });
 
   // ── Pane-scoped sibling of _apq() ────────────────────────────────────────
   // ⚠ 2026-08-10 — the 2026-08-09 "THE QUEUE USED TO LIE WHEN DENIED" fix
@@ -527,21 +541,21 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Send Back</button>
               `:item.type==='finance-req'?`
-                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">${emojiIcon('✓',16)} Approve Deletion</button>
-                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">${emojiIcon('✗',16)} Deny</button>
+                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${escHtml(item.historyId||'')}" data-name="${escHtml(item.userName||'')}" data-month="${escHtml(item.month||'')}" data-req-by="${escHtml(item.requestedBy||'')}">${emojiIcon('✓',16)} Approve Deletion</button>
+                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${escHtml(item.month||'')}" data-req-by="${escHtml(item.requestedBy||'')}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='finance-del'?`
-                <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">${emojiIcon('✓',16)} Approve Deletion</button>
-                <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">${emojiIcon('✗',16)} Deny</button>
+                <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${escHtml(item.requestedBy||'')}">${emojiIcon('✓',16)} Approve Deletion</button>
+                <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${escHtml(item.requestedBy||'')}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='quote-approval'?`
-                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
-                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
-                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
+                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
+                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId||'')}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
               `:item.type==='delete-quote'?`
-                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✓',16)} Approve Delete</button>
-                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✗',16)} Deny</button>
+                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.coll||'bs_quotes')}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${escHtml(item.deleteRequestedBy||'')}">${emojiIcon('✓',16)} Approve Delete</button>
+                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${escHtml(item.coll||'bs_quotes')}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${escHtml(item.deleteRequestedBy||'')}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='delete-client'?`
-                <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✓',16)} Approve Delete</button>
-                <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✗',16)} Deny</button>
+                <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${escHtml(item.deleteRequestedBy||'')}">${emojiIcon('✓',16)} Approve Delete</button>
+                <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${escHtml(item.deleteRequestedBy||'')}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='raise'?`
                 <button class="btn-success btn-sm rz-approve-btn" data-id="${item.id}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm rz-reject-btn" data-id="${item.id}">${emojiIcon('✗',16)} Reject</button>
@@ -566,15 +580,18 @@ window.renderApprovals = async function(currentUser) {
 
       // Signup approve
       wrap.querySelectorAll('.sg-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          const { password: pwd } = await Approvals.dispatch('signup', 'approve', btn.dataset.id, {
+          const r = await Approvals.dispatch('signup', 'approve', btn.dataset.id, {
             name: btn.dataset.name, email: btn.dataset.email, phone: btn.dataset.phone, currentUser
           });
-          Notifs.success(`${btn.dataset.name} approved! Password: ${pwd}`);
+          if (r.already && !r.password) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
+          showSignupApprovedModal(btn.dataset.name, btn.dataset.email, r.password);
+          Notifs.success(`${btn.dataset.name} approved!`);
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.sg-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Reject ${escHtml(btn.dataset.name)}?`, html:true}))) return;
-          await Approvals.dispatch('signup', 'reject', btn.dataset.id, {});
+          const r = await Approvals.dispatch('signup', 'reject', btn.dataset.id, {});
+          if (r && r.already) Notifs.showToast('Already handled.');
           loadApprovalsSub('all');
       }));
 
@@ -606,8 +623,9 @@ window.renderApprovals = async function(currentUser) {
       // find out indirectly via their payslip. Now notifies like every sibling
       // approve/reject handler on this page.
       wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const ok = await transitionStatus(db.collection('approval_requests').doc(btn.dataset.id), 'pending', { status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
+          if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'✅ CA Deduction Approved', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was approved.`, icon:'✅', type:'ca_deduct_reviewed', link:'personal-finance'
           }));
@@ -615,8 +633,9 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const ok = await transitionStatus(db.collection('approval_requests').doc(btn.dataset.id), 'pending', { status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:approval_requests-pending');
+          if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'❌ CA Deduction Rejected', body:`Your ₱${fmt(btn.dataset.amount)} cash advance deduction request was rejected.`, icon:'❌', type:'ca_deduct_reviewed', link:'personal-finance'
           }));
@@ -665,8 +684,9 @@ window.renderApprovals = async function(currentUser) {
       // creator (unlike openSubDetail's dedicated flow in tasks.js, which notifies
       // both ways). Employees who submit via the aggregated queue never heard back.
       wrap.querySelectorAll('.sub-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const ok = await transitionStatus(db.collection('submissions').doc(btn.dataset.id), 'pending', { status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending');
+          if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'✅ Submission Approved', body:`"${btn.dataset.title}" was approved.`, icon:'✅', type:'submission_reviewed', link:'submissions'
           }));
@@ -674,8 +694,9 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.sub-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
+          const ok = await transitionStatus(db.collection('submissions').doc(btn.dataset.id), 'pending', { status:'rejected', rejectedBy:currentUser.uid });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('approvals-pending:submissions-pending');
+          if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, {
             title:'❌ Submission Rejected', body:`"${btn.dataset.title}" was rejected.`, icon:'❌', type:'submission_reviewed', link:'submissions'
           }));
@@ -691,7 +712,8 @@ window.renderApprovals = async function(currentUser) {
           // Payroll recall spec §A3.1 — completedAt alongside approvedAt so
           // month-scoped KPI (computeKpiForMonth via taskDoneMonth) can
           // resolve which month this task was actually approved/finished in.
-          await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), completedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const ok = await transitionStatus(db.collection('tasks').doc(btn.dataset.id), 'review', { status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), completedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
@@ -703,7 +725,8 @@ window.renderApprovals = async function(currentUser) {
           // review queue only ever acts on 'review'-status tasks, so this is
           // normally a no-op delete of an absent field; kept for safety if a
           // task somehow reaches here already carrying one).
-          await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', completedAt:firebase.firestore.FieldValue.delete(), lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const ok = await transitionStatus(db.collection('tasks').doc(btn.dataset.id), 'review', { status:'in-progress', completedAt:firebase.firestore.FieldValue.delete(), lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
@@ -715,18 +738,20 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.name)} (${btn.dataset.month}) payroll record?`, danger:true, html:true}))) return;
           btn.disabled = true;
+          try {
           const r = await Approvals.dispatch('finance-req', 'approve', btn.dataset.id, {
             currentUser, histId: btn.dataset.histId, name: btn.dataset.name, month: btn.dataset.month, reqBy: btn.dataset.reqBy
           });
           if (r.already) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           Notifs.success('Record deleted and requester notified.');
           loadApprovalsSub('all');
+          } finally { btn.disabled = false; }
       }));
       wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
-          await Approvals.dispatch('finance-req', 'deny', btn.dataset.id, {
+          const r = await Approvals.dispatch('finance-req', 'deny', btn.dataset.id, {
             currentUser, name: btn.dataset.name, month: btn.dataset.month, reqBy: btn.dataset.reqBy
           });
-          Notifs.error('Request denied and requester notified.');
+          if (r && r.already) Notifs.showToast('Already handled.'); else Notifs.error('Request denied and requester notified.');
           loadApprovalsSub('all');
       }));
 
@@ -734,18 +759,20 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.label)}? This permanently deletes it.`, danger:true, html:true}))) return;
           btn.disabled = true;
+          try {
           const r = await Approvals.dispatch('finance-del', 'approve', btn.dataset.id, {
             currentUser, coll: btn.dataset.coll, docId: btn.dataset.doc, label: btn.dataset.label, reqBy: btn.dataset.reqBy
           });
           if (r.already) { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           Notifs.success('Deleted and requester notified.');
           loadApprovalsSub('all');
+          } finally { btn.disabled = false; }
       }));
       wrap.querySelectorAll('.fdel-deny-btn').forEach(btn => onClickSafe(btn, async () => {
-          await Approvals.dispatch('finance-del', 'deny', btn.dataset.id, {
+          const r = await Approvals.dispatch('finance-del', 'deny', btn.dataset.id, {
             currentUser, label: btn.dataset.label, reqBy: btn.dataset.reqBy
           });
-          Notifs.error('Request denied and requester notified.');
+          if (r && r.already) Notifs.showToast('Already handled.'); else Notifs.error('Request denied and requester notified.');
           loadApprovalsSub('all');
       }));
 
@@ -1094,35 +1121,39 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.name)} (${btn.dataset.month}) payroll record?`, danger:true, html:true}))) return;
           btn.disabled = true;
+          try {
           const r = await Approvals.dispatch('finance-req', 'approve', btn.dataset.id, {
             currentUser, histId: btn.dataset.histId, name: btn.dataset.name, month: btn.dataset.month, reqBy: btn.dataset.reqBy
           });
           if (r.already) { Notifs.showToast('Already handled.'); loadApprovalsSub('finance-requests'); return; }
           Notifs.success('Record deleted and requester notified.');
           loadApprovalsSub('finance-requests');
+          } finally { btn.disabled = false; }
       }));
       wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
-          await Approvals.dispatch('finance-req', 'deny', btn.dataset.id, {
+          const r = await Approvals.dispatch('finance-req', 'deny', btn.dataset.id, {
             currentUser, name: btn.dataset.name, month: btn.dataset.month, reqBy: btn.dataset.reqBy
           });
-          Notifs.error('Request denied.');
+          if (r && r.already) Notifs.showToast('Already handled.'); else Notifs.error('Request denied.');
           loadApprovalsSub('finance-requests');
       }));
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.label)}? This permanently deletes it.`, danger:true, html:true}))) return;
           btn.disabled = true;
+          try {
           const r = await Approvals.dispatch('finance-del', 'approve', btn.dataset.id, {
             currentUser, coll: btn.dataset.coll, docId: btn.dataset.doc, label: btn.dataset.label, reqBy: btn.dataset.reqBy
           });
           if (r.already) { Notifs.showToast('Already handled.'); loadApprovalsSub('finance-requests'); return; }
           Notifs.success('Deleted and requester notified.');
           loadApprovalsSub('finance-requests');
+          } finally { btn.disabled = false; }
       }));
       wrap.querySelectorAll('.fdel-deny-btn').forEach(btn => onClickSafe(btn, async () => {
-          await Approvals.dispatch('finance-del', 'deny', btn.dataset.id, {
+          const r = await Approvals.dispatch('finance-del', 'deny', btn.dataset.id, {
             currentUser, label: btn.dataset.label, reqBy: btn.dataset.reqBy
           });
-          Notifs.error('Request denied and requester notified.');
+          if (r && r.already) Notifs.showToast('Already handled.'); else Notifs.error('Request denied and requester notified.');
           loadApprovalsSub('finance-requests');
       }));
       return;
@@ -1212,7 +1243,8 @@ window.renderApprovals = async function(currentUser) {
         if (!(await confirmDialog({message:`Approve "${escHtml(btn.dataset.name)}"?`, html:true}))) return;
         // Payroll recall spec §A3.1 — completedAt alongside approvedAt (see
         // the aggregated "All Requests" .rt-approve-btn handler above).
-        await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
+        const ok = await transitionStatus(db.collection('tasks').doc(btn.dataset.id), 'review', {status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
+        if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('review-tasks'); return; }
         if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
         const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
         if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
@@ -1223,7 +1255,8 @@ window.renderApprovals = async function(currentUser) {
         if (!(await confirmDialog({message:`Send "${escHtml(btn.dataset.name)}" back for revision?`, html:true}))) return;
         // Payroll recall spec §A3.1 — clear completedAt on send-back (see
         // the aggregated "All Requests" .rt-reject-btn handler above).
-        await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.delete(),sentBackBy:currentUser.uid});
+        const ok = await transitionStatus(db.collection('tasks').doc(btn.dataset.id), 'review', {status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.delete(),sentBackBy:currentUser.uid});
+        if (!ok) { Notifs.showToast('Already handled.'); loadApprovalsSub('review-tasks'); return; }
         if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('tasks-all'); dbCacheInvalidate('approvals-pending:tasks-review'); }
         const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
         if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
@@ -1269,35 +1302,28 @@ window.renderApprovals = async function(currentUser) {
 
       wrap.querySelectorAll('.signup-approve').forEach(btn => {
         btn.addEventListener('click', async () => {
+         try {
           const id    = btn.dataset.id;
           const name  = btn.dataset.name;
           const email = btn.dataset.email;
           const phone = btn.dataset.phone;
-          const { password: pwd } = await Approvals.dispatch('signup', 'approve', id, { name, email, phone, currentUser });
-          openModal(`${emojiIcon('✓',16)} Approved — Action Required`, `
-            <p style="margin-bottom:14px;font-size:14px">Profile created for <strong>${escHtml(name)}</strong>.</p>
-            <div style="padding:14px;background:rgba(48,209,88,.1);border:1.5px solid rgba(48,209,88,.4);border-radius:10px;margin-bottom:14px">
-              <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Generated Password</div>
-              <div style="font-size:22px;font-weight:800;font-family:monospace;letter-spacing:2px;color:var(--text)">${escHtml(pwd)}</div>
-            </div>
-            <p style="font-size:13px;color:var(--text-muted)">Next steps:</p>
-            <ol style="font-size:13px;color:var(--text-muted);line-height:2;padding-left:18px">
-              <li>Go to <strong>Firebase Console → Authentication → Add User</strong></li>
-              <li>Email: <strong>${escHtml(email)}</strong></li>
-              <li>Password: <strong>${escHtml(pwd)}</strong></li>
-              <li>Share this password with ${escHtml(name)} via phone or message</li>
-              <li>They can change it after first login</li>
-            </ol>
-          `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
+          const r = await Approvals.dispatch('signup', 'approve', id, { name, email, phone, currentUser });
+          if (r.already && !r.password) { Notifs.showToast('Already handled.'); loadApprovalsSub('signups'); return; }
+          showSignupApprovedModal(name, email, r.password);
           Notifs.success(`${name} approved!`);
           loadApprovalsSub('signups');
+         } catch (e) {
+          console.error('signup approve failed', e);
+          Notifs.error('Could not approve: ' + (e && e.message || e));
+         }
         });
       });
 
       wrap.querySelectorAll('.signup-reject').forEach(btn => {
         btn.addEventListener('click', async () => {
           if (!(await confirmDialog({message:`Reject ${escHtml(btn.dataset.name)}'s request?`, html:true}))) return;
-          await Approvals.dispatch('signup', 'reject', btn.dataset.id, {});
+          const r = await Approvals.dispatch('signup', 'reject', btn.dataset.id, {});
+          if (r && r.already) { Notifs.showToast('Already handled.'); loadApprovalsSub('signups'); return; }
           Notifs.error('Request rejected.');
           loadApprovalsSub('signups');
         });
@@ -1386,14 +1412,14 @@ window.renderApprovals = async function(currentUser) {
           </div>
           ${item.status!=='pending' ? '' : canActOn('quote-approval') ? (item.quoteId ? `
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-            <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
-            <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
-            <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
+            <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
+            <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
+            <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${escHtml(item.quoteId)}" data-coll="${escHtml(item.quoteColl||'bs_quotes')}" data-by="${escHtml(item.agentId||'')}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return</button>
           </div>` : `
           <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
             <span style="font-size:11px;color:var(--text-muted)">(no linked quote)</span>
-            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="approved">Mark Approved</button>
-            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="rejected">Mark Rejected</button>
+            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${escHtml(item.agentId||'')}" data-status="approved">Mark Approved</button>
+            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${escHtml(item.agentId||'')}" data-status="rejected">Mark Rejected</button>
           </div>`)
           // Cannot act. This branch used to emit '' — so the Corporate
           // Secretary got a pending quote approval with no buttons and no
@@ -1679,3 +1705,23 @@ async function openQuoteApprovalReview(ctx, onDone){
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
 }
+
+// Shared by the All Requests view and the Sign-ups tab: the generated password
+// is shown once, in a modal with the Firebase Console steps (a toast vanishes).
+window.showSignupApprovedModal = function (name, email, pwd) {
+  openModal(`${emojiIcon('✓',16)} Approved — Action Required`, `
+    <p style="margin-bottom:14px;font-size:14px">Profile created for <strong>${escHtml(name)}</strong>.</p>
+    <div style="padding:14px;background:rgba(48,209,88,.1);border:1.5px solid rgba(48,209,88,.4);border-radius:10px;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Generated Password</div>
+      <div style="font-size:22px;font-weight:800;font-family:monospace;letter-spacing:2px;color:var(--text)">${escHtml(pwd)}</div>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted)">Next steps:</p>
+    <ol style="font-size:13px;color:var(--text-muted);line-height:2;padding-left:18px">
+      <li>Go to <strong>Firebase Console → Authentication → Add User</strong></li>
+      <li>Email: <strong>${escHtml(email)}</strong></li>
+      <li>Password: <strong>${escHtml(pwd)}</strong></li>
+      <li>Share this password with ${escHtml(name)} via phone or message</li>
+      <li>They can change it after first login</li>
+    </ol>
+  `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
+};

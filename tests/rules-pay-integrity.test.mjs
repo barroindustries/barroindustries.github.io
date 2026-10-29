@@ -51,7 +51,8 @@ describe('C2 — cash_advances: the borrower cannot touch what payroll trusts', 
 
   it('owner update is reason/date only, and only while the request is still pending', () => {
     const upd = allow(ca, 'update');
-    assert.match(upd, /isMoneyAdmin\(\)\s*\|\|/);
+    // Money tier, minus self-approval (sweep 2026-10-29, tests/rules-sweep-2026-10-29.test.mjs R4).
+    assert.match(upd, /\(isMoneyAdmin\(\) && \(isPresident\(\)[\s\S]*?\)\)\s*\|\|/);
     const owner = upd.slice(upd.indexOf('resource.data.userId == request.auth.uid'));
     assert.match(owner, /resource\.data\.status == 'pending'/);
     const keys = owner.match(/affectedKeys\(\)\.hasOnly\((\[[^\]]*\])\)/);

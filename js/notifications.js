@@ -76,6 +76,10 @@ window.Notifs = (() => {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     if (_unreadDebounceTimer) { clearTimeout(_unreadDebounceTimer); _unreadDebounceTimer = null; }
     window.Chat?._detachGlobalBadgeListener?.();   // Wave1 P0 fix #3
+    // Forget the signed-out user's inbox: on a shared device the next sign-in
+    // must not briefly show the previous user's items or badge count.
+    _lastItems = []; _lastUid = null; _trueUnreadCount = null;
+    updateBadge(0);
   }
 
   // ── Badge ─────────────────────────────────────
@@ -156,8 +160,13 @@ window.Notifs = (() => {
       return;
     }
     if (taskId || type?.startsWith('task')) {
-      if (taskId && typeof window.openTaskDetail === 'function') {
-        window.openTaskDetail(taskId, window.currentUser, window.currentRole);
+      // openTaskDetail lives in the lazy tasks screen — on a fresh session it
+      // isn't loaded yet, so load it rather than dropping the reader on the list.
+      const openTask = () => window.openTaskDetail(taskId, window.currentUser, window.currentRole);
+      if (taskId && typeof window.openTaskDetail === 'function') openTask();
+      else if (taskId && typeof window.ensureScript === 'function') {
+        window.ensureScript('js/screens/tasks.js').then(openTask)
+          .catch(() => { if (typeof navigateTo === 'function') navigateTo('tasks'); });
       } else if (typeof navigateTo === 'function') navigateTo('tasks');
     } else if (type === 'cash_advance' || type === 'ca_approved') {
       if (typeof navigateTo === 'function') navigateTo('personal-finance');
@@ -524,7 +533,7 @@ window.Notifs = (() => {
   // payroll disburse notification deep-link to the exact month's payslip
   // (see _navigateFromNotif below). Optional — every existing call site
   // that omits it behaves byte-identically (data.month is simply absent).
-  async function send(targetUid, { title, body, icon = `${emojiIcon('🔔',16)}`, type = 'general', link = null, dedupKey = null, taskId = null, chatId = null, month = null, meetingId = null } = {}) {
+  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null, chatId = null, month = null, meetingId = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
       // Single-field query — no composite index required
@@ -593,9 +602,40 @@ window.Notifs = (() => {
   // doc id from the dedupKey and use batch.set() (idempotent) instead of
   // batch.set() with an auto-id — re-running the same broadcast the same day
   // overwrites the same doc rather than creating a duplicate.
+  // The default key carries a hash of the BODY, not just type|title|day: two
+  // different same-titled sends on one day (two employees' "Cash Advance
+  // Request") must land as two docs. With title-only keys the second one was a
+  // set() onto an existing doc — an UPDATE, which the rules deny to anyone but
+  // the inbox owner — so the whole fan-out batch failed after the caller's own
+  // record had already been saved.
+  function _hash(s) {
+    let h = 5381; s = String(s || '');
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
   function _defaultDedupKey(notifData) {
     const day = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
-    return [notifData.type || 'notif', notifData.title || '', day].join('|');
+    return [notifData.type || 'notif', String(notifData.title || '').slice(0, 120), _hash(notifData.body), day].join('|');
+  }
+  // Commit one deterministic-id doc per recipient. A batch is all-or-nothing, and
+  // a recipient who already holds this exact doc makes set() an update the rules
+  // deny — so on permission-denied, fall back to one write per recipient: the
+  // existing copies are skipped (that IS the dedup) and everyone else still gets it.
+  async function _commitDedup(refs, payload) {
+    const docs = refs.slice();
+    while (docs.length) {
+      const chunk = docs.splice(0, 499);
+      const batch = db.batch();
+      chunk.forEach(ref => batch.set(ref, payload));
+      try {
+        await batch.commit();
+      } catch (e) {
+        if (!e || e.code !== 'permission-denied') throw e;
+        await Promise.all(chunk.map(ref => ref.set(payload).catch(err => {
+          if (!err || err.code !== 'permission-denied') throw err;
+        })));
+      }
+    }
   }
   function _dedupDocId(dedupKey) {
     // Firestore doc ids can't contain '/'; keep it deterministic + safe.
@@ -666,16 +706,9 @@ window.Notifs = (() => {
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
     const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};
-    const docs = allDocs.slice();
-    while (docs.length) {
-      const chunk = docs.splice(0, 499);
-      const batch = db.batch();
-      chunk.forEach(doc => {
-        const ref = db.collection('notifications').doc(doc.id).collection('items').doc(docId);
-        batch.set(ref, { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-      });
-      await batch.commit();
-    }
+    await _commitDedup(
+      allDocs.map(doc => db.collection('notifications').doc(doc.id).collection('items').doc(docId)),
+      { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   }
 
   // ── Send to all users ────────────────────────
@@ -684,16 +717,9 @@ window.Notifs = (() => {
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
     const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};
-    const docs = snap.docs.slice();
-    while (docs.length) {
-      const chunk = docs.splice(0, 499);
-      const batch = db.batch();
-      chunk.forEach(doc => {
-        const ref = db.collection('notifications').doc(doc.id).collection('items').doc(docId);
-        batch.set(ref, { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-      });
-      await batch.commit();
-    }
+    await _commitDedup(
+      snap.docs.map(doc => db.collection('notifications').doc(doc.id).collection('items').doc(docId)),
+      { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   }
 
   // ── Send to president / owner ─────────────────
@@ -707,12 +733,9 @@ window.Notifs = (() => {
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
     const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};
-    const batch = db.batch();
-    allDocs.forEach(d => {
-      const ref = db.collection('notifications').doc(d.id).collection('items').doc(docId);
-      batch.set(ref, { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-    });
-    await batch.commit();
+    await _commitDedup(
+      allDocs.map(doc => db.collection('notifications').doc(doc.id).collection('items').doc(docId)),
+      { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   }
 
   // ── Email (EmailJS) ───────────────────────────

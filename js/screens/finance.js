@@ -2535,7 +2535,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
 
   if(isPrivileged){
     document.getElementById('fin-ca-add-btn')?.addEventListener('click',()=>{
-      window.renderCashAdvancePage && window.openPresidentCashAdvanceModal ? window.openPresidentCashAdvanceModal() : navigateTo('cash-advance');
+      window.renderCashAdvancePage && window.openPresidentCashAdvanceModal ? window.openPresidentCashAdvanceModal() : navigateTo('cash-advances');
     });
   }
 }
