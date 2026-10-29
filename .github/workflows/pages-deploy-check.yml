@@ -28,6 +28,14 @@ jobs:
     name: Pages build for this commit actually published
     runs-on: ubuntu-latest
     steps:
+      # The version step below reads js/config.js from this commit. Without a
+      # checkout the file is missing, so until 2026-10-29 that step always printed
+      # "could not read APP_VERSION; skipping" and never compared anything.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: js/config.js
+          sparse-checkout-cone-mode: false
+
       - name: Wait for the Pages build to settle, then check it
         env:
           GH_TOKEN: ${{ github.token }}
@@ -73,11 +81,12 @@ jobs:
           set -uo pipefail
           # Belt and braces: a "built" status still does not prove the CDN is
           # serving it. Compare the deployed APP_VERSION against the one in this
-          # commit, which the pre-commit hook keeps in js/config.js.
+          # commit, which the pre-commit hook keeps in js/config.js. The site lives at
+          # barroindustries.com; the old ravenmails address now answers 404.
           want="$(grep -oE "APP_VERSION *= *'[^']+'" js/config.js | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)"
           if [ -z "$want" ]; then echo "::warning::could not read APP_VERSION; skipping"; exit 0; fi
           for i in $(seq 1 12); do
-            got="$(curl -fsS --max-time 15 "https://barroindustries-operatingsystem.ravenmails.com/js/config.js?cb=$RANDOM" 2>/dev/null \
+            got="$(curl -fsS --max-time 15 "https://barroindustries.com/js/config.js?cb=$RANDOM" 2>/dev/null \
                    | grep -oE "APP_VERSION *= *'[^']+'" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || true)"
             echo "[$i] live=$got want=$want"
             [ "$got" = "$want" ] && { echo "::notice::Live site serves $want."; exit 0; }
